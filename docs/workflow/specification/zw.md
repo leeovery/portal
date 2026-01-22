@@ -143,3 +143,22 @@ Layout: [default] ▾
 ### Renaming
 
 Session renaming is supported. Workspaces evolve - a session started as "project-a" may become "comparison-testing".
+
+## Running Inside Zellij
+
+### Detection
+
+ZW detects if it's running inside an existing Zellij session via the `ZELLIJ` environment variable (set by Zellij when inside a session).
+
+### Utility Mode
+
+When running inside Zellij, ZW enters **utility mode** with restricted operations:
+
+**Blocked:**
+- Attaching to another session (prevents nesting)
+
+**Allowed:**
+- Rename current session
+- View other sessions (read-only)
+- Kill other sessions
+- Show current session info
