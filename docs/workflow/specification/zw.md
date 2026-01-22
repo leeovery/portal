@@ -52,3 +52,64 @@ ZW does not track which project a session belongs to. Select a session → attac
 ### No Directory Change Before Attach
 
 When attaching to an existing session, ZW does not change directories. Zellij restores shell state on reattach - each pane resumes exactly where it was.
+
+## TUI Design
+
+### Technology
+
+Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea) (terminal UI framework).
+
+### Layout
+
+Full-screen picker optimized for small screens (mobile SSH use case).
+
+```
+┌─────────────────────────────────────┐
+│                                     │
+│           SESSIONS                  │
+│                                     │
+│    >  cx-03          ● attached     │
+│       api-work       2 tabs         │
+│       client-proj                   │
+│                                     │
+│           EXITED                    │
+│                                     │
+│       old-feature    (resurrect)    │
+│                                     │
+│    ─────────────────────────────    │
+│    [n] new in project...            │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+### Sections
+
+1. **SESSIONS** - Running Zellij sessions
+   - Shows session name
+   - Shows attached indicator (`● attached`) if another client is connected
+   - Optionally shows tab count (e.g., `2 tabs`)
+
+2. **EXITED** - Resurrectable sessions (detached but recoverable from Zellij's cache)
+   - Shows `(resurrect)` indicator
+
+3. **New session option** - `[n] new in project...`
+   - Opens project picker to start a new session
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `j` / `k` | Navigate list |
+| `Enter` | Select (attach to session or open project picker) |
+| `n` | Jump to "new session" option |
+| `K` | Kill selected session |
+| `q` / `Esc` | Quit |
+
+### Session Info Display
+
+For running sessions, ZW can query tab names via:
+```bash
+zellij --session <name> action query-tab-names
+```
+
+This allows showing tab count or tab names inline without entering the session.
