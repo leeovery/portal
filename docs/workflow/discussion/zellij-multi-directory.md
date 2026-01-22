@@ -269,8 +269,8 @@ From **project-centric** (original cx-design.md) to **workspace-centric**:
 - [x] Is this enough value over aliases + `zellij ls | fzf`?
 - [x] Session naming convention - still `{name}-{NN}` or free-form?
 - [x] Should CX manage layouts for new sessions?
-- [ ] Can CX detect it's running inside a Zellij session?
-- [ ] What operations should work from inside vs outside Zellij?
+- [x] Can CX detect it's running inside a Zellij session?
+- [x] What operations should work from inside vs outside Zellij?
 
 ---
 
@@ -371,9 +371,122 @@ So CX *can* detect it's running inside Zellij.
 
 ### Decision
 
-*Pending - need to explore what's useful here...*
+**Utility mode** when running inside Zellij:
+- Detect via `ZELLIJ` env var
+- **Block nesting** - don't allow attaching to another session from inside one
+- **Allow safe operations:**
+  - Rename current session
+  - View other sessions (read-only)
+  - Kill other sessions
+  - Show current session info
 
 ---
 
-## Remaining Questions
+## File browser for new projects
+
+### Decision
+
+**Unchanged from original design:**
+- `[/]` or arrow to "new directory" option opens interactive file browser
+- Navigate directories, select one to start session there
+- Selected directory gets added to remembered projects
+
+---
+
+## Configuration & Storage
+
+### Decision
+
+**Location:** `~/.config/cx/`
+
+Contents:
+- `config` - flat key=value config (as in original design)
+- `projects.json` - remembered project directories
+- `layouts/` - custom layout files (KDL format)
+
+---
+
+## Error Handling: Zellij not installed
+
+### Decision
+
+**Not a concern** - Zellij will be a Homebrew dependency. Install scripts will ensure it's present.
+
+If somehow missing, simple error: "CX requires Zellij. Install with: brew install zellij"
+
+---
+
+## CLI Subcommands
+
+### Decision
+
+**Minimal, as originally designed:**
+- `cx` - main TUI picker
+- `cx clean` / `cx prune` - remove dead/exited sessions (non-interactive)
+- `cx version` - version info
+- `cx help` - usage
+
+Most operations happen through the TUI.
+
+---
+
+## Distribution
+
+### Decision
+
+**Unchanged from original design:**
+- Homebrew tap (`leeovery/tools`)
+- GoReleaser for builds
+- Zellij as brew dependency
+
+---
+
+## Final Summary
+
+### The Pivot
+
+This discussion identified a fundamental model change for CX:
+
+**Before:** Project-centric tool that maps sessions to single project directories, auto-runs Claude, manages session→project relationships.
+
+**After:** Workspace-centric Zellij wrapper that provides a mobile-friendly session picker, remembers project directories for quick new session creation, and lets workspaces evolve freely across multiple directories.
+
+### Key Decisions
+
+| Area | Decision |
+|------|----------|
+| **Core model** | Session = workspace (may span multiple directories) |
+| **Session→project mapping** | None needed - separate concerns |
+| **Naming** | Free-form, defaults to directory basename, always prompt |
+| **Layouts** | Default single pane + optional saved layouts in `~/.config/cx/layouts/` |
+| **Inside Zellij** | Utility mode (rename, info, kill) - block nesting |
+| **TUI** | Minimal, mobile-friendly, sessions + exited + new option |
+| **Session info** | Query via `zellij --session <name> action query-tab-names` |
+| **File browser** | Unchanged from original design |
+| **Storage** | `~/.config/cx/` |
+| **Distribution** | Homebrew + GoReleaser (unchanged) |
+
+### What Carries Forward from Original Design
+
+- Go + Bubbletea TUI
+- Flat config format
+- Homebrew distribution via `leeovery/tools` tap
+- File browser for new project discovery
+- Keyboard shortcuts (N, K, Enter, etc.)
+- `cx clean` subcommand
+
+### What Changes from Original Design
+
+- No `sessions.json` mapping file
+- No automatic Claude execution
+- Session names are user-chosen, not `{project}-{NN}`
+- TUI organized by sessions (not projects with session badges)
+- No "cd before attach" (Zellij handles it)
+- Utility mode when running inside Zellij
+
+### Next Steps
+
+1. **Update specification** - Revise based on this discussion's outcomes
+2. **Reconcile with cx-design.md** - Mark superseded sections
+3. **Implementation planning** - New plan reflecting the simpler model
 
