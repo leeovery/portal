@@ -113,3 +113,33 @@ zellij --session <name> action query-tab-names
 ```
 
 This allows showing tab count or tab names inline without entering the session.
+
+## Session Naming
+
+### Free-Form with Smart Defaults
+
+Session names are user-chosen, not auto-generated.
+
+**Default**: Directory basename (e.g., starting in `~/Code/myapp` suggests "myapp")
+
+**Always prompt**: Even for previously saved projects, ZW prompts for the session name. Users may want a contextual name (e.g., "testing-workflow") rather than the project name.
+
+### New Session Flow
+
+```
+Selected: ~/Code/myapp
+
+Workspace name: [myapp] _
+  (Enter to accept, or type a custom name)
+
+Layout: [default] ▾
+  • default (single pane)
+  • dev-setup
+  • split-view
+```
+
+**Layout selection**: ZW presents existing Zellij layouts for the user to choose from. ZW does not create or manage layouts - that's handled by Zellij itself. If no custom layouts exist, ZW starts sessions with Zellij's default (single pane).
+
+### Renaming
+
+Session renaming is supported. Workspaces evolve - a session started as "project-a" may become "comparison-testing".
