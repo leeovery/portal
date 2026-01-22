@@ -1,6 +1,6 @@
 ---
 topic: zellij-multi-directory
-status: in-progress
+status: concluded
 date: 2026-01-22
 ---
 
