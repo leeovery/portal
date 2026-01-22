@@ -180,3 +180,21 @@ Remembered directories are stored in `~/.config/zw/projects.json`.
 ### Usage in TUI
 
 When selecting "new in project...", remembered directories appear first in the project picker, allowing quick selection before browsing to new locations.
+
+## File Browser
+
+### Purpose
+
+When starting a new session in a directory not in the remembered list, an interactive file browser allows navigating to and selecting the desired directory.
+
+### Access
+
+From the project picker (when creating a new session):
+- Select the "browse..." option, or
+- Press `/` to open the file browser directly
+
+### Behavior
+
+- Navigate directories using arrow keys
+- Select a directory to start a new session there
+- The selected directory is automatically added to remembered projects
