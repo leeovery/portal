@@ -484,9 +484,25 @@ This discussion identified a fundamental model change for CX:
 - No "cd before attach" (Zellij handles it)
 - Utility mode when running inside Zellij
 
+### Tool Rename
+
+**Old name:** CX (Claude eXecute) - no longer fits since it's not Claude-specific
+
+**New name:** **ZW (Zellij Workspaces)**
+- Short, easy to type
+- `z` and `w` are close on keyboard
+- Clearly communicates purpose: manage Zellij workspaces
+- Command: `zw`
+
+**Implications:**
+- Config location: `~/.config/zw/`
+- Homebrew formula: `zw`
+- Repository: consider renaming from `cx` to `zw`
+
 ### Next Steps
 
 1. **Update specification** - Revise based on this discussion's outcomes
 2. **Reconcile with cx-design.md** - Mark superseded sections
-3. **Implementation planning** - New plan reflecting the simpler model
+3. **Rename repository** - `cx` → `zw`
+4. **Implementation planning** - New plan reflecting the simpler model
 
