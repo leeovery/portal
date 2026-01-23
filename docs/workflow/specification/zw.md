@@ -222,3 +222,18 @@ another_key=another_value
 ```
 
 Specific configuration options will be determined during implementation based on what behaviors need to be user-configurable.
+
+## CLI Interface
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `zw` | Launch the main TUI picker |
+| `zw clean` | Remove exited/dead sessions (non-interactive) |
+| `zw version` | Show version information |
+| `zw help` | Show usage information |
+
+### Design Philosophy
+
+Most operations happen through the TUI. The CLI subcommands are minimal, providing only non-interactive utilities and standard help/version flags.
