@@ -262,3 +262,23 @@ brew install zw
 Zellij is a required dependency. The Homebrew formula declares Zellij as a dependency, ensuring it's installed automatically.
 
 If Zellij is somehow missing at runtime, ZW displays: "ZW requires Zellij. Install with: brew install zellij"
+
+## Dependencies
+
+Prerequisites that must exist before implementation can begin:
+
+### Required
+
+None. ZW is a standalone tool with no blocking dependencies on other systems.
+
+### Runtime Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| **Zellij** | ZW wraps Zellij - all session operations require Zellij to be installed |
+
+**Note**: Zellij is a runtime dependency (must be present when ZW runs), not a build-time dependency. ZW can be built and tested independently; Zellij is declared as a Homebrew dependency for installation.
+
+### Build Dependencies
+
+Standard Go toolchain and libraries (Bubble Tea, etc.) - handled by `go.mod`.
