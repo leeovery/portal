@@ -198,3 +198,27 @@ From the project picker (when creating a new session):
 - Navigate directories using arrow keys
 - Select a directory to start a new session there
 - The selected directory is automatically added to remembered projects
+
+## Configuration & Storage
+
+### Location
+
+All ZW data is stored in `~/.config/zw/`.
+
+### Files
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `config` | Flat key=value | User configuration options |
+| `projects.json` | JSON | Remembered project directories |
+
+### Configuration Options
+
+Configuration uses a simple flat format:
+
+```
+key=value
+another_key=another_value
+```
+
+Specific configuration options will be determined during implementation based on what behaviors need to be user-configurable.
