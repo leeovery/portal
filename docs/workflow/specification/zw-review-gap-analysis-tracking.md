@@ -39,10 +39,10 @@ The spec says ZW presents existing Zellij layouts but doesn't explain:
 - The Zellij Integration commands table is missing the layout flag
 
 **Proposed Addition**:
-(To be discussed)
+Added "Layout Discovery" subsection and "Create with layout" row to Session Operations table.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Query Zellij for config location, display without .kdl extension, skip picker if no layouts.
 
 ---
 

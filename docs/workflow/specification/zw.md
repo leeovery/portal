@@ -300,11 +300,20 @@ ZW uses these Zellij CLI commands:
 | Operation | Command |
 |-----------|---------|
 | Create/attach session | `zellij attach -c <session-name>` (creates if doesn't exist) |
+| Create with layout | `zellij attach -c <session-name> --layout <layout-name>` |
 | Attach to existing | `zellij attach <session-name>` |
 | List sessions | `zellij list-sessions` |
 | Kill session | `zellij kill-session <session-name>` |
 | Delete exited session | `zellij delete-session <session-name>` |
 | Query tab names | `zellij --session <name> action query-tab-names` |
+
+### Layout Discovery
+
+ZW queries Zellij for its configuration directory to locate available layouts. Layouts are `.kdl` files in the `layouts/` subdirectory of Zellij's config.
+
+**Display**: Layout names are shown without the `.kdl` extension (e.g., "dev-setup" not "dev-setup.kdl").
+
+**No layouts available**: If no custom layouts exist, ZW skips the layout picker and creates sessions with Zellij's default (single pane). The new session flow shows "No custom layouts available."
 
 ## Dependencies
 
