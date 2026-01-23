@@ -237,3 +237,28 @@ Specific configuration options will be determined during implementation based on
 ### Design Philosophy
 
 Most operations happen through the TUI. The CLI subcommands are minimal, providing only non-interactive utilities and standard help/version flags.
+
+## Distribution
+
+### Installation Method
+
+Distributed via Homebrew tap.
+
+```bash
+brew tap leeovery/tools
+brew install zw
+```
+
+**Future exploration**: Publishing to Homebrew core (without requiring a personal tap) - to be explored post-implementation.
+
+### Build & Release
+
+[GoReleaser](https://goreleaser.com/) handles cross-platform builds.
+
+**Release process**: A release script tags a version, which triggers a GitHub Actions workflow to perform the build and publish the release.
+
+### Runtime Dependency
+
+Zellij is a required dependency. The Homebrew formula declares Zellij as a dependency, ensuring it's installed automatically.
+
+If Zellij is somehow missing at runtime, ZW displays: "ZW requires Zellij. Install with: brew install zellij"
