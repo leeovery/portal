@@ -240,6 +240,11 @@ Most operations happen through the TUI. The CLI subcommands are minimal, providi
 
 ## Distribution
 
+### Target Platforms
+
+- macOS (arm64, amd64)
+- Linux (arm64, amd64)
+
 ### Installation Method
 
 Distributed via Homebrew tap.
