@@ -81,10 +81,10 @@ The spec doesn't define the JSON format for projects.json:
 This affects sorting (by recency?), display, and whether projects have custom display names.
 
 **Proposed Addition**:
-(To be discussed)
+Added "projects.json Structure" subsection with full schema.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Includes path, name (required, defaults to basename), aliases (array), and last_used for recency sorting.
 
 ---
 

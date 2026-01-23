@@ -235,6 +235,30 @@ All ZW data is stored in `~/.config/zw/`.
 | `config` | Flat key=value | User configuration options |
 | `projects.json` | JSON | Remembered project directories |
 
+### projects.json Structure
+
+```json
+{
+  "projects": [
+    {
+      "path": "/Users/lee/Code/myapp",
+      "name": "myapp",
+      "aliases": ["app", "ma"],
+      "last_used": "2026-01-22T10:30:00Z"
+    }
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Absolute path to project directory |
+| `name` | Yes | Display name (defaults to directory basename, can be customized) |
+| `aliases` | No | Array of short identifiers for quick access via `zw <alias>` |
+| `last_used` | Yes | ISO timestamp, used for sorting by recency |
+
+**Aliases**: Must be unique across all projects. Enables quick session start: `zw app` opens the project picker for that project directly.
+
 ### Configuration Options
 
 Configuration uses a simple flat format:
