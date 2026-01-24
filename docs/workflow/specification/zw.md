@@ -283,9 +283,14 @@ Specific configuration options will be determined during implementation based on
 | Command | Description |
 |---------|-------------|
 | `zw` | Launch the main TUI picker |
+| `zw .` | Start new session in current directory (opens naming prompt) |
+| `zw <path>` | Start new session in specified directory (opens naming prompt) |
+| `zw <alias>` | Start new session for project with matching alias (opens naming prompt) |
 | `zw clean` | Remove exited/dead sessions (non-interactive) |
 | `zw version` | Show version information |
 | `zw help` | Show usage information |
+
+**Quick-start shortcuts**: `zw .`, `zw <path>`, and `zw <alias>` all open the same naming/layout flow as selecting a directory via the project picker - they just skip navigation. The selected directory is added to remembered projects if not already present.
 
 ### Design Philosophy
 

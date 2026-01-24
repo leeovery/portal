@@ -123,16 +123,16 @@ Added kill confirmation note after keyboard shortcuts table.
 
 **Source**: cx-design.md - comparing to current TUI mockup
 **Category**: Gap/Ambiguity
-**Affects**: TUI Design section
+**Affects**: CLI Interface section
 
 **Details**:
 The original cx-design TUI had `[.] current directory` as an option to quickly start a session in pwd without going through the project picker. This is missing from the new TUI mockup. Is this functionality still wanted?
 
 **Proposed Addition**:
-(To be discussed)
+Added `zw .`, `zw <path>`, and `zw <alias>` CLI shortcuts to Commands table.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: CLI-only shortcuts. Opens same naming/layout flow as selecting directory in project picker - just skips navigation. Period key does nothing inside TUI.
 
 ---
 
