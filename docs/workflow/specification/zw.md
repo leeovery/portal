@@ -359,6 +359,8 @@ ZW uses `zellij list-sessions` to discover both running and exited sessions. The
 
 **Parsing note**: The command outputs with ANSI color codes. ZW must strip escape sequences when parsing the output.
 
+**Attached status**: Running sessions may show the number of connected clients in the `zellij list-sessions` output. ZW displays `● attached` for sessions with one or more clients. Implementation should verify the exact output format, as it may vary by Zellij version.
+
 ## Dependencies
 
 Prerequisites that must exist before implementation can begin:

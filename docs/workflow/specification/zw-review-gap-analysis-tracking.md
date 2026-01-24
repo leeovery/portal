@@ -146,7 +146,7 @@ Added `zw .`, `zw <path>`, and `zw <alias>` CLI shortcuts to Commands table.
 The spec shows "● attached" indicator but doesn't specify how ZW determines if another client is attached. Presumably from `zellij list-sessions` output format?
 
 **Proposed Addition**:
-(To be discussed)
+Added "Attached status" note to Session Discovery subsection.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Parse from zellij list-sessions output. Verify exact format during implementation as it may vary by Zellij version.
