@@ -242,7 +242,7 @@ ZW detects if it's running inside an existing Zellij session via the `ZELLIJ` en
 When running inside Zellij, ZW enters **utility mode** with restricted operations:
 
 **Blocked:**
-- Attaching to another session (prevents nesting)
+- Attaching to another session (prevents nesting) — applies to both the TUI and the `zw attach` CLI command
 
 **Allowed:**
 - Rename current session
@@ -345,6 +345,7 @@ From the project picker (when creating a new session):
 
 ### Behavior
 
+- **Content**: Shows directories only — files are not displayed
 - **Starting directory**: Current working directory
 - **Navigation**: Arrow keys to move through directory listing
 - **Enter directory**: `Enter` or `→` descends into highlighted directory
@@ -487,9 +488,14 @@ brew install zw
 
 ### Build & Release
 
-[GoReleaser](https://goreleaser.com/) handles cross-platform builds.
+[GoReleaser](https://goreleaser.com/) handles cross-platform builds and distribution.
 
-**Release process**: A release script tags a version, which triggers a GitHub Actions workflow to perform the build and publish the release.
+**Release process**:
+1. Run release script (generates version tag)
+2. Push tag to GitHub
+3. GitHub Actions workflow triggers GoReleaser
+4. GoReleaser builds binaries and creates GitHub Release
+5. GoReleaser auto-updates the Homebrew formula in `leeovery/homebrew-tools`
 
 ### Runtime Dependency
 

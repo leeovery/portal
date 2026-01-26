@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-01-26
 phase: Input Review
 topic: ZW
@@ -21,8 +21,8 @@ The spec's `projects.json` has a `name` field described as "defaults to director
 **Proposed Addition**:
 (pending discussion)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved (expanded scope — also revised Session Naming to auto-generated)
+**Notes**: Added Project Naming and Project Management subsections. Rewrote Session Naming to auto-generated {project-name}-{nanoid}. Updated New Session Flow and CLI command descriptions.
 
 ---
 
@@ -38,8 +38,8 @@ The cx-design discussion explicitly states the file browser shows directories on
 **Proposed Addition**:
 (pending discussion)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "directories only" to File Browser Behavior list.
 
 ---
 
@@ -55,8 +55,8 @@ The cx-design discussion explicitly describes GoReleaser auto-updating the Homeb
 **Proposed Addition**:
 (pending discussion)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Replaced Build & Release with detailed 5-step release process.
 
 ---
 
@@ -72,5 +72,5 @@ The spec says utility mode blocks "Attaching to another session (prevents nestin
 **Proposed Addition**:
 (pending discussion)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified that nesting block applies to both TUI and `zw attach` CLI command.
