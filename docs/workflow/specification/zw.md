@@ -113,6 +113,7 @@ Full-screen picker optimized for small screens (mobile SSH use case).
 
 2. **EXITED** - Resurrectable sessions (detached but recoverable from Zellij's cache)
    - Shows `(resurrect)` indicator
+   - `Enter` on an exited session resurrects it (reattaches via `zellij attach <session-name>`)
 
 3. **New session option** - `[n] new in project...`
    - Opens project picker to start a new session
@@ -225,6 +226,8 @@ The session is created automatically with an auto-generated name (e.g., `myapp-x
 
 **Layout selection**: ZW presents existing Zellij layouts for the user to choose from. ZW does not create or manage layouts - that's handled by Zellij itself. If no custom layouts exist, ZW starts sessions with Zellij's default (single pane).
 
+**No custom layouts**: If no custom layouts exist and the project is already saved, ZW skips all prompts — the session is created immediately upon project selection.
+
 ## Running Inside Zellij
 
 ### Environment Variables
@@ -243,6 +246,7 @@ When running inside Zellij, ZW enters **utility mode** with restricted operation
 
 **Blocked:**
 - Attaching to another session (prevents nesting) — applies to both the TUI and the `zw attach` CLI command
+- Creating new sessions (prevents nesting) — applies to `zw .`, `zw <path>`, and `zw <alias>` CLI commands. ZW displays: "Cannot create sessions from inside Zellij. Exit this session first."
 
 **Allowed:**
 - Rename current session
@@ -292,7 +296,13 @@ ZW maintains a list of directories where the user has previously started session
 
 ### How Directories are Added
 
-When a user navigates to a new directory via the file browser and starts a session there, that directory is added to the remembered list.
+A directory is added to the remembered list when a new session is started there, regardless of entry point:
+- File browser selection
+- `zw .` (current directory)
+- `zw <path>` (specified directory)
+- `zw <alias>` (alias resolves to a directory already in `projects.json`, so no addition needed)
+
+If the directory is not already in `projects.json`, it is added automatically.
 
 ### Project Naming
 
