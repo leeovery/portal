@@ -1,8 +1,9 @@
 ---
-checksum: 7afaa148a994fb0c691514df82fc0b1f
-generated: 2026-01-22
+checksum: 8b8fdafef66613f3efb476658ca13608
+generated: 2026-01-26T12:42:00
 research_files:
   - cc-tool-plan.md
+  - tmux-session-managers-analysis.md
 ---
 
 # Research Analysis Cache
@@ -78,3 +79,28 @@ research_files:
 - **Source**: cc-tool-plan.md (lines 477-504)
 - **Summary**: Four phases - Core MVP, Session Management, Polish, Distribution.
 - **Key questions**: Is the phasing right? Anything moved between phases?
+
+### 15. Git root detection for project registration
+- **Source**: tmux-session-managers-analysis.md (lines 134, 164)
+- **Summary**: sesh's `root` command detects git repo root for a directory, ensuring sessions start at project root regardless of where the user is in the tree. Low effort via `git rev-parse --show-toplevel`.
+- **Key questions**: Should ZW always resolve to git root, or offer it as a suggestion? Where in the flow does this apply (file browser, `zw .`, `zw <path>`)?
+
+### 16. Shell completions via Cobra
+- **Source**: tmux-session-managers-analysis.md (lines 118, 136, 160)
+- **Summary**: sesh provides built-in shell completion generation for bash/zsh/fish/powershell. Cobra provides this largely for free. Standard CLI hygiene.
+- **Key questions**: Just needs a `zw completion <shell>` subcommand wired up. Minimal design decisions required.
+
+### 17. Startup commands per project
+- **Source**: tmux-session-managers-analysis.md (lines 106-113, 132, 162)
+- **Summary**: sesh allows defining a `startup_command` per session that runs on creation (e.g., open nvim). Could be added to ZW's projects.json.
+- **Key questions**: Does this overlap with Zellij layouts (which can define commands per pane)? Is projects.json the right place?
+
+### 18. Quick session toggle (`last` command)
+- **Source**: tmux-session-managers-analysis.md (lines 115, 133, 161)
+- **Summary**: sesh's `last` command switches to the second-most recently used session. Common workflow pattern.
+- **Key questions**: Does Zellij track session access order? Would ZW need its own recency tracking?
+
+### 19. zoxide integration for directory discovery
+- **Source**: tmux-session-managers-analysis.md (lines 35, 50-51, 163)
+- **Summary**: Both tmux-session-wizard and sesh use zoxide as a directory source. Previously reviewed and decided not to proceed.
+- **Key questions**: Already decided against — documented for completeness only.
