@@ -1,8 +1,8 @@
 ---
 topic: zw
-status: concluded
+status: in-progress
 type: feature
-date: 2026-01-25
+date: 2026-01-26
 ---
 
 # Specification: ZW (Zellij Workspaces)
@@ -58,10 +58,22 @@ When attaching to an existing session, ZW does not change directories. Zellij re
 
 When starting a **new** session, ZW changes to the selected project directory before creating the session. The sequence is:
 
-1. cd to project directory
-2. Run `zellij attach -c <session-name>` (with optional layout flag)
+1. Resolve directory to git root (if inside a git repository)
+2. cd to resolved directory
+3. Run `zellij attach -c <session-name>` (with optional layout flag)
 
-This ensures the new session's default pane opens in the project directory.
+This ensures the new session's default pane opens in the project root directory.
+
+### Git Root Resolution
+
+When a directory is selected for a new session (via `zw .`, `zw <path>`, or the file browser), ZW resolves it to the git repository root before proceeding.
+
+**Implementation**: Run `git -C <selected-dir> rev-parse --show-toplevel`. If it succeeds, use the output as the directory. If it fails (exit code 128 — not a git repo), use the original directory as-is.
+
+**Behavior**:
+- Resolution is automatic and silent — no prompt or confirmation
+- Non-git directories are used unchanged, with no warning
+- One resolution function applied uniformly at all three entry points (`zw .`, `zw <path>`, file browser)
 
 ## TUI Design
 
@@ -363,6 +375,7 @@ Specific configuration options will be determined during implementation based on
 | `zw clean` | Remove exited/dead sessions (non-interactive) |
 | `zw list` | Output running session names, one per line (for scripting/fzf) |
 | `zw attach <name>` | Attach to session by exact name |
+| `zw completion <shell>` | Output shell completion script (bash, zsh, fish) |
 | `zw version` | Show version information |
 | `zw help` | Show usage information |
 
@@ -396,6 +409,24 @@ done
 ```
 
 This provides an alternative to the TUI for power users who prefer external pickers or scripting.
+
+### Shell Completions
+
+ZW provides shell completion scripts via Cobra's built-in generators.
+
+```
+zw completion bash
+zw completion zsh
+zw completion fish
+```
+
+Each outputs the completion script to stdout. Users source it in their shell config:
+
+```bash
+source <(zw completion zsh)
+```
+
+**Supported shells**: bash, zsh, fish only. No powershell — ZW wraps Zellij, which doesn't run on Windows.
 
 ## Distribution
 
