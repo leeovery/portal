@@ -2,3 +2,4 @@ docs/workflow/discussion/cx-design.md: 001
 docs/workflow/discussion/zellij-multi-directory.md: 001
 docs/workflow/discussion/fzf-output-mode.md: 001
 docs/workflow/specification/zw.md: 002
+docs/workflow/discussion/git-root-and-completions.md: 001
