@@ -2,8 +2,16 @@
 topic: zw
 status: concluded
 type: feature
-date: 2026-01-26
-sources: []
+date: 2026-01-31
+sources:
+  - name: cx-design
+    status: incorporated
+  - name: zellij-multi-directory
+    status: incorporated
+  - name: fzf-output-mode
+    status: incorporated
+  - name: git-root-and-completions
+    status: incorporated
 ---
 
 # Specification: ZW (Zellij Workspaces)
