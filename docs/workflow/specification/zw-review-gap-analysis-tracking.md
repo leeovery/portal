@@ -21,8 +21,9 @@ CLI table says: "Remove exited/dead sessions (non-interactive)"
 Stale Project Cleanup section says: "detects missing or renamed directories and offers to remove them"
 These are two different operations (Zellij session cleanup vs. project list cleanup). "Offers to remove" implies interactivity, contradicting "non-interactive."
 
-**Proposed Addition**: (pending discussion)
-**Resolution**: Pending
+**Proposed Addition**: Updated CLI table and Stale Project Cleanup section.
+**Resolution**: Approved
+**Notes**: Option C chosen - both session cleanup and stale project removal, with printed output, non-interactive.
 
 ---
 
@@ -38,8 +39,9 @@ The spec says ZW runs `zellij attach -c <session-name>` but doesn't say whether 
 - exec: ZW ceases to exist, clean handoff, no post-attach actions
 - subprocess: ZW waits, can do cleanup after, but must manage terminal state
 
-**Proposed Addition**: (pending discussion)
-**Resolution**: Pending
+**Proposed Addition**: New "Process Handoff" subsection in Zellij Integration.
+**Resolution**: Approved
+**Notes**: exec model chosen — standard pattern for session pickers, no post-attach actions needed.
 
 ---
 
@@ -57,8 +59,9 @@ The spec says ZW runs `zellij attach -c <session-name>` but doesn't say whether 
 - How to clear filter
 - Conflict: `k` is both navigation (down) and a typeable character. `n` is both "jump to new" and a typeable character. How does the TUI distinguish?
 
-**Proposed Addition**: (pending discussion)
-**Resolution**: Pending
+**Proposed Addition**: New "Filter Mode" subsection in TUI Design, updated shortcuts table (replaced "Typing" with `/").
+**Resolution**: Approved
+**Notes**: Option A chosen — dedicated `/` key enters filter mode, Esc exits. Clear separation between shortcut and filter modes.
 
 ---
 
@@ -72,8 +75,8 @@ The spec says ZW runs `zellij attach -c <session-name>` but doesn't say whether 
 **Details**:
 "Enter on a session shows info instead of attaching" but what info? How displayed? Tab names? A popup? Details pane?
 
-**Proposed Addition**: (pending discussion)
-**Resolution**: Pending
+**Proposed Addition**: Inline expansion with tab names, toggle on Enter, no popup.
+**Resolution**: Approved
 
 ---
 
@@ -90,8 +93,9 @@ The project picker is a core screen but its full interaction model is sparse:
 - Can you fuzzy-filter the project list?
 - How to navigate back to session list?
 
-**Proposed Addition**: (pending discussion)
-**Resolution**: Pending
+**Proposed Addition**: New "Project Picker Interaction" subsection under Project Memory. Updated empty state mock and file browser access to remove `/` shortcut conflict.
+**Resolution**: Approved
+**Notes**: `/` is consistently "filter mode" across all screens. File browser accessed via list item, not shortcut.
 
 ---
 

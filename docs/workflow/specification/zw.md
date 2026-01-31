@@ -141,10 +141,27 @@ Full-screen picker optimized for small screens (mobile SSH use case).
 | `Enter` | Select (attach to session or open project picker) |
 | `n` | Jump to "new session" option |
 | `K` | Kill selected session |
+| `/` | Enter filter mode |
 | `q` / `Esc` | Quit |
-| Typing | Fuzzy filter the list |
 
 **Kill confirmation**: Pressing `K` prompts for confirmation before killing the selected session: "Kill session 'myapp'? (y/n)"
+
+### Filter Mode
+
+The session list supports fuzzy filtering via a dedicated mode, activated by pressing `/`.
+
+**Entering filter mode**: Press `/`. A filter input appears at the bottom of the list (e.g., `filter: _`). All subsequent keystrokes are treated as filter input — shortcut keys (`n`, `k`, `K`, etc.) lose their shortcut meaning and become typeable characters.
+
+**While filtering**:
+- Typing narrows the visible list by fuzzy-matching against session names
+- `↑` / `↓` navigate the filtered results
+- `Enter` selects the highlighted item (same as normal mode)
+- `Backspace` deletes the last filter character; if the filter is already empty, exits filter mode
+- `Esc` clears the filter and exits filter mode
+
+**What gets filtered**: Running sessions and exited sessions. The `[n] new in project...` option is always visible and never filtered out.
+
+**Outside filter mode**: All single-key shortcuts (`n`, `k`, `j`, `K`, `q`) work as documented in the keyboard shortcuts table. No filtering occurs.
 
 ### Session Info Display
 
@@ -178,7 +195,7 @@ Select a project:
   No saved projects yet.
 
   ─────────────────────────────
-  [/] browse for directory...
+  browse for directory...
 ```
 
 The file browser is always available to start sessions in new directories.
@@ -290,6 +307,8 @@ When running inside Zellij, the TUI displays with modifications:
 - `[n] new in project...` is hidden (can't start nested sessions)
 - `[r] rename current session` option added
 
+**Session info display**: Pressing `Enter` on a session in utility mode shows an inline expansion below the session entry with tab names (queried via `zellij --session <name> action query-tab-names`). Pressing `Enter` again or selecting a different session collapses it. No separate screen or popup.
+
 **Keyboard shortcuts in utility mode:**
 | Key | Action |
 |-----|--------|
@@ -342,13 +361,32 @@ Remembered directories are stored in `~/.config/zw/projects.json`.
 
 When selecting "new in project...", remembered directories appear first in the project picker, allowing quick selection before browsing to new locations.
 
+### Project Picker Interaction
+
+The project picker is a full-screen list shown when selecting `[n] new in project...` from the main TUI.
+
+**Layout**: Remembered projects are listed by recency, with a `[browse for directory...]` option always visible at the bottom of the list.
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `j` / `k` | Navigate project list |
+| `Enter` | Select project (proceeds to naming/layout flow) or open file browser if on browse option |
+| `/` | Enter filter mode (same behavior as main session list) |
+| `e` | Edit selected project (rename, manage aliases) |
+| `x` | Remove selected project from remembered list (with confirmation) |
+| `Esc` | Return to main session list |
+
+**Edit mode**: Pressing `e` opens an inline edit for the selected project — cycling through editable fields (name, aliases) with `Tab`, confirming with `Enter`, cancelling with `Esc`.
+
 ### Stale Project Cleanup
 
 **Automatic**: If a remembered directory no longer exists on disk, ZW removes it from the project list automatically when encountered.
 
 **Manual**: While navigating the project list, users can manually remove a project from the remembered list via keyboard shortcut.
 
-**Via `zw clean`**: The clean command also detects missing or renamed directories and offers to remove them from the project list.
+**Via `zw clean`**: Deletes all exited Zellij sessions (`zellij delete-session`) and removes projects whose directories no longer exist on disk. Prints each action taken (e.g., "Deleted exited session: old-feature", "Removed stale project: myapp (/Users/lee/Code/myapp)"). Non-interactive — no confirmation prompts.
 
 ## File Browser
 
@@ -359,8 +397,7 @@ When starting a new session in a directory not in the remembered list, an intera
 ### Access
 
 From the project picker (when creating a new session):
-- Select the "browse..." option, or
-- Press `/` to open the file browser directly
+- Select the "browse for directory..." option at the bottom of the project list
 
 ### Behavior
 
@@ -431,7 +468,7 @@ Specific configuration options will be determined during implementation based on
 | `zw .` | Start new session in current directory |
 | `zw <path>` | Start new session in specified directory |
 | `zw <alias>` | Start new session for project with matching alias |
-| `zw clean` | Remove exited/dead sessions (non-interactive) |
+| `zw clean` | Remove exited sessions and stale projects, print what was removed (non-interactive) |
 | `zw list` | Output running session names, one per line (for scripting/fzf) |
 | `zw attach <name>` | Attach to session by exact name |
 | `zw completion <shell>` | Output shell completion script (bash, zsh, fish) |
@@ -538,6 +575,10 @@ ZW uses these Zellij CLI commands:
 | Delete exited session | `zellij delete-session <session-name>` |
 | Query tab names | `zellij --session <name> action query-tab-names` |
 | Rename session | `zellij action rename-session <new-name>` (from inside session) |
+
+### Process Handoff
+
+When launching Zellij (attach or create), ZW uses `exec` to replace its own process with Zellij. ZW's job is complete once the user selects a session — there are no post-attach actions. This avoids terminal state management and is the standard pattern for session pickers.
 
 ### Layout Discovery
 
