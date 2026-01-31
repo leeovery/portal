@@ -1,7 +1,7 @@
 {
   "plugins": {
     "@leeovery/claude-technical-workflows": {
-      "version": "2.0.45",
+      "version": "2.0.51",
       "files": [
         "skills/technical-discussion",
         "skills/technical-implementation",
@@ -14,6 +14,9 @@
         "commands/start-feature.md",
         "commands/workflow",
         "agents/chain-verifier.md",
+        "agents/planning-phase-designer.md",
+        "agents/planning-task-author.md",
+        "agents/planning-task-designer.md",
         "scripts/discovery-for-discussion.sh",
         "scripts/discovery-for-implementation-and-review.sh",
         "scripts/discovery-for-planning.sh",

@@ -26,7 +26,16 @@ Either way: Transform unvalidated reference material into a specification that's
   - Any other reference material
 - **Topic name** (required) - Used for the output filename
 
-**If missing:** Will ask user to provide context or point to source files.
+**Before proceeding**, verify all required inputs are available and unambiguous. If anything is missing or unclear, **STOP** — do not proceed until resolved.
+
+- **No source material provided?**
+  > "I need source material to build a specification from. Could you point me to the source files (e.g., `docs/workflow/discussion/{topic}.md`), or provide the content directly?"
+
+- **No topic name provided?**
+  > "What should the specification be named? This determines the output file: `docs/workflow/specification/{name}.md`."
+
+- **Source material seems incomplete or unclear?**
+  > "I have the source material, but {concern}. Should I proceed as-is, or is there additional material I should review?"
 
 **Multiple sources:** When multiple sources are provided, extract exhaustively from ALL of them. Content may be scattered across sources - a decision in one may have constraints or details in another. The specification consolidates everything into a single standalone document.
 
@@ -66,11 +75,11 @@ After user signs off:
 - **STOP and WAIT** for the user to explicitly approve before writing
 - Treat each write operation as requiring its own explicit approval
 
-**What counts as approval:** "Log it" (the standard choice you present) or equivalent: "Yes", "Approved", "Add it", "That's good".
+**What counts as approval:** `y`/`yes` (the standard choice you present) or equivalent: "Approved", "Add it", "That's good".
 
 **What does NOT count as approval:** Silence, you presenting choices, the user asking a follow-up question, the user saying "What's next?", or any response that isn't explicit confirmation.
 
-If you are uncertain whether the user approved, **ASK**: "Would you like me to log it, or do you want to adjust something?"
+If you are uncertain whether the user approved, **ASK**: "Ready to log it, or do you want to change something?"
 
 ---
 
@@ -94,7 +103,7 @@ The specification is the **golden document** - planning uses only this. If infor
 
 ## Critical Rules
 
-**STOP AND WAIT FOR APPROVAL**: You MUST NOT write to the specification until the user has explicitly approved. Presenting content is NOT approval. Presenting choices is NOT approval. You must receive explicit confirmation (e.g., "Log it") before ANY write operation. If uncertain, ASK.
+**STOP AND WAIT FOR APPROVAL**: You MUST NOT write to the specification until the user has explicitly approved. Presenting content is NOT approval. Presenting choices is NOT approval. You must receive explicit confirmation (e.g., `y`/`yes`) before ANY write operation. If uncertain, ASK.
 
 **Log verbatim**: When approved, write exactly what was presented - no silent modifications.
 

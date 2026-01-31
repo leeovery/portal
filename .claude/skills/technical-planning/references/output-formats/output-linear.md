@@ -1,6 +1,6 @@
 # Output: Linear
 
-*Output adapter for **[technical-planning](../SKILL.md)***
+*Output adapter for **[technical-planning](../../SKILL.md)***
 
 ---
 
@@ -141,22 +141,30 @@ When creating issues, if something is unclear or missing from the specification:
 
 This allows iterative refinement. Create all issues, identify gaps, circle back to specification if needed, then update issues with missing detail. Plans don't have to be perfect on first pass.
 
-### 4. Create Local Plan File
+### 4. Create Plan Index File
 
 Create `docs/workflow/planning/{topic}.md`:
 
 ```markdown
 ---
+topic: {topic-name}
+status: planning
 format: linear
+specification: ../specification/{topic}.md
+cross_cutting_specs:              # Omit if none
+  - ../specification/{spec}.md
+spec_commit: {git-commit-hash}
 plan_id: {PROJECT_NAME}
 project_id: {ID from MCP response}
 team: {TEAM_NAME}
+created: YYYY-MM-DD  # Use today's actual date
+updated: YYYY-MM-DD  # Use today's actual date
+planning:
+  phase: 1
+  task: ~
 ---
 
-# Plan Reference: {Topic Name}
-
-**Specification**: `docs/workflow/specification/{topic}.md`
-**Created**: YYYY-MM-DD *(use today's actual date)*
+# Plan: {Topic Name}
 
 ## About This Plan
 
@@ -185,10 +193,36 @@ Architectural decisions from cross-cutting specifications that inform this plan:
 
 | Specification | Key Decisions | Applies To |
 |---------------|---------------|------------|
-| [Caching Strategy](../specification/caching-strategy.md) | Cache API responses for 5 min | Tasks involving API calls |
-| [Rate Limiting](../specification/rate-limiting.md) | 100 req/min per user | User-facing endpoints |
+| [Caching Strategy](../../specification/caching-strategy.md) | Cache API responses for 5 min | Tasks involving API calls |
+| [Rate Limiting](../../specification/rate-limiting.md) | 100 req/min per user | User-facing endpoints |
 
 *Remove this section if no cross-cutting specifications apply.*
+
+## Phases
+
+### Phase 1: {Name}
+status: draft
+label: phase-1
+
+**Goal**: {What this phase accomplishes}
+**Why this order**: {Why this comes at this position}
+
+**Acceptance**:
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+#### Tasks
+| ID | Name | Edge Cases | Status |
+|----|------|------------|--------|
+| {issue-id} | {Task Name} | {list} | pending |
+
+---
+
+### Phase 2: {Name}
+status: draft
+label: phase-2
+
+...
 
 ## External Dependencies
 
@@ -198,18 +232,29 @@ Architectural decisions from cross-cutting specifications that inform this plan:
 - {topic}: {description} → {issue-id} (resolved)
 ```
 
-The External Dependencies section tracks what this plan needs from other topics. See `formal-planning.md` for the format and states (unresolved, resolved, satisfied externally).
+The External Dependencies section tracks what this plan needs from other topics. See `../dependencies.md` for the format and states (unresolved, resolved, satisfied externally).
 
 ## Frontmatter
 
-The frontmatter contains all information needed to query Linear:
+The frontmatter contains all information needed to query Linear and tracks planning progress:
 
 ```yaml
 ---
+topic: {topic-name}
+status: planning | concluded
 format: linear
+specification: ../specification/{topic}.md
+cross_cutting_specs:              # Omit if none
+  - ../specification/{spec}.md
+spec_commit: {git-commit-hash}
 plan_id: USER-AUTH-FEATURE
 project_id: abc123-def456
 team: Engineering
+created: YYYY-MM-DD  # Use today's actual date
+updated: YYYY-MM-DD  # Use today's actual date
+planning:
+  phase: 2
+  task: 3
 ---
 ```
 
@@ -266,6 +311,14 @@ Linear:
 
 - Update issue status in Linear via MCP after each task
 - User sees real-time progress in Linear UI
+
+### Cleanup (Restart)
+
+The official Linear MCP server does not support deletion. Ask the user to delete the Linear project manually via the Linear UI.
+
+> "The Linear project **{project name}** needs to be deleted before restarting. Please delete it in the Linear UI (Project Settings → Delete project), then confirm so I can proceed."
+
+**STOP.** Wait for the user to confirm.
 
 ### Fallback
 

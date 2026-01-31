@@ -1,6 +1,6 @@
 # Output: Beads
 
-*Output adapter for **[technical-planning](../SKILL.md)***
+*Output adapter for **[technical-planning](../../SKILL.md)***
 
 ---
 
@@ -233,20 +233,28 @@ When tasks depend on each other:
 bd dep add bd-a3f8.1.2 bd-a3f8.1.1  # 1.2 blocked by 1.1
 ```
 
-### 5. Create Local Plan File
+### 5. Create Plan Index File
 
 Create `docs/workflow/planning/{topic}.md`:
 
 ```markdown
 ---
+topic: {topic-name}
+status: planning
 format: beads
+specification: ../specification/{topic}.md
+cross_cutting_specs:              # Omit if none
+  - ../specification/{spec}.md
+spec_commit: {git-commit-hash}
 plan_id: bd-{EPIC_ID}
+created: YYYY-MM-DD  # Use today's actual date
+updated: YYYY-MM-DD  # Use today's actual date
+planning:
+  phase: 1
+  task: ~
 ---
 
-# Plan Reference: {Topic Name}
-
-**Specification**: `docs/workflow/specification/{topic}.md`
-**Created**: YYYY-MM-DD *(use today's actual date)*
+# Plan: {Topic Name}
 
 ## About This Plan
 
@@ -275,17 +283,36 @@ Architectural decisions from cross-cutting specifications that inform this plan:
 
 | Specification | Key Decisions | Applies To |
 |---------------|---------------|------------|
-| [Caching Strategy](../specification/caching-strategy.md) | Cache API responses for 5 min | Tasks involving API calls |
-| [Rate Limiting](../specification/rate-limiting.md) | 100 req/min per user | User-facing endpoints |
+| [Caching Strategy](../../specification/caching-strategy.md) | Cache API responses for 5 min | Tasks involving API calls |
+| [Rate Limiting](../../specification/rate-limiting.md) | 100 req/min per user | User-facing endpoints |
 
 *Remove this section if no cross-cutting specifications apply.*
 
-## Phase Overview
+## Phases
 
-| Phase | Goal | Epic ID |
-|-------|------|---------|
-| Phase 1 | {Goal} | bd-{id}.1 |
-| Phase 2 | {Goal} | bd-{id}.2 |
+### Phase 1: {Name}
+status: draft
+beads_id: bd-{id}.1
+
+**Goal**: {What this phase accomplishes}
+**Why this order**: {Why this comes at this position}
+
+**Acceptance**:
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+#### Tasks
+| ID | Name | Edge Cases | Status |
+|----|------|------------|--------|
+| bd-{id}.1.1 | {Task Name} | {list} | pending |
+
+---
+
+### Phase 2: {Name}
+status: draft
+beads_id: bd-{id}.2
+
+...
 
 ## External Dependencies
 
@@ -295,16 +322,27 @@ Architectural decisions from cross-cutting specifications that inform this plan:
 - {topic}: {description} → {task-id} (resolved)
 ```
 
-The External Dependencies section tracks what this plan needs from other topics. See `formal-planning.md` for the format and states (unresolved, resolved, satisfied externally).
+The External Dependencies section tracks what this plan needs from other topics. See `../dependencies.md` for the format and states (unresolved, resolved, satisfied externally).
 
 ## Frontmatter
 
-The `format: beads` frontmatter tells implementation to use beads CLI:
+The frontmatter tells implementation to use beads CLI and tracks planning progress:
 
 ```yaml
 ---
+topic: {topic-name}
+status: planning | concluded
 format: beads
+specification: ../specification/{topic}.md
+cross_cutting_specs:              # Omit if none
+  - ../specification/{spec}.md
+spec_commit: {git-commit-hash}
 plan_id: bd-a3f8
+created: YYYY-MM-DD  # Use today's actual date
+updated: YYYY-MM-DD  # Use today's actual date
+planning:
+  phase: 2
+  task: 3
 ---
 ```
 
@@ -389,6 +427,20 @@ project/
 │   ├── discussion/{topic}.md      # Discussion output
 │   ├── specification/{topic}.md   # Specification output
 │   └── planning/{topic}.md        # Planning output (format: beads)
+```
+
+### Cleanup (Restart)
+
+Delete the epic and all its children (phases and tasks):
+
+```bash
+bd delete {epic-id} --cascade --force
+```
+
+If using database mode, sync afterwards to persist the deletion to JSONL:
+
+```bash
+bd sync
 ```
 
 ## Priority Mapping

@@ -40,7 +40,11 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them. Presen
 
 **This step is mandatory. You must complete it before proceeding.**
 
-Invoke the `/migrate` command and assess its output before proceeding to Step 1.
+Invoke the `/migrate` command and assess its output.
+
+**If files were updated**: STOP and wait for the user to review the changes (e.g., via `git diff`) and confirm before proceeding to Step 1. Do not continue automatically.
+
+**If no updates needed**: Proceed to Step 1.
 
 ---
 
@@ -116,25 +120,31 @@ At least one concluded discussion exists.
 Show the current state clearly. Use this EXACT format:
 
 ```
-Workflow Status: Specification Phase
+Specification Phase
 
-Discussions:
-  ✓ {topic-1} - concluded - ready
-  ✓ {topic-2} - concluded - ready
-  ○ {topic-3} - concluded - spec: {spec_status}
-  · {topic-4} - in-progress - not ready
+Available discussions:
+  + {topic-1} - create new spec
+  + {topic-2} - create new spec
+  ▶ {topic-3} - continue in-progress spec
+  > {topic-4} - review concluded spec
 
-Specifications:
-  • {spec-1} (active) - sources: {topic-1}
-  • {spec-2} (superseded → {other-spec}) - sources: {topic-x}
+Not specifiable discussions:
+  · {topic-5} [in-progress]
+
+Existing specifications:
+  • {spec-1} [active] - sources: {topic-1}
+  • {spec-2} [superseded → {other-spec}] - sources: {topic-x}
 
 {N} concluded discussions available.
 ```
 
 **Legend:**
-- `✓` = concluded, no spec yet (ready to specify)
-- `○` = concluded, has individual spec (shows spec status: in-progress or concluded)
-- `·` = in-progress (not ready)
+- `+` = concluded, no spec yet (create new)
+- `▶` = concluded, has in-progress spec (continue)
+- `>` = concluded, has concluded spec (review)
+- `·` = in-progress (not specifiable)
+
+Omit either discussions section if it has no entries.
 
 #### Routing Based on State
 
@@ -324,7 +334,12 @@ Then analyze coupling between discussions:
 - **Behavioral coupling**: Discussions where one's implementation requires another
 - **Conceptual coupling**: Discussions that address different facets of the same problem
 
-Group discussions that are tightly coupled - they should become a single specification because their decisions are inseparable.
+Group discussions into specifications where each grouping represents a **coherent feature or capability that can be independently planned and built** — with clear stages delivering incremental, testable value. Coupling tells you what's related; the grouping decision also requires that the result is the right shape:
+
+- **Tightly coupled discussions belong together** — their decisions are inseparable and would produce interleaved implementation work
+- **Don't group too broadly** — if a grouping mixes unrelated concerns, the resulting specification will produce incoherent stages and tasks that jump between disconnected areas
+- **Don't group too narrowly** — if a grouping is too thin, it may not warrant its own specification, planning, and implementation cycle
+- **Flag cross-cutting discussions** — discussions about patterns or policies (not features) should become cross-cutting specifications rather than being grouped with feature discussions
 
 #### Preserve Anchored Names
 

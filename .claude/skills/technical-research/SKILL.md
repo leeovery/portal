@@ -20,7 +20,13 @@ Either way: Explore feasibility (technical, business, market), validate assumpti
 - **Topic or idea** (required) - What to research/explore
 - **Existing context** (optional) - Any prior research or constraints
 
-**If missing:** Will ask user what they want to explore.
+**Before proceeding**, confirm the required input is clear. If anything is missing or unclear, **STOP** and resolve with the user.
+
+- **No topic provided?**
+  > "What would you like to research or explore? This could be a new idea, a technical concept, a market opportunity — anything you want to investigate."
+
+- **Topic is vague or could go many directions?**
+  > "You mentioned {topic}. That could cover a lot of ground — is there a specific angle you'd like to start with, or should I explore broadly?"
 
 ## Your Expertise
 
@@ -86,6 +92,8 @@ Research without documentation is wasted. Follow this loop:
 **Don't batch**. Every insight gets pushed before the next question. Context can refresh at any time—unpushed work is lost.
 
 ## Critical Rules
+
+**No status field**: Research documents do NOT have a `status` field in their frontmatter. Only `topic` and `date`. Research is open-ended by nature — it doesn't "conclude." Even when a research exploration feels complete, do not add `status: concluded` or any similar field. The document stays as-is.
 
 **Don't hallucinate**: Only document what was actually discussed.
 
