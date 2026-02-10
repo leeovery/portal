@@ -277,3 +277,303 @@ CLI commands also use switch-client instead of attach:
 
 - `mux .`, `mux <path>`, `mux <alias>` → create session detached, then switch-client
 - `mux attach <name>` → switch-client to the named session
+
+## Project Memory
+
+### Remembered Directories
+
+mux maintains a list of directories where the user has previously started sessions. This enables quick access to frequently used project directories when starting new sessions.
+
+### How Directories are Added
+
+A directory is added to the remembered list when a new session is started there, regardless of entry point:
+- File browser selection
+- `mux .` (current directory)
+- `mux <path>` (specified directory)
+- `mux <alias>` (alias resolves to a directory already in `projects.json`, so no addition needed)
+
+If the directory is not already in `projects.json`, it is added automatically.
+
+### Project Naming
+
+When a user starts a session in a **new directory** (not yet in `projects.json`), mux presents a naming screen before proceeding to session creation:
+
+- **Project name**: Text input, defaults to directory basename (after git root resolution)
+- **Aliases**: Optional, user can add one or more short identifiers for quick access via `mux <alias>`
+
+This is a dedicated screen within the TUI.
+
+**Saved projects**: When starting a session in a directory already in `projects.json`, mux skips the project naming screen and proceeds directly to session creation.
+
+**Project names are independent of tmux session names.** A project may have many sessions — each session's name is auto-generated from the project name (see Session Naming). The project name is a mux display concept; it does not propagate to tmux directly.
+
+### Project Management
+
+For saved projects, users can manage project details from the project picker via keyboard shortcut:
+- **Rename** the project display name
+- **Add or remove aliases**
+
+These changes update `projects.json` only and do not affect any existing tmux session names.
+
+### Storage
+
+Remembered directories are stored in `~/.config/mux/projects.json`.
+
+### Usage in TUI
+
+When selecting "new in project...", remembered directories appear first in the project picker, allowing quick selection before browsing to new locations.
+
+### Project Picker Interaction
+
+The project picker is a full-screen list shown when selecting `[n] new in project...` from the main TUI.
+
+**Layout**: Remembered projects are listed by recency, with a `[browse for directory...]` option always visible at the bottom of the list.
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` or `j` / `k` | Navigate project list |
+| `Enter` | Select project (proceeds to naming flow for new projects, or creates session immediately for saved projects) or open file browser if on browse option |
+| `/` | Enter filter mode (same behavior as main session list) |
+| `e` | Edit selected project (rename, manage aliases) |
+| `x` | Remove selected project from remembered list (with confirmation) |
+| `Esc` | Return to main session list |
+
+**Edit mode**: Pressing `e` opens an inline edit for the selected project — cycling through editable fields (name, aliases) with `Tab`, confirming with `Enter`, cancelling with `Esc`.
+
+### Stale Project Cleanup
+
+**Automatic**: If a remembered directory no longer exists on disk, mux removes it from the project list automatically when encountered.
+
+**Manual**: While navigating the project list, users can manually remove a project from the remembered list via the `x` keyboard shortcut.
+
+**Via `mux clean`**: Removes projects whose directories no longer exist on disk. Prints each action taken (e.g., "Removed stale project: myapp (/Users/lee/Code/myapp)"). Non-interactive — no confirmation prompts.
+
+## File Browser
+
+### Purpose
+
+When starting a new session in a directory not in the remembered list, an interactive file browser allows navigating to and selecting the desired directory.
+
+### Access
+
+From the project picker (when creating a new session):
+- Select the "browse for directory..." option at the bottom of the project list
+
+### Behavior
+
+- **Content**: Shows directories only — files are not displayed
+- **Starting directory**: Current working directory
+- **Navigation**: Arrow keys to move through directory listing
+- **Enter directory**: `Enter` or `→` descends into highlighted directory
+- **Go up**: `Backspace` or `←` goes to parent directory
+- **Select current directory**: `Enter` on `.` (current dir indicator) or dedicated shortcut (e.g., `Space`)
+- **Cancel**: `Esc` returns to project picker without selection
+- The selected directory is automatically added to remembered projects
+
+## Configuration & Storage
+
+### Location
+
+All mux data is stored in `~/.config/mux/`.
+
+### Files
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `config` | Flat key=value | User configuration options |
+| `projects.json` | JSON | Remembered project directories |
+
+### projects.json Structure
+
+```json
+{
+  "projects": [
+    {
+      "path": "/Users/lee/Code/myapp",
+      "name": "myapp",
+      "aliases": ["app", "ma"],
+      "last_used": "2026-01-22T10:30:00Z"
+    }
+  ]
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Absolute path to project directory |
+| `name` | Yes | Display name (defaults to directory basename, can be customized) |
+| `aliases` | No | Array of short identifiers for quick access via `mux <alias>` |
+| `last_used` | Yes | ISO timestamp, used for sorting by recency |
+
+**Aliases**: Must be unique across all projects. Enables quick session start: `mux app` opens the project picker for that project directly.
+
+### Configuration Options
+
+Configuration uses a simple flat format:
+
+```
+key=value
+another_key=another_value
+```
+
+Specific configuration options will be determined during implementation based on what behaviors need to be user-configurable.
+
+## CLI Interface
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `mux` | Launch the main TUI picker |
+| `mux .` | Start new session in current directory |
+| `mux <path>` | Start new session in specified directory |
+| `mux <alias>` | Start new session for project with matching alias |
+| `mux clean` | Remove stale projects (directories that no longer exist on disk), non-interactive |
+| `mux list` | Output running session names, one per line (for scripting/fzf) |
+| `mux attach <name>` | Attach to session by exact name |
+| `mux completion <shell>` | Output shell completion script (bash, zsh, fish) |
+| `mux version` | Show version information |
+| `mux help` | Show usage information |
+
+**Quick-start shortcuts**: `mux .`, `mux <path>`, and `mux <alias>` all open the same naming flow as selecting a directory via the project picker — they just skip navigation. The selected directory is added to remembered projects if not already present. For saved projects, session creation is immediate (no prompts).
+
+**Attach errors**: If `mux attach <name>` doesn't match any running session, mux displays: "No session found: {name}" and exits with a non-zero status code.
+
+### Argument Resolution
+
+When `mux` receives a positional argument (e.g., `mux myapp`):
+
+1. **Path detection**: If the argument contains `/` or starts with `.`, treat it as a path
+2. **Alias lookup**: Otherwise, check if it matches a project alias in `projects.json`
+3. **Fallback to path**: If no alias match, treat as a relative path
+4. **Validation**: If the resolved path doesn't exist, display error: "No project alias or directory found: {arg}"
+
+### Design Philosophy
+
+Most operations happen through the TUI. The CLI subcommands are minimal, providing only non-interactive utilities and standard help/version flags.
+
+### Scripting & fzf Integration
+
+`mux list` outputs session names one per line for piping to external tools:
+
+```bash
+# Quick attach with fzf
+mux attach $(mux list | fzf)
+
+# Scripting
+for session in $(mux list); do
+  echo "Session: $session"
+done
+```
+
+This provides an alternative to the TUI for power users who prefer external pickers or scripting.
+
+### Shell Completions
+
+mux provides shell completion scripts via Cobra's built-in generators.
+
+```
+mux completion bash
+mux completion zsh
+mux completion fish
+```
+
+Each outputs the completion script to stdout. Users source it in their shell config:
+
+```bash
+source <(mux completion zsh)
+```
+
+**Supported shells**: bash, zsh, fish only. No powershell — mux wraps tmux, which doesn't run on Windows.
+
+## Distribution
+
+### Target Platforms
+
+- macOS (arm64, amd64)
+- Linux (arm64, amd64)
+
+### Installation Method
+
+Distributed via Homebrew tap.
+
+```bash
+brew tap leeovery/tools
+brew install mux
+```
+
+**Future exploration**: Publishing to Homebrew core (without requiring a personal tap) — to be explored post-implementation.
+
+### Build & Release
+
+[GoReleaser](https://goreleaser.com/) handles cross-platform builds and distribution.
+
+**Release process**:
+1. Run release script (generates version tag)
+2. Push tag to GitHub
+3. GitHub Actions workflow triggers GoReleaser
+4. GoReleaser builds binaries and creates GitHub Release
+5. GoReleaser auto-updates the Homebrew formula in `leeovery/homebrew-tools`
+
+### Runtime Dependency
+
+tmux is a required dependency. The Homebrew formula declares tmux as a dependency, ensuring it's installed automatically.
+
+If tmux is somehow missing at runtime, mux displays: "mux requires tmux. Install with: brew install tmux"
+
+## tmux Integration
+
+### Session Operations
+
+mux uses these tmux commands (verified against tmux 3.6a):
+
+| Operation | Command |
+|-----------|---------|
+| Create or attach | `tmux new-session -A -s <name>` |
+| Create with start dir | `tmux new-session -A -s <name> -c <dir>` |
+| Create detached (for switch-client) | `tmux new-session -d -s <name> -c <dir>` |
+| Attach to existing | `tmux attach-session -t <name>` |
+| Switch client (inside tmux) | `tmux switch-client -t <name>` |
+| List sessions | `tmux list-sessions -F '#{session_name}\|#{session_windows}\|#{session_attached}'` |
+| Check session exists | `tmux has-session -t <name>` (exit 0 if exists, 1 if not) |
+| Kill session | `tmux kill-session -t <name>` |
+| Rename session | `tmux rename-session -t <name> <new-name>` |
+| List windows | `tmux list-windows -t <name> -F '#{window_index}\|#{window_name}\|#{window_panes}'` |
+
+### Process Handoff
+
+When launching tmux from outside (bare shell), mux uses `exec` to replace its own process with tmux. mux's job is complete once the user selects a session — there are no post-attach actions. This avoids terminal state management and is the standard pattern for session pickers.
+
+When running inside tmux, no `exec` is needed — `switch-client` is a tmux command sent to the server, not a process replacement. mux exits normally after issuing the tmux commands.
+
+### Session Discovery
+
+mux uses `tmux list-sessions` with format strings to discover running sessions. The `-F` flag provides structured, parseable output with no ANSI escape codes to strip.
+
+Available metadata per session:
+- `#{session_name}` — session name
+- `#{session_windows}` — window count
+- `#{session_attached}` — number of attached clients (0 = detached, 1+ = attached)
+- `#{session_created}` — creation timestamp (unix epoch)
+
+## Dependencies
+
+Prerequisites that must exist before implementation can begin:
+
+### Required
+
+None. mux is a standalone tool with no blocking dependencies on other systems.
+
+### Runtime Dependencies
+
+| Dependency | Purpose |
+|------------|---------|
+| **tmux** | mux wraps tmux — all session operations require tmux to be installed |
+
+**Note**: tmux is a runtime dependency (must be present when mux runs), not a build-time dependency. mux can be built and tested independently; tmux is declared as a Homebrew dependency for installation.
+
+### Build Dependencies
+
+Standard Go toolchain and libraries (Bubble Tea, Cobra, etc.) — handled by `go.mod`.
