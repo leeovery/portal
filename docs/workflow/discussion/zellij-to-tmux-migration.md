@@ -26,7 +26,7 @@ This discussion identifies what changes, what stays, and resolves the tmux-speci
 - [x] What are the tmux equivalents for all Zellij session operations?
 - [x] What happens to exited/resurrectable sessions (Zellij-native feature)?
 - [x] How should the layout system work with tmux?
-- [ ] Should the tool be renamed (ZW = "Zellij Workspaces")?
+- [x] Should the tool be renamed (ZW = "Zellij Workspaces")?
 - [ ] How does utility mode work with tmux?
 - [ ] What session metadata can we display from outside tmux?
 - [ ] How does process handoff (exec) work with tmux?
@@ -130,5 +130,46 @@ This simplifies the new session flow significantly. When starting a session in a
 - Remove layout picker from new session flow
 - Remove `--layout` flag from session creation command
 - New session flow for saved projects becomes: select project → session created immediately
+
+---
+
+## Should the tool be renamed?
+
+### Context
+
+"ZW" stands for "Zellij Workspaces" — no longer fits after switching to tmux.
+
+### Options Considered
+
+**tmux-flavoured (2 chars):**
+- `tx` — "tmux execute/extend". Clear tmux connection, no known CLI conflicts.
+- `tw` — "tmux workspaces". Direct successor to "zw". Keys on different rows.
+- `tm` — "tmux manager". Could be confused with Time Machine on macOS.
+
+**z-prefix (familiar territory):**
+- `zx` — Already appeared in project history. Adjacent bottom-row keys, fast. Google has an npm `zx` tool but it's a Node package — no real conflict.
+- `zz` — Same key twice, fastest possible. No CLI conflicts. But no semantic meaning, and `zz` is a vim motion.
+
+**Other:**
+- `mux` — 3 chars but immediately clear. "I'm a multiplexer tool." Distinctive, no conflicts.
+- `sx` — "session execute". Short but anonymous.
+
+### Journey
+
+User wanted something that acknowledges tmux without hiding it. Considered keyboard ergonomics — already has `cx` for Claude Code, `c` for Composer. The `z` prefix had history from the Zellij era but no longer carried meaning.
+
+`tx` was appealing for being 2 chars with clear tmux association. But `mux` stood out — instantly communicable, self-documenting, and can be aliased to anything shorter (e.g., `alias x=mux`) per user preference.
+
+### Decision
+
+**Rename to `mux`.**
+
+- Command: `mux`
+- Config location: `~/.config/mux/`
+- Homebrew formula: `mux`
+- Repository: rename from `zw` to `mux`
+- 3 chars is fine — user will alias to a single char if needed
+
+**Spec impact:** Global find-replace of `zw` → `mux` throughout. All CLI commands become `mux`, `mux .`, `mux list`, `mux attach`, etc.
 
 ---
