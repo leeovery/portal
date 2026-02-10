@@ -1,19 +1,19 @@
 ---
 topic: mux
-status: in-progress
+status: concluded
 type: feature
 date: 2026-02-10
 sources:
   - name: cx-design
-    status: pending
+    status: incorporated
   - name: zellij-multi-directory
-    status: pending
+    status: incorporated
   - name: fzf-output-mode
-    status: pending
+    status: incorporated
   - name: git-root-and-completions
-    status: pending
+    status: incorporated
   - name: zellij-to-tmux-migration
-    status: pending
+    status: incorporated
 ---
 
 # Specification: mux
