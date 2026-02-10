@@ -28,9 +28,9 @@ This discussion identifies what changes, what stays, and resolves the tmux-speci
 - [x] How should the layout system work with tmux?
 - [x] Should the tool be renamed (ZW = "Zellij Workspaces")?
 - [x] How does utility mode work with tmux?
-- [ ] What session metadata can we display from outside tmux?
-- [ ] How does process handoff (exec) work with tmux?
-- [ ] What changes for the runtime dependency?
+- [x] What session metadata can we display from outside tmux?
+- [x] How does process handoff (exec) work with tmux?
+- [x] What changes for the runtime dependency?
 
 ---
 
@@ -223,3 +223,128 @@ This is strictly better than the Zellij spec — the full TUI works from everywh
 - The TUI is the same everywhere, just the action differs
 
 ---
+
+## What session metadata can we display from outside tmux?
+
+### Context
+
+The Zellij spec showed tab count and attached indicator per session. Need to verify what tmux exposes.
+
+### Decision
+
+tmux's `-F` format strings provide clean, structured access to all metadata. Verified on tmux 3.6a:
+
+**`tmux list-sessions -F`** — available per session:
+- `#{session_name}` — session name
+- `#{session_windows}` — window count
+- `#{session_attached}` — number of attached clients (0 = detached, 1+ = attached)
+- `#{session_created}` — creation timestamp (unix epoch)
+
+**`tmux list-windows -t <name> -F`** — available per window:
+- `#{window_index}` — window number
+- `#{window_name}` — window name
+- `#{window_panes}` — pane count
+- `#{window_active}` — 1 if active window
+
+**`tmux list-clients -F`** — available per client:
+- `#{client_session}` — which session the client is in
+- `#{client_name}` — client tty
+
+This is actually cleaner than Zellij — no ANSI escape stripping needed, no output format guessing. The `-F` flag gives us exact control over the output format with pipe-delimited fields.
+
+**TUI display per session:**
+- Session name
+- Window count (e.g., `2 windows`) — equivalent to Zellij's tab count
+- Attached indicator (`● attached`) when `session_attached > 0`
+
+Identical to what the Zellij spec showed, just sourced differently.
+
+---
+
+## How does process handoff (exec) work with tmux?
+
+### Context
+
+The Zellij spec used `exec` to replace mux's process with Zellij when launching a session. This avoided terminal state management — mux's job is done once the user selects.
+
+### Decision
+
+**Same approach, works identically with tmux.**
+
+From outside tmux (bare shell):
+- `exec tmux new-session -A -s <name> -c <dir>` — replaces mux's process with tmux
+- `exec tmux attach-session -t <name>` — same
+
+From inside tmux:
+- No `exec` needed — `switch-client` is a tmux command, not a process replacement
+- For new sessions: `tmux new-session -d -s <name> -c <dir>` then `tmux switch-client -t <name>`
+- mux exits normally after issuing the tmux commands
+
+No design changes from the Zellij spec — the `exec` pattern carries forward for the outside-tmux case.
+
+---
+
+## What changes for the runtime dependency?
+
+### Decision
+
+Straightforward swap:
+
+- **Runtime dependency**: tmux (was Zellij)
+- **Homebrew formula**: `depends_on "tmux"` (was `depends_on "zellij"`)
+- **Missing dependency message**: "mux requires tmux. Install with: brew install tmux"
+- **Detection**: Check if `tmux` is in `$PATH` at startup
+
+tmux is more widely available than Zellij — likely already installed on most target systems. The Homebrew dependency ensures it regardless.
+
+No design changes needed — same pattern, different binary name.
+
+---
+
+## Summary
+
+### What Changes
+
+| Area | Zellij Spec | tmux Spec |
+|---|---|---|
+| **Name** | ZW (Zellij Workspaces) | mux |
+| **Config location** | `~/.config/zw/` | `~/.config/mux/` |
+| **Session operations** | `zellij attach -c`, `zellij list-sessions`, etc. | `tmux new-session -A -s`, `tmux list-sessions`, etc. |
+| **Directory for new sessions** | cd to dir, then create | `new-session -c <dir>` — no cd needed |
+| **Exited sessions** | EXITED section in TUI, resurrect, delete | Dropped entirely — tmux sessions are alive or gone |
+| **Layouts** | KDL layout picker during session creation | Dropped entirely — not needed |
+| **Inside-multiplexer mode** | Restricted "utility mode" — blocked attach/create | Full TUI, uses `switch-client` instead of attach |
+| **Session info** | Query tab names, strip ANSI codes | `-F` format strings — clean, structured output |
+| **Env var detection** | `ZELLIJ` | `TMUX` |
+| **Rename from outside** | Not supported (inside only) | Supported via `rename-session -t` |
+| **Runtime dependency** | Zellij | tmux |
+
+### What Stays Unchanged
+
+- Go + Bubble Tea TUI
+- Project memory (`projects.json` with aliases, names, timestamps)
+- File browser for directory discovery
+- Git root resolution
+- CLI structure (`mux`, `mux .`, `mux <path>`, `mux <alias>`, `mux list`, `mux attach`, `mux clean`, `mux completion`)
+- Session naming (project name + nanoid suffix)
+- Filter mode, keyboard shortcuts
+- Flat config format
+- Argument resolution logic (path detection → alias lookup → fallback)
+- Distribution (GoReleaser + Homebrew tap)
+- `exec` process handoff (outside tmux)
+- Mobile-first design philosophy
+
+### Net Effect
+
+The tmux migration **simplifies** the tool:
+- No exited sessions section
+- No layout picker
+- No restricted utility mode — full TUI everywhere
+- No ANSI code stripping
+- No cd before session creation
+- Rename works from outside
+
+### Next Steps
+
+1. Revise specification — update `docs/workflow/specification/zw.md` → new file for `mux`
+2. Rename repository — `zw` → `mux`
