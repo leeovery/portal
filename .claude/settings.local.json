@@ -4,7 +4,9 @@
       "Skill(migrate)",
       "Bash(cat:*)",
       "Skill(technical-discussion)",
-      "Bash(.claude/scripts/discovery-for-specification.sh:*)"
+      "Bash(.claude/scripts/discovery-for-specification.sh:*)",
+      "Bash(col:*)",
+      "Bash(tmux list-sessions:*)"
     ]
   }
 }
