@@ -184,7 +184,7 @@ The session list supports fuzzy filtering via a dedicated mode, activated by pre
 
 ### Session Info Display
 
-mux queries session metadata via tmux format strings:
+Portal queries session metadata via tmux format strings:
 
 ```bash
 tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}'
@@ -336,7 +336,6 @@ To rename a project or add aliases after the fact:
 
 For saved projects, users can manage project details from the project picker via keyboard shortcut:
 - **Rename** the project display name
-- **Add or remove aliases**
 
 These changes update `projects.json` only and do not affect any existing tmux session names.
 
@@ -368,7 +367,7 @@ The project picker is a full-screen list shown when selecting `[n] new in projec
 |-----|--------|
 | `↑` / `↓` or `j` / `k` | Navigate project list |
 | `Enter` | Select project → creates session immediately |
-| `/` | Enter filter mode (fuzzy-matches against project name and aliases) |
+| `/` | Enter filter mode (fuzzy-matches against project name) |
 | `e` | Edit selected project (rename, manage aliases) |
 | `x` | Remove selected project from remembered list (with confirmation) |
 | `Esc` | Return to main session list |
@@ -417,6 +416,7 @@ All Portal data is stored in `~/.config/portal/`.
 |------|--------|---------|
 | `config` | Flat key=value | User configuration options |
 | `projects.json` | JSON | Remembered project directories |
+| `aliases` | Flat key=value | Path aliases for quick navigation |
 
 ### projects.json Structure
 
@@ -426,7 +426,6 @@ All Portal data is stored in `~/.config/portal/`.
     {
       "path": "/Users/lee/Code/myapp",
       "name": "myapp",
-      "aliases": ["app", "ma"],
       "last_used": "2026-01-22T10:30:00Z"
     }
   ]
@@ -437,12 +436,23 @@ All Portal data is stored in `~/.config/portal/`.
 |-------|----------|-------------|
 | `path` | Yes | Absolute path to project directory |
 | `name` | Yes | Display name (defaults to directory basename, can be customized) |
-| `aliases` | No | Array of short identifiers for quick access via `x <alias>` |
 | `last_used` | Yes | ISO timestamp, used for sorting by recency |
 
-**Aliases**: Must be unique across all projects. Enables quick session start: `x app` resolves the alias and starts a session immediately.
-
 **`last_used` updates**: The timestamp is updated every time a new session is started in the project's directory, regardless of entry point. This keeps the project picker sorted by actual usage.
+
+### Alias Storage
+
+Aliases are stored separately from projects in `~/.config/portal/aliases`, using a flat key-value format:
+
+```
+m2api=/Users/lee/Code/mac2/api
+aa=/Users/lee/Code/aerobid/api
+work=/Users/lee/Code/work
+```
+
+Aliases are pure navigation shortcuts — they map a short name to a directory path. They are independent of the project registry: you can alias a path that has never had a session started in it.
+
+**Aliases must be unique.** Each alias name maps to exactly one path. Setting an alias that already exists overwrites it.
 
 ### Configuration Options
 
