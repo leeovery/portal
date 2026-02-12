@@ -27,8 +27,8 @@ Source material from external AI conversation proposed two separate binaries. Di
 - [x] What behaviour belongs in `x` (interactive launcher)?
 - [x] Query resolution: aliases + zoxide + fallback
 - [x] What behaviour belongs in `xctl` (control plane)?
-- [ ] Under-the-hood routing: how x and xctl map to portal subcommands
-- [ ] Output conventions for xctl (machine-friendly, --json, exit codes)
+- [x] Under-the-hood routing: how x and xctl map to portal subcommands
+- [x] Output conventions for xctl
 - [ ] How does this affect the existing mux spec?
 
 ---
@@ -230,5 +230,62 @@ function xctl() { portal "$@" }
 `portal open` is the launcher subcommand — handles TUI, path resolution, query resolution. All other subcommands are management verbs. No ambiguity because `open` is explicit.
 
 `portal init <shell>` and `portal version` are accessed directly via the `portal` binary (or via `xctl init`/`xctl version` since xctl passes through).
+
+Confidence: High.
+
+---
+
+## Output conventions for xctl
+
+### Context
+
+Source material proposed machine-friendly defaults, `--json`, `--quiet`, consistent exit codes. Current mux spec just has names-only output for `mux list`. Needed to decide what the default output looks like and how to handle interactive vs piped contexts.
+
+### Options Considered
+
+**Option A: Names only always** (current mux spec)
+- Pros: dead simple piping
+- Cons: useless for interactive terminal use — no status, path, etc.
+
+**Option B: Rich output always** (source material)
+- Pros: informative
+- Cons: requires `awk` to extract names for piping
+
+**Option C: TTY detection** (ls/git pattern)
+- Pros: right output for the context automatically, no flags needed for common cases
+- Cons: none meaningful — well-established Unix pattern
+
+### Journey
+
+Source material proposed `--json` and `--quiet` flags. Dropped `--json` and `--quiet` — over-engineering for current needs. The real question was whether to default to names-only or rich output.
+
+Drew analogy to `ls`: simple by default but configurable. Then identified TTY detection as the clean solution — interactive terminal gets rich output, piped context gets names only. No flags needed for the 95% case.
+
+### Decision
+
+**TTY detection for `xctl list`:**
+
+Interactive (stdout is TTY):
+```
+flowx-dev    attached    3 panes    ~/work/flowx
+claude-lab   detached    1 pane     ~/work/claude
+```
+
+Piped (stdout is not TTY):
+```
+flowx-dev
+claude-lab
+```
+
+Override flags for edge cases:
+- `xctl list --short` — names only even in terminal
+- `xctl list --long` — full details even in pipe
+
+**Exit codes** (standard Unix):
+- 0: success
+- 1: not found / no match
+- 2: invalid usage
+
+**No `--json` or `--quiet`** — YAGNI. Can add later if scripting needs evolve.
 
 Confidence: High.
