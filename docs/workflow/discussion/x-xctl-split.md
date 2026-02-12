@@ -1,6 +1,6 @@
 ---
 topic: x-xctl-split
-status: in-progress
+status: concluded
 date: 2026-02-11
 ---
 
@@ -29,7 +29,7 @@ Source material from external AI conversation proposed two separate binaries. Di
 - [x] What behaviour belongs in `xctl` (control plane)?
 - [x] Under-the-hood routing: how x and xctl map to portal subcommands
 - [x] Output conventions for xctl
-- [ ] How does this affect the existing mux spec?
+- [x] How does this affect the existing mux spec?
 
 ---
 
@@ -289,3 +289,47 @@ Override flags for edge cases:
 **No `--json` or `--quiet`** — YAGNI. Can add later if scripting needs evolve.
 
 Confidence: High.
+
+---
+
+## How does this affect the existing mux spec?
+
+### Decision
+
+The mux spec (concluded) carries forward almost entirely. What changes:
+
+| Aspect | mux spec | Portal |
+|--------|----------|--------|
+| Binary name | `mux` | `portal` |
+| CLI entry | `mux` (single command) | `portal open` via `x` shell function |
+| Management | `mux list`, `mux clean`, etc. | `portal list`, `portal clean` via `xctl` |
+| Aliases | project aliases in projects.json | warp-drive style aliases + zoxide resolution |
+| Shell integration | `mux completion <shell>` | `portal init <shell>` (completions + functions) |
+| List output | names only | TTY-aware (rich interactive, names piped) |
+
+**Unchanged**: TUI design, Bubble Tea, session model, session naming, git root resolution, inside-tmux behaviour, project memory concept, file browser, storage location, distribution, tmux integration, dependencies.
+
+The mux spec should be superseded by a new Portal spec that weaves in these decisions. That's the next workflow phase (specification).
+
+Confidence: High.
+
+---
+
+## Summary
+
+### Key Insights
+
+1. Single-binary + shell-integration (zoxide pattern) is cleaner than two separate binaries — solves distribution, enables configurable command names, proven pattern
+2. The `x` / `xctl` conceptual split maps cleanly to `portal open` / `portal <verb>` under the hood
+3. Aliases and zoxide serve different needs and complement each other — aliases for deterministic muscle-memory shortcuts, zoxide for long-tail frecency matching
+4. TTY detection for output formatting is the "do the right thing" approach — no flags needed for common cases
+
+### Current State
+
+- All questions resolved
+- Ready for specification phase — new Portal spec superseding mux spec
+
+### Next Steps
+
+- [ ] Create Portal specification (supersedes mux spec), weaving in all decisions from this discussion
+- [ ] Determine if mux spec needs formal "superseded by portal" marker
