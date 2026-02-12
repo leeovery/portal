@@ -26,7 +26,8 @@ Source material from external AI conversation proposed two separate binaries. Di
 - [x] Naming: project name, binary name, shell commands?
 - [x] What behaviour belongs in `x` (interactive launcher)?
 - [x] Query resolution: aliases + zoxide + fallback
-- [ ] What behaviour belongs in `xctl` (control plane)?
+- [x] What behaviour belongs in `xctl` (control plane)?
+- [ ] Under-the-hood routing: how x and xctl map to portal subcommands
 - [ ] Output conventions for xctl (machine-friendly, --json, exit codes)
 - [ ] How does this affect the existing mux spec?
 
@@ -152,5 +153,82 @@ xctl alias list
 ```
 
 Storage: flat key-value in a config file. Either a dedicated aliases file or a section in the main config — keep it simple, don't over-engineer.
+
+Confidence: High.
+
+---
+
+## What behaviour belongs in `xctl` (control plane)?
+
+### Context
+
+Source material proposed: list, attach, kill, clean, new, rename. Need to decide what earns a place vs. staying TUI-only. Also need to clarify how xctl relates to portal under the hood.
+
+### Options Considered
+
+**Source material set**: list, attach, kill, clean, new, rename, alias
+**Reduced set**: list, attach, kill, clean, alias (drop new and rename)
+
+### Journey
+
+`new` was rejected — creating sessions is what `x` does (`x .`, `x <path>`, `x <query>`). Having `xctl new` duplicates that. `rename` was rejected — low scripting value, TUI action. Who's scripting session renames?
+
+Then debated whether `xctl` needs to exist at all. Since `portal` has explicit subcommands (`portal list`, `portal kill`, etc.), `xctl` is just a passthrough: `xctl list` → `portal list`. But: zero implementation cost (shell function wrapper), nice shared-letter pairing with `x`, and configurable via `--cmd` (user picks `q` → gets `q` + `qctl`). Kept for ergonomics.
+
+### Decision
+
+**xctl subcommands:**
+
+| Command | Purpose |
+|---------|---------|
+| `xctl list` | List sessions (machine-friendly, one per line) |
+| `xctl attach <session>` | Attach to session by exact name |
+| `xctl kill <session>` | Kill a session |
+| `xctl clean` | Remove stale data, prune dead entries |
+| `xctl alias set <name> <path>` | Set an alias |
+| `xctl alias rm <name>` | Remove an alias |
+| `xctl alias list` | List all aliases |
+
+**Excluded:** `new` (use `x`), `rename` (TUI-only).
+
+**Under the hood:** `xctl` is a shell function that passes through to `portal`:
+```bash
+function xctl() { portal "$@" }
+```
+
+This means `xctl list` = `portal list`. The function exists purely for ergonomics and configurability.
+
+Confidence: High.
+
+---
+
+## Under-the-hood routing: how x and xctl map to portal subcommands
+
+### Decision
+
+The `portal` binary has explicit subcommands. Shell functions provide the ergonomic layer:
+
+```bash
+# emitted by: eval "$(portal init zsh)"
+function x() { portal open "$@" }
+function xctl() { portal "$@" }
+```
+
+**Portal subcommand map:**
+
+| User types | Resolves to | Purpose |
+|------------|-------------|---------|
+| `x` | `portal open` | TUI picker |
+| `x .` | `portal open .` | New session in cwd |
+| `x <query>` | `portal open <query>` | Resolve + attach |
+| `xctl list` | `portal list` | List sessions |
+| `xctl attach <s>` | `portal attach <s>` | Attach by name |
+| `xctl kill <s>` | `portal kill <s>` | Kill session |
+| `xctl clean` | `portal clean` | Housekeeping |
+| `xctl alias ...` | `portal alias ...` | Alias management |
+
+`portal open` is the launcher subcommand — handles TUI, path resolution, query resolution. All other subcommands are management verbs. No ambiguity because `open` is explicit.
+
+`portal init <shell>` and `portal version` are accessed directly via the `portal` binary (or via `xctl init`/`xctl version` since xctl passes through).
 
 Confidence: High.
