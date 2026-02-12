@@ -336,8 +336,9 @@ To rename a project or add aliases after the fact:
 
 For saved projects, users can manage project details from the project picker via keyboard shortcut:
 - **Rename** the project display name
+- **Add or remove aliases** for the project's directory
 
-These changes update `projects.json` only and do not affect any existing tmux session names.
+Project renames update `projects.json`. Alias changes update `~/.config/portal/aliases`. Neither affects existing tmux session names.
 
 **Alias management via CLI**: Aliases can also be managed non-interactively:
 
@@ -402,6 +403,7 @@ From the project picker (when creating a new session):
 - **Go up**: `Backspace` or `←` goes to parent directory
 - **Select current directory**: `Enter` on `.` (current dir indicator) or dedicated shortcut (e.g., `Space`)
 - **Filtering**: Typing narrows the directory listing at the current level by fuzzy match. `Backspace` removes the last filter character; when the filter is empty, `Backspace` reverts to its navigation role (go to parent directory). `Esc` clears the filter (if active) or cancels the browser (if no filter).
+- **Add alias**: `a` on a highlighted directory prompts for an alias name. Saves to `~/.config/portal/aliases` (directory is resolved to git root first). No session is started.
 - The selected directory is automatically added to remembered projects
 
 ## Configuration & Storage
@@ -488,14 +490,14 @@ function xctl() { portal "$@" }
 | `x <path>` | New session at resolved path |
 | `x <query>` | Resolve via alias → zoxide → TUI fallback |
 
-**Quick-start shortcuts**: `x .`, `x <path>`, and `x <alias>` all open the same naming flow as selecting a directory via the project picker — they just skip navigation. The selected directory is added to remembered projects if not already present. For saved projects, session creation is immediate (no prompts).
+**Quick-start shortcuts**: `x .`, `x <path>`, and `x <alias>` skip the project picker — the directory is resolved, registered if new, and a session starts immediately.
 
 ### Query Resolution
 
 When `x` receives a positional argument (e.g., `x myapp`):
 
 1. **Existing path**: If the argument is an absolute path, relative path, or starts with `~` — use directly
-2. **Alias match**: Check if it matches a project alias in `projects.json` — resolve to configured path
+2. **Alias match**: Check if it matches an alias in `~/.config/portal/aliases` — resolve to configured path
 3. **Zoxide query**: Run `zoxide query <terms>` — use the best frecency match
 4. **No match**: Fall back to TUI with the query pre-filled as the filter
 
