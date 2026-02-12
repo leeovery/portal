@@ -24,9 +24,9 @@ Source material from external AI conversation proposed two separate binaries. Di
 
 - [x] Architecture: two binaries or single binary + shell integration?
 - [x] Naming: project name, binary name, shell commands?
-- [ ] What behaviour belongs in `x` (interactive launcher)?
+- [x] What behaviour belongs in `x` (interactive launcher)?
+- [x] Query resolution: aliases + zoxide + fallback
 - [ ] What behaviour belongs in `xctl` (control plane)?
-- [ ] Should `x` accept `<query-or-path>` args? Alias vs zoxide-style resolution?
 - [ ] Output conventions for xctl (machine-friendly, --json, exit codes)
 - [ ] How does this affect the existing mux spec?
 
@@ -84,5 +84,73 @@ Confidence: High. Matches proven patterns, solves distribution, enables configur
 - **Configurable**: `--cmd` flag on `portal init` changes both (e.g., `--cmd p` → `p` + `pctl`)
 
 The `ctl` suffix convention is well-understood (kubectl, systemctl, sysctl). Immediately signals "control/management tool."
+
+Confidence: High.
+
+---
+
+## What behaviour belongs in `x` (interactive launcher)?
+
+### Decision
+
+`x` is the portal into workspaces. It does one thing: get you into a tmux session.
+
+| Input | Behaviour |
+|-------|-----------|
+| `x` | Opens TUI picker |
+| `x .` | New session in cwd, attach |
+| `x <path>` | New session at resolved path, attach |
+| `x <query>` | Resolve via alias → zoxide → TUI fallback, attach |
+
+No subcommands. No verbs. Just a destination (or no args for TUI). This is the muscle-memory daily driver.
+
+Confidence: High.
+
+---
+
+## Query resolution: aliases + zoxide + fallback
+
+### Context
+
+Current mux spec uses explicit project aliases. Source material suggested zoxide integration. User wanted both — aliases for deterministic shortcuts (warp-drive style), zoxide for the long tail.
+
+### Options Considered
+
+**Option A: Aliases only** (current mux spec)
+- Pros: deterministic, simple
+- Cons: must register everything, no discovery
+
+**Option B: Zoxide only**
+- Pros: zero config, leverages existing data
+- Cons: ambiguous for common dir names (`api`, `app`), no custom shortcuts
+
+**Option C: Aliases + zoxide + fallback**
+- Pros: deterministic shortcuts where needed, fuzzy matching everywhere else, graceful degradation
+- Cons: slightly more complex resolution — but the order is clear
+
+### Journey
+
+User cited warp-drive as the mental model for aliases — short muscle-memory shortcuts like `m2api` → `~/Code/mac2/api`, `aa` → `~/Code/aerobid/api`. These solve the problem zoxide can't: when multiple directories share the same name (`api` appears in 10 projects).
+
+For everything else, zoxide already has rich frecency data from normal shell usage. Building Portal's own frecency tracker would be over-engineering — cold-start problem, limited data from Portal usage alone.
+
+### Decision
+
+**Resolution order for `x <query>`:**
+1. **Existing path** (absolute, relative, `~`) → use directly
+2. **Alias match** → resolve to configured path
+3. **Zoxide query** (`zoxide query <terms>`) → best frecency match
+4. **No match** → fall back to TUI with query pre-filled as filter
+
+Zoxide is an optional soft dependency. If not installed, step 3 is skipped. Aliases and TUI fallback still work.
+
+**Alias management via `xctl`:**
+```
+xctl alias set m2api ~/Code/mac2/api
+xctl alias rm m2api
+xctl alias list
+```
+
+Storage: flat key-value in a config file. Either a dedicated aliases file or a section in the main config — keep it simple, don't over-engineer.
 
 Confidence: High.
