@@ -1,6 +1,6 @@
 ---
 topic: mux
-status: in-progress
+status: concluded
 type: feature
 date: 2026-02-12
 sources:
