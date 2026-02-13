@@ -12,7 +12,7 @@ When launching a new tmux session via `x <project>`, the user wants the ability 
 
 ### References
 
-- [Portal specification](../specification/portal.md)
+- [mux specification](../specification/mux.md)
 - [x-xctl-split discussion](x-xctl-split.md)
 - [cx-design discussion](cx-design.md)
 
@@ -21,8 +21,8 @@ When launching a new tmux session via `x <project>`, the user wants the ability 
 - [x] What CLI syntax for passing the command through?
 - [x] Should the command replace the shell or run then drop to shell?
 - [x] How does this interact with the TUI flow?
-- [ ] Should projects.json support default commands per project?
-- [ ] How does this relate to the existing cx variants (cx, cx c, cx r)?
+- [x] Should projects.json support default commands per project?
+- [x] How does this relate to the existing cx variants (cx, cx c, cx r)?
 
 ---
 
@@ -107,3 +107,62 @@ Confirmed this means `xc` (→ `x -e claude`) works consistently:
 **A — command is orthogonal to project resolution.** TUI opens normally, command applies after selection. Consistent behaviour regardless of how the project was resolved.
 
 ---
+
+## Should projects.json support default commands per project?
+
+### Journey
+
+The aliasing approach already solves "I always want claude with this project" at the shell level. Adding per-project exec config in projects.json means more config surface, precedence rules (CLI vs config — which wins?), and potentially surprising behaviour if you forget a project has a default.
+
+Also corrected a misunderstanding: aliases in the portal design are NOT properties of projects. They live in a separate flat map as independent routing shortcuts — decided in the x-xctl-split discussion.
+
+### Decision
+
+**Skip — YAGNI.** Use the tool first, feel the friction, add config later if a real pattern emerges. Shell aliases/functions cover the known use cases without adding config surface prematurely.
+
+---
+
+## How does this relate to the existing cx variants (cx, cx c, cx r)?
+
+### Context
+
+Current `cx` has hardcoded claude-specific subcommands:
+- `cx` / `cx n` → new session + `claude`
+- `cx c` → new session + `claude --continue`
+- `cx r` → new session + `claude --resume`
+
+### Decision
+
+**cx is fully replaced by portal/x. No claude-specific functionality in x.**
+
+Portal is a command-agnostic session manager. It doesn't know or care about claude. The generalised exec mechanism (`-e` / `--`) makes the old hardcoded variants unnecessary at the tool level.
+
+The user creates whatever personal shortcuts they want in their shell config:
+```bash
+alias xc='x -e claude'
+alias xcc='x -e "claude --continue"'
+alias xcr='x -e "claude --resume"'
+```
+
+Clean separation of concerns: x manages sessions, shell aliases encode personal workflows.
+
+---
+
+## Summary
+
+### Key Insights
+
+1. Exec is orthogonal to project resolution — the command applies regardless of how the project was chosen (direct, alias, zoxide, TUI)
+2. `-e` and `--` aren't competing syntaxes — they're complementary. `-e` for aliases, `--` for compound commands. Same internal code path.
+3. Portal should be command-agnostic. Claude-specific shortcuts belong in user shell config, not baked into the tool.
+4. "Run then drop to shell" is the safe default. `exec` as a command prefix is the escape hatch — no flag needed.
+
+### Current State
+
+- All five questions resolved
+- No open items
+
+### Next Steps
+
+- [ ] Update mux specification to include exec functionality
+- [ ] Remove claude-specific references from spec if any remain
