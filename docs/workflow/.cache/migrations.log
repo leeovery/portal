@@ -5,5 +5,6 @@ docs/workflow/specification/zw.md: 002
 docs/workflow/discussion/git-root-and-completions.md: 001
 docs/workflow/specification/zw.md: 004
 docs/workflow/discussion/zellij-to-tmux-migration.md: 001
-docs/workflow/specification/mux.md: 002
-docs/workflow/specification/mux.md: 004
+docs/workflow/specification/portal.md: 002
+docs/workflow/specification/portal.md: 004
+docs/workflow/discussion/x-xctl-split.md: 001

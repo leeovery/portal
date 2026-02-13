@@ -16,7 +16,7 @@ Source material from external AI conversation proposed two separate binaries. Di
 
 ### References
 
-- [Current mux spec](../specification/mux.md)
+- [Current Portal spec](../specification/portal.md)
 - [tmux-session-managers-analysis](../research/tmux-session-managers-analysis.md)
 - [zellij-to-tmux-migration discussion](zellij-to-tmux-migration.md)
 

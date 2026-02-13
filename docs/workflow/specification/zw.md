@@ -1,7 +1,7 @@
 ---
 topic: zw
 status: superseded
-superseded_by: mux
+superseded_by: portal
 type: feature
 date: 2026-01-31
 sources:

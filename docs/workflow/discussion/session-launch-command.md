@@ -12,7 +12,7 @@ When launching a new tmux session via `x <project>`, the user wants the ability 
 
 ### References
 
-- [mux specification](../specification/mux.md)
+- [Portal specification](../specification/portal.md)
 - [x-xctl-split discussion](x-xctl-split.md)
 - [cx-design discussion](cx-design.md)
 

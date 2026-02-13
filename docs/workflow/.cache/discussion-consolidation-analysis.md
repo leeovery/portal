@@ -14,7 +14,7 @@ discussion_files:
 
 ## Recommended Groupings
 
-### Mux
+### Portal
 - **cx-design**: Original tool design — TUI, session management, project memory, distribution
 - **zellij-multi-directory**: Model pivot from project-centric to workspace-centric; renamed CX → ZW
 - **fzf-output-mode**: Added `list` and `attach` subcommands for scripting/fzf piping
@@ -30,4 +30,4 @@ discussion_files:
 
 ## Analysis Notes
 
-**Naming conflict**: The anchored spec name is `mux`, but the latest discussion (`x-xctl-split`) renames the tool to Portal with binary `portal`. The spec will need renaming from `mux` to `portal` when updated.
+All discussions consolidated into the Portal specification.
