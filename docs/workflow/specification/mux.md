@@ -256,6 +256,8 @@ The suffix is a 6-character nanoid, ensuring uniqueness without user input. User
 
 **Name sanitization**: tmux session names cannot contain periods (`.`) or colons (`:`). When generating a session name from a project name, Portal replaces these characters with hyphens (`-`). For example, project "my.app" produces sessions like `my-app-x7k2m9`.
 
+**Collision handling**: If the generated session name already exists in tmux (checked via `tmux has-session`), Portal regenerates with a new nanoid suffix. This is unlikely with 6-character nanoids but handled gracefully.
+
 ### Renaming
 
 Session renaming is available both inside and outside tmux:
@@ -373,7 +375,7 @@ The project picker is a full-screen list shown when selecting `[n] new in projec
 | `x` | Remove selected project from remembered list (with confirmation) |
 | `Esc` | Return to main session list |
 
-**Edit mode**: Pressing `e` opens an inline edit for the selected project — cycling through editable fields (name, aliases) with `Tab`, confirming with `Enter`, cancelling with `Esc`.
+**Edit mode**: Pressing `e` opens an inline edit for the selected project. Editable fields: project name (stored in `projects.json`) and aliases (read/written from `~/.config/portal/aliases`, filtered to aliases whose path matches the selected project's directory). Cycle fields with `Tab`, confirm with `Enter`, cancel with `Esc`.
 
 ### Stale Project Cleanup
 
@@ -499,7 +501,7 @@ When `x` receives a positional argument (e.g., `x myapp`):
 1. **Existing path**: If the argument is an absolute path, relative path, or starts with `~` — use directly
 2. **Alias match**: Check if it matches an alias in `~/.config/portal/aliases` — resolve to configured path
 3. **Zoxide query**: Run `zoxide query <terms>` — use the best frecency match
-4. **No match**: Fall back to TUI with the query pre-filled as the filter
+4. **No match**: Fall back to the main session picker with the query pre-filled as the filter text
 
 Zoxide is an **optional soft dependency**. If not installed, step 3 is skipped silently. Aliases and TUI fallback still work.
 
@@ -527,6 +529,7 @@ These are accessed via the `portal` binary directly (or via `xctl` since it pass
 
 | Command | Description |
 |---------|-------------|
+| `portal open [query]` | Launch TUI picker, or resolve query and start/attach session (used via `x` shell function) |
 | `portal init <shell>` | Output shell integration script (bash, zsh, fish) |
 | `portal init <shell> --cmd <name>` | Output shell integration with custom command names |
 | `portal version` | Show version information |
@@ -540,8 +543,8 @@ These are accessed via the `portal` binary directly (or via `xctl` since it pass
 
 **Interactive (stdout is TTY):**
 ```
-flowx-dev    attached    3 panes    ~/work/flowx
-claude-lab   detached    1 pane     ~/work/claude
+flowx-dev    attached    3 windows
+claude-lab   detached    1 window
 ```
 
 **Piped (stdout is not TTY):**
