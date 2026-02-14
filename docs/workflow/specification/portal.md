@@ -424,8 +424,9 @@ From the project picker (when creating a new session):
 - **Navigation**: Arrow keys to move through directory listing
 - **Enter directory**: `Enter` or `→` descends into highlighted directory
 - **Go up**: `Backspace` or `←` goes to parent directory
-- **Select current directory**: `Enter` on `.` (current dir indicator) or dedicated shortcut (e.g., `Space`)
+- **Select current directory**: `Space` selects the current directory for session creation. Alternatively, `Enter` on the `.` entry (current dir indicator) does the same.
 - **Filtering**: Typing narrows the directory listing at the current level by fuzzy match. `Backspace` removes the last filter character; when the filter is empty, `Backspace` reverts to its navigation role (go to parent directory). `Esc` clears the filter (if active) or cancels the browser (if no filter).
+- **Hidden directories**: Directories starting with `.` are hidden by default. Press `.` to toggle their visibility. The toggle applies only to the current browser session and resets on next open.
 - **Add alias**: `a` on a highlighted directory prompts for an alias name. Saves to `~/.config/portal/aliases` (directory is resolved to git root first). No session is started.
 - The selected directory is automatically added to remembered projects
 
@@ -478,6 +479,8 @@ work=/Users/lee/Code/work
 Aliases are pure navigation shortcuts — they map a short name to a directory path. They are independent of the project registry: you can alias a path that has never had a session started in it.
 
 **Aliases must be unique.** Each alias name maps to exactly one path. Setting an alias that already exists overwrites it.
+
+**Path normalization**: When setting an alias, Portal expands `~` to the user's home directory and resolves relative paths to absolute before storing. The aliases file always contains absolute paths.
 
 ### Configuration Options
 
@@ -544,11 +547,13 @@ When `x` receives a positional argument (e.g., `x myapp`):
 1. **Existing path**: If the argument is an absolute path, relative path, or starts with `~` — use directly
 2. **Alias match**: Check if it matches an alias in `~/.config/portal/aliases` — resolve to configured path
 3. **Zoxide query**: Run `zoxide query <terms>` — use the best frecency match
-4. **No match**: Fall back to the main session picker with the query pre-filled as the filter text
+4. **No match**: Fall back to the TUI with the query pre-filled as the filter text. If a command is pending (`-e`/`--`), this opens the project picker; otherwise, the main session picker.
 
 Zoxide is an **optional soft dependency**. If not installed, step 3 is skipped silently. Aliases and TUI fallback still work.
 
 **Path detection heuristic**: An argument containing `/` or starting with `.` or `~` is treated as a path (step 1). Everything else enters the alias → zoxide → fallback chain.
+
+**Path validation**: After resolution (whether from a literal path, alias, or zoxide), Portal validates the resolved directory exists on disk. If it does not, Portal displays: "Directory not found: {path}" and exits with a non-zero status code. No session is created.
 
 ### xctl — The Control Plane
 
@@ -566,6 +571,8 @@ Zoxide is an **optional soft dependency**. If not installed, step 3 is skipped s
 
 **Attach errors**: If `xctl attach <name>` doesn't match any running session, Portal displays: "No session found: {name}" and exits with a non-zero status code.
 
+**Kill errors**: If `xctl kill <name>` doesn't match any running session, Portal displays: "No session found: {name}" and exits with a non-zero status code.
+
 ### portal — Direct Commands
 
 These are accessed via the `portal` binary directly (or via `xctl` since it passes through):
@@ -577,6 +584,8 @@ These are accessed via the `portal` binary directly (or via `xctl` since it pass
 | `portal init <shell> --cmd <name>` | Output shell integration with custom command names |
 | `portal version` | Show version information |
 | `portal help` | Show usage information |
+
+**Note**: All `xctl` subcommands (`list`, `attach`, `kill`, `clean`, `alias`) are also accessible as `portal` subcommands directly, since `xctl` passes through to `portal`. They are documented in the xctl section above.
 
 **Supported shells for `portal init`**: bash, zsh, fish only. No powershell — Portal wraps tmux, which doesn't run on Windows.
 
@@ -698,9 +707,21 @@ This is the safe default: if the command crashes or is interrupted (Ctrl+C), the
 
 Users wanting exec-and-die behavior can pass `exec` as part of the command itself: `x myproject -- exec claude`.
 
-**Implementation**: The command is run via the shell (e.g., `zsh -ic '<cmd>; exec zsh'`), ensuring the session's shell process persists after the command completes.
+**Implementation**: The command is passed as tmux's `shell-command` argument on `new-session`. Portal uses `$SHELL` to detect the user's login shell:
 
-**No command specified**: When no `-e` or `--` is provided, the session starts with a plain shell in the project directory — the current behavior.
+```
+tmux new-session -A -s <name> -c <dir> "$SHELL -ic '<cmd>; exec $SHELL'"
+```
+
+This creates the session with a shell that runs the command, then replaces itself with a fresh interactive shell via `exec`. The session's shell process persists after the command completes.
+
+For the inside-tmux case (detached creation + switch):
+```
+tmux new-session -d -s <name> -c <dir> "$SHELL -ic '<cmd>; exec $SHELL'"
+tmux switch-client -t <name>
+```
+
+**No command specified**: When no `-e` or `--` is provided, the `shell-command` argument is omitted — tmux starts the session with the user's default shell in the project directory.
 
 ### Session Discovery
 

@@ -20,8 +20,8 @@ The spec defines the shell incantation (`zsh -ic '<cmd>; exec zsh'`) and the tmu
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Updated Command Execution in Sessions section with full tmux invocations (outside and inside tmux), using $SHELL instead of hardcoded zsh.
 
 ---
 
@@ -36,8 +36,8 @@ Query resolution step 4 says: "Fall back to the main session picker with the que
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Updated step 4 to route to project picker when command is pending, session picker otherwise.
 
 ---
 
@@ -52,8 +52,8 @@ The file browser shows "directories only" but doesn't specify whether hidden dir
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Hidden by default, `.` key toggles visibility, resets on next open.
 
 ---
 
@@ -68,8 +68,8 @@ When setting an alias via `xctl alias set m2api ~/Code/mac2/api`, is `~` expande
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Always expand ~ and resolve relative paths to absolute before storage.
 
 ---
 
@@ -84,8 +84,8 @@ The spec says: "Enter on `.` (current dir indicator) or dedicated shortcut (e.g.
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Space as concrete binding, Enter on `.` as alternative.
 
 ---
 
@@ -100,8 +100,8 @@ The "portal — Direct Commands" table lists only `open`, `init`, `version`, `he
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added clarifying note after the table cross-referencing xctl section.
 
 ---
 
@@ -116,8 +116,8 @@ The "portal — Direct Commands" table lists only `open`, `init`, `version`, `he
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added matching error behavior paragraph after attach errors.
 
 ---
 
@@ -132,5 +132,5 @@ When `x /nonexistent/path` is used, the path detection heuristic identifies it a
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Broadened to cover all resolution sources (literal path, alias, zoxide). Validate after resolution, error if directory doesn't exist.
