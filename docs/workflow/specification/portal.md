@@ -1,6 +1,6 @@
 ---
 topic: portal
-status: in-progress
+status: concluded
 type: feature
 date: 2026-02-13
 sources:
