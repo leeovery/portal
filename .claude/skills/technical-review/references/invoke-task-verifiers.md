@@ -32,10 +32,10 @@ From each plan in scope, list every task across all phases:
 
 ## Create Output Directory
 
-For each topic in scope, ensure the review output directory exists:
+Ensure the review output directory exists:
 
 ```bash
-mkdir -p docs/workflow/review/{topic}
+mkdir -p docs/workflow/review/{topic}/r{N}
 ```
 
 ---
@@ -60,8 +60,9 @@ Each verifier receives:
 3. **Plan path** — the full plan for phase context
 4. **Project skill paths** — from Step 2 discovery
 5. **Review checklist path** — `skills/technical-review/references/review-checklist.md`
-6. **Topic name** — for output file path
-7. **Task index** — sequential number for file naming (1, 2, 3...)
+6. **Topic** — the plan topic name (used for output directory)
+7. **Review number** — version number (e.g., 1 for `r1/`)
+8. **Task index** — sequential number for file naming (1, 2, 3...)
 
 If any verifier fails (error, timeout), record the failure and continue — aggregate what's available.
 
@@ -77,7 +78,7 @@ FINDINGS_COUNT: {N blocking issues}
 SUMMARY: {1 sentence}
 ```
 
-Full findings are written to `docs/workflow/review/{topic}/qa-task-{index}.md`.
+Full findings are written to `docs/workflow/review/{topic}/r{N}/qa-task-{index}.md`.
 
 ---
 
@@ -85,7 +86,7 @@ Full findings are written to `docs/workflow/review/{topic}/qa-task-{index}.md`.
 
 Once all batches have completed:
 
-1. Read all `docs/workflow/review/{topic}/qa-task-*.md` files
+1. Read all `docs/workflow/review/{topic}/r{N}/qa-task-*.md` files
 2. Synthesize findings from file contents:
    - Collect all tasks with `STATUS: Incomplete` or `STATUS: Issues Found` as blocking issues
    - Collect all test issues (under/over-tested)

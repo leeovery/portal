@@ -17,8 +17,9 @@ You receive:
 3. **Plan path**: The full plan for additional context
 4. **Project skill paths**: Relevant `.claude/skills/` paths for framework conventions
 5. **Review checklist path**: Path to the review checklist (`skills/technical-review/references/review-checklist.md`) — read this for detailed verification criteria
-6. **Topic name**: The plan topic (used for output file path)
-7. **Task index**: Sequential number for this task (used for output file naming)
+6. **Topic**: The plan topic name (used for output directory)
+7. **Review number**: Version number (e.g., 1 for `r1/`)
+8. **Task index**: Sequential number for this task (used for output file naming)
 
 ## Your Task
 
@@ -86,7 +87,7 @@ Review the implementation as a senior architect would:
 
 ## Output File Format
 
-Write to `docs/workflow/review/{topic}/qa-task-{index}.md`:
+Write to `docs/workflow/review/{topic}/r{N}/qa-task-{index}.md`:
 
 ```
 TASK: [Task name/description]
