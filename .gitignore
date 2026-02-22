@@ -34,4 +34,4 @@ Thumbs.db
 # Build
 dist/
 build/
-docs/workflow/.cache/
+.workflows/.cache/
