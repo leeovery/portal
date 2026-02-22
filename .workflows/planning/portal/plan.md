@@ -20,8 +20,9 @@ planning:
 # Plan: Portal
 
 ### Phase 1: Walking Skeleton -- Session List and Attach
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Establish the Go project with Cobra CLI, tmux integration layer, and Bubble Tea TUI that lists live tmux sessions and attaches to a selected one. One complete end-to-end flow proving the architecture.
 
@@ -37,8 +38,9 @@ ext_id:
 - [ ] tmux list-sessions parsing handles no-server case gracefully (non-zero exit treated as zero sessions)
 
 ### Phase 2: New Session from Directory -- Project Memory and Session Creation
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Add the ability to create new tmux sessions from a directory, with git root resolution, auto-generated session naming (nanoid suffix), project memory persistence (projects.json), and the project picker TUI view.
 
@@ -55,8 +57,9 @@ ext_id:
 - [ ] Empty state ("No saved projects yet.") displays when no projects remembered, with browse option still visible
 
 ### Phase 3: File Browser and CLI Quick-Start
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Add the interactive directory browser for navigating to and selecting new project directories, and implement the non-interactive CLI quick-start paths (`portal open .`, `portal open <path>`) that create sessions without the TUI.
 
@@ -75,8 +78,9 @@ ext_id:
 - [ ] Non-existent directory prints "Directory not found: {path}" and exits with code 1
 
 ### Phase 4: Query Resolution, Aliases, and Shell Integration
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Implement the alias system (storage, CRUD commands), zoxide integration, the full query resolution chain (path detection -> alias -> zoxide -> TUI fallback), and the `portal init` command that emits shell functions and tab completions.
 
@@ -95,8 +99,9 @@ ext_id:
 - [ ] File browser `a` shortcut prompts for alias name and saves to aliases file (directory git-root-resolved, no session started)
 
 ### Phase 5: Inside-tmux Mode, Session Management, and Filter Mode
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Implement inside-tmux detection with switch-client behaviour, TUI session management actions (kill with confirmation, rename with inline input), filter mode for fuzzy-searching the session list, and the xctl management commands (`list`, `attach`, `kill`, `clean`).
 
@@ -118,8 +123,9 @@ ext_id:
 - [ ] `portal clean` removes stale projects non-interactively, printing each removal
 
 ### Phase 6: Command Execution, Project Editing, and Distribution
-status: draft
+status: approved
 ext_id:
+approved_at: 2026-02-22
 
 **Goal**: Implement `-e`/`--` command execution for new sessions, project picker edit mode (rename and alias management), and the complete build/release pipeline (GoReleaser, GitHub Actions, Homebrew tap formula).
 
