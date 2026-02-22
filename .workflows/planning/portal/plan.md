@@ -37,6 +37,17 @@ approved_at: 2026-02-22
 - [ ] Empty state ("No active sessions") displays when no tmux server or no sessions exist
 - [ ] tmux list-sessions parsing handles no-server case gracefully (non-zero exit treated as zero sessions)
 
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| portal-1-1 | Go Module and Cobra Root Command | none | pending | |
+| portal-1-2 | tmux Session Listing and Parsing | no tmux server running, empty session list | pending | |
+| portal-1-3 | Session List TUI Model | single session in list, long session names | pending | |
+| portal-1-4 | Keyboard Navigation | single-item list navigation | pending | |
+| portal-1-5 | Quit Handling | none | pending | |
+| portal-1-6 | Attach on Enter | none | pending | |
+| portal-1-7 | Empty State Display | tmux server disappears between list and display | pending | |
+
 ### Phase 2: New Session from Directory -- Project Memory and Session Creation
 status: approved
 ext_id:
