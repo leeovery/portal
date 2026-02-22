@@ -13,8 +13,8 @@ task_list_gate_mode: auto
 author_gate_mode: auto
 finding_gate_mode: gated
 planning:
-  phase: 6
-  task: 1
+  phase: ~
+  task: ~
 ---
 
 # Plan: Portal
@@ -186,7 +186,7 @@ approved_at: 2026-02-22
 
 ### Phase 6: Command Execution, Project Editing, and Distribution
 status: approved
-ext_id:
+ext_id: tick-a6b7c9
 approved_at: 2026-02-22
 
 **Goal**: Implement `-e`/`--` command execution for new sessions, project picker edit mode (rename and alias management), and the complete build/release pipeline (GoReleaser, GitHub Actions, Homebrew tap formula).
@@ -210,12 +210,12 @@ approved_at: 2026-02-22
 #### Tasks
 | ID | Name | Edge Cases | Status | Ext ID |
 |----|------|------------|--------|--------|
-| portal-6-1 | Command Flag Parsing (-e and --) | -e with empty string, -- with no arguments, both -e and -- provided | pending | |
-| portal-6-2 | Command-Aware Session Creation | command containing single quotes, $SHELL not set, special shell characters | pending | |
-| portal-6-3 | Command-Pending TUI Mode | no saved projects, query pre-filled as filter, long command in banner | pending | |
-| portal-6-4 | Project Picker Edit Mode | no aliases, multiple aliases, alias collision, empty project name | pending | |
-| portal-6-5 | Project Picker Remove with Confirmation | removing last project, rapid key presses, project has aliases | pending | |
-| portal-6-6 | tmux Runtime Dependency Check | tmux not executable, broken symlink | pending | |
-| portal-6-7 | Version Command | version not set at build time | pending | |
-| portal-6-8 | GoReleaser Configuration | none | pending | |
-| portal-6-9 | GitHub Actions Release Workflow | tag without v prefix, workflow permissions | pending | |
+| portal-6-1 | Command Flag Parsing (-e and --) | -e with empty string, -- with no arguments, both -e and -- provided | authored | tick-d9e0f1 |
+| portal-6-2 | Command-Aware Session Creation | command containing single quotes, $SHELL not set, special shell characters | authored | tick-c2d3e4 |
+| portal-6-3 | Command-Pending TUI Mode | no saved projects, query pre-filled as filter, long command in banner | authored | tick-f5a6b7 |
+| portal-6-4 | Project Picker Edit Mode | no aliases, multiple aliases, alias collision, empty project name | authored | tick-e8f9a0 |
+| portal-6-5 | Project Picker Remove with Confirmation | removing last project, rapid key presses, project has aliases | authored | tick-b1c2d3 |
+| portal-6-6 | tmux Runtime Dependency Check | tmux not executable, broken symlink | authored | tick-a4b5c6 |
+| portal-6-7 | Version Command | version not set at build time | authored | tick-d7e8f0 |
+| portal-6-8 | GoReleaser Configuration | none | authored | tick-f1a2b3 |
+| portal-6-9 | GitHub Actions Release Workflow | tag without v prefix, workflow permissions | authored | tick-c4d5e6 |
