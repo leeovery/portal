@@ -49,6 +49,16 @@ func NewProjectPicker(store ProjectStore) ProjectPickerModel {
 	}
 }
 
+// WithFilter returns a copy of the ProjectPickerModel with the filter pre-filled.
+// The picker starts in filtering mode with the given text.
+func (m ProjectPickerModel) WithFilter(text string) ProjectPickerModel {
+	if text != "" {
+		m.filtering = true
+		m.filterText = text
+	}
+	return m
+}
+
 // Init calls CleanStale and then loads projects from the store.
 func (m ProjectPickerModel) Init() tea.Cmd {
 	return func() tea.Msg {

@@ -2740,3 +2740,374 @@ func TestFilterMode(t *testing.T) {
 		}
 	})
 }
+
+func TestCommandPendingMode(t *testing.T) {
+	t.Run("command-pending mode starts in project picker view", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/api", Name: "api"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"})
+
+		// Init should load projects (not sessions)
+		cmd := m.Init()
+		if cmd == nil {
+			t.Fatal("Init() returned nil command")
+		}
+		msg := cmd()
+
+		// Should be a ProjectsLoadedMsg, not a SessionsMsg
+		projectsMsg, ok := msg.(ui.ProjectsLoadedMsg)
+		if !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
+		if len(projectsMsg.Projects) != 2 {
+			t.Fatalf("expected 2 projects, got %d", len(projectsMsg.Projects))
+		}
+
+		// Feed projects back to model
+		var model tea.Model = m
+		model, _ = model.Update(projectsMsg)
+
+		view := model.View()
+		// Should show project picker, not session list
+		if !strings.Contains(view, "Select a project") {
+			t.Errorf("expected project picker view, got:\n%s", view)
+		}
+		if strings.Contains(view, "No active sessions") {
+			t.Errorf("session list should not be shown in command-pending mode, got:\n%s", view)
+		}
+		if strings.Contains(view, "[n] new in project...") {
+			t.Errorf("session list new option should not be shown in command-pending mode, got:\n%s", view)
+		}
+	})
+
+	t.Run("banner shows command text", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Command: claude") {
+			t.Errorf("expected 'Command: claude' banner, got:\n%s", view)
+		}
+	})
+
+	t.Run("banner shows multi-arg command joined", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude", "--resume", "--model", "opus"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Command: claude --resume --model opus") {
+			t.Errorf("expected full command in banner, got:\n%s", view)
+		}
+	})
+
+	t.Run("session list not displayed in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "existing", Windows: 2, Attached: false},
+			}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		// Session list content should not be visible
+		if strings.Contains(view, "existing") {
+			t.Errorf("session list should not be displayed in command-pending mode, got:\n%s", view)
+		}
+	})
+
+	t.Run("project selection creates session with command", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude", "--resume"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Select a project
+		_, cmd = model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		if cmd == nil {
+			t.Fatal("expected command from project selection, got nil")
+		}
+		cmd()
+
+		// Verify command was forwarded
+		wantCmd := []string{"claude", "--resume"}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range creator.createdCommand {
+			if arg != wantCmd[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
+			}
+		}
+	})
+
+	t.Run("esc in command-pending mode quits TUI", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press Esc - should quit, not go back to session list
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from Esc in command-pending mode, got nil")
+		}
+		// The Esc in project picker normally emits BackMsg. In command-pending mode,
+		// BackMsg should trigger quit instead of returning to session list.
+		quitMsg := cmd()
+		// Follow the message chain: BackMsg -> model handles it
+		_, cmd = model.Update(quitMsg)
+		if cmd == nil {
+			t.Fatal("expected quit command after BackMsg in command-pending mode, got nil")
+		}
+		finalMsg := cmd()
+		if _, ok := finalMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", finalMsg)
+		}
+	})
+
+	t.Run("query filter pre-filled in project picker", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"}).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		// Should show filter text pre-filled
+		if !strings.Contains(view, "filter: myapp") {
+			t.Errorf("expected pre-filled filter 'myapp', got:\n%s", view)
+		}
+	})
+
+	t.Run("browse selection applies pending command", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+		lister := &mockDirLister{
+			entries: map[string][]browser.DirEntry{
+				"/home/user": {{Name: "code"}},
+			},
+		}
+
+		m := tui.NewWithAllDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+			lister,
+			"/home/user",
+		).WithCommand([]string{"vim", "."})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Trigger browse
+		model, _ = model.Update(ui.BrowseSelectedMsg{})
+
+		// Select directory from browser
+		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
+		if cmd == nil {
+			t.Fatal("expected command from directory selection, got nil")
+		}
+		cmd()
+
+		// Verify command was forwarded
+		wantCmd := []string{"vim", "."}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range creator.createdCommand {
+			if arg != wantCmd[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
+			}
+		}
+	})
+
+	t.Run("no command starts in session list view", func(t *testing.T) {
+		m := tui.New(&mockSessionLister{
+			sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			},
+		})
+
+		cmd := m.Init()
+		msg := cmd()
+
+		// Should be a SessionsMsg
+		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		if !ok {
+			t.Fatalf("expected SessionsMsg, got %T", msg)
+		}
+
+		var model tea.Model = m
+		model, _ = model.Update(sessionsMsg)
+
+		view := model.View()
+		if !strings.Contains(view, "dev") {
+			t.Errorf("expected session 'dev' in view, got:\n%s", view)
+		}
+		if strings.Contains(view, "Command:") {
+			t.Errorf("should not show command banner without pending command, got:\n%s", view)
+		}
+	})
+
+	t.Run("long command text in banner renders without truncation", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		longCmd := "some-very-long-command-name --with-many-flags --verbose --output=/tmp/really-long-path"
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{longCmd})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		expected := "Command: " + longCmd
+		if !strings.Contains(view, expected) {
+			t.Errorf("expected full command in banner %q, got:\n%s", expected, view)
+		}
+	})
+
+	t.Run("no saved projects shows empty state with browse and command banner", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Command: claude") {
+			t.Errorf("expected command banner in empty state, got:\n%s", view)
+		}
+		if !strings.Contains(view, "browse for directory...") {
+			t.Errorf("expected browse option in empty state, got:\n%s", view)
+		}
+		if !strings.Contains(view, "No saved projects yet.") {
+			t.Errorf("expected empty projects message, got:\n%s", view)
+		}
+	})
+}

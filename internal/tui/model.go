@@ -94,6 +94,7 @@ type Model struct {
 	filterMode      bool
 	filterText      string
 	command         []string
+	commandPending  bool
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -108,15 +109,27 @@ func (m Model) InitialFilter() string {
 }
 
 // WithInitialFilter returns a copy of the Model with the initial filter set.
+// When in command-pending mode, the filter is applied to the project picker.
 func (m Model) WithInitialFilter(filter string) Model {
 	m.initialFilter = filter
+	if m.commandPending && filter != "" {
+		m.projectPicker = m.projectPicker.WithFilter(filter)
+	}
 	return m
 }
 
 // WithCommand returns a copy of the Model with the given command set.
-// The command is forwarded to the session creator when a new session is created.
+// When command is non-empty, the TUI starts in command-pending mode:
+// the session list is skipped and the project picker is shown directly.
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
+	if len(command) > 0 {
+		m.commandPending = true
+		m.view = viewProjectPicker
+		if m.projectStore != nil {
+			m.projectPicker = ui.NewProjectPicker(m.projectStore)
+		}
+	}
 	return m
 }
 
@@ -205,8 +218,12 @@ func (m Model) totalItems() int {
 	return len(m.sessions) + 1
 }
 
-// Init returns a command that fetches tmux sessions.
+// Init returns a command that fetches tmux sessions, or loads projects
+// when in command-pending mode.
 func (m Model) Init() tea.Cmd {
+	if m.commandPending && m.projectStore != nil {
+		return m.projectPicker.Init()
+	}
 	return func() tea.Msg {
 		sessions, err := m.sessionLister.ListSessions()
 		return SessionsMsg{Sessions: sessions, Err: err}
@@ -218,6 +235,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
 	case ui.BackMsg:
+		if m.commandPending {
+			return m, tea.Quit
+		}
 		m.view = viewSessionList
 		return m, nil
 	case ui.ProjectSelectedMsg:
@@ -566,7 +586,14 @@ var (
 func (m Model) View() string {
 	switch m.view {
 	case viewProjectPicker:
-		return m.projectPicker.View()
+		var b strings.Builder
+		if m.commandPending {
+			b.WriteString("Command: ")
+			b.WriteString(strings.Join(m.command, " "))
+			b.WriteString("\n\n")
+		}
+		b.WriteString(m.projectPicker.View())
+		return b.String()
 	case viewFileBrowser:
 		return m.fileBrowser.View()
 	default:
