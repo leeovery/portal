@@ -613,3 +613,92 @@ func TestEnterSelection(t *testing.T) {
 		}
 	})
 }
+
+func TestEmptyState(t *testing.T) {
+	t.Run("empty sessions shows no active sessions message", func(t *testing.T) {
+		m := tui.New(nil)
+		// Simulate receiving an empty sessions list
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+		view := updated.View()
+		if view != "No active sessions" {
+			t.Errorf("expected %q, got %q", "No active sessions", view)
+		}
+	})
+
+	t.Run("nil sessions shows no active sessions message", func(t *testing.T) {
+		m := tui.New(nil)
+		// Simulate receiving nil sessions (tmux server not running)
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: nil})
+		view := updated.View()
+		if view != "No active sessions" {
+			t.Errorf("expected %q, got %q", "No active sessions", view)
+		}
+	})
+
+	t.Run("non-empty sessions does not show empty message", func(t *testing.T) {
+		m := tui.New(nil)
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 3, Attached: false},
+		}
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		view := updated.View()
+		if strings.Contains(view, "No active sessions") {
+			t.Errorf("view should not contain empty state message when sessions exist: %q", view)
+		}
+	})
+
+	t.Run("empty state is not shown before sessions are loaded", func(t *testing.T) {
+		m := tui.New(nil)
+		// Before any sessionsMsg, view should NOT show the empty state message
+		view := m.View()
+		if strings.Contains(view, "No active sessions") {
+			t.Errorf("empty state message should not appear before sessions are loaded: %q", view)
+		}
+	})
+
+	t.Run("quit works in empty state", func(t *testing.T) {
+		quitKeys := []tea.KeyMsg{
+			{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			{Type: tea.KeyEsc},
+			{Type: tea.KeyCtrlC},
+		}
+
+		for _, key := range quitKeys {
+			m := tui.New(nil)
+			// Load empty sessions
+			updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+			// Press quit key
+			_, cmd := updated.Update(key)
+			if cmd == nil {
+				t.Fatalf("expected quit command for key %v, got nil", key)
+			}
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); !ok {
+				t.Errorf("expected tea.QuitMsg for key %v, got %T", key, msg)
+			}
+		}
+	})
+
+	t.Run("enter is no-op in empty state", func(t *testing.T) {
+		m := tui.New(nil)
+		// Load empty sessions
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+		// Press Enter
+		result, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		// Should not trigger quit
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Error("enter in empty state should not trigger quit")
+			}
+		}
+		// Selected should remain empty
+		model, ok := result.(tui.Model)
+		if !ok {
+			t.Fatalf("expected tui.Model, got %T", result)
+		}
+		if model.Selected() != "" {
+			t.Errorf("expected empty selected, got %q", model.Selected())
+		}
+	})
+}

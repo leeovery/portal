@@ -26,6 +26,7 @@ type Model struct {
 	sessions      []tmux.Session
 	cursor        int
 	selected      string
+	loaded        bool
 	sessionLister SessionLister
 }
 
@@ -47,6 +48,7 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 	return Model{
 		sessions: sessions,
 		cursor:   0,
+		loaded:   true,
 	}
 }
 
@@ -67,6 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessions = msg.Sessions
 		m.cursor = 0
+		m.loaded = true
 	case tea.KeyMsg:
 		switch {
 		case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc:
@@ -100,6 +103,10 @@ var (
 
 // View renders the session list.
 func (m Model) View() string {
+	if m.loaded && len(m.sessions) == 0 {
+		return "No active sessions"
+	}
+
 	var b strings.Builder
 
 	for i, s := range m.sessions {
