@@ -31,6 +31,11 @@ Thumbs.db
 .env.local
 .env.*.local
 
+.tick/cache.db
+.tick/lock
+
+.claude/settings.local.json
+
 # Build
 dist/
 build/
