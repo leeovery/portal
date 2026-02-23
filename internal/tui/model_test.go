@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
+	"github.com/leeovery/portal/internal/ui"
 )
 
 func TestView(t *testing.T) {
@@ -353,15 +355,16 @@ func TestKeyboardNavigation(t *testing.T) {
 			wantCursorLine: 0,
 		},
 		{
-			name:     "cursor does not go below last item",
+			name:     "cursor does not go below last item including new option",
 			sessions: threeSessions,
 			keys: []tea.Msg{
 				tea.KeyMsg{Type: tea.KeyDown},
 				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyDown},
+				tea.KeyMsg{Type: tea.KeyDown}, // lands on [n] new in project...
+				tea.KeyMsg{Type: tea.KeyDown}, // should not go further
+				tea.KeyMsg{Type: tea.KeyDown}, // should not go further
 			},
-			wantCursorLine: 2,
+			wantCursorLine: 5, // 3 sessions + blank + divider + new option line
 		},
 		{
 			name:     "cursor does not go above first item",
@@ -614,14 +617,273 @@ func TestEnterSelection(t *testing.T) {
 	})
 }
 
+func TestNewInProjectOption(t *testing.T) {
+	t.Run("session list includes new in project option", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 3, Attached: true},
+			{Name: "work", Windows: 1, Attached: false},
+		})
+		view := m.View()
+
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("view missing '[n] new in project...' option:\n%s", view)
+		}
+	})
+
+	t.Run("new option appears below sessions with divider", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 3, Attached: false},
+			{Name: "work", Windows: 1, Attached: false},
+		})
+		view := m.View()
+
+		lastSessionIdx := strings.Index(view, "work")
+		dividerIdx := strings.Index(view, "─")
+		newOptionIdx := strings.Index(view, "[n] new in project...")
+
+		if lastSessionIdx == -1 || dividerIdx == -1 || newOptionIdx == -1 {
+			t.Fatalf("missing elements in view:\n%s", view)
+		}
+		if dividerIdx <= lastSessionIdx {
+			t.Errorf("divider (idx %d) should appear after last session (idx %d)", dividerIdx, lastSessionIdx)
+		}
+		if newOptionIdx <= dividerIdx {
+			t.Errorf("new option (idx %d) should appear after divider (idx %d)", newOptionIdx, dividerIdx)
+		}
+	})
+
+	t.Run("n key jumps to new option", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+		view := m.View()
+		// The [n] new in project... line should have the cursor
+		lines := strings.Split(view, "\n")
+		var newOptionLine string
+		for _, line := range lines {
+			if strings.Contains(line, "new in project") {
+				newOptionLine = line
+				break
+			}
+		}
+		if !strings.Contains(newOptionLine, ">") {
+			t.Errorf("n key should move cursor to new option line: %q", newOptionLine)
+		}
+	})
+
+	t.Run("enter on new option switches to project picker", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: sessions},
+			store,
+			creator,
+		)
+		// Load sessions
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press n to jump to new option, then Enter
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		// Load projects into the picker
+		model, _ = model.Update(ui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		view := model.View()
+		if !strings.Contains(view, "Select a project") {
+			t.Errorf("expected project picker view, got:\n%s", view)
+		}
+	})
+
+	t.Run("esc in project picker returns to session list", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: sessions},
+			store,
+			creator,
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to project picker
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+
+		// Esc should return to session list
+		model, _ = model.Update(ui.BackMsg{})
+
+		view := model.View()
+		if !strings.Contains(view, "dev") {
+			t.Errorf("expected session list with 'dev', got:\n%s", view)
+		}
+		if strings.Contains(view, "Select a project") {
+			t.Errorf("should not show project picker after Esc:\n%s", view)
+		}
+	})
+
+	t.Run("project selection triggers creation and returns session name", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{
+			sessionName: "myapp-abc123",
+		}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: sessions},
+			store,
+			creator,
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to project picker
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+
+		// Select a project
+		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		if cmd == nil {
+			t.Fatal("expected command from project selection, got nil")
+		}
+
+		// The command should trigger session creation
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "myapp-abc123" {
+			t.Errorf("expected session name %q, got %q", "myapp-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/code/myapp" {
+			t.Errorf("expected CreateFromDir called with %q, got %q", "/code/myapp", creator.createdDir)
+		}
+	})
+
+	t.Run("empty session list still shows new option", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{})
+		view := m.View()
+
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("empty session list should show new option:\n%s", view)
+		}
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("empty session list should show no sessions message:\n%s", view)
+		}
+	})
+
+	t.Run("combined empty state navigable", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		creator := &mockSessionCreator{}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			store,
+			creator,
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+
+		// n should jump to new option
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		// Enter should switch to project picker
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		// Load empty projects
+		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: []project.Project{}})
+
+		view := model.View()
+		if !strings.Contains(view, "Select a project") {
+			t.Errorf("expected project picker in combined empty state, got:\n%s", view)
+		}
+		if !strings.Contains(view, "No saved projects yet.") {
+			t.Errorf("expected empty projects message, got:\n%s", view)
+		}
+
+		// Esc should return to session list
+		model, _ = model.Update(ui.BackMsg{})
+		view = model.View()
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("expected session list after Esc, got:\n%s", view)
+		}
+	})
+}
+
+// mockProjectStore implements ui.ProjectStore for tui testing.
+type mockProjectStore struct {
+	projects []project.Project
+	listErr  error
+}
+
+func (m *mockProjectStore) List() ([]project.Project, error) {
+	return m.projects, m.listErr
+}
+
+func (m *mockProjectStore) CleanStale() (int, error) {
+	return 0, nil
+}
+
+// mockSessionCreator implements tui.SessionCreator for testing.
+type mockSessionCreator struct {
+	sessionName string
+	createdDir  string
+	err         error
+}
+
+func (m *mockSessionCreator) CreateFromDir(dir string) (string, error) {
+	m.createdDir = dir
+	if m.err != nil {
+		return "", m.err
+	}
+	return m.sessionName, nil
+}
+
 func TestEmptyState(t *testing.T) {
 	t.Run("empty sessions shows no active sessions message", func(t *testing.T) {
 		m := tui.New(nil)
 		// Simulate receiving an empty sessions list
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 		view := updated.View()
-		if view != "No active sessions" {
-			t.Errorf("expected %q, got %q", "No active sessions", view)
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("expected view to contain 'No active sessions', got %q", view)
+		}
+		// Should still show the new option
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("expected view to contain '[n] new in project...', got %q", view)
 		}
 	})
 
@@ -630,8 +892,12 @@ func TestEmptyState(t *testing.T) {
 		// Simulate receiving nil sessions (tmux server not running)
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: nil})
 		view := updated.View()
-		if view != "No active sessions" {
-			t.Errorf("expected %q, got %q", "No active sessions", view)
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("expected view to contain 'No active sessions', got %q", view)
+		}
+		// Should still show the new option
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("expected view to contain '[n] new in project...', got %q", view)
 		}
 	})
 

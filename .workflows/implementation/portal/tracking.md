@@ -17,6 +17,7 @@ current_phase: 2
 current_task: ~
 completed_phases:
   - 1
+  - 2
 completed_tasks:
   - tick-a4b5c6
   - tick-fc2921
@@ -32,6 +33,7 @@ completed_tasks:
   - tick-275824
   - tick-f924e3
   - tick-4c54e1
+  - tick-444a76
 started: 2026-02-23
 updated: 2026-02-23
 completed: ~
