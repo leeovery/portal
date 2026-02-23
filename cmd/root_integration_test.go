@@ -124,3 +124,36 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestPortalBinaryAliasRmNotFound(t *testing.T) {
+	binary := buildPortalBinary(t)
+
+	tmpDir := t.TempDir()
+	aliasFile := filepath.Join(tmpDir, "aliases")
+
+	cmd := exec.Command(binary, "alias", "rm", "nonexistent")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + tmpDir,
+		"PORTAL_ALIASES_FILE=" + aliasFile,
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected command to fail, but it succeeded")
+	}
+
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("exit code = %d, want 1", exitErr.ExitCode())
+	}
+
+	outputStr := strings.TrimSpace(string(output))
+	want := "alias not found: nonexistent"
+	if outputStr != want {
+		t.Errorf("output = %q, want %q", outputStr, want)
+	}
+}

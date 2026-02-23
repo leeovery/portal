@@ -184,3 +184,165 @@ func TestAliasSetCommand(t *testing.T) {
 		}
 	})
 }
+
+func TestAliasRmCommand(t *testing.T) {
+	t.Run("removes existing alias", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		// Seed aliases file
+		if err := os.WriteFile(aliasFile, []byte("proj=/Users/lee/Code/project\nwork=/Users/lee/Code/work\n"), 0o644); err != nil {
+			t.Fatalf("failed to write seed file: %v", err)
+		}
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"alias", "rm", "proj"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(aliasFile)
+		if err != nil {
+			t.Fatalf("failed to read aliases file: %v", err)
+		}
+
+		got := string(data)
+		want := "work=/Users/lee/Code/work\n"
+		if got != want {
+			t.Errorf("aliases file content = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("returns error for non-existent alias", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		// Empty aliases file
+		if err := os.WriteFile(aliasFile, []byte(""), 0o644); err != nil {
+			t.Fatalf("failed to write seed file: %v", err)
+		}
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"alias", "rm", "nonexistent"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error for non-existent alias, got nil")
+		}
+
+		want := "alias not found: nonexistent"
+		if err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("exits 0 on success", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		if err := os.WriteFile(aliasFile, []byte("proj=/some/path\n"), 0o644); err != nil {
+			t.Fatalf("failed to write seed file: %v", err)
+		}
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"alias", "rm", "proj"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("expected exit 0 (no error), got: %v", err)
+		}
+	})
+
+	t.Run("requires exactly one argument", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"alias", "rm"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error for missing argument, got nil")
+		}
+	})
+}
+
+func TestAliasListCommand(t *testing.T) {
+	t.Run("outputs aliases sorted by name", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		content := "zebra=/z/path\napple=/a/path\nmango=/m/path\n"
+		if err := os.WriteFile(aliasFile, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write seed file: %v", err)
+		}
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"alias", "list"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := buf.String()
+		want := "apple=/a/path\nmango=/m/path\nzebra=/z/path\n"
+		if got != want {
+			t.Errorf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("produces empty output when no aliases", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		// No aliases file exists
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"alias", "list"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := buf.String()
+		if got != "" {
+			t.Errorf("output = %q, want empty string", got)
+		}
+	})
+
+	t.Run("exits 0 on success", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"alias", "list"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("expected exit 0 (no error), got: %v", err)
+		}
+	})
+
+	t.Run("accepts no arguments", func(t *testing.T) {
+		dir := t.TempDir()
+		aliasFile := filepath.Join(dir, "aliases")
+		t.Setenv("PORTAL_ALIASES_FILE", aliasFile)
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"alias", "list", "extraarg"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error for extra argument, got nil")
+		}
+	})
+}
