@@ -1,6 +1,7 @@
 package ui_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,19 +12,38 @@ import (
 
 // mockDirLister implements ui.DirLister for testing.
 type mockDirLister struct {
-	entries map[string][]browser.DirEntry
+	entries       map[string][]browser.DirEntry
+	hiddenEntries map[string][]browser.DirEntry
+	errFunc       func(path string) error
 }
 
 func (m *mockDirLister) ListDirectories(path string, showHidden bool) ([]browser.DirEntry, error) {
-	if entries, ok := m.entries[path]; ok {
-		return entries, nil
+	if m.errFunc != nil {
+		if err := m.errFunc(path); err != nil {
+			return nil, err
+		}
 	}
-	return []browser.DirEntry{}, nil
+	var result []browser.DirEntry
+	if entries, ok := m.entries[path]; ok {
+		result = append(result, entries...)
+	}
+	if showHidden {
+		if hidden, ok := m.hiddenEntries[path]; ok {
+			result = append(result, hidden...)
+		}
+	}
+	if result == nil {
+		return []browser.DirEntry{}, nil
+	}
+	return result, nil
 }
+
+// alwaysValidPath is a PathChecker that always returns nil (path exists).
+func alwaysValidPath(_ string) error { return nil }
 
 // newTestBrowser creates a FileBrowserModel with the given start path and mock entries.
 func newTestBrowser(startPath string, entries map[string][]browser.DirEntry) ui.FileBrowserModel {
-	return ui.NewFileBrowser(startPath, &mockDirLister{entries: entries})
+	return ui.NewFileBrowserWithChecker(startPath, &mockDirLister{entries: entries}, alwaysValidPath)
 }
 
 // standardEntries returns a mock directory structure for testing.
@@ -444,6 +464,220 @@ func TestFileBrowser_FilterMatchesNothingShowsEmptyListing(t *testing.T) {
 	// The "." entry should still be visible (current directory indicator)
 	if !strings.Contains(view, ".") {
 		t.Errorf("dot entry should still be visible:\n%s", view)
+	}
+}
+
+func keySpace() tea.Msg { return tea.KeyMsg{Type: tea.KeySpace} }
+
+func TestFileBrowser_DotKeyTogglesHiddenVisibility(t *testing.T) {
+	entries := map[string][]browser.DirEntry{
+		"/home/user/code": {
+			{Name: "alpha"},
+			{Name: "beta"},
+		},
+	}
+	hidden := map[string][]browser.DirEntry{
+		"/home/user/code": {
+			{Name: ".hidden"},
+			{Name: ".secret"},
+		},
+	}
+	m := ui.NewFileBrowser("/home/user/code", &mockDirLister{entries: entries, hiddenEntries: hidden})
+
+	// Initially hidden dirs should not be visible
+	view := m.View()
+	if strings.Contains(view, ".hidden") {
+		t.Errorf("hidden dirs should not be visible initially:\n%s", view)
+	}
+
+	// Press "." to toggle showHidden on
+	var model tea.Model = m
+	model = sendBrowserKeys(model, keyRune('.'))
+
+	view = model.View()
+	if !strings.Contains(view, ".hidden") {
+		t.Errorf("hidden dirs should be visible after toggle:\n%s", view)
+	}
+	if !strings.Contains(view, ".secret") {
+		t.Errorf("hidden dirs should be visible after toggle:\n%s", view)
+	}
+	if !strings.Contains(view, "alpha") {
+		t.Errorf("normal dirs should still be visible after toggle:\n%s", view)
+	}
+
+	// Press "." again to toggle showHidden off
+	model = sendBrowserKeys(model, keyRune('.'))
+
+	view = model.View()
+	if strings.Contains(view, ".hidden") {
+		t.Errorf("hidden dirs should be hidden again after second toggle:\n%s", view)
+	}
+	if strings.Contains(view, ".secret") {
+		t.Errorf("hidden dirs should be hidden again after second toggle:\n%s", view)
+	}
+	if !strings.Contains(view, "alpha") {
+		t.Errorf("normal dirs should still be visible:\n%s", view)
+	}
+}
+
+func TestFileBrowser_SpaceOnDotEntryEmitsSelection(t *testing.T) {
+	m := newTestBrowser("/home/user/code", standardEntries())
+
+	// Cursor starts at 0 (the "." entry). Press Space.
+	_, cmd := m.Update(keySpace())
+
+	if cmd == nil {
+		t.Fatal("expected command from Space on dot entry, got nil")
+	}
+
+	msg := cmd()
+	sel, ok := msg.(ui.BrowserDirSelectedMsg)
+	if !ok {
+		t.Fatalf("expected BrowserDirSelectedMsg, got %T", msg)
+	}
+	if sel.Path != "/home/user/code" {
+		t.Errorf("expected path %q, got %q", "/home/user/code", sel.Path)
+	}
+}
+
+func TestFileBrowser_EnterOnDotEntryEmitsSelection(t *testing.T) {
+	m := newTestBrowser("/home/user/code", standardEntries())
+
+	// Cursor starts at 0 (the "." entry). Press Enter.
+	_, cmd := m.Update(keyEnter())
+
+	if cmd == nil {
+		t.Fatal("expected command from Enter on dot entry, got nil")
+	}
+
+	msg := cmd()
+	sel, ok := msg.(ui.BrowserDirSelectedMsg)
+	if !ok {
+		t.Fatalf("expected BrowserDirSelectedMsg, got %T", msg)
+	}
+	if sel.Path != "/home/user/code" {
+		t.Errorf("expected path %q, got %q", "/home/user/code", sel.Path)
+	}
+}
+
+func TestFileBrowser_SelectionMessageContainsCurrentPath(t *testing.T) {
+	m := newTestBrowser("/home/user/code", standardEntries())
+
+	// Navigate into alpha first
+	var model tea.Model = m
+	model = sendBrowserKeys(model, keyDown()) // cursor on alpha
+	model, _ = model.Update(keyEnter())       // descend into alpha
+
+	// Now cursor should be at 0 (dot entry) in /home/user/code/alpha
+	// Press Space to select current directory
+	_, cmd := model.Update(keySpace())
+
+	if cmd == nil {
+		t.Fatal("expected command from Space, got nil")
+	}
+
+	msg := cmd()
+	sel, ok := msg.(ui.BrowserDirSelectedMsg)
+	if !ok {
+		t.Fatalf("expected BrowserDirSelectedMsg, got %T", msg)
+	}
+	if sel.Path != "/home/user/code/alpha" {
+		t.Errorf("expected path %q, got %q", "/home/user/code/alpha", sel.Path)
+	}
+}
+
+func TestFileBrowser_DotKeyIgnoredWhenFiltering(t *testing.T) {
+	entries := map[string][]browser.DirEntry{
+		"/home/user/code": {
+			{Name: "alpha"},
+			{Name: "beta"},
+		},
+	}
+	hidden := map[string][]browser.DirEntry{
+		"/home/user/code": {
+			{Name: ".hidden"},
+		},
+	}
+	m := ui.NewFileBrowserWithChecker("/home/user/code", &mockDirLister{entries: entries, hiddenEntries: hidden}, alwaysValidPath)
+
+	// Type "a" to start filtering, then type "."
+	var model tea.Model = m
+	model = sendBrowserKeys(model, keyRune('a'), keyRune('.'))
+
+	view := model.View()
+	// "." should have been added to filter text, not toggled showHidden
+	// Hidden dirs should NOT be visible
+	if strings.Contains(view, ".hidden") {
+		t.Errorf("hidden dirs should not be visible when dot typed during filter:\n%s", view)
+	}
+	// Filter should be "a." which won't match "alpha" or "beta" (no '.' in names)
+	// Actually fuzzy "a." would match: 'a' then '.' - none of the entries have '.'
+	if strings.Contains(view, "alpha") {
+		t.Errorf("filter 'a.' should not match 'alpha' (no '.' in name):\n%s", view)
+	}
+}
+
+func TestFileBrowser_OnlyHiddenSubdirectoriesRevealedByToggle(t *testing.T) {
+	// Directory with no visible entries - only hidden ones
+	entries := map[string][]browser.DirEntry{
+		"/home/user/code": {},
+	}
+	hidden := map[string][]browser.DirEntry{
+		"/home/user/code": {
+			{Name: ".config"},
+			{Name: ".local"},
+		},
+	}
+	m := ui.NewFileBrowserWithChecker("/home/user/code", &mockDirLister{entries: entries, hiddenEntries: hidden}, alwaysValidPath)
+
+	// Initially only "." entry visible, no directories listed
+	view := m.View()
+	if strings.Contains(view, ".config") {
+		t.Errorf("hidden dirs should not be visible initially:\n%s", view)
+	}
+	if strings.Contains(view, ".local") {
+		t.Errorf("hidden dirs should not be visible initially:\n%s", view)
+	}
+
+	// Toggle hidden with "."
+	var model tea.Model = m
+	model = sendBrowserKeys(model, keyRune('.'))
+
+	view = model.View()
+	if !strings.Contains(view, ".config") {
+		t.Errorf(".config should be visible after toggle:\n%s", view)
+	}
+	if !strings.Contains(view, ".local") {
+		t.Errorf(".local should be visible after toggle:\n%s", view)
+	}
+}
+
+func TestFileBrowser_SelectedDirectoryRemovedProducesError(t *testing.T) {
+	failingChecker := func(path string) error {
+		return fmt.Errorf("no such file or directory: %s", path)
+	}
+	m := ui.NewFileBrowserWithChecker("/home/user/code",
+		&mockDirLister{entries: standardEntries()},
+		failingChecker,
+	)
+
+	// Cursor at 0 (dot entry). Press Space.
+	_, cmd := m.Update(keySpace())
+
+	if cmd == nil {
+		t.Fatal("expected command from Space, got nil")
+	}
+
+	msg := cmd()
+	errMsg, ok := msg.(ui.BrowserDirSelectErrMsg)
+	if !ok {
+		t.Fatalf("expected BrowserDirSelectErrMsg, got %T", msg)
+	}
+	if errMsg.Path != "/home/user/code" {
+		t.Errorf("expected path %q, got %q", "/home/user/code", errMsg.Path)
+	}
+	if errMsg.Err == nil {
+		t.Error("expected non-nil error")
 	}
 }
 

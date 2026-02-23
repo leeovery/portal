@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,10 +13,24 @@ import (
 // BrowserCancelMsg is emitted when the user cancels the file browser with Esc (no filter active).
 type BrowserCancelMsg struct{}
 
+// BrowserDirSelectedMsg is emitted when the user selects the current directory via Space or Enter on the "." entry.
+type BrowserDirSelectedMsg struct {
+	Path string
+}
+
+// BrowserDirSelectErrMsg is emitted when a directory selection fails (e.g., directory no longer exists).
+type BrowserDirSelectErrMsg struct {
+	Path string
+	Err  error
+}
+
 // DirLister abstracts directory listing for testability.
 type DirLister interface {
 	ListDirectories(path string, showHidden bool) ([]browser.DirEntry, error)
 }
+
+// PathChecker verifies a directory path exists on disk.
+type PathChecker func(path string) error
 
 // FileBrowserModel is the Bubble Tea model for the file browser view.
 type FileBrowserModel struct {
@@ -23,14 +38,34 @@ type FileBrowserModel struct {
 	entries    []browser.DirEntry
 	cursor     int
 	lister     DirLister
+	checkPath  PathChecker
 	filterText string
+	showHidden bool
+}
+
+// defaultPathChecker uses os.Stat to verify a directory exists.
+func defaultPathChecker(path string) error {
+	_, err := os.Stat(path)
+	return err
 }
 
 // NewFileBrowser creates a FileBrowserModel starting at the given path.
 func NewFileBrowser(startPath string, lister DirLister) FileBrowserModel {
 	m := FileBrowserModel{
-		path:   startPath,
-		lister: lister,
+		path:      startPath,
+		lister:    lister,
+		checkPath: defaultPathChecker,
+	}
+	m.loadEntries()
+	return m
+}
+
+// NewFileBrowserWithChecker creates a FileBrowserModel with a custom path checker for testability.
+func NewFileBrowserWithChecker(startPath string, lister DirLister, checker PathChecker) FileBrowserModel {
+	m := FileBrowserModel{
+		path:      startPath,
+		lister:    lister,
+		checkPath: checker,
 	}
 	m.loadEntries()
 	return m
@@ -38,7 +73,7 @@ func NewFileBrowser(startPath string, lister DirLister) FileBrowserModel {
 
 // loadEntries refreshes the directory listing for the current path.
 func (m *FileBrowserModel) loadEntries() {
-	entries, err := m.lister.ListDirectories(m.path, false)
+	entries, err := m.lister.ListDirectories(m.path, m.showHidden)
 	if err != nil {
 		m.entries = []browser.DirEntry{}
 		return
@@ -92,6 +127,11 @@ func (m FileBrowserModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor--
 		}
 
+	case tea.KeySpace:
+		if m.cursor == 0 {
+			return m.handleSelectCurrentDir()
+		}
+
 	case tea.KeyEnter, tea.KeyRight:
 		return m.handleDescend()
 
@@ -115,6 +155,12 @@ func (m FileBrowserModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyRunes:
+		if m.filterText == "" && string(msg.Runes) == "." {
+			m.showHidden = !m.showHidden
+			m.cursor = 0
+			m.loadEntries()
+			return m, nil
+		}
 		m.filterText += string(msg.Runes)
 		m.cursor = 0
 	}
@@ -122,11 +168,24 @@ func (m FileBrowserModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleSelectCurrentDir emits a selection message for the current directory.
+// Validates the directory still exists before emitting.
+func (m FileBrowserModel) handleSelectCurrentDir() (tea.Model, tea.Cmd) {
+	path := m.path
+	checker := m.checkPath
+	return m, func() tea.Msg {
+		if err := checker(path); err != nil {
+			return BrowserDirSelectErrMsg{Path: path, Err: fmt.Errorf("directory no longer exists: %s", path)}
+		}
+		return BrowserDirSelectedMsg{Path: path}
+	}
+}
+
 // handleDescend enters the directory at the current cursor position.
+// When cursor is on the "." entry (index 0), selects the current directory.
 func (m FileBrowserModel) handleDescend() (tea.Model, tea.Cmd) {
-	// Cursor 0 is the "." entry - no-op for navigation (selection handled elsewhere)
 	if m.cursor == 0 {
-		return m, nil
+		return m.handleSelectCurrentDir()
 	}
 
 	filtered := m.filteredEntries()
