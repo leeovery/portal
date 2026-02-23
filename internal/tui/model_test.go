@@ -425,3 +425,77 @@ func TestKeyboardNavigation(t *testing.T) {
 		}
 	})
 }
+
+func TestQuitHandling(t *testing.T) {
+	sessions := []tmux.Session{
+		{Name: "alpha", Windows: 1, Attached: false},
+		{Name: "bravo", Windows: 2, Attached: false},
+	}
+
+	quitTests := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{
+			name: "q key triggers quit",
+			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}},
+		},
+		{
+			name: "Esc key triggers quit",
+			key:  tea.KeyMsg{Type: tea.KeyEsc},
+		},
+		{
+			name: "Ctrl+C triggers quit",
+			key:  tea.KeyMsg{Type: tea.KeyCtrlC},
+		},
+	}
+
+	for _, tt := range quitTests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := tui.NewModelWithSessions(sessions)
+			_, cmd := m.Update(tt.key)
+			if cmd == nil {
+				t.Fatal("expected quit command, got nil")
+			}
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); !ok {
+				t.Errorf("expected tea.QuitMsg, got %T", msg)
+			}
+		})
+	}
+
+	noQuitTests := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{
+			name: "down arrow does not trigger quit",
+			key:  tea.KeyMsg{Type: tea.KeyDown},
+		},
+		{
+			name: "up arrow does not trigger quit",
+			key:  tea.KeyMsg{Type: tea.KeyUp},
+		},
+		{
+			name: "j key does not trigger quit",
+			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}},
+		},
+		{
+			name: "k key does not trigger quit",
+			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}},
+		},
+	}
+
+	for _, tt := range noQuitTests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := tui.NewModelWithSessions(sessions)
+			_, cmd := m.Update(tt.key)
+			if cmd != nil {
+				msg := cmd()
+				if _, ok := msg.(tea.QuitMsg); ok {
+					t.Error("navigation key should not trigger quit")
+				}
+			}
+		})
+	}
+}
