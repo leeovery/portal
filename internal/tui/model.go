@@ -31,6 +31,7 @@ type SessionLister interface {
 type ProjectStore interface {
 	List() ([]project.Project, error)
 	CleanStale() ([]project.Project, error)
+	Remove(path string) error
 }
 
 // SessionKiller defines the interface for killing tmux sessions.

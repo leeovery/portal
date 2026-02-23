@@ -12,9 +12,12 @@ import (
 
 // mockProjectStore implements ui.ProjectStore for testing.
 type mockProjectStore struct {
-	projects    []project.Project
-	listErr     error
-	cleanCalled bool
+	projects     []project.Project
+	listErr      error
+	cleanCalled  bool
+	removeCalled bool
+	removedPath  string
+	removeErr    error
 }
 
 func (m *mockProjectStore) List() ([]project.Project, error) {
@@ -24,6 +27,23 @@ func (m *mockProjectStore) List() ([]project.Project, error) {
 func (m *mockProjectStore) CleanStale() ([]project.Project, error) {
 	m.cleanCalled = true
 	return nil, nil
+}
+
+func (m *mockProjectStore) Remove(path string) error {
+	m.removeCalled = true
+	m.removedPath = path
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	// Simulate removal from the in-memory list
+	var kept []project.Project
+	for _, p := range m.projects {
+		if p.Path != path {
+			kept = append(kept, p)
+		}
+	}
+	m.projects = kept
+	return nil
 }
 
 func projectsLoaded(projects []project.Project) ui.ProjectsLoadedMsg {
@@ -705,5 +725,220 @@ func TestProjectPicker_EscClearsFilterAndExitsFilterMode(t *testing.T) {
 	// All projects should be visible again
 	if !strings.Contains(view, "newest") || !strings.Contains(view, "middle") || !strings.Contains(view, "oldest") {
 		t.Errorf("all projects should be visible after clearing filter:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_XEntersConfirmationMode(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Press x on first project ("newest")
+	m = sendKeys(m, keyRune('x'))
+
+	view := m.View()
+	if !strings.Contains(view, "Remove project 'newest'? (y/n)") {
+		t.Errorf("should show confirmation prompt:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_YConfirmsAndRefreshes(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Press x on first project, then y to confirm
+	m = sendKeys(m, keyRune('x'))
+	_, cmd := m.Update(keyRune('y'))
+
+	if !store.removeCalled {
+		t.Fatal("expected Remove to be called on store")
+	}
+	if store.removedPath != "/code/newest" {
+		t.Errorf("expected removed path %q, got %q", "/code/newest", store.removedPath)
+	}
+	if cmd == nil {
+		t.Fatal("expected refresh command after removal")
+	}
+	// The command should produce a ProjectsLoadedMsg (refresh)
+	msg := cmd()
+	if _, ok := msg.(ui.ProjectsLoadedMsg); !ok {
+		t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+	}
+}
+
+func TestProjectPicker_Remove_NCancels(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Press x then n to cancel
+	m = sendKeys(m, keyRune('x'), keyRune('n'))
+
+	if store.removeCalled {
+		t.Error("Remove should not be called after cancel")
+	}
+	view := m.View()
+	if strings.Contains(view, "Remove project") {
+		t.Errorf("confirmation prompt should be dismissed after n:\n%s", view)
+	}
+	// Should still show all projects
+	if !strings.Contains(view, "newest") {
+		t.Errorf("project should still be visible after cancel:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_EscCancels(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Press x then Esc to cancel
+	m = sendKeys(m, keyRune('x'), keyEsc())
+
+	if store.removeCalled {
+		t.Error("Remove should not be called after Esc cancel")
+	}
+	view := m.View()
+	if strings.Contains(view, "Remove project") {
+		t.Errorf("confirmation prompt should be dismissed after Esc:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_ProjectGoneFromList(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Remove "newest": press x, then y
+	m = sendKeys(m, keyRune('x'))
+	m, cmd := m.Update(keyRune('y'))
+
+	// Simulate the refresh by executing the command
+	if cmd != nil {
+		msg := cmd()
+		m, _ = m.Update(msg)
+	}
+
+	view := m.View()
+	if strings.Contains(view, "newest") {
+		t.Errorf("removed project should not appear in list:\n%s", view)
+	}
+	if !strings.Contains(view, "middle") {
+		t.Errorf("remaining projects should still appear:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_CursorAdjustsWhenLastRemoved(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Navigate to last project ("oldest", index 2)
+	m = sendKeys(m, keyDown(), keyDown())
+
+	// Remove "oldest": press x, then y
+	m = sendKeys(m, keyRune('x'))
+	m, cmd := m.Update(keyRune('y'))
+
+	// Simulate the refresh
+	if cmd != nil {
+		msg := cmd()
+		m, _ = m.Update(msg)
+	}
+
+	// Cursor should have moved up; pressing Enter should select "middle" (now last project)
+	_, selectCmd := m.Update(keyEnter())
+	if selectCmd == nil {
+		t.Fatal("expected command from Enter after cursor adjust")
+	}
+	msg := selectCmd()
+	sel, ok := msg.(ui.ProjectSelectedMsg)
+	if !ok {
+		t.Fatalf("expected ProjectSelectedMsg, got %T", msg)
+	}
+	if sel.Path != "/code/middle" {
+		t.Errorf("expected cursor on %q after removal of last, got %q", "/code/middle", sel.Path)
+	}
+}
+
+func TestProjectPicker_Remove_XOnBrowseIsNoop(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Navigate to browse option (past 3 projects)
+	m = sendKeys(m, keyDown(), keyDown(), keyDown())
+
+	// Press x on browse
+	m = sendKeys(m, keyRune('x'))
+
+	view := m.View()
+	if strings.Contains(view, "Remove project") {
+		t.Errorf("x on browse should be no-op, but got confirmation:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_LastProjectShowsEmptyState(t *testing.T) {
+	singleProject := []project.Project{
+		{Path: "/code/only", Name: "only", LastUsed: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	store := &mockProjectStore{projects: singleProject}
+	m := initModel(store)
+
+	// Remove the only project
+	m = sendKeys(m, keyRune('x'))
+	m, cmd := m.Update(keyRune('y'))
+
+	// Simulate the refresh
+	if cmd != nil {
+		msg := cmd()
+		m, _ = m.Update(msg)
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "No saved projects yet.") {
+		t.Errorf("should show empty state after removing last project:\n%s", view)
+	}
+	if !strings.Contains(view, "browse for directory...") {
+		t.Errorf("browse should still be visible in empty state:\n%s", view)
+	}
+}
+
+func TestProjectPicker_Remove_AliasesPreserved(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	editor := &mockProjectEditor{}
+	aliases := map[string]string{
+		"nw": "/code/newest",
+	}
+	aliasEditor := newMockAliasEditor(aliases)
+	m := initEditModel(store, editor, aliasEditor)
+
+	// Remove "newest"
+	m = sendKeys(m, keyRune('x'))
+	m, cmd := m.Update(keyRune('y'))
+
+	// Simulate refresh
+	if cmd != nil {
+		msg := cmd()
+		_, _ = m.Update(msg)
+	}
+
+	// Aliases should not be touched
+	if len(aliasEditor.deletions) != 0 {
+		t.Errorf("aliases should not be removed, but got deletions: %v", aliasEditor.deletions)
+	}
+	if _, ok := aliasEditor.aliases["nw"]; !ok {
+		t.Error("alias 'nw' should still exist after project removal")
+	}
+}
+
+func TestProjectPicker_Remove_RapidXPressesNoDoubleRemoval(t *testing.T) {
+	store := &mockProjectStore{projects: threeProjects()}
+	m := initModel(store)
+
+	// Press x to enter confirm, then x again (should be intercepted by confirmation state)
+	m = sendKeys(m, keyRune('x'), keyRune('x'))
+
+	// Should still be in confirmation mode, not have triggered anything extra
+	view := m.View()
+	if !strings.Contains(view, "Remove project 'newest'? (y/n)") {
+		t.Errorf("should still show confirmation after rapid x presses:\n%s", view)
+	}
+	if store.removeCalled {
+		t.Error("store.Remove should not have been called during confirmation")
 	}
 }

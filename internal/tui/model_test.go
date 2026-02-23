@@ -963,6 +963,10 @@ func (m *mockProjectStore) CleanStale() ([]project.Project, error) {
 	return nil, nil
 }
 
+func (m *mockProjectStore) Remove(_ string) error {
+	return nil
+}
+
 // mockSessionCreator implements tui.SessionCreator for testing.
 type mockSessionCreator struct {
 	sessionName    string

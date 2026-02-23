@@ -13,6 +13,7 @@ import (
 type ProjectStore interface {
 	List() ([]project.Project, error)
 	CleanStale() ([]project.Project, error)
+	Remove(path string) error
 }
 
 // ProjectEditor defines the interface for renaming projects.
@@ -63,6 +64,12 @@ type ProjectPickerModel struct {
 	loaded     bool
 	filtering  bool
 	filterText string
+
+	// Confirm remove state
+	confirmRemove      bool
+	pendingRemovePath  string
+	pendingRemoveName  string
+	afterRemove        bool // set after removal to adjust cursor on refresh
 
 	// Edit mode state
 	editMode        bool
@@ -149,9 +156,22 @@ func (m ProjectPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects = msg.Projects
 		m.loaded = true
-		m.cursor = 0
+		if m.afterRemove {
+			m.afterRemove = false
+			// Clamp cursor to the last project (not browse) after removal
+			if len(m.projects) > 0 && m.cursor >= len(m.projects) {
+				m.cursor = len(m.projects) - 1
+			} else if len(m.projects) == 0 {
+				m.cursor = 0
+			}
+		} else {
+			m.cursor = 0
+		}
 
 	case tea.KeyMsg:
+		if m.confirmRemove {
+			return m.updateConfirmRemove(msg)
+		}
 		if m.editMode {
 			return m.updateEditMode(msg)
 		}
@@ -177,6 +197,9 @@ func (m ProjectPickerModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
+
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+		return m.handleRemoveKey()
 
 	case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
 		return m.handleEditKey()
@@ -227,6 +250,49 @@ func (m ProjectPickerModel) updateFiltering(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.filterText += string(msg.Runes)
 		m.cursor = 0 // Reset cursor when filter changes
 	}
+	return m, nil
+}
+
+func (m ProjectPickerModel) handleRemoveKey() (tea.Model, tea.Cmd) {
+	filtered := m.filteredProjects()
+	// No-op on browse option
+	if m.cursor >= len(filtered) {
+		return m, nil
+	}
+
+	p := filtered[m.cursor]
+	m.confirmRemove = true
+	m.pendingRemovePath = p.Path
+	m.pendingRemoveName = p.Name
+	return m, nil
+}
+
+func (m ProjectPickerModel) updateConfirmRemove(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "y":
+		path := m.pendingRemovePath
+		m.confirmRemove = false
+		m.pendingRemovePath = ""
+		m.pendingRemoveName = ""
+		m.afterRemove = true
+
+		_ = m.store.Remove(path)
+
+		return m, func() tea.Msg {
+			_, _ = m.store.CleanStale()
+			projects, err := m.store.List()
+			return ProjectsLoadedMsg{Projects: projects, Err: err}
+		}
+
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "n",
+		msg.Type == tea.KeyEsc:
+		m.confirmRemove = false
+		m.pendingRemovePath = ""
+		m.pendingRemoveName = ""
+		return m, nil
+	}
+
+	// All other keys are intercepted (no-op) during confirmation
 	return m, nil
 }
 
@@ -408,6 +474,11 @@ func (m ProjectPickerModel) View() string {
 	var b strings.Builder
 
 	b.WriteString("Select a project:\n\n")
+
+	if m.confirmRemove {
+		fmt.Fprintf(&b, "  Remove project '%s'? (y/n)\n", m.pendingRemoveName)
+		return b.String()
+	}
 
 	filtered := m.filteredProjects()
 
