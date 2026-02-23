@@ -125,6 +125,55 @@ func TestPortalBinaryTmuxMissing(t *testing.T) {
 	}
 }
 
+func TestPortalBinaryUnsupportedShellExitCode2(t *testing.T) {
+	binary := buildPortalBinary(t)
+
+	tests := []struct {
+		name     string
+		args     []string
+		wantMsg  string
+		wantCode int
+	}{
+		{
+			name:     "powershell exits with code 2",
+			args:     []string{"init", "powershell"},
+			wantMsg:  "unsupported shell: powershell (supported: bash, zsh, fish)",
+			wantCode: 2,
+		},
+		{
+			name:     "nushell exits with code 2",
+			args:     []string{"init", "nushell"},
+			wantMsg:  "unsupported shell: nushell (supported: bash, zsh, fish)",
+			wantCode: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.Command(binary, tt.args...)
+			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}
+
+			output, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatal("expected command to fail, but it succeeded")
+			}
+
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				t.Fatalf("expected ExitError, got %T: %v", err, err)
+			}
+			if exitErr.ExitCode() != tt.wantCode {
+				t.Errorf("exit code = %d, want %d", exitErr.ExitCode(), tt.wantCode)
+			}
+
+			outputStr := strings.TrimSpace(string(output))
+			if outputStr != tt.wantMsg {
+				t.Errorf("output = %q, want %q", outputStr, tt.wantMsg)
+			}
+		})
+	}
+}
+
 func TestPortalBinaryAliasRmNotFound(t *testing.T) {
 	binary := buildPortalBinary(t)
 
