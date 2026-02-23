@@ -16,6 +16,10 @@ func resetRootCmd() {
 	_ = initCmd.Flags().Set("cmd", "x")     // reset to default; value is always valid
 	_ = listCmd.Flags().Set("short", "false") // reset list flags
 	_ = listCmd.Flags().Set("long", "false")
+	if f := openCmd.Flags().Lookup("exec"); f != nil { // reset exec flag
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
 }
 
 func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {

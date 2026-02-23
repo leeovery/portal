@@ -72,16 +72,26 @@ func buildSessionConnector() SessionConnector {
 	return &AttachConnector{}
 }
 
+// parsedCommand holds the command slice parsed from -e/--exec or -- args.
+// Set during command parsing, consumed by downstream session creation.
+var parsedCommand []string //nolint:unused // stored for downstream session creation task
+
 var openCmd = &cobra.Command{
-	Use:   "open [destination]",
+	Use:   "open [-e cmd] [destination] [-- cmd args...]",
 	Short: "Open the interactive session picker or start a session at a path",
-	Args:  cobra.MaximumNArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
+		command, destination, err := parseCommandArgs(cmd, args)
+		if err != nil {
+			return err
+		}
+		parsedCommand = command
+
+		if destination == "" {
 			return openTUI("")
 		}
 
-		query := args[0]
+		query := destination
 
 		qr, err := buildQueryResolver()
 		if err != nil {
@@ -102,6 +112,50 @@ var openCmd = &cobra.Command{
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}
 	},
+}
+
+// parseCommandArgs extracts the command slice and destination from cobra args and flags.
+// It validates mutual exclusivity of -e/--exec and --, and rejects empty commands.
+func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, error) {
+	execFlag, _ := cmd.Flags().GetString("exec")
+	dashIdx := cmd.ArgsLenAtDash()
+
+	hasExec := cmd.Flags().Changed("exec")
+	hasDash := dashIdx >= 0
+
+	if hasExec && hasDash {
+		return nil, "", NewUsageError("cannot use both -e/--exec and -- to specify a command")
+	}
+
+	if hasExec {
+		if execFlag == "" {
+			return nil, "", NewUsageError("-e/--exec value must not be empty")
+		}
+		var dest string
+		if len(args) > 0 {
+			dest = args[0]
+		}
+		return []string{execFlag}, dest, nil
+	}
+
+	if hasDash {
+		dashArgs := args[dashIdx:]
+		if len(dashArgs) == 0 {
+			return nil, "", NewUsageError("no command specified after --")
+		}
+		var dest string
+		if dashIdx > 0 {
+			dest = args[0]
+		}
+		return dashArgs, dest, nil
+	}
+
+	// No command specified
+	var dest string
+	if len(args) > 0 {
+		dest = args[0]
+	}
+	return nil, dest, nil
 }
 
 // sessionCreatorIface creates a tmux session from a directory and returns the session name.
@@ -276,5 +330,6 @@ func buildQueryResolver() (*resolver.QueryResolver, error) {
 }
 
 func init() {
+	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	rootCmd.AddCommand(openCmd)
 }

@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/leeovery/portal/internal/resolver"
+	"github.com/spf13/cobra"
 )
 
 // testAliasLookup implements resolver.AliasLookup for testing.
@@ -405,6 +407,174 @@ func TestPathOpener(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+// newTestOpenCmd creates a fresh cobra command with the -e/--exec flag for testing
+// parseCommandArgs in isolation, avoiding state leaks between subtests.
+func newTestOpenCmd() (*cobra.Command, *cobra.Command) {
+	child := &cobra.Command{
+		Use:  "open",
+		Args: cobra.ArbitraryArgs,
+	}
+	child.Flags().StringP("exec", "e", "", "command to execute in the new session")
+
+	root := &cobra.Command{Use: "portal", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(child)
+
+	return root, child
+}
+
+func TestParseCommandArgs(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string // args to set on the root command (e.g. ["open", "-e", "claude"])
+		wantCmd      []string
+		wantDest     string
+		wantErr      string
+		wantUsageErr bool
+	}{
+		{
+			name:     "no flags produces nil command",
+			args:     []string{"open"},
+			wantCmd:  nil,
+			wantDest: "",
+		},
+		{
+			name:     "destination only produces nil command",
+			args:     []string{"open", "myproject"},
+			wantCmd:  nil,
+			wantDest: "myproject",
+		},
+		{
+			name:     "parses -e flag into command slice",
+			args:     []string{"open", "-e", "claude"},
+			wantCmd:  []string{"claude"},
+			wantDest: "",
+		},
+		{
+			name:     "parses --exec flag into command slice",
+			args:     []string{"open", "--exec", "claude"},
+			wantCmd:  []string{"claude"},
+			wantDest: "",
+		},
+		{
+			name:     "destination parsed correctly with -e flag",
+			args:     []string{"open", "-e", "claude", "myproject"},
+			wantCmd:  []string{"claude"},
+			wantDest: "myproject",
+		},
+		{
+			name:     "parses -- args into command slice",
+			args:     []string{"open", "--", "claude", "--resume"},
+			wantCmd:  []string{"claude", "--resume"},
+			wantDest: "",
+		},
+		{
+			name:     "destination parsed correctly with -- syntax",
+			args:     []string{"open", "myproject", "--", "claude", "--resume", "--model", "opus"},
+			wantCmd:  []string{"claude", "--resume", "--model", "opus"},
+			wantDest: "myproject",
+		},
+		{
+			name:         "-e with empty string produces exit code 2",
+			args:         []string{"open", "-e", ""},
+			wantErr:      "-e/--exec value must not be empty",
+			wantUsageErr: true,
+		},
+		{
+			name:         "-- with no arguments produces exit code 2",
+			args:         []string{"open", "--"},
+			wantErr:      "no command specified after --",
+			wantUsageErr: true,
+		},
+		{
+			name:         "both -e and -- produces exit code 2",
+			args:         []string{"open", "-e", "vim", "--", "claude", "--resume"},
+			wantErr:      "cannot use both -e/--exec and -- to specify a command",
+			wantUsageErr: true,
+		},
+		{
+			name:         "-- with destination but no command args produces exit code 2",
+			args:         []string{"open", "myproject", "--"},
+			wantErr:      "no command specified after --",
+			wantUsageErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, child := newTestOpenCmd()
+
+			var gotCmd []string
+			var gotDest string
+			var gotErr error
+
+			child.RunE = func(cmd *cobra.Command, args []string) error {
+				c, d, err := parseCommandArgs(cmd, args)
+				gotCmd = c
+				gotDest = d
+				gotErr = err
+				return err
+			}
+
+			root.SetArgs(tt.args)
+			err := root.Execute()
+
+			if tt.wantErr != "" {
+				if gotErr == nil && err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				errMsg := ""
+				if gotErr != nil {
+					errMsg = gotErr.Error()
+				} else {
+					errMsg = err.Error()
+				}
+				if errMsg != tt.wantErr {
+					t.Errorf("error = %q, want %q", errMsg, tt.wantErr)
+				}
+				if tt.wantUsageErr {
+					checkErr := gotErr
+					if checkErr == nil {
+						checkErr = err
+					}
+					var usageErr *UsageError
+					if !errors.As(checkErr, &usageErr) {
+						t.Errorf("expected UsageError for exit code 2, got %T", checkErr)
+					}
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotErr != nil {
+				t.Fatalf("unexpected parse error: %v", gotErr)
+			}
+
+			// Check command slice
+			if tt.wantCmd == nil {
+				if gotCmd != nil {
+					t.Errorf("command = %v, want nil", gotCmd)
+				}
+			} else {
+				if len(gotCmd) != len(tt.wantCmd) {
+					t.Fatalf("command = %v, want %v", gotCmd, tt.wantCmd)
+				}
+				for i, arg := range gotCmd {
+					if arg != tt.wantCmd[i] {
+						t.Errorf("command[%d] = %q, want %q", i, arg, tt.wantCmd[i])
+					}
+				}
+			}
+
+			// Check destination
+			if gotDest != tt.wantDest {
+				t.Errorf("destination = %q, want %q", gotDest, tt.wantDest)
+			}
+		})
+	}
 }
 
 func TestBuildSessionConnector(t *testing.T) {
