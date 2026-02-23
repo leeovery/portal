@@ -1225,3 +1225,154 @@ func TestEmptyState(t *testing.T) {
 		}
 	})
 }
+
+func TestInsideTmuxSessionExclusion(t *testing.T) {
+	t.Run("current session excluded from list inside tmux", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "current-sess", Windows: 2, Attached: true},
+			{Name: "bravo", Windows: 3, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
+		view := m.View()
+
+		lines := strings.Split(view, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "current-sess") && !strings.Contains(line, "Current:") {
+				t.Errorf("current session should not appear in session list, found in line: %q", line)
+			}
+		}
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("non-current session 'alpha' should appear in list, got:\n%s", view)
+		}
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("non-current session 'bravo' should appear in list, got:\n%s", view)
+		}
+	})
+
+	t.Run("header renders current session name inside tmux", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+			{Name: "my-project-x7k2m9", Windows: 2, Attached: true},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("my-project-x7k2m9")
+		view := m.View()
+
+		if !strings.Contains(view, "Current: my-project-x7k2m9") {
+			t.Errorf("expected header 'Current: my-project-x7k2m9', got:\n%s", view)
+		}
+		// Header should appear before the session list
+		headerIdx := strings.Index(view, "Current: my-project-x7k2m9")
+		devIdx := strings.Index(view, "dev")
+		if headerIdx >= devIdx {
+			t.Errorf("header (idx %d) should appear before session 'dev' (idx %d)", headerIdx, devIdx)
+		}
+	})
+
+	t.Run("no header rendered outside tmux", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+			{Name: "work", Windows: 2, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		view := m.View()
+
+		if strings.Contains(view, "Current:") {
+			t.Errorf("header should not appear outside tmux, got:\n%s", view)
+		}
+	})
+
+	t.Run("empty state shows no other sessions when only current session", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "only-session", Windows: 1, Attached: true},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("only-session")
+		view := m.View()
+
+		if !strings.Contains(view, "No other sessions") {
+			t.Errorf("expected 'No other sessions' when only current session exists, got:\n%s", view)
+		}
+		if strings.Contains(view, "No active sessions") {
+			t.Errorf("should not show 'No active sessions' inside tmux, got:\n%s", view)
+		}
+	})
+
+	t.Run("empty state shows no active sessions outside tmux", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{})
+		view := m.View()
+
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("expected 'No active sessions' outside tmux, got:\n%s", view)
+		}
+		if strings.Contains(view, "No other sessions") {
+			t.Errorf("should not show 'No other sessions' outside tmux, got:\n%s", view)
+		}
+	})
+
+	t.Run("multiple sessions minus current renders correctly", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "current-one", Windows: 2, Attached: true},
+			{Name: "bravo", Windows: 3, Attached: false},
+			{Name: "charlie", Windows: 4, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-one")
+		view := m.View()
+
+		if !strings.Contains(view, "Current: current-one") {
+			t.Errorf("expected header with current session name, got:\n%s", view)
+		}
+		for _, name := range []string{"alpha", "bravo", "charlie"} {
+			if !strings.Contains(view, name) {
+				t.Errorf("expected session %q in list, got:\n%s", name, view)
+			}
+		}
+		// Ensure current-one only appears in the header, not in the session list area
+		lines := strings.Split(view, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "current-one") && !strings.Contains(line, "Current:") {
+				t.Errorf("current session should only appear in header, found in list line: %q", line)
+			}
+		}
+	})
+
+	t.Run("very long current session name renders in header without truncation", func(t *testing.T) {
+		longName := "my-extremely-long-project-name-that-goes-on-and-on-forever-x7k2m9"
+		sessions := []tmux.Session{
+			{Name: longName, Windows: 1, Attached: true},
+			{Name: "other", Windows: 2, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux(longName)
+		view := m.View()
+
+		expected := "Current: " + longName
+		if !strings.Contains(view, expected) {
+			t.Errorf("expected full header %q in view, got:\n%s", expected, view)
+		}
+	})
+
+	t.Run("new in project option visible when inside tmux", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "current-sess", Windows: 1, Attached: true},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
+		view := m.View()
+
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("new in project option should be visible inside tmux, got:\n%s", view)
+		}
+	})
+
+	t.Run("new in project option visible with sessions filtered inside tmux", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "current-sess", Windows: 2, Attached: true},
+		}
+		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
+		view := m.View()
+
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("new in project option should be visible, got:\n%s", view)
+		}
+	})
+}

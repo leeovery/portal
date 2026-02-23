@@ -71,6 +71,8 @@ type Model struct {
 	projectPicker  ui.ProjectPickerModel
 	fileBrowser    ui.FileBrowserModel
 	initialFilter  string
+	insideTmux     bool
+	currentSession string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -87,6 +89,16 @@ func (m Model) InitialFilter() string {
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 func (m Model) WithInitialFilter(filter string) Model {
 	m.initialFilter = filter
+	return m
+}
+
+// WithInsideTmux returns a copy of the Model configured as running inside tmux
+// with the given current session name. The current session is excluded from the
+// session list and a header showing the current session name is rendered.
+func (m Model) WithInsideTmux(currentSession string) Model {
+	m.insideTmux = true
+	m.currentSession = currentSession
+	m.sessions = m.filteredSessions()
 	return m
 }
 
@@ -124,6 +136,20 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 		cursor:   0,
 		loaded:   true,
 	}
+}
+
+// filteredSessions returns sessions with the current session excluded when inside tmux.
+func (m Model) filteredSessions() []tmux.Session {
+	if !m.insideTmux || m.currentSession == "" {
+		return m.sessions
+	}
+	filtered := make([]tmux.Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		if s.Name != m.currentSession {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered
 }
 
 // totalItems returns the count of navigable items in the session list view.
@@ -212,6 +238,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.sessions = msg.Sessions
+		m.sessions = m.filteredSessions()
 		m.cursor = 0
 		m.loaded = true
 
@@ -290,8 +317,17 @@ func (m Model) View() string {
 func (m Model) viewSessionList() string {
 	var b strings.Builder
 
+	if m.insideTmux && m.currentSession != "" {
+		b.WriteString("Current: " + m.currentSession)
+		b.WriteString("\n\n")
+	}
+
 	if m.loaded && len(m.sessions) == 0 {
-		b.WriteString("No active sessions")
+		if m.insideTmux {
+			b.WriteString("No other sessions")
+		} else {
+			b.WriteString("No active sessions")
+		}
 	} else {
 		for i, s := range m.sessions {
 			cursor := "  "

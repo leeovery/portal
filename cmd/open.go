@@ -144,6 +144,12 @@ func openTUI(initialFilter string) error {
 	if initialFilter != "" {
 		m = m.WithInitialFilter(initialFilter)
 	}
+	if tmux.InsideTmux() {
+		sessionName, err := client.CurrentSessionName()
+		if err == nil && sessionName != "" {
+			m = m.WithInsideTmux(sessionName)
+		}
+	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
