@@ -2086,3 +2086,363 @@ func TestRenameSession(t *testing.T) {
 		}
 	})
 }
+
+func TestFilterMode(t *testing.T) {
+	t.Run("slash activates filter mode", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Press / to enter filter mode
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+		view := m.View()
+		if !strings.Contains(view, "filter:") {
+			t.Errorf("expected 'filter:' prompt in view after /, got:\n%s", view)
+		}
+	})
+
+	t.Run("typing narrows session list", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode and type "br"
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		view := m.View()
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("filtered view should contain 'bravo', got:\n%s", view)
+		}
+		if strings.Contains(view, "alpha") {
+			t.Errorf("filtered view should not contain 'alpha', got:\n%s", view)
+		}
+		if strings.Contains(view, "charlie") {
+			t.Errorf("filtered view should not contain 'charlie', got:\n%s", view)
+		}
+		if !strings.Contains(view, "filter: br") {
+			t.Errorf("expected 'filter: br' in view, got:\n%s", view)
+		}
+	})
+
+	t.Run("fuzzy match filters correctly with subsequence matching", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "my-project", Windows: 1, Attached: false},
+			{Name: "dev-work", Windows: 2, Attached: false},
+			{Name: "portal-abc", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode and type "mpr" — subsequence of "my-project"
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		view := m.View()
+		if !strings.Contains(view, "my-project") {
+			t.Errorf("fuzzy match should include 'my-project' for 'mpr', got:\n%s", view)
+		}
+		if strings.Contains(view, "dev-work") {
+			t.Errorf("fuzzy match should not include 'dev-work' for 'mpr', got:\n%s", view)
+		}
+	})
+
+	t.Run("new-in-project option always visible during filter", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode and type "xyz" (matches nothing)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+
+		view := m.View()
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("new-in-project should always be visible during filter, got:\n%s", view)
+		}
+		if strings.Contains(view, "alpha") {
+			t.Errorf("alpha should not be visible with filter 'xyz', got:\n%s", view)
+		}
+	})
+
+	t.Run("enter selects from filtered list", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode, type "br", then press Enter
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Fatalf("expected tea.QuitMsg, got %T", msg)
+		}
+
+		model, ok := updated.(tui.Model)
+		if !ok {
+			t.Fatalf("expected tui.Model, got %T", updated)
+		}
+		if model.Selected() != "bravo" {
+			t.Errorf("expected selected %q, got %q", "bravo", model.Selected())
+		}
+	})
+
+	t.Run("shortcut keys are typeable in filter mode", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "nq-session", Windows: 1, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+		// Type shortcut keys: n, K, R, q, k, j
+		shortcutKeys := []rune{'n', 'K', 'R', 'q', 'k', 'j'}
+		for _, r := range shortcutKeys {
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+
+		view := m.View()
+		if !strings.Contains(view, "filter: nKRqkj") {
+			t.Errorf("shortcut keys should be typeable in filter mode, expected 'filter: nKRqkj', got:\n%s", view)
+		}
+	})
+
+	t.Run("cursor resets when filter text changes", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "anvil", Windows: 2, Attached: false},
+			{Name: "bravo", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode, type "a" (matches alpha, anvil)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+
+		// Move cursor down to anvil
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+		// Type another character — cursor should reset to 0
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+
+		view := m.View()
+		// After typing "al", only alpha matches. Cursor should be at 0.
+		lines := strings.Split(view, "\n")
+		var alphaLine string
+		for _, line := range lines {
+			if strings.Contains(line, "alpha") {
+				alphaLine = line
+				break
+			}
+		}
+		if !strings.Contains(alphaLine, ">") {
+			t.Errorf("cursor should reset to first item when filter changes, got:\n%s", view)
+		}
+	})
+
+	t.Run("no sessions match filter shows empty filtered list with new-in-project visible", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode and type something that matches nothing
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
+
+		view := m.View()
+		// No sessions should be listed
+		if strings.Contains(view, "alpha") {
+			t.Errorf("no sessions should match 'zzz', got:\n%s", view)
+		}
+		if strings.Contains(view, "bravo") {
+			t.Errorf("no sessions should match 'zzz', got:\n%s", view)
+		}
+		// [n] new in project should still be visible
+		if !strings.Contains(view, "[n] new in project...") {
+			t.Errorf("[n] new in project should be visible even when no sessions match, got:\n%s", view)
+		}
+		// Cursor should be on [n] since no sessions match (cursor 0 == len(matched) == 0)
+		lines := strings.Split(view, "\n")
+		var newLine string
+		for _, line := range lines {
+			if strings.Contains(line, "new in project") {
+				newLine = line
+				break
+			}
+		}
+		if !strings.Contains(newLine, ">") {
+			t.Errorf("[n] should have cursor when no sessions match, got:\n%s", view)
+		}
+	})
+
+	t.Run("single character filter works correctly", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode and type "a" — should match "alpha", "bravo", "charlie" (all contain 'a')
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+
+		view := m.View()
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("'alpha' should match filter 'a', got:\n%s", view)
+		}
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("'bravo' should match filter 'a', got:\n%s", view)
+		}
+		if !strings.Contains(view, "charlie") {
+			t.Errorf("'charlie' should match filter 'a', got:\n%s", view)
+		}
+	})
+
+	t.Run("arrow keys navigate filtered results", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "anvil", Windows: 2, Attached: false},
+			{Name: "bravo", Windows: 3, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode, type "a" (matches alpha, anvil)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+
+		// Cursor should be on alpha (index 0)
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		var alphaLine string
+		for _, line := range lines {
+			if strings.Contains(line, "alpha") {
+				alphaLine = line
+				break
+			}
+		}
+		if !strings.Contains(alphaLine, ">") {
+			t.Errorf("cursor should be on alpha initially, got:\n%s", view)
+		}
+
+		// Press down to move to anvil
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		view = m.View()
+		lines = strings.Split(view, "\n")
+		var anvilLine string
+		for _, line := range lines {
+			if strings.Contains(line, "anvil") {
+				anvilLine = line
+				break
+			}
+		}
+		if !strings.Contains(anvilLine, ">") {
+			t.Errorf("cursor should be on anvil after down arrow, got:\n%s", view)
+		}
+	})
+
+	t.Run("esc exits filter mode and clears filter", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode, type something
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Esc should exit filter mode
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		view := m.View()
+		// Should show all sessions again
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("alpha should be visible after exiting filter mode, got:\n%s", view)
+		}
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("bravo should be visible after exiting filter mode, got:\n%s", view)
+		}
+		// Filter prompt should be gone
+		if strings.Contains(view, "filter:") {
+			t.Errorf("filter prompt should be gone after Esc, got:\n%s", view)
+		}
+	})
+
+	t.Run("backspace removes last filter character", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode, type "br"
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		// Backspace should remove 'r'
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+
+		view := m.View()
+		if !strings.Contains(view, "filter: b") {
+			t.Errorf("expected 'filter: b' after backspace, got:\n%s", view)
+		}
+		// Both alpha and bravo contain 'b' (bravo matches, alpha doesn't)
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("bravo should match filter 'b', got:\n%s", view)
+		}
+	})
+
+	t.Run("backspace on empty filter exits filter mode", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		var m tea.Model = tui.NewModelWithSessions(sessions)
+
+		// Enter filter mode
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+		// Backspace on empty filter should exit
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+
+		view := m.View()
+		if strings.Contains(view, "filter:") {
+			t.Errorf("backspace on empty filter should exit filter mode, got:\n%s", view)
+		}
+		// All sessions should be visible
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("alpha should be visible after exiting filter, got:\n%s", view)
+		}
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("bravo should be visible after exiting filter, got:\n%s", view)
+		}
+	})
+}

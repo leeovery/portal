@@ -91,6 +91,8 @@ type Model struct {
 	renameMode      bool
 	renameInput     textinput.Model
 	renameTarget    string
+	filterMode      bool
+	filterText      string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -279,6 +281,11 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRename(msg)
 	}
 
+	// Handle filter mode
+	if m.filterMode {
+		return m.updateFilter(msg)
+	}
+
 	switch msg := msg.(type) {
 	case SessionsMsg:
 		if msg.Err != nil {
@@ -312,6 +319,11 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleKillKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "R":
 			return m.handleRenameKey()
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "/":
+			m.filterMode = true
+			m.filterText = ""
+			m.cursor = 0
+			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			// Jump to the "new in project" option
 			m.cursor = len(m.sessions)
@@ -431,6 +443,91 @@ func (m Model) renameAndRefresh(oldName, newName string) tea.Cmd {
 	}
 }
 
+func (m Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch keyMsg.Type {
+	case tea.KeyEsc:
+		m.filterMode = false
+		m.filterText = ""
+		m.cursor = 0
+		return m, nil
+	case tea.KeyBackspace:
+		if len(m.filterText) > 0 {
+			m.filterText = m.filterText[:len(m.filterText)-1]
+			m.cursor = 0
+		} else {
+			m.filterMode = false
+			m.filterText = ""
+			m.cursor = 0
+		}
+		return m, nil
+	case tea.KeyEnter:
+		matched := m.filterMatchedSessions()
+		if m.cursor < len(matched) {
+			m.selected = matched[m.cursor].Name
+			return m, tea.Quit
+		}
+		// Cursor on the [n] new in project option
+		if m.cursor == len(matched) {
+			if m.projectStore != nil {
+				m.filterMode = false
+				m.filterText = ""
+				m.projectPicker = ui.NewProjectPicker(m.projectStore)
+				return m, m.projectPicker.Init()
+			}
+		}
+		return m, nil
+	case tea.KeyDown:
+		matched := m.filterMatchedSessions()
+		// +1 for the [n] new in project option
+		if m.cursor < len(matched) {
+			m.cursor++
+		}
+		return m, nil
+	case tea.KeyUp:
+		if m.cursor > 0 {
+			m.cursor--
+		}
+		return m, nil
+	case tea.KeyRunes:
+		m.filterText += string(keyMsg.Runes)
+		m.cursor = 0
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// filterMatchedSessions returns sessions whose names fuzzy-match the current filter text.
+// Uses subsequence matching: each character in the filter must appear in order in the session name.
+func (m Model) filterMatchedSessions() []tmux.Session {
+	if m.filterText == "" {
+		return m.sessions
+	}
+	var matched []tmux.Session
+	for _, s := range m.sessions {
+		if fuzzyMatch(strings.ToLower(s.Name), strings.ToLower(m.filterText)) {
+			matched = append(matched, s)
+		}
+	}
+	return matched
+}
+
+// fuzzyMatch returns true if pattern is a subsequence of text.
+func fuzzyMatch(text, pattern string) bool {
+	pi := 0
+	for i := 0; i < len(text) && pi < len(pattern); i++ {
+		if text[i] == pattern[pi] {
+			pi++
+		}
+	}
+	return pi == len(pattern)
+}
+
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 	// Cursor on a session
 	if m.cursor < len(m.sessions) {
@@ -469,6 +566,14 @@ func (m Model) View() string {
 	}
 }
 
+// displaySessions returns the sessions to display, applying filter when in filter mode.
+func (m Model) displaySessions() []tmux.Session {
+	if m.filterMode {
+		return m.filterMatchedSessions()
+	}
+	return m.sessions
+}
+
 // viewSessionList renders the session list with the "new in project" option.
 func (m Model) viewSessionList() string {
 	var b strings.Builder
@@ -478,14 +583,16 @@ func (m Model) viewSessionList() string {
 		b.WriteString("\n\n")
 	}
 
-	if m.loaded && len(m.sessions) == 0 {
+	visible := m.displaySessions()
+
+	if m.loaded && len(visible) == 0 && !m.filterMode {
 		if m.insideTmux {
 			b.WriteString("No other sessions")
 		} else {
 			b.WriteString("No active sessions")
 		}
 	} else {
-		for i, s := range m.sessions {
+		for i, s := range visible {
 			cursor := "  "
 			if i == m.cursor {
 				cursor = cursorStyle.Render("> ")
@@ -514,7 +621,7 @@ func (m Model) viewSessionList() string {
 	b.WriteString("\n")
 
 	newCursor := "  "
-	if m.cursor == len(m.sessions) {
+	if m.cursor == len(visible) {
 		newCursor = cursorStyle.Render("> ")
 	}
 	fmt.Fprintf(&b, "%s[n] new in project...", newCursor)
@@ -527,6 +634,11 @@ func (m Model) viewSessionList() string {
 	if m.renameMode {
 		b.WriteString("\n\n")
 		b.WriteString(m.renameInput.View())
+	}
+
+	if m.filterMode {
+		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "filter: %s", m.filterText)
 	}
 
 	return b.String()
