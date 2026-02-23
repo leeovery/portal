@@ -1110,6 +1110,25 @@ func TestFileBrowserIntegration(t *testing.T) {
 	})
 }
 
+func TestInitialFilter(t *testing.T) {
+	t.Run("model stores initial filter text", func(t *testing.T) {
+		m := tui.New(&mockSessionLister{sessions: []tmux.Session{}})
+		m = m.WithInitialFilter("myquery")
+
+		if m.InitialFilter() != "myquery" {
+			t.Errorf("InitialFilter() = %q, want %q", m.InitialFilter(), "myquery")
+		}
+	})
+
+	t.Run("initial filter defaults to empty", func(t *testing.T) {
+		m := tui.New(&mockSessionLister{sessions: []tmux.Session{}})
+
+		if m.InitialFilter() != "" {
+			t.Errorf("InitialFilter() = %q, want empty", m.InitialFilter())
+		}
+	})
+}
+
 func TestEmptyState(t *testing.T) {
 	t.Run("empty sessions shows no active sessions message", func(t *testing.T) {
 		m := tui.New(nil)

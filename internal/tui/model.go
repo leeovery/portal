@@ -70,12 +70,24 @@ type Model struct {
 	view           viewState
 	projectPicker  ui.ProjectPickerModel
 	fileBrowser    ui.FileBrowserModel
+	initialFilter  string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
 // the user quit without selecting.
 func (m Model) Selected() string {
 	return m.selected
+}
+
+// InitialFilter returns the initial filter text for the session list.
+func (m Model) InitialFilter() string {
+	return m.initialFilter
+}
+
+// WithInitialFilter returns a copy of the Model with the initial filter set.
+func (m Model) WithInitialFilter(filter string) Model {
+	m.initialFilter = filter
+	return m
 }
 
 // New creates a Model that fetches sessions from the given SessionLister.
