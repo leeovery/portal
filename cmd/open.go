@@ -45,8 +45,8 @@ func openPath(arg string) error {
 	store := project.NewStore(filepath.Join(configDir, "portal", "projects.json"))
 	gen := session.NewNanoIDGenerator()
 
-	creator := session.NewSessionCreator(gitResolver, store, client, gen)
-	sessionName, err := creator.CreateFromDir(resolvedPath)
+	qs := session.NewQuickStart(gitResolver, store, client, gen)
+	result, err := qs.Run(resolvedPath)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func openPath(arg string) error {
 		return fmt.Errorf("tmux not found: %w", err)
 	}
 
-	return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", sessionName}, os.Environ())
+	return syscall.Exec(tmuxPath, result.ExecArgs, os.Environ())
 }
 
 // resolverAdapter adapts resolver.ResolveGitRoot to the session.GitResolver interface.

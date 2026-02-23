@@ -27,14 +27,16 @@ func (m *mockGitResolver) Resolve(dir string) (string, error) {
 
 // mockProjectStore implements session.ProjectStore for testing.
 type mockProjectStore struct {
-	upsertPath string
-	upsertName string
-	upsertErr  error
+	upsertPath  string
+	upsertName  string
+	upsertCount int
+	upsertErr   error
 }
 
 func (m *mockProjectStore) Upsert(path, name string) error {
 	m.upsertPath = path
 	m.upsertName = name
+	m.upsertCount++
 	return m.upsertErr
 }
 
