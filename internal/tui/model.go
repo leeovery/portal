@@ -40,7 +40,7 @@ type SessionKiller interface {
 
 // SessionCreator defines the interface for creating sessions from directories.
 type SessionCreator interface {
-	CreateFromDir(dir string) (string, error)
+	CreateFromDir(dir string, command []string) (string, error)
 }
 
 // SessionRenamer defines the interface for renaming tmux sessions.
@@ -93,6 +93,7 @@ type Model struct {
 	renameTarget    string
 	filterMode      bool
 	filterText      string
+	command         []string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -109,6 +110,13 @@ func (m Model) InitialFilter() string {
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 func (m Model) WithInitialFilter(filter string) Model {
 	m.initialFilter = filter
+	return m
+}
+
+// WithCommand returns a copy of the Model with the given command set.
+// The command is forwarded to the session creator when a new session is created.
+func (m Model) WithCommand(command []string) Model {
+	m.command = command
 	return m
 }
 
@@ -245,7 +253,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) createSession(dir string) tea.Cmd {
 	return func() tea.Msg {
-		name, err := m.sessionCreator.CreateFromDir(dir)
+		name, err := m.sessionCreator.CreateFromDir(dir, m.command)
 		if err != nil {
 			return sessionCreateErrMsg{Err: err}
 		}

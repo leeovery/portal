@@ -32,7 +32,7 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		result, err := qs.Run(subDir)
+		result, err := qs.Run(subDir, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -63,7 +63,7 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		_, err := qs.Run(gitRoot)
+		_, err := qs.Run(gitRoot, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -88,13 +88,13 @@ func TestQuickStart(t *testing.T) {
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
 		// First call registers the project
-		_, err := qs.Run(gitRoot)
+		_, err := qs.Run(gitRoot, nil)
 		if err != nil {
 			t.Fatalf("unexpected error on first run: %v", err)
 		}
 
 		// Second call should also call Upsert (which updates last_used)
-		_, err = qs.Run(gitRoot)
+		_, err = qs.Run(gitRoot, nil)
 		if err != nil {
 			t.Fatalf("unexpected error on second run: %v", err)
 		}
@@ -118,7 +118,7 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		result, err := qs.Run(dir)
+		result, err := qs.Run(dir, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -150,7 +150,7 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		result, err := qs.Run(dir)
+		result, err := qs.Run(dir, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -176,13 +176,99 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		_, err := qs.Run(subDir)
+		_, err := qs.Run(subDir, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
 		if store.upsertName != "myproject" {
 			t.Errorf("project name = %q, want %q", store.upsertName, "myproject")
+		}
+	})
+
+	t.Run("exec args include shell-command when command provided", func(t *testing.T) {
+		t.Setenv("SHELL", "/bin/zsh")
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		checker := &mockSessionChecker{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		qs := session.NewQuickStart(gitResolver, store, checker, gen)
+
+		result, err := qs.Run(dir, []string{"claude", "--resume"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wantSessionName := filepath.Base(dir) + "-abc123"
+		shellCmd := "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"
+		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir, shellCmd}
+		if len(result.ExecArgs) != len(wantArgs) {
+			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
+		}
+		for i, arg := range result.ExecArgs {
+			if arg != wantArgs[i] {
+				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("uses shell resolved at construction time", func(t *testing.T) {
+		t.Setenv("SHELL", "/usr/local/bin/fish")
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		checker := &mockSessionChecker{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		qs := session.NewQuickStart(gitResolver, store, checker, gen)
+
+		// Change SHELL after construction — should NOT affect the QuickStart
+		t.Setenv("SHELL", "/bin/bash")
+
+		result, err := qs.Run(dir, []string{"vim"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wantSessionName := filepath.Base(dir) + "-abc123"
+		shellCmd := "/usr/local/bin/fish -ic 'vim; exec /usr/local/bin/fish'"
+		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir, shellCmd}
+		if len(result.ExecArgs) != len(wantArgs) {
+			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
+		}
+		for i, arg := range result.ExecArgs {
+			if arg != wantArgs[i] {
+				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("no shell-command in exec args when command is nil", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		checker := &mockSessionChecker{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		qs := session.NewQuickStart(gitResolver, store, checker, gen)
+
+		result, err := qs.Run(dir, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should be exactly 7 args: tmux new-session -A -s <name> -c <dir>
+		wantSessionName := filepath.Base(dir) + "-abc123"
+		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir}
+		if len(result.ExecArgs) != len(wantArgs) {
+			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
+		}
+		for i, arg := range result.ExecArgs {
+			if arg != wantArgs[i] {
+				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
 		}
 	})
 
@@ -194,7 +280,7 @@ func TestQuickStart(t *testing.T) {
 
 		qs := session.NewQuickStart(gitResolver, store, checker, gen)
 
-		_, err := qs.Run("/some/path")
+		_, err := qs.Run("/some/path", nil)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

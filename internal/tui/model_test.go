@@ -797,6 +797,96 @@ func TestNewInProjectOption(t *testing.T) {
 		}
 	})
 
+	t.Run("project selection forwards command to session creator", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{
+			sessionName: "myapp-abc123",
+		}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: sessions},
+			nil,
+			store,
+			creator,
+		).WithCommand([]string{"claude", "--resume"})
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to project picker
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+
+		// Select a project
+		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		if cmd == nil {
+			t.Fatal("expected command from project selection, got nil")
+		}
+
+		// Execute the command to trigger session creation
+		cmd()
+
+		// Verify command was forwarded to session creator
+		wantCmd := []string{"claude", "--resume"}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range creator.createdCommand {
+			if arg != wantCmd[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
+			}
+		}
+	})
+
+	t.Run("no command set passes nil to session creator", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{
+			sessionName: "myapp-abc123",
+		}
+
+		m := tui.NewWithDeps(
+			&mockSessionLister{sessions: sessions},
+			nil,
+			store,
+			creator,
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to project picker
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+
+		// Select a project
+		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		if cmd == nil {
+			t.Fatal("expected command from project selection, got nil")
+		}
+
+		// Execute the command to trigger session creation
+		cmd()
+
+		// Verify nil command was passed (no command set on model)
+		if creator.createdCommand != nil {
+			t.Errorf("expected nil command, got %v", creator.createdCommand)
+		}
+	})
+
 	t.Run("empty session list still shows new option", func(t *testing.T) {
 		m := tui.NewModelWithSessions([]tmux.Session{})
 		view := m.View()
@@ -875,13 +965,15 @@ func (m *mockProjectStore) CleanStale() ([]project.Project, error) {
 
 // mockSessionCreator implements tui.SessionCreator for testing.
 type mockSessionCreator struct {
-	sessionName string
-	createdDir  string
-	err         error
+	sessionName    string
+	createdDir     string
+	createdCommand []string
+	err            error
 }
 
-func (m *mockSessionCreator) CreateFromDir(dir string) (string, error) {
+func (m *mockSessionCreator) CreateFromDir(dir string, command []string) (string, error) {
 	m.createdDir = dir
+	m.createdCommand = command
 	if m.err != nil {
 		return "", m.err
 	}
@@ -1025,6 +1117,47 @@ func TestFileBrowserIntegration(t *testing.T) {
 		// Verify it was called with the browsed path.
 		if creator.createdDir != "/home/user/myproj" {
 			t.Errorf("expected CreateFromDir with %q, got %q", "/home/user/myproj", creator.createdDir)
+		}
+	})
+
+	t.Run("file browser selection forwards command to session creator", func(t *testing.T) {
+		sessions := []tmux.Session{}
+		store := &mockProjectStore{projects: []project.Project{}}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+		lister := &mockDirLister{
+			entries: map[string][]browser.DirEntry{},
+		}
+
+		m := tui.NewWithAllDeps(
+			&mockSessionLister{sessions: sessions},
+			nil,
+			store,
+			creator,
+			lister,
+			"/home/user",
+		).WithCommand([]string{"vim", "."})
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(ui.BrowseSelectedMsg{})
+
+		// File browser selects directory
+		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
+		if cmd == nil {
+			t.Fatal("expected command from directory selection, got nil")
+		}
+
+		// Execute the command to trigger session creation
+		cmd()
+
+		// Verify command was forwarded
+		wantCmd := []string{"vim", "."}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range creator.createdCommand {
+			if arg != wantCmd[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
+			}
 		}
 	})
 

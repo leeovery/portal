@@ -50,8 +50,13 @@ func (c *Client) HasSession(name string) bool {
 }
 
 // NewSession creates a new detached tmux session with the given name and start directory.
-func (c *Client) NewSession(name, dir string) error {
-	_, err := c.cmd.Run("new-session", "-d", "-s", name, "-c", dir)
+// When shellCommand is non-empty, it is appended as the tmux shell-command argument.
+func (c *Client) NewSession(name, dir, shellCommand string) error {
+	args := []string{"new-session", "-d", "-s", name, "-c", dir}
+	if shellCommand != "" {
+		args = append(args, shellCommand)
+	}
+	_, err := c.cmd.Run(args...)
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session %q: %w", name, err)
 	}

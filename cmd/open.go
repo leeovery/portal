@@ -74,7 +74,7 @@ func buildSessionConnector() SessionConnector {
 
 // parsedCommand holds the command slice parsed from -e/--exec or -- args.
 // Set during command parsing, consumed by downstream session creation.
-var parsedCommand []string //nolint:unused // stored for downstream session creation task
+var parsedCommand []string
 
 var openCmd = &cobra.Command{
 	Use:   "open [-e cmd] [destination] [-- cmd args...]",
@@ -160,7 +160,7 @@ func parseCommandArgs(cmd *cobra.Command, args []string) ([]string, string, erro
 
 // sessionCreatorIface creates a tmux session from a directory and returns the session name.
 type sessionCreatorIface interface {
-	CreateFromDir(dir string) (string, error)
+	CreateFromDir(dir string, command []string) (string, error)
 }
 
 // quickStartResult contains the result of a quick-start session creation.
@@ -172,7 +172,7 @@ type quickStartResult struct {
 
 // quickStarter runs the quick-start pipeline and returns exec args.
 type quickStarter interface {
-	Run(path string) (*quickStartResult, error)
+	Run(path string, command []string) (*quickStartResult, error)
 }
 
 // execer abstracts process replacement for testability.
@@ -194,8 +194,8 @@ type quickStartAdapter struct {
 }
 
 // Run runs the quick-start pipeline and converts the result.
-func (a *quickStartAdapter) Run(path string) (*quickStartResult, error) {
-	result, err := a.qs.Run(path)
+func (a *quickStartAdapter) Run(path string, command []string) (*quickStartResult, error) {
+	result, err := a.qs.Run(path, command)
 	if err != nil {
 		return nil, err
 	}
@@ -219,16 +219,18 @@ type PathOpener struct {
 }
 
 // Open creates a session at the given path and connects to it.
-func (po *PathOpener) Open(resolvedPath string) error {
+// When command is non-nil, it is passed through to session creation
+// for execution as a tmux shell-command.
+func (po *PathOpener) Open(resolvedPath string, command []string) error {
 	if po.insideTmux {
-		sessionName, err := po.creator.CreateFromDir(resolvedPath)
+		sessionName, err := po.creator.CreateFromDir(resolvedPath, command)
 		if err != nil {
 			return err
 		}
 		return po.switcher.SwitchClient(sessionName)
 	}
 
-	result, err := po.qs.Run(resolvedPath)
+	result, err := po.qs.Run(resolvedPath, command)
 	if err != nil {
 		return err
 	}
@@ -267,7 +269,7 @@ func openPath(resolvedPath string) error {
 		opener.tmuxPath = tmuxPath
 	}
 
-	return opener.Open(resolvedPath)
+	return opener.Open(resolvedPath, parsedCommand)
 }
 
 // resolverAdapter adapts resolver.ResolveGitRoot to the session.GitResolver interface.
@@ -282,6 +284,9 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 func openTUI(initialFilter string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
 	m := tui.NewWithKiller(client, client)
+	if len(parsedCommand) > 0 {
+		m = m.WithCommand(parsedCommand)
+	}
 	if initialFilter != "" {
 		m = m.WithInitialFilter(initialFilter)
 	}

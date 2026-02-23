@@ -29,22 +29,26 @@ type QuickStart struct {
 	store   ProjectStore
 	checker SessionChecker
 	gen     IDGenerator
+	shell   string
 }
 
 // NewQuickStart creates a QuickStart with the given dependencies.
+// The user's shell is resolved from $SHELL at construction time.
 func NewQuickStart(git GitResolver, store ProjectStore, checker SessionChecker, gen IDGenerator) *QuickStart {
 	return &QuickStart{
 		git:     git,
 		store:   store,
 		checker: checker,
 		gen:     gen,
+		shell:   ShellFromEnv(),
 	}
 }
 
 // Run executes the quick-start pipeline for the given path.
 // It resolves the git root, registers the project, generates a session name,
 // and returns the result with exec args for atomic tmux create-or-attach handoff.
-func (qs *QuickStart) Run(path string) (*QuickStartResult, error) {
+// When command is non-nil and non-empty, a shell-command is appended to exec args.
+func (qs *QuickStart) Run(path string, command []string) (*QuickStartResult, error) {
 	resolvedDir, err := qs.git.Resolve(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve directory: %w", err)
@@ -65,9 +69,15 @@ func (qs *QuickStart) Run(path string) (*QuickStartResult, error) {
 		return nil, fmt.Errorf("failed to upsert project: %w", err)
 	}
 
+	execArgs := []string{"tmux", "new-session", "-A", "-s", sessionName, "-c", resolvedDir}
+	shellCmd := BuildShellCommand(command, qs.shell)
+	if shellCmd != "" {
+		execArgs = append(execArgs, shellCmd)
+	}
+
 	return &QuickStartResult{
 		SessionName: sessionName,
 		Dir:         resolvedDir,
-		ExecArgs:    []string{"tmux", "new-session", "-A", "-s", sessionName, "-c", resolvedDir},
+		ExecArgs:    execArgs,
 	}, nil
 }

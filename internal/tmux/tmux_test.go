@@ -171,7 +171,7 @@ func TestNewSession(t *testing.T) {
 		mock := &MockCommander{}
 		client := tmux.NewClient(mock)
 
-		err := client.NewSession("my-session", "/home/user/project")
+		err := client.NewSession("my-session", "/home/user/project", "")
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -187,11 +187,55 @@ func TestNewSession(t *testing.T) {
 		}
 	})
 
+	t.Run("includes shell-command when provided", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		shellCmd := "/bin/zsh -ic 'claude; exec /bin/zsh'"
+		err := client.NewSession("my-session", "/home/user/project", shellCmd)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"new-session", "-d", "-s", "my-session", "-c", "/home/user/project", shellCmd}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("no shell-command argument when empty string", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewSession("my-session", "/home/user/project", "")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		// Should be exactly 6 args: new-session -d -s <name> -c <dir>
+		if len(mock.Calls[0]) != 6 {
+			t.Errorf("got %d args %v, want 6 args (no shell-command)", len(mock.Calls[0]), mock.Calls[0])
+		}
+	})
+
 	t.Run("returns error when tmux command fails", func(t *testing.T) {
 		mock := &MockCommander{Err: fmt.Errorf("tmux error")}
 		client := tmux.NewClient(mock)
 
-		err := client.NewSession("my-session", "/some/dir")
+		err := client.NewSession("my-session", "/some/dir", "")
 
 		if err == nil {
 			t.Fatal("expected error, got nil")

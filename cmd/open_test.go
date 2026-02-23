@@ -197,25 +197,29 @@ func TestSwitchConnector(t *testing.T) {
 
 // mockSessionCreator implements the sessionCreatorIface for testing.
 type mockSessionCreator struct {
-	createdDir  string
-	sessionName string
-	err         error
+	createdDir     string
+	createdCommand []string
+	sessionName    string
+	err            error
 }
 
-func (m *mockSessionCreator) CreateFromDir(dir string) (string, error) {
+func (m *mockSessionCreator) CreateFromDir(dir string, command []string) (string, error) {
 	m.createdDir = dir
+	m.createdCommand = command
 	return m.sessionName, m.err
 }
 
 // mockQuickStarter implements the quickStarter interface for testing.
 type mockQuickStarter struct {
-	ranPath string
-	result  *quickStartResult
-	err     error
+	ranPath    string
+	ranCommand []string
+	result     *quickStartResult
+	err        error
 }
 
-func (m *mockQuickStarter) Run(path string) (*quickStartResult, error) {
+func (m *mockQuickStarter) Run(path string, command []string) (*quickStartResult, error) {
 	m.ranPath = path
+	m.ranCommand = command
 	return m.result, m.err
 }
 
@@ -249,7 +253,7 @@ func TestPathOpener(t *testing.T) {
 			execer:     execer,
 		}
 
-		err := opener.Open("/home/user/project")
+		err := opener.Open("/home/user/project", nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -292,7 +296,7 @@ func TestPathOpener(t *testing.T) {
 			tmuxPath:   "/usr/bin/tmux",
 		}
 
-		err := opener.Open("/home/user/project")
+		err := opener.Open("/home/user/project", nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -335,7 +339,7 @@ func TestPathOpener(t *testing.T) {
 			execer:     &mockExecer{},
 		}
 
-		err := opener.Open("/some/dir")
+		err := opener.Open("/some/dir", nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -358,7 +362,7 @@ func TestPathOpener(t *testing.T) {
 			execer:     &mockExecer{},
 		}
 
-		err := opener.Open("/some/dir")
+		err := opener.Open("/some/dir", nil)
 
 		if err == nil {
 			t.Fatal("expected error, got nil")
@@ -382,10 +386,75 @@ func TestPathOpener(t *testing.T) {
 			execer:     &mockExecer{},
 		}
 
-		err := opener.Open("/some/dir")
+		err := opener.Open("/some/dir", nil)
 
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("inside tmux passes command to session creator", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
+		switcher := &mockSwitchClient{}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+		}
+
+		command := []string{"claude", "--resume"}
+		err := opener.Open("/home/user/project", command)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(creator.createdCommand) != len(command) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, command)
+		}
+		for i, arg := range creator.createdCommand {
+			if arg != command[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, command[i])
+			}
+		}
+	})
+
+	t.Run("outside tmux passes command to quickstart", func(t *testing.T) {
+		qs := &mockQuickStarter{
+			result: &quickStartResult{
+				SessionName: "myproject-abc123",
+				Dir:         "/home/user/project",
+				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project", "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"},
+			},
+		}
+		execer := &mockExecer{}
+
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs:         qs,
+			execer:     execer,
+			tmuxPath:   "/usr/bin/tmux",
+		}
+
+		command := []string{"claude", "--resume"}
+		err := opener.Open("/home/user/project", command)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(qs.ranCommand) != len(command) {
+			t.Fatalf("command = %v, want %v", qs.ranCommand, command)
+		}
+		for i, arg := range qs.ranCommand {
+			if arg != command[i] {
+				t.Errorf("command[%d] = %q, want %q", i, arg, command[i])
+			}
 		}
 	})
 
@@ -401,7 +470,7 @@ func TestPathOpener(t *testing.T) {
 			tmuxPath:   "/usr/bin/tmux",
 		}
 
-		err := opener.Open("/some/dir")
+		err := opener.Open("/some/dir", nil)
 
 		if err == nil {
 			t.Fatal("expected error, got nil")
