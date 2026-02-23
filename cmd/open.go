@@ -104,7 +104,87 @@ var openCmd = &cobra.Command{
 	},
 }
 
-// openPath creates a new tmux session at the given resolved directory path and execs into it.
+// sessionCreatorIface creates a tmux session from a directory and returns the session name.
+type sessionCreatorIface interface {
+	CreateFromDir(dir string) (string, error)
+}
+
+// quickStartResult contains the result of a quick-start session creation.
+type quickStartResult struct {
+	SessionName string
+	Dir         string
+	ExecArgs    []string
+}
+
+// quickStarter runs the quick-start pipeline and returns exec args.
+type quickStarter interface {
+	Run(path string) (*quickStartResult, error)
+}
+
+// execer abstracts process replacement for testability.
+type execer interface {
+	Exec(argv0 string, argv []string, envv []string) error
+}
+
+// realExecer replaces the current process via syscall.Exec.
+type realExecer struct{}
+
+// Exec replaces the current process.
+func (r *realExecer) Exec(argv0 string, argv []string, envv []string) error {
+	return syscall.Exec(argv0, argv, envv)
+}
+
+// quickStartAdapter adapts session.QuickStart to the quickStarter interface.
+type quickStartAdapter struct {
+	qs *session.QuickStart
+}
+
+// Run runs the quick-start pipeline and converts the result.
+func (a *quickStartAdapter) Run(path string) (*quickStartResult, error) {
+	result, err := a.qs.Run(path)
+	if err != nil {
+		return nil, err
+	}
+	return &quickStartResult{
+		SessionName: result.SessionName,
+		Dir:         result.Dir,
+		ExecArgs:    result.ExecArgs,
+	}, nil
+}
+
+// PathOpener handles creating a new tmux session from a resolved path.
+// It branches on insideTmux: inside tmux creates detached then switches;
+// outside tmux uses exec handoff with -A flag.
+type PathOpener struct {
+	insideTmux bool
+	creator    sessionCreatorIface
+	switcher   SwitchClienter
+	qs         quickStarter
+	execer     execer
+	tmuxPath   string
+}
+
+// Open creates a session at the given path and connects to it.
+func (po *PathOpener) Open(resolvedPath string) error {
+	if po.insideTmux {
+		sessionName, err := po.creator.CreateFromDir(resolvedPath)
+		if err != nil {
+			return err
+		}
+		return po.switcher.SwitchClient(sessionName)
+	}
+
+	result, err := po.qs.Run(resolvedPath)
+	if err != nil {
+		return err
+	}
+
+	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
+}
+
+// openPath creates a new tmux session at the given resolved directory path.
+// When inside tmux, it creates the session detached and switches to it.
+// When outside tmux, it execs into tmux with the -A flag for atomic create-or-attach.
 func openPath(resolvedPath string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
 	gitResolver := &resolverAdapter{}
@@ -115,18 +195,25 @@ func openPath(resolvedPath string) error {
 	store := project.NewStore(filepath.Join(configDir, "portal", "projects.json"))
 	gen := session.NewNanoIDGenerator()
 
-	qs := session.NewQuickStart(gitResolver, store, client, gen)
-	result, err := qs.Run(resolvedPath)
-	if err != nil {
-		return err
+	insideTmux := tmux.InsideTmux()
+
+	opener := &PathOpener{
+		insideTmux: insideTmux,
+		creator:    session.NewSessionCreator(gitResolver, store, client, gen),
+		switcher:   client,
+		qs:         &quickStartAdapter{qs: session.NewQuickStart(gitResolver, store, client, gen)},
+		execer:     &realExecer{},
 	}
 
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
+	if !insideTmux {
+		tmuxPath, err := exec.LookPath("tmux")
+		if err != nil {
+			return fmt.Errorf("tmux not found: %w", err)
+		}
+		opener.tmuxPath = tmuxPath
 	}
 
-	return syscall.Exec(tmuxPath, result.ExecArgs, os.Environ())
+	return opener.Open(resolvedPath)
 }
 
 // resolverAdapter adapts resolver.ResolveGitRoot to the session.GitResolver interface.

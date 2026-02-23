@@ -193,6 +193,220 @@ func TestSwitchConnector(t *testing.T) {
 	})
 }
 
+// mockSessionCreator implements the sessionCreatorIface for testing.
+type mockSessionCreator struct {
+	createdDir  string
+	sessionName string
+	err         error
+}
+
+func (m *mockSessionCreator) CreateFromDir(dir string) (string, error) {
+	m.createdDir = dir
+	return m.sessionName, m.err
+}
+
+// mockQuickStarter implements the quickStarter interface for testing.
+type mockQuickStarter struct {
+	ranPath string
+	result  *quickStartResult
+	err     error
+}
+
+func (m *mockQuickStarter) Run(path string) (*quickStartResult, error) {
+	m.ranPath = path
+	return m.result, m.err
+}
+
+// mockExecer implements the execer interface for testing.
+type mockExecer struct {
+	calledPath string
+	calledArgs []string
+	calledEnv  []string
+	err        error
+}
+
+func (m *mockExecer) Exec(argv0 string, argv []string, envv []string) error {
+	m.calledPath = argv0
+	m.calledArgs = argv
+	m.calledEnv = envv
+	return m.err
+}
+
+func TestPathOpener(t *testing.T) {
+	t.Run("inside tmux creates session detached then switches", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
+		switcher := &mockSwitchClient{}
+		qs := &mockQuickStarter{}
+		execer := &mockExecer{}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         qs,
+			execer:     execer,
+		}
+
+		err := opener.Open("/home/user/project")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify detached session creation
+		if creator.createdDir != "/home/user/project" {
+			t.Errorf("CreateFromDir called with %q, want %q", creator.createdDir, "/home/user/project")
+		}
+
+		// Verify switch-client called with correct session name
+		if switcher.switchedTo != "myproject-abc123" {
+			t.Errorf("SwitchClient called with %q, want %q", switcher.switchedTo, "myproject-abc123")
+		}
+
+		// Verify no exec happened
+		if execer.calledPath != "" {
+			t.Errorf("exec was called with %q, expected no exec inside tmux", execer.calledPath)
+		}
+	})
+
+	t.Run("outside tmux creates session with exec handoff", func(t *testing.T) {
+		creator := &mockSessionCreator{}
+		switcher := &mockSwitchClient{}
+		qs := &mockQuickStarter{
+			result: &quickStartResult{
+				SessionName: "myproject-abc123",
+				Dir:         "/home/user/project",
+				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
+			},
+		}
+		execer := &mockExecer{}
+
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         qs,
+			execer:     execer,
+			tmuxPath:   "/usr/bin/tmux",
+		}
+
+		err := opener.Open("/home/user/project")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify QuickStart was called
+		if qs.ranPath != "/home/user/project" {
+			t.Errorf("QuickStart.Run called with %q, want %q", qs.ranPath, "/home/user/project")
+		}
+
+		// Verify exec was called with correct args
+		if execer.calledPath != "/usr/bin/tmux" {
+			t.Errorf("exec path = %q, want %q", execer.calledPath, "/usr/bin/tmux")
+		}
+		wantArgs := []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"}
+		if len(execer.calledArgs) != len(wantArgs) {
+			t.Fatalf("exec args = %v, want %v", execer.calledArgs, wantArgs)
+		}
+		for i, arg := range execer.calledArgs {
+			if arg != wantArgs[i] {
+				t.Errorf("exec args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+
+		// Verify CreateFromDir was NOT called (outside tmux uses QuickStart)
+		if creator.createdDir != "" {
+			t.Errorf("CreateFromDir should not be called outside tmux, but was called with %q", creator.createdDir)
+		}
+	})
+
+	t.Run("inside tmux switch-client called with correct session name", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "portal-z9y8x7"}
+		switcher := &mockSwitchClient{}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+		}
+
+		err := opener.Open("/some/dir")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if switcher.switchedTo != "portal-z9y8x7" {
+			t.Errorf("SwitchClient called with %q, want %q", switcher.switchedTo, "portal-z9y8x7")
+		}
+	})
+
+	t.Run("inside tmux returns error when session creation fails", func(t *testing.T) {
+		creator := &mockSessionCreator{err: fmt.Errorf("tmux error")}
+		switcher := &mockSwitchClient{}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+		}
+
+		err := opener.Open("/some/dir")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		// Verify switch-client was NOT called
+		if switcher.switchedTo != "" {
+			t.Errorf("SwitchClient should not be called when creation fails, but was called with %q", switcher.switchedTo)
+		}
+	})
+
+	t.Run("inside tmux returns error when switch-client fails", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
+		switcher := &mockSwitchClient{err: fmt.Errorf("switch failed")}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+		}
+
+		err := opener.Open("/some/dir")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("outside tmux returns error when quickstart fails", func(t *testing.T) {
+		qs := &mockQuickStarter{err: fmt.Errorf("git error")}
+
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs:         qs,
+			execer:     &mockExecer{},
+			tmuxPath:   "/usr/bin/tmux",
+		}
+
+		err := opener.Open("/some/dir")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
 func TestBuildSessionConnector(t *testing.T) {
 	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
