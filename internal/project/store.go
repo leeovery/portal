@@ -171,6 +171,24 @@ func (s *Store) CleanStale() ([]Project, error) {
 	return removed, nil
 }
 
+// Rename updates the display name of the project matched by path.
+// It does not change the LastUsed timestamp. It is a no-op if the path is not found.
+func (s *Store) Rename(path, newName string) error {
+	projects, err := s.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load projects: %w", err)
+	}
+
+	for i := range projects {
+		if projects[i].Path == path {
+			projects[i].Name = newName
+			return s.Save(projects)
+		}
+	}
+
+	return nil
+}
+
 // Remove deletes the project with the given path. It is a no-op if the path
 // is not found.
 func (s *Store) Remove(path string) error {

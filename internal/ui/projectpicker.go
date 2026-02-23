@@ -15,6 +15,19 @@ type ProjectStore interface {
 	CleanStale() ([]project.Project, error)
 }
 
+// ProjectEditor defines the interface for renaming projects.
+type ProjectEditor interface {
+	Rename(path, newName string) error
+}
+
+// AliasEditor defines the interface for managing aliases in edit mode.
+type AliasEditor interface {
+	Load() (map[string]string, error)
+	Set(name, path string)
+	Delete(name string) bool
+	Save() error
+}
+
 // ProjectsLoadedMsg carries the result of loading projects from the store.
 type ProjectsLoadedMsg struct {
 	Projects []project.Project
@@ -32,14 +45,35 @@ type BrowseSelectedMsg struct{}
 // BackMsg is emitted when the user presses Esc to return to the session list.
 type BackMsg struct{}
 
+// editField tracks which field has focus in edit mode.
+type editField int
+
+const (
+	editFieldName editField = iota
+	editFieldAliases
+)
+
 // ProjectPickerModel is the Bubble Tea model for the project picker view.
 type ProjectPickerModel struct {
 	store      ProjectStore
+	editor     ProjectEditor
+	aliasStore AliasEditor
 	projects   []project.Project
 	cursor     int
 	loaded     bool
 	filtering  bool
 	filterText string
+
+	// Edit mode state
+	editMode        bool
+	editProject     project.Project
+	editName        string
+	editAliases     []string // current alias names for the project's directory
+	editRemoved     []string // alias names removed during this edit session
+	editNewAlias    string   // text input for adding a new alias
+	editFocus       editField
+	editAliasCursor int
+	editError       string
 }
 
 // NewProjectPicker creates a new ProjectPickerModel with the given store.
@@ -47,6 +81,13 @@ func NewProjectPicker(store ProjectStore) ProjectPickerModel {
 	return ProjectPickerModel{
 		store: store,
 	}
+}
+
+// WithEditor returns a copy of the ProjectPickerModel with edit mode support.
+func (m ProjectPickerModel) WithEditor(editor ProjectEditor, aliasStore AliasEditor) ProjectPickerModel {
+	m.editor = editor
+	m.aliasStore = aliasStore
+	return m
 }
 
 // WithFilter returns a copy of the ProjectPickerModel with the filter pre-filled.
@@ -111,6 +152,9 @@ func (m ProjectPickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 
 	case tea.KeyMsg:
+		if m.editMode {
+			return m.updateEditMode(msg)
+		}
 		if m.filtering {
 			return m.updateFiltering(msg)
 		}
@@ -133,6 +177,9 @@ func (m ProjectPickerModel) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor > 0 {
 			m.cursor--
 		}
+
+	case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
+		return m.handleEditKey()
 
 	case msg.Type == tea.KeyRunes && string(msg.Runes) == "/":
 		m.filtering = true
@@ -183,6 +230,161 @@ func (m ProjectPickerModel) updateFiltering(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return m, nil
 }
 
+func (m ProjectPickerModel) handleEditKey() (tea.Model, tea.Cmd) {
+	filtered := m.filteredProjects()
+	// No-op on browse option or if no editor configured
+	if m.cursor >= len(filtered) || m.editor == nil || m.aliasStore == nil {
+		return m, nil
+	}
+
+	p := filtered[m.cursor]
+	m.editMode = true
+	m.editProject = p
+	m.editName = p.Name
+	m.editFocus = editFieldName
+	m.editNewAlias = ""
+	m.editError = ""
+	m.editRemoved = nil
+	m.editAliasCursor = 0
+
+	// Load aliases matching this project's directory
+	allAliases, err := m.aliasStore.Load()
+	if err != nil {
+		m.editAliases = nil
+	} else {
+		var matching []string
+		for name, path := range allAliases {
+			if path == p.Path {
+				matching = append(matching, name)
+			}
+		}
+		m.editAliases = matching
+	}
+
+	return m, nil
+}
+
+func (m ProjectPickerModel) updateEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.editMode = false
+		m.editError = ""
+		return m, nil
+
+	case tea.KeyTab:
+		if m.editFocus == editFieldName {
+			m.editFocus = editFieldAliases
+		} else {
+			m.editFocus = editFieldName
+		}
+		return m, nil
+
+	case tea.KeyEnter:
+		return m.handleEditConfirm()
+
+	case tea.KeyBackspace:
+		if m.editFocus == editFieldName {
+			if len(m.editName) > 0 {
+				m.editName = m.editName[:len(m.editName)-1]
+			}
+		} else if m.editAliasCursor == len(m.editAliases) {
+			// On Add input
+			if len(m.editNewAlias) > 0 {
+				m.editNewAlias = m.editNewAlias[:len(m.editNewAlias)-1]
+			}
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.editFocus == editFieldAliases && m.editAliasCursor < len(m.editAliases) {
+			m.editAliasCursor++
+		}
+		return m, nil
+
+	case tea.KeyUp:
+		if m.editFocus == editFieldAliases && m.editAliasCursor > 0 {
+			m.editAliasCursor--
+		}
+		return m, nil
+
+	case tea.KeyRunes:
+		text := string(msg.Runes)
+		// In alias area, on an existing alias entry: x removes it
+		if m.editFocus == editFieldAliases && text == "x" && m.editAliasCursor < len(m.editAliases) {
+			removed := m.editAliases[m.editAliasCursor]
+			m.editRemoved = append(m.editRemoved, removed)
+			m.editAliases = append(m.editAliases[:m.editAliasCursor], m.editAliases[m.editAliasCursor+1:]...)
+			if m.editAliasCursor > len(m.editAliases) {
+				m.editAliasCursor = len(m.editAliases)
+			}
+			return m, nil
+		}
+		// In alias area, on Add input: type into new alias
+		if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
+			m.editNewAlias += text
+			m.editError = ""
+			return m, nil
+		}
+		if m.editFocus == editFieldName {
+			m.editName += text
+		}
+		m.editError = ""
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m ProjectPickerModel) handleEditConfirm() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.editName)
+	if name == "" {
+		m.editError = "Project name cannot be empty"
+		return m, nil
+	}
+
+	// Save project name if changed
+	if name != m.editProject.Name {
+		if err := m.editor.Rename(m.editProject.Path, name); err != nil {
+			m.editError = "Failed to save project name"
+			return m, nil
+		}
+	}
+
+	// Handle alias removals
+	for _, removed := range m.editRemoved {
+		m.aliasStore.Delete(removed)
+	}
+
+	// Handle new alias addition
+	newAlias := strings.TrimSpace(m.editNewAlias)
+	if newAlias != "" {
+		// Check for collision
+		allAliases, err := m.aliasStore.Load()
+		if err == nil {
+			if existingPath, ok := allAliases[newAlias]; ok && existingPath != m.editProject.Path {
+				m.editError = fmt.Sprintf("Alias '%s' already exists", newAlias)
+				return m, nil
+			}
+		}
+		m.aliasStore.Set(newAlias, m.editProject.Path)
+	}
+
+	// Save alias changes
+	if err := m.aliasStore.Save(); err != nil {
+		m.editError = "Failed to save aliases"
+		return m, nil
+	}
+
+	m.editMode = false
+	m.editError = ""
+
+	// Refresh project list
+	return m, func() tea.Msg {
+		_, _ = m.store.CleanStale()
+		projects, err := m.store.List()
+		return ProjectsLoadedMsg{Projects: projects, Err: err}
+	}
+}
+
 func (m ProjectPickerModel) handleEnter() (tea.Model, tea.Cmd) {
 	filtered := m.filteredProjects()
 	if m.cursor < len(filtered) {
@@ -197,6 +399,10 @@ func (m ProjectPickerModel) handleEnter() (tea.Model, tea.Cmd) {
 func (m ProjectPickerModel) View() string {
 	if !m.loaded {
 		return ""
+	}
+
+	if m.editMode {
+		return m.viewEditMode()
 	}
 
 	var b strings.Builder
@@ -230,6 +436,52 @@ func (m ProjectPickerModel) View() string {
 	if m.filtering {
 		fmt.Fprintf(&b, "\nfilter: %s", m.filterText)
 	}
+
+	return b.String()
+}
+
+func (m ProjectPickerModel) viewEditMode() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Edit project: %s\n\n", m.editProject.Name)
+
+	nameIndicator := "  "
+	if m.editFocus == editFieldName {
+		nameIndicator = "> "
+	}
+	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, m.editName)
+
+	b.WriteString("\n")
+
+	aliasIndicator := "  "
+	if m.editFocus == editFieldAliases {
+		aliasIndicator = "> "
+	}
+	b.WriteString(aliasIndicator + "Aliases:\n")
+
+	if len(m.editAliases) == 0 {
+		b.WriteString("    (none)\n")
+	} else {
+		for i, a := range m.editAliases {
+			marker := "    "
+			if m.editFocus == editFieldAliases && m.editAliasCursor == i {
+				marker = "  > "
+			}
+			fmt.Fprintf(&b, "%s[x] %s\n", marker, a)
+		}
+	}
+
+	addMarker := "    "
+	if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
+		addMarker = "  > "
+	}
+	fmt.Fprintf(&b, "%sAdd: %s\n", addMarker, m.editNewAlias)
+
+	if m.editError != "" {
+		fmt.Fprintf(&b, "\n  Error: %s\n", m.editError)
+	}
+
+	b.WriteString("\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field")
 
 	return b.String()
 }

@@ -326,6 +326,71 @@ func TestRemove(t *testing.T) {
 	})
 }
 
+func TestRename(t *testing.T) {
+	t.Run("renames project by path without changing last_used", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		lastUsed := time.Date(2026, 1, 22, 10, 30, 0, 0, time.UTC)
+		content := `{"projects":[{"path":"/Users/lee/Code/myapp","name":"myapp","last_used":"2026-01-22T10:30:00Z"}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+
+		if err := store.Rename("/Users/lee/Code/myapp", "renamed-app"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+
+		if projects[0].Name != "renamed-app" {
+			t.Errorf("Name = %q, want %q", projects[0].Name, "renamed-app")
+		}
+		if !projects[0].LastUsed.Equal(lastUsed) {
+			t.Errorf("LastUsed changed: got %v, want %v", projects[0].LastUsed, lastUsed)
+		}
+	})
+
+	t.Run("no error when renaming nonexistent path", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		content := `{"projects":[{"path":"/a","name":"first","last_used":"2026-01-01T00:00:00Z"}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+
+		if err := store.Rename("/nonexistent", "new-name"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Original should be unchanged
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+
+		if projects[0].Name != "first" {
+			t.Errorf("Name = %q, want %q (should be unchanged)", projects[0].Name, "first")
+		}
+	})
+}
+
 func TestCleanStale(t *testing.T) {
 	t.Run("removes project with non-existent directory", func(t *testing.T) {
 		dir := t.TempDir()
