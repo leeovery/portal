@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-02-22
 cycle: 1
 phase: Traceability Review
@@ -126,8 +126,8 @@ Updated portal-4-5 (tick-fe7c90) full description:
 **Spec Reference**: .workflows/specification/portal/specification.md -- Query Resolution section
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to tick-fe7c90
 
 ---
 
@@ -558,8 +558,8 @@ portal-3-7 (tick-afb187):
 **Spec Reference**: .workflows/specification/portal/specification.md -- Directory Change for New Sessions, Git Root Resolution, How Directories are Added, Session Naming, Process Handoff
 ```
 
-**Resolution**: Pending
-**Notes**: All seven Phase 3 tasks lack the required Problem, Solution, Outcome fields and have insufficient detail for implementation without referencing the specification. The proposed content adds these fields and pulls forward the relevant spec details.
+**Resolution**: Fixed
+**Notes**: Applied to tick-f26ed6, tick-62c4f1, tick-cebbcb, tick-feea91, tick-9d6404, tick-33fb7f, tick-afb187
 
 ---
 
@@ -911,8 +911,8 @@ portal-4-9 (tick-b92526):
 **Spec Reference**: .workflows/specification/portal/specification.md -- File Browser (Add alias) section
 ```
 
-**Resolution**: Pending
-**Notes**: All nine Phase 4 tasks lack the required task template fields and have insufficient detail for implementation. The proposed content adds the full structure and pulls forward spec details. Note: portal-4-5 is addressed separately in Finding 2 with additional TUI fallback detail.
+**Resolution**: Fixed
+**Notes**: Applied to tick-5533b4, tick-a2e7bd, tick-26cdeb, tick-b3b992, tick-83fe89, tick-457428, tick-19ad25, tick-b92526. portal-4-5 was addressed in Finding 2.
 
 ---
 
@@ -979,5 +979,5 @@ Updated portal-1-3 (tick-afcc27) acceptance criteria:
 - [ ] All tests pass
 ```
 
-**Resolution**: Pending
-**Notes**: Minor but worth making explicit to prevent implementer from adding unnecessary sorting.
+**Resolution**: Fixed
+**Notes**: Applied to tick-afcc27. Minor but worth making explicit.
