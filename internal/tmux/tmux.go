@@ -114,6 +114,15 @@ func (c *Client) CurrentSessionName() (string, error) {
 	return output, nil
 }
 
+// KillSession kills the tmux session with the given name.
+func (c *Client) KillSession(name string) error {
+	_, err := c.cmd.Run("kill-session", "-t", name)
+	if err != nil {
+		return fmt.Errorf("failed to kill tmux session %q: %w", name, err)
+	}
+	return nil
+}
+
 // SwitchClient switches the current tmux client to the named session.
 // Used when Portal is running inside an existing tmux session.
 func (c *Client) SwitchClient(name string) error {

@@ -690,6 +690,7 @@ func TestNewInProjectOption(t *testing.T) {
 
 		m := tui.NewWithDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 		)
@@ -725,6 +726,7 @@ func TestNewInProjectOption(t *testing.T) {
 
 		m := tui.NewWithDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 		)
@@ -763,6 +765,7 @@ func TestNewInProjectOption(t *testing.T) {
 
 		m := tui.NewWithDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 		)
@@ -814,6 +817,7 @@ func TestNewInProjectOption(t *testing.T) {
 
 		m := tui.NewWithDeps(
 			&mockSessionLister{sessions: []tmux.Session{}},
+			nil,
 			store,
 			creator,
 		)
@@ -842,6 +846,17 @@ func TestNewInProjectOption(t *testing.T) {
 			t.Errorf("expected session list after Esc, got:\n%s", view)
 		}
 	})
+}
+
+// mockSessionKiller implements tui.SessionKiller for testing.
+type mockSessionKiller struct {
+	killedName string
+	err        error
+}
+
+func (m *mockSessionKiller) KillSession(name string) error {
+	m.killedName = name
+	return m.err
 }
 
 // mockProjectStore implements ui.ProjectStore for tui testing.
@@ -904,6 +919,7 @@ func TestFileBrowserIntegration(t *testing.T) {
 
 		m := tui.NewWithAllDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 			lister,
@@ -945,6 +961,7 @@ func TestFileBrowserIntegration(t *testing.T) {
 
 		m := tui.NewWithAllDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 			lister,
@@ -985,6 +1002,7 @@ func TestFileBrowserIntegration(t *testing.T) {
 
 		m := tui.NewWithAllDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 			lister,
@@ -1028,6 +1046,7 @@ func TestFileBrowserIntegration(t *testing.T) {
 
 		m := tui.NewWithAllDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 			lister,
@@ -1069,6 +1088,7 @@ func TestFileBrowserIntegration(t *testing.T) {
 
 		m := tui.NewWithAllDeps(
 			&mockSessionLister{sessions: sessions},
+			nil,
 			store,
 			creator,
 			lister,
@@ -1373,6 +1393,351 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 
 		if !strings.Contains(view, "[n] new in project...") {
 			t.Errorf("new in project option should be visible, got:\n%s", view)
+		}
+	})
+}
+
+func TestKillSession(t *testing.T) {
+	t.Run("K enters confirmation mode with session name", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K on the first session
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+
+		view := model.View()
+		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+			t.Errorf("expected confirmation prompt for 'alpha', got:\n%s", view)
+		}
+	})
+
+	t.Run("y in confirmation mode triggers kill and refresh", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		if cmd == nil {
+			t.Fatal("expected command from kill confirmation, got nil")
+		}
+
+		// Execute the command — it should kill and then return a SessionsMsg
+		msg := cmd()
+		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		if !ok {
+			t.Fatalf("expected SessionsMsg, got %T", msg)
+		}
+
+		// The kill should have been called
+		if killer.killedName != "alpha" {
+			t.Errorf("expected kill of %q, got %q", "alpha", killer.killedName)
+		}
+
+		// Simulate receiving the refreshed sessions (alpha removed)
+		if sessionsMsg.Err != nil {
+			t.Fatalf("unexpected error: %v", sessionsMsg.Err)
+		}
+	})
+
+	t.Run("n in confirmation mode cancels", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then n
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+		view := model.View()
+		// Should be back to normal session list, no confirmation prompt
+		if strings.Contains(view, "Kill session") {
+			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
+		}
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
+		}
+		if killer.killedName != "" {
+			t.Errorf("kill should not have been called, but got %q", killer.killedName)
+		}
+	})
+
+	t.Run("Esc in confirmation mode cancels", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then Esc
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		view := model.View()
+		if strings.Contains(view, "Kill session") {
+			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
+		}
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
+		}
+		if killer.killedName != "" {
+			t.Errorf("kill should not have been called, but got %q", killer.killedName)
+		}
+	})
+
+	t.Run("session list refreshes after kill", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		remainingSessions := []tmux.Session{
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then y to kill alpha
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		// Update the lister to return remaining sessions
+		lister.sessions = remainingSessions
+
+		// Execute the command
+		msg := cmd()
+
+		// Feed the result back into the model
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if strings.Contains(view, "alpha") {
+			t.Errorf("killed session 'alpha' should not appear in refreshed list, got:\n%s", view)
+		}
+		if !strings.Contains(view, "bravo") {
+			t.Errorf("remaining session 'bravo' should appear in list, got:\n%s", view)
+		}
+	})
+
+	t.Run("cursor adjusts when last session killed", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		remainingSessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to bravo (last session)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+		// Press K then y to kill bravo
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		// Update lister
+		lister.sessions = remainingSessions
+
+		// Execute and feed back
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		// Cursor should be on alpha (index 0), which is now the last session
+		lines := strings.Split(view, "\n")
+		var alphaLine string
+		for _, line := range lines {
+			if strings.Contains(line, "alpha") {
+				alphaLine = line
+				break
+			}
+		}
+		if !strings.Contains(alphaLine, ">") {
+			t.Errorf("cursor should be on 'alpha' after killing last session, got:\n%s", view)
+		}
+	})
+
+	t.Run("K on new-in-project option is no-op", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Navigate to the [n] option
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+		// Press K — should be no-op
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+
+		view := model.View()
+		if strings.Contains(view, "Kill session") {
+			t.Errorf("K on new option should be no-op, got:\n%s", view)
+		}
+	})
+
+	t.Run("kill error returns error in SessionsMsg", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then y to attempt kill
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		if cmd == nil {
+			t.Fatal("expected command from kill confirmation, got nil")
+		}
+
+		// Execute the command — it should return a SessionsMsg with the kill error
+		msg := cmd()
+		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		if !ok {
+			t.Fatalf("expected SessionsMsg, got %T", msg)
+		}
+		if sessionsMsg.Err == nil {
+			t.Fatal("expected error in SessionsMsg when kill fails, got nil")
+		}
+		if sessionsMsg.Err.Error() != "failed to kill session 'alpha': session not found" {
+			t.Errorf("unexpected error message: %q", sessionsMsg.Err.Error())
+		}
+	})
+
+	t.Run("kill error clears confirmation state via SessionsMsg", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{err: fmt.Errorf("session not found")}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		// Execute command and feed back
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// SessionsMsg with error triggers quit, so the model should exit.
+		// But the confirmation prompt should not still be showing.
+		view := model.View()
+		if strings.Contains(view, "Kill session") {
+			t.Errorf("confirmation prompt should be cleared after kill error, got:\n%s", view)
+		}
+	})
+
+	t.Run("killing last remaining session shows empty state", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "solo", Windows: 1, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.NewWithKiller(lister, killer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		// Update lister to return empty
+		lister.sessions = []tmux.Session{}
+
+		// Execute and feed back
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "No active sessions") {
+			t.Errorf("expected empty state after killing last session, got:\n%s", view)
+		}
+	})
+
+	t.Run("NewWithDeps supports kill", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		store := &mockProjectStore{projects: []project.Project{}}
+		creator := &mockSessionCreator{}
+
+		m := tui.NewWithDeps(lister, killer, store, creator)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K — should enter confirmation mode (not no-op)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		view := model.View()
+		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+			t.Errorf("expected confirmation prompt via NewWithDeps, got:\n%s", view)
+		}
+	})
+
+	t.Run("NewWithAllDeps supports kill", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		store := &mockProjectStore{projects: []project.Project{}}
+		creator := &mockSessionCreator{}
+		dirLister := &mockDirLister{entries: map[string][]browser.DirEntry{}}
+
+		m := tui.NewWithAllDeps(lister, killer, store, creator, dirLister, "/home/user")
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press K — should enter confirmation mode (not no-op)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		view := model.View()
+		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+			t.Errorf("expected confirmation prompt via NewWithAllDeps, got:\n%s", view)
 		}
 	})
 }

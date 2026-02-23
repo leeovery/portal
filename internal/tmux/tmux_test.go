@@ -235,6 +235,39 @@ func TestCurrentSessionName(t *testing.T) {
 	})
 }
 
+func TestKillSession(t *testing.T) {
+	t.Run("runs kill-session with session name", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.KillSession("my-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "kill-session -t my-session"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("session not found")}
+		client := tmux.NewClient(mock)
+
+		err := client.KillSession("nonexistent")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
 func TestSwitchClient(t *testing.T) {
 	t.Run("runs switch-client with session name", func(t *testing.T) {
 		mock := &MockCommander{}

@@ -227,7 +227,7 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 // openTUI launches the interactive session picker with an optional initial filter.
 func openTUI(initialFilter string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
-	m := tui.New(client)
+	m := tui.NewWithKiller(client, client)
 	if initialFilter != "" {
 		m = m.WithInitialFilter(initialFilter)
 	}

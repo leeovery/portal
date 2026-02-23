@@ -32,6 +32,11 @@ type ProjectStore interface {
 	CleanStale() (int, error)
 }
 
+// SessionKiller defines the interface for killing tmux sessions.
+type SessionKiller interface {
+	KillSession(name string) error
+}
+
 // SessionCreator defines the interface for creating sessions from directories.
 type SessionCreator interface {
 	CreateFromDir(dir string) (string, error)
@@ -58,21 +63,24 @@ type sessionCreateErrMsg struct {
 
 // Model is the Bubble Tea model for the session list TUI.
 type Model struct {
-	sessions       []tmux.Session
-	cursor         int
-	selected       string
-	loaded         bool
-	sessionLister  SessionLister
-	projectStore   ProjectStore
-	sessionCreator SessionCreator
-	dirLister      DirLister
-	startPath      string
-	view           viewState
-	projectPicker  ui.ProjectPickerModel
-	fileBrowser    ui.FileBrowserModel
-	initialFilter  string
-	insideTmux     bool
-	currentSession string
+	sessions        []tmux.Session
+	cursor          int
+	selected        string
+	loaded          bool
+	sessionLister   SessionLister
+	sessionKiller   SessionKiller
+	projectStore    ProjectStore
+	sessionCreator  SessionCreator
+	dirLister       DirLister
+	startPath       string
+	view            viewState
+	projectPicker   ui.ProjectPickerModel
+	fileBrowser     ui.FileBrowserModel
+	initialFilter   string
+	insideTmux      bool
+	currentSession  string
+	confirmKill     bool
+	pendingKillName string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -109,19 +117,29 @@ func New(lister SessionLister) Model {
 	}
 }
 
+// NewWithKiller creates a Model with session listing and killing support.
+func NewWithKiller(lister SessionLister, killer SessionKiller) Model {
+	return Model{
+		sessionLister: lister,
+		sessionKiller: killer,
+	}
+}
+
 // NewWithDeps creates a Model with all dependencies for full functionality.
-func NewWithDeps(lister SessionLister, store ProjectStore, creator SessionCreator) Model {
+func NewWithDeps(lister SessionLister, killer SessionKiller, store ProjectStore, creator SessionCreator) Model {
 	return Model{
 		sessionLister:  lister,
+		sessionKiller:  killer,
 		projectStore:   store,
 		sessionCreator: creator,
 	}
 }
 
 // NewWithAllDeps creates a Model with all dependencies including the file browser.
-func NewWithAllDeps(lister SessionLister, store ProjectStore, creator SessionCreator, dirLister DirLister, startPath string) Model {
+func NewWithAllDeps(lister SessionLister, killer SessionKiller, store ProjectStore, creator SessionCreator, dirLister DirLister, startPath string) Model {
 	return Model{
 		sessionLister:  lister,
+		sessionKiller:  killer,
 		projectStore:   store,
 		sessionCreator: creator,
 		dirLister:      dirLister,
@@ -232,6 +250,11 @@ func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle confirmKill state first
+	if m.confirmKill {
+		return m.updateConfirmKill(msg)
+	}
+
 	switch msg := msg.(type) {
 	case SessionsMsg:
 		if msg.Err != nil {
@@ -239,7 +262,11 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.sessions = msg.Sessions
 		m.sessions = m.filteredSessions()
-		m.cursor = 0
+		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
+			m.cursor = len(m.sessions) - 1
+		} else if len(m.sessions) == 0 {
+			m.cursor = 0
+		}
 		m.loaded = true
 
 	case ui.ProjectsLoadedMsg:
@@ -257,6 +284,8 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "K":
+			return m.handleKillKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			// Jump to the "new in project" option
 			m.cursor = len(m.sessions)
@@ -273,6 +302,52 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
+	// No-op if cursor is on the [n] new in project option
+	if m.cursor >= len(m.sessions) {
+		return m, nil
+	}
+	// No-op if no session killer configured
+	if m.sessionKiller == nil {
+		return m, nil
+	}
+	m.confirmKill = true
+	m.pendingKillName = m.sessions[m.cursor].Name
+	return m, nil
+}
+
+func (m Model) updateConfirmKill(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch {
+	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "y":
+		name := m.pendingKillName
+		m.confirmKill = false
+		m.pendingKillName = ""
+		return m, m.killAndRefresh(name)
+	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "n",
+		keyMsg.Type == tea.KeyEsc:
+		m.confirmKill = false
+		m.pendingKillName = ""
+		return m, nil
+	}
+	// Ignore all other keys in confirmation mode
+	return m, nil
+}
+
+func (m Model) killAndRefresh(name string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.sessionKiller.KillSession(name); err != nil {
+			return SessionsMsg{Err: fmt.Errorf("failed to kill session '%s': %w", name, err)}
+		}
+		sessions, err := m.sessionLister.ListSessions()
+		return SessionsMsg{Sessions: sessions, Err: err}
+	}
 }
 
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
@@ -362,6 +437,11 @@ func (m Model) viewSessionList() string {
 		newCursor = cursorStyle.Render("> ")
 	}
 	fmt.Fprintf(&b, "%s[n] new in project...", newCursor)
+
+	if m.confirmKill {
+		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "Kill session '%s'? (y/n)", m.pendingKillName)
+	}
 
 	return b.String()
 }
