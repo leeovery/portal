@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,4 +153,64 @@ func TestOpenCommand_QueryResolution_ZoxideNotFound(t *testing.T) {
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
+}
+
+// mockSwitchClient implements the SwitchClienter interface for testing.
+type mockSwitchClient struct {
+	switchedTo string
+	err        error
+}
+
+func (m *mockSwitchClient) SwitchClient(name string) error {
+	m.switchedTo = name
+	return m.err
+}
+
+func TestSwitchConnector(t *testing.T) {
+	t.Run("calls SwitchClient with session name", func(t *testing.T) {
+		mock := &mockSwitchClient{}
+		connector := &SwitchConnector{client: mock}
+
+		err := connector.Connect("my-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.switchedTo != "my-session" {
+			t.Errorf("SwitchClient called with %q, want %q", mock.switchedTo, "my-session")
+		}
+	})
+
+	t.Run("returns error when SwitchClient fails", func(t *testing.T) {
+		mock := &mockSwitchClient{err: fmt.Errorf("session not found")}
+		connector := &SwitchConnector{client: mock}
+
+		err := connector.Connect("nonexistent")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestBuildSessionConnector(t *testing.T) {
+	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
+		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
+
+		connector := buildSessionConnector()
+
+		if _, ok := connector.(*SwitchConnector); !ok {
+			t.Errorf("expected *SwitchConnector, got %T", connector)
+		}
+	})
+
+	t.Run("returns AttachConnector when outside tmux", func(t *testing.T) {
+		t.Setenv("TMUX", "")
+
+		connector := buildSessionConnector()
+
+		if _, ok := connector.(*AttachConnector); !ok {
+			t.Errorf("expected *AttachConnector, got %T", connector)
+		}
+	})
 }

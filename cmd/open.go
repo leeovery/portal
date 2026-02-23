@@ -27,6 +27,51 @@ type OpenDeps struct {
 	DirValidator resolver.DirValidator
 }
 
+// SessionConnector connects the user to a tmux session.
+// The implementation differs based on whether Portal is inside or outside tmux.
+type SessionConnector interface {
+	Connect(name string) error
+}
+
+// SwitchClienter defines the interface for switching tmux clients.
+type SwitchClienter interface {
+	SwitchClient(name string) error
+}
+
+// SwitchConnector connects to a session by issuing tmux switch-client.
+// Used when Portal is running inside an existing tmux session.
+type SwitchConnector struct {
+	client SwitchClienter
+}
+
+// Connect switches the current tmux client to the named session.
+func (sc *SwitchConnector) Connect(name string) error {
+	return sc.client.SwitchClient(name)
+}
+
+// AttachConnector connects to a session by exec-ing tmux attach-session.
+// Used when Portal is running outside tmux (bare shell).
+type AttachConnector struct{}
+
+// Connect replaces the current process with tmux attach-session.
+func (ac *AttachConnector) Connect(name string) error {
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("tmux not found: %w", err)
+	}
+	return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", name}, os.Environ())
+}
+
+// buildSessionConnector returns the appropriate SessionConnector based on
+// whether Portal is running inside an existing tmux session.
+func buildSessionConnector() SessionConnector {
+	if tmux.InsideTmux() {
+		client := tmux.NewClient(&tmux.RealCommander{})
+		return &SwitchConnector{client: client}
+	}
+	return &AttachConnector{}
+}
+
 var openCmd = &cobra.Command{
 	Use:   "open [destination]",
 	Short: "Open the interactive session picker or start a session at a path",
@@ -116,12 +161,8 @@ func openTUI(initialFilter string) error {
 		return nil
 	}
 
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
-	}
-
-	return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", selected}, os.Environ())
+	connector := buildSessionConnector()
+	return connector.Connect(selected)
 }
 
 // buildQueryResolver creates a QueryResolver with appropriate dependencies.

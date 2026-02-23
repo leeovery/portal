@@ -103,3 +103,23 @@ func (c *Client) ListSessions() ([]Session, error) {
 
 	return sessions, nil
 }
+
+// CurrentSessionName returns the name of the tmux session that the current client
+// is attached to. It runs tmux display-message to query the session name.
+func (c *Client) CurrentSessionName() (string, error) {
+	output, err := c.cmd.Run("display-message", "-p", "#{session_name}")
+	if err != nil {
+		return "", fmt.Errorf("failed to get current session name: %w", err)
+	}
+	return output, nil
+}
+
+// SwitchClient switches the current tmux client to the named session.
+// Used when Portal is running inside an existing tmux session.
+func (c *Client) SwitchClient(name string) error {
+	_, err := c.cmd.Run("switch-client", "-t", name)
+	if err != nil {
+		return fmt.Errorf("failed to switch to session %q: %w", name, err)
+	}
+	return nil
+}
