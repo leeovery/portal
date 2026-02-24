@@ -1,0 +1,33 @@
+AGENT: standards
+FINDINGS:
+- FINDING: TUI openTUI missing renamer, project store, session creator, and dir lister dependencies
+  SEVERITY: high
+  FILES: /Users/leeovery/Code/portal/cmd/open.go:284-318
+  DESCRIPTION: The openTUI function creates the TUI model via `tui.NewWithKiller(client, client)`, which only sets sessionLister and sessionKiller. The spec defines keyboard shortcuts for rename (R), new session from project picker ([n]/Enter), and file browser navigation. Without sessionRenamer, projectStore, sessionCreator, and dirLister being wired in, the TUI cannot: (1) rename sessions via R (silently no-ops because sessionRenamer is nil), (2) create new sessions from the project picker (handleSessionListEnter does nothing when projectStore is nil), (3) navigate the file browser for new sessions. The spec states these are core TUI features: "Select a project -> start a new session" and "R - Rename selected session". This means the real application's TUI is limited to attaching to existing sessions only -- the "new in project..." flow and rename are non-functional.
+  RECOMMENDATION: Wire all dependencies into openTUI. Create the model via NewWithAllDeps (or equivalent) passing a sessionRenamer (the tmux client), a project store, a session creator (session.NewSessionCreator), a dir lister (browser.ListDirectories adapter), and the current working directory as startPath. The TUI model already supports all these via its constructor variants.
+
+- FINDING: GoReleaser config uses homebrew_casks instead of brews
+  SEVERITY: medium
+  FILES: /Users/leeovery/Code/portal/.goreleaser.yaml:34-44
+  DESCRIPTION: The spec says "Distributed via Homebrew tap" with `brew tap leeovery/tools && brew install portal` and GoReleaser auto-updates the Homebrew formula. The goreleaser.yaml uses `homebrew_casks` as the top-level key, but GoReleaser v2 uses `brews` for generating Homebrew formulae in a tap repository. `homebrew_casks` is for macOS .app cask definitions, not for CLI tool formulae. This means the release pipeline will not generate or push a Homebrew formula to the leeovery/homebrew-tools tap, breaking the specified installation method.
+  RECOMMENDATION: Change `homebrew_casks` to `brews` in .goreleaser.yaml. The inner structure should also be adjusted to match the GoReleaser v2 brews schema: `repository` (with owner/name), `homepage`, `description`, `license`, and `dependencies` (as array of `name:` entries).
+
+- FINDING: openTUI does not pass command to TUI when in command-pending mode from TUI-created sessions
+  SEVERITY: high
+  FILES: /Users/leeovery/Code/portal/cmd/open.go:284-318
+  DESCRIPTION: When `openTUI` is called, it correctly calls `m.WithCommand(parsedCommand)` to set command-pending mode and passes command to the TUI model. The TUI model then passes `m.command` to `sessionCreator.CreateFromDir(dir, m.command)` when creating a session from the project picker. However, after session creation, the TUI sets `m.selected = msg.SessionName` and quits. Back in openTUI, the code calls `connector.Connect(selected)` which either exec's `tmux attach-session` or runs `tmux switch-client`. This works because SessionCreator.CreateFromDir already created the session (detached) with the command baked in. BUT: since projectStore and sessionCreator are not wired into the TUI model (as noted in the first finding), this code path is dead -- the TUI cannot actually create sessions. If the dependencies were wired in, the flow would work correctly for inside-tmux. For outside-tmux, `connector.Connect` uses `exec tmux attach-session -t <name>` which attaches to the already-created detached session -- this works. However, the spec says outside-tmux should use `exec` for process handoff with `new-session -A`, not `attach-session` to a pre-created detached session. The TUI path creates detached first then attaches, which achieves the same result but uses a different tmux command sequence than specified.
+  RECOMMENDATION: This finding is contingent on the first finding being addressed. When wiring dependencies, the outside-tmux TUI path should either: (a) accept the detached-then-attach pattern as functionally equivalent (it is), or (b) use the QuickStart pipeline for outside-tmux TUI session creation to match the exec handoff pattern. The current detached+attach approach works but differs from the spec's `exec tmux new-session -A` pattern for outside-tmux.
+
+- FINDING: parsedCommand uses package-level var creating shared mutable state
+  SEVERITY: medium
+  FILES: /Users/leeovery/Code/portal/cmd/open.go:77
+  DESCRIPTION: The `parsedCommand` variable is declared at package level (`var parsedCommand []string`). It is set during `openCmd.RunE` and later consumed by `openPath` and `openTUI`. This shared mutable state pattern means concurrent use or test isolation issues could arise. The golang-pro skill says "MUST NOT DO: Hardcode configuration" and the code-quality standard says "Inject dependencies" and "Avoid hidden dependencies". The parsedCommand is a hidden dependency passed via package state rather than function parameters.
+  RECOMMENDATION: Pass the command slice explicitly through function parameters. Change `openPath(resolvedPath string)` to `openPath(resolvedPath string, command []string)` and `openTUI(initialFilter string)` to `openTUI(initialFilter string, command []string)`. Remove the package-level var.
+
+- FINDING: openDeps, listDeps, attachDeps, killDeps use package-level mutable state for test injection
+  SEVERITY: low
+  FILES: /Users/leeovery/Code/portal/cmd/open.go:21, /Users/leeovery/Code/portal/cmd/list.go:13, /Users/leeovery/Code/portal/cmd/attach.go:13, /Users/leeovery/Code/portal/cmd/kill.go:13
+  DESCRIPTION: Multiple commands use package-level `var *Deps` pointers that are set by tests and checked at runtime with nil guards. While this works for a CLI that runs once and exits, it is a deviation from the golang-pro skill's guidance to "Inject dependencies" via proper DI patterns. This is a low-severity observation since Cobra commands naturally have limited DI options.
+  RECOMMENDATION: Acceptable for a CLI tool using Cobra. No change needed, but the pattern should not proliferate further.
+
+SUMMARY: The most impactful finding is that the production TUI (via openTUI) is missing critical dependencies -- sessionRenamer, projectStore, sessionCreator, and dirLister -- meaning the TUI can only list and attach to existing sessions. All project picker, file browser, and rename functionality is non-functional in the real binary despite being fully implemented in the TUI model code. The GoReleaser config also uses the wrong key for Homebrew formula generation, which will break the distribution pipeline.
