@@ -1,0 +1,43 @@
+version: 2
+
+project_name: portal
+
+builds:
+  - binary: portal
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - arm64
+      - amd64
+    ldflags:
+      - -s -w -X github.com/leeovery/portal/cmd.version={{.Version}}
+
+archives:
+  - format_overrides:
+      - goos: darwin
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: leeovery
+    name: portal
+
+homebrew_casks:
+  - repository:
+      owner: leeovery
+      name: homebrew-tools
+    name: portal
+    homepage: https://github.com/leeovery/portal
+    description: Interactive session picker for tmux
+    license: MIT
+    dependencies:
+      - formula: tmux
