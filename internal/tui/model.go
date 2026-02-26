@@ -9,7 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/fuzzy"
-	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
 )
@@ -28,12 +27,8 @@ type SessionLister interface {
 	ListSessions() ([]tmux.Session, error)
 }
 
-// ProjectStore defines the interface for loading and cleaning projects.
-type ProjectStore interface {
-	List() ([]project.Project, error)
-	CleanStale() ([]project.Project, error)
-	Remove(path string) error
-}
+// ProjectStore abstracts project storage for testability.
+type ProjectStore = ui.ProjectStore
 
 // SessionKiller defines the interface for killing tmux sessions.
 type SessionKiller interface {
