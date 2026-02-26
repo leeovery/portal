@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/browser"
+	"github.com/leeovery/portal/internal/fuzzy"
 )
 
 // BrowserCancelMsg is emitted when the user cancels the file browser with Esc (no filter active).
@@ -128,7 +129,7 @@ func (m FileBrowserModel) filteredEntries() []browser.DirEntry {
 	lowerFilter := strings.ToLower(m.filterText)
 	var filtered []browser.DirEntry
 	for _, e := range m.entries {
-		if fuzzyMatch(strings.ToLower(e.Name), lowerFilter) {
+		if fuzzy.Match(strings.ToLower(e.Name), lowerFilter) {
 			filtered = append(filtered, e)
 		}
 	}

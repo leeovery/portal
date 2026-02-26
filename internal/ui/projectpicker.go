@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/fuzzy"
 	"github.com/leeovery/portal/internal/project"
 )
 
@@ -124,22 +125,11 @@ func (m ProjectPickerModel) filteredProjects() []project.Project {
 	var filtered []project.Project
 	lowerFilter := strings.ToLower(m.filterText)
 	for _, p := range m.projects {
-		if fuzzyMatch(strings.ToLower(p.Name), lowerFilter) {
+		if fuzzy.Match(strings.ToLower(p.Name), lowerFilter) {
 			filtered = append(filtered, p)
 		}
 	}
 	return filtered
-}
-
-// fuzzyMatch checks if the pattern characters appear in order within the text.
-func fuzzyMatch(text, pattern string) bool {
-	pi := 0
-	for ti := 0; ti < len(text) && pi < len(pattern); ti++ {
-		if text[ti] == pattern[pi] {
-			pi++
-		}
-	}
-	return pi == len(pattern)
 }
 
 // totalItems returns the count of visible items (filtered projects + browse option).

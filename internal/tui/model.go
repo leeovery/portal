@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/leeovery/portal/internal/fuzzy"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
@@ -544,22 +545,11 @@ func (m Model) filterMatchedSessions() []tmux.Session {
 	}
 	var matched []tmux.Session
 	for _, s := range m.sessions {
-		if fuzzyMatch(strings.ToLower(s.Name), strings.ToLower(m.filterText)) {
+		if fuzzy.Match(strings.ToLower(s.Name), strings.ToLower(m.filterText)) {
 			matched = append(matched, s)
 		}
 	}
 	return matched
-}
-
-// fuzzyMatch returns true if pattern is a subsequence of text.
-func fuzzyMatch(text, pattern string) bool {
-	pi := 0
-	for i := 0; i < len(text) && pi < len(pattern); i++ {
-		if text[i] == pattern[pi] {
-			pi++
-		}
-	}
-	return pi == len(pattern)
 }
 
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
