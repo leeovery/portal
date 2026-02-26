@@ -261,3 +261,14 @@ ext_id: tick-0ed051
 | ID | Name | Edge Cases | Status | Ext ID |
 |----|------|------------|--------|--------|
 | portal-9-1 | Apply initial filter to session list on query resolution fallback | none | authored | tick-1bd4ee |
+
+### Phase 10: Analysis (Cycle 4)
+status: approved
+ext_id: tick-c85ba3
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| portal-10-1 | Align GoReleaser config and release workflow with tick reference pattern | none | authored | tick-eef443 |
