@@ -72,10 +72,6 @@ func buildSessionConnector() SessionConnector {
 	return &AttachConnector{}
 }
 
-// parsedCommand holds the command slice parsed from -e/--exec or -- args.
-// Set during command parsing, consumed by downstream session creation.
-var parsedCommand []string
-
 var openCmd = &cobra.Command{
 	Use:   "open [-e cmd] [destination] [-- cmd args...]",
 	Short: "Open the interactive session picker or start a session at a path",
@@ -85,10 +81,9 @@ var openCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		parsedCommand = command
 
 		if destination == "" {
-			return openTUI("")
+			return openTUI("", command)
 		}
 
 		query := destination
@@ -105,9 +100,9 @@ var openCmd = &cobra.Command{
 
 		switch r := result.(type) {
 		case *resolver.PathResult:
-			return openPath(r.Path)
+			return openPath(r.Path, command)
 		case *resolver.FallbackResult:
-			return openTUI(r.Query)
+			return openTUI(r.Query, command)
 		default:
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}
@@ -241,7 +236,7 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 // openPath creates a new tmux session at the given resolved directory path.
 // When inside tmux, it creates the session detached and switches to it.
 // When outside tmux, it execs into tmux with the -A flag for atomic create-or-attach.
-func openPath(resolvedPath string) error {
+func openPath(resolvedPath string, command []string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
 	gitResolver := &resolverAdapter{}
 	projectsPath, err := projectsFilePath()
@@ -269,7 +264,7 @@ func openPath(resolvedPath string) error {
 		opener.tmuxPath = tmuxPath
 	}
 
-	return opener.Open(resolvedPath, parsedCommand)
+	return opener.Open(resolvedPath, command)
 }
 
 // resolverAdapter adapts resolver.ResolveGitRoot to the session.GitResolver interface.
@@ -289,7 +284,7 @@ func (o *osDirLister) ListDirectories(path string, showHidden bool) ([]browser.D
 }
 
 // openTUI launches the interactive session picker with an optional initial filter.
-func openTUI(initialFilter string) error {
+func openTUI(initialFilter string, command []string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
@@ -311,8 +306,8 @@ func openTUI(initialFilter string) error {
 		tui.WithSessionCreator(session.NewSessionCreator(gitResolver, store, client, gen)),
 		tui.WithDirLister(&osDirLister{}, cwd),
 	)
-	if len(parsedCommand) > 0 {
-		m = m.WithCommand(parsedCommand)
+	if len(command) > 0 {
+		m = m.WithCommand(command)
 	}
 	if initialFilter != "" {
 		m = m.WithInitialFilter(initialFilter)
