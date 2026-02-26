@@ -123,17 +123,7 @@ func (m *FileBrowserModel) loadEntries() {
 
 // filteredEntries returns the directory entries that match the current filter text.
 func (m FileBrowserModel) filteredEntries() []browser.DirEntry {
-	if m.filterText == "" {
-		return m.entries
-	}
-	lowerFilter := strings.ToLower(m.filterText)
-	var filtered []browser.DirEntry
-	for _, e := range m.entries {
-		if fuzzy.Match(strings.ToLower(e.Name), lowerFilter) {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
+	return fuzzy.Filter(m.entries, m.filterText, func(e browser.DirEntry) string { return e.Name })
 }
 
 // totalItems returns the count of navigable items (dot entry + filtered directory entries).

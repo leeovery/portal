@@ -119,17 +119,7 @@ func (m ProjectPickerModel) Init() tea.Cmd {
 
 // filteredProjects returns the projects that match the current filter text.
 func (m ProjectPickerModel) filteredProjects() []project.Project {
-	if m.filterText == "" {
-		return m.projects
-	}
-	var filtered []project.Project
-	lowerFilter := strings.ToLower(m.filterText)
-	for _, p := range m.projects {
-		if fuzzy.Match(strings.ToLower(p.Name), lowerFilter) {
-			filtered = append(filtered, p)
-		}
-	}
-	return filtered
+	return fuzzy.Filter(m.projects, m.filterText, func(p project.Project) string { return p.Name })
 }
 
 // totalItems returns the count of visible items (filtered projects + browse option).

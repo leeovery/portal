@@ -540,16 +540,7 @@ func (m Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 // filterMatchedSessions returns sessions whose names fuzzy-match the current filter text.
 // Uses subsequence matching: each character in the filter must appear in order in the session name.
 func (m Model) filterMatchedSessions() []tmux.Session {
-	if m.filterText == "" {
-		return m.sessions
-	}
-	var matched []tmux.Session
-	for _, s := range m.sessions {
-		if fuzzy.Match(strings.ToLower(s.Name), strings.ToLower(m.filterText)) {
-			matched = append(matched, s)
-		}
-	}
-	return matched
+	return fuzzy.Filter(m.sessions, m.filterText, func(s tmux.Session) string { return s.Name })
 }
 
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
