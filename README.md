@@ -16,7 +16,9 @@ A CLI that gives you fast, fuzzy session management from bare shell,
 
 ---
 
-Portal runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, and auto-detects git roots for new sessions.
+Portal is a CLI that runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, and auto-detects git roots for new sessions.
+
+After [shell integration](#shell-integration), you interact with Portal through two functions: **`x`** (session picker / opener) and **`xctl`** (subcommands like list, kill, alias). The function names are customizable — see `--cmd` below.
 
 ## Install
 
@@ -54,8 +56,14 @@ x ~/Code/myproject
 x ~/Code/myproject -e "make dev"
 
 # Set up an alias
-portal alias set work ~/Code/work-project
+xctl alias set work ~/Code/work-project
 x work
+
+# List running sessions
+xctl list
+
+# Kill a session
+xctl kill myproject
 ```
 
 ## Shell Integration
@@ -86,16 +94,18 @@ eval "$(portal init zsh --cmd p)"   # creates p() and pctl()
 
 ## Commands
 
-### `open`
+> Examples below use the default `x` / `xctl` function names. If you used `--cmd p`, substitute `p` and `pctl`. You can also call the `portal` binary directly.
 
-Interactive session picker or path-based session creation. This is what runs when you call `x()`.
+### `x` (open)
+
+Interactive session picker or path-based session creation. `x` maps to `portal open`.
 
 ```bash
-portal open                          # interactive TUI
-portal open ~/Code/myproject         # open session at path
-portal open myalias                  # resolve alias → path → session
-portal open ~/Code/app -e "make dev" # run command in new session
-portal open ~/Code/app -- npm start  # alternative command syntax
+x                                    # interactive TUI
+x ~/Code/myproject                   # open session at path
+x myalias                            # resolve alias → path → session
+x ~/Code/app -e "make dev"           # run command in new session
+x ~/Code/app -- npm start            # alternative command syntax
 ```
 
 | Flag | Description |
@@ -106,22 +116,22 @@ Path resolution order: aliases → zoxide → TUI with filter.
 
 New sessions auto-resolve to the git repository root when applicable.
 
-### `attach`
+### `xctl attach`
 
 Attach to an existing tmux session by name.
 
 ```bash
-portal attach myproject
+xctl attach myproject
 ```
 
-### `list`
+### `xctl list`
 
 List running tmux sessions.
 
 ```bash
-portal list                          # auto-detect format
-portal list --long                   # full details
-portal list --short                  # names only
+xctl list                            # auto-detect format
+xctl list --long                     # full details
+xctl list --short                    # names only
 ```
 
 | Flag | Description |
@@ -129,43 +139,43 @@ portal list --short                  # names only
 | `--long` | Full session details (name, status, window count) |
 | `--short` | Session names only, one per line |
 
-### `kill`
+### `xctl kill`
 
 Kill a tmux session by name.
 
 ```bash
-portal kill myproject
+xctl kill myproject
 ```
 
-### `alias`
+### `xctl alias`
 
 Manage path aliases for quick session access.
 
 ```bash
-portal alias set work ~/Code/work    # create alias
-portal alias rm work                 # remove alias
-portal alias list                    # list all aliases
+xctl alias set work ~/Code/work      # create alias
+xctl alias rm work                   # remove alias
+xctl alias list                      # list all aliases
 ```
 
-### `clean`
+### `xctl clean`
 
 Remove stale projects whose directories no longer exist on disk.
 
 ```bash
-portal clean
+xctl clean
 ```
 
-### `version`
+### `xctl version`
 
 Print the Portal version.
 
 ```bash
-portal version
+xctl version
 ```
 
-### `init`
+### `portal init`
 
-Output shell integration script for eval. See [Shell Integration](#shell-integration).
+Output shell integration script for eval. See [Shell Integration](#shell-integration). This is the one command you call via the `portal` binary directly.
 
 ```bash
 portal init zsh
@@ -195,7 +205,7 @@ Portal stores config in `~/.config/portal/`:
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 
-Projects are auto-populated when you create new sessions and cleaned with `portal clean`.
+Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
 
 ## License
 
