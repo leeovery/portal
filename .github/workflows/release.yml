@@ -3,7 +3,8 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '!v*-*'
 
 permissions:
   contents: write
@@ -15,9 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
 
-      - name: Set up Go
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -28,4 +29,30 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Extract checksums
+        id: checksums
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHECKSUMS_FILE="dist/portal_${VERSION}_checksums.txt"
+          SHA256_ARM64=$(grep "portal_${VERSION}_darwin_arm64.tar.gz" "$CHECKSUMS_FILE" | awk '{print $1}')
+          SHA256_AMD64=$(grep "portal_${VERSION}_darwin_amd64.tar.gz" "$CHECKSUMS_FILE" | awk '{print $1}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256_arm64=$SHA256_ARM64" >> "$GITHUB_OUTPUT"
+          echo "sha256_amd64=$SHA256_AMD64" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch to homebrew-tools
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token ${{ secrets.CICD_PAT }}" \
+            https://api.github.com/repos/leeovery/homebrew-tools/dispatches \
+            -d '{
+              "event_type": "update-formula",
+              "client_payload": {
+                "tool": "portal",
+                "version": "${{ steps.checksums.outputs.version }}",
+                "sha256_arm64": "${{ steps.checksums.outputs.sha256_arm64 }}",
+                "sha256_amd64": "${{ steps.checksums.outputs.sha256_amd64 }}"
+              }
+            }'
