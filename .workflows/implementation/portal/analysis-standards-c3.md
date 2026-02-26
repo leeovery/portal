@@ -1,0 +1,9 @@
+AGENT: standards
+FINDINGS:
+- FINDING: Session list TUI does not apply initial filter from query resolution fallback
+  SEVERITY: medium
+  FILES: /Users/leeovery/Code/portal/internal/tui/model.go:110-116, /Users/leeovery/Code/portal/internal/tui/model.go:319-332
+  DESCRIPTION: The spec's Query Resolution step 4 states "No match: Fall back to the TUI with the query pre-filled as the filter text. If a command is pending (-e/--), this opens the project picker; otherwise, the main session picker." When commandPending is true, WithInitialFilter correctly forwards the filter to the project picker via m.projectPicker.WithFilter(filter). However, when commandPending is false (the normal session list fallback), the initialFilter string is stored in the model but never used to activate filter mode. The filterMode boolean stays false and filterText stays empty. The user sees the full unfiltered session list instead of seeing it pre-filtered by their query. For example, `x myapp` where "myapp" resolves to FallbackResult should open the session picker with "myapp" already typed into the filter. Currently it opens with no filter active.
+  RECOMMENDATION: In WithInitialFilter, when not in commandPending mode and filter is non-empty, set m.filterMode = true and m.filterText = filter. Alternatively, apply the filter in the SessionsMsg handler when m.initialFilter is non-empty and the model has just loaded for the first time.
+
+SUMMARY: One medium-severity spec conformance issue found: the session list TUI fallback from query resolution does not pre-fill the filter text as specified. All other spec requirements -- exit codes, error messages, inside/outside tmux behavior, session naming, shell command construction, file browser, project picker, and kill/rename flows -- conform to the specification. Prior cycle findings (GoReleaser homebrew_casks, config directory path, TUI dependencies) were resolved or confirmed as non-issues.
