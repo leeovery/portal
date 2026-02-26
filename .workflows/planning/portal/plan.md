@@ -237,3 +237,16 @@ ext_id: tick-98bd31
 | portal-7-4 | Extract fuzzyMatch into shared internal package | none | authored | tick-ae743d |
 | portal-7-5 | Extract config file path helper to eliminate duplication | none | authored | tick-218aad |
 | portal-7-6 | Pass parsedCommand as parameter instead of package-level variable | none | authored | tick-4a035c |
+
+### Phase 8: Analysis (Cycle 2)
+status: approved
+ext_id: tick-3a2937
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| portal-8-1 | Extract generic FuzzyFilter function | none | authored | tick-312e8c |
+| portal-8-2 | Deduplicate ProjectStore interface | none | authored | tick-7f0e35 |
+| portal-8-3 | Remove redundant quickStartResult mirror type | none | authored | tick-200812 |

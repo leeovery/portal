@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: Portal (Cycle 2)
 
 ## Task 1: Extract generic FuzzyFilter function
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -59,7 +59,7 @@ sources: duplication
 - Existing tests in tui and ui packages continue to pass
 
 ## Task 2: Deduplicate ProjectStore interface
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -86,7 +86,7 @@ sources: duplication
 - All existing tests in `internal/tui/` and `internal/ui/` pass unchanged (the alias is structurally identical)
 
 ## Task 3: Remove redundant quickStartResult mirror type
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
