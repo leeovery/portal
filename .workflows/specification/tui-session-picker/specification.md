@@ -15,7 +15,21 @@ sources:
 
 ## Specification
 
-[Validated content accumulates here, organized by topic/phase]
+### Architecture & Component Choices
+
+The TUI is rebuilt as a **two-page architecture** using `charmbracelet/bubbles/list`. The two pages — Sessions and Projects — are equal peers (not parent-child). Each page is a full `bubbles/list.Model` instance with built-in filtering, pagination, help bar, status bar, custom item delegates, and keybinding management.
+
+**Component adoption:**
+- **`bubbles/list`** — adopted for both pages. Brings `help`, `key`, and `paginator` as transitive dependencies.
+- **`bubbles/textinput`** — retained for rename and project edit input fields.
+- **`bubbles/filepicker`** — not adopted. It shows files and directories (Portal needs directories only), lacks fuzzy filtering, and doesn't support alias saving or current-directory selection. Too many gaps.
+- **Custom file browser** (`internal/ui/browser.go`) — retained as-is. Purpose-built for directory-only navigation with fuzzy filtering and alias support.
+
+**Structural changes:**
+- `ProjectPickerModel` (`internal/ui/projectpicker.go`) is **deleted** along with its associated tests. All project listing functionality moves into a `bubbles/list` page within the main TUI model.
+- The `viewState` enum (`viewSessionList`, `viewProjectPicker`, `viewFileBrowser`) is replaced by a page-based model with the file browser as a sub-view.
+- Hand-rolled `strings.Builder` rendering is replaced by `bubbles/list` delegates and lipgloss styling.
+- Any code, tests, or message types that exist solely to support the old `ProjectPickerModel` should be removed rather than left as dead code.
 
 ---
 
