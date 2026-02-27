@@ -4,7 +4,7 @@ status: in-progress
 type: feature
 work_type: feature
 date: 2026-02-27
-review_cycle: 0
+review_cycle: 1
 finding_gate_mode: gated
 sources:
   - name: tui-session-picker
