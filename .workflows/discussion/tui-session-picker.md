@@ -36,7 +36,12 @@ The original proposal (from `tui-session-picker-ux.md`) was to merge sessions an
 - [x] How should empty states be handled (no sessions, no projects, both empty)?
 - [x] What's the right approach for the `[b] browse for directory...` item?
 - [x] How should the `n` key auto-execute behavior work?
-- [ ] Should we adopt `bubbles/list` and other bubbles components?
+- [x] Should we adopt `bubbles/list` and other bubbles components?
+- [x] How should kill confirmation, rename, and project edit work with `bubbles/list`?
+- [x] How should inside-tmux mode work?
+- [x] How should session refresh after kill work?
+- [x] How should file browser return path work?
+- [x] How should initial filter (`--filter` flag) work?
 
 ---
 
@@ -192,5 +197,84 @@ Empty pages are always reachable via `p`/`s` — show the `bubbles/list` built-i
 ### Decision
 
 **`n` immediately creates a session in cwd and attaches.** No confirmation, no cursor movement — same as `portal open .` / `x .`. Works from both pages (cwd doesn't change based on page). Works in command-pending mode (creates session in cwd with the pending command). No spinner — session creation is near-instant.
+
+---
+
+## Should we adopt `bubbles/list` and other bubbles components?
+
+### Context
+
+The current TUI is entirely hand-rolled with `strings.Builder` and basic lipgloss styles. `bubbles` provides ready-made components — the question is which to adopt.
+
+### Journey
+
+Evaluated `bubbles/list` — it provides filtering, pagination, help bar, status bar, custom delegates, spinner, and keybinding management. Covers almost everything the UX doc calls for. The only missing feature is section grouping/headers, which drove the two-page architecture decision.
+
+Evaluated `bubbles/filepicker` as a replacement for the custom file browser. The filepicker shows files and directories (Portal only needs directories), has no fuzzy filtering, and doesn't support alias saving or current-directory selection. Too many gaps — wrapping it would be more work than keeping our own browser.
+
+Other components evaluated: `viewport` (not needed, `list` handles scrolling), `table` (list with delegates is more flexible), `spinner` (not needed for session creation), `progress`/`textarea`/`timer` (no use case).
+
+### Decision
+
+**Adopt `bubbles/list`** for sessions and projects pages. This brings `help`, `key`, and `paginator` along automatically. Continue using `textinput` for rename/edit inputs. **Keep the custom file browser** — it's purpose-built for directory-only navigation with fuzzy filtering and alias support.
+
+---
+
+## How should kill confirmation, rename, and project edit work?
+
+### Context
+
+The current kill confirmation, rename mode, and project edit mode all render inline in the list. With `bubbles/list` owning the rendering via delegates, we needed a new pattern.
+
+### Journey
+
+Initially proposed delegate-level rendering — the delegate checks model state and renders the highlighted item differently (e.g., showing "Kill X? (y/n)" or a `textinput` inline). This works but means delegates need to know about multiple modal states.
+
+Then explored modal overlays — a styled lipgloss box rendered on top of the list in `View()`. Bubble Tea doesn't have built-in modals, but `lipgloss.Place()` can position content over the list output. All key input routes to the modal while it's open.
+
+Modal pattern unifies all action prompts into one consistent UX: action triggers modal, list stays visible but inactive behind it, Esc always dismisses. Kill, rename, and project edit all use the same infrastructure with different content.
+
+Briefly considered offering both modal and inline (e.g., `r` for modal rename, `R` for inline) as a way to test which feels better. Decided against — ship modal first, refactor to inline later if it feels wrong. Cheaper than maintaining two paths.
+
+### Decision
+
+**Modal overlays for all action prompts.** Single reusable modal pattern:
+- **Kill**: small modal — "Kill {name}? (y/n)"
+- **Rename**: small modal with `textinput` pre-populated with current session name
+- **Project edit**: larger modal with name field, alias list, full edit controls
+
+List renders normally behind the modal. All input routes to the modal while active. Esc dismisses.
+
+---
+
+## How should inside-tmux mode work?
+
+### Decision
+
+**Exclude current session from the items list** — filter it out before calling `SetItems()`. Display "Current: {session}" in the **list title**, e.g., `Sessions (current: my-app-x7k2)`. Persistent context, always visible at the top.
+
+---
+
+## How should session refresh after kill work?
+
+### Decision
+
+**Kill session via tmux, fetch fresh list, call `SetItems()`.** `bubbles/list` handles cursor repositioning automatically. If killed session was the last one, list shows empty state. User can press `p` to go to projects.
+
+---
+
+## How should file browser return path work?
+
+### Decision
+
+**Same as current behavior.** Browser emits `BrowserDirSelectedMsg{Path}` → parent creates session and exits TUI. Browser cancelled (`BrowserCancelMsg`) → return to Projects page. No change in flow, just the return destination is explicitly the Projects page.
+
+---
+
+## How should initial filter work?
+
+### Decision
+
+**Apply to the default page during initialization.** Call `SetFilterText()` and `SetFilterState(list.FilterApplied)` on whichever page is the default (sessions if they exist, otherwise projects). Same behavior as current, just using `bubbles/list` API.
 
 ---
