@@ -1,6 +1,6 @@
 ---
 topic: tui-session-picker
-status: in-progress
+status: concluded
 work_type: feature
 date: 2026-02-27
 ---
@@ -278,3 +278,26 @@ List renders normally behind the modal. All input routes to the modal while acti
 **Apply to the default page during initialization.** Call `SetFilterText()` and `SetFilterState(list.FilterApplied)` on whichever page is the default (sessions if they exist, otherwise projects). Same behavior as current, just using `bubbles/list` API.
 
 ---
+
+## Summary
+
+### Key Insights
+
+1. `bubbles/list` lacks section/group support, which drove the two-page architecture — but two pages turned out to be a better UX than the original single-screen proposal anyway
+2. Modal overlays provide a consistent pattern for all action prompts (kill, rename, edit) without fighting the list delegate rendering
+3. `bubbles/filepicker` doesn't fit Portal's directory-only, fuzzy-filtering, alias-saving use case — keep the custom browser
+4. The original UX complaints (undiscoverable keybindings, buried projects, no section context) are all solved by `bubbles/list`'s built-in help bar, two equal-hierarchy pages, and page titles
+
+### Current State
+
+All questions resolved. Architecture is clear:
+- Two-page TUI using `bubbles/list` (Sessions + Projects)
+- `p`/`s` for named switching, `x` as undocumented toggle
+- Modal overlays for kill/rename/project-edit
+- Custom file browser retained
+- Command-pending mode locks to Projects page
+
+### Next Steps
+
+- [ ] Specification — formalize the decisions into a buildable spec
+- [ ] Implementation — rebuild TUI on `bubbles/list` with two-page architecture and modal system
