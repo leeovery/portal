@@ -20,10 +20,10 @@ topic: tui-session-picker
 The `n` key section says it "Works from both pages" and "Works in command-pending mode." However, `[n] new here` only appears in the Sessions page help bar. The Projects page help bar and command-pending help bar don't include it. This is ambiguous — is `n` intentionally undocumented on the Projects page (like `x` for toggle), or should it appear in both help bars?
 
 **Proposed Addition**:
-[Pending discussion]
+Update all three help bars: Sessions adds `[n] new in cwd` (replacing `new here`), Projects adds `[n] new in cwd`, command-pending adds `[n] new in cwd`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: User chose "new in cwd" label over "new here". Applied to all three help bars for consistency.
 
 ---
 

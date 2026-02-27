@@ -36,7 +36,7 @@ The TUI is rebuilt as a **two-page architecture** using `charmbracelet/bubbles/l
 A full `bubbles/list.Model` displaying all active tmux sessions.
 
 **Help bar keybindings:**
-`[enter] attach  [r] rename  [k] kill  [p] projects  [n] new here  [/] filter  [q] quit`
+`[enter] attach  [r] rename  [k] kill  [p] projects  [n] new in cwd  [/] filter  [q] quit`
 
 **Item display:** Each session item is rendered via a custom `ItemDelegate`. Sessions show the session name, window count, and attached badge.
 
@@ -62,7 +62,7 @@ A full `bubbles/list.Model` displaying all active tmux sessions.
 A full `bubbles/list.Model` displaying all saved projects.
 
 **Help bar keybindings:**
-`[enter] new session  [e] edit  [d] delete  [s] sessions  [b] browse  [/] filter  [q] quit`
+`[enter] new session  [e] edit  [d] delete  [s] sessions  [n] new in cwd  [b] browse  [/] filter  [q] quit`
 
 **Item display:** Each project item is rendered via a custom `ItemDelegate`. Projects show the project name and path.
 
@@ -110,7 +110,7 @@ When `portal open -e cmd` is used, the TUI enters command-pending mode.
 - A status line below the title indicates the pending command: `Select project to run: {command}`
 
 **Help bar keybindings:**
-`[enter] run here  [b] browse  [/] filter  [q] quit`
+`[enter] run here  [n] new in cwd  [b] browse  [/] filter  [q] quit`
 
 **Actions:**
 - `enter` — creates a session in the selected project's directory with the pending command, then attaches
