@@ -151,6 +151,16 @@ When `portal open -e cmd` is used, the TUI enters command-pending mode.
 - Empty pages are always reachable via `p`/`s` — navigation is consistent regardless of state
 - Empty pages display the `bubbles/list` built-in empty message ("No sessions running" / "No saved projects")
 
+### Dependencies
+
+No blocking dependencies. All prerequisite systems exist:
+- tmux session management — existing functionality, unchanged
+- Project configuration and storage — existing functionality, unchanged
+- File browser (`internal/ui/browser.go`) — retained as-is
+- `charmbracelet/bubbles/list` — external Go package, added via `go get`
+
+The `tui-redesign` discussion (visual frames/styling) is orthogonal — it can be applied after the architectural rebuild without blocking it.
+
 ---
 
 ## Working Notes
