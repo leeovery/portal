@@ -126,6 +126,14 @@ When `portal open -e cmd` is used, the TUI enters command-pending mode.
 - Call `SetFilterText()` and `SetFilterState(list.FilterApplied)` on whichever page is the default (sessions if they exist, otherwise projects)
 - Same behavior as the current implementation, using `bubbles/list` API
 
+### `n` Key — New Session in CWD
+
+`n` immediately creates a session in the current working directory and attaches. No confirmation, no cursor movement — equivalent to `portal open .` / `x .`.
+
+- Works from both pages (cwd doesn't change based on page)
+- Works in command-pending mode (creates session in cwd with the pending command)
+- No spinner — session creation is near-instant
+
 ### Page Navigation & Defaults
 
 **Page switching:**
