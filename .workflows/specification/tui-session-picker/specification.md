@@ -100,6 +100,23 @@ All action prompts use a **single reusable modal overlay pattern**. Bubble Tea d
 
 **Why modals over inline rendering:** The delegate-level approach (rendering confirmation/input inline in the highlighted list item) requires delegates to know about multiple modal states. Modals unify all action prompts into one consistent UX pattern.
 
+### Command-Pending Mode
+
+When `portal open -e cmd` is used, the TUI enters command-pending mode.
+
+**Behavior:**
+- Locked to the Projects page — `s` and `x` keybindings are **not registered** (pressing them does nothing, they don't appear in the help bar)
+- Title stays "Projects" for consistency
+- A status line below the title indicates the pending command: `Select project to run: {command}`
+
+**Help bar keybindings:**
+`[enter] run here  [b] browse  [/] filter  [q] quit`
+
+**Actions:**
+- `enter` — creates a session in the selected project's directory with the pending command, then attaches
+- `b` — opens file browser (same as normal mode)
+- `q`/`Esc` — cancels entirely (exits TUI without creating a session)
+
 ### Page Navigation & Defaults
 
 **Page switching:**
