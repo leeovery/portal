@@ -31,8 +31,8 @@ The original proposal (from `tui-session-picker-ux.md`) was to merge sessions an
 - [x] How should the unified single-screen list be modeled — one model or composed sub-models?
 - [x] Should sessions and projects be one list or two pages?
 - [x] How should page switching and keybindings work?
-- [ ] How should filter (`/`) work?
-- [ ] What happens to command-pending mode (`portal open -e cmd`)?
+- [x] How should filter (`/`) work?
+- [x] What happens to command-pending mode (`portal open -e cmd`)?
 - [ ] How should empty states be handled (no sessions, no projects, both empty)?
 - [ ] What's the right approach for the `[b] browse for directory...` item?
 - [ ] How should the `n` key auto-execute behavior work?
@@ -126,5 +126,36 @@ All keybindings standardized to lowercase.
 
 **Projects page keybindings:**
 `[enter] new session  [e] edit  [d] delete  [s] sessions  [b] browse  [/] filter  [q] quit`
+
+---
+
+## How should filter work?
+
+### Decision
+
+**Independent filters per page.** Each `bubbles/list` manages its own filter state. Filtering sessions doesn't affect projects and vice versa. Switching pages doesn't carry filter text across. This is the default `bubbles/list` behavior — no extra work needed.
+
+---
+
+## What happens to command-pending mode?
+
+### Context
+
+Currently `portal open -e cmd` skips the session list and opens the project picker directly. With two pages, we need to decide how this mode works.
+
+### Journey
+
+Considered allowing switching to sessions during command-pending mode. But attaching to an existing session doesn't make sense when you have a command to run — existing sessions are already doing something. The question became how to communicate *why* the switch is disabled.
+
+### Decision
+
+**Command-pending mode locks to the Projects page.** `s` and `x` keybindings are not registered — pressing them does nothing, and they don't appear in the help bar.
+
+Title stays "Projects" for consistency. A status line below indicates the pending command: `Select project to run: {command}`.
+
+Help bar in command-pending mode:
+`[enter] run here  [b] browse  [/] filter  [q] quit`
+
+Selecting a project creates a session with the command and attaches. `q`/`Esc` cancels entirely.
 
 ---
