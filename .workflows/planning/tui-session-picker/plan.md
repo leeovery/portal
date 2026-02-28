@@ -13,7 +13,7 @@ task_list_gate_mode: auto
 author_gate_mode: auto
 finding_gate_mode: gated
 planning:
-  phase: 2
+  phase: 3
   task: ~
 ---
 
@@ -60,7 +60,7 @@ ext_id: tick-f20382
 ### Phase 2: Projects Page with bubbles/list
 status: approved
 approved_at: 2026-02-28
-ext_id:
+ext_id: tick-364f1a
 
 **Goal**: Replace `ProjectPickerModel` with a `bubbles/list`-based Projects page including all project actions (new session on enter, edit, delete), custom item delegate, file browser integration, and complete two-way page navigation. Delete the old `ProjectPickerModel` and its tests.
 
@@ -83,13 +83,13 @@ ext_id:
 #### Tasks
 | ID | Name | Edge Cases | Status | Ext ID |
 |----|------|------------|--------|--------|
-| tui-session-picker-2-1 | Project List Item and Custom ItemDelegate | long project paths, projects with identical names | pending | |
-| tui-session-picker-2-2 | Projects Page with bubbles/list Core | empty project list shows built-in empty message, project load error, session creation error | pending | |
-| tui-session-picker-2-3 | Delete Confirmation Modal for Projects | delete last remaining project shows empty state, delete while filter active | pending | |
-| tui-session-picker-2-4 | Project Edit Modal | empty name rejected, alias collision, alias removal, no editor configured | pending | |
-| tui-session-picker-2-5 | File Browser Integration from Projects Page | browser cancel returns to Projects page, Esc in browser returns to Projects page | pending | |
-| tui-session-picker-2-6 | Two-Way Page Navigation and Independent Filters | switching pages does not carry filter text, navigating to empty page shows empty message | pending | |
-| tui-session-picker-2-7 | Remove Old ProjectPickerModel | none | pending | |
+| tui-session-picker-2-1 | Project List Item and Custom ItemDelegate | long project paths, projects with identical names | authored | tick-df51d2 |
+| tui-session-picker-2-2 | Projects Page with bubbles/list Core | empty project list shows built-in empty message, project load error, session creation error | authored | tick-9184b3 |
+| tui-session-picker-2-3 | Delete Confirmation Modal for Projects | delete last remaining project shows empty state, delete while filter active | authored | tick-5509f1 |
+| tui-session-picker-2-4 | Project Edit Modal | empty name rejected, alias collision, alias removal, no editor configured | authored | tick-fd7b3f |
+| tui-session-picker-2-5 | File Browser Integration from Projects Page | browser cancel returns to Projects page, Esc in browser returns to Projects page | authored | tick-f14aa6 |
+| tui-session-picker-2-6 | Two-Way Page Navigation and Independent Filters | switching pages does not carry filter text, navigating to empty page shows empty message | authored | tick-9aebe2 |
+| tui-session-picker-2-7 | Remove Old ProjectPickerModel | none | authored | tick-de5cb8 |
 
 ### Phase 3: Command-Pending Mode and Launch Defaults
 status: approved
