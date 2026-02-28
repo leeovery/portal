@@ -20,7 +20,8 @@ planning:
 # Plan: TUI Session Picker
 
 ### Phase 1: Sessions Page with bubbles/list
-status: draft
+status: approved
+approved_at: 2026-02-28
 ext_id:
 
 **Goal**: Replace the hand-rolled session list with a `bubbles/list`-based Sessions page, establishing the page architecture, modal overlay system, custom item delegate pattern, and all session-level actions (attach, kill, rename, filter, n-key). This phase also sets up the page-switching skeleton so Phase 2 can plug in the Projects page.
@@ -44,7 +45,8 @@ ext_id:
 - [ ] Old `viewState` enum, hand-rolled session rendering, and manual cursor/filter logic are removed from the model
 
 ### Phase 2: Projects Page with bubbles/list
-status: draft
+status: approved
+approved_at: 2026-02-28
 ext_id:
 
 **Goal**: Replace `ProjectPickerModel` with a `bubbles/list`-based Projects page including all project actions (new session on enter, edit, delete), custom item delegate, file browser integration, and complete two-way page navigation. Delete the old `ProjectPickerModel` and its tests.
@@ -66,7 +68,8 @@ ext_id:
 - [ ] Independent filter state per page (switching pages does not carry filter text)
 
 ### Phase 3: Command-Pending Mode and Launch Defaults
-status: draft
+status: approved
+approved_at: 2026-02-28
 ext_id:
 
 **Goal**: Implement command-pending mode (TUI locked to Projects page with restricted keybindings and pending command display) and default page selection logic on launch. Wire up the `cmd/open.go` integration points.
