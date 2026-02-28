@@ -9,7 +9,7 @@ spec_commit: ed0a774efcfa406e84785f233fcc45d27d516848
 created: 2026-02-28
 updated: 2026-02-28
 external_dependencies: []
-task_list_gate_mode: gated
+task_list_gate_mode: auto
 author_gate_mode: auto
 finding_gate_mode: gated
 planning:
