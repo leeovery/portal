@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-02-28
 cycle: 1
 phase: Traceability Review
@@ -160,5 +160,5 @@ This finding overlaps with Finding 2 (same task, same field). The proposed conte
 - When commandPending true, do not register s, x, e, or d keybindings (only enter, n, b, /, q remain; p is already absent from Projects help bar)
 ```
 
-**Resolution**: Pending
-**Notes**: This is subsumed by Finding 2's proposed content. Both findings affect the same Do bullet in Task 3-2.
+**Resolution**: Fixed
+**Notes**: Resolved by Finding 2's applied fix — p is no longer in the disabled list, noted as already absent from Projects help bar.
