@@ -6,7 +6,15 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/tmux"
+)
+
+var (
+	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
+	nameStyle     = lipgloss.NewStyle().Bold(true)
+	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
 )
 
 // SessionItem wraps a tmux.Session and implements the list.Item interface

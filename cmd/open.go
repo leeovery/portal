@@ -290,6 +290,7 @@ func openTUI(initialFilter string, command []string) error {
 		tui.WithProjectStore(store),
 		tui.WithSessionCreator(session.NewSessionCreator(gitResolver, store, client, gen)),
 		tui.WithDirLister(&osDirLister{}, cwd),
+		tui.WithCWD(cwd),
 	)
 	if len(command) > 0 {
 		m = m.WithCommand(command)

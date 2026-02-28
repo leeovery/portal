@@ -570,104 +570,27 @@ func TestEnterSelection(t *testing.T) {
 	})
 }
 
-func TestNewInProjectOption(t *testing.T) {
-	t.Run("n key switches to project picker", func(t *testing.T) {
+func TestNKeyCreatesSessionInCWD(t *testing.T) {
+	t.Run("n creates session in cwd and quits", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 1, Attached: false},
-		}
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{}
-
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Press n to go to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-
-		// Load projects into the picker
-		model, _ = model.Update(ui.ProjectsLoadedMsg{
-			Projects: store.projects,
-		})
-
-		view := model.View()
-		if !strings.Contains(view, "Select a project") {
-			t.Errorf("expected project picker view, got:\n%s", view)
-		}
-	})
-
-	t.Run("esc in project picker returns to session list", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{}
-
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Esc should return to session list
-		model, _ = model.Update(ui.BackMsg{})
-
-		view := model.View()
-		if !strings.Contains(view, "dev") {
-			t.Errorf("expected session list with 'dev', got:\n%s", view)
-		}
-		if strings.Contains(view, "Select a project") {
-			t.Errorf("should not show project picker after Esc:\n%s", view)
-		}
-	})
-
-	t.Run("project selection triggers creation and returns session name", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
 		}
 		creator := &mockSessionCreator{
-			sessionName: "myapp-abc123",
+			sessionName: "portal-abc123",
 		}
 
 		m := tui.New(
 			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/code/portal"),
 		)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Select a project
-		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		// Press n to create session in cwd
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 		if cmd == nil {
-			t.Fatal("expected command from project selection, got nil")
+			t.Fatal("expected command from n key, got nil")
 		}
 
 		msg := cmd()
@@ -675,129 +598,119 @@ func TestNewInProjectOption(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
 		}
-		if createdMsg.SessionName != "myapp-abc123" {
-			t.Errorf("expected session name %q, got %q", "myapp-abc123", createdMsg.SessionName)
+		if createdMsg.SessionName != "portal-abc123" {
+			t.Errorf("expected session name %q, got %q", "portal-abc123", createdMsg.SessionName)
 		}
-		if creator.createdDir != "/code/myapp" {
-			t.Errorf("expected CreateFromDir called with %q, got %q", "/code/myapp", creator.createdDir)
+		if creator.createdDir != "/home/user/code/portal" {
+			t.Errorf("expected CreateFromDir called with %q, got %q", "/home/user/code/portal", creator.createdDir)
 		}
-	})
-
-	t.Run("project selection forwards command to session creator", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{
-			sessionName: "myapp-abc123",
+		if creator.createdCommand != nil {
+			t.Errorf("expected nil command, got %v", creator.createdCommand)
 		}
 
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-		).WithCommand([]string{"claude", "--resume"})
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Select a project
-		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		// Feed SessionCreatedMsg back — should set selected and quit
+		model, cmd = model.Update(createdMsg)
 		if cmd == nil {
-			t.Fatal("expected command from project selection, got nil")
+			t.Fatal("expected quit command after SessionCreatedMsg, got nil")
 		}
-
-		cmd()
-
-		wantCmd := []string{"claude", "--resume"}
-		if len(creator.createdCommand) != len(wantCmd) {
-			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
 		}
-		for i, arg := range creator.createdCommand {
-			if arg != wantCmd[i] {
-				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
-			}
+		if model.(tui.Model).Selected() != "portal-abc123" {
+			t.Errorf("expected Selected() = %q, got %q", "portal-abc123", model.(tui.Model).Selected())
 		}
 	})
 
-	t.Run("no command set passes nil to session creator", func(t *testing.T) {
+	t.Run("n with no session creator is no-op", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 1, Attached: false},
-		}
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{
-			sessionName: "myapp-abc123",
 		}
 
 		m := tui.New(
 			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user"),
 		)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Select a project
-		_, cmd := model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
-		if cmd == nil {
-			t.Fatal("expected command from project selection, got nil")
-		}
-
-		cmd()
-
-		if creator.createdCommand != nil {
-			t.Errorf("expected nil command, got %v", creator.createdCommand)
+		// Press n — no session creator, should be no-op
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd != nil {
+			t.Errorf("expected nil command when no session creator, got non-nil")
 		}
 	})
 
-	t.Run("n key navigable from empty session list", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{},
+	t.Run("session creation error is handled gracefully", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
 		}
-		creator := &mockSessionCreator{}
+		creator := &mockSessionCreator{
+			err: fmt.Errorf("tmux failed"),
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/code"),
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press n
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key, got nil")
+		}
+
+		msg := cmd()
+		// Should be sessionCreateErrMsg (unexported), not SessionCreatedMsg
+		if _, ok := msg.(tui.SessionCreatedMsg); ok {
+			t.Fatal("expected error msg, got SessionCreatedMsg")
+		}
+
+		// Feed the error back — should return to session list, not crash
+		model, _ = model.Update(msg)
+		if model.(tui.Model).Selected() != "" {
+			t.Errorf("expected empty Selected() after error, got %q", model.(tui.Model).Selected())
+		}
+
+		// Verify TUI still renders (no crash)
+		view := model.View()
+		if !strings.Contains(view, "dev") {
+			t.Errorf("expected session list after error, got:\n%s", view)
+		}
+	})
+
+	t.Run("n from empty session list creates session in cwd", func(t *testing.T) {
+		creator := &mockSessionCreator{
+			sessionName: "code-abc123",
+		}
 
 		m := tui.New(
 			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/code"),
 		)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
-		// n should switch to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		// Load empty projects
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: []project.Project{}})
-
-		view := model.View()
-		if !strings.Contains(view, "Select a project") {
-			t.Errorf("expected project picker in combined empty state, got:\n%s", view)
-		}
-		if !strings.Contains(view, "No saved projects yet.") {
-			t.Errorf("expected empty projects message, got:\n%s", view)
+		// Press n
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key on empty list, got nil")
 		}
 
-		// Esc should return to session list
-		model, _ = model.Update(ui.BackMsg{})
-		// The list view should render (empty state managed by bubbles/list)
-		view = model.View()
-		if strings.Contains(view, "Select a project") {
-			t.Errorf("should not show project picker after back, got:\n%s", view)
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "code-abc123" {
+			t.Errorf("expected session name %q, got %q", "code-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/home/user/code" {
+			t.Errorf("expected CreateFromDir called with %q, got %q", "/home/user/code", creator.createdDir)
 		}
 	})
 }
@@ -862,9 +775,6 @@ func (m *mockDirLister) ListDirectories(path string, showHidden bool) ([]browser
 
 func TestFileBrowserIntegration(t *testing.T) {
 	t.Run("browse option opens file browser", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -878,20 +788,18 @@ func TestFileBrowserIntegration(t *testing.T) {
 		}
 
 		m := tui.New(
-			&mockSessionLister{sessions: sessions},
+			&mockSessionLister{sessions: []tmux.Session{}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 			tui.WithDirLister(lister, "/home/user"),
-		)
+		).WithCommand([]string{"test"})
+
 		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Trigger browse selection
+		// Trigger browse selection from project picker
 		model, _ = model.Update(ui.BrowseSelectedMsg{})
 
 		view := model.View()
@@ -1022,9 +930,6 @@ func TestFileBrowserIntegration(t *testing.T) {
 	})
 
 	t.Run("cancel in file browser returns to project picker", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -1038,18 +943,16 @@ func TestFileBrowserIntegration(t *testing.T) {
 		}
 
 		m := tui.New(
-			&mockSessionLister{sessions: sessions},
+			&mockSessionLister{sessions: []tmux.Session{}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 			tui.WithDirLister(lister, "/home/user"),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		).WithCommand([]string{"test"})
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
 
 		// Open file browser
 		model, _ = model.Update(ui.BrowseSelectedMsg{})
@@ -1068,7 +971,6 @@ func TestFileBrowserIntegration(t *testing.T) {
 	})
 
 	t.Run("browse works from empty project list", func(t *testing.T) {
-		sessions := []tmux.Session{}
 		store := &mockProjectStore{projects: []project.Project{}}
 		creator := &mockSessionCreator{sessionName: "docs-abc123"}
 		lister := &mockDirLister{
@@ -1078,20 +980,18 @@ func TestFileBrowserIntegration(t *testing.T) {
 		}
 
 		m := tui.New(
-			&mockSessionLister{sessions: sessions},
+			&mockSessionLister{sessions: []tmux.Session{}},
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 			tui.WithDirLister(lister, "/home/user"),
-		)
+		).WithCommand([]string{"test"})
+
 		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
 
-		// Navigate to project picker (empty)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: []project.Project{}})
-
-		// In empty project list, cursor is on browse option. Trigger browse.
+		// Trigger browse from project picker
 		model, _ = model.Update(ui.BrowseSelectedMsg{})
 
 		view := model.View()
@@ -1104,11 +1004,11 @@ func TestFileBrowserIntegration(t *testing.T) {
 		}
 
 		// Selecting a directory should create a session
-		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/docs"})
+		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/docs"})
 		if cmd == nil {
 			t.Fatal("expected command from directory selection, got nil")
 		}
-		msg := cmd()
+		msg = cmd()
 		createdMsg, ok := msg.(tui.SessionCreatedMsg)
 		if !ok {
 			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
@@ -3288,28 +3188,23 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 	})
 
 	t.Run("WithProjectStore and WithSessionCreator enable project picker", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
 			},
 		}
 		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-		lister := &mockSessionLister{sessions: sessions}
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
 
 		m := tui.New(lister,
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		).WithCommand([]string{"test"})
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
 
 		view := model.View()
 		if !strings.Contains(view, "Select a project") {
@@ -3318,9 +3213,6 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 	})
 
 	t.Run("WithDirLister enables file browser", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 1, Attached: false},
-		}
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -3332,22 +3224,20 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 				"/home/user": {{Name: "code"}, {Name: "docs"}},
 			},
 		}
-		lister := &mockSessionLister{sessions: sessions}
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
 
 		m := tui.New(lister,
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 			tui.WithDirLister(dirLister, "/home/user"),
-		)
+		).WithCommand([]string{"test"})
+
 		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
 
-		// Navigate to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
-
-		// Trigger browse
+		// Trigger browse from project picker
 		model, _ = model.Update(ui.BrowseSelectedMsg{})
 
 		view := model.View()

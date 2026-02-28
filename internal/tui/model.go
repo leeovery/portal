@@ -77,6 +77,7 @@ type Model struct {
 	sessionCreator  SessionCreator
 	dirLister       DirLister
 	startPath       string
+	cwd             string
 	view            viewState
 	projectPicker   ui.ProjectPickerModel
 	fileBrowser     ui.FileBrowserModel
@@ -185,6 +186,14 @@ func WithProjectStore(s ProjectStore) Option {
 func WithSessionCreator(c SessionCreator) Option {
 	return func(m *Model) {
 		m.sessionCreator = c
+	}
+}
+
+// WithCWD sets the current working directory on the model.
+// Used by the n key to create a new session in the current directory.
+func WithCWD(path string) Option {
+	return func(m *Model) {
+		m.cwd = path
 	}
 }
 
@@ -408,7 +417,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterText = ""
 			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
-			return m.handleNewInProject()
+			return m.handleNewInCWD()
 		case msg.Type == tea.KeyEnter:
 			return m.handleSessionListEnter()
 		}
@@ -598,12 +607,21 @@ func (m *Model) applyFilter() {
 	m.sessionList.Select(0)
 }
 
-func (m Model) handleNewInProject() (tea.Model, tea.Cmd) {
-	if m.projectStore != nil {
-		m.projectPicker = ui.NewProjectPicker(m.projectStore)
-		return m, m.projectPicker.Init()
+func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
+	if m.sessionCreator == nil {
+		return m, nil
 	}
-	return m, nil
+	return m, m.createSessionInCWD()
+}
+
+func (m Model) createSessionInCWD() tea.Cmd {
+	return func() tea.Msg {
+		name, err := m.sessionCreator.CreateFromDir(m.cwd, nil)
+		if err != nil {
+			return sessionCreateErrMsg{Err: err}
+		}
+		return SessionCreatedMsg{SessionName: name}
+	}
 }
 
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
