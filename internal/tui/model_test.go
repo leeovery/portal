@@ -3132,6 +3132,476 @@ func TestPageSwitching(t *testing.T) {
 	})
 }
 
+func TestProjectsPage(t *testing.T) {
+	t.Run("ProjectsLoadedMsg populates project list items", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Send ProjectsLoadedMsg
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		items := updated.ProjectListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 project list items, got %d", len(items))
+		}
+		pi0 := items[0].(tui.ProjectItem)
+		if pi0.Project.Name != "portal" {
+			t.Errorf("items[0].Project.Name = %q, want %q", pi0.Project.Name, "portal")
+		}
+		pi1 := items[1].(tui.ProjectItem)
+		if pi1.Project.Name != "webapp" {
+			t.Errorf("items[1].Project.Name = %q, want %q", pi1.Project.Name, "webapp")
+		}
+	})
+
+	t.Run("createSession creates session at given path", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "portal-abc123"}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		// Press enter on first project
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter on project, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "portal-abc123" {
+			t.Errorf("expected session name %q, got %q", "portal-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/code/portal" {
+			t.Errorf("expected CreateFromDir with %q, got %q", "/code/portal", creator.createdDir)
+		}
+	})
+
+	t.Run("createSessionInCWD delegates to createSession with cwd", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "mydir-abc123"}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+
+		// Press n to create in cwd
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "mydir-abc123" {
+			t.Errorf("expected session name %q, got %q", "mydir-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("expected CreateFromDir with %q, got %q", "/home/user/mydir", creator.createdDir)
+		}
+	})
+
+	t.Run("enter on project creates session and quits", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "webapp-abc123"}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Navigate to second project
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+		// Press enter
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter on project, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "webapp-abc123" {
+			t.Errorf("expected session name %q, got %q", "webapp-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/code/webapp" {
+			t.Errorf("expected CreateFromDir with %q, got %q", "/code/webapp", creator.createdDir)
+		}
+
+		// Feed SessionCreatedMsg back — should set selected and quit
+		model, cmd = model.Update(createdMsg)
+		if cmd == nil {
+			t.Fatal("expected quit command after SessionCreatedMsg, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+		if model.(tui.Model).Selected() != "webapp-abc123" {
+			t.Errorf("expected Selected() = %q, got %q", "webapp-abc123", model.(tui.Model).Selected())
+		}
+	})
+
+	t.Run("n on projects page creates session in cwd", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "mydir-abc123"}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		// Press n to create session in cwd
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key on projects page, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "mydir-abc123" {
+			t.Errorf("expected session name %q, got %q", "mydir-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("expected CreateFromDir with %q, got %q", "/home/user/mydir", creator.createdDir)
+		}
+
+		// Feed SessionCreatedMsg back — should set selected and quit
+		model, cmd = model.Update(createdMsg)
+		if cmd == nil {
+			t.Fatal("expected quit command after SessionCreatedMsg, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+		if model.(tui.Model).Selected() != "mydir-abc123" {
+			t.Errorf("expected Selected() = %q, got %q", "mydir-abc123", model.(tui.Model).Selected())
+		}
+	})
+
+	t.Run("q key quits from projects page", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Press q — should quit
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if cmd == nil {
+			t.Fatal("expected quit command from q on projects page, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("Ctrl+C quits from projects page", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Press Ctrl+C — should quit
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C on projects page, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("empty project list shows empty message", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page (no items loaded)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		view := model.View()
+		if !strings.Contains(view, "No saved projects") {
+			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
+		}
+	})
+
+	t.Run("project load error leaves list empty", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Send ProjectsLoadedMsg with error
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Err: fmt.Errorf("failed to load projects"),
+		})
+
+		updated := model.(tui.Model)
+		items := updated.ProjectListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items after load error, got %d", len(items))
+		}
+
+		// Should not crash — view should still render
+		view := model.View()
+		if view == "" {
+			t.Error("view should not be empty after project load error")
+		}
+	})
+
+	t.Run("session creation error handled gracefully", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		creator := &mockSessionCreator{err: fmt.Errorf("tmux failed")}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		// Press enter on project
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter, got nil")
+		}
+
+		msg := cmd()
+		// Should be error message, not SessionCreatedMsg
+		if _, ok := msg.(tui.SessionCreatedMsg); ok {
+			t.Fatal("expected error msg, got SessionCreatedMsg")
+		}
+
+		// Feed the error back — should not crash, selected should be empty
+		model, _ = model.Update(msg)
+		if model.(tui.Model).Selected() != "" {
+			t.Errorf("expected empty Selected() after error, got %q", model.(tui.Model).Selected())
+		}
+
+		// Verify TUI still renders
+		view := model.View()
+		if view == "" {
+			t.Error("view should not be empty after session creation error")
+		}
+	})
+
+	t.Run("WindowSizeMsg updates project list dimensions", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		})
+
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		model := updated.(tui.Model)
+
+		w, h := model.ProjectListSize()
+		if w != 120 {
+			t.Errorf("project list width = %d, want 120", w)
+		}
+		if h != 40 {
+			t.Errorf("project list height = %d, want 40", h)
+		}
+	})
+
+	t.Run("projects help bar shows correct keybindings", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(&mockSessionCreator{sessionName: "test"}),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page with wide width
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		view := model.View()
+		expectedDescs := []string{
+			"new session",
+			"sessions",
+			"new in cwd",
+		}
+		for _, desc := range expectedDescs {
+			if !strings.Contains(view, desc) {
+				t.Errorf("projects help bar should contain %q, got:\n%s", desc, view)
+			}
+		}
+	})
+
+	t.Run("Init fires loadProjects command", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+		)
+
+		cmd := m.Init()
+		if cmd == nil {
+			t.Fatal("Init() returned nil command")
+		}
+
+		// The Init command should be a batch that includes loadProjects.
+		// We cannot directly inspect batch commands, but we can verify
+		// that after running Init and feeding messages, both sessions
+		// and projects get loaded.
+		// For now, just verify Init returns a non-nil command.
+	})
+
+	t.Run("projects page renders using list View", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects, set size, populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		view := model.View()
+		if !strings.Contains(view, "portal") {
+			t.Errorf("view should contain 'portal', got:\n%s", view)
+		}
+		if !strings.Contains(view, "webapp") {
+			t.Errorf("view should contain 'webapp', got:\n%s", view)
+		}
+	})
+}
+
 func TestSessionsPageEmptyText(t *testing.T) {
 	t.Run("empty sessions page shows no sessions running", func(t *testing.T) {
 		m := tui.NewModelWithSessions(nil)

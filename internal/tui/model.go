@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
 )
@@ -65,6 +66,12 @@ type SessionCreatedMsg struct {
 // sessionCreateErrMsg is emitted when session creation fails.
 type sessionCreateErrMsg struct {
 	Err error
+}
+
+// ProjectsLoadedMsg carries the result of loading projects from the store.
+type ProjectsLoadedMsg struct {
+	Projects []project.Project
+	Err      error
 }
 
 // Model is the Bubble Tea model for the session list TUI.
@@ -134,6 +141,16 @@ func (m Model) SessionListVisibleItems() []list.Item {
 // SessionListFilterValue returns the current filter text, for testing.
 func (m Model) SessionListFilterValue() string {
 	return m.sessionList.FilterValue()
+}
+
+// ProjectListItems returns the current items in the project list, for testing.
+func (m Model) ProjectListItems() []list.Item {
+	return m.projectList.Items()
+}
+
+// ProjectListSize returns the project list dimensions, for testing.
+func (m Model) ProjectListSize() (int, int) {
+	return m.projectList.Width(), m.projectList.Height()
 }
 
 // ActivePage returns the currently active page, for testing.
@@ -247,16 +264,18 @@ func newSessionList(items []list.Item) list.Model {
 	return l
 }
 
-// projectHelpKeys returns key.Binding entries for the projects page stub.
+// projectHelpKeys returns key.Binding entries for the projects page.
 func projectHelpKeys() []key.Binding {
 	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new session")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
+		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 	}
 }
 
-// newProjectList creates and configures a stub bubbles/list.Model for projects.
+// newProjectList creates and configures a bubbles/list.Model for projects.
 func newProjectList() list.Model {
-	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(nil, ProjectDelegate{}, 0, 0)
 	l.Title = "Projects"
 	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
@@ -310,16 +329,33 @@ func (m Model) filteredSessions() []tmux.Session {
 	return filtered
 }
 
+// loadProjects returns a command that cleans stale projects and loads the list.
+func (m Model) loadProjects() tea.Cmd {
+	if m.projectStore == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, _ = m.projectStore.CleanStale()
+		projects, err := m.projectStore.List()
+		return ProjectsLoadedMsg{Projects: projects, Err: err}
+	}
+}
+
 // Init returns a command that fetches tmux sessions, or loads projects
 // when in command-pending mode.
 func (m Model) Init() tea.Cmd {
 	if m.commandPending && m.projectStore != nil {
 		return m.projectPicker.Init()
 	}
-	return func() tea.Msg {
+	fetchSessions := func() tea.Msg {
 		sessions, err := m.sessionLister.ListSessions()
 		return SessionsMsg{Sessions: sessions, Err: err}
 	}
+	loadProjects := m.loadProjects()
+	if loadProjects != nil {
+		return tea.Batch(fetchSessions, loadProjects)
+	}
+	return fetchSessions
 }
 
 // Update handles messages and updates the model.
@@ -349,12 +385,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.BrowserCancelMsg:
 		m.activePage = PageProjects
 		return m, nil
+	case ProjectsLoadedMsg:
+		if msg.Err == nil {
+			items := ProjectsToListItems(msg.Projects)
+			m.projectList.SetItems(items)
+		}
+		return m, nil
 	case SessionCreatedMsg:
 		m.selected = msg.SessionName
 		return m, tea.Quit
 	case sessionCreateErrMsg:
-		// On error, return to session list
-		m.activePage = PageSessions
+		// On error, return to current page
 		return m, nil
 	}
 
@@ -391,6 +432,16 @@ func (m Model) updateProjectPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// selectedProjectItem returns the currently selected ProjectItem from the list, if any.
+func (m Model) selectedProjectItem() (ProjectItem, bool) {
+	item := m.projectList.SelectedItem()
+	if item == nil {
+		return ProjectItem{}, false
+	}
+	pi, ok := item.(ProjectItem)
+	return pi, ok
+}
+
 func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -414,12 +465,27 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
 			m.activePage = PageSessions
 			return m, nil
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
+			return m.handleNewInCWD()
+		case msg.Type == tea.KeyEnter:
+			return m.handleProjectEnter()
 		}
 	}
 
 	var cmd tea.Cmd
 	m.projectList, cmd = m.projectList.Update(msg)
 	return m, cmd
+}
+
+func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
+	pi, ok := m.selectedProjectItem()
+	if !ok {
+		return m, nil
+	}
+	if m.sessionCreator == nil {
+		return m, nil
+	}
+	return m, m.createSession(pi.Project.Path)
 }
 
 func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -639,13 +705,7 @@ func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) createSessionInCWD() tea.Cmd {
-	return func() tea.Msg {
-		name, err := m.sessionCreator.CreateFromDir(m.cwd, nil)
-		if err != nil {
-			return sessionCreateErrMsg{Err: err}
-		}
-		return SessionCreatedMsg{SessionName: name}
-	}
+	return m.createSession(m.cwd)
 }
 
 func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
