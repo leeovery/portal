@@ -7,13 +7,18 @@ task_gate_mode: gated
 fix_gate_mode: gated
 analysis_gate_mode: gated
 fix_attempts: 0
-linters: []
+
+linters:
+  - name: golangci-lint
+    command: golangci-lint run ./...
+  - name: gofmt
+    command: gofmt -l .
 analysis_cycle: 0
-project_skills: []
+project_skills: [golang-pro]
 current_phase: 1
-current_task: ~
+current_task: tick-c64e34
 completed_phases: []
-completed_tasks: []
+completed_tasks: [tick-5d021f]
 started: 2026-02-28
 updated: 2026-02-28
 completed: ~
