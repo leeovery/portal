@@ -14,7 +14,7 @@ author_gate_mode: auto
 finding_gate_mode: gated
 planning:
   phase: 1
-  task: 3
+  task: 4
 ---
 
 # Plan: TUI Session Picker
@@ -49,7 +49,7 @@ ext_id: tick-f20382
 |----|------|------------|--------|--------|
 | tui-session-picker-1-1 | Session List Item and Custom ItemDelegate | singular window pluralization, long session names, attached vs detached display | authored | tick-5d021f |
 | tui-session-picker-1-2 | Sessions Page with bubbles/list Core | empty session list shows list empty state, SessionsMsg error triggers quit, inside-tmux with only current session | authored | tick-c64e34 |
-| tui-session-picker-1-3 | Modal Overlay System and Kill Confirmation | kill last remaining session shows empty state, kill error triggers refresh | pending | |
+| tui-session-picker-1-3 | Modal Overlay System and Kill Confirmation | kill last remaining session shows empty state, kill error triggers refresh | authored | tick-b29c05 |
 | tui-session-picker-1-4 | Rename Modal with TextInput | empty rename input rejected, rename to same name, rename error | pending | |
 | tui-session-picker-1-5 | N-Key New Session in CWD | session creation error, no session creator configured | pending | |
 | tui-session-picker-1-6 | Built-in Filtering and Initial Filter | initial filter with no matches, empty initial filter is no-op | pending | |
