@@ -1,6 +1,6 @@
 ---
 topic: tui-session-picker
-status: planning
+status: concluded
 format: tick
 work_type: feature
 ext_id: tick-dd35bb
