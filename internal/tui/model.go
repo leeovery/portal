@@ -13,13 +13,16 @@ import (
 	"github.com/leeovery/portal/internal/ui"
 )
 
-// viewState tracks which view the TUI is currently displaying.
-type viewState int
+// page tracks which page the TUI is currently displaying.
+type page int
 
 const (
-	viewSessionList viewState = iota
-	viewProjectPicker
-	viewFileBrowser
+	// PageSessions displays the sessions list.
+	PageSessions page = iota
+	// PageProjects displays the projects list.
+	PageProjects
+	// pageFileBrowser displays the file browser sub-view.
+	pageFileBrowser
 )
 
 // SessionLister defines the interface for listing tmux sessions.
@@ -77,7 +80,8 @@ type Model struct {
 	dirLister       DirLister
 	startPath       string
 	cwd             string
-	view            viewState
+	activePage      page
+	projectList     list.Model
 	projectPicker   ui.ProjectPickerModel
 	fileBrowser     ui.FileBrowserModel
 	initialFilter   string
@@ -132,6 +136,11 @@ func (m Model) SessionListFilterValue() string {
 	return m.sessionList.FilterValue()
 }
 
+// ActivePage returns the currently active page, for testing.
+func (m Model) ActivePage() page {
+	return m.activePage
+}
+
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 // The filter is applied to the session list after items load.
 func (m Model) WithInitialFilter(filter string) Model {
@@ -146,7 +155,7 @@ func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
 		m.commandPending = true
-		m.view = viewProjectPicker
+		m.activePage = PageProjects
 		if m.projectStore != nil {
 			m.projectPicker = ui.NewProjectPicker(m.projectStore)
 		}
@@ -234,6 +243,27 @@ func newSessionList(items []list.Item) list.Model {
 	l.SetFilteringEnabled(true)
 	l.AdditionalShortHelpKeys = sessionHelpKeys
 	l.AdditionalFullHelpKeys = sessionHelpKeys
+	l.SetStatusBarItemName("session", "sessions running")
+	return l
+}
+
+// projectHelpKeys returns key.Binding entries for the projects page stub.
+func projectHelpKeys() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
+	}
+}
+
+// newProjectList creates and configures a stub bubbles/list.Model for projects.
+func newProjectList() list.Model {
+	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Projects"
+	l.KeyMap.Quit.SetEnabled(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.AdditionalShortHelpKeys = projectHelpKeys
+	l.AdditionalFullHelpKeys = projectHelpKeys
+	l.SetStatusBarItemName("project", "saved projects")
 	return l
 }
 
@@ -243,6 +273,7 @@ func New(lister SessionLister, opts ...Option) Model {
 	m := Model{
 		sessionLister: lister,
 		sessionList:   newSessionList(nil),
+		projectList:   newProjectList(),
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -255,9 +286,12 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 	items := ToListItems(sessions)
 	l := newSessionList(items)
 	l.SetSize(80, 24)
+	pl := newProjectList()
+	pl.SetSize(80, 24)
 	m := Model{
 		sessions:    sessions,
 		sessionList: l,
+		projectList: pl,
 	}
 	return m
 }
@@ -290,39 +324,48 @@ func (m Model) Init() tea.Cmd {
 
 // Update handles messages and updates the model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Forward WindowSizeMsg to both page lists so they have correct dimensions
+	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.sessionList.SetSize(wsm.Width, wsm.Height)
+		m.projectList.SetSize(wsm.Width, wsm.Height)
+	}
+
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
 	case ui.BackMsg:
 		if m.commandPending {
 			return m, tea.Quit
 		}
-		m.view = viewSessionList
+		m.activePage = PageSessions
 		return m, nil
 	case ui.ProjectSelectedMsg:
 		return m, m.createSession(msg.Path)
 	case ui.BrowseSelectedMsg:
 		m.fileBrowser = ui.NewFileBrowser(m.startPath, m.dirLister)
-		m.view = viewFileBrowser
+		m.activePage = pageFileBrowser
 		return m, nil
 	case ui.BrowserDirSelectedMsg:
 		return m, m.createSession(msg.Path)
 	case ui.BrowserCancelMsg:
-		m.view = viewProjectPicker
+		m.activePage = PageProjects
 		return m, nil
 	case SessionCreatedMsg:
 		m.selected = msg.SessionName
 		return m, tea.Quit
 	case sessionCreateErrMsg:
 		// On error, return to session list
-		m.view = viewSessionList
+		m.activePage = PageSessions
 		return m, nil
 	}
 
 	// Delegate to the active view
-	switch m.view {
-	case viewProjectPicker:
-		return m.updateProjectPicker(msg)
-	case viewFileBrowser:
+	switch m.activePage {
+	case PageProjects:
+		if m.commandPending {
+			return m.updateProjectPicker(msg)
+		}
+		return m.updateProjectsPage(msg)
+	case pageFileBrowser:
 		return m.updateFileBrowser(msg)
 	default:
 		return m.updateSessionList(msg)
@@ -345,6 +388,31 @@ func (m Model) updateProjectPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ok {
 		m.projectPicker = picker
 	}
+	return m, cmd
+}
+
+func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if m.projectList.SettingFilter() {
+			break
+		}
+		switch {
+		case msg.Type == tea.KeyCtrlC:
+			return m, tea.Quit
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+			return m, tea.Quit
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "s":
+			m.activePage = PageSessions
+			return m, nil
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+			m.activePage = PageSessions
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.projectList, cmd = m.projectList.Update(msg)
 	return m, cmd
 }
 
@@ -398,12 +466,8 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if picker, ok := updated.(ui.ProjectPickerModel); ok {
 			m.projectPicker = picker
 		}
-		m.view = viewProjectPicker
+		m.activePage = PageProjects
 		return m, cmd
-
-	case tea.WindowSizeMsg:
-		m.sessionList.SetSize(msg.Width, msg.Height)
-		return m, nil
 
 	case tea.KeyMsg:
 		// When the list is actively filtering, let it handle all key input
@@ -421,6 +485,12 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleRenameKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			return m.handleNewInCWD()
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "p":
+			m.activePage = PageProjects
+			return m, nil
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+			m.activePage = PageProjects
+			return m, nil
 		case msg.Type == tea.KeyEnter:
 			return m.handleSessionListEnter()
 		}
@@ -570,17 +640,18 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 
 // View renders the current view.
 func (m Model) View() string {
-	switch m.view {
-	case viewProjectPicker:
-		var b strings.Builder
+	switch m.activePage {
+	case PageProjects:
 		if m.commandPending {
+			var b strings.Builder
 			b.WriteString("Command: ")
 			b.WriteString(strings.Join(m.command, " "))
 			b.WriteString("\n\n")
+			b.WriteString(m.projectPicker.View())
+			return b.String()
 		}
-		b.WriteString(m.projectPicker.View())
-		return b.String()
-	case viewFileBrowser:
+		return m.projectList.View()
+	case pageFileBrowser:
 		return m.fileBrowser.View()
 	default:
 		return m.viewSessionList()

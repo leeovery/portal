@@ -3001,3 +3001,178 @@ func TestBuiltInFiltering(t *testing.T) {
 		}
 	})
 }
+
+func TestPageSwitching(t *testing.T) {
+	t.Run("p on sessions page switches to projects page", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Verify starting on sessions page
+		if m.ActivePage() != tui.PageSessions {
+			t.Fatalf("expected initial page to be PageSessions, got %d", m.ActivePage())
+		}
+
+		// Press p to switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("s on projects page switches to sessions page", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page first
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Press s to switch back to sessions page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("x toggles from sessions to projects", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Press x to toggle from sessions to projects
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after x from sessions, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("x toggles from projects to sessions", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects first
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Press x to toggle back to sessions
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions after x from projects, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("switching to projects and back preserves session list state", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Move cursor down to bravo
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+		// Verify cursor is on bravo
+		result, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if result.(tui.Model).Selected() != "bravo" {
+			t.Fatalf("precondition: expected cursor on bravo, got %q", result.(tui.Model).Selected())
+		}
+
+		// Reset model (re-navigate to bravo without selecting)
+		model = tui.NewModelWithSessions(sessions)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+
+		// Switch to projects and back
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+		// Press enter to verify cursor is still on bravo
+		result, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command from enter")
+		}
+		if result.(tui.Model).Selected() != "bravo" {
+			t.Errorf("expected cursor still on bravo after page switch round-trip, got %q", result.(tui.Model).Selected())
+		}
+	})
+
+	t.Run("switching to empty stub projects page shows empty message", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page (stub with no items)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		view := model.View()
+		if !strings.Contains(view, "No saved projects") {
+			t.Errorf("expected 'No saved projects' on empty projects page, got:\n%s", view)
+		}
+	})
+}
+
+func TestSessionsPageEmptyText(t *testing.T) {
+	t.Run("empty sessions page shows no sessions running", func(t *testing.T) {
+		m := tui.NewModelWithSessions(nil)
+		view := m.View()
+		if !strings.Contains(view, "No sessions running") {
+			t.Errorf("expected 'No sessions running' on empty sessions page, got:\n%s", view)
+		}
+	})
+}
+
+func TestProjectsStubHelpBar(t *testing.T) {
+	t.Run("projects stub help bar includes s for sessions", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page and set wide width so help bar shows
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := model.View()
+		if !strings.Contains(view, "sessions") {
+			t.Errorf("projects help bar should contain 'sessions', got:\n%s", view)
+		}
+	})
+}
+
+func TestSessionsPageHelpBarIncludesProjects(t *testing.T) {
+	t.Run("sessions page help bar includes p for projects", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		// Use wider width so all help bindings fit
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := updated.View()
+		if !strings.Contains(view, "projects") {
+			t.Errorf("sessions help bar should contain 'projects', got:\n%s", view)
+		}
+	})
+}
