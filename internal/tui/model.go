@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/fuzzy"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
 )
@@ -88,8 +87,6 @@ type Model struct {
 	pendingKillName string
 	renameInput     textinput.Model
 	renameTarget    string
-	filterMode      bool
-	filterText      string
 	command         []string
 	commandPending  bool
 }
@@ -120,13 +117,25 @@ func (m Model) SessionListSize() (int, int) {
 	return m.sessionList.Width(), m.sessionList.Height()
 }
 
+// SessionListFilterState returns the current filter state of the session list, for testing.
+func (m Model) SessionListFilterState() list.FilterState {
+	return m.sessionList.FilterState()
+}
+
+// SessionListVisibleItems returns the visible (filtered) items in the session list, for testing.
+func (m Model) SessionListVisibleItems() []list.Item {
+	return m.sessionList.VisibleItems()
+}
+
+// SessionListFilterValue returns the current filter text, for testing.
+func (m Model) SessionListFilterValue() string {
+	return m.sessionList.FilterValue()
+}
+
 // WithInitialFilter returns a copy of the Model with the initial filter set.
-// When in command-pending mode, the filter is applied to the project picker.
+// The filter is applied to the session list after items load.
 func (m Model) WithInitialFilter(filter string) Model {
 	m.initialFilter = filter
-	if m.commandPending && filter != "" {
-		m.projectPicker = m.projectPicker.WithFilter(filter)
-	}
 	return m
 }
 
@@ -222,7 +231,7 @@ func newSessionList(items []list.Item) list.Model {
 	l.Title = "Sessions"
 	l.KeyMap.Quit.SetEnabled(false)
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	l.AdditionalShortHelpKeys = sessionHelpKeys
 	l.AdditionalFullHelpKeys = sessionHelpKeys
 	return l
@@ -363,11 +372,6 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModal(msg)
 	}
 
-	// Handle filter mode
-	if m.filterMode {
-		return m.updateFilter(msg)
-	}
-
 	switch msg := msg.(type) {
 	case SessionsMsg:
 		if msg.Err != nil {
@@ -383,10 +387,9 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.initialFilter != "" {
-			m.filterMode = true
-			m.filterText = m.initialFilter
+			m.sessionList.SetFilterText(m.initialFilter)
+			m.sessionList.SetFilterState(list.FilterApplied)
 			m.initialFilter = ""
-			m.applyFilter()
 		}
 
 	case ui.ProjectsLoadedMsg:
@@ -403,6 +406,10 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// When the list is actively filtering, let it handle all key input
+		if m.sessionList.SettingFilter() {
+			break
+		}
 		switch {
 		case msg.Type == tea.KeyCtrlC:
 			return m, tea.Quit
@@ -412,10 +419,6 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleKillKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "r":
 			return m.handleRenameKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "/":
-			m.filterMode = true
-			m.filterText = ""
-			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			return m.handleNewInCWD()
 		case msg.Type == tea.KeyEnter:
@@ -423,7 +426,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Delegate remaining key handling to the list (cursor navigation, etc.)
+	// Delegate remaining key handling to the list (cursor navigation, filtering, etc.)
 	var cmd tea.Cmd
 	m.sessionList, cmd = m.sessionList.Update(msg)
 	return m, cmd
@@ -539,74 +542,6 @@ func (m Model) renameAndRefresh(oldName, newName string) tea.Cmd {
 	}
 }
 
-func (m Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
-	keyMsg, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-
-	switch keyMsg.Type {
-	case tea.KeyEsc:
-		m.filterMode = false
-		m.filterText = ""
-		// Restore unfiltered items
-		items := ToListItems(m.filteredSessions())
-		m.sessionList.SetItems(items)
-		return m, nil
-	case tea.KeyBackspace:
-		if len(m.filterText) > 0 {
-			m.filterText = m.filterText[:len(m.filterText)-1]
-			m.applyFilter()
-		} else {
-			m.filterMode = false
-			m.filterText = ""
-			items := ToListItems(m.filteredSessions())
-			m.sessionList.SetItems(items)
-		}
-		return m, nil
-	case tea.KeyEnter:
-		si, ok := m.selectedSessionItem()
-		if ok {
-			m.selected = si.Session.Name
-			return m, tea.Quit
-		}
-		// No session selected — check if we should go to project picker
-		if m.projectStore != nil {
-			m.filterMode = false
-			m.filterText = ""
-			m.projectPicker = ui.NewProjectPicker(m.projectStore)
-			return m, m.projectPicker.Init()
-		}
-		return m, nil
-	case tea.KeyDown:
-		// Let the list handle navigation
-		var cmd tea.Cmd
-		m.sessionList, cmd = m.sessionList.Update(msg)
-		return m, cmd
-	case tea.KeyUp:
-		var cmd tea.Cmd
-		m.sessionList, cmd = m.sessionList.Update(msg)
-		return m, cmd
-	case tea.KeyRunes:
-		m.filterText += string(keyMsg.Runes)
-		m.applyFilter()
-		return m, nil
-	}
-
-	return m, nil
-}
-
-// applyFilter updates the list items based on the current filter text.
-func (m *Model) applyFilter() {
-	filtered := m.filteredSessions()
-	matched := fuzzy.Filter(filtered, m.filterText, func(s tmux.Session) string {
-		return s.Name
-	})
-	items := ToListItems(matched)
-	m.sessionList.SetItems(items)
-	m.sessionList.Select(0)
-}
-
 func (m Model) handleNewInCWD() (tea.Model, tea.Cmd) {
 	if m.sessionCreator == nil {
 		return m, nil
@@ -673,13 +608,5 @@ func (m Model) viewSessionList() string {
 		return renderModal(m.renameInput.View(), listView, w, h)
 	}
 
-	var b strings.Builder
-	b.WriteString(listView)
-
-	if m.filterMode {
-		b.WriteString("\n\n")
-		fmt.Fprintf(&b, "filter: %s", m.filterText)
-	}
-
-	return b.String()
+	return listView
 }
