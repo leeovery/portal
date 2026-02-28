@@ -85,7 +85,6 @@ type Model struct {
 	currentSession  string
 	modal           modalState
 	pendingKillName string
-	renameMode      bool
 	renameInput     textinput.Model
 	renameTarget    string
 	filterMode      bool
@@ -355,11 +354,6 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateModal(msg)
 	}
 
-	// Handle rename mode
-	if m.renameMode {
-		return m.updateRename(msg)
-	}
-
 	// Handle filter mode
 	if m.filterMode {
 		return m.updateFilter(msg)
@@ -407,7 +401,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "k":
 			return m.handleKillKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "R":
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "r":
 			return m.handleRenameKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "/":
 			m.filterMode = true
@@ -443,6 +437,8 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.modal {
 	case modalKillConfirm:
 		return m.updateKillConfirmModal(msg)
+	case modalRename:
+		return m.updateRenameModal(msg)
 	default:
 		return m, nil
 	}
@@ -488,17 +484,17 @@ func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
 	if m.sessionRenamer == nil {
 		return m, nil
 	}
-	m.renameMode = true
+	m.modal = modalRename
 	m.renameTarget = si.Session.Name
 	ti := textinput.New()
-	ti.Prompt = "Rename: "
+	ti.Prompt = "New name: "
 	ti.SetValue(m.renameTarget)
 	ti.Focus()
 	m.renameInput = ti
 	return m, nil
 }
 
-func (m Model) updateRename(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateRenameModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if ok {
 		switch keyMsg.Type {
@@ -508,11 +504,11 @@ func (m Model) updateRename(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			oldName := m.renameTarget
-			m.renameMode = false
+			m.modal = modalNone
 			m.renameTarget = ""
 			return m, m.renameAndRefresh(oldName, newName)
 		case tea.KeyEsc:
-			m.renameMode = false
+			m.modal = modalNone
 			m.renameTarget = ""
 			return m, nil
 		}
@@ -642,26 +638,25 @@ func (m Model) View() string {
 func (m Model) viewSessionList() string {
 	listView := m.sessionList.View()
 
+	w, h := m.sessionList.Width(), m.sessionList.Height()
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+
 	// Overlay modal on top of list when active
-	if m.modal == modalKillConfirm {
+	switch m.modal {
+	case modalKillConfirm:
 		content := fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName)
-		w, h := m.sessionList.Width(), m.sessionList.Height()
-		if w == 0 {
-			w = 80
-		}
-		if h == 0 {
-			h = 24
-		}
 		return renderModal(content, listView, w, h)
+	case modalRename:
+		return renderModal(m.renameInput.View(), listView, w, h)
 	}
 
 	var b strings.Builder
 	b.WriteString(listView)
-
-	if m.renameMode {
-		b.WriteString("\n\n")
-		b.WriteString(m.renameInput.View())
-	}
 
 	if m.filterMode {
 		b.WriteString("\n\n")

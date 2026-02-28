@@ -1863,7 +1863,7 @@ func newModelWithRenamer(lister *mockSessionLister, killer *mockSessionKiller, r
 }
 
 func TestRenameSession(t *testing.T) {
-	t.Run("R enters rename mode with current name pre-filled", func(t *testing.T) {
+	t.Run("r opens rename modal with pre-populated session name", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -1874,20 +1874,25 @@ func TestRenameSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R on the first session
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r (lowercase) on the first session
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
 		view := model.View()
-		// Should show rename prompt with the session name
-		if !strings.Contains(view, "Rename:") {
-			t.Errorf("expected rename prompt, got:\n%s", view)
+		// Should show rename modal with "New name: " prompt
+		if !strings.Contains(view, "New name:") {
+			t.Errorf("expected rename modal with 'New name:' prompt, got:\n%s", view)
 		}
+		// Should have border styling (modal overlay)
+		if !strings.ContainsAny(view, "─│╭╮╰╯") {
+			t.Errorf("rename modal should contain border characters, got:\n%s", view)
+		}
+		// Should contain the pre-populated session name
 		if !strings.Contains(view, "alpha") {
-			t.Errorf("expected pre-filled name 'alpha' in rename prompt, got:\n%s", view)
+			t.Errorf("expected pre-filled name 'alpha' in rename modal, got:\n%s", view)
 		}
 	})
 
-	t.Run("Enter in rename mode calls rename-session and refreshes", func(t *testing.T) {
+	t.Run("enter in rename modal renames session and refreshes", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -1898,13 +1903,11 @@ func TestRenameSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R to enter rename mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r to open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
 		// Clear the text and type a new name
-		// First, select all and delete (Ctrl+U clears line)
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-		// Type "new-alpha"
 		for _, r := range "new-alpha" {
 			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		}
@@ -1932,7 +1935,43 @@ func TestRenameSession(t *testing.T) {
 		}
 	})
 
-	t.Run("Esc in rename mode cancels without renaming", func(t *testing.T) {
+	t.Run("empty rename input is rejected on enter", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		renamer := &mockSessionRenamer{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press r to open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		// Clear input
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+
+		// Press Enter with empty input
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		// Should not trigger rename (no command returned)
+		if cmd != nil {
+			t.Error("expected nil command for empty rename input")
+		}
+
+		// Renamer should not have been called
+		if renamer.renamedOld != "" {
+			t.Errorf("rename should not have been called with empty input, but got old=%q", renamer.renamedOld)
+		}
+
+		// Modal should still be open (modal stays open on empty input)
+		view := model.View()
+		if !strings.Contains(view, "New name:") {
+			t.Errorf("rename modal should stay open after empty enter, got:\n%s", view)
+		}
+	})
+
+	t.Run("Esc dismisses rename modal without renaming", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -1943,16 +1982,16 @@ func TestRenameSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R to enter rename mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r to open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
-		// Press Esc to cancel
+		// Press Esc to dismiss
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 		view := model.View()
-		// Should be back to normal session list
-		if strings.Contains(view, "Rename:") {
-			t.Errorf("rename prompt should be cleared after Esc, got:\n%s", view)
+		// Should be back to normal session list, no modal
+		if strings.Contains(view, "New name:") {
+			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
 		}
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("session 'alpha' should still be in list after cancel, got:\n%s", view)
@@ -1962,7 +2001,7 @@ func TestRenameSession(t *testing.T) {
 		}
 	})
 
-	t.Run("empty input does not trigger rename", func(t *testing.T) {
+	t.Run("rename to same name is allowed", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 		}
@@ -1972,23 +2011,93 @@ func TestRenameSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R to enter rename mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r — name is pre-filled with "alpha"
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
-		// Clear input
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-
-		// Press Enter with empty input
+		// Press Enter without changing — same name rename
 		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-		// Should not trigger rename (no command returned)
-		if cmd != nil {
-			t.Error("expected nil command for empty rename input")
+		if cmd == nil {
+			t.Fatal("expected command from same-name rename, got nil")
 		}
 
-		// Should still be in rename mode or cancelled — renamer should not have been called
-		if renamer.renamedOld != "" {
-			t.Errorf("rename should not have been called with empty input, but got old=%q", renamer.renamedOld)
+		msg := cmd()
+		_, ok := msg.(tui.SessionsMsg)
+		if !ok {
+			t.Fatalf("expected SessionsMsg, got %T", msg)
+		}
+
+		// Verify rename was called with same old and new name
+		if renamer.renamedOld != "alpha" {
+			t.Errorf("expected old name %q, got %q", "alpha", renamer.renamedOld)
+		}
+		if renamer.renamedNew != "alpha" {
+			t.Errorf("expected new name %q, got %q", "alpha", renamer.renamedNew)
+		}
+	})
+
+	t.Run("rename error triggers refresh", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		renamer := &mockSessionRenamer{err: fmt.Errorf("duplicate session name")}
+		lister := &mockSessionLister{sessions: sessions}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// r, clear, type new name, Enter
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		for _, r := range "bravo" {
+			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if cmd == nil {
+			t.Fatal("expected command from rename, got nil")
+		}
+
+		msg := cmd()
+		sessionsMsg, ok := msg.(tui.SessionsMsg)
+		if !ok {
+			t.Fatalf("expected SessionsMsg, got %T", msg)
+		}
+		if sessionsMsg.Err == nil {
+			t.Fatal("expected error in SessionsMsg when rename fails, got nil")
+		}
+	})
+
+	t.Run("r on empty list is no-op", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		renamer := &mockSessionRenamer{}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+
+		// Press r on empty list
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		view := model.View()
+		// Should not show rename modal
+		if strings.Contains(view, "New name:") {
+			t.Errorf("r on empty list should be no-op, got:\n%s", view)
+		}
+	})
+
+	t.Run("r without renamer configured is no-op", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+
+		// Press r — should be no-op (no renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		view := model.View()
+		if strings.Contains(view, "New name:") {
+			t.Errorf("r with no renamer should be no-op, got:\n%s", view)
 		}
 	})
 
@@ -2007,8 +2116,8 @@ func TestRenameSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 
 		// Clear and type new name
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
@@ -2030,139 +2139,9 @@ func TestRenameSession(t *testing.T) {
 		if !strings.Contains(view, "new-alpha") {
 			t.Errorf("expected renamed session 'new-alpha' in list, got:\n%s", view)
 		}
-		if strings.Contains(view, "Rename:") {
-			t.Errorf("rename prompt should be cleared after successful rename, got:\n%s", view)
-		}
-	})
-
-	t.Run("renamed session appears with new name in list", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "dev", Windows: 3, Attached: true},
-			{Name: "work", Windows: 1, Attached: false},
-		}
-		renamedSessions := []tmux.Session{
-			{Name: "development", Windows: 3, Attached: true},
-			{Name: "work", Windows: 1, Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// R, clear, type new name, Enter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-		for _, r := range "development" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		}
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-		lister.sessions = renamedSessions
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		view := model.View()
-		if !strings.Contains(view, "development") {
-			t.Errorf("expected 'development' in view, got:\n%s", view)
-		}
-		if strings.Contains(view, "dev") && !strings.Contains(view, "development") {
-			t.Errorf("old name 'dev' should no longer appear, got:\n%s", view)
-		}
-	})
-
-	t.Run("rename error from tmux is returned in SessionsMsg", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-		}
-		renamer := &mockSessionRenamer{err: fmt.Errorf("duplicate session name")}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// R, clear, type new name, Enter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-		for _, r := range "bravo" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		}
-		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-		if cmd == nil {
-			t.Fatal("expected command from rename, got nil")
-		}
-
-		msg := cmd()
-		sessionsMsg, ok := msg.(tui.SessionsMsg)
-		if !ok {
-			t.Fatalf("expected SessionsMsg, got %T", msg)
-		}
-		if sessionsMsg.Err == nil {
-			t.Fatal("expected error in SessionsMsg when rename fails, got nil")
-		}
-	})
-
-	t.Run("cursor stays at same index after rename", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-			{Name: "bravo", Windows: 2, Attached: false},
-			{Name: "charlie", Windows: 3, Attached: false},
-		}
-		renamedSessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-			{Name: "bravo-renamed", Windows: 2, Attached: false},
-			{Name: "charlie", Windows: 3, Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to bravo (index 1)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
-
-		// R, clear, type new name, Enter
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
-		for _, r := range "bravo-renamed" {
-			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		}
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-		lister.sessions = renamedSessions
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		view := model.View()
-		// Cursor should be on bravo-renamed (index 1)
-		lines := strings.Split(view, "\n")
-		var bravoLine string
-		for _, line := range lines {
-			if strings.Contains(line, "bravo-renamed") {
-				bravoLine = line
-				break
-			}
-		}
-		if !strings.Contains(bravoLine, ">") {
-			t.Errorf("cursor should be on 'bravo-renamed' after rename, got:\n%s", view)
-		}
-	})
-
-	t.Run("R with no renamer configured is no-op", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-		}
-		m := tui.NewModelWithSessions(sessions)
-
-		// Press R — should be no-op (no renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-
-		view := model.View()
-		if strings.Contains(view, "Rename:") {
-			t.Errorf("R with no renamer should be no-op, got:\n%s", view)
+		// Modal should be dismissed
+		if strings.Contains(view, "New name:") {
+			t.Errorf("rename modal should be dismissed after successful rename, got:\n%s", view)
 		}
 	})
 }
@@ -3300,11 +3279,11 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press R — should enter rename mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+		// Press r — should open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
 		view := model.View()
-		if !strings.Contains(view, "Rename:") {
-			t.Errorf("expected rename prompt, got:\n%s", view)
+		if !strings.Contains(view, "New name:") {
+			t.Errorf("expected rename modal prompt, got:\n%s", view)
 		}
 	})
 

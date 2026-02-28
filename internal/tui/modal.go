@@ -12,6 +12,7 @@ type modalState int
 const (
 	modalNone        modalState = iota
 	modalKillConfirm            // Kill session confirmation
+	modalRename                 // Rename session with textinput
 )
 
 // modalStyle defines the bordered box style for modal overlays.
