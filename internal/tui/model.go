@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/fuzzy"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
@@ -17,7 +18,7 @@ import (
 type viewState int
 
 const (
-	viewSessionList  viewState = iota
+	viewSessionList viewState = iota
 	viewProjectPicker
 	viewFileBrowser
 )
@@ -66,10 +67,9 @@ type sessionCreateErrMsg struct {
 
 // Model is the Bubble Tea model for the session list TUI.
 type Model struct {
+	sessionList     list.Model
 	sessions        []tmux.Session
-	cursor          int
 	selected        string
-	loaded          bool
 	sessionLister   SessionLister
 	sessionKiller   SessionKiller
 	sessionRenamer  SessionRenamer
@@ -105,6 +105,21 @@ func (m Model) InitialFilter() string {
 	return m.initialFilter
 }
 
+// SessionListItems returns the current items in the session list, for testing.
+func (m Model) SessionListItems() []list.Item {
+	return m.sessionList.Items()
+}
+
+// SessionListTitle returns the session list title, for testing.
+func (m Model) SessionListTitle() string {
+	return m.sessionList.Title
+}
+
+// SessionListSize returns the session list dimensions, for testing.
+func (m Model) SessionListSize() (int, int) {
+	return m.sessionList.Width(), m.sessionList.Height()
+}
+
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 // When in command-pending mode, the filter is applied to the project picker.
 func (m Model) WithInitialFilter(filter string) Model {
@@ -132,11 +147,14 @@ func (m Model) WithCommand(command []string) Model {
 
 // WithInsideTmux returns a copy of the Model configured as running inside tmux
 // with the given current session name. The current session is excluded from the
-// session list and a header showing the current session name is rendered.
+// session list and the list title shows the current session name.
 func (m Model) WithInsideTmux(currentSession string) Model {
 	m.insideTmux = true
 	m.currentSession = currentSession
-	m.sessions = m.filteredSessions()
+	// Re-filter and update list items if sessions are already populated
+	filtered := m.filteredSessions()
+	m.sessionList.SetItems(ToListItems(filtered))
+	m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", currentSession)
 	return m
 }
 
@@ -179,11 +197,35 @@ func WithDirLister(d DirLister, startPath string) Option {
 	}
 }
 
+// sessionHelpKeys returns key.Binding entries for session-specific actions.
+func sessionHelpKeys() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
+		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
+		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
+		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+	}
+}
+
+// newSessionList creates and configures a new bubbles/list.Model for sessions.
+func newSessionList(items []list.Item) list.Model {
+	l := list.New(items, SessionDelegate{}, 0, 0)
+	l.Title = "Sessions"
+	l.KeyMap.Quit.SetEnabled(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.AdditionalShortHelpKeys = sessionHelpKeys
+	l.AdditionalFullHelpKeys = sessionHelpKeys
+	return l
+}
+
 // New creates a Model that fetches sessions from the given SessionLister.
 // Optional dependencies are configured via functional options.
 func New(lister SessionLister, opts ...Option) Model {
 	m := Model{
 		sessionLister: lister,
+		sessionList:   newSessionList(nil),
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -193,11 +235,14 @@ func New(lister SessionLister, opts ...Option) Model {
 
 // NewModelWithSessions creates a Model pre-populated with sessions, for testing.
 func NewModelWithSessions(sessions []tmux.Session) Model {
-	return Model{
-		sessions: sessions,
-		cursor:   0,
-		loaded:   true,
+	items := ToListItems(sessions)
+	l := newSessionList(items)
+	l.SetSize(80, 24)
+	m := Model{
+		sessions:    sessions,
+		sessionList: l,
 	}
+	return m
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -212,12 +257,6 @@ func (m Model) filteredSessions() []tmux.Session {
 		}
 	}
 	return filtered
-}
-
-// totalItems returns the count of navigable items in the session list view.
-// This is the number of sessions plus 1 for the "new in project" option.
-func (m Model) totalItems() int {
-	return len(m.sessions) + 1
 }
 
 // Init returns a command that fetches tmux sessions, or loads projects
@@ -300,6 +339,16 @@ func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// selectedSessionItem returns the currently selected SessionItem from the list, if any.
+func (m Model) selectedSessionItem() (SessionItem, bool) {
+	item := m.sessionList.SelectedItem()
+	if item == nil {
+		return SessionItem{}, false
+	}
+	si, ok := item.(SessionItem)
+	return si, ok
+}
+
 func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle confirmKill state first
 	if m.confirmKill {
@@ -322,17 +371,19 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.sessions = msg.Sessions
-		m.sessions = m.filteredSessions()
-		if m.cursor >= len(m.sessions) && len(m.sessions) > 0 {
-			m.cursor = len(m.sessions) - 1
-		} else if len(m.sessions) == 0 {
-			m.cursor = 0
+		filtered := m.filteredSessions()
+		items := ToListItems(filtered)
+		m.sessionList.SetItems(items)
+
+		if m.insideTmux && m.currentSession != "" {
+			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
 		}
-		m.loaded = true
+
 		if m.initialFilter != "" {
 			m.filterMode = true
 			m.filterText = m.initialFilter
 			m.initialFilter = ""
+			m.applyFilter()
 		}
 
 	case ui.ProjectsLoadedMsg:
@@ -344,9 +395,13 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewProjectPicker
 		return m, cmd
 
+	case tea.WindowSizeMsg:
+		m.sessionList.SetSize(msg.Width, msg.Height)
+		return m, nil
+
 	case tea.KeyMsg:
 		switch {
-		case msg.Type == tea.KeyCtrlC || msg.Type == tea.KeyEsc:
+		case msg.Type == tea.KeyCtrlC:
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
@@ -357,37 +412,30 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "/":
 			m.filterMode = true
 			m.filterText = ""
-			m.cursor = 0
 			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
-			// Jump to the "new in project" option
-			m.cursor = len(m.sessions)
-		case msg.Type == tea.KeyDown || (msg.Type == tea.KeyRunes && string(msg.Runes) == "j"):
-			if m.cursor < m.totalItems()-1 {
-				m.cursor++
-			}
-		case msg.Type == tea.KeyUp || (msg.Type == tea.KeyRunes && string(msg.Runes) == "k"):
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			return m.handleNewInProject()
 		case msg.Type == tea.KeyEnter:
 			return m.handleSessionListEnter()
 		}
 	}
-	return m, nil
+
+	// Delegate remaining key handling to the list (cursor navigation, etc.)
+	var cmd tea.Cmd
+	m.sessionList, cmd = m.sessionList.Update(msg)
+	return m, cmd
 }
 
 func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
-	// No-op if cursor is on the [n] new in project option
-	if m.cursor >= len(m.sessions) {
+	si, ok := m.selectedSessionItem()
+	if !ok {
 		return m, nil
 	}
-	// No-op if no session killer configured
 	if m.sessionKiller == nil {
 		return m, nil
 	}
 	m.confirmKill = true
-	m.pendingKillName = m.sessions[m.cursor].Name
+	m.pendingKillName = si.Session.Name
 	return m, nil
 }
 
@@ -424,16 +472,15 @@ func (m Model) killAndRefresh(name string) tea.Cmd {
 }
 
 func (m Model) handleRenameKey() (tea.Model, tea.Cmd) {
-	// No-op if cursor is on the [n] new in project option
-	if m.cursor >= len(m.sessions) {
+	si, ok := m.selectedSessionItem()
+	if !ok {
 		return m, nil
 	}
-	// No-op if no session renamer configured
 	if m.sessionRenamer == nil {
 		return m, nil
 	}
 	m.renameMode = true
-	m.renameTarget = m.sessions[m.cursor].Name
+	m.renameTarget = si.Session.Name
 	ti := textinput.New()
 	ti.Prompt = "Rename: "
 	ti.SetValue(m.renameTarget)
@@ -488,86 +535,80 @@ func (m Model) updateFilter(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.filterMode = false
 		m.filterText = ""
-		m.cursor = 0
+		// Restore unfiltered items
+		items := ToListItems(m.filteredSessions())
+		m.sessionList.SetItems(items)
 		return m, nil
 	case tea.KeyBackspace:
 		if len(m.filterText) > 0 {
 			m.filterText = m.filterText[:len(m.filterText)-1]
-			m.cursor = 0
+			m.applyFilter()
 		} else {
 			m.filterMode = false
 			m.filterText = ""
-			m.cursor = 0
+			items := ToListItems(m.filteredSessions())
+			m.sessionList.SetItems(items)
 		}
 		return m, nil
 	case tea.KeyEnter:
-		matched := m.filterMatchedSessions()
-		if m.cursor < len(matched) {
-			m.selected = matched[m.cursor].Name
+		si, ok := m.selectedSessionItem()
+		if ok {
+			m.selected = si.Session.Name
 			return m, tea.Quit
 		}
-		// Cursor on the [n] new in project option
-		if m.cursor == len(matched) {
-			if m.projectStore != nil {
-				m.filterMode = false
-				m.filterText = ""
-				m.projectPicker = ui.NewProjectPicker(m.projectStore)
-				return m, m.projectPicker.Init()
-			}
-		}
-		return m, nil
-	case tea.KeyDown:
-		matched := m.filterMatchedSessions()
-		// +1 for the [n] new in project option
-		if m.cursor < len(matched) {
-			m.cursor++
-		}
-		return m, nil
-	case tea.KeyUp:
-		if m.cursor > 0 {
-			m.cursor--
-		}
-		return m, nil
-	case tea.KeyRunes:
-		m.filterText += string(keyMsg.Runes)
-		m.cursor = 0
-		return m, nil
-	}
-
-	return m, nil
-}
-
-// filterMatchedSessions returns sessions whose names fuzzy-match the current filter text.
-// Uses subsequence matching: each character in the filter must appear in order in the session name.
-func (m Model) filterMatchedSessions() []tmux.Session {
-	return fuzzy.Filter(m.sessions, m.filterText, func(s tmux.Session) string { return s.Name })
-}
-
-func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
-	// Cursor on a session
-	if m.cursor < len(m.sessions) {
-		m.selected = m.sessions[m.cursor].Name
-		return m, tea.Quit
-	}
-
-	// Cursor on the "new in project" option
-	if m.cursor == len(m.sessions) {
+		// No session selected — check if we should go to project picker
 		if m.projectStore != nil {
+			m.filterMode = false
+			m.filterText = ""
 			m.projectPicker = ui.NewProjectPicker(m.projectStore)
 			return m, m.projectPicker.Init()
 		}
+		return m, nil
+	case tea.KeyDown:
+		// Let the list handle navigation
+		var cmd tea.Cmd
+		m.sessionList, cmd = m.sessionList.Update(msg)
+		return m, cmd
+	case tea.KeyUp:
+		var cmd tea.Cmd
+		m.sessionList, cmd = m.sessionList.Update(msg)
+		return m, cmd
+	case tea.KeyRunes:
+		m.filterText += string(keyMsg.Runes)
+		m.applyFilter()
+		return m, nil
 	}
 
 	return m, nil
 }
 
-var (
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
-	nameStyle     = lipgloss.NewStyle().Bold(true)
-	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
-	dividerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-)
+// applyFilter updates the list items based on the current filter text.
+func (m *Model) applyFilter() {
+	filtered := m.filteredSessions()
+	matched := fuzzy.Filter(filtered, m.filterText, func(s tmux.Session) string {
+		return s.Name
+	})
+	items := ToListItems(matched)
+	m.sessionList.SetItems(items)
+	m.sessionList.Select(0)
+}
+
+func (m Model) handleNewInProject() (tea.Model, tea.Cmd) {
+	if m.projectStore != nil {
+		m.projectPicker = ui.NewProjectPicker(m.projectStore)
+		return m, m.projectPicker.Init()
+	}
+	return m, nil
+}
+
+func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
+	si, ok := m.selectedSessionItem()
+	if !ok {
+		return m, nil
+	}
+	m.selected = si.Session.Name
+	return m, tea.Quit
+}
 
 // View renders the current view.
 func (m Model) View() string {
@@ -588,65 +629,11 @@ func (m Model) View() string {
 	}
 }
 
-// displaySessions returns the sessions to display, applying filter when in filter mode.
-func (m Model) displaySessions() []tmux.Session {
-	if m.filterMode {
-		return m.filterMatchedSessions()
-	}
-	return m.sessions
-}
-
-// viewSessionList renders the session list with the "new in project" option.
+// viewSessionList renders the session list using bubbles/list.
 func (m Model) viewSessionList() string {
 	var b strings.Builder
 
-	if m.insideTmux && m.currentSession != "" {
-		b.WriteString("Current: " + m.currentSession)
-		b.WriteString("\n\n")
-	}
-
-	visible := m.displaySessions()
-
-	if m.loaded && len(visible) == 0 && !m.filterMode {
-		if m.insideTmux {
-			b.WriteString("No other sessions")
-		} else {
-			b.WriteString("No active sessions")
-		}
-	} else {
-		for i, s := range visible {
-			cursor := "  "
-			if i == m.cursor {
-				cursor = cursorStyle.Render("> ")
-			}
-
-			windowLabel := fmt.Sprintf("%d windows", s.Windows)
-			if s.Windows == 1 {
-				windowLabel = "1 window"
-			}
-
-			detail := detailStyle.Render(windowLabel)
-
-			if s.Attached {
-				detail += "  " + attachedStyle.Render("● attached")
-			}
-
-			line := fmt.Sprintf("%s%s  %s", cursor, nameStyle.Render(s.Name), detail)
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-	}
-
-	// Divider and new option
-	b.WriteString("\n")
-	b.WriteString(dividerStyle.Render("  ─────────────────────────────"))
-	b.WriteString("\n")
-
-	newCursor := "  "
-	if m.cursor == len(visible) {
-		newCursor = cursorStyle.Render("> ")
-	}
-	fmt.Fprintf(&b, "%s[n] new in project...", newCursor)
+	b.WriteString(m.sessionList.View())
 
 	if m.confirmKill {
 		b.WriteString("\n\n")

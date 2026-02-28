@@ -250,7 +250,7 @@ func TestInit(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	t.Run("sessionsMsg populates sessions and sets cursor to zero", func(t *testing.T) {
+	t.Run("sessionsMsg populates list items", func(t *testing.T) {
 		m := tui.New(nil)
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 3, Attached: true},
@@ -258,26 +258,19 @@ func TestUpdate(t *testing.T) {
 		}
 
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
-		view := updated.View()
+		model := updated.(tui.Model)
 
-		if !strings.Contains(view, "dev") {
-			t.Error("view missing session 'dev' after sessionsMsg")
+		items := model.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 list items, got %d", len(items))
 		}
-		if !strings.Contains(view, "work") {
-			t.Error("view missing session 'work' after sessionsMsg")
+		si0 := items[0].(tui.SessionItem)
+		if si0.Session.Name != "dev" {
+			t.Errorf("items[0].Session.Name = %q, want %q", si0.Session.Name, "dev")
 		}
-
-		// Verify cursor is at first session
-		lines := strings.Split(view, "\n")
-		var devLine string
-		for _, line := range lines {
-			if strings.Contains(line, "dev") {
-				devLine = line
-				break
-			}
-		}
-		if !strings.Contains(devLine, ">") {
-			t.Errorf("cursor should be on first session after sessionsMsg: %q", devLine)
+		si1 := items[1].(tui.SessionItem)
+		if si1.Session.Name != "work" {
+			t.Errorf("items[1].Session.Name = %q, want %q", si1.Session.Name, "work")
 		}
 	})
 
@@ -297,17 +290,6 @@ func TestUpdate(t *testing.T) {
 	})
 }
 
-// cursorLine returns the index of the line containing the cursor indicator ">".
-// Returns -1 if no cursor found.
-func cursorLine(view string) int {
-	for i, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, ">") {
-			return i
-		}
-	}
-	return -1
-}
-
 func TestKeyboardNavigation(t *testing.T) {
 	threeSessions := []tmux.Session{
 		{Name: "alpha", Windows: 1, Attached: false},
@@ -315,117 +297,92 @@ func TestKeyboardNavigation(t *testing.T) {
 		{Name: "charlie", Windows: 3, Attached: false},
 	}
 
-	tests := []struct {
-		name           string
-		sessions       []tmux.Session
-		keys           []tea.Msg
-		wantCursorLine int
-	}{
-		{
-			name:     "down arrow moves cursor down",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyDown},
-			},
-			wantCursorLine: 1,
-		},
-		{
-			name:     "j key moves cursor down",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}},
-			},
-			wantCursorLine: 1,
-		},
-		{
-			name:     "up arrow moves cursor up",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyUp},
-			},
-			wantCursorLine: 0,
-		},
-		{
-			name:     "k key moves cursor up",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}},
-			},
-			wantCursorLine: 0,
-		},
-		{
-			name:     "cursor does not go below last item including new option",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyDown}, // lands on [n] new in project...
-				tea.KeyMsg{Type: tea.KeyDown}, // should not go further
-				tea.KeyMsg{Type: tea.KeyDown}, // should not go further
-			},
-			wantCursorLine: 5, // 3 sessions + blank + divider + new option line
-		},
-		{
-			name:     "cursor does not go above first item",
-			sessions: threeSessions,
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyUp},
-				tea.KeyMsg{Type: tea.KeyUp},
-			},
-			wantCursorLine: 0,
-		},
-		{
-			name: "navigation is no-op with single session",
-			sessions: []tmux.Session{
-				{Name: "solo", Windows: 1, Attached: false},
-			},
-			keys: []tea.Msg{
-				tea.KeyMsg{Type: tea.KeyDown},
-				tea.KeyMsg{Type: tea.KeyUp},
-				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}},
-				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}},
-			},
-			wantCursorLine: 0,
-		},
-	}
+	t.Run("down arrow moves cursor to next item", func(t *testing.T) {
+		var m tea.Model = tui.NewModelWithSessions(threeSessions)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var m tea.Model = tui.NewModelWithSessions(tt.sessions)
-			for _, key := range tt.keys {
-				m, _ = m.Update(key)
-			}
-			view := m.View()
-			got := cursorLine(view)
-			if got != tt.wantCursorLine {
-				t.Errorf("cursor on line %d, want %d\nview:\n%s", got, tt.wantCursorLine, view)
-			}
-		})
-	}
+		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command")
+		}
+		model := result.(tui.Model)
+		if model.Selected() != "bravo" {
+			t.Errorf("expected selected %q, got %q", "bravo", model.Selected())
+		}
+	})
+
+	t.Run("up arrow moves cursor up", func(t *testing.T) {
+		var m tea.Model = tui.NewModelWithSessions(threeSessions)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+
+		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command")
+		}
+		model := result.(tui.Model)
+		if model.Selected() != "alpha" {
+			t.Errorf("expected selected %q, got %q", "alpha", model.Selected())
+		}
+	})
+
+	t.Run("cursor does not go below last item", func(t *testing.T) {
+		var m tea.Model = tui.NewModelWithSessions(threeSessions)
+		for i := 0; i < 10; i++ {
+			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		}
+
+		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command")
+		}
+		model := result.(tui.Model)
+		if model.Selected() != "charlie" {
+			t.Errorf("expected selected %q (last item), got %q", "charlie", model.Selected())
+		}
+	})
+
+	t.Run("cursor does not go above first item", func(t *testing.T) {
+		var m tea.Model = tui.NewModelWithSessions(threeSessions)
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+
+		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command")
+		}
+		model := result.(tui.Model)
+		if model.Selected() != "alpha" {
+			t.Errorf("expected selected %q (first item), got %q", "alpha", model.Selected())
+		}
+	})
 
 	t.Run("view highlights correct row after navigation", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		// Move cursor to "bravo" (index 1)
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		view := m.View()
 
 		lines := strings.Split(view, "\n")
-		if len(lines) < 3 {
-			t.Fatalf("expected 3 lines, got %d", len(lines))
+		var alphaLine, bravoLine, charlieLine string
+		for _, line := range lines {
+			if strings.Contains(line, "alpha") {
+				alphaLine = line
+			}
+			if strings.Contains(line, "bravo") {
+				bravoLine = line
+			}
+			if strings.Contains(line, "charlie") {
+				charlieLine = line
+			}
 		}
-		// alpha should NOT have cursor
-		if strings.Contains(lines[0], ">") {
-			t.Errorf("alpha line should not have cursor: %q", lines[0])
+		if strings.Contains(alphaLine, ">") {
+			t.Errorf("alpha line should not have cursor: %q", alphaLine)
 		}
-		// bravo SHOULD have cursor
-		if !strings.Contains(lines[1], ">") {
-			t.Errorf("bravo line should have cursor: %q", lines[1])
+		if !strings.Contains(bravoLine, ">") {
+			t.Errorf("bravo line should have cursor: %q", bravoLine)
 		}
-		// charlie should NOT have cursor
-		if strings.Contains(lines[2], ">") {
-			t.Errorf("charlie line should not have cursor: %q", lines[2])
+		if strings.Contains(charlieLine, ">") {
+			t.Errorf("charlie line should not have cursor: %q", charlieLine)
 		}
 	})
 }
@@ -443,10 +400,6 @@ func TestQuitHandling(t *testing.T) {
 		{
 			name: "q key triggers quit",
 			key:  tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}},
-		},
-		{
-			name: "Esc key triggers quit",
-			key:  tea.KeyMsg{Type: tea.KeyEsc},
 		},
 		{
 			name: "Ctrl+C triggers quit",
@@ -564,7 +517,6 @@ func TestEnterSelection(t *testing.T) {
 
 		quitKeys := []tea.KeyMsg{
 			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyEsc},
 			{Type: tea.KeyCtrlC},
 		}
 
@@ -619,65 +571,7 @@ func TestEnterSelection(t *testing.T) {
 }
 
 func TestNewInProjectOption(t *testing.T) {
-	t.Run("session list includes new in project option", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{
-			{Name: "dev", Windows: 3, Attached: true},
-			{Name: "work", Windows: 1, Attached: false},
-		})
-		view := m.View()
-
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("view missing '[n] new in project...' option:\n%s", view)
-		}
-	})
-
-	t.Run("new option appears below sessions with divider", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{
-			{Name: "dev", Windows: 3, Attached: false},
-			{Name: "work", Windows: 1, Attached: false},
-		})
-		view := m.View()
-
-		lastSessionIdx := strings.Index(view, "work")
-		dividerIdx := strings.Index(view, "─")
-		newOptionIdx := strings.Index(view, "[n] new in project...")
-
-		if lastSessionIdx == -1 || dividerIdx == -1 || newOptionIdx == -1 {
-			t.Fatalf("missing elements in view:\n%s", view)
-		}
-		if dividerIdx <= lastSessionIdx {
-			t.Errorf("divider (idx %d) should appear after last session (idx %d)", dividerIdx, lastSessionIdx)
-		}
-		if newOptionIdx <= dividerIdx {
-			t.Errorf("new option (idx %d) should appear after divider (idx %d)", newOptionIdx, dividerIdx)
-		}
-	})
-
-	t.Run("n key jumps to new option", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-			{Name: "bravo", Windows: 2, Attached: false},
-			{Name: "charlie", Windows: 3, Attached: false},
-		}
-		var m tea.Model = tui.NewModelWithSessions(sessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-
-		view := m.View()
-		// The [n] new in project... line should have the cursor
-		lines := strings.Split(view, "\n")
-		var newOptionLine string
-		for _, line := range lines {
-			if strings.Contains(line, "new in project") {
-				newOptionLine = line
-				break
-			}
-		}
-		if !strings.Contains(newOptionLine, ">") {
-			t.Errorf("n key should move cursor to new option line: %q", newOptionLine)
-		}
-	})
-
-	t.Run("enter on new option switches to project picker", func(t *testing.T) {
+	t.Run("n key switches to project picker", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 1, Attached: false},
 		}
@@ -693,13 +587,11 @@ func TestNewInProjectOption(t *testing.T) {
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
 		)
-		// Load sessions
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press n to jump to new option, then Enter
+		// Press n to go to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		// Load projects into the picker
 		model, _ = model.Update(ui.ProjectsLoadedMsg{
@@ -733,7 +625,6 @@ func TestNewInProjectOption(t *testing.T) {
 
 		// Navigate to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Esc should return to session list
@@ -771,7 +662,6 @@ func TestNewInProjectOption(t *testing.T) {
 
 		// Navigate to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Select a project
@@ -780,7 +670,6 @@ func TestNewInProjectOption(t *testing.T) {
 			t.Fatal("expected command from project selection, got nil")
 		}
 
-		// The command should trigger session creation
 		msg := cmd()
 		createdMsg, ok := msg.(tui.SessionCreatedMsg)
 		if !ok {
@@ -817,7 +706,6 @@ func TestNewInProjectOption(t *testing.T) {
 
 		// Navigate to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Select a project
@@ -826,10 +714,8 @@ func TestNewInProjectOption(t *testing.T) {
 			t.Fatal("expected command from project selection, got nil")
 		}
 
-		// Execute the command to trigger session creation
 		cmd()
 
-		// Verify command was forwarded to session creator
 		wantCmd := []string{"claude", "--resume"}
 		if len(creator.createdCommand) != len(wantCmd) {
 			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
@@ -864,7 +750,6 @@ func TestNewInProjectOption(t *testing.T) {
 
 		// Navigate to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Select a project
@@ -873,28 +758,14 @@ func TestNewInProjectOption(t *testing.T) {
 			t.Fatal("expected command from project selection, got nil")
 		}
 
-		// Execute the command to trigger session creation
 		cmd()
 
-		// Verify nil command was passed (no command set on model)
 		if creator.createdCommand != nil {
 			t.Errorf("expected nil command, got %v", creator.createdCommand)
 		}
 	})
 
-	t.Run("empty session list still shows new option", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{})
-		view := m.View()
-
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("empty session list should show new option:\n%s", view)
-		}
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("empty session list should show no sessions message:\n%s", view)
-		}
-	})
-
-	t.Run("combined empty state navigable", func(t *testing.T) {
+	t.Run("n key navigable from empty session list", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{},
 		}
@@ -908,10 +779,8 @@ func TestNewInProjectOption(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
 
-		// n should jump to new option
+		// n should switch to project picker
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-		// Enter should switch to project picker
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		// Load empty projects
 		model, _ = model.Update(ui.ProjectsLoadedMsg{Projects: []project.Project{}})
 
@@ -925,9 +794,10 @@ func TestNewInProjectOption(t *testing.T) {
 
 		// Esc should return to session list
 		model, _ = model.Update(ui.BackMsg{})
+		// The list view should render (empty state managed by bubbles/list)
 		view = model.View()
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("expected session list after Esc, got:\n%s", view)
+		if strings.Contains(view, "Select a project") {
+			t.Errorf("should not show project picker after back, got:\n%s", view)
 		}
 	})
 }
@@ -1284,20 +1154,18 @@ func TestInitialFilter(t *testing.T) {
 		if !strings.Contains(view, "filter: myapp") {
 			t.Errorf("expected 'filter: myapp' in view, got:\n%s", view)
 		}
-		// Should show matching sessions
-		if !strings.Contains(view, "myapp-dev") {
-			t.Errorf("expected 'myapp-dev' in filtered view, got:\n%s", view)
+
+		// Should have filtered items (only matching sessions)
+		updatedModel := model.(tui.Model)
+		items := updatedModel.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 matching items, got %d", len(items))
 		}
-		if !strings.Contains(view, "myapp-prod") {
-			t.Errorf("expected 'myapp-prod' in filtered view, got:\n%s", view)
-		}
-		// Should not show non-matching sessions
-		if strings.Contains(view, "other") {
-			t.Errorf("'other' should be filtered out, got:\n%s", view)
-		}
-		// Should show new in project option
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("expected '[n] new in project...' in view, got:\n%s", view)
+		for _, item := range items {
+			si := item.(tui.SessionItem)
+			if si.Session.Name == "other" {
+				t.Error("'other' should be filtered out")
+			}
 		}
 	})
 
@@ -1323,12 +1191,11 @@ func TestInitialFilter(t *testing.T) {
 		if strings.Contains(view, "filter:") {
 			t.Errorf("second SessionsMsg should not re-activate filter mode, got:\n%s", view)
 		}
-		// All sessions should be visible (no filter applied)
-		if !strings.Contains(view, "myapp-dev") {
-			t.Errorf("expected 'myapp-dev' visible after filter consumed, got:\n%s", view)
-		}
-		if !strings.Contains(view, "other") {
-			t.Errorf("expected 'other' visible after filter consumed, got:\n%s", view)
+		// All sessions should be in list items (no filter applied)
+		updatedModel := model.(tui.Model)
+		items := updatedModel.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items after filter consumed, got %d", len(items))
 		}
 	})
 
@@ -1365,67 +1232,48 @@ func TestInitialFilter(t *testing.T) {
 }
 
 func TestEmptyState(t *testing.T) {
-	t.Run("empty sessions shows no active sessions message", func(t *testing.T) {
+	t.Run("empty sessions shows list empty state", func(t *testing.T) {
 		m := tui.New(nil)
-		// Simulate receiving an empty sessions list
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
-		view := updated.View()
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("expected view to contain 'No active sessions', got %q", view)
-		}
-		// Should still show the new option
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("expected view to contain '[n] new in project...', got %q", view)
+
+		items := updated.(tui.Model).SessionListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
 		}
 	})
 
-	t.Run("nil sessions shows no active sessions message", func(t *testing.T) {
+	t.Run("nil sessions shows list empty state", func(t *testing.T) {
 		m := tui.New(nil)
-		// Simulate receiving nil sessions (tmux server not running)
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: nil})
-		view := updated.View()
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("expected view to contain 'No active sessions', got %q", view)
-		}
-		// Should still show the new option
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("expected view to contain '[n] new in project...', got %q", view)
+
+		items := updated.(tui.Model).SessionListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
 		}
 	})
 
-	t.Run("non-empty sessions does not show empty message", func(t *testing.T) {
+	t.Run("non-empty sessions populates list", func(t *testing.T) {
 		m := tui.New(nil)
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 3, Attached: false},
 		}
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
-		view := updated.View()
-		if strings.Contains(view, "No active sessions") {
-			t.Errorf("view should not contain empty state message when sessions exist: %q", view)
-		}
-	})
 
-	t.Run("empty state is not shown before sessions are loaded", func(t *testing.T) {
-		m := tui.New(nil)
-		// Before any sessionsMsg, view should NOT show the empty state message
-		view := m.View()
-		if strings.Contains(view, "No active sessions") {
-			t.Errorf("empty state message should not appear before sessions are loaded: %q", view)
+		items := updated.(tui.Model).SessionListItems()
+		if len(items) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(items))
 		}
 	})
 
 	t.Run("quit works in empty state", func(t *testing.T) {
 		quitKeys := []tea.KeyMsg{
 			{Type: tea.KeyRunes, Runes: []rune{'q'}},
-			{Type: tea.KeyEsc},
 			{Type: tea.KeyCtrlC},
 		}
 
 		for _, key := range quitKeys {
 			m := tui.New(nil)
-			// Load empty sessions
 			updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
-			// Press quit key
 			_, cmd := updated.Update(key)
 			if cmd == nil {
 				t.Fatalf("expected quit command for key %v, got nil", key)
@@ -1439,18 +1287,14 @@ func TestEmptyState(t *testing.T) {
 
 	t.Run("enter is no-op in empty state", func(t *testing.T) {
 		m := tui.New(nil)
-		// Load empty sessions
 		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
-		// Press Enter
 		result, cmd := updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		// Should not trigger quit
 		if cmd != nil {
 			msg := cmd()
 			if _, ok := msg.(tea.QuitMsg); ok {
 				t.Error("enter in empty state should not trigger quit")
 			}
 		}
-		// Selected should remain empty
 		model, ok := result.(tui.Model)
 		if !ok {
 			t.Fatalf("expected tui.Model, got %T", result)
@@ -1469,14 +1313,19 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 			{Name: "bravo", Windows: 3, Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
-		view := m.View()
 
-		lines := strings.Split(view, "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "current-sess") && !strings.Contains(line, "Current:") {
-				t.Errorf("current session should not appear in session list, found in line: %q", line)
+		items := m.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items (excluding current), got %d", len(items))
+		}
+		for _, item := range items {
+			si := item.(tui.SessionItem)
+			if si.Session.Name == "current-sess" {
+				t.Error("current session should be excluded from list items")
 			}
 		}
+
+		view := m.View()
 		if !strings.Contains(view, "alpha") {
 			t.Errorf("non-current session 'alpha' should appear in list, got:\n%s", view)
 		}
@@ -1485,62 +1334,47 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 		}
 	})
 
-	t.Run("header renders current session name inside tmux", func(t *testing.T) {
+	t.Run("title shows current session name inside tmux", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 1, Attached: false},
 			{Name: "my-project-x7k2m9", Windows: 2, Attached: true},
 		}
 		m := tui.NewModelWithSessions(sessions).WithInsideTmux("my-project-x7k2m9")
-		view := m.View()
 
-		if !strings.Contains(view, "Current: my-project-x7k2m9") {
-			t.Errorf("expected header 'Current: my-project-x7k2m9', got:\n%s", view)
+		title := m.SessionListTitle()
+		want := "Sessions (current: my-project-x7k2m9)"
+		if title != want {
+			t.Errorf("SessionListTitle() = %q, want %q", title, want)
 		}
-		// Header should appear before the session list
-		headerIdx := strings.Index(view, "Current: my-project-x7k2m9")
-		devIdx := strings.Index(view, "dev")
-		if headerIdx >= devIdx {
-			t.Errorf("header (idx %d) should appear before session 'dev' (idx %d)", headerIdx, devIdx)
+		// Title should appear in view
+		view := m.View()
+		if !strings.Contains(view, "current: my-project-x7k2m9") {
+			t.Errorf("expected title with current session name in view, got:\n%s", view)
 		}
 	})
 
-	t.Run("no header rendered outside tmux", func(t *testing.T) {
+	t.Run("title is Sessions outside tmux", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "dev", Windows: 1, Attached: false},
 			{Name: "work", Windows: 2, Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions)
-		view := m.View()
 
-		if strings.Contains(view, "Current:") {
-			t.Errorf("header should not appear outside tmux, got:\n%s", view)
+		title := m.SessionListTitle()
+		if title != "Sessions" {
+			t.Errorf("SessionListTitle() = %q, want %q", title, "Sessions")
 		}
 	})
 
-	t.Run("empty state shows no other sessions when only current session", func(t *testing.T) {
+	t.Run("empty list when only current session exists inside tmux", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "only-session", Windows: 1, Attached: true},
 		}
 		m := tui.NewModelWithSessions(sessions).WithInsideTmux("only-session")
-		view := m.View()
 
-		if !strings.Contains(view, "No other sessions") {
-			t.Errorf("expected 'No other sessions' when only current session exists, got:\n%s", view)
-		}
-		if strings.Contains(view, "No active sessions") {
-			t.Errorf("should not show 'No active sessions' inside tmux, got:\n%s", view)
-		}
-	})
-
-	t.Run("empty state shows no active sessions outside tmux", func(t *testing.T) {
-		m := tui.NewModelWithSessions([]tmux.Session{})
-		view := m.View()
-
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("expected 'No active sessions' outside tmux, got:\n%s", view)
-		}
-		if strings.Contains(view, "No other sessions") {
-			t.Errorf("should not show 'No other sessions' outside tmux, got:\n%s", view)
+		items := m.SessionListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items after filtering, got %d", len(items))
 		}
 	})
 
@@ -1552,62 +1386,40 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 			{Name: "charlie", Windows: 4, Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-one")
-		view := m.View()
 
-		if !strings.Contains(view, "Current: current-one") {
-			t.Errorf("expected header with current session name, got:\n%s", view)
+		title := m.SessionListTitle()
+		if !strings.Contains(title, "current-one") {
+			t.Errorf("expected title with current session name, got: %q", title)
 		}
+
+		view := m.View()
 		for _, name := range []string{"alpha", "bravo", "charlie"} {
 			if !strings.Contains(view, name) {
 				t.Errorf("expected session %q in list, got:\n%s", name, view)
 			}
 		}
-		// Ensure current-one only appears in the header, not in the session list area
-		lines := strings.Split(view, "\n")
-		for _, line := range lines {
-			if strings.Contains(line, "current-one") && !strings.Contains(line, "Current:") {
-				t.Errorf("current session should only appear in header, found in list line: %q", line)
+		// Ensure current-one only appears in the title, not in session items
+		items := m.SessionListItems()
+		for _, item := range items {
+			si := item.(tui.SessionItem)
+			if si.Session.Name == "current-one" {
+				t.Error("current session should only appear in title, not in items")
 			}
 		}
 	})
 
-	t.Run("very long current session name renders in header without truncation", func(t *testing.T) {
+	t.Run("very long current session name in title", func(t *testing.T) {
 		longName := "my-extremely-long-project-name-that-goes-on-and-on-forever-x7k2m9"
 		sessions := []tmux.Session{
 			{Name: longName, Windows: 1, Attached: true},
 			{Name: "other", Windows: 2, Attached: false},
 		}
 		m := tui.NewModelWithSessions(sessions).WithInsideTmux(longName)
-		view := m.View()
 
-		expected := "Current: " + longName
-		if !strings.Contains(view, expected) {
-			t.Errorf("expected full header %q in view, got:\n%s", expected, view)
-		}
-	})
-
-	t.Run("new in project option visible when inside tmux", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "current-sess", Windows: 1, Attached: true},
-		}
-		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
-		view := m.View()
-
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("new in project option should be visible inside tmux, got:\n%s", view)
-		}
-	})
-
-	t.Run("new in project option visible with sessions filtered inside tmux", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-			{Name: "current-sess", Windows: 2, Attached: true},
-		}
-		m := tui.NewModelWithSessions(sessions).WithInsideTmux("current-sess")
-		view := m.View()
-
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("new in project option should be visible, got:\n%s", view)
+		title := m.SessionListTitle()
+		expected := "Sessions (current: " + longName + ")"
+		if title != expected {
+			t.Errorf("SessionListTitle() = %q, want %q", title, expected)
 		}
 	})
 }
@@ -1804,28 +1616,6 @@ func TestKillSession(t *testing.T) {
 		}
 	})
 
-	t.Run("K on new-in-project option is no-op", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-		}
-		killer := &mockSessionKiller{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := tui.New(lister, tui.WithKiller(killer))
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to the [n] option
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-
-		// Press K — should be no-op
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
-
-		view := model.View()
-		if strings.Contains(view, "Kill session") {
-			t.Errorf("K on new option should be no-op, got:\n%s", view)
-		}
-	})
-
 	t.Run("kill error returns error in SessionsMsg", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
@@ -1886,7 +1676,7 @@ func TestKillSession(t *testing.T) {
 		}
 	})
 
-	t.Run("killing last remaining session shows empty state", func(t *testing.T) {
+	t.Run("killing last remaining session empties list", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "solo", Windows: 1, Attached: false},
 		}
@@ -1907,9 +1697,9 @@ func TestKillSession(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
-		if !strings.Contains(view, "No active sessions") {
-			t.Errorf("expected empty state after killing last session, got:\n%s", view)
+		items := model.(tui.Model).SessionListItems()
+		if len(items) != 0 {
+			t.Errorf("expected 0 items after killing last session, got %d", len(items))
 		}
 	})
 
@@ -1953,6 +1743,32 @@ func TestKillSession(t *testing.T) {
 		view := model.View()
 		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
 			t.Errorf("expected confirmation prompt via NewWithAllDeps, got:\n%s", view)
+		}
+	})
+}
+
+func TestSessionListHelpBar(t *testing.T) {
+	t.Run("help bar shows session-specific keybindings", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+
+		view := m.View()
+
+		// Each description should appear in the help bar
+		expectedDescs := []string{
+			"attach",
+			"rename",
+			"kill",
+			"projects",
+			"new in cwd",
+		}
+		for _, desc := range expectedDescs {
+			if !strings.Contains(view, desc) {
+				t.Errorf("help bar should contain %q, got:\n%s", desc, view)
+			}
 		}
 	})
 }
@@ -2102,28 +1918,6 @@ func TestRenameSession(t *testing.T) {
 		// Should still be in rename mode or cancelled — renamer should not have been called
 		if renamer.renamedOld != "" {
 			t.Errorf("rename should not have been called with empty input, but got old=%q", renamer.renamedOld)
-		}
-	})
-
-	t.Run("R on new-in-project option is no-op", func(t *testing.T) {
-		sessions := []tmux.Session{
-			{Name: "alpha", Windows: 1, Attached: false},
-		}
-		renamer := &mockSessionRenamer{}
-		lister := &mockSessionLister{sessions: sessions}
-		m := newModelWithRenamer(lister, nil, renamer)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to the [n] option
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-
-		// Press R — should be no-op
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-
-		view := model.View()
-		if strings.Contains(view, "Rename:") {
-			t.Errorf("R on new option should be no-op, got:\n%s", view)
 		}
 	})
 
@@ -2370,7 +2164,7 @@ func TestFilterMode(t *testing.T) {
 		}
 	})
 
-	t.Run("new-in-project option always visible during filter", func(t *testing.T) {
+	t.Run("filter with no matches empties list items", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -2383,12 +2177,10 @@ func TestFilterMode(t *testing.T) {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
 
-		view := m.View()
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("new-in-project should always be visible during filter, got:\n%s", view)
-		}
-		if strings.Contains(view, "alpha") {
-			t.Errorf("alpha should not be visible with filter 'xyz', got:\n%s", view)
+		model := m.(tui.Model)
+		items := model.SessionListItems()
+		if len(items) != 0 {
+			t.Errorf("expected 0 items matching 'xyz', got %d", len(items))
 		}
 	})
 
@@ -2477,7 +2269,7 @@ func TestFilterMode(t *testing.T) {
 		}
 	})
 
-	t.Run("no sessions match filter shows empty filtered list with new-in-project visible", func(t *testing.T) {
+	t.Run("no sessions match filter shows empty list", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -2490,29 +2282,18 @@ func TestFilterMode(t *testing.T) {
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'z'}})
 
+		model := m.(tui.Model)
+		items := model.SessionListItems()
+		if len(items) != 0 {
+			t.Errorf("expected 0 items matching 'zzz', got %d", len(items))
+		}
+
 		view := m.View()
-		// No sessions should be listed
 		if strings.Contains(view, "alpha") {
 			t.Errorf("no sessions should match 'zzz', got:\n%s", view)
 		}
 		if strings.Contains(view, "bravo") {
 			t.Errorf("no sessions should match 'zzz', got:\n%s", view)
-		}
-		// [n] new in project should still be visible
-		if !strings.Contains(view, "[n] new in project...") {
-			t.Errorf("[n] new in project should be visible even when no sessions match, got:\n%s", view)
-		}
-		// Cursor should be on [n] since no sessions match (cursor 0 == len(matched) == 0)
-		lines := strings.Split(view, "\n")
-		var newLine string
-		for _, line := range lines {
-			if strings.Contains(line, "new in project") {
-				newLine = line
-				break
-			}
-		}
-		if !strings.Contains(newLine, ">") {
-			t.Errorf("[n] should have cursor when no sessions match, got:\n%s", view)
 		}
 	})
 
@@ -3179,6 +2960,221 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 		if !strings.Contains(view, "No saved projects yet.") {
 			t.Errorf("expected empty projects message, got:\n%s", view)
+		}
+	})
+}
+
+func TestSessionListWithBubblesList(t *testing.T) {
+	t.Run("SessionsMsg populates list items", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 3, Attached: true},
+			{Name: "work", Windows: 1, Attached: false},
+		}
+		m := tui.New(nil)
+
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		model := updated.(tui.Model)
+
+		items := model.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 list items, got %d", len(items))
+		}
+		si0 := items[0].(tui.SessionItem)
+		if si0.Session.Name != "dev" {
+			t.Errorf("items[0].Session.Name = %q, want %q", si0.Session.Name, "dev")
+		}
+		si1 := items[1].(tui.SessionItem)
+		if si1.Session.Name != "work" {
+			t.Errorf("items[1].Session.Name = %q, want %q", si1.Session.Name, "work")
+		}
+	})
+
+	t.Run("SessionsMsg with error triggers quit", func(t *testing.T) {
+		m := tui.New(nil)
+		errMsg := tui.SessionsMsg{Err: fmt.Errorf("tmux not running")}
+
+		_, cmd := m.Update(errMsg)
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("enter selects session and quits", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 3, Attached: true},
+			{Name: "work", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+
+		updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Fatalf("expected tea.QuitMsg, got %T", msg)
+		}
+
+		model := updated.(tui.Model)
+		if model.Selected() != "dev" {
+			t.Errorf("Selected() = %q, want %q", model.Selected(), "dev")
+		}
+	})
+
+	t.Run("q key triggers quit", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		})
+
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("Ctrl+C triggers quit", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		})
+
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("inside tmux excludes current session from list", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "current-sess", Windows: 2, Attached: true},
+			{Name: "bravo", Windows: 3, Attached: false},
+		}
+		m := tui.New(nil)
+		m = m.WithInsideTmux("current-sess")
+
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		model := updated.(tui.Model)
+
+		items := model.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items (excluding current), got %d", len(items))
+		}
+		for _, item := range items {
+			si := item.(tui.SessionItem)
+			if si.Session.Name == "current-sess" {
+				t.Error("current session should be excluded from list items")
+			}
+		}
+	})
+
+	t.Run("inside tmux sets title with current session name", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "my-project", Windows: 2, Attached: true},
+		}
+		m := tui.New(nil)
+		m = m.WithInsideTmux("my-project")
+
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		model := updated.(tui.Model)
+
+		title := model.SessionListTitle()
+		want := "Sessions (current: my-project)"
+		if title != want {
+			t.Errorf("SessionListTitle() = %q, want %q", title, want)
+		}
+	})
+
+	t.Run("outside tmux sets title to Sessions", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		}
+		m := tui.New(nil)
+
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		model := updated.(tui.Model)
+
+		title := model.SessionListTitle()
+		if title != "Sessions" {
+			t.Errorf("SessionListTitle() = %q, want %q", title, "Sessions")
+		}
+	})
+
+	t.Run("empty session list shows empty state", func(t *testing.T) {
+		m := tui.New(nil)
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+
+		items := updated.(tui.Model).SessionListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items, got %d", len(items))
+		}
+
+		view := updated.View()
+		if view == "" {
+			t.Error("view should not be empty even with no items")
+		}
+	})
+
+	t.Run("WindowSizeMsg updates list dimensions", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 1, Attached: false},
+		})
+
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		model := updated.(tui.Model)
+
+		w, h := model.SessionListSize()
+		if w != 120 {
+			t.Errorf("list width = %d, want 120", w)
+		}
+		if h != 40 {
+			t.Errorf("list height = %d, want 40", h)
+		}
+	})
+
+	t.Run("inside tmux with only current session shows empty list", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "only-session", Windows: 1, Attached: true},
+		}
+		m := tui.New(nil)
+		m = m.WithInsideTmux("only-session")
+
+		updated, _ := m.Update(tui.SessionsMsg{Sessions: sessions})
+		model := updated.(tui.Model)
+
+		items := model.SessionListItems()
+		if len(items) != 0 {
+			t.Fatalf("expected 0 items after filtering, got %d", len(items))
+		}
+	})
+
+	t.Run("sessions page renders using list View", func(t *testing.T) {
+		m := tui.NewModelWithSessions([]tmux.Session{
+			{Name: "dev", Windows: 3, Attached: true},
+			{Name: "work", Windows: 1, Attached: false},
+		})
+		// Send a WindowSizeMsg so the list has dimensions to render
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		view := updated.View()
+		// The view should contain session names (rendered by the list)
+		if !strings.Contains(view, "dev") {
+			t.Errorf("view should contain 'dev', got:\n%s", view)
+		}
+		if !strings.Contains(view, "work") {
+			t.Errorf("view should contain 'work', got:\n%s", view)
 		}
 	})
 }
