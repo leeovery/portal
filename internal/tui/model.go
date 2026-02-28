@@ -83,7 +83,7 @@ type Model struct {
 	initialFilter   string
 	insideTmux      bool
 	currentSession  string
-	confirmKill     bool
+	modal           modalState
 	pendingKillName string
 	renameMode      bool
 	renameInput     textinput.Model
@@ -350,9 +350,9 @@ func (m Model) selectedSessionItem() (SessionItem, bool) {
 }
 
 func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Handle confirmKill state first
-	if m.confirmKill {
-		return m.updateConfirmKill(msg)
+	// Handle active modal first — route all input to modal handler
+	if m.modal != modalNone {
+		return m.updateModal(msg)
 	}
 
 	// Handle rename mode
@@ -405,7 +405,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "K":
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "k":
 			return m.handleKillKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "R":
 			return m.handleRenameKey()
@@ -434,12 +434,21 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 	if m.sessionKiller == nil {
 		return m, nil
 	}
-	m.confirmKill = true
+	m.modal = modalKillConfirm
 	m.pendingKillName = si.Session.Name
 	return m, nil
 }
 
-func (m Model) updateConfirmKill(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch m.modal {
+	case modalKillConfirm:
+		return m.updateKillConfirmModal(msg)
+	default:
+		return m, nil
+	}
+}
+
+func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
@@ -448,16 +457,16 @@ func (m Model) updateConfirmKill(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
 	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "y":
 		name := m.pendingKillName
-		m.confirmKill = false
+		m.modal = modalNone
 		m.pendingKillName = ""
 		return m, m.killAndRefresh(name)
 	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "n",
 		keyMsg.Type == tea.KeyEsc:
-		m.confirmKill = false
+		m.modal = modalNone
 		m.pendingKillName = ""
 		return m, nil
 	}
-	// Ignore all other keys in confirmation mode
+	// Ignore all other keys while modal is active
 	return m, nil
 }
 
@@ -631,14 +640,23 @@ func (m Model) View() string {
 
 // viewSessionList renders the session list using bubbles/list.
 func (m Model) viewSessionList() string {
-	var b strings.Builder
+	listView := m.sessionList.View()
 
-	b.WriteString(m.sessionList.View())
-
-	if m.confirmKill {
-		b.WriteString("\n\n")
-		fmt.Fprintf(&b, "Kill session '%s'? (y/n)", m.pendingKillName)
+	// Overlay modal on top of list when active
+	if m.modal == modalKillConfirm {
+		content := fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName)
+		w, h := m.sessionList.Width(), m.sessionList.Height()
+		if w == 0 {
+			w = 80
+		}
+		if h == 0 {
+			h = 24
+		}
+		return renderModal(content, listView, w, h)
 	}
+
+	var b strings.Builder
+	b.WriteString(listView)
 
 	if m.renameMode {
 		b.WriteString("\n\n")

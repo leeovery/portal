@@ -1425,7 +1425,7 @@ func TestInsideTmuxSessionExclusion(t *testing.T) {
 }
 
 func TestKillSession(t *testing.T) {
-	t.Run("K enters confirmation mode with session name", func(t *testing.T) {
+	t.Run("k opens kill confirmation modal for selected session", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
@@ -1436,12 +1436,16 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K on the first session
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k on the first session
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 
 		view := model.View()
-		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt for 'alpha', got:\n%s", view)
+		}
+		// Modal should have border styling (box-drawing characters)
+		if !strings.ContainsAny(view, "─│╭╮╰╯") {
+			t.Errorf("modal overlay should contain border characters, got:\n%s", view)
 		}
 	})
 
@@ -1456,8 +1460,8 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		if cmd == nil {
@@ -1493,13 +1497,13 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then n
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then n
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 
 		view := model.View()
 		// Should be back to normal session list, no confirmation prompt
-		if strings.Contains(view, "Kill session") {
+		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
 		}
 		if !strings.Contains(view, "alpha") {
@@ -1521,12 +1525,12 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then Esc
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then Esc
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 		view := model.View()
-		if strings.Contains(view, "Kill session") {
+		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
 		}
 		if !strings.Contains(view, "alpha") {
@@ -1551,8 +1555,8 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then y to kill alpha
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y to kill alpha
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		// Update the lister to return remaining sessions
@@ -1590,8 +1594,8 @@ func TestKillSession(t *testing.T) {
 		// Navigate to bravo (last session)
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 
-		// Press K then y to kill bravo
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y to kill bravo
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		// Update lister
@@ -1627,8 +1631,8 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then y to attempt kill
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y to attempt kill
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		if cmd == nil {
@@ -1660,8 +1664,8 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		// Execute command and feed back
@@ -1671,7 +1675,7 @@ func TestKillSession(t *testing.T) {
 		// SessionsMsg with error triggers quit, so the model should exit.
 		// But the confirmation prompt should not still be showing.
 		view := model.View()
-		if strings.Contains(view, "Kill session") {
+		if strings.Contains(view, "? (y/n)") {
 			t.Errorf("confirmation prompt should be cleared after kill error, got:\n%s", view)
 		}
 	})
@@ -1686,8 +1690,8 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K then y
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 
 		// Update lister to return empty
@@ -1716,10 +1720,10 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K — should enter confirmation mode (not no-op)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k — should enter confirmation mode (not no-op)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		view := model.View()
-		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt via NewWithDeps, got:\n%s", view)
 		}
 	})
@@ -1738,11 +1742,78 @@ func TestKillSession(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K — should enter confirmation mode (not no-op)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k — should enter confirmation mode (not no-op)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		view := model.View()
-		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt via NewWithAllDeps, got:\n%s", view)
+		}
+	})
+
+	t.Run("other keys ignored during kill modal", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.New(lister, tui.WithKiller(killer))
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press k to open kill modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+
+		// Press various keys that should be ignored
+		ignoredKeys := []tea.KeyMsg{
+			{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			{Type: tea.KeyRunes, Runes: []rune{'k'}},
+			{Type: tea.KeyRunes, Runes: []rune{'r'}},
+			{Type: tea.KeyRunes, Runes: []rune{'p'}},
+			{Type: tea.KeyRunes, Runes: []rune{'x'}},
+			{Type: tea.KeyDown},
+			{Type: tea.KeyUp},
+			{Type: tea.KeyEnter},
+		}
+		for _, k := range ignoredKeys {
+			var cmd tea.Cmd
+			model, cmd = model.Update(k)
+			if cmd != nil {
+				msg := cmd()
+				if _, ok := msg.(tui.SessionsMsg); ok {
+					t.Errorf("key %v should be ignored during kill modal but produced SessionsMsg", k)
+				}
+			}
+		}
+
+		// Modal should still be showing
+		view := model.View()
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
+			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
+		}
+		// Session should not have been killed
+		if killer.killedName != "" {
+			t.Errorf("no kill should have occurred, but got %q", killer.killedName)
+		}
+	})
+
+	t.Run("k on empty list is no-op", func(t *testing.T) {
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithKiller(killer))
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+
+		// Press k on empty list
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+
+		// Should be a no-op: no command, no modal
+		if cmd != nil {
+			t.Errorf("k on empty list should return nil command, got non-nil")
+		}
+		view := model.View()
+		if strings.Contains(view, "? (y/n)") {
+			t.Errorf("k on empty list should not show confirmation modal, got:\n%s", view)
 		}
 	})
 }
@@ -3211,10 +3282,10 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Press K — should enter confirmation mode
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		// Press k — should enter confirmation mode
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		view := model.View()
-		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected confirmation prompt, got:\n%s", view)
 		}
 	})
@@ -3339,9 +3410,9 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
 		// Verify kill works
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
 		view := model.View()
-		if !strings.Contains(view, "Kill session 'alpha'? (y/n)") {
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
 			t.Errorf("expected kill confirmation, got:\n%s", view)
 		}
 	})
