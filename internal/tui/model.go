@@ -238,7 +238,7 @@ func sessionHelpKeys() []key.Binding {
 func newSessionList(items []list.Item) list.Model {
 	l := list.New(items, SessionDelegate{}, 0, 0)
 	l.Title = "Sessions"
-	l.KeyMap.Quit.SetEnabled(false)
+	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.AdditionalShortHelpKeys = sessionHelpKeys
@@ -258,7 +258,7 @@ func projectHelpKeys() []key.Binding {
 func newProjectList() list.Model {
 	l := list.New(nil, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Projects"
-	l.KeyMap.Quit.SetEnabled(false)
+	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.AdditionalShortHelpKeys = projectHelpKeys
@@ -394,11 +394,17 @@ func (m Model) updateProjectPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlC {
+			return m, tea.Quit
+		}
 		if m.projectList.SettingFilter() {
 			break
 		}
 		switch {
-		case msg.Type == tea.KeyCtrlC:
+		case msg.Type == tea.KeyEsc:
+			if m.projectList.FilterState() == list.FilterApplied {
+				break
+			}
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
@@ -470,12 +476,20 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlC {
+			return m, tea.Quit
+		}
 		// When the list is actively filtering, let it handle all key input
 		if m.sessionList.SettingFilter() {
 			break
 		}
 		switch {
-		case msg.Type == tea.KeyCtrlC:
+		case msg.Type == tea.KeyEsc:
+			// Progressive back: if filter is active, let the list clear it;
+			// otherwise quit.
+			if m.sessionList.FilterState() == list.FilterApplied {
+				break
+			}
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
@@ -516,6 +530,11 @@ func (m Model) handleKillKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Ctrl+C always force-quits regardless of modal state
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+
 	switch m.modal {
 	case modalKillConfirm:
 		return m.updateKillConfirmModal(msg)

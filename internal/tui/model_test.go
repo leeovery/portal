@@ -3176,3 +3176,386 @@ func TestSessionsPageHelpBarIncludesProjects(t *testing.T) {
 		}
 	})
 }
+
+func TestEscProgressiveBack(t *testing.T) {
+	t.Run("Esc with no modal or filter quits TUI", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from Esc with no modal or filter, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+
+	t.Run("Esc during kill modal dismisses modal", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := tui.New(lister, tui.WithKiller(killer))
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press k to open kill modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+
+		// Verify kill modal is showing
+		view := model.View()
+		if !strings.Contains(view, "Kill alpha? (y/n)") {
+			t.Fatalf("precondition: expected kill modal, got:\n%s", view)
+		}
+
+		// Press Esc — should dismiss modal, NOT quit
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should not quit
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("Esc during kill modal should dismiss modal, not quit")
+			}
+		}
+
+		// Modal should be dismissed
+		view = model.View()
+		if strings.Contains(view, "Kill alpha? (y/n)") {
+			t.Errorf("kill modal should be dismissed after Esc, got:\n%s", view)
+		}
+
+		// Sessions should still be visible
+		if !strings.Contains(view, "alpha") {
+			t.Errorf("session list should be visible after modal dismiss, got:\n%s", view)
+		}
+	})
+
+	t.Run("Esc during rename modal dismisses modal", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		renamer := &mockSessionRenamer{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press r to open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		// Verify rename modal is showing
+		view := model.View()
+		if !strings.Contains(view, "New name:") {
+			t.Fatalf("precondition: expected rename modal, got:\n%s", view)
+		}
+
+		// Press Esc — should dismiss modal, NOT quit
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should not quit
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("Esc during rename modal should dismiss modal, not quit")
+			}
+		}
+
+		// Modal should be dismissed
+		view = model.View()
+		if strings.Contains(view, "New name:") {
+			t.Errorf("rename modal should be dismissed after Esc, got:\n%s", view)
+		}
+
+		// Renamer should not have been called
+		if renamer.renamedOld != "" {
+			t.Errorf("rename should not have been called, but got old=%q", renamer.renamedOld)
+		}
+	})
+
+	t.Run("Esc with filter active clears filter", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "myapp-dev", Windows: 1, Attached: false},
+			{Name: "other", Windows: 2, Attached: false},
+			{Name: "myapp-prod", Windows: 3, Attached: false},
+		}
+		m := tui.New(&mockSessionLister{sessions: sessions})
+		m = m.WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Verify filter is applied
+		updatedModel := model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.FilterApplied {
+			t.Fatalf("precondition: expected FilterApplied, got %v", updatedModel.SessionListFilterState())
+		}
+
+		// Press Esc — should clear filter, NOT quit
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should not quit
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("Esc with applied filter should clear filter, not quit")
+			}
+		}
+
+		// Filter should be cleared
+		updatedModel = model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("filter state = %v after Esc, want Unfiltered", updatedModel.SessionListFilterState())
+		}
+
+		// All items should be visible
+		visible := updatedModel.SessionListVisibleItems()
+		if len(visible) != 3 {
+			t.Errorf("expected 3 visible items after clearing filter, got %d", len(visible))
+		}
+	})
+
+	t.Run("Esc during SettingFilter cancels filter without quitting", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+			{Name: "charlie", Windows: 3, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Enter filter mode by pressing /
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+		// Type some filter text
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+
+		// Verify we are in SettingFilter state (actively typing filter)
+		updatedModel := model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.Filtering {
+			t.Fatalf("precondition: expected Filtering state, got %v", updatedModel.SessionListFilterState())
+		}
+
+		// Press Esc — should cancel filter, NOT quit
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should not quit
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("Esc during SettingFilter should cancel filter, not quit")
+			}
+		}
+
+		// Filter state should return to Unfiltered
+		updatedModel = model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("filter state = %v after Esc during SettingFilter, want Unfiltered", updatedModel.SessionListFilterState())
+		}
+	})
+
+	t.Run("Ctrl+C force-quits from any state", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+
+		// Ctrl+C from normal session list (no modal)
+		var model tea.Model = tui.NewModelWithSessions(sessions)
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from Ctrl+C, got %T", msg)
+		}
+
+		// Test Ctrl+C with filter applied
+		m2 := tui.New(&mockSessionLister{sessions: sessions})
+		m2 = m2.WithInitialFilter("alpha")
+		model = m2
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C with filter, got nil")
+		}
+		msg = cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from Ctrl+C with filter, got %T", msg)
+		}
+
+		// Test Ctrl+C during kill modal
+		killer := &mockSessionKiller{}
+		lister := &mockSessionLister{sessions: sessions}
+		m3 := tui.New(lister, tui.WithKiller(killer))
+		model = m3
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		// Open kill modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		// Ctrl+C should force-quit even during kill modal
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C during kill modal, got nil")
+		}
+		msg = cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from Ctrl+C during kill modal, got %T", msg)
+		}
+
+		// Test Ctrl+C during rename modal
+		renamer := &mockSessionRenamer{}
+		lister2 := &mockSessionLister{sessions: sessions}
+		m4 := newModelWithRenamer(lister2, nil, renamer)
+		model = m4
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		// Open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+		// Ctrl+C should force-quit even during rename modal
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C during rename modal, got nil")
+		}
+		msg = cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from Ctrl+C during rename modal, got %T", msg)
+		}
+
+		// Test Ctrl+C during active filtering (SettingFilter)
+		m5 := tui.NewModelWithSessions(sessions)
+		model = m5
+		// Enter filter mode with /
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		// Type a character to confirm filtering
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		// Verify we are in SettingFilter state
+		if model.(tui.Model).SessionListFilterState() != list.Filtering {
+			t.Fatalf("precondition: expected Filtering state, got %v", model.(tui.Model).SessionListFilterState())
+		}
+		// Ctrl+C should force-quit even during active filtering
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command from Ctrl+C during active filtering, got nil")
+		}
+		msg = cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from Ctrl+C during active filtering, got %T", msg)
+		}
+	})
+
+	t.Run("Esc during rename then Esc again quits TUI", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		renamer := &mockSessionRenamer{}
+		lister := &mockSessionLister{sessions: sessions}
+		m := newModelWithRenamer(lister, nil, renamer)
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Press r to open rename modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+
+		// First Esc — dismisses rename modal
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("first Esc should dismiss modal, not quit")
+			}
+		}
+
+		// Verify modal is dismissed
+		view := model.View()
+		if strings.Contains(view, "New name:") {
+			t.Fatalf("rename modal should be dismissed, got:\n%s", view)
+		}
+
+		// Second Esc — should quit
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from second Esc, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from second Esc, got %T", msg)
+		}
+	})
+
+	t.Run("Esc clears filter then second Esc quits", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "myapp-dev", Windows: 1, Attached: false},
+			{Name: "other", Windows: 2, Attached: false},
+		}
+		m := tui.New(&mockSessionLister{sessions: sessions})
+		m = m.WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		// Verify filter is applied
+		updatedModel := model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.FilterApplied {
+			t.Fatalf("precondition: expected FilterApplied, got %v", updatedModel.SessionListFilterState())
+		}
+
+		// First Esc — clears filter
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("first Esc should clear filter, not quit")
+			}
+		}
+
+		updatedModel = model.(tui.Model)
+		if updatedModel.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("filter should be cleared after first Esc, got %v", updatedModel.SessionListFilterState())
+		}
+
+		// Second Esc — should quit
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from second Esc, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from second Esc, got %T", msg)
+		}
+	})
+
+	t.Run("Esc on projects page with no filter quits TUI", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Verify on projects page
+		if model.(tui.Model).ActivePage() != tui.PageProjects {
+			t.Fatalf("precondition: expected PageProjects, got %d", model.(tui.Model).ActivePage())
+		}
+
+		// Press Esc — should quit
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from Esc on projects page, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+	})
+}
