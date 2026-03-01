@@ -357,6 +357,7 @@ func sessionHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
 		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
 
@@ -382,6 +383,7 @@ func projectHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
 
@@ -392,6 +394,7 @@ func commandPendingHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run here")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
 

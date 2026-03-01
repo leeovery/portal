@@ -7289,3 +7289,71 @@ func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
 	}
 	return []tea.Msg{msg}
 }
+
+func TestHelpBarQuitBinding(t *testing.T) {
+	t.Run("session help bar includes quit binding", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := updated.View()
+		if !strings.Contains(view, "quit") {
+			t.Errorf("session help bar should contain 'quit', got:\n%s", view)
+		}
+	})
+
+	t.Run("project help bar includes quit binding", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(&mockSessionCreator{sessionName: "test"}),
+		)
+		var model tea.Model = m
+
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		view := model.View()
+		if !strings.Contains(view, "quit") {
+			t.Errorf("project help bar should contain 'quit', got:\n%s", view)
+		}
+	})
+
+	t.Run("command-pending help bar includes quit binding", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := model.View()
+		if !strings.Contains(view, "quit") {
+			t.Errorf("command-pending help bar should contain 'quit', got:\n%s", view)
+		}
+	})
+}
