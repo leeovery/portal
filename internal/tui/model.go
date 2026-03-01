@@ -228,6 +228,31 @@ func (m Model) ActivePage() page {
 	return m.activePage
 }
 
+// CommandPending returns whether the model is in command-pending mode, for testing.
+func (m Model) CommandPending() bool {
+	return m.commandPending
+}
+
+// Command returns the command slice, for testing.
+func (m Model) Command() []string {
+	return m.command
+}
+
+// InsideTmux returns whether the model is configured as running inside tmux, for testing.
+func (m Model) InsideTmux() bool {
+	return m.insideTmux
+}
+
+// CurrentSession returns the current tmux session name, for testing.
+func (m Model) CurrentSession() string {
+	return m.currentSession
+}
+
+// CWD returns the current working directory, for testing.
+func (m Model) CWD() string {
+	return m.cwd
+}
+
 // WithInitialFilter returns a copy of the Model with the initial filter set.
 // The filter is applied to the session list after items load.
 func (m Model) WithInitialFilter(filter string) Model {

@@ -268,6 +268,52 @@ func (o *osDirLister) ListDirectories(path string, showHidden bool) ([]browser.D
 	return browser.ListDirectories(path, showHidden)
 }
 
+// tuiConfig holds injectable dependencies for building the TUI model.
+type tuiConfig struct {
+	lister         tui.SessionLister
+	killer         tui.SessionKiller
+	renamer        tui.SessionRenamer
+	projectStore   tui.ProjectStore
+	sessionCreator tui.SessionCreator
+	dirLister      tui.DirLister
+	cwd            string
+	insideTmux     bool
+	currentSession string
+}
+
+// buildTUIModel constructs a tui.Model from the given config and parameters.
+func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Model {
+	m := tui.New(cfg.lister,
+		tui.WithKiller(cfg.killer),
+		tui.WithRenamer(cfg.renamer),
+		tui.WithProjectStore(cfg.projectStore),
+		tui.WithSessionCreator(cfg.sessionCreator),
+		tui.WithDirLister(cfg.dirLister, cfg.cwd),
+		tui.WithCWD(cfg.cwd),
+	)
+	if len(command) > 0 {
+		m = m.WithCommand(command)
+	}
+	if initialFilter != "" {
+		m = m.WithInitialFilter(initialFilter)
+	}
+	if cfg.insideTmux && cfg.currentSession != "" {
+		m = m.WithInsideTmux(cfg.currentSession)
+	}
+	return m
+}
+
+// processTUIResult handles the result of a TUI run.
+// If the user selected a session, it connects via the given connector.
+// If the user quit without selecting, it returns nil.
+func processTUIResult(model tui.Model, connector SessionConnector) error {
+	selected := model.Selected()
+	if selected == "" {
+		return nil
+	}
+	return connector.Connect(selected)
+}
+
 // openTUI launches the interactive session picker with an optional initial filter.
 func openTUI(initialFilter string, command []string) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
@@ -284,26 +330,25 @@ func openTUI(initialFilter string, command []string) error {
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	m := tui.New(client,
-		tui.WithKiller(client),
-		tui.WithRenamer(client),
-		tui.WithProjectStore(store),
-		tui.WithSessionCreator(session.NewSessionCreator(gitResolver, store, client, gen)),
-		tui.WithDirLister(&osDirLister{}, cwd),
-		tui.WithCWD(cwd),
-	)
-	if len(command) > 0 {
-		m = m.WithCommand(command)
+	cfg := tuiConfig{
+		lister:         client,
+		killer:         client,
+		renamer:        client,
+		projectStore:   store,
+		sessionCreator: session.NewSessionCreator(gitResolver, store, client, gen),
+		dirLister:      &osDirLister{},
+		cwd:            cwd,
 	}
-	if initialFilter != "" {
-		m = m.WithInitialFilter(initialFilter)
-	}
+
 	if tmux.InsideTmux() {
 		sessionName, err := client.CurrentSessionName()
 		if err == nil && sessionName != "" {
-			m = m.WithInsideTmux(sessionName)
+			cfg.insideTmux = true
+			cfg.currentSession = sessionName
 		}
 	}
+
+	m := buildTUIModel(cfg, initialFilter, command)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
@@ -316,13 +361,8 @@ func openTUI(initialFilter string, command []string) error {
 		return fmt.Errorf("unexpected model type: %T", finalModel)
 	}
 
-	selected := model.Selected()
-	if selected == "" {
-		return nil
-	}
-
 	connector := buildSessionConnector()
-	return connector.Connect(selected)
+	return processTUIResult(model, connector)
 }
 
 // buildQueryResolver creates a QueryResolver with appropriate dependencies.

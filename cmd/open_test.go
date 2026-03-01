@@ -8,8 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/browser"
+	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -645,6 +650,254 @@ func TestParseCommandArgs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// stubSessionLister implements tui.SessionLister for cmd-level testing.
+type stubSessionLister struct {
+	sessions []tmux.Session
+	err      error
+}
+
+func (s *stubSessionLister) ListSessions() ([]tmux.Session, error) {
+	return s.sessions, s.err
+}
+
+// stubProjectStore implements tui.ProjectStore for cmd-level testing.
+type stubProjectStore struct {
+	projects []project.Project
+}
+
+func (s *stubProjectStore) List() ([]project.Project, error) { return s.projects, nil }
+func (s *stubProjectStore) CleanStale() ([]project.Project, error) {
+	return s.projects, nil
+}
+func (s *stubProjectStore) Remove(_ string) error { return nil }
+
+// stubSessionKiller implements tui.SessionKiller for cmd-level testing.
+type stubSessionKiller struct{}
+
+func (s *stubSessionKiller) KillSession(_ string) error { return nil }
+
+// stubSessionRenamer implements tui.SessionRenamer for cmd-level testing.
+type stubSessionRenamer struct{}
+
+func (s *stubSessionRenamer) RenameSession(_, _ string) error { return nil }
+
+// stubTUISessionCreator implements tui.SessionCreator for cmd-level testing.
+type stubTUISessionCreator struct{}
+
+func (s *stubTUISessionCreator) CreateFromDir(_ string, _ []string) (string, error) {
+	return "stub-session", nil
+}
+
+// stubDirLister implements tui.DirLister for cmd-level testing.
+type stubDirLister struct{}
+
+func (s *stubDirLister) ListDirectories(_ string, _ bool) ([]browser.DirEntry, error) {
+	return nil, nil
+}
+
+// mockConnector implements SessionConnector for testing.
+type mockConnector struct {
+	connectedTo string
+	err         error
+}
+
+func (m *mockConnector) Connect(name string) error {
+	m.connectedTo = name
+	return m.err
+}
+
+func TestBuildTUIModel(t *testing.T) {
+	t.Run("no command and no filter creates default model", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if m.Selected() != "" {
+			t.Errorf("Selected() = %q, want empty", m.Selected())
+		}
+		if m.InitialFilter() != "" {
+			t.Errorf("InitialFilter() = %q, want empty", m.InitialFilter())
+		}
+		if m.CommandPending() {
+			t.Error("CommandPending() = true, want false")
+		}
+		if m.InsideTmux() {
+			t.Error("InsideTmux() = true, want false")
+		}
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("ActivePage() = %d, want PageSessions (0)", m.ActivePage())
+		}
+	})
+
+	t.Run("command creates model in command-pending mode", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+		}
+
+		m := buildTUIModel(cfg, "", []string{"claude"})
+
+		if !m.CommandPending() {
+			t.Error("CommandPending() = false, want true")
+		}
+		if m.ActivePage() != tui.PageProjects {
+			t.Errorf("ActivePage() = %d, want PageProjects (1)", m.ActivePage())
+		}
+		wantCmd := []string{"claude"}
+		gotCmd := m.Command()
+		if len(gotCmd) != len(wantCmd) {
+			t.Fatalf("Command() = %v, want %v", gotCmd, wantCmd)
+		}
+		for i, arg := range gotCmd {
+			if arg != wantCmd[i] {
+				t.Errorf("Command()[%d] = %q, want %q", i, arg, wantCmd[i])
+			}
+		}
+	})
+
+	t.Run("filter creates model with initial filter", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+		}
+
+		m := buildTUIModel(cfg, "myapp", nil)
+
+		if m.InitialFilter() != "myapp" {
+			t.Errorf("InitialFilter() = %q, want %q", m.InitialFilter(), "myapp")
+		}
+		if m.CommandPending() {
+			t.Error("CommandPending() = true, want false")
+		}
+	})
+
+	t.Run("command and filter combines both", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+		}
+
+		m := buildTUIModel(cfg, "myapp", []string{"claude"})
+
+		if m.InitialFilter() != "myapp" {
+			t.Errorf("InitialFilter() = %q, want %q", m.InitialFilter(), "myapp")
+		}
+		if !m.CommandPending() {
+			t.Error("CommandPending() = false, want true")
+		}
+		if m.ActivePage() != tui.PageProjects {
+			t.Errorf("ActivePage() = %d, want PageProjects (1)", m.ActivePage())
+		}
+	})
+
+	t.Run("inside tmux detection passes session name to model", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+			insideTmux:     true,
+			currentSession: "my-session",
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if !m.InsideTmux() {
+			t.Error("InsideTmux() = false, want true")
+		}
+		if m.CurrentSession() != "my-session" {
+			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "my-session")
+		}
+		if m.SessionListTitle() != "Sessions (current: my-session)" {
+			t.Errorf("SessionListTitle() = %q, want %q", m.SessionListTitle(), "Sessions (current: my-session)")
+		}
+	})
+
+	t.Run("cwd wired correctly", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user/projects",
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if m.CWD() != "/home/user/projects" {
+			t.Errorf("CWD() = %q, want %q", m.CWD(), "/home/user/projects")
+		}
+	})
+}
+
+func TestProcessTUIResult(t *testing.T) {
+	t.Run("clean exit without selection returns nil", func(t *testing.T) {
+		m := tui.New(&stubSessionLister{})
+		// m.Selected() is "" by default
+		connector := &mockConnector{}
+
+		err := processTUIResult(m, connector)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if connector.connectedTo != "" {
+			t.Errorf("connector should not be called on clean exit, but was called with %q", connector.connectedTo)
+		}
+	})
+
+	t.Run("selected session name forwarded to connector", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 3},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		// Simulate user selecting a session via Update with Enter
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(tui.Model)
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(tui.Model)
+
+		connector := &mockConnector{}
+
+		err := processTUIResult(m, connector)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if connector.connectedTo != "dev" {
+			t.Errorf("connector called with %q, want %q", connector.connectedTo, "dev")
+		}
+	})
 }
 
 func TestBuildSessionConnector(t *testing.T) {
