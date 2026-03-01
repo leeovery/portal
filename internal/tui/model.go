@@ -612,7 +612,7 @@ func (m Model) selectedProjectItem() (ProjectItem, bool) {
 func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle active modal first — route all input to modal handler
 	if m.modal != modalNone {
-		return m.updateProjectModal(msg)
+		return m.updateModal(msg)
 	}
 
 	switch msg := msg.(type) {
@@ -699,22 +699,6 @@ func (m Model) handleDeleteProjectKey() (tea.Model, tea.Cmd) {
 	m.pendingDeletePath = pi.Project.Path
 	m.pendingDeleteName = pi.Project.Name
 	return m, nil
-}
-
-func (m Model) updateProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Ctrl+C always force-quits regardless of modal state
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
-		return m, tea.Quit
-	}
-
-	switch m.modal {
-	case modalDeleteProject:
-		return m.updateDeleteProjectModal(msg)
-	case modalEditProject:
-		return m.updateEditProjectModal(msg)
-	default:
-		return m, nil
-	}
 }
 
 func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -988,6 +972,10 @@ func (m Model) updateModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateKillConfirmModal(msg)
 	case modalRename:
 		return m.updateRenameModal(msg)
+	case modalDeleteProject:
+		return m.updateDeleteProjectModal(msg)
+	case modalEditProject:
+		return m.updateEditProjectModal(msg)
 	default:
 		return m, nil
 	}
