@@ -76,30 +76,32 @@ type ProjectsLoadedMsg struct {
 
 // Model is the Bubble Tea model for the session list TUI.
 type Model struct {
-	sessionList     list.Model
-	sessions        []tmux.Session
-	selected        string
-	sessionLister   SessionLister
-	sessionKiller   SessionKiller
-	sessionRenamer  SessionRenamer
-	projectStore    ProjectStore
-	sessionCreator  SessionCreator
-	dirLister       DirLister
-	startPath       string
-	cwd             string
-	activePage      page
-	projectList     list.Model
-	projectPicker   ui.ProjectPickerModel
-	fileBrowser     ui.FileBrowserModel
-	initialFilter   string
-	insideTmux      bool
-	currentSession  string
-	modal           modalState
-	pendingKillName string
-	renameInput     textinput.Model
-	renameTarget    string
-	command         []string
-	commandPending  bool
+	sessionList       list.Model
+	sessions          []tmux.Session
+	selected          string
+	sessionLister     SessionLister
+	sessionKiller     SessionKiller
+	sessionRenamer    SessionRenamer
+	projectStore      ProjectStore
+	sessionCreator    SessionCreator
+	dirLister         DirLister
+	startPath         string
+	cwd               string
+	activePage        page
+	projectList       list.Model
+	projectPicker     ui.ProjectPickerModel
+	fileBrowser       ui.FileBrowserModel
+	initialFilter     string
+	insideTmux        bool
+	currentSession    string
+	modal             modalState
+	pendingKillName   string
+	renameInput       textinput.Model
+	renameTarget      string
+	pendingDeletePath string
+	pendingDeleteName string
+	command           []string
+	commandPending    bool
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -151,6 +153,17 @@ func (m Model) ProjectListItems() []list.Item {
 // ProjectListSize returns the project list dimensions, for testing.
 func (m Model) ProjectListSize() (int, int) {
 	return m.projectList.Width(), m.projectList.Height()
+}
+
+// ProjectListFilterState returns the current filter state of the project list, for testing.
+func (m Model) ProjectListFilterState() list.FilterState {
+	return m.projectList.FilterState()
+}
+
+// SetProjectListFilter sets the filter text and applies it on the project list, for testing.
+func (m *Model) SetProjectListFilter(text string) {
+	m.projectList.SetFilterText(text)
+	m.projectList.SetFilterState(list.FilterApplied)
 }
 
 // ActivePage returns the currently active page, for testing.
@@ -341,6 +354,19 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
+// deleteAndRefreshProjects returns a command that removes a project and reloads the list.
+// Errors from Remove are propagated via ProjectsLoadedMsg.
+func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
+	return func() tea.Msg {
+		if err := m.projectStore.Remove(path); err != nil {
+			return ProjectsLoadedMsg{Err: fmt.Errorf("failed to delete project '%s': %w", path, err)}
+		}
+		_, _ = m.projectStore.CleanStale()
+		projects, err := m.projectStore.List()
+		return ProjectsLoadedMsg{Projects: projects, Err: err}
+	}
+}
+
 // Init returns a command that fetches tmux sessions, or loads projects
 // when in command-pending mode.
 func (m Model) Init() tea.Cmd {
@@ -443,6 +469,11 @@ func (m Model) selectedProjectItem() (ProjectItem, bool) {
 }
 
 func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Handle active modal first — route all input to modal handler
+	if m.modal != modalNone {
+		return m.updateProjectModal(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -467,6 +498,8 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			return m.handleNewInCWD()
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
+			return m.handleDeleteProjectKey()
 		case msg.Type == tea.KeyEnter:
 			return m.handleProjectEnter()
 		}
@@ -486,6 +519,58 @@ func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, m.createSession(pi.Project.Path)
+}
+
+func (m Model) handleDeleteProjectKey() (tea.Model, tea.Cmd) {
+	pi, ok := m.selectedProjectItem()
+	if !ok {
+		return m, nil
+	}
+	if m.projectStore == nil {
+		return m, nil
+	}
+	m.modal = modalDeleteProject
+	m.pendingDeletePath = pi.Project.Path
+	m.pendingDeleteName = pi.Project.Name
+	return m, nil
+}
+
+func (m Model) updateProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Ctrl+C always force-quits regardless of modal state
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+
+	switch m.modal {
+	case modalDeleteProject:
+		return m.updateDeleteProjectModal(msg)
+	default:
+		return m, nil
+	}
+}
+
+func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch {
+	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "y":
+		path := m.pendingDeletePath
+		m.modal = modalNone
+		m.pendingDeletePath = ""
+		m.pendingDeleteName = ""
+		return m, m.deleteAndRefreshProjects(path)
+	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "n",
+		keyMsg.Type == tea.KeyEsc:
+		m.modal = modalNone
+		m.pendingDeletePath = ""
+		m.pendingDeleteName = ""
+		return m, nil
+	}
+	// Ignore all other keys while modal is active
+	return m, nil
 }
 
 func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -729,12 +814,31 @@ func (m Model) View() string {
 			b.WriteString(m.projectPicker.View())
 			return b.String()
 		}
-		return m.projectList.View()
+		return m.viewProjectList()
 	case pageFileBrowser:
 		return m.fileBrowser.View()
 	default:
 		return m.viewSessionList()
 	}
+}
+
+// viewProjectList renders the project list, with optional modal overlay.
+func (m Model) viewProjectList() string {
+	listView := m.projectList.View()
+
+	if m.modal == modalDeleteProject {
+		w, h := m.projectList.Width(), m.projectList.Height()
+		if w == 0 {
+			w = 80
+		}
+		if h == 0 {
+			h = 24
+		}
+		content := fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName)
+		return renderModal(content, listView, w, h)
+	}
+
+	return listView
 }
 
 // viewSessionList renders the session list using bubbles/list.

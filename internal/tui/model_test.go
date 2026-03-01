@@ -729,8 +729,11 @@ func (m *mockSessionKiller) KillSession(name string) error {
 
 // mockProjectStore implements ui.ProjectStore for tui testing.
 type mockProjectStore struct {
-	projects []project.Project
-	listErr  error
+	projects     []project.Project
+	listErr      error
+	removeCalled bool
+	removedPath  string
+	removeErr    error
 }
 
 func (m *mockProjectStore) List() ([]project.Project, error) {
@@ -741,8 +744,10 @@ func (m *mockProjectStore) CleanStale() ([]project.Project, error) {
 	return nil, nil
 }
 
-func (m *mockProjectStore) Remove(_ string) error {
-	return nil
+func (m *mockProjectStore) Remove(path string) error {
+	m.removeCalled = true
+	m.removedPath = path
+	return m.removeErr
 }
 
 // mockSessionCreator implements tui.SessionCreator for testing.
@@ -3598,6 +3603,401 @@ func TestProjectsPage(t *testing.T) {
 		}
 		if !strings.Contains(view, "webapp") {
 			t.Errorf("view should contain 'webapp', got:\n%s", view)
+		}
+	})
+}
+
+func TestDeleteProject(t *testing.T) {
+	t.Run("d opens delete confirmation modal for selected project", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d on the first project
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		view := model.View()
+		if !strings.Contains(view, "Delete portal? (y/n)") {
+			t.Errorf("expected delete confirmation for 'portal', got:\n%s", view)
+		}
+		// Modal should have border styling
+		if !strings.ContainsAny(view, "─│╭╮╰╯") {
+			t.Errorf("modal overlay should contain border characters, got:\n%s", view)
+		}
+	})
+
+	t.Run("y in delete modal removes project and refreshes list", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		if cmd == nil {
+			t.Fatal("expected command from delete confirmation, got nil")
+		}
+
+		// Execute the command — should call Remove and return ProjectsLoadedMsg
+		msg := cmd()
+		loadedMsg, ok := msg.(tui.ProjectsLoadedMsg)
+		if !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
+		if loadedMsg.Err != nil {
+			t.Fatalf("unexpected error: %v", loadedMsg.Err)
+		}
+
+		// Verify remove was called (inside the command)
+		if !store.removeCalled {
+			t.Error("expected store.Remove to be called")
+		}
+		if store.removedPath != "/code/portal" {
+			t.Errorf("expected Remove(%q), got Remove(%q)", "/code/portal", store.removedPath)
+		}
+	})
+
+	t.Run("n in delete modal dismisses without deleting", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d then n
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+		view := model.View()
+		if strings.Contains(view, "? (y/n)") {
+			t.Errorf("confirmation prompt should be cleared after n, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portal") {
+			t.Errorf("project 'portal' should still be in list after cancel, got:\n%s", view)
+		}
+		if store.removeCalled {
+			t.Error("Remove should not have been called after cancel")
+		}
+	})
+
+	t.Run("Esc in delete modal dismisses without deleting", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d then Esc
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		view := model.View()
+		if strings.Contains(view, "? (y/n)") {
+			t.Errorf("confirmation prompt should be cleared after Esc, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portal") {
+			t.Errorf("project 'portal' should still be in list after cancel, got:\n%s", view)
+		}
+		if store.removeCalled {
+			t.Error("Remove should not have been called after Esc")
+		}
+	})
+
+	t.Run("other keys ignored during delete modal", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d to open delete modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		// Press various keys that should be ignored
+		ignoredKeys := []tea.KeyMsg{
+			{Type: tea.KeyRunes, Runes: []rune{'q'}},
+			{Type: tea.KeyRunes, Runes: []rune{'d'}},
+			{Type: tea.KeyRunes, Runes: []rune{'s'}},
+			{Type: tea.KeyRunes, Runes: []rune{'x'}},
+			{Type: tea.KeyDown},
+			{Type: tea.KeyUp},
+			{Type: tea.KeyEnter},
+		}
+		for _, k := range ignoredKeys {
+			var cmd tea.Cmd
+			model, cmd = model.Update(k)
+			if cmd != nil {
+				msg := cmd()
+				if _, ok := msg.(tui.ProjectsLoadedMsg); ok {
+					t.Errorf("key %v should be ignored during delete modal but produced ProjectsLoadedMsg", k)
+				}
+			}
+		}
+
+		// Modal should still be showing
+		view := model.View()
+		if !strings.Contains(view, "Delete portal? (y/n)") {
+			t.Errorf("modal should still show after ignored keys, got:\n%s", view)
+		}
+		if store.removeCalled {
+			t.Error("no remove should have occurred")
+		}
+	})
+
+	t.Run("delete last remaining project shows empty state", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		// Press d then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		// Update store to return empty after removal
+		store.projects = []project.Project{}
+
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		if cmd == nil {
+			t.Fatal("expected command from delete confirmation, got nil")
+		}
+
+		// Execute command and feed result back
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "No saved projects") {
+			t.Errorf("expected empty state after deleting last project, got:\n%s", view)
+		}
+	})
+
+	t.Run("d on empty project list is no-op", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page (no items)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Press d on empty list
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		if cmd != nil {
+			t.Errorf("d on empty list should return nil command, got non-nil")
+		}
+		view := model.View()
+		if strings.Contains(view, "? (y/n)") {
+			t.Errorf("d on empty list should not show confirmation modal, got:\n%s", view)
+		}
+	})
+
+	t.Run("delete error propagated via ProjectsLoadedMsg", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+			removeErr: fmt.Errorf("permission denied"),
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Press d then y
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		if cmd == nil {
+			t.Fatal("expected command from delete confirmation, got nil")
+		}
+
+		// Execute the command — should return ProjectsLoadedMsg with the remove error
+		msg := cmd()
+		loadedMsg, ok := msg.(tui.ProjectsLoadedMsg)
+		if !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
+		if loadedMsg.Err == nil {
+			t.Fatal("expected error in ProjectsLoadedMsg when Remove fails, got nil")
+		}
+		if !strings.Contains(loadedMsg.Err.Error(), "permission denied") {
+			t.Errorf("expected error to contain 'permission denied', got: %q", loadedMsg.Err.Error())
+		}
+	})
+
+	t.Run("delete while filter active removes the correct project", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+				{Path: "/code/api", Name: "api"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+
+		// Switch to projects page and populate
+		var model tea.Model = m
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+				{Path: "/code/api", Name: "api"},
+			},
+		})
+
+		// Apply a filter via the list's filter API so only "webapp" is visible
+		tuiModel := model.(tui.Model)
+		tuiModel.SetProjectListFilter("webapp")
+		if tuiModel.ProjectListFilterState() != list.FilterApplied {
+			t.Fatalf("precondition: expected FilterApplied, got %v", tuiModel.ProjectListFilterState())
+		}
+		model = tuiModel
+
+		// Press d — should target webapp from the filtered view
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		view := model.View()
+		if !strings.Contains(view, "Delete webapp? (y/n)") {
+			t.Errorf("expected delete confirmation for 'webapp', got:\n%s", view)
+		}
+
+		// Confirm deletion
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+		if cmd == nil {
+			t.Fatal("expected command from delete confirmation, got nil")
+		}
+
+		// Execute the command and verify correct project was removed
+		msg := cmd()
+		_, ok := msg.(tui.ProjectsLoadedMsg)
+		if !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
+		if store.removedPath != "/code/webapp" {
+			t.Errorf("expected Remove(%q), got Remove(%q)", "/code/webapp", store.removedPath)
 		}
 	})
 }

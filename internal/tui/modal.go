@@ -10,9 +10,10 @@ import (
 type modalState int
 
 const (
-	modalNone        modalState = iota
-	modalKillConfirm            // Kill session confirmation
-	modalRename                 // Rename session with textinput
+	modalNone          modalState = iota
+	modalKillConfirm              // Kill session confirmation
+	modalRename                   // Rename session with textinput
+	modalDeleteProject            // Delete project confirmation
 )
 
 // modalStyle defines the bordered box style for modal overlays.
