@@ -17,6 +17,14 @@ var (
 	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
 )
 
+// windowLabel returns a formatted window count with correct pluralization.
+func windowLabel(count int) string {
+	if count == 1 {
+		return "1 window"
+	}
+	return fmt.Sprintf("%d windows", count)
+}
+
 // SessionItem wraps a tmux.Session and implements the list.Item interface
 // for use with bubbles/list.
 type SessionItem struct {
@@ -36,16 +44,13 @@ func (i SessionItem) Title() string {
 // Description returns the window count with correct pluralization
 // and the attached badge if the session is attached.
 func (i SessionItem) Description() string {
-	windowLabel := fmt.Sprintf("%d windows", i.Session.Windows)
-	if i.Session.Windows == 1 {
-		windowLabel = "1 window"
-	}
+	label := windowLabel(i.Session.Windows)
 
 	if i.Session.Attached {
-		return windowLabel + "  ● attached"
+		return label + "  ● attached"
 	}
 
-	return windowLabel
+	return label
 }
 
 // SessionDelegate implements list.ItemDelegate for rendering session items.
@@ -77,11 +82,7 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	name := nameStyle.Render(si.Session.Name)
 
-	windowLabel := fmt.Sprintf("%d windows", si.Session.Windows)
-	if si.Session.Windows == 1 {
-		windowLabel = "1 window"
-	}
-	detail := detailStyle.Render(windowLabel)
+	detail := detailStyle.Render(windowLabel(si.Session.Windows))
 
 	if si.Session.Attached {
 		detail += "  " + attachedStyle.Render("● attached")
