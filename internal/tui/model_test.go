@@ -4429,3 +4429,509 @@ func TestEscProgressiveBack(t *testing.T) {
 		}
 	})
 }
+
+// mockProjectEditor implements tui.ProjectEditor for testing.
+type mockProjectEditor struct {
+	renamedPath string
+	renamedName string
+	err         error
+}
+
+func (m *mockProjectEditor) Rename(path, newName string) error {
+	m.renamedPath = path
+	m.renamedName = newName
+	return m.err
+}
+
+// mockAliasEditor implements tui.AliasEditor for testing.
+type mockAliasEditor struct {
+	aliases    map[string]string
+	loadErr    error
+	setCalls   []aliasSetCall
+	deleted    []string
+	saveCalled bool
+	saveErr    error
+}
+
+type aliasSetCall struct {
+	name string
+	path string
+}
+
+func (m *mockAliasEditor) Load() (map[string]string, error) {
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	result := make(map[string]string)
+	for k, v := range m.aliases {
+		result[k] = v
+	}
+	return result, nil
+}
+
+func (m *mockAliasEditor) Set(name, path string) {
+	m.setCalls = append(m.setCalls, aliasSetCall{name: name, path: path})
+	if m.aliases == nil {
+		m.aliases = make(map[string]string)
+	}
+	m.aliases[name] = path
+}
+
+func (m *mockAliasEditor) Delete(name string) bool {
+	m.deleted = append(m.deleted, name)
+	_, ok := m.aliases[name]
+	if ok {
+		delete(m.aliases, name)
+	}
+	return ok
+}
+
+func (m *mockAliasEditor) Save() error {
+	m.saveCalled = true
+	return m.saveErr
+}
+
+// setupEditModel creates a model on the projects page with the given projects,
+// project editor, and alias editor.
+func setupEditModel(store *mockProjectStore, editor *mockProjectEditor, aliases *mockAliasEditor) tea.Model {
+	opts := []tui.Option{
+		tui.WithProjectStore(store),
+	}
+	if editor != nil {
+		opts = append(opts, tui.WithProjectEditor(editor))
+	}
+	if aliases != nil {
+		opts = append(opts, tui.WithAliasEditor(aliases))
+	}
+	m := tui.New(&mockSessionLister{sessions: []tmux.Session{}}, opts...)
+	var model tea.Model = m
+
+	// Switch to projects page and populate
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
+	return model
+}
+
+func TestEditProject(t *testing.T) {
+	t.Run("e opens edit modal with project name and aliases", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{
+				"p": "/code/portal",
+				"w": "/code/webapp",
+			},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Press e on first project
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		view := model.View()
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("edit modal should contain 'Name:' field, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portal") {
+			t.Errorf("edit modal should show current project name 'portal', got:\n%s", view)
+		}
+		if !strings.Contains(view, "Aliases:") {
+			t.Errorf("edit modal should contain 'Aliases:' section, got:\n%s", view)
+		}
+		// Should show alias 'p' which maps to /code/portal
+		if !strings.Contains(view, "p") {
+			t.Errorf("edit modal should show alias 'p', got:\n%s", view)
+		}
+		// Should have border styling (modal overlay)
+		if !strings.ContainsAny(view, "─│╭╮╰╯") {
+			t.Errorf("edit modal should have border styling, got:\n%s", view)
+		}
+	})
+
+	t.Run("Tab switches focus between name and aliases", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Initially focus is on name field — typing goes to name
+		// Type a character
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Z'}})
+		view := model.View()
+		if !strings.Contains(view, "portalZ") {
+			t.Errorf("typing should append to name field, got:\n%s", view)
+		}
+
+		// Press Tab to switch to aliases
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+		// Now typing should go to alias "Add:" input, not name
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+		view = model.View()
+		if !strings.Contains(view, "Add:") {
+			t.Errorf("after Tab, view should show 'Add:' section, got:\n%s", view)
+		}
+		if !strings.Contains(view, "portalZ") {
+			t.Errorf("name should still be 'portalZ' (not modified by alias typing), got:\n%s", view)
+		}
+
+		// Tab again returns to name
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Y'}})
+		view = model.View()
+		if !strings.Contains(view, "portalZY") {
+			t.Errorf("after second Tab, typing should append to name, got:\n%s", view)
+		}
+	})
+
+	t.Run("Enter saves name change and refreshes list", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Change name
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+
+		// Press Enter to save
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if cmd == nil {
+			t.Fatal("Enter should return a command for refresh, got nil")
+		}
+
+		// Verify editor.Rename was called
+		if editor.renamedPath != "/code/portal" {
+			t.Errorf("expected Rename path '/code/portal', got %q", editor.renamedPath)
+		}
+		if editor.renamedName != "new" {
+			t.Errorf("expected Rename name 'new', got %q", editor.renamedName)
+		}
+
+		// Execute command — should refresh projects
+		msg := cmd()
+		loadedMsg, ok := msg.(tui.ProjectsLoadedMsg)
+		if !ok {
+			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
+		}
+		if loadedMsg.Err != nil {
+			t.Fatalf("unexpected error: %v", loadedMsg.Err)
+		}
+	})
+
+	t.Run("Esc cancels edit without saving", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Change name
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+
+		// Press Esc to cancel
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should not have called Rename
+		if editor.renamedPath != "" {
+			t.Error("Esc should not call Rename")
+		}
+		// Should not return a command (no refresh)
+		if cmd != nil {
+			t.Errorf("Esc should return nil command, got non-nil")
+		}
+		// Modal should be dismissed — view shows project list
+		view := model.View()
+		if strings.Contains(view, "Name:") {
+			t.Errorf("edit modal should be dismissed after Esc, got:\n%s", view)
+		}
+		// Original name should be visible (unchanged)
+		if !strings.Contains(view, "portal") {
+			t.Errorf("original project name should still be in list, got:\n%s", view)
+		}
+	})
+
+	t.Run("empty name rejected with error on Enter", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Clear name completely
+		for range len("portal") {
+			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		}
+
+		// Press Enter with empty name
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		// Should show error
+		view := model.View()
+		if !strings.Contains(view, "cannot be empty") {
+			t.Errorf("expected empty name error, got:\n%s", view)
+		}
+		// Should NOT dismiss modal
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should still be open after validation error, got:\n%s", view)
+		}
+		// Should not have called Rename
+		if editor.renamedPath != "" {
+			t.Error("should not call Rename with empty name")
+		}
+		if cmd != nil {
+			t.Errorf("should not return command on validation error, got non-nil")
+		}
+	})
+
+	t.Run("alias collision shows error message", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{
+				"w": "/code/webapp",
+			},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal on portal (first project)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Switch to alias section
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+		// Type 'w' as new alias (which already exists for /code/webapp)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+
+		// Press Enter to save
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		view := model.View()
+		if !strings.Contains(view, "already exists") {
+			t.Errorf("expected alias collision error, got:\n%s", view)
+		}
+		// Modal should still be open
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should still be open after alias collision, got:\n%s", view)
+		}
+		if cmd != nil {
+			t.Errorf("should not return command on alias collision, got non-nil")
+		}
+	})
+
+	t.Run("x removes alias from list in edit mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{
+				"p":  "/code/portal",
+				"pt": "/code/portal",
+			},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Switch to alias section
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+		// Press x to remove the first alias
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		view := model.View()
+		// The modal should still be open
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should still be open after removing alias, got:\n%s", view)
+		}
+		// At least one alias should remain visible
+		if !strings.Contains(view, "Aliases:") {
+			t.Errorf("aliases section should still be visible, got:\n%s", view)
+		}
+	})
+
+	t.Run("new alias is added on save", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Switch to alias section (cursor starts on Add input since no existing aliases)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+		// Type new alias
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+		// Press Enter to save
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if cmd == nil {
+			t.Fatal("Enter should return a command for refresh, got nil")
+		}
+
+		// Verify alias was set
+		if len(aliases.setCalls) != 1 {
+			t.Fatalf("expected 1 Set call, got %d", len(aliases.setCalls))
+		}
+		if aliases.setCalls[0].name != "my" {
+			t.Errorf("expected alias name 'my', got %q", aliases.setCalls[0].name)
+		}
+		if aliases.setCalls[0].path != "/code/portal" {
+			t.Errorf("expected alias path '/code/portal', got %q", aliases.setCalls[0].path)
+		}
+		if !aliases.saveCalled {
+			t.Error("expected Save to be called")
+		}
+	})
+
+	t.Run("alias removal is committed on save", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{
+				"p": "/code/portal",
+			},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Switch to alias section
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+
+		// Press x to remove alias
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		// Press Enter to save
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if cmd == nil {
+			t.Fatal("Enter should return a command for refresh, got nil")
+		}
+
+		// Verify Delete was called for the removed alias
+		if len(aliases.deleted) != 1 {
+			t.Fatalf("expected 1 Delete call, got %d", len(aliases.deleted))
+		}
+		if aliases.deleted[0] != "p" {
+			t.Errorf("expected Delete('p'), got Delete(%q)", aliases.deleted[0])
+		}
+		if !aliases.saveCalled {
+			t.Error("expected Save to be called")
+		}
+	})
+
+	t.Run("e with no editor configured is no-op", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		// No editor or alias editor provided
+		model := setupEditModel(store, nil, nil)
+
+		// Press e
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		if cmd != nil {
+			t.Errorf("e with no editor should return nil command, got non-nil")
+		}
+		view := model.View()
+		if strings.Contains(view, "Name:") {
+			t.Errorf("edit modal should not open without editor, got:\n%s", view)
+		}
+	})
+
+	t.Run("e on empty project list is no-op", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{
+			aliases: map[string]string{},
+		}
+		model := setupEditModel(store, editor, aliases)
+
+		// Press e on empty list
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		if cmd != nil {
+			t.Errorf("e on empty list should return nil command, got non-nil")
+		}
+		view := model.View()
+		if strings.Contains(view, "Name:") {
+			t.Errorf("edit modal should not open on empty list, got:\n%s", view)
+		}
+	})
+}

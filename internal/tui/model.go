@@ -49,6 +49,27 @@ type SessionRenamer interface {
 	RenameSession(oldName, newName string) error
 }
 
+// ProjectEditor defines the interface for renaming projects.
+type ProjectEditor interface {
+	Rename(path, newName string) error
+}
+
+// AliasEditor defines the interface for managing aliases in edit mode.
+type AliasEditor interface {
+	Load() (map[string]string, error)
+	Set(name, path string)
+	Delete(name string) bool
+	Save() error
+}
+
+// editField tracks which field has focus in the edit modal.
+type editField int
+
+const (
+	editFieldName editField = iota
+	editFieldAliases
+)
+
 // DirLister abstracts directory listing for testability.
 type DirLister = ui.DirLister
 
@@ -83,6 +104,8 @@ type Model struct {
 	sessionKiller     SessionKiller
 	sessionRenamer    SessionRenamer
 	projectStore      ProjectStore
+	projectEditor     ProjectEditor
+	aliasEditor       AliasEditor
 	sessionCreator    SessionCreator
 	dirLister         DirLister
 	startPath         string
@@ -102,6 +125,16 @@ type Model struct {
 	pendingDeleteName string
 	command           []string
 	commandPending    bool
+
+	// Edit project modal state
+	editProject     project.Project
+	editName        string
+	editAliases     []string
+	editRemoved     []string
+	editNewAlias    string
+	editFocus       editField
+	editAliasCursor int
+	editError       string
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -242,6 +275,20 @@ func WithSessionCreator(c SessionCreator) Option {
 func WithCWD(path string) Option {
 	return func(m *Model) {
 		m.cwd = path
+	}
+}
+
+// WithProjectEditor sets the project editor dependency for rename operations.
+func WithProjectEditor(e ProjectEditor) Option {
+	return func(m *Model) {
+		m.projectEditor = e
+	}
+}
+
+// WithAliasEditor sets the alias editor dependency for alias management.
+func WithAliasEditor(a AliasEditor) Option {
+	return func(m *Model) {
+		m.aliasEditor = a
 	}
 }
 
@@ -500,6 +547,8 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleNewInCWD()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
 			return m.handleDeleteProjectKey()
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
+			return m.handleEditProjectKey()
 		case msg.Type == tea.KeyEnter:
 			return m.handleProjectEnter()
 		}
@@ -544,6 +593,8 @@ func (m Model) updateProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.modal {
 	case modalDeleteProject:
 		return m.updateDeleteProjectModal(msg)
+	case modalEditProject:
+		return m.updateEditProjectModal(msg)
 	default:
 		return m, nil
 	}
@@ -571,6 +622,163 @@ func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	// Ignore all other keys while modal is active
 	return m, nil
+}
+
+func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
+	pi, ok := m.selectedProjectItem()
+	if !ok {
+		return m, nil
+	}
+	if m.projectEditor == nil || m.aliasEditor == nil {
+		return m, nil
+	}
+
+	m.modal = modalEditProject
+	m.editProject = pi.Project
+	m.editName = pi.Project.Name
+	m.editFocus = editFieldName
+	m.editNewAlias = ""
+	m.editError = ""
+	m.editRemoved = nil
+	m.editAliasCursor = 0
+
+	// Load aliases matching this project's directory
+	allAliases, err := m.aliasEditor.Load()
+	if err != nil {
+		m.editAliases = nil
+	} else {
+		var matching []string
+		for name, path := range allAliases {
+			if path == pi.Project.Path {
+				matching = append(matching, name)
+			}
+		}
+		m.editAliases = matching
+	}
+
+	return m, nil
+}
+
+func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+
+	switch keyMsg.Type {
+	case tea.KeyEsc:
+		m.modal = modalNone
+		m.editError = ""
+		return m, nil
+
+	case tea.KeyTab:
+		if m.editFocus == editFieldName {
+			m.editFocus = editFieldAliases
+		} else {
+			m.editFocus = editFieldName
+		}
+		return m, nil
+
+	case tea.KeyEnter:
+		return m.handleEditProjectConfirm()
+
+	case tea.KeyBackspace:
+		if m.editFocus == editFieldName {
+			if len(m.editName) > 0 {
+				m.editName = m.editName[:len(m.editName)-1]
+			}
+		} else if m.editAliasCursor == len(m.editAliases) {
+			// On Add input
+			if len(m.editNewAlias) > 0 {
+				m.editNewAlias = m.editNewAlias[:len(m.editNewAlias)-1]
+			}
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.editFocus == editFieldAliases && m.editAliasCursor < len(m.editAliases) {
+			m.editAliasCursor++
+		}
+		return m, nil
+
+	case tea.KeyUp:
+		if m.editFocus == editFieldAliases && m.editAliasCursor > 0 {
+			m.editAliasCursor--
+		}
+		return m, nil
+
+	case tea.KeyRunes:
+		text := string(keyMsg.Runes)
+		// In alias area, on an existing alias entry: x removes it
+		if m.editFocus == editFieldAliases && text == "x" && m.editAliasCursor < len(m.editAliases) {
+			removed := m.editAliases[m.editAliasCursor]
+			m.editRemoved = append(m.editRemoved, removed)
+			m.editAliases = append(m.editAliases[:m.editAliasCursor], m.editAliases[m.editAliasCursor+1:]...)
+			if m.editAliasCursor > len(m.editAliases) {
+				m.editAliasCursor = len(m.editAliases)
+			}
+			return m, nil
+		}
+		// In alias area, on Add input: type into new alias
+		if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
+			m.editNewAlias += text
+			m.editError = ""
+			return m, nil
+		}
+		if m.editFocus == editFieldName {
+			m.editName += text
+		}
+		m.editError = ""
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
+	name := strings.TrimSpace(m.editName)
+	if name == "" {
+		m.editError = "Project name cannot be empty"
+		return m, nil
+	}
+
+	// Save project name if changed
+	if name != m.editProject.Name {
+		if err := m.projectEditor.Rename(m.editProject.Path, name); err != nil {
+			m.editError = "Failed to save project name"
+			return m, nil
+		}
+	}
+
+	// Handle alias removals
+	for _, removed := range m.editRemoved {
+		m.aliasEditor.Delete(removed)
+	}
+
+	// Handle new alias addition
+	newAlias := strings.TrimSpace(m.editNewAlias)
+	if newAlias != "" {
+		// Check for collision
+		allAliases, err := m.aliasEditor.Load()
+		if err == nil {
+			if existingPath, ok := allAliases[newAlias]; ok && existingPath != m.editProject.Path {
+				m.editError = fmt.Sprintf("Alias '%s' already exists", newAlias)
+				return m, nil
+			}
+		}
+		m.aliasEditor.Set(newAlias, m.editProject.Path)
+	}
+
+	// Save alias changes
+	if err := m.aliasEditor.Save(); err != nil {
+		m.editError = "Failed to save aliases"
+		return m, nil
+	}
+
+	m.modal = modalNone
+	m.editError = ""
+
+	return m, m.loadProjects()
 }
 
 func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -826,19 +1034,70 @@ func (m Model) View() string {
 func (m Model) viewProjectList() string {
 	listView := m.projectList.View()
 
-	if m.modal == modalDeleteProject {
-		w, h := m.projectList.Width(), m.projectList.Height()
-		if w == 0 {
-			w = 80
-		}
-		if h == 0 {
-			h = 24
-		}
+	w, h := m.projectList.Width(), m.projectList.Height()
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+
+	switch m.modal {
+	case modalDeleteProject:
 		content := fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName)
 		return renderModal(content, listView, w, h)
+	case modalEditProject:
+		return renderModal(m.renderEditProjectContent(), listView, w, h)
 	}
 
 	return listView
+}
+
+// renderEditProjectContent builds the content string for the edit project modal.
+func (m Model) renderEditProjectContent() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "Edit: %s\n\n", m.editProject.Name)
+
+	nameIndicator := "  "
+	if m.editFocus == editFieldName {
+		nameIndicator = "> "
+	}
+	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, m.editName)
+
+	b.WriteString("\n")
+
+	aliasIndicator := "  "
+	if m.editFocus == editFieldAliases {
+		aliasIndicator = "> "
+	}
+	b.WriteString(aliasIndicator + "Aliases:\n")
+
+	if len(m.editAliases) == 0 {
+		b.WriteString("    (none)\n")
+	} else {
+		for i, a := range m.editAliases {
+			marker := "    "
+			if m.editFocus == editFieldAliases && m.editAliasCursor == i {
+				marker = "  > "
+			}
+			fmt.Fprintf(&b, "%s[x] %s\n", marker, a)
+		}
+	}
+
+	addMarker := "    "
+	if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
+		addMarker = "  > "
+	}
+	fmt.Fprintf(&b, "%sAdd: %s\n", addMarker, m.editNewAlias)
+
+	if m.editError != "" {
+		fmt.Fprintf(&b, "\n  Error: %s\n", m.editError)
+	}
+
+	b.WriteString("\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field")
+
+	return b.String()
 }
 
 // viewSessionList renders the session list using bubbles/list.

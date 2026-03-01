@@ -14,6 +14,7 @@ const (
 	modalKillConfirm              // Kill session confirmation
 	modalRename                   // Rename session with textinput
 	modalDeleteProject            // Delete project confirmation
+	modalEditProject              // Edit project with name and alias editing
 )
 
 // modalStyle defines the bordered box style for modal overlays.
