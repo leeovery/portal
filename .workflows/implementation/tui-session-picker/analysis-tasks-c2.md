@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: tui-session-picker (Cycle 2)
 
 ## Task 1: Guard evaluateDefaultPage against command-pending page selection
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -41,7 +41,7 @@ sources: architecture
 - Test that `evaluateDefaultPage` in normal mode still defaults to `PageSessions` when sessions exist.
 
 ## Task 2: Add [q] quit binding to all help bars
-status: pending
+status: approved
 severity: low
 sources: standards
 

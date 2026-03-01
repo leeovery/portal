@@ -141,3 +141,15 @@ ext_id: tick-dfe7e0
 | tui-session-picker-4-3 | Extract shared view-list-with-modal rendering helper | none | authored | tick-f56bab |
 | tui-session-picker-4-4 | Eliminate duplicated window-label pluralization in SessionDelegate.Render | none | authored | tick-dad932 |
 | tui-session-picker-4-5 | Fix command-pending status line position to below title | none | authored | tick-717ebc |
+
+### Phase 5: Analysis (Cycle 2)
+status: approved
+ext_id: tick-78afbe
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| tui-session-picker-5-1 | Guard evaluateDefaultPage against command-pending page selection | none | authored | tick-a87527 |
+| tui-session-picker-5-2 | Add [q] quit binding to all help bars | none | authored | tick-1c66e9 |
