@@ -12,7 +12,7 @@ import (
 
 var (
 	projectNameStyle = lipgloss.NewStyle().Bold(true)
-	projectPathStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	projectPathStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 )
 
 // ProjectItem wraps a project.Project and implements the list.Item interface

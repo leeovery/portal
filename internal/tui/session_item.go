@@ -13,7 +13,7 @@ import (
 var (
 	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))
 	nameStyle     = lipgloss.NewStyle().Bold(true)
-	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
 )
 

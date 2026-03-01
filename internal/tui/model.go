@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
@@ -128,6 +129,9 @@ type Model struct {
 	pendingDeleteName string
 	command           []string
 	commandPending    bool
+
+	// Terminal dimensions (cached for re-applying after data loads)
+	termWidth, termHeight int
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -361,6 +365,20 @@ func sessionHelpKeys() []key.Binding {
 	}
 }
 
+// brightenHelpStyles makes the help bar text lighter so it's easier to read.
+func brightenHelpStyles(l *list.Model) {
+	keyColor := lipgloss.Color("#999999")
+	descColor := lipgloss.Color("#777777")
+	sepColor := lipgloss.Color("#555555")
+	l.Help.Styles.ShortKey = lipgloss.NewStyle().Foreground(keyColor)
+	l.Help.Styles.ShortDesc = lipgloss.NewStyle().Foreground(descColor)
+	l.Help.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(sepColor)
+	l.Help.Styles.FullKey = lipgloss.NewStyle().Foreground(keyColor)
+	l.Help.Styles.FullDesc = lipgloss.NewStyle().Foreground(descColor)
+	l.Help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(sepColor)
+	l.Help.Styles.Ellipsis = lipgloss.NewStyle().Foreground(sepColor)
+}
+
 // newSessionList creates and configures a new bubbles/list.Model for sessions.
 func newSessionList(items []list.Item) list.Model {
 	l := list.New(items, SessionDelegate{}, 0, 0)
@@ -371,6 +389,11 @@ func newSessionList(items []list.Item) list.Model {
 	l.AdditionalShortHelpKeys = sessionHelpKeys
 	l.AdditionalFullHelpKeys = sessionHelpKeys
 	l.SetStatusBarItemName("session", "sessions running")
+	l.Help.ShowAll = true
+	l.KeyMap.ShowFullHelp.Unbind()
+	l.KeyMap.CloseFullHelp.Unbind()
+	l.InfiniteScrolling = true
+	brightenHelpStyles(&l)
 	return l
 }
 
@@ -408,6 +431,11 @@ func newProjectList() list.Model {
 	l.AdditionalShortHelpKeys = projectHelpKeys
 	l.AdditionalFullHelpKeys = projectHelpKeys
 	l.SetStatusBarItemName("project", "saved projects")
+	l.Help.ShowAll = true
+	l.KeyMap.ShowFullHelp.Unbind()
+	l.KeyMap.CloseFullHelp.Unbind()
+	l.InfiniteScrolling = true
+	brightenHelpStyles(&l)
 	return l
 }
 
@@ -545,6 +573,8 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Forward WindowSizeMsg to both page lists so they have correct dimensions
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
+		m.termWidth = wsm.Width
+		m.termHeight = wsm.Height
 		m.sessionList.SetSize(wsm.Width, wsm.Height)
 		m.projectList.SetSize(wsm.Width, wsm.Height)
 	}
@@ -564,6 +594,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		filtered := m.filteredSessions()
 		items := ToListItems(filtered)
 		m.sessionList.SetItems(items)
+		// Re-apply terminal size so pagination accounts for full help height
+		if m.termWidth > 0 || m.termHeight > 0 {
+			m.sessionList.SetSize(m.termWidth, m.termHeight)
+		}
 
 		if m.insideTmux && m.currentSession != "" {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
@@ -576,6 +610,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil {
 			items := ProjectsToListItems(msg.Projects)
 			m.projectList.SetItems(items)
+			// Re-apply terminal size so pagination accounts for full help height
+			if m.termWidth > 0 || m.termHeight > 0 {
+				m.projectList.SetSize(m.termWidth, m.termHeight)
+			}
 		}
 		m.projectsLoaded = true
 		m.evaluateDefaultPage()
@@ -629,6 +667,10 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+		// Swallow ? so the list can't toggle help off
+		if isRuneKey(msg, "?") {
+			return m, nil
 		}
 		if m.projectList.SettingFilter() {
 			break
@@ -920,6 +962,10 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
+		}
+		// Swallow ? so the list can't toggle help off
+		if isRuneKey(msg, "?") {
+			return m, nil
 		}
 		// When the list is actively filtering, let it handle all key input
 		if m.sessionList.SettingFilter() {

@@ -327,9 +327,10 @@ func TestKeyboardNavigation(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor does not go below last item", func(t *testing.T) {
+	t.Run("cursor wraps to first item when going past last", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		for i := 0; i < 10; i++ {
+		// Move down 3 times: alpha -> bravo -> charlie -> wraps to alpha
+		for i := 0; i < 3; i++ {
 			m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		}
 
@@ -338,14 +339,13 @@ func TestKeyboardNavigation(t *testing.T) {
 			t.Fatal("expected quit command")
 		}
 		model := result.(tui.Model)
-		if model.Selected() != "charlie" {
-			t.Errorf("expected selected %q (last item), got %q", "charlie", model.Selected())
+		if model.Selected() != "alpha" {
+			t.Errorf("expected selected %q (wrapped to first), got %q", "alpha", model.Selected())
 		}
 	})
 
-	t.Run("cursor does not go above first item", func(t *testing.T) {
+	t.Run("cursor wraps to last item when going above first", func(t *testing.T) {
 		var m tea.Model = tui.NewModelWithSessions(threeSessions)
-		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 
 		result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -353,8 +353,8 @@ func TestKeyboardNavigation(t *testing.T) {
 			t.Fatal("expected quit command")
 		}
 		model := result.(tui.Model)
-		if model.Selected() != "alpha" {
-			t.Errorf("expected selected %q (first item), got %q", "alpha", model.Selected())
+		if model.Selected() != "charlie" {
+			t.Errorf("expected selected %q (wrapped to last), got %q", "charlie", model.Selected())
 		}
 	})
 
@@ -2484,7 +2484,7 @@ func TestCommandPendingMode(t *testing.T) {
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected status line in empty state, got:\n%s", view)
 		}
-		if !strings.Contains(view, "b browse") {
+		if !strings.Contains(view, "b") || !strings.Contains(view, "browse") {
 			t.Errorf("expected browse help key in empty state, got:\n%s", view)
 		}
 		if !strings.Contains(view, "No saved projects") {
