@@ -330,6 +330,7 @@ func projectHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new session")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 	}
 }
 
@@ -549,6 +550,8 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleDeleteProjectKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
 			return m.handleEditProjectKey()
+		case msg.Type == tea.KeyRunes && string(msg.Runes) == "b":
+			return m.handleBrowseKey()
 		case msg.Type == tea.KeyEnter:
 			return m.handleProjectEnter()
 		}
@@ -557,6 +560,15 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.projectList, cmd = m.projectList.Update(msg)
 	return m, cmd
+}
+
+func (m Model) handleBrowseKey() (tea.Model, tea.Cmd) {
+	if m.dirLister == nil {
+		return m, nil
+	}
+	m.fileBrowser = ui.NewFileBrowser(m.startPath, m.dirLister)
+	m.activePage = pageFileBrowser
+	return m, nil
 }
 
 func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {

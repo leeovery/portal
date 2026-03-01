@@ -4935,3 +4935,212 @@ func TestEditProject(t *testing.T) {
 		}
 	})
 }
+
+func TestFileBrowserFromProjectsPage(t *testing.T) {
+	// Helper to set up a model on the projects page with projects loaded.
+	setupProjectsModel := func(t *testing.T, dirEntries map[string][]browser.DirEntry) tea.Model {
+		t.Helper()
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "portal-abc123"}
+		lister := &mockDirLister{entries: dirEntries}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithDirLister(lister, "/home/user"),
+		)
+		var model tea.Model = m
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		// Populate projects
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+		// Give it a size
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		return model
+	}
+
+	t.Run("b on projects page opens file browser", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}, {Name: "docs"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		view := model.View()
+		if !strings.Contains(view, "/home/user") {
+			t.Errorf("expected file browser with starting path /home/user, got:\n%s", view)
+		}
+		if !strings.Contains(view, "code") {
+			t.Errorf("expected file browser to show directory entry 'code', got:\n%s", view)
+		}
+		if !strings.Contains(view, "docs") {
+			t.Errorf("expected file browser to show directory entry 'docs', got:\n%s", view)
+		}
+		// Should not show project list
+		if strings.Contains(view, "Projects") {
+			t.Errorf("should not show projects list title when file browser is open:\n%s", view)
+		}
+	})
+
+	t.Run("BrowserDirSelectedMsg creates session and quits", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Browser emits BrowserDirSelectedMsg
+		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
+		if cmd == nil {
+			t.Fatal("expected command from BrowserDirSelectedMsg, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "portal-abc123" {
+			t.Errorf("session name = %q, want %q", createdMsg.SessionName, "portal-abc123")
+		}
+	})
+
+	t.Run("BrowserCancelMsg returns to projects page", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Cancel the file browser
+		model, _ = model.Update(ui.BrowserCancelMsg{})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after cancel, got %d", updated.ActivePage())
+		}
+		view := model.View()
+		if !strings.Contains(view, "portal") {
+			t.Errorf("expected projects page with 'portal' after cancel, got:\n%s", view)
+		}
+	})
+
+	t.Run("Esc in browser with no filter returns to projects page", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Press Esc with no filter — browser emits BrowserCancelMsg
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		// The browser should emit BrowserCancelMsg as a command
+		if cmd != nil {
+			msg := cmd()
+			model, _ = model.Update(msg)
+		}
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after Esc in browser, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("Esc in browser with filter clears filter", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}, {Name: "docs"}, {Name: "configs"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Type a filter into the browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+
+		// Press Esc — should clear filter, not cancel browser
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Should NOT have a BrowserCancelMsg command
+		if cmd != nil {
+			msg := cmd()
+			if _, ok := msg.(ui.BrowserCancelMsg); ok {
+				t.Error("Esc with active filter should clear filter, not cancel browser")
+			}
+		}
+
+		// Should still be in file browser, showing all entries
+		view := model.View()
+		if !strings.Contains(view, "/home/user") {
+			t.Errorf("expected to still be in file browser, got:\n%s", view)
+		}
+		if !strings.Contains(view, "docs") {
+			t.Errorf("expected all entries visible after filter clear, got:\n%s", view)
+		}
+	})
+
+	t.Run("b works when projects list has active filter", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Apply a filter on the projects list
+		updated := model.(tui.Model)
+		updated.SetProjectListFilter("portal")
+		model = tea.Model(updated)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		view := model.View()
+		if !strings.Contains(view, "/home/user") {
+			t.Errorf("expected file browser after b with filter, got:\n%s", view)
+		}
+		if !strings.Contains(view, "code") {
+			t.Errorf("expected file browser entries, got:\n%s", view)
+		}
+	})
+
+	t.Run("projects page state preserved when returning from browser", func(t *testing.T) {
+		entries := map[string][]browser.DirEntry{
+			"/home/user": {{Name: "code"}},
+		}
+		model := setupProjectsModel(t, entries)
+
+		// Remember the project list state
+		pre := model.(tui.Model)
+		preItems := pre.ProjectListItems()
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Cancel back to projects
+		model, _ = model.Update(ui.BrowserCancelMsg{})
+
+		post := model.(tui.Model)
+		postItems := post.ProjectListItems()
+
+		if len(postItems) != len(preItems) {
+			t.Errorf("project list items changed: had %d, now %d", len(preItems), len(postItems))
+		}
+		if post.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects, got %d", post.ActivePage())
+		}
+	})
+}
