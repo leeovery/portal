@@ -6243,3 +6243,268 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 		}
 	})
 }
+
+func TestCommandPendingBrowseAndNKey(t *testing.T) {
+	t.Run("browse directory selection forwards command in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+		lister := &mockDirLister{
+			entries: map[string][]browser.DirEntry{
+				"/home/user": {{Name: "code"}},
+			},
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithDirLister(lister, "/home/user"),
+		).WithCommand([]string{"claude", "--resume"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Browser emits BrowserDirSelectedMsg
+		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
+		if cmd == nil {
+			t.Fatal("expected command from directory selection, got nil")
+		}
+		cmd()
+
+		// Verify command was forwarded to CreateFromDir
+		wantCmd := []string{"claude", "--resume"}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range wantCmd {
+			if creator.createdCommand[i] != arg {
+				t.Errorf("command[%d] = %q, want %q", i, creator.createdCommand[i], arg)
+			}
+		}
+		if creator.createdDir != "/home/user/code" {
+			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/code")
+		}
+	})
+
+	t.Run("browse cancel returns to locked Projects page in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+		lister := &mockDirLister{
+			entries: map[string][]browser.DirEntry{
+				"/home/user": {{Name: "code"}},
+			},
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithDirLister(lister, "/home/user"),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press b to open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Cancel the file browser
+		model, _ = model.Update(ui.BrowserCancelMsg{})
+
+		updated := model.(tui.Model)
+		// Should return to Projects page (not Sessions)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after cancel, got %d", updated.ActivePage())
+		}
+
+		// View should show the command-pending banner (confirms still in command-pending mode)
+		view := model.View()
+		if !strings.Contains(view, "Select project to run:") {
+			t.Errorf("expected command-pending banner after cancel, got:\n%s", view)
+		}
+	})
+
+	t.Run("n-key creates session in cwd with command in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "cwd-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		).WithCommand([]string{"vim", "."})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press n to create session in cwd
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key, got nil")
+		}
+		cmd()
+
+		// Verify command was forwarded
+		wantCmd := []string{"vim", "."}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
+		}
+		for i, arg := range wantCmd {
+			if creator.createdCommand[i] != arg {
+				t.Errorf("command[%d] = %q, want %q", i, creator.createdCommand[i], arg)
+			}
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/mydir")
+		}
+	})
+
+	t.Run("n-key creates session in cwd without command in normal mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "cwd-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		// Press n to create session in cwd
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key, got nil")
+		}
+		cmd()
+
+		// In normal mode, command should be nil
+		if creator.createdCommand != nil {
+			t.Errorf("expected nil command in normal mode, got %v", creator.createdCommand)
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/mydir")
+		}
+	})
+
+	t.Run("n-key works from Sessions page", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "cwd-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			}},
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		)
+		var model tea.Model = m
+
+		// Load sessions to land on Sessions page
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Fatalf("expected PageSessions, got %d", updated.ActivePage())
+		}
+
+		// Press n to create session in cwd from Sessions page
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key on Sessions page, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "cwd-abc123" {
+			t.Errorf("session name = %q, want %q", createdMsg.SessionName, "cwd-abc123")
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/mydir")
+		}
+	})
+
+	t.Run("n-key works from Projects page", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "cwd-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithCWD("/home/user/mydir"),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("expected PageProjects, got %d", updated.ActivePage())
+		}
+
+		// Press n to create session in cwd from Projects page
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		if cmd == nil {
+			t.Fatal("expected command from n key on Projects page, got nil")
+		}
+
+		msg := cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "cwd-abc123" {
+			t.Errorf("session name = %q, want %q", createdMsg.SessionName, "cwd-abc123")
+		}
+		if creator.createdDir != "/home/user/mydir" {
+			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/mydir")
+		}
+	})
+}
