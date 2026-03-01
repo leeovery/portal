@@ -1109,25 +1109,14 @@ func (m Model) View() string {
 
 // viewProjectList renders the project list, with optional modal overlay.
 func (m Model) viewProjectList() string {
-	listView := m.projectList.View()
-
-	w, h := m.projectList.Width(), m.projectList.Height()
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
-
+	var modalContent string
 	switch m.modal {
 	case modalDeleteProject:
-		content := fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName)
-		return renderModal(content, listView, w, h)
+		modalContent = fmt.Sprintf("Delete %s? (y/n)", m.pendingDeleteName)
 	case modalEditProject:
-		return renderModal(m.renderEditProjectContent(), listView, w, h)
+		modalContent = m.renderEditProjectContent()
 	}
-
-	return listView
+	return renderListWithModal(m.projectList, modalContent)
 }
 
 // renderEditProjectContent builds the content string for the edit project modal.
@@ -1179,24 +1168,12 @@ func (m Model) renderEditProjectContent() string {
 
 // viewSessionList renders the session list using bubbles/list.
 func (m Model) viewSessionList() string {
-	listView := m.sessionList.View()
-
-	w, h := m.sessionList.Width(), m.sessionList.Height()
-	if w == 0 {
-		w = 80
-	}
-	if h == 0 {
-		h = 24
-	}
-
-	// Overlay modal on top of list when active
+	var modalContent string
 	switch m.modal {
 	case modalKillConfirm:
-		content := fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName)
-		return renderModal(content, listView, w, h)
+		modalContent = fmt.Sprintf("Kill %s? (y/n)", m.pendingKillName)
 	case modalRename:
-		return renderModal(m.renameInput.View(), listView, w, h)
+		modalContent = m.renameInput.View()
 	}
-
-	return listView
+	return renderListWithModal(m.sessionList, modalContent)
 }

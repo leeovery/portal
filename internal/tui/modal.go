@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -22,6 +23,27 @@ const (
 var modalStyle = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder()).
 	Padding(1, 2)
+
+// renderListWithModal renders a list view with an optional modal overlay.
+// It applies a dimension fallback (80x24) when the list has zero dimensions,
+// then overlays the modal content centered on top of the list if modalContent
+// is non-empty.
+func renderListWithModal(l list.Model, modalContent string) string {
+	listView := l.View()
+	if modalContent == "" {
+		return listView
+	}
+
+	w, h := l.Width(), l.Height()
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+
+	return renderModal(modalContent, listView, w, h)
+}
 
 // renderModal overlays styled modal content centered on top of the list view.
 // The list view remains visible behind the modal overlay. Uses ANSI-aware width
