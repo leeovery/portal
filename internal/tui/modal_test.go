@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestRenderModal(t *testing.T) {
@@ -56,6 +59,66 @@ func TestRenderModal(t *testing.T) {
 		hasBorder := strings.ContainsAny(result, "─│┌┐└┘├┤┬┴┼╭╮╰╯")
 		if !hasBorder {
 			t.Errorf("renderModal output should contain border characters, got:\n%s", result)
+		}
+	})
+
+	t.Run("modal centers correctly over ANSI-styled background", func(t *testing.T) {
+		// Build a background with raw ANSI escape sequences.
+		// \033[1;31m is bold red, \033[0m is reset.
+		// These occupy bytes/runes but are zero-width on screen.
+		// The visible text "styled session line" is 19 chars wide,
+		// but the full string with ANSI escapes is much longer in runes.
+		ansiPrefix := "\033[1;31m"
+		ansiSuffix := "\033[0m"
+		visibleText := "styled session line"
+		styledLine := ansiPrefix + visibleText + ansiSuffix
+
+		// Verify our ANSI setup: rune count differs from display width
+		if len([]rune(styledLine)) == ansi.StringWidth(styledLine) {
+			t.Fatal("test setup: styled line rune count should differ from display width")
+		}
+
+		var bgLines []string
+		for i := 0; i < 24; i++ {
+			bgLines = append(bgLines, styledLine)
+		}
+		listView := strings.Join(bgLines, "\n")
+
+		content := "OK"
+		width := 40
+		height := 24
+
+		result := renderModal(content, listView, width, height)
+
+		// The styled modal content is rendered with border + padding.
+		styledModal := modalStyle.Render(content)
+		modalWidth := lipgloss.Width(styledModal)
+
+		// Expected left offset for centering
+		expectedX := (width - modalWidth) / 2
+
+		// Find the first line that contains the modal border top (╭)
+		resultLines := strings.Split(result, "\n")
+		found := false
+		for _, line := range resultLines {
+			if !strings.Contains(line, "╭") {
+				continue
+			}
+			found = true
+
+			// The modal border should start at expectedX display columns.
+			// Find the position of ╭ in display columns (ANSI-aware).
+			idx := strings.Index(line, "╭")
+			prefix := line[:idx]
+			displayOffset := ansi.StringWidth(prefix)
+
+			if displayOffset != expectedX {
+				t.Errorf("modal horizontal offset = %d display columns, want %d\nline: %q", displayOffset, expectedX, line)
+			}
+			break
+		}
+		if !found {
+			t.Errorf("could not find modal border character in result:\n%s", result)
 		}
 	})
 }

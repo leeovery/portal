@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // modalState tracks which modal overlay is currently active.
@@ -23,44 +24,40 @@ var modalStyle = lipgloss.NewStyle().
 	Padding(1, 2)
 
 // renderModal overlays styled modal content centered on top of the list view.
-// The list view remains visible behind the modal overlay.
+// The list view remains visible behind the modal overlay. Uses ANSI-aware width
+// measurement so that escape sequences in the background do not shift the overlay.
 func renderModal(content string, listView string, width, height int) string {
 	styledModal := modalStyle.Render(content)
 	overlayX := max(0, (width-lipgloss.Width(styledModal))/2)
 	overlayY := max(0, (height-lipgloss.Height(styledModal))/2)
-	return placeOverlay(overlayX, overlayY, styledModal, listView)
-}
 
-// placeOverlay composites the foreground string on top of the background string
-// at the given x, y position. Characters in the foreground replace characters
-// in the background, leaving the rest of the background visible.
-func placeOverlay(x, y int, fg, bg string) string {
-	fgLines := strings.Split(fg, "\n")
-	bgLines := strings.Split(bg, "\n")
+	fgLines := strings.Split(styledModal, "\n")
+	bgLines := strings.Split(listView, "\n")
 
 	// Ensure background has enough lines
-	for len(bgLines) < y+len(fgLines) {
+	for len(bgLines) < overlayY+len(fgLines) {
 		bgLines = append(bgLines, "")
 	}
 
 	for i, fgLine := range fgLines {
-		bgIdx := y + i
+		bgIdx := overlayY + i
 		if bgIdx < 0 || bgIdx >= len(bgLines) {
 			continue
 		}
 
-		bgLine := []rune(bgLines[bgIdx])
-		fgRunes := []rune(fgLine)
+		bgLine := bgLines[bgIdx]
+		fgWidth := ansi.StringWidth(fgLine)
+		bgWidth := ansi.StringWidth(bgLine)
 
-		// Extend background line with spaces if needed
-		for len(bgLine) < x+len(fgRunes) {
-			bgLine = append(bgLine, ' ')
+		// Pad background with spaces if it's too narrow
+		if bgWidth < overlayX+fgWidth {
+			bgLine += strings.Repeat(" ", overlayX+fgWidth-bgWidth)
 		}
 
-		// Overwrite background runes with foreground runes
-		copy(bgLine[x:x+len(fgRunes)], fgRunes)
-
-		bgLines[bgIdx] = string(bgLine)
+		// Composite: left bg + foreground + right bg (all ANSI-aware)
+		left := ansi.Truncate(bgLine, overlayX, "")
+		right := ansi.TruncateLeft(bgLine, overlayX+fgWidth, "")
+		bgLines[bgIdx] = left + fgLine + right
 	}
 
 	return strings.Join(bgLines, "\n")
