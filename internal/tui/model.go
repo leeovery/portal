@@ -129,6 +129,11 @@ type Model struct {
 	command           []string
 	commandPending    bool
 
+	// Data loading tracking
+	sessionsLoaded       bool
+	projectsLoaded       bool
+	defaultPageEvaluated bool
+
 	// Edit project modal state
 	editProject     project.Project
 	editName        string
@@ -403,6 +408,25 @@ func (m Model) filteredSessions() []tmux.Session {
 	return filtered
 }
 
+// evaluateDefaultPage sets the active page based on loaded data.
+// It only runs once both sessions and projects have been loaded.
+// If sessions exist (after inside-tmux filtering), show Sessions page;
+// otherwise show Projects page.
+func (m *Model) evaluateDefaultPage() {
+	if m.defaultPageEvaluated {
+		return
+	}
+	if !m.sessionsLoaded || !m.projectsLoaded {
+		return
+	}
+	m.defaultPageEvaluated = true
+	if len(m.sessionList.Items()) > 0 {
+		m.activePage = PageSessions
+	} else {
+		m.activePage = PageProjects
+	}
+}
+
 // loadProjects returns a command that cleans stale projects and loads the list.
 func (m Model) loadProjects() tea.Cmd {
 	if m.projectStore == nil {
@@ -460,11 +484,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ui.BrowserCancelMsg:
 		m.activePage = PageProjects
 		return m, nil
+	case SessionsMsg:
+		if msg.Err != nil {
+			return m, tea.Quit
+		}
+		m.sessions = msg.Sessions
+		filtered := m.filteredSessions()
+		items := ToListItems(filtered)
+		m.sessionList.SetItems(items)
+
+		if m.insideTmux && m.currentSession != "" {
+			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
+		}
+
+		if m.initialFilter != "" {
+			m.sessionList.SetFilterText(m.initialFilter)
+			m.sessionList.SetFilterState(list.FilterApplied)
+			m.initialFilter = ""
+		}
+
+		m.sessionsLoaded = true
+		m.evaluateDefaultPage()
+		return m, nil
 	case ProjectsLoadedMsg:
 		if msg.Err == nil {
 			items := ProjectsToListItems(msg.Projects)
 			m.projectList.SetItems(items)
 		}
+		m.projectsLoaded = true
+		m.evaluateDefaultPage()
 		return m, nil
 	case SessionCreatedMsg:
 		m.selected = msg.SessionName
@@ -813,25 +861,6 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case SessionsMsg:
-		if msg.Err != nil {
-			return m, tea.Quit
-		}
-		m.sessions = msg.Sessions
-		filtered := m.filteredSessions()
-		items := ToListItems(filtered)
-		m.sessionList.SetItems(items)
-
-		if m.insideTmux && m.currentSession != "" {
-			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
-		}
-
-		if m.initialFilter != "" {
-			m.sessionList.SetFilterText(m.initialFilter)
-			m.sessionList.SetFilterState(list.FilterApplied)
-			m.initialFilter = ""
-		}
-
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit

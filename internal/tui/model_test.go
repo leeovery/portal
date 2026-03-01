@@ -5307,3 +5307,335 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 		}
 	})
 }
+
+func TestDefaultPageSelection(t *testing.T) {
+	t.Run("defaults to Sessions page when sessions exist", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Send both messages to simulate Init() completion
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 3, Attached: true},
+				{Name: "work", Windows: 1, Attached: false},
+			},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions when sessions exist, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("defaults to Projects page when no sessions exist but projects exist", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Send both messages — no sessions
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects when no sessions, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("defaults to Projects page when both pages are empty", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects when both empty, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("defaults to Projects page when all sessions filtered by inside-tmux exclusion", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		).WithInsideTmux("only-session")
+		var model tea.Model = m
+
+		// The only session is the current session, so it gets filtered out
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "only-session", Windows: 2, Attached: true},
+			},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects when all sessions filtered by inside-tmux, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("page switching works after defaulting to Sessions page", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Load both data sources — sessions exist, so defaults to Sessions
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 3, Attached: true},
+			},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Fatalf("precondition: expected PageSessions, got %d", updated.ActivePage())
+		}
+
+		// Press p to switch to projects
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+		}
+
+		// Press s to switch back to sessions
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+		}
+
+		// Press x to toggle to projects
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after x, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("page switching works after defaulting to Projects page", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Load both — no sessions, so defaults to Projects
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("precondition: expected PageProjects, got %d", updated.ActivePage())
+		}
+
+		// Press s to switch to sessions
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions after s, got %d", updated.ActivePage())
+		}
+
+		// Press p to switch back to projects
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after p, got %d", updated.ActivePage())
+		}
+
+		// Press x to toggle to sessions
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions after x from projects, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("evaluateDefaultPage only runs once and does not override manual page switch", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithKiller(&mockSessionKiller{}),
+		)
+		var model tea.Model = m
+
+		// Initial load: sessions exist, so defaults to Sessions page
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 3, Attached: true},
+			},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Fatalf("precondition: expected PageSessions, got %d", updated.ActivePage())
+		}
+
+		// User manually switches to Projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("precondition: expected PageProjects after p, got %d", updated.ActivePage())
+		}
+
+		// A subsequent SessionsMsg arrives (e.g. after rename-and-refresh)
+		// with sessions still present. This should NOT override the user's
+		// manual page selection back to PageSessions.
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev-renamed", Windows: 3, Attached: true},
+			},
+		})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects to persist after refresh, got %d — evaluateDefaultPage ran more than once", updated.ActivePage())
+		}
+	})
+
+	t.Run("default page waits for both data sources before evaluating", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Send only SessionsMsg (no sessions) — page should NOT change yet
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{},
+		})
+		updated := model.(tui.Model)
+		// Before both are loaded, activePage stays at default (PageSessions)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions before both loaded, got %d", updated.ActivePage())
+		}
+
+		// Now send ProjectsLoadedMsg — now both are loaded, should switch to Projects
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after both loaded with no sessions, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("default page waits for both data sources before evaluating — projects first", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Send only ProjectsLoadedMsg first — page should NOT change yet
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+		updated := model.(tui.Model)
+		// Before both are loaded, activePage stays at default (PageSessions)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions before both loaded, got %d", updated.ActivePage())
+		}
+
+		// Now send SessionsMsg — now both are loaded, should switch to Projects (no sessions)
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{},
+		})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after both loaded with no sessions, got %d", updated.ActivePage())
+		}
+	})
+}
