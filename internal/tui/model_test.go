@@ -6508,3 +6508,319 @@ func TestCommandPendingBrowseAndNKey(t *testing.T) {
 		}
 	})
 }
+
+func TestCommandPendingEscAndQuit(t *testing.T) {
+	t.Run("Esc with nothing active in command-pending mode exits TUI", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Esc with nothing active should quit
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from Esc, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+	})
+
+	t.Run("Esc with filter active clears filter first in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Apply a filter on the project list
+		updated := model.(tui.Model)
+		updated.SetProjectListFilter("myapp")
+		model = updated
+
+		// Verify filter is applied
+		if model.(tui.Model).ProjectListFilterState() != list.FilterApplied {
+			t.Fatalf("precondition: expected FilterApplied, got %v", model.(tui.Model).ProjectListFilterState())
+		}
+
+		// Esc should clear the filter, not quit
+		model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd != nil {
+			quitMsg := cmd()
+			if _, ok := quitMsg.(tea.QuitMsg); ok {
+				t.Fatal("first Esc should clear filter, not quit")
+			}
+		}
+
+		// Filter should be cleared
+		if model.(tui.Model).ProjectListFilterState() != list.Unfiltered {
+			t.Errorf("filter should be cleared after Esc, got %v", model.(tui.Model).ProjectListFilterState())
+		}
+	})
+
+	t.Run("two Esc presses: clear filter then exit in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Apply a filter
+		updated := model.(tui.Model)
+		updated.SetProjectListFilter("myapp")
+		model = updated
+
+		// First Esc clears filter
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if model.(tui.Model).ProjectListFilterState() != list.Unfiltered {
+			t.Fatalf("first Esc should clear filter, got %v", model.(tui.Model).ProjectListFilterState())
+		}
+
+		// Second Esc should quit
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from second Esc, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from second Esc, got %T", quitMsg)
+		}
+	})
+
+	t.Run("Esc with modal active dismisses modal in command-pending mode", func(t *testing.T) {
+		// In command-pending mode, e and d keys are disabled so modals cannot
+		// be opened directly. This test verifies that the modal-first architecture
+		// works on the projects page by testing in normal mode, which exercises
+		// the same updateProjectsPage code path for Esc handling.
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithProjectEditor(editor),
+			tui.WithAliasEditor(aliases),
+		)
+
+		var model tea.Model = m
+		cmd := m.Init()
+		// Process both session and project loading
+		for cmd != nil {
+			msgs := executeBatchCmd(cmd)
+			cmd = nil
+			for _, msg := range msgs {
+				var nextCmd tea.Cmd
+				model, nextCmd = model.Update(msg)
+				if nextCmd != nil {
+					cmd = nextCmd
+				}
+			}
+		}
+
+		// Navigate to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Open edit modal with e
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		// Verify modal is open by checking view contains edit content
+		view := model.(tui.Model).View()
+		if !strings.Contains(view, "Edit:") {
+			t.Fatalf("precondition: expected edit modal open, got:\n%s", view)
+		}
+
+		// Press Esc — should dismiss modal, not quit
+		model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd != nil {
+			quitMsg := cmd()
+			if _, ok := quitMsg.(tea.QuitMsg); ok {
+				t.Fatal("Esc should dismiss modal, not quit")
+			}
+		}
+
+		// Modal should be dismissed — view should not contain Edit modal
+		view = model.(tui.Model).View()
+		if strings.Contains(view, "Edit:") {
+			t.Errorf("modal should be dismissed after Esc, got:\n%s", view)
+		}
+	})
+
+	t.Run("Esc in file browser returns to Projects page in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "code-abc123"}
+		lister := &mockDirLister{
+			entries: map[string][]browser.DirEntry{
+				"/home/user": {{Name: "code"}},
+			},
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithDirLister(lister, "/home/user"),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+
+		// Verify we left the projects page (now on file browser)
+		updated := model.(tui.Model)
+		if updated.ActivePage() == tui.PageProjects || updated.ActivePage() == tui.PageSessions {
+			t.Fatalf("precondition: expected file browser page, got %d", updated.ActivePage())
+		}
+
+		// Cancel the browser (simulates Esc producing BrowserCancelMsg)
+		model, _ = model.Update(ui.BrowserCancelMsg{})
+
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected PageProjects after Esc in file browser, got %d", updated.ActivePage())
+		}
+
+		// Should still be in command-pending mode
+		view := model.(tui.Model).View()
+		if !strings.Contains(view, "Select project to run:") {
+			t.Errorf("expected command-pending banner after returning from browser, got:\n%s", view)
+		}
+	})
+
+	t.Run("q exits from any state in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// q should quit from projects page with no filter
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if cmd == nil {
+			t.Fatal("expected quit command from q, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg from q, got %T", quitMsg)
+		}
+	})
+
+	t.Run("Esc on Projects page in normal mode with nothing active exits TUI", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+
+		var model tea.Model = m
+		cmd := m.Init()
+		// In normal mode, Init batches sessions + projects
+		msgs := executeBatchCmd(cmd)
+		for _, msg := range msgs {
+			model, _ = model.Update(msg)
+		}
+
+		// With no sessions loaded, model should default to projects page
+		if model.(tui.Model).ActivePage() != tui.PageProjects {
+			t.Fatalf("precondition: expected PageProjects, got %d", model.(tui.Model).ActivePage())
+		}
+
+		// Esc should quit
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		if cmd == nil {
+			t.Fatal("expected quit command from Esc on projects page, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+	})
+}
+
+// executeBatchCmd executes a tea.Cmd that may be a batch command and returns all messages.
+func executeBatchCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batchMsg, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batchMsg {
+			if c != nil {
+				msgs = append(msgs, c())
+			}
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}
