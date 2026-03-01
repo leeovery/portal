@@ -1062,7 +1062,7 @@ func (m Model) View() string {
 	case PageProjects:
 		if m.commandPending {
 			var b strings.Builder
-			b.WriteString("Command: ")
+			b.WriteString("Select project to run: ")
 			b.WriteString(strings.Join(m.command, " "))
 			b.WriteString("\n\n")
 			b.WriteString(m.viewProjectList())

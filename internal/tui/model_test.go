@@ -1135,7 +1135,7 @@ func TestInitialFilter(t *testing.T) {
 
 		view := model.View()
 		// Should show command header (command-pending mode)
-		if !strings.Contains(view, "Command: claude") {
+		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected command-pending mode header, got:\n%s", view)
 		}
 		// Initial filter is stored but not applied to project picker
@@ -2188,8 +2188,8 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View()
-		if !strings.Contains(view, "Command: claude") {
-			t.Errorf("expected 'Command: claude' banner, got:\n%s", view)
+		if !strings.Contains(view, "Select project to run: claude") {
+			t.Errorf("expected 'Select project to run: claude' status line, got:\n%s", view)
 		}
 	})
 
@@ -2213,8 +2213,8 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View()
-		if !strings.Contains(view, "Command: claude --resume --model opus") {
-			t.Errorf("expected full command in banner, got:\n%s", view)
+		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
+			t.Errorf("expected full command in status line, got:\n%s", view)
 		}
 	})
 
@@ -2418,8 +2418,8 @@ func TestCommandPendingMode(t *testing.T) {
 		if !strings.Contains(view, "dev") {
 			t.Errorf("expected session 'dev' in view, got:\n%s", view)
 		}
-		if strings.Contains(view, "Command:") {
-			t.Errorf("should not show command banner without pending command, got:\n%s", view)
+		if strings.Contains(view, "Select project to run:") {
+			t.Errorf("should not show status line without pending command, got:\n%s", view)
 		}
 	})
 
@@ -2444,9 +2444,9 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View()
-		expected := "Command: " + longCmd
+		expected := "Select project to run: " + longCmd
 		if !strings.Contains(view, expected) {
-			t.Errorf("expected full command in banner %q, got:\n%s", expected, view)
+			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
 		}
 	})
 
@@ -2468,8 +2468,8 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View()
-		if !strings.Contains(view, "Command: claude") {
-			t.Errorf("expected command banner in empty state, got:\n%s", view)
+		if !strings.Contains(view, "Select project to run: claude") {
+			t.Errorf("expected status line in empty state, got:\n%s", view)
 		}
 		if !strings.Contains(view, "b browse") {
 			t.Errorf("expected browse help key in empty state, got:\n%s", view)
@@ -5863,6 +5863,139 @@ func TestDefaultPageSelection(t *testing.T) {
 		updated = model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
 			t.Errorf("expected PageProjects after both loaded with no sessions, got %d", updated.ActivePage())
+		}
+	})
+}
+
+func TestCommandPendingStatusLine(t *testing.T) {
+	t.Run("status line shows pending command text", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Select project to run: claude") {
+			t.Errorf("expected status line 'Select project to run: claude', got:\n%s", view)
+		}
+	})
+
+	t.Run("status line absent in normal mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Switch to projects page
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{{Path: "/code/myapp", Name: "myapp"}},
+		})
+
+		view := model.View()
+		if strings.Contains(view, "Select project to run:") {
+			t.Errorf("status line should not appear in normal mode, got:\n%s", view)
+		}
+	})
+
+	t.Run("multi-word command shown space-separated", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude", "--resume", "--model", "opus"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Select project to run: claude --resume --model opus") {
+			t.Errorf("expected multi-word command in status line, got:\n%s", view)
+		}
+	})
+
+	t.Run("long command text renders without truncation", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		longCmd := "some-very-long-command-name --with-many-flags --verbose --output=/tmp/really-long-path"
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{longCmd})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		expected := "Select project to run: " + longCmd
+		if !strings.Contains(view, expected) {
+			t.Errorf("expected full command in status line %q, got:\n%s", expected, view)
+		}
+	})
+
+	t.Run("title stays Projects in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		if !strings.Contains(view, "Projects") {
+			t.Errorf("expected 'Projects' title in command-pending mode, got:\n%s", view)
 		}
 	})
 }
