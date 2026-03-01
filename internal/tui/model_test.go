@@ -5923,6 +5923,69 @@ func TestDefaultPageSelection(t *testing.T) {
 			t.Errorf("expected PageProjects after both loaded with no sessions, got %d", updated.ActivePage())
 		}
 	})
+
+	t.Run("command-pending sets PageProjects even when sessionList has items", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		).WithCommand([]string{"claude"})
+		var model tea.Model = m
+
+		// Simulate a SessionsMsg arriving (populates sessionList with items)
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 3, Attached: true},
+				{Name: "work", Windows: 1, Attached: false},
+			},
+		})
+
+		// Now send ProjectsLoadedMsg which triggers evaluateDefaultPage
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("command-pending should always set PageProjects, got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("normal mode still defaults to PageSessions when sessions exist", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "dev", Windows: 3, Attached: true},
+				{Name: "work", Windows: 1, Attached: false},
+			},
+		})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Errorf("normal mode should default to PageSessions when sessions exist, got %d", updated.ActivePage())
+		}
+	})
 }
 
 func TestCommandPendingStatusLine(t *testing.T) {

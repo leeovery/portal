@@ -453,10 +453,10 @@ func (m Model) filteredSessions() []tmux.Session {
 
 // evaluateDefaultPage sets the active page based on loaded data.
 // It only runs once both sessions and projects have been loaded.
-// If sessions exist (after inside-tmux filtering), show Sessions page;
+// In command-pending mode, always sets PageProjects regardless of session list contents.
+// In normal mode, if sessions exist (after inside-tmux filtering), show Sessions page;
 // otherwise show Projects page.
 // After determining the default page, applies any initial filter to that page's list.
-// In command-pending mode, always applies to the Projects page.
 func (m *Model) evaluateDefaultPage() {
 	if m.defaultPageEvaluated {
 		return
@@ -469,7 +469,9 @@ func (m *Model) evaluateDefaultPage() {
 		return
 	}
 	m.defaultPageEvaluated = true
-	if len(m.sessionList.Items()) > 0 {
+	if m.commandPending {
+		m.activePage = PageProjects
+	} else if len(m.sessionList.Items()) > 0 {
 		m.activePage = PageSessions
 	} else {
 		m.activePage = PageProjects
