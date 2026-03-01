@@ -2478,6 +2478,233 @@ func TestCommandPendingMode(t *testing.T) {
 			t.Errorf("expected empty projects message, got:\n%s", view)
 		}
 	})
+
+	t.Run("pressing s in command-pending mode does nothing", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Verify we are on projects page
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("expected projects page, got %v", updated.ActivePage())
+		}
+
+		// Press s - should do nothing (stay on projects page)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+		updated = model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("pressing s in command-pending mode should stay on projects page, got page %v", updated.ActivePage())
+		}
+	})
+
+	t.Run("pressing x in command-pending mode does nothing", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "dev", Windows: 1, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press x - should do nothing (stay on projects page)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("pressing x in command-pending mode should stay on projects page, got page %v", updated.ActivePage())
+		}
+	})
+
+	t.Run("pressing e in command-pending mode does nothing", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+			tui.WithProjectEditor(editor),
+			tui.WithAliasEditor(aliases),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press e - should do nothing (no modal should appear)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		view := model.View()
+		if strings.Contains(view, "Edit:") {
+			t.Errorf("pressing e in command-pending mode should not open edit modal, got:\n%s", view)
+		}
+	})
+
+	t.Run("pressing d in command-pending mode does nothing", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press d - should do nothing (no delete modal should appear)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+
+		view := model.View()
+		if strings.Contains(view, "Delete") && strings.Contains(view, "y/n") {
+			t.Errorf("pressing d in command-pending mode should not open delete modal, got:\n%s", view)
+		}
+	})
+
+	t.Run("help bar omits s, x, e, and d in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+		// Set wide width so help bar renders fully
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := model.View()
+		// s, e, d should NOT appear as help keys
+		for _, desc := range []string{"sessions", "edit", "delete"} {
+			if strings.Contains(view, desc) {
+				t.Errorf("help bar should not contain %q in command-pending mode, got:\n%s", desc, view)
+			}
+		}
+		// browse, new in cwd should still appear
+		for _, desc := range []string{"browse", "new in cwd"} {
+			if !strings.Contains(view, desc) {
+				t.Errorf("help bar should contain %q in command-pending mode, got:\n%s", desc, view)
+			}
+		}
+	})
+
+	t.Run("help bar shows run here for enter in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+		// Set wide width so help bar renders fully
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+
+		view := model.View()
+		if !strings.Contains(view, "run here") {
+			t.Errorf("help bar should show 'run here' for enter in command-pending mode, got:\n%s", view)
+		}
+		if strings.Contains(view, "new session") {
+			t.Errorf("help bar should not show 'new session' in command-pending mode, got:\n%s", view)
+		}
+	})
+
+	t.Run("normal mode retains s, x, e, and d keybindings", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		})
+
+		view := model.View()
+		for _, desc := range []string{"sessions", "edit", "delete"} {
+			if !strings.Contains(view, desc) {
+				t.Errorf("normal mode help bar should contain %q, got:\n%s", desc, view)
+			}
+		}
+		if !strings.Contains(view, "new session") {
+			t.Errorf("normal mode help bar should show 'new session' for enter, got:\n%s", view)
+		}
+	})
 }
 
 func TestSessionListWithBubblesList(t *testing.T) {

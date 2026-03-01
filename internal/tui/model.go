@@ -233,11 +233,14 @@ func (m Model) WithInitialFilter(filter string) Model {
 // WithCommand returns a copy of the Model with the given command set.
 // When command is non-empty, the TUI starts in command-pending mode:
 // the session list is skipped and the projects page is shown directly.
+// Help keys are updated to omit s, x, e, and d and show "run here" for enter.
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
 		m.commandPending = true
 		m.activePage = PageProjects
+		m.projectList.AdditionalShortHelpKeys = commandPendingHelpKeys
+		m.projectList.AdditionalFullHelpKeys = commandPendingHelpKeys
 	}
 	return m
 }
@@ -347,6 +350,16 @@ func projectHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
+		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+	}
+}
+
+// commandPendingHelpKeys returns key.Binding entries for command-pending mode.
+// Only enter (run here), n, b, /, and q are shown; s, x, e, and d are omitted.
+func commandPendingHelpKeys() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run here")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 	}
@@ -590,8 +603,14 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
 			return m.handleNewInCWD()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
+			if m.commandPending {
+				return m, nil
+			}
 			return m.handleDeleteProjectKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
+			if m.commandPending {
+				return m, nil
+			}
 			return m.handleEditProjectKey()
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "b":
 			return m.handleBrowseKey()
