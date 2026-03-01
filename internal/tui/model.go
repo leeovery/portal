@@ -212,6 +212,11 @@ func (m Model) ProjectListFilterState() list.FilterState {
 	return m.projectList.FilterState()
 }
 
+// ProjectListVisibleItems returns the visible (filtered) items in the project list, for testing.
+func (m Model) ProjectListVisibleItems() []list.Item {
+	return m.projectList.VisibleItems()
+}
+
 // SetProjectListFilter sets the filter text and applies it on the project list, for testing.
 func (m *Model) SetProjectListFilter(text string) {
 	m.projectList.SetFilterText(text)
@@ -425,11 +430,17 @@ func (m Model) filteredSessions() []tmux.Session {
 // It only runs once both sessions and projects have been loaded.
 // If sessions exist (after inside-tmux filtering), show Sessions page;
 // otherwise show Projects page.
+// After determining the default page, applies any initial filter to that page's list.
+// In command-pending mode, always applies to the Projects page.
 func (m *Model) evaluateDefaultPage() {
 	if m.defaultPageEvaluated {
 		return
 	}
-	if !m.sessionsLoaded || !m.projectsLoaded {
+	if m.commandPending {
+		if !m.projectsLoaded {
+			return
+		}
+	} else if !m.sessionsLoaded || !m.projectsLoaded {
 		return
 	}
 	m.defaultPageEvaluated = true
@@ -438,6 +449,19 @@ func (m *Model) evaluateDefaultPage() {
 	} else {
 		m.activePage = PageProjects
 	}
+
+	if m.initialFilter == "" {
+		return
+	}
+
+	if m.activePage == PageSessions && !m.commandPending {
+		m.sessionList.SetFilterText(m.initialFilter)
+		m.sessionList.SetFilterState(list.FilterApplied)
+	} else {
+		m.projectList.SetFilterText(m.initialFilter)
+		m.projectList.SetFilterState(list.FilterApplied)
+	}
+	m.initialFilter = ""
 }
 
 // loadProjects returns a command that cleans stale projects and loads the list.
@@ -508,12 +532,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.insideTmux && m.currentSession != "" {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
-		}
-
-		if m.initialFilter != "" {
-			m.sessionList.SetFilterText(m.initialFilter)
-			m.sessionList.SetFilterState(list.FilterApplied)
-			m.initialFilter = ""
 		}
 
 		m.sessionsLoaded = true

@@ -1046,17 +1046,26 @@ func TestInitialFilter(t *testing.T) {
 		}
 	})
 
-	t.Run("SessionsMsg applies initial filter via built-in list filtering", func(t *testing.T) {
+	t.Run("evaluateDefaultPage applies initial filter via built-in list filtering", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "myapp-dev", Windows: 1, Attached: false},
 			{Name: "other", Windows: 2, Attached: false},
 			{Name: "myapp-prod", Windows: 3, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("myapp")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		updatedModel := model.(tui.Model)
 
@@ -1113,7 +1122,7 @@ func TestInitialFilter(t *testing.T) {
 		}
 	})
 
-	t.Run("command-pending mode preserved with initial filter", func(t *testing.T) {
+	t.Run("command-pending mode applies initial filter to project list", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -1138,11 +1147,13 @@ func TestInitialFilter(t *testing.T) {
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected command-pending mode header, got:\n%s", view)
 		}
-		// Initial filter is stored but not applied to project picker
-		// (project picker filter forwarding removed)
+		// Initial filter is applied to project list and consumed
 		updatedModel := model.(tui.Model)
-		if updatedModel.InitialFilter() != "myapp" {
-			t.Errorf("initial filter should be stored as %q, got %q", "myapp", updatedModel.InitialFilter())
+		if updatedModel.ProjectListFilterState() != list.FilterApplied {
+			t.Errorf("project filter state = %v, want FilterApplied", updatedModel.ProjectListFilterState())
+		}
+		if updatedModel.InitialFilter() != "" {
+			t.Errorf("initialFilter should be consumed, got %q", updatedModel.InitialFilter())
 		}
 	})
 }
@@ -2318,7 +2329,7 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 	})
 
-	t.Run("initial filter stored but not applied to project list", func(t *testing.T) {
+	t.Run("initial filter applied to project list in command-pending mode", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2338,15 +2349,17 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Initial filter is stored but not applied to project list
-		// All projects should be in the list (no filter applied)
+		// Initial filter is applied to project list
 		updated := model.(tui.Model)
 		items := updated.ProjectListItems()
 		if len(items) != 2 {
-			t.Errorf("expected 2 projects in list (no filter applied), got %d", len(items))
+			t.Errorf("expected 2 total projects in list, got %d", len(items))
 		}
-		if updated.ProjectListFilterState() != list.Unfiltered {
-			t.Errorf("expected unfiltered project list, got filter state %v", updated.ProjectListFilterState())
+		if updated.ProjectListFilterState() != list.FilterApplied {
+			t.Errorf("expected FilterApplied on project list, got filter state %v", updated.ProjectListFilterState())
+		}
+		if updated.ProjectListFilterValue() != "myapp" {
+			t.Errorf("expected project filter value %q, got %q", "myapp", updated.ProjectListFilterValue())
 		}
 	})
 
@@ -3087,11 +3100,20 @@ func TestBuiltInFiltering(t *testing.T) {
 			{Name: "other", Windows: 2, Attached: false},
 			{Name: "myapp-prod", Windows: 3, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("myapp")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		updatedModel := model.(tui.Model)
 
@@ -3129,11 +3151,20 @@ func TestBuiltInFiltering(t *testing.T) {
 			{Name: "alpha", Windows: 1, Attached: false},
 			{Name: "bravo", Windows: 2, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("zzzzz")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		updatedModel := model.(tui.Model)
 
@@ -3198,11 +3229,20 @@ func TestBuiltInFiltering(t *testing.T) {
 			{Name: "other", Windows: 2, Attached: false},
 			{Name: "myapp-prod", Windows: 3, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("myapp")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Verify filter is applied
 		updatedModel := model.(tui.Model)
@@ -4378,11 +4418,20 @@ func TestEscProgressiveBack(t *testing.T) {
 			{Name: "other", Windows: 2, Attached: false},
 			{Name: "myapp-prod", Windows: 3, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("myapp")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Verify filter is applied
 		updatedModel := model.(tui.Model)
@@ -4587,11 +4636,20 @@ func TestEscProgressiveBack(t *testing.T) {
 			{Name: "myapp-dev", Windows: 1, Attached: false},
 			{Name: "other", Windows: 2, Attached: false},
 		}
-		m := tui.New(&mockSessionLister{sessions: sessions})
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		)
 		m = m.WithInitialFilter("myapp")
 
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: store.projects})
 
 		// Verify filter is applied
 		updatedModel := model.(tui.Model)
@@ -6803,6 +6861,315 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		quitMsg := cmd()
 		if _, ok := quitMsg.(tea.QuitMsg); !ok {
 			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+	})
+}
+
+func TestInitialFilterAppliedToDefaultPage(t *testing.T) {
+	t.Run("initial filter applied to Sessions page when sessions exist", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "myapp-dev", Windows: 1, Attached: false},
+			{Name: "other", Windows: 2, Attached: false},
+			{Name: "myapp-prod", Windows: 3, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		updated := model.(tui.Model)
+
+		// Should default to Sessions page
+		if updated.ActivePage() != tui.PageSessions {
+			t.Fatalf("expected PageSessions, got %d", updated.ActivePage())
+		}
+
+		// Filter should be applied to session list
+		if updated.SessionListFilterState() != list.FilterApplied {
+			t.Errorf("session filter state = %v, want FilterApplied", updated.SessionListFilterState())
+		}
+		if updated.SessionListFilterValue() != "myapp" {
+			t.Errorf("session filter value = %q, want %q", updated.SessionListFilterValue(), "myapp")
+		}
+
+		// Visible items should only include matching sessions
+		visible := updated.SessionListVisibleItems()
+		if len(visible) != 2 {
+			t.Fatalf("expected 2 visible items, got %d", len(visible))
+		}
+		for _, item := range visible {
+			si := item.(tui.SessionItem)
+			if si.Session.Name == "other" {
+				t.Error("'other' should be filtered out")
+			}
+		}
+
+		// Filter consumed
+		if updated.InitialFilter() != "" {
+			t.Errorf("initialFilter should be consumed, got %q", updated.InitialFilter())
+		}
+	})
+
+	t.Run("initial filter applied to Projects page when no sessions exist", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+				{Path: "/code/myapp-prod", Name: "myapp-prod"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+		).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		updated := model.(tui.Model)
+
+		// Should default to Projects page
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("expected PageProjects, got %d", updated.ActivePage())
+		}
+
+		// Filter should be applied to project list
+		if updated.ProjectListFilterState() != list.FilterApplied {
+			t.Errorf("project filter state = %v, want FilterApplied", updated.ProjectListFilterState())
+		}
+		if updated.ProjectListFilterValue() != "myapp" {
+			t.Errorf("project filter value = %q, want %q", updated.ProjectListFilterValue(), "myapp")
+		}
+
+		// Visible items should only include matching projects
+		visible := updated.ProjectListVisibleItems()
+		if len(visible) != 2 {
+			t.Fatalf("expected 2 visible items, got %d", len(visible))
+		}
+		for _, item := range visible {
+			pi := item.(tui.ProjectItem)
+			if pi.Project.Name == "other" {
+				t.Error("'other' should be filtered out")
+			}
+		}
+
+		// Filter consumed
+		if updated.InitialFilter() != "" {
+			t.Errorf("initialFilter should be consumed, got %q", updated.InitialFilter())
+		}
+	})
+
+	t.Run("initial filter applied to Projects page in command-pending mode", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+				{Path: "/code/other", Name: "other"},
+				{Path: "/code/myapp-prod", Name: "myapp-prod"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"}).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		// In command-pending mode, Init() only loads projects (no sessions fetch)
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		updated := model.(tui.Model)
+
+		// Should be on Projects page (command-pending mode)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Fatalf("expected PageProjects in command-pending mode, got %d", updated.ActivePage())
+		}
+
+		// Filter should be applied to project list
+		if updated.ProjectListFilterState() != list.FilterApplied {
+			t.Errorf("project filter state = %v, want FilterApplied", updated.ProjectListFilterState())
+		}
+		if updated.ProjectListFilterValue() != "myapp" {
+			t.Errorf("project filter value = %q, want %q", updated.ProjectListFilterValue(), "myapp")
+		}
+
+		// Visible items should only include matching projects
+		visible := updated.ProjectListVisibleItems()
+		if len(visible) != 2 {
+			t.Fatalf("expected 2 visible items, got %d", len(visible))
+		}
+		for _, item := range visible {
+			pi := item.(tui.ProjectItem)
+			if pi.Project.Name == "other" {
+				t.Error("'other' should be filtered out")
+			}
+		}
+
+		// Filter consumed
+		if updated.InitialFilter() != "" {
+			t.Errorf("initialFilter should be consumed, got %q", updated.InitialFilter())
+		}
+	})
+
+	t.Run("initial filter with no matches shows empty filtered state", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		).WithInitialFilter("zzzzz")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		updated := model.(tui.Model)
+
+		// Should default to Sessions page (sessions exist)
+		if updated.ActivePage() != tui.PageSessions {
+			t.Fatalf("expected PageSessions, got %d", updated.ActivePage())
+		}
+
+		// Filter applied
+		if updated.SessionListFilterState() != list.FilterApplied {
+			t.Errorf("filter state = %v, want FilterApplied", updated.SessionListFilterState())
+		}
+
+		// Visible items should be empty
+		visible := updated.SessionListVisibleItems()
+		if len(visible) != 0 {
+			t.Errorf("expected 0 visible items for non-matching filter, got %d", len(visible))
+		}
+	})
+
+	t.Run("empty initial filter is no-op", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha", Windows: 1, Attached: false},
+			{Name: "bravo", Windows: 2, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		).WithInitialFilter("")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		updated := model.(tui.Model)
+
+		// Filter state should be Unfiltered
+		if updated.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("session filter state = %v, want Unfiltered", updated.SessionListFilterState())
+		}
+
+		// All items should be visible
+		visible := updated.SessionListVisibleItems()
+		if len(visible) != 2 {
+			t.Errorf("expected 2 visible items, got %d", len(visible))
+		}
+	})
+
+	t.Run("filter consumed after first application", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "myapp-dev", Windows: 1, Attached: false},
+			{Name: "other", Windows: 2, Attached: false},
+		}
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+			tui.WithProjectStore(store),
+		).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: store.projects,
+		})
+
+		// Filter consumed after first evaluation
+		updated := model.(tui.Model)
+		if updated.InitialFilter() != "" {
+			t.Errorf("initialFilter should be consumed, got %q", updated.InitialFilter())
+		}
+
+		// Exit filter with Esc (clears built-in filter)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Second SessionsMsg — should NOT re-apply filter
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		updated = model.(tui.Model)
+		if updated.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("filter state = %v after second load, want Unfiltered", updated.SessionListFilterState())
+		}
+		items := updated.SessionListItems()
+		if len(items) != 2 {
+			t.Fatalf("expected 2 items after filter consumed, got %d", len(items))
+		}
+	})
+
+	t.Run("SessionsMsg handler no longer applies initial filter", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "myapp-dev", Windows: 1, Attached: false},
+			{Name: "other", Windows: 2, Attached: false},
+			{Name: "myapp-prod", Windows: 3, Attached: false},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: sessions},
+		).WithInitialFilter("myapp")
+
+		var model tea.Model = m
+		// Only send SessionsMsg without ProjectsLoadedMsg
+		// evaluateDefaultPage won't run (needs both), so filter should NOT be applied
+		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
+
+		updated := model.(tui.Model)
+
+		// Filter should NOT be applied yet (evaluateDefaultPage hasn't run)
+		if updated.SessionListFilterState() != list.Unfiltered {
+			t.Errorf("filter state = %v, want Unfiltered (filter should not be applied in SessionsMsg handler)", updated.SessionListFilterState())
+		}
+
+		// initialFilter should still be stored (not consumed)
+		if updated.InitialFilter() == "" {
+			t.Error("initialFilter should still be stored before evaluateDefaultPage runs")
 		}
 	})
 }
