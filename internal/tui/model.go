@@ -32,7 +32,11 @@ type SessionLister interface {
 }
 
 // ProjectStore abstracts project storage for testability.
-type ProjectStore = ui.ProjectStore
+type ProjectStore interface {
+	List() ([]project.Project, error)
+	CleanStale() ([]project.Project, error)
+	Remove(path string) error
+}
 
 // SessionKiller defines the interface for killing tmux sessions.
 type SessionKiller interface {
@@ -112,7 +116,6 @@ type Model struct {
 	cwd               string
 	activePage        page
 	projectList       list.Model
-	projectPicker     ui.ProjectPickerModel
 	fileBrowser       ui.FileBrowserModel
 	initialFilter     string
 	insideTmux        bool
@@ -224,15 +227,12 @@ func (m Model) WithInitialFilter(filter string) Model {
 
 // WithCommand returns a copy of the Model with the given command set.
 // When command is non-empty, the TUI starts in command-pending mode:
-// the session list is skipped and the project picker is shown directly.
+// the session list is skipped and the projects page is shown directly.
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
 		m.commandPending = true
 		m.activePage = PageProjects
-		if m.projectStore != nil {
-			m.projectPicker = ui.NewProjectPicker(m.projectStore)
-		}
 	}
 	return m
 }
@@ -431,8 +431,8 @@ func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 // Init returns a command that fetches tmux sessions, or loads projects
 // when in command-pending mode.
 func (m Model) Init() tea.Cmd {
-	if m.commandPending && m.projectStore != nil {
-		return m.projectPicker.Init()
+	if m.commandPending {
+		return m.loadProjects()
 	}
 	fetchSessions := func() tea.Msg {
 		sessions, err := m.sessionLister.ListSessions()
@@ -455,18 +455,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
-	case ui.BackMsg:
-		if m.commandPending {
-			return m, tea.Quit
-		}
-		m.activePage = PageSessions
-		return m, nil
-	case ui.ProjectSelectedMsg:
-		return m, m.createSession(msg.Path)
-	case ui.BrowseSelectedMsg:
-		m.fileBrowser = ui.NewFileBrowser(m.startPath, m.dirLister)
-		m.activePage = pageFileBrowser
-		return m, nil
 	case ui.BrowserDirSelectedMsg:
 		return m, m.createSession(msg.Path)
 	case ui.BrowserCancelMsg:
@@ -489,9 +477,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate to the active view
 	switch m.activePage {
 	case PageProjects:
-		if m.commandPending {
-			return m.updateProjectPicker(msg)
-		}
 		return m.updateProjectsPage(msg)
 	case pageFileBrowser:
 		return m.updateFileBrowser(msg)
@@ -508,15 +493,6 @@ func (m Model) createSession(dir string) tea.Cmd {
 		}
 		return SessionCreatedMsg{SessionName: name}
 	}
-}
-
-func (m Model) updateProjectPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
-	updated, cmd := m.projectPicker.Update(msg)
-	picker, ok := updated.(ui.ProjectPickerModel)
-	if ok {
-		m.projectPicker = picker
-	}
-	return m, cmd
 }
 
 // selectedProjectItem returns the currently selected ProjectItem from the list, if any.
@@ -552,9 +528,15 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
 			return m, tea.Quit
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "s":
+			if m.commandPending {
+				return m, nil
+			}
 			m.activePage = PageSessions
 			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+			if m.commandPending {
+				return m, nil
+			}
 			m.activePage = PageSessions
 			return m, nil
 		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
@@ -850,15 +832,6 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.initialFilter = ""
 		}
 
-	case ui.ProjectsLoadedMsg:
-		// Forward to project picker if we're transitioning
-		updated, cmd := m.projectPicker.Update(msg)
-		if picker, ok := updated.(ui.ProjectPickerModel); ok {
-			m.projectPicker = picker
-		}
-		m.activePage = PageProjects
-		return m, cmd
-
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
@@ -1044,7 +1017,7 @@ func (m Model) View() string {
 			b.WriteString("Command: ")
 			b.WriteString(strings.Join(m.command, " "))
 			b.WriteString("\n\n")
-			b.WriteString(m.projectPicker.View())
+			b.WriteString(m.viewProjectList())
 			return b.String()
 		}
 		return m.viewProjectList()

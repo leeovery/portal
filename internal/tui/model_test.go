@@ -727,7 +727,7 @@ func (m *mockSessionKiller) KillSession(name string) error {
 	return m.err
 }
 
-// mockProjectStore implements ui.ProjectStore for tui testing.
+// mockProjectStore implements tui.ProjectStore for testing.
 type mockProjectStore struct {
 	projects     []project.Project
 	listErr      error
@@ -767,7 +767,7 @@ func (m *mockSessionCreator) CreateFromDir(dir string, command []string) (string
 	return m.sessionName, nil
 }
 
-// mockDirLister implements ui.DirLister for tui testing.
+// mockDirLister implements tui.DirLister for testing.
 type mockDirLister struct {
 	entries map[string][]browser.DirEntry
 }
@@ -805,8 +805,8 @@ func TestFileBrowserIntegration(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Trigger browse selection from project picker
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		view := model.View()
 		// File browser should show the starting directory path
@@ -817,9 +817,9 @@ func TestFileBrowserIntegration(t *testing.T) {
 		if !strings.Contains(view, "code") {
 			t.Errorf("expected file browser to show directory entries, got:\n%s", view)
 		}
-		// Should NOT show project picker
-		if strings.Contains(view, "Select a project") {
-			t.Errorf("should not show project picker when file browser is open:\n%s", view)
+		// Should NOT show project list
+		if strings.Contains(view, "Projects") {
+			t.Errorf("should not show project list when file browser is open:\n%s", view)
 		}
 	})
 
@@ -840,8 +840,9 @@ func TestFileBrowserIntegration(t *testing.T) {
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// Simulate browse flow: project picker -> file browser -> directory selected
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Navigate to projects page, then open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		// File browser emits BrowserDirSelectedMsg
 		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
@@ -878,7 +879,10 @@ func TestFileBrowserIntegration(t *testing.T) {
 		)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+
+		// Navigate to projects page, then open file browser
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		// File browser selects directory
 		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/myproj"})
@@ -912,7 +916,9 @@ func TestFileBrowserIntegration(t *testing.T) {
 		).WithCommand([]string{"vim", "."})
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		// File browser selects directory
 		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
@@ -960,19 +966,16 @@ func TestFileBrowserIntegration(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Open file browser
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		// Cancel the file browser
 		model, _ = model.Update(ui.BrowserCancelMsg{})
 
 		view := model.View()
-		// Should be back in project picker
-		if !strings.Contains(view, "Select a project") {
-			t.Errorf("expected project picker after cancel, got:\n%s", view)
-		}
+		// Should be back on projects page showing project items
 		if !strings.Contains(view, "myapp") {
-			t.Errorf("expected project 'myapp' in picker, got:\n%s", view)
+			t.Errorf("expected projects page with 'myapp' after cancel, got:\n%s", view)
 		}
 	})
 
@@ -997,8 +1000,8 @@ func TestFileBrowserIntegration(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Trigger browse from project picker
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		view := model.View()
 		// Should be in file browser
@@ -2146,7 +2149,7 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 
 		// Should be a ProjectsLoadedMsg, not a SessionsMsg
-		projectsMsg, ok := msg.(ui.ProjectsLoadedMsg)
+		projectsMsg, ok := msg.(tui.ProjectsLoadedMsg)
 		if !ok {
 			t.Fatalf("expected ProjectsLoadedMsg, got %T", msg)
 		}
@@ -2159,15 +2162,9 @@ func TestCommandPendingMode(t *testing.T) {
 		model, _ = model.Update(projectsMsg)
 
 		view := model.View()
-		// Should show project picker, not session list
-		if !strings.Contains(view, "Select a project") {
-			t.Errorf("expected project picker view, got:\n%s", view)
-		}
-		if strings.Contains(view, "No active sessions") {
-			t.Errorf("session list should not be shown in command-pending mode, got:\n%s", view)
-		}
-		if strings.Contains(view, "[n] new in project...") {
-			t.Errorf("session list new option should not be shown in command-pending mode, got:\n%s", view)
+		// Should show projects page content, not session list
+		if !strings.Contains(view, "myapp") {
+			t.Errorf("expected projects page with project items, got:\n%s", view)
 		}
 	})
 
@@ -2268,13 +2265,17 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Select a project
-		_, cmd = model.Update(ui.ProjectSelectedMsg{Path: "/code/myapp"})
+		// Select a project by pressing Enter (first project in list)
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		if cmd == nil {
 			t.Fatal("expected command from project selection, got nil")
 		}
 		cmd()
 
+		// Verify session was created with the project directory
+		if creator.createdDir != "/code/myapp" {
+			t.Errorf("expected CreateFromDir with %q, got %q", "/code/myapp", creator.createdDir)
+		}
 		// Verify command was forwarded
 		wantCmd := []string{"claude", "--resume"}
 		if len(creator.createdCommand) != len(wantCmd) {
@@ -2306,26 +2307,18 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Press Esc - should quit, not go back to session list
+		// Press Esc - should quit directly
 		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 		if cmd == nil {
 			t.Fatal("expected quit command from Esc in command-pending mode, got nil")
 		}
-		// The Esc in project picker normally emits BackMsg. In command-pending mode,
-		// BackMsg should trigger quit instead of returning to session list.
 		quitMsg := cmd()
-		// Follow the message chain: BackMsg -> model handles it
-		_, cmd = model.Update(quitMsg)
-		if cmd == nil {
-			t.Fatal("expected quit command after BackMsg in command-pending mode, got nil")
-		}
-		finalMsg := cmd()
-		if _, ok := finalMsg.(tea.QuitMsg); !ok {
-			t.Errorf("expected tea.QuitMsg, got %T", finalMsg)
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
 		}
 	})
 
-	t.Run("initial filter stored but not forwarded to project picker", func(t *testing.T) {
+	t.Run("initial filter stored but not applied to project list", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/myapp", Name: "myapp"},
@@ -2345,14 +2338,15 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		view := model.View()
-		// Initial filter is stored but not applied to project picker
-		// All projects should be visible (no filter applied)
-		if !strings.Contains(view, "myapp") {
-			t.Errorf("myapp project should be visible, got:\n%s", view)
+		// Initial filter is stored but not applied to project list
+		// All projects should be in the list (no filter applied)
+		updated := model.(tui.Model)
+		items := updated.ProjectListItems()
+		if len(items) != 2 {
+			t.Errorf("expected 2 projects in list (no filter applied), got %d", len(items))
 		}
-		if !strings.Contains(view, "other") {
-			t.Errorf("other project should be visible (no filter applied), got:\n%s", view)
+		if updated.ProjectListFilterState() != list.Unfiltered {
+			t.Errorf("expected unfiltered project list, got filter state %v", updated.ProjectListFilterState())
 		}
 	})
 
@@ -2379,8 +2373,8 @@ func TestCommandPendingMode(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Trigger browse
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		// Select directory from browser
 		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
@@ -2477,10 +2471,10 @@ func TestCommandPendingMode(t *testing.T) {
 		if !strings.Contains(view, "Command: claude") {
 			t.Errorf("expected command banner in empty state, got:\n%s", view)
 		}
-		if !strings.Contains(view, "browse for directory...") {
-			t.Errorf("expected browse option in empty state, got:\n%s", view)
+		if !strings.Contains(view, "b browse") {
+			t.Errorf("expected browse help key in empty state, got:\n%s", view)
 		}
-		if !strings.Contains(view, "No saved projects yet.") {
+		if !strings.Contains(view, "No saved projects") {
 			t.Errorf("expected empty projects message, got:\n%s", view)
 		}
 	})
@@ -2779,8 +2773,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		model, _ = model.Update(msg)
 
 		view := model.View()
-		if !strings.Contains(view, "Select a project") {
-			t.Errorf("expected project picker view, got:\n%s", view)
+		if !strings.Contains(view, "myapp") {
+			t.Errorf("expected projects page with project items, got:\n%s", view)
 		}
 	})
 
@@ -2809,8 +2803,8 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		msg := cmd()
 		model, _ = model.Update(msg)
 
-		// Trigger browse from project picker
-		model, _ = model.Update(ui.BrowseSelectedMsg{})
+		// Press b to open file browser from projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
 
 		view := model.View()
 		if !strings.Contains(view, "/home/user") {

@@ -76,9 +76,16 @@ func standardEntries() map[string][]browser.DirEntry {
 	}
 }
 
-func keyUp() tea.Msg    { return tea.KeyMsg{Type: tea.KeyUp} }
-func keyRight() tea.Msg { return tea.KeyMsg{Type: tea.KeyRight} }
-func keyLeft() tea.Msg  { return tea.KeyMsg{Type: tea.KeyLeft} }
+func keyDown() tea.Msg      { return tea.KeyMsg{Type: tea.KeyDown} }
+func keyUp() tea.Msg        { return tea.KeyMsg{Type: tea.KeyUp} }
+func keyEnter() tea.Msg     { return tea.KeyMsg{Type: tea.KeyEnter} }
+func keyEsc() tea.Msg       { return tea.KeyMsg{Type: tea.KeyEsc} }
+func keyBackspace() tea.Msg { return tea.KeyMsg{Type: tea.KeyBackspace} }
+func keyRight() tea.Msg     { return tea.KeyMsg{Type: tea.KeyRight} }
+func keyLeft() tea.Msg      { return tea.KeyMsg{Type: tea.KeyLeft} }
+func keyRune(r rune) tea.Msg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+}
 
 func sendBrowserKeys(m tea.Model, keys ...tea.Msg) tea.Model {
 	for _, k := range keys {
