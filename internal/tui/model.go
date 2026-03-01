@@ -1092,12 +1092,13 @@ func (m Model) View() string {
 	switch m.activePage {
 	case PageProjects:
 		if m.commandPending {
-			var b strings.Builder
-			b.WriteString("Select project to run: ")
-			b.WriteString(strings.Join(m.command, " "))
-			b.WriteString("\n\n")
-			b.WriteString(m.viewProjectList())
-			return b.String()
+			listView := m.viewProjectList()
+			statusLine := "Select project to run: " + strings.Join(m.command, " ")
+			// Insert status line after the first line (title) of the list view
+			if idx := strings.IndexByte(listView, '\n'); idx >= 0 {
+				return listView[:idx+1] + statusLine + "\n" + listView[idx+1:]
+			}
+			return listView + "\n" + statusLine
 		}
 		return m.viewProjectList()
 	case pageFileBrowser:

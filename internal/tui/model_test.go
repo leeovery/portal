@@ -6056,6 +6056,41 @@ func TestCommandPendingStatusLine(t *testing.T) {
 			t.Errorf("expected 'Projects' title in command-pending mode, got:\n%s", view)
 		}
 	})
+
+	t.Run("status line appears after title line not before", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		view := model.View()
+		titleIdx := strings.Index(view, "Projects")
+		statusIdx := strings.Index(view, "Select project to run: claude")
+		if titleIdx < 0 {
+			t.Fatalf("title 'Projects' not found in view:\n%s", view)
+		}
+		if statusIdx < 0 {
+			t.Fatalf("status line not found in view:\n%s", view)
+		}
+		if statusIdx < titleIdx {
+			t.Errorf("status line (pos %d) appears before title (pos %d); expected status after title.\nView:\n%s",
+				statusIdx, titleIdx, view)
+		}
+	})
 }
 
 func TestCommandPendingEnterCreatesSession(t *testing.T) {
