@@ -5999,3 +5999,247 @@ func TestCommandPendingStatusLine(t *testing.T) {
 		}
 	})
 }
+
+func TestCommandPendingEnterCreatesSession(t *testing.T) {
+	t.Run("enter on project in command-pending mode creates session with command", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude", "--resume"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press enter on first project
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter on project, got nil")
+		}
+
+		msg = cmd()
+		createdMsg, ok := msg.(tui.SessionCreatedMsg)
+		if !ok {
+			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
+		}
+		if createdMsg.SessionName != "myapp-abc123" {
+			t.Errorf("expected session name %q, got %q", "myapp-abc123", createdMsg.SessionName)
+		}
+		if creator.createdDir != "/code/myapp" {
+			t.Errorf("expected CreateFromDir called with dir %q, got %q", "/code/myapp", creator.createdDir)
+		}
+		if creator.createdCommand == nil {
+			t.Fatal("expected command to be forwarded, got nil")
+		}
+	})
+
+	t.Run("command slice forwarded exactly to CreateFromDir", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude", "--resume", "--model", "opus"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press enter on project
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter, got nil")
+		}
+		cmd()
+
+		wantCmd := []string{"claude", "--resume", "--model", "opus"}
+		if len(creator.createdCommand) != len(wantCmd) {
+			t.Fatalf("command length = %d, want %d; got %v", len(creator.createdCommand), len(wantCmd), creator.createdCommand)
+		}
+		for i, arg := range wantCmd {
+			if creator.createdCommand[i] != arg {
+				t.Errorf("command[%d] = %q, want %q", i, creator.createdCommand[i], arg)
+			}
+		}
+	})
+
+	t.Run("selected returns session name after creation", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press enter to create session
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command, got nil")
+		}
+		msg = cmd()
+
+		// Feed SessionCreatedMsg back
+		model, _ = model.Update(msg)
+		updated := model.(tui.Model)
+		if updated.Selected() != "myapp-abc123" {
+			t.Errorf("Selected() = %q, want %q", updated.Selected(), "myapp-abc123")
+		}
+	})
+
+	t.Run("TUI quits after successful session creation", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press enter to create session
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command, got nil")
+		}
+		msg = cmd()
+
+		// Feed SessionCreatedMsg back — should return quit command
+		_, cmd = model.Update(msg)
+		if cmd == nil {
+			t.Fatal("expected quit command after SessionCreatedMsg, got nil")
+		}
+		quitMsg := cmd()
+		if _, ok := quitMsg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", quitMsg)
+		}
+	})
+
+	t.Run("session creation error keeps TUI on Projects page", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{err: fmt.Errorf("tmux failed")}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		).WithCommand([]string{"claude"})
+
+		var model tea.Model = m
+		cmd := m.Init()
+		msg := cmd()
+		model, _ = model.Update(msg)
+
+		// Press enter on project — will fail
+		_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter, got nil")
+		}
+		msg = cmd()
+
+		// Should not be SessionCreatedMsg
+		if _, ok := msg.(tui.SessionCreatedMsg); ok {
+			t.Fatal("expected error msg, got SessionCreatedMsg")
+		}
+
+		// Feed error back — should stay on projects page
+		model, cmd = model.Update(msg)
+
+		// No quit command should be returned
+		if cmd != nil {
+			t.Errorf("expected nil command after error, got non-nil")
+		}
+
+		// Should still be on Projects page
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageProjects {
+			t.Errorf("expected to stay on PageProjects, got page %v", updated.ActivePage())
+		}
+
+		// Selected should be empty
+		if updated.Selected() != "" {
+			t.Errorf("expected empty Selected() after error, got %q", updated.Selected())
+		}
+
+		// Should still render
+		view := model.View()
+		if view == "" {
+			t.Error("view should not be empty after error")
+		}
+	})
+
+	t.Run("normal mode enter on project passes nil command", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		}
+		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
+
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(creator),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page and populate
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/myapp", Name: "myapp"},
+			},
+		})
+
+		// Press enter on project
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		if cmd == nil {
+			t.Fatal("expected command from enter, got nil")
+		}
+		cmd()
+
+		// In normal mode (no WithCommand), command should be nil
+		if creator.createdCommand != nil {
+			t.Errorf("expected nil command in normal mode, got %v", creator.createdCommand)
+		}
+	})
+}
