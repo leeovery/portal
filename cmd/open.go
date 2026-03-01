@@ -274,6 +274,8 @@ type tuiConfig struct {
 	killer         tui.SessionKiller
 	renamer        tui.SessionRenamer
 	projectStore   tui.ProjectStore
+	projectEditor  tui.ProjectEditor
+	aliasEditor    tui.AliasEditor
 	sessionCreator tui.SessionCreator
 	dirLister      tui.DirLister
 	cwd            string
@@ -283,14 +285,21 @@ type tuiConfig struct {
 
 // buildTUIModel constructs a tui.Model from the given config and parameters.
 func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Model {
-	m := tui.New(cfg.lister,
+	opts := []tui.Option{
 		tui.WithKiller(cfg.killer),
 		tui.WithRenamer(cfg.renamer),
 		tui.WithProjectStore(cfg.projectStore),
 		tui.WithSessionCreator(cfg.sessionCreator),
 		tui.WithDirLister(cfg.dirLister, cfg.cwd),
 		tui.WithCWD(cfg.cwd),
-	)
+	}
+	if cfg.projectEditor != nil {
+		opts = append(opts, tui.WithProjectEditor(cfg.projectEditor))
+	}
+	if cfg.aliasEditor != nil {
+		opts = append(opts, tui.WithAliasEditor(cfg.aliasEditor))
+	}
+	m := tui.New(cfg.lister, opts...)
 	if len(command) > 0 {
 		m = m.WithCommand(command)
 	}
@@ -325,6 +334,11 @@ func openTUI(initialFilter string, command []string) error {
 		return err
 	}
 
+	aliasStore, err := loadAliasStore()
+	if err != nil {
+		return err
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to determine working directory: %w", err)
@@ -335,6 +349,8 @@ func openTUI(initialFilter string, command []string) error {
 		killer:         client,
 		renamer:        client,
 		projectStore:   store,
+		projectEditor:  store,
+		aliasEditor:    aliasStore,
 		sessionCreator: session.NewSessionCreator(gitResolver, store, client, gen),
 		dirLister:      &osDirLister{},
 		cwd:            cwd,

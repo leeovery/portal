@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -697,6 +698,36 @@ func (s *stubDirLister) ListDirectories(_ string, _ bool) ([]browser.DirEntry, e
 	return nil, nil
 }
 
+// stubProjectEditor implements tui.ProjectEditor for cmd-level testing.
+type stubProjectEditor struct{}
+
+func (s *stubProjectEditor) Rename(_, _ string) error { return nil }
+
+// stubAliasEditor implements tui.AliasEditor for cmd-level testing.
+type stubAliasEditor struct {
+	aliases map[string]string
+}
+
+func (s *stubAliasEditor) Load() (map[string]string, error) {
+	result := make(map[string]string)
+	for k, v := range s.aliases {
+		result[k] = v
+	}
+	return result, nil
+}
+func (s *stubAliasEditor) Set(name, path string) {
+	if s.aliases == nil {
+		s.aliases = make(map[string]string)
+	}
+	s.aliases[name] = path
+}
+func (s *stubAliasEditor) Delete(name string) bool {
+	_, ok := s.aliases[name]
+	delete(s.aliases, name)
+	return ok
+}
+func (s *stubAliasEditor) Save() error { return nil }
+
 // mockConnector implements SessionConnector for testing.
 type mockConnector struct {
 	connectedTo string
@@ -856,6 +887,39 @@ func TestBuildTUIModel(t *testing.T) {
 
 		if m.CWD() != "/home/user/projects" {
 			t.Errorf("CWD() = %q, want %q", m.CWD(), "/home/user/projects")
+		}
+	})
+
+	t.Run("project and alias editors wired enables edit modal", func(t *testing.T) {
+		projects := []project.Project{
+			{Path: "/code/portal", Name: "portal"},
+		}
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{projects: projects},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+			projectEditor:  &stubProjectEditor{},
+			aliasEditor:    &stubAliasEditor{aliases: map[string]string{}},
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		// Navigate to projects page and populate
+		var model tea.Model = m
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{Projects: projects})
+
+		// Press e to open edit modal
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+		view := model.View()
+		if !strings.Contains(view, "Edit:") {
+			t.Errorf("expected edit modal to open when editors are wired, got view:\n%s", view)
 		}
 	})
 }
