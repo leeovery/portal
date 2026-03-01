@@ -14,7 +14,7 @@ author_gate_mode: auto
 finding_gate_mode: auto
 review_cycle: 3
 planning:
-  phase: 3
+  phase: 4
   task: ~
 ---
 
@@ -126,3 +126,18 @@ ext_id: tick-68f174
 | tui-session-picker-3-6 | Command-Pending Esc and Quit Behavior | Esc with filter active needs two presses, Esc with modal active dismisses modal first | authored | tick-5c4639 |
 | tui-session-picker-3-7 | Initial Filter Applied to Default Page | initial filter with no matches, empty initial filter is no-op, filter applied to Projects when no sessions | authored | tick-bd640d |
 | tui-session-picker-3-8 | Wire cmd/open.go to New Model API | no command no filter passthrough, command with filter combined | authored | tick-dc682b |
+
+### Phase 4: Analysis (Cycle 1)
+status: approved
+ext_id: tick-dfe7e0
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| tui-session-picker-4-1 | Replace ANSI-unaware placeOverlay with lipgloss.Place | none | authored | tick-d2056e |
+| tui-session-picker-4-2 | Unify duplicated modal dispatch into single method | none | authored | tick-6fac0d |
+| tui-session-picker-4-3 | Extract shared view-list-with-modal rendering helper | none | authored | tick-f56bab |
+| tui-session-picker-4-4 | Eliminate duplicated window-label pluralization in SessionDelegate.Render | none | authored | tick-dad932 |
+| tui-session-picker-4-5 | Fix command-pending status line position to below title | none | authored | tick-717ebc |

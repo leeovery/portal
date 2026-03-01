@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: tui-session-picker (Cycle 1)
 
 ## Task 1: Replace ANSI-unaware placeOverlay with lipgloss.Place
-status: pending
+status: approved
 severity: high
 sources: architecture
 
@@ -34,7 +34,7 @@ sources: architecture
 - Add a test that renders a modal over content containing ANSI escape sequences and verifies the modal is horizontally centered (using lipgloss.Width for measurement)
 
 ## Task 2: Unify duplicated modal dispatch into single method
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -62,7 +62,7 @@ sources: duplication, architecture
 - Ctrl+C during any modal state still triggers quit
 
 ## Task 3: Extract shared view-list-with-modal rendering helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -88,7 +88,7 @@ sources: duplication
 - Modal overlay tests for both pages continue to produce correct output
 
 ## Task 4: Eliminate duplicated window-label pluralization in SessionDelegate.Render
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -114,7 +114,7 @@ sources: duplication
 - Verify that `windowLabel(1)` returns "1 window" and `windowLabel(3)` returns "3 windows"
 
 ## Task 5: Fix command-pending status line position to below title
-status: pending
+status: approved
 severity: low
 sources: standards
 
