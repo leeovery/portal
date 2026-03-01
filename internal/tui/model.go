@@ -178,6 +178,17 @@ func (m Model) SessionListFilterValue() string {
 	return m.sessionList.FilterValue()
 }
 
+// SetSessionListFilter sets the filter text and applies it on the session list, for testing.
+func (m *Model) SetSessionListFilter(text string) {
+	m.sessionList.SetFilterText(text)
+	m.sessionList.SetFilterState(list.FilterApplied)
+}
+
+// ProjectListFilterValue returns the current filter text in the project list, for testing.
+func (m Model) ProjectListFilterValue() string {
+	return m.projectList.FilterValue()
+}
+
 // ProjectListItems returns the current items in the project list, for testing.
 func (m Model) ProjectListItems() []list.Item {
 	return m.projectList.Items()
@@ -329,8 +340,10 @@ func projectHelpKeys() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new session")),
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
-		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
+		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 	}
 }
 

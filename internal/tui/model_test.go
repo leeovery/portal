@@ -5144,3 +5144,172 @@ func TestFileBrowserFromProjectsPage(t *testing.T) {
 		}
 	})
 }
+
+func TestPageSwitchingFilterIndependence(t *testing.T) {
+	t.Run("switching pages does not carry filter text", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+				{Name: "bravo", Windows: 2, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Provide window size for both lists
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Load sessions
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+				{Name: "bravo", Windows: 2, Attached: false},
+			},
+		})
+
+		// Apply a filter on the sessions list
+		tuiModel := model.(tui.Model)
+		tuiModel.SetSessionListFilter("alpha")
+		model = tuiModel
+
+		// Verify session filter is applied
+		if tuiModel.SessionListFilterValue() != "alpha" {
+			t.Fatalf("precondition: expected session filter 'alpha', got %q", tuiModel.SessionListFilterValue())
+		}
+
+		// Switch to projects page
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+
+		// Load projects
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+				{Path: "/code/webapp", Name: "webapp"},
+			},
+		})
+
+		// Verify projects page has no filter text
+		updated := model.(tui.Model)
+		if updated.ProjectListFilterValue() != "" {
+			t.Errorf("expected empty project filter after switch, got %q", updated.ProjectListFilterValue())
+		}
+		if updated.ProjectListFilterState() != list.Unfiltered {
+			t.Errorf("expected Unfiltered project state, got %v", updated.ProjectListFilterState())
+		}
+	})
+
+	t.Run("filter state preserved when switching back to source page", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+				{Name: "bravo", Windows: 2, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Provide window size
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Load sessions
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+				{Name: "bravo", Windows: 2, Attached: false},
+			},
+		})
+
+		// Apply filter on sessions
+		tuiModel := model.(tui.Model)
+		tuiModel.SetSessionListFilter("alpha")
+		model = tuiModel
+
+		// Switch to projects then back to sessions
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+
+		// Verify session filter is still applied
+		updated := model.(tui.Model)
+		if updated.SessionListFilterValue() != "alpha" {
+			t.Errorf("expected session filter 'alpha' preserved, got %q", updated.SessionListFilterValue())
+		}
+		if updated.SessionListFilterState() != list.FilterApplied {
+			t.Errorf("expected FilterApplied after round-trip, got %v", updated.SessionListFilterState())
+		}
+	})
+
+	t.Run("projects help bar includes s for sessions and project-specific keys", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{}},
+			tui.WithProjectStore(store),
+			tui.WithSessionCreator(&mockSessionCreator{sessionName: "test"}),
+		)
+		var model tea.Model = m
+
+		// Switch to projects page with wide width
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		model, _ = model.Update(tui.ProjectsLoadedMsg{
+			Projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		})
+
+		view := model.View()
+		expectedDescs := []string{
+			"sessions",
+			"edit",
+			"delete",
+			"browse",
+		}
+		for _, desc := range expectedDescs {
+			if !strings.Contains(view, desc) {
+				t.Errorf("projects help bar should contain %q, got:\n%s", desc, view)
+			}
+		}
+	})
+
+	t.Run("sessions help bar still includes p for projects after projects page replacement", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		m := tui.New(
+			&mockSessionLister{sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+			}},
+			tui.WithProjectStore(store),
+		)
+		var model tea.Model = m
+
+		// Set wide width and load sessions
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 24})
+		model, _ = model.Update(tui.SessionsMsg{
+			Sessions: []tmux.Session{
+				{Name: "alpha", Windows: 1, Attached: false},
+			},
+		})
+
+		view := model.View()
+		if !strings.Contains(view, "projects") {
+			t.Errorf("sessions help bar should contain 'projects', got:\n%s", view)
+		}
+	})
+}
