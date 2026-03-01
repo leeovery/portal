@@ -411,6 +411,11 @@ func newProjectList() list.Model {
 	return l
 }
 
+// isRuneKey reports whether msg is a rune key matching the given character.
+func isRuneKey(msg tea.KeyMsg, ch string) bool {
+	return msg.Type == tea.KeyRunes && string(msg.Runes) == ch
+}
+
 // New creates a Model that fetches sessions from the given SessionLister.
 // Optional dependencies are configured via functional options.
 func New(lister SessionLister, opts ...Option) Model {
@@ -634,33 +639,33 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			return m, tea.Quit
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+		case isRuneKey(msg, "q"):
 			return m, tea.Quit
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "s":
+		case isRuneKey(msg, "s"):
 			if m.commandPending {
 				return m, nil
 			}
 			m.activePage = PageSessions
 			return m, nil
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+		case isRuneKey(msg, "x"):
 			if m.commandPending {
 				return m, nil
 			}
 			m.activePage = PageSessions
 			return m, nil
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
+		case isRuneKey(msg, "n"):
 			return m.handleNewInCWD()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "d":
+		case isRuneKey(msg, "d"):
 			if m.commandPending {
 				return m, nil
 			}
 			return m.handleDeleteProjectKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "e":
+		case isRuneKey(msg, "e"):
 			if m.commandPending {
 				return m, nil
 			}
 			return m.handleEditProjectKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "b":
+		case isRuneKey(msg, "b"):
 			return m.handleBrowseKey()
 		case msg.Type == tea.KeyEnter:
 			return m.handleProjectEnter()
@@ -713,13 +718,13 @@ func (m Model) updateDeleteProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
-	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "y":
+	case isRuneKey(keyMsg, "y"):
 		path := m.pendingDeletePath
 		m.modal = modalNone
 		m.pendingDeletePath = ""
 		m.pendingDeleteName = ""
 		return m, m.deleteAndRefreshProjects(path)
-	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "n",
+	case isRuneKey(keyMsg, "n"),
 		keyMsg.Type == tea.KeyEsc:
 		m.modal = modalNone
 		m.pendingDeletePath = ""
@@ -928,18 +933,18 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			return m, tea.Quit
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "q":
+		case isRuneKey(msg, "q"):
 			return m, tea.Quit
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "k":
+		case isRuneKey(msg, "k"):
 			return m.handleKillKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "r":
+		case isRuneKey(msg, "r"):
 			return m.handleRenameKey()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "n":
+		case isRuneKey(msg, "n"):
 			return m.handleNewInCWD()
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "p":
+		case isRuneKey(msg, "p"):
 			m.activePage = PageProjects
 			return m, nil
-		case msg.Type == tea.KeyRunes && string(msg.Runes) == "x":
+		case isRuneKey(msg, "x"):
 			m.activePage = PageProjects
 			return m, nil
 		case msg.Type == tea.KeyEnter:
@@ -993,12 +998,12 @@ func (m Model) updateKillConfirmModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
-	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "y":
+	case isRuneKey(keyMsg, "y"):
 		name := m.pendingKillName
 		m.modal = modalNone
 		m.pendingKillName = ""
 		return m, m.killAndRefresh(name)
-	case keyMsg.Type == tea.KeyRunes && string(keyMsg.Runes) == "n",
+	case isRuneKey(keyMsg, "n"),
 		keyMsg.Type == tea.KeyEsc:
 		m.modal = modalNone
 		m.pendingKillName = ""
