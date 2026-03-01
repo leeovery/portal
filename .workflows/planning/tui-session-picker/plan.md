@@ -153,3 +153,15 @@ ext_id: tick-78afbe
 |----|------|------------|--------|--------|
 | tui-session-picker-5-1 | Guard evaluateDefaultPage against command-pending page selection | none | authored | tick-a87527 |
 | tui-session-picker-5-2 | Add [q] quit binding to all help bars | none | authored | tick-1c66e9 |
+
+### Phase 6: Analysis (Cycle 3)
+status: approved
+ext_id: tick-199756
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+| ID | Name | Edge Cases | Status | Ext ID |
+|----|------|------------|--------|--------|
+| tui-session-picker-6-1 | Extract rune-key matching helper | none | authored | tick-d6ffad |
+| tui-session-picker-6-2 | Wire edit-project dependencies in production | none | authored | tick-a6dd98 |

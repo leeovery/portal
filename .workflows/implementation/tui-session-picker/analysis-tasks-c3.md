@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: tui-session-picker (Cycle 3)
 
 ## Task 1: Extract rune-key matching helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -36,7 +36,7 @@ sources: duplication
 - Existing test suite covers all key-handling paths; no new tests needed since this is a pure refactor with no behavioral change
 
 ## Task 2: Wire edit-project dependencies in production
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
