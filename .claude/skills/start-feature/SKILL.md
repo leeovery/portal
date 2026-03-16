@@ -1,17 +1,9 @@
 ---
 name: start-feature
-allowed-tools: Bash(ls .workflows/discussion/), Bash(ls .workflows/research/), Bash(.claude/hooks/workflows/write-session-state.sh)
-hooks:
-  PreToolUse:
-    - hooks:
-        - type: command
-          command: "$CLAUDE_PROJECT_DIR/.claude/hooks/workflows/system-check.sh"
-          once: true
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.js), Bash(ls .workflows/)
 ---
 
-Start a new feature and route it through the pipeline: (Research) → Discussion → Specification → Planning → Implementation → Review.
-
-Research is optional — offered when significant uncertainties exist.
+Start a new feature. Gather a brief description, create the work unit, and route to the first phase.
 
 > **⚠️ ZERO OUTPUT RULE**: Do not narrate your processing. Produce no output until a step or reference file explicitly specifies display content. No "proceeding with...", no discovery summaries, no routing decisions, no transition text. Your first output must be content explicitly called for by the instructions.
 
@@ -23,68 +15,51 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
-- Even if the user's initial prompt seems to answer a question, still confirm with them at the appropriate step
 - Complete each step fully before moving to the next
 
 ---
 
-## Resuming After Context Refresh
+## Step 0: Initialisation
 
-Context refresh (compaction) summarizes the conversation, losing procedural detail. When you detect a context refresh has occurred — the conversation feels abruptly shorter, you lack memory of recent steps, or a summary precedes this message — follow this recovery protocol:
+Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
 
-1. **Re-read this skill file completely.** Do not rely on your summary of it. The full process, steps, and rules must be reloaded.
-2. **Identify the topic.** Check conversation history for the topic name. If unknown, check `.workflows/discussion/` or `.workflows/research/` for recently modified files.
-3. **Determine current step from artifacts:**
-   - No research or discussion file exists → resume at **Step 1**
-   - Research file exists, no discussion → resume at **Step 4** (re-invoke technical-research)
-   - Discussion exists with `status: in-progress` → resume at **Step 4** (re-invoke technical-discussion)
-   - Discussion exists with `status: concluded` → already handled by processing skill's bridge invocation
-4. **Announce your position** to the user before continuing: what step you believe you're at, what's been completed, and what comes next. Wait for confirmation.
+**Run migrations — this is mandatory. You must complete it before proceeding.**
 
-Do not guess at progress or continue from memory. The files on disk and git history are authoritative — your recollection is not.
-
----
-
-## Step 0: Run Migrations
-
-**This step is mandatory. You must complete it before proceeding.**
-
-Invoke the `/migrate` skill and assess its output.
-
-#### If files were updated
-
-**STOP.** Wait for the user to review the changes (e.g., via `git diff`) and confirm before proceeding.
-
-#### If no updates needed
-
-→ Proceed to **Step 1**.
+Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
 
 ---
 
 ## Step 1: Gather Feature Context
 
-Load **[gather-feature-context.md](references/gather-feature-context.md)** and follow its instructions.
+Load **[gather-feature-context.md](references/gather-feature-context.md)** and follow its instructions as written.
 
 → Proceed to **Step 2**.
 
 ---
 
-## Step 2: Topic Name and Conflict Check
+## Step 2: Feature Name and Conflict Check
 
-Load **[topic-name-check.md](references/topic-name-check.md)** and follow its instructions.
+Load **[name-check.md](references/name-check.md)** and follow its instructions as written.
 
 → Proceed to **Step 3**.
 
 ---
 
-## Step 3: Research Gating
+## Step 3: Route to First Phase
 
-Load **[research-gating.md](references/research-gating.md)** and follow its instructions.
+Load **[research-gating.md](references/research-gating.md)** and follow its instructions as written.
 
 → Proceed to **Step 4**.
 
 ---
 
-## Step 4: Invoke Processing Skill
+## Step 4: Invoke Entry-Point Skill
 
-Load **[invoke-skill.md](references/invoke-skill.md)** and follow its instructions.
+Invoke the appropriate entry-point skill based on the selected phase:
+
+| Phase | Invoke |
+|-------|--------|
+| research | `/workflow-research-entry feature {work_unit}` |
+| discussion | `/workflow-discussion-entry feature {work_unit}` |
+
+This skill ends. The invoked skill will load into context and provide additional instructions. Terminal.

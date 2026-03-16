@@ -1,0 +1,81 @@
+# Validate Phase
+
+*Reference for **[workflow-implementation-entry](../SKILL.md)***
+
+---
+
+Check if plan exists and is ready.
+
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.js get {work_unit}.planning.{topic} status
+```
+
+Also verify the plan file exists at `.workflows/{work_unit}/planning/{topic}/planning.md`.
+
+#### If plan doesn't exist
+
+> *Output the next fenced block as a code block:*
+
+```
+Plan Missing
+
+No plan found for "{topic:(titlecase)}".
+
+A completed plan is required for implementation.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If plan exists but status is not `completed`
+
+> *Output the next fenced block as a code block:*
+
+```
+Plan Not Completed
+
+The plan for "{topic:(titlecase)}" is not yet completed.
+```
+
+**STOP.** Do not proceed — terminal condition.
+
+#### If plan exists and status is `completed`
+
+Check if implementation phase entry exists:
+
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.js exists {work_unit}.implementation.{topic}
+```
+
+**If exists (`true`):**
+
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.js get {work_unit}.implementation.{topic} status
+```
+
+**If status is `completed`:**
+
+Reset to in-progress:
+
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.js set {work_unit}.implementation.{topic} status in-progress
+```
+
+> *Output the next fenced block as a code block:*
+
+```
+Reopening implementation: {topic:(titlecase)}
+```
+
+→ Return to **[the skill](../SKILL.md)**.
+
+**If status is `in-progress`:**
+
+Proceed normally.
+
+→ Return to **[the skill](../SKILL.md)**.
+
+**If not exists (`false`):**
+
+Proceed normally (new entry).
+
+→ Return to **[the skill](../SKILL.md)**.

@@ -1,18 +1,12 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(.claude/skills/workflow-start/scripts/discovery.sh)
-hooks:
-  PreToolUse:
-    - hooks:
-        - type: command
-          command: "$CLAUDE_PROJECT_DIR/.claude/hooks/workflows/system-check.sh"
-          once: true
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.js), Bash(node .claude/skills/workflow-manifest/scripts/manifest.js)
 ---
 
-Unified workflow entry point. Discovers state, determines work type, and routes appropriately.
+Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
 
-> **ZERO OUTPUT RULE**: Do not narrate your processing. Produce no output until a step or reference file explicitly specifies display content. No "proceeding with...", no discovery summaries, no routing decisions, no transition text. Your first output must be content explicitly called for by the instructions.
+> **⚠️ ZERO OUTPUT RULE**: Do not narrate your processing. Produce no output until a step or reference file explicitly specifies display content. No "proceeding with...", no discovery summaries, no routing decisions, no transition text. Your first output must be content explicitly called for by the instructions.
 
 ## Instructions
 
@@ -26,42 +20,62 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 ---
 
-## Step 0: Run Migrations
+> *Output the next fenced block as a code block:*
 
-**This step is mandatory. You must complete it before proceeding.**
+```
+──────────────────────────────────────────────────────────────────────
+    ___   _____________   __________________
+   /   | / ____/ ____/ | / /_  __/  _/ ____/
+  / /| |/ / __/ __/ /  |/ / / /  / // /
+ / ___ / /_/ / /___/ /|  / / / _/ // /___
+/_/  |_\____/_____/_/ |_/ /_/ /___/\____/
+ _       ______  ____  __ __ ________    ____ _       _______
+| |     / / __ \/ __ \/ //_// ____/ /   / __ \ |     / / ___/
+| | /| / / / / / /_/ / ,<  / /_  / /   / / / / | /| / /\__ \
+| |/ |/ / /_/ / _, _/ /| |/ __/ / /___/ /_/ /| |/ |/ /___/ /
+|__/|__/\____/_/ |_/_/ |_/_/   /_____/\____/ |__/|__//____/
 
-Invoke the `/migrate` skill and assess its output.
+──────────────────────────────────────────────────────────────────────
+Agentic engineering workflows — from idea to implementation.
+──────────────────────────────────────────────────────────────────────
+```
 
-#### If files were updated
+---
 
-**STOP.** Wait for the user to review the changes (e.g., via `git diff`) and confirm before proceeding.
+## Step 0: Initialisation
 
-#### If no updates needed
+Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
 
-→ Proceed to **Step 1**.
+**Run migrations — this is mandatory. You must complete it before proceeding.**
+
+Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
 
 ---
 
 ## Step 1: Run Discovery
 
-!`.claude/skills/workflow-start/scripts/discovery.sh`
+!`node .claude/skills/workflow-start/scripts/discovery.js`
 
-If the above shows a script invocation rather than YAML output, the dynamic content preprocessor did not run. Execute the script before continuing:
+If the above shows a script invocation rather than discovery output, the dynamic content preprocessor did not run. Execute the script before continuing:
 
 ```bash
-.claude/skills/workflow-start/scripts/discovery.sh
+node .claude/skills/workflow-start/scripts/discovery.js
 ```
 
 Parse the output to understand the current workflow state:
 
-**From `greenfield` section:**
-- Research files, discussions (name, status, work_type), specifications (name, status, work_type, type), plans, implementations
+**From `epics` section:**
+- `work_units` — name, active_phases (list of phase names with artifacts)
 
 **From `features` section:**
-- Topics with `work_type: feature` at any phase
+- `work_units` — name, next_phase, phase_label
 
 **From `bugfixes` section:**
-- Topics with `work_type: bugfix` at any phase (includes investigations)
+- `work_units` — name, next_phase, phase_label
+
+**From `completed`/`cancelled` arrays:**
+- Non-active work units with name, work_type, status, last_phase
+- `completed_count`, `cancelled_count`
 
 **From `state` section:**
 - Counts for each work type, `has_any_work` flag
@@ -70,28 +84,18 @@ Parse the output to understand the current workflow state:
 
 ---
 
-## Step 2: Work Type Selection
+## Step 2: Check State
 
-Load **[work-type-selection.md](references/work-type-selection.md)** and follow its instructions.
+#### If `state.has_any_work` is false
 
-The reference will present the current state and ask the user which work type they want to work on.
+Load **[empty-state.md](references/empty-state.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3** with the selected work type.
+#### Otherwise
+
+→ Proceed to **Step 3**.
 
 ---
 
-## Step 3: Route to Work Type
+## Step 3: Display and Route
 
-Based on the selected work type, load the appropriate routing reference:
-
-#### If work type is "greenfield"
-
-Load **[greenfield-routing.md](references/greenfield-routing.md)** and follow its instructions.
-
-#### If work type is "feature"
-
-Load **[feature-routing.md](references/feature-routing.md)** and follow its instructions.
-
-#### If work type is "bugfix"
-
-Load **[bugfix-routing.md](references/bugfix-routing.md)** and follow its instructions.
+Load **[active-work.md](references/active-work.md)** and follow its instructions as written.
