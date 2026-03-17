@@ -3,7 +3,7 @@ topic: tui-session-picker
 status: concluded
 format: tick
 work_type: feature
-ext_id: tick-dd35bb
+external_id: tick-dd35bb
 specification: ../specification/tui-session-picker/specification.md
 spec_commit: ed0a774efcfa406e84785f233fcc45d27d516848
 created: 2026-02-28
@@ -23,7 +23,7 @@ planning:
 ### Phase 1: Sessions Page with bubbles/list
 status: approved
 approved_at: 2026-02-28
-ext_id: tick-f20382
+external_id: tick-f20382
 
 **Goal**: Replace the hand-rolled session list with a `bubbles/list`-based Sessions page, establishing the page architecture, modal overlay system, custom item delegate pattern, and all session-level actions (attach, kill, rename, filter, n-key). This phase also sets up the page-switching skeleton so Phase 2 can plug in the Projects page.
 
@@ -46,8 +46,8 @@ ext_id: tick-f20382
 - [ ] Old `viewState` enum, hand-rolled session rendering, and manual cursor/filter logic are removed from the model
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-1-1 | Session List Item and Custom ItemDelegate | singular window pluralization, long session names, attached vs detached display | authored | tick-5d021f |
 | tui-session-picker-1-2 | Sessions Page with bubbles/list Core | empty session list shows list empty state, SessionsMsg error triggers quit, inside-tmux with only current session | authored | tick-c64e34 |
 | tui-session-picker-1-3 | Modal Overlay System and Kill Confirmation | kill last remaining session shows empty state, kill error triggers refresh | authored | tick-b29c05 |
@@ -61,7 +61,7 @@ ext_id: tick-f20382
 ### Phase 2: Projects Page with bubbles/list
 status: approved
 approved_at: 2026-02-28
-ext_id: tick-364f1a
+external_id: tick-364f1a
 
 **Goal**: Replace `ProjectPickerModel` with a `bubbles/list`-based Projects page including all project actions (new session on enter, edit, delete), custom item delegate, file browser integration, and complete two-way page navigation. Delete the old `ProjectPickerModel` and its tests.
 
@@ -82,8 +82,8 @@ ext_id: tick-364f1a
 - [ ] Independent filter state per page (switching pages does not carry filter text)
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-2-1 | Project List Item and Custom ItemDelegate | long project paths, projects with identical names | authored | tick-df51d2 |
 | tui-session-picker-2-2 | Projects Page with bubbles/list Core | empty project list shows built-in empty message, project load error, session creation error | authored | tick-9184b3 |
 | tui-session-picker-2-3 | Delete Confirmation Modal for Projects | delete last remaining project shows empty state, delete while filter active | authored | tick-5509f1 |
@@ -95,7 +95,7 @@ ext_id: tick-364f1a
 ### Phase 3: Command-Pending Mode and Launch Defaults
 status: approved
 approved_at: 2026-02-28
-ext_id: tick-68f174
+external_id: tick-68f174
 
 **Goal**: Implement command-pending mode (TUI locked to Projects page with restricted keybindings and pending command display) and default page selection logic on launch. Wire up the `cmd/open.go` integration points.
 
@@ -116,8 +116,8 @@ ext_id: tick-68f174
 - [ ] `cmd/open.go` wiring updated to pass command and filter to the new model API
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-3-1 | Default Page Selection on Launch | both pages empty defaults to Projects, sessions exist but all filtered by inside-tmux | authored | tick-2f0ec0 |
 | tui-session-picker-3-2 | Command-Pending Mode Core | pressing s/x does nothing, page-switch keys absent from help bar | authored | tick-310db8 |
 | tui-session-picker-3-3 | Command-Pending Status Line and Help Bar | long command text, multi-word commands | authored | tick-f8d97a |
@@ -129,13 +129,13 @@ ext_id: tick-68f174
 
 ### Phase 4: Analysis (Cycle 1)
 status: approved
-ext_id: tick-dfe7e0
+external_id: tick-dfe7e0
 
 **Goal**: Address findings from Analysis (Cycle 1).
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-4-1 | Replace ANSI-unaware placeOverlay with lipgloss.Place | none | authored | tick-d2056e |
 | tui-session-picker-4-2 | Unify duplicated modal dispatch into single method | none | authored | tick-6fac0d |
 | tui-session-picker-4-3 | Extract shared view-list-with-modal rendering helper | none | authored | tick-f56bab |
@@ -144,24 +144,24 @@ ext_id: tick-dfe7e0
 
 ### Phase 5: Analysis (Cycle 2)
 status: approved
-ext_id: tick-78afbe
+external_id: tick-78afbe
 
 **Goal**: Address findings from Analysis (Cycle 2).
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-5-1 | Guard evaluateDefaultPage against command-pending page selection | none | authored | tick-a87527 |
 | tui-session-picker-5-2 | Add [q] quit binding to all help bars | none | authored | tick-1c66e9 |
 
 ### Phase 6: Analysis (Cycle 3)
 status: approved
-ext_id: tick-199756
+external_id: tick-199756
 
 **Goal**: Address findings from Analysis (Cycle 3).
 
 #### Tasks
-| ID | Name | Edge Cases | Status | Ext ID |
-|----|------|------------|--------|--------|
+| Internal ID | Name | Edge Cases | Status | External ID |
+|-------------|------|------------|--------|--------|
 | tui-session-picker-6-1 | Extract rune-key matching helper | none | authored | tick-d6ffad |
 | tui-session-picker-6-2 | Wire edit-project dependencies in production | none | authored | tick-a6dd98 |
