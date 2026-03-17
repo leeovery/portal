@@ -1,8 +1,8 @@
 {
   "leeovery/claude-technical-workflows": {
     "ref": null,
-    "commit": "ce03d7689cca1d11721e2029d783c3928b964d4c",
-    "installedAt": "2026-03-16T20:21:24.469Z",
+    "commit": "23cbafbde64f8633751d1e287b991f69cf6e41a5",
+    "installedAt": "2026-03-17T09:17:47.619Z",
     "agents": [
       "claude"
     ],
@@ -159,6 +159,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/025-unify-manifest-items.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/026-rename-review-artifacts.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/027-rename-external-deps-task-id.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/028-remove-phase-level-status.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
