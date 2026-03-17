@@ -12,11 +12,10 @@ Portal should self-bootstrap the tmux server when it detects none is running, re
 
 ## Questions
 
-- [ ] Where should EnsureServer live — tmux.Client method or standalone function?
-- [ ] Where in the call chain should it be invoked — PersistentPreRunE, openTUI, or elsewhere?
-- [ ] Should non-TUI commands (list, attach, kill) also trigger server bootstrap?
-- [ ] How should the TUI handle the bootstrap wait — block before TUI, or show a loading state?
-- [ ] How to handle _boot session cleanup — timing and responsibility?
-- [ ] Should the resurrect file path be configurable or hardcoded?
+- [ ] What's the right bootstrap flow — and does the proposed sequence from the idea hold up?
+- [ ] Which Portal commands should trigger bootstrap vs skip it?
+- [ ] What should the user experience be during the wait for session restore?
+- [ ] How should we handle the _boot session lifecycle?
+- [ ] What happens when things go wrong — timeouts, no resurrect data, partial restores?
 
 ---
