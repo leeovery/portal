@@ -13,7 +13,7 @@ Portal should self-bootstrap the tmux server when it detects none is running, re
 ## Questions
 
 - [x] What's the right bootstrap flow — and does the proposed sequence from the idea hold up?
-- [ ] Which Portal commands should trigger bootstrap vs skip it?
+- [x] Which Portal commands should trigger bootstrap vs skip it?
 - [x] What should the user experience be during the wait for session restore?
 - [x] How should we handle the _boot session lifecycle?
 - [x] What happens when things go wrong — timeouts, no resurrect data, partial restores?
@@ -105,8 +105,36 @@ All four scenarios converge to a sensible state. If the user later creates a ses
 
 ---
 
+## Q5: Which Commands Trigger Bootstrap
+
+### Context
+
+All Portal commands interact with tmux — listing sessions, attaching, creating, killing. Question was whether only the TUI should bootstrap, or all commands.
+
+### Options Explored
+
+**A) All commands bootstrap, CLI commands block briefly.** Consistent behavior. `x list` after reboot pauses, then shows restored sessions.
+
+**B) All commands bootstrap, CLI commands don't wait.** Start server but no pause. `x list` might return empty immediately after reboot.
+
+**C) Only TUI bootstraps.** CLI commands work with whatever's there. Simpler but potentially surprising if someone runs `x list` first.
+
+### Journey
+
+Initially considered whether CLI subcommands would realistically be the first thing run after a reboot. But the priority is correctness over simplicity — if a command needs tmux, it should ensure tmux is ready.
+
+Explored whether a CLI command could show feedback during the wait. Answer: yes — print a status message to stderr ("Starting tmux server..."), block briefly, then output the normal result to stdout. Piping still works cleanly since the status message is on stderr.
+
+### Decision
+
+**Option A — all commands trigger bootstrap with context-appropriate feedback.** Shared bootstrap function called early by every command. TUI path shows the loading interstitial. CLI path prints an inline status message to stderr and blocks briefly.
+
+**Why:** Correctness first. Every command that needs tmux should ensure it's there. The presentation differs by context but the logic is the same.
+
+---
+
 ## Open Questions
 
-- [ ] Which Portal commands should trigger bootstrap vs skip it?
+None — all five original questions answered.
 
 ---
