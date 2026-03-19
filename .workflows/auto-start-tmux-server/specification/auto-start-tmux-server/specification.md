@@ -59,6 +59,8 @@ Not user-configurable. Both values should be defined as named constants in the c
 
 **Applies to both TUI and CLI paths** — same timing logic, different presentation.
 
+**Detection method:** Poll `tmux list-sessions` to check for session presence. Poll interval: 500ms. This applies to the CLI path directly; the TUI path uses its existing refresh cycle (which already polls session state) rather than a separate poll loop.
+
 ### Error Handling & Edge Cases
 
 Bootstrap is a one-shot attempt. Try once, wait briefly, proceed regardless. No retry loop.

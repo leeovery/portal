@@ -35,10 +35,10 @@ The spec says bootstrap is a "shared function called early by every Portal comma
 **Details**:
 The spec says "transition out of the loading state as soon as sessions are detected" with min/max bounds. But it never specifies how sessions are detected during the wait. For the TUI path, it mentions "sessions appear naturally via the TUI's refresh cycle" -- but the TUI refresh cycle is an existing mechanism for listing sessions periodically, not a wait-loop. For the CLI path, there is no refresh cycle at all. The spec needs to define: What command is polled? At what interval? Is it `tmux list-sessions`? Every 250ms? Every second? Without this, an implementer must guess both the detection method and the polling frequency, which directly affect responsiveness and system load.
 
-**Proposed Addition**:
+**Proposed Addition**: Detection method added to Timing section
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added poll method (tmux list-sessions, 500ms) with TUI using existing refresh cycle
 
 ---
 
