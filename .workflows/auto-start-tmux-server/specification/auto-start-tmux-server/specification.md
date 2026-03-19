@@ -25,7 +25,7 @@ This means:
 
 **Detection:** None needed. `tmux start-server` is idempotent — if the server is already running, it's a no-op. Always call it; skip the detection step entirely.
 
-**One-shot:** Bootstrap is a single attempt. No retry loop. If the server starts and then exits (e.g., no sessions created by plugins), Portal proceeds normally. Commands like `tmux new-session` will implicitly start the server again when the user takes action.
+**One-shot:** Server start is a single attempt — no retry if `tmux start-server` fails. The subsequent session wait (see Timing) is a separate concern: it polls for sessions to appear, not for the server start to succeed.
 
 **Caveat:** tmux's server exits by default with no sessions. The assumption is that continuum (if present) hooks in quickly enough to create sessions before this happens. If not, a keepalive session could be added later — but this is deferred unless the problem actually occurs.
 

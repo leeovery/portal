@@ -83,10 +83,10 @@ The spec says bootstrap is "called early by every Portal command." The codebase 
 **Details**:
 The spec repeatedly says bootstrap is "one-shot" and "no retry loop," but the timing section describes waiting up to 6 seconds with session-detection that transitions early. These are two different things: (1) starting the server (one-shot), and (2) waiting for sessions to appear (polling with bounds). The spec conflates them under "bootstrap." An implementer could reasonably read "one-shot, no retry loop" as meaning no waiting at all. The spec should clearly separate "server start" (one-shot, fire-and-forget) from "session wait" (bounded poll) as distinct phases of the bootstrap flow.
 
-**Proposed Addition**:
+**Proposed Addition**: Replaced One-shot line to distinguish server start from session wait
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified that one-shot refers to server start only; session wait is a separate concern
 
 ---
 
