@@ -29,6 +29,14 @@ This means:
 
 **Caveat:** tmux's server exits by default with no sessions. The assumption is that continuum (if present) hooks in quickly enough to create sessions before this happens. If not, a keepalive session could be added later — but this is deferred unless the problem actually occurs.
 
+### User Experience
+
+Two presentation paths share the same bootstrap logic:
+
+**TUI path:** A dedicated loading interstitial — a blank screen with centered "Starting tmux server..." text. Visibly different from the normal TUI so the user knows something is happening. No logo, no progress bar — just a clean loading state. Sessions appear naturally via the TUI's refresh cycle as tmux/plugins do their thing.
+
+**CLI path:** Print a status message to stderr ("Starting tmux server...") and block briefly. Normal command output goes to stdout. Piping works cleanly since the status message is on stderr.
+
 ---
 
 ## Working Notes
