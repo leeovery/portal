@@ -14,6 +14,15 @@
 - [ ] When the server is not running, `tmux start-server` is called once and the function returns regardless of outcome
 - [ ] All new functions use the existing `Commander` interface for testability
 
+### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-1-1 | ServerRunning method | no server → false, server running → true |
+| auto-start-tmux-server-1-2 | StartServer method | start-server fails (error propagated, no retry) |
+| auto-start-tmux-server-1-3 | EnsureServer bootstrap function | server already running skips start-server, start fails still returns serverStarted=true |
+| auto-start-tmux-server-1-4 | PersistentPreRunE integration | skipTmuxCheck bypasses bootstrap, CheckTmuxAvailable failure prevents bootstrap |
+
 ## Phase 2: Session Wait with Timing Bounds
 <!-- status: approved, approved_at: 2026-03-19 -->
 
