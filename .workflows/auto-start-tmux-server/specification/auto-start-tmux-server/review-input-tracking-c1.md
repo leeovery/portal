@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-19
 cycle: 1
 phase: Input Review
@@ -21,5 +21,5 @@ The idea doc explicitly lists "tmux not installed: existing `CheckTmuxAvailable`
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Skipped
+**Notes**: Already handled by existing CheckTmuxAvailable in PersistentPreRunE. Not specific to this feature — bootstrap naturally runs after the availability check. No spec change needed.
