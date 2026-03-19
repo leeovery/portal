@@ -12,10 +12,101 @@ Portal should self-bootstrap the tmux server when it detects none is running, re
 
 ## Questions
 
-- [ ] What's the right bootstrap flow — and does the proposed sequence from the idea hold up?
+- [x] What's the right bootstrap flow — and does the proposed sequence from the idea hold up?
 - [ ] Which Portal commands should trigger bootstrap vs skip it?
-- [ ] What should the user experience be during the wait for session restore?
-- [ ] How should we handle the _boot session lifecycle?
-- [ ] What happens when things go wrong — timeouts, no resurrect data, partial restores?
+- [x] What should the user experience be during the wait for session restore?
+- [x] How should we handle the _boot session lifecycle?
+- [x] What happens when things go wrong — timeouts, no resurrect data, partial restores?
+
+---
+
+## Q1: Bootstrap Flow
+
+### Context
+
+The original idea proposed: detect no server → check resurrect data → start `_boot` session → poll for restore → kill `_boot` → proceed. This had a conditional branch based on whether resurrect data existed.
+
+### Options Explored
+
+**Option A (original proposal):** Check resurrect data at `~/.local/share/tmux/resurrect/last` first, conditionally wait. Two code paths.
+
+**Option B:** Always start server, always poll briefly, proceed regardless. One code path. The poll timeout handles both "sessions restored" and "nothing to restore" naturally.
+
+**Option C (chosen):** Start server via `tmux start-server`, show a loading interstitial in the TUI, let sessions appear naturally via the TUI's refresh cycle. No polling loop.
+
+### Journey
+
+Started with the idea's proposed flow but questioned why Portal should check for resurrect data at all. Key realisation: **Portal should be completely agnostic about tmux plugins.** Whether the user has resurrect/continuum, some other plugin, or nothing — that's tmux's business. Portal's only job is to ensure a server is running.
+
+Searched the codebase and confirmed zero references to resurrect/continuum in Portal source code — it's already decoupled. All references are in idea docs and old workflow discussions.
+
+This reframing eliminated the resurrect data check entirely and simplified the design.
+
+### Decision
+
+**Option C — immediate entry with loading interstitial.** Portal starts the server and drops into the TUI immediately with a loading screen. Sessions appear as tmux/plugins do their thing. No blocking poll, no knowledge of resurrect.
+
+**Why:** Keeps `x` responsive. Portal stays plugin-agnostic. User gets visual feedback that something is happening.
+
+---
+
+## Q2: No `_boot` Session Needed
+
+### Context
+
+The original idea required creating a throwaway `_boot` session (`tmux new-session -d -s _boot`) because the assumption was tmux needed at least one session to keep the server alive.
+
+### Journey
+
+Questioned whether a throwaway session was truly necessary. Checked `man tmux` and discovered `tmux start-server` (alias `start`) — explicitly starts the server **without creating any sessions**.
+
+### Decision
+
+Use `tmux start-server` instead of creating a `_boot` session. No throwaway session to create, name, hide, or clean up.
+
+**Caveat noted:** tmux docs say the server exits by default with no sessions. Assumption is that continuum hooks into the process quickly enough to create sessions before this happens. If not, a keepalive session could be added later — but treating that as an edge case to handle if it actually occurs, not upfront.
+
+---
+
+## Q3: User Experience — Loading Interstitial
+
+### Options Explored
+
+1. Normal empty state (Projects page) with a subtle "tmux server starting..." banner that auto-dismisses
+2. A dedicated interstitial/overlay — "Starting tmux..." — that dissolves into the normal view
+3. Small status indicator in the corner/footer
+
+### Decision
+
+**Option 2 — dedicated loading interstitial.** A visibly different screen so the user clearly sees something is happening. Preferred over a subtle banner that could be missed. Simple centered screen with Portal name/logo and "Starting tmux..." message, dissolves into normal TUI once sessions appear (or after timeout).
+
+---
+
+## Q4: Error Handling and Edge Cases
+
+### Context
+
+What happens when there are no sessions to restore? The server starts, nothing appears, tmux may shut down. Risk of a loop: start server → no sessions → server exits → Portal detects no server → starts again.
+
+### Decision
+
+**Bootstrap is a one-shot attempt.** Try once, wait briefly, proceed regardless. No retry loop.
+
+| Situation | What happens |
+|---|---|
+| Has continuum + saved sessions | Server starts, sessions restore, TUI shows them |
+| Has continuum + no saved data | Server starts, nothing restores, server may exit, TUI shows empty state |
+| No continuum at all | Server starts, nothing happens, server may exit, TUI shows empty state |
+| tmux already running | No bootstrap needed, fast path |
+
+All four scenarios converge to a sensible state. If the user later creates a session through Portal, `tmux new-session` starts the server implicitly — no Portal intervention needed.
+
+**Why no loop:** Portal doesn't need the server running to show its UI. It only needs tmux when the user takes an action (create/attach session), and those commands handle server lifecycle natively.
+
+---
+
+## Open Questions
+
+- [ ] Which Portal commands should trigger bootstrap vs skip it?
 
 ---
