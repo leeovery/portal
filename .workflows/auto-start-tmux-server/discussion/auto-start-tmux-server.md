@@ -133,8 +133,39 @@ Explored whether a CLI command could show feedback during the wait. Answer: yes 
 
 ---
 
+## Q6: Timing — Interstitial Duration
+
+### Context
+
+How long should the loading interstitial / CLI wait last? Need to balance responsiveness with avoiding a jarring flash if sessions appear almost instantly.
+
+### Decision
+
+**Session-detection with min/max bounds.** Transition out of the interstitial as soon as sessions are detected, but enforce:
+
+- **Minimum 2 seconds** — prevents a flash of the interstitial if sessions appear very quickly
+- **Maximum 5-6 seconds** — proceed regardless after this, even if no sessions have appeared
+
+Not configurable. These are sensible defaults that cover the common case without adding user-facing complexity.
+
+**Applies to both TUI and CLI paths** — same timing logic, different presentation.
+
+---
+
+## Q7: LaunchAgent Removal
+
+### Context
+
+The existing `com.leeovery.tmux-boot` LaunchAgent is a separate workaround (not part of Portal codebase — lives in dotfiles). This feature replaces it entirely, making Portal self-contained.
+
+### Decision
+
+Removing the LaunchAgent dependency is **in scope** for this feature — the discussion and spec should acknowledge that this feature eliminates the need for it. The actual LaunchAgent file removal from the system/dotfiles is a separate manual cleanup, not a Portal code change.
+
+---
+
 ## Open Questions
 
-None — all five original questions answered.
+None — all questions answered.
 
 ---
