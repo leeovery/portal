@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-19
 cycle: 1
 phase: Gap Analysis
@@ -99,7 +99,7 @@ The spec repeatedly says bootstrap is "one-shot" and "no retry loop," but the ti
 **Details**:
 For the CLI path, the spec says: print stderr message, block briefly, then proceed. Consider `x list` after reboot: bootstrap starts server, waits 2-6s for sessions, then... does the list command re-query sessions? The spec describes the wait period but not the handoff. If bootstrap waits and detects sessions, does it pass them to the command? Or does the command just re-run `list-sessions` after the wait completes? This matters for implementation -- the bootstrap function's return type and the command's awareness of the wait both depend on this.
 
-**Proposed Addition**:
+**Proposed Addition**: CLI handoff clarification added to User Experience section
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Bootstrap returns control; command queries tmux normally after wait

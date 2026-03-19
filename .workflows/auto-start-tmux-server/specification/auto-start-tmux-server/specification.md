@@ -48,6 +48,8 @@ Two presentation paths share the same bootstrap logic:
 
 **CLI path:** Print a status message to stderr ("Starting tmux server...") and block briefly. Normal command output goes to stdout. Piping works cleanly since the status message is on stderr.
 
+After the wait completes, bootstrap returns control to the command. The command then executes normally — it queries tmux for sessions as it always does. Bootstrap doesn't pass session data through; it just ensures the server has had time to start and plugins have had time to restore sessions.
+
 ### Timing
 
 **Session-detection with min/max bounds.** Transition out of the loading state as soon as sessions are detected, but enforce:
