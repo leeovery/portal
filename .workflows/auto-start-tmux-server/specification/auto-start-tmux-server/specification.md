@@ -17,6 +17,18 @@ This means:
 - No conditional logic based on plugin presence
 - No awareness of how sessions get restored — they just appear (or don't)
 
+### Bootstrap Mechanism
+
+**Command:** `tmux start-server` — starts the tmux server without creating any sessions. No throwaway `_boot` session needed.
+
+**Trigger:** A shared bootstrap function called early by every Portal command. If tmux is already running, this is a no-op (fast path).
+
+**Detection:** `tmux list-sessions` failing (or equivalent check) indicates no server is running.
+
+**One-shot:** Bootstrap is a single attempt. No retry loop. If the server starts and then exits (e.g., no sessions created by plugins), Portal proceeds normally. Commands like `tmux new-session` will implicitly start the server again when the user takes action.
+
+**Caveat:** tmux's server exits by default with no sessions. The assumption is that continuum (if present) hooks in quickly enough to create sessions before this happens. If not, a keepalive session could be added later — but this is deferred unless the problem actually occurs.
+
 ---
 
 ## Working Notes
