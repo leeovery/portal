@@ -27,6 +27,21 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "auto-start-tmux-server": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "3133a216cdf07f4583e39290e4523fd711f2ceac",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "phase": 1,
+          "task": "/Users/leeovery"
+        }
+      },
+      "format": "tick"
     }
   }
 }
