@@ -51,10 +51,10 @@ The spec says "transition out of the loading state as soon as sessions are detec
 **Details**:
 The spec says: "Detection: `tmux list-sessions` failing (or equivalent check) indicates no server is running." Two issues: (1) "or equivalent check" leaves the actual mechanism undefined, and (2) `tmux list-sessions` fails both when no server exists AND when the server has no sessions -- these are different states requiring different responses. Since `tmux start-server` is idempotent (no-op if server already running), the spec could simplify by always calling `start-server` as the detection+action in one step, bypassing the ambiguity entirely. An implementer needs to know the exact detection approach.
 
-**Proposed Addition**:
+**Proposed Addition**: Replaced Detection line with idempotent start-server approach
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Simplified — always call start-server, no detection needed
 
 ---
 

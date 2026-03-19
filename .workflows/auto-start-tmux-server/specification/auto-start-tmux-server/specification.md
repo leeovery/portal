@@ -23,7 +23,7 @@ This means:
 
 **Trigger:** A shared bootstrap function called early by every Portal command. If tmux is already running, this is a no-op (fast path).
 
-**Detection:** `tmux list-sessions` failing (or equivalent check) indicates no server is running.
+**Detection:** None needed. `tmux start-server` is idempotent — if the server is already running, it's a no-op. Always call it; skip the detection step entirely.
 
 **One-shot:** Bootstrap is a single attempt. No retry loop. If the server starts and then exits (e.g., no sessions created by plugins), Portal proceeds normally. Commands like `tmux new-session` will implicitly start the server again when the user takes action.
 
