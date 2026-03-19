@@ -17,12 +17,12 @@
         "auto-start-tmux-server": {
           "status": "in-progress",
           "type": "feature",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "finding_gate_mode": "gated",
           "date": "2026-03-19",
           "sources": {
             "auto-start-tmux-server": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }
