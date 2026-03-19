@@ -15,6 +15,7 @@
 - [ ] All new functions use the existing `Commander` interface for testability
 
 ### Tasks
+<!-- status: approved, approved_at: 2026-03-19 -->
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
