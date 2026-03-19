@@ -33,7 +33,7 @@
         "auto-start-tmux-server": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "3133a216cdf07f4583e39290e4523fd711f2ceac",
+          "spec_commit": "fc0d76218f83ab61e6752aed352732eec52115fe",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
