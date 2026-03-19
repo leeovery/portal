@@ -1,8 +1,8 @@
 {
   "leeovery/claude-technical-workflows": {
     "ref": null,
-    "commit": "6666d147abbf888949f843d0903a7310212154ad",
-    "installedAt": "2026-03-17T13:01:18.801Z",
+    "commit": "01c3e1b317e4d5dc8b64e1d190ac68cc426a57ed",
+    "installedAt": "2026-03-19T21:19:51.209Z",
     "agents": [
       "claude"
     ],
@@ -123,6 +123,10 @@
       ".claude/skills/workflow-investigation-process/references/initialize-investigation.md",
       ".claude/skills/workflow-investigation-process/references/symptom-gathering.md",
       ".claude/skills/workflow-investigation-process/references/template.md",
+      ".claude/skills/workflow-log-bug/",
+      ".claude/skills/workflow-log-bug/SKILL.md",
+      ".claude/skills/workflow-log-idea/",
+      ".claude/skills/workflow-log-idea/SKILL.md",
       ".claude/skills/workflow-manifest/",
       ".claude/skills/workflow-manifest/SKILL.md",
       ".claude/skills/workflow-manifest/scripts/",
@@ -160,6 +164,7 @@
       ".claude/skills/workflow-migrate/scripts/migrations/026-rename-review-artifacts.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/027-rename-external-deps-task-id.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/028-remove-phase-level-status.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/029-backfill-task-map.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -205,7 +210,6 @@
       ".claude/skills/workflow-planning-process/references/phase-design/feature.md",
       ".claude/skills/workflow-planning-process/references/phase-design.md",
       ".claude/skills/workflow-planning-process/references/plan-construction.md",
-      ".claude/skills/workflow-planning-process/references/plan-index-schema.md",
       ".claude/skills/workflow-planning-process/references/plan-review.md",
       ".claude/skills/workflow-planning-process/references/planning-principles.md",
       ".claude/skills/workflow-planning-process/references/process-review-findings.md",
@@ -317,6 +321,7 @@
       ".claude/skills/workflow-start/references/active-work.md",
       ".claude/skills/workflow-start/references/empty-state.md",
       ".claude/skills/workflow-start/references/manage-work-unit.md",
+      ".claude/skills/workflow-start/references/start-from-inbox.md",
       ".claude/skills/workflow-start/references/view-completed.md",
       ".claude/skills/workflow-start/references/view-plan.md",
       ".claude/skills/workflow-start/scripts/",
