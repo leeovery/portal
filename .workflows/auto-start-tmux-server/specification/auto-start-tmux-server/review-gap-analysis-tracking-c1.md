@@ -19,10 +19,10 @@ topic: auto-start-tmux-server
 **Details**:
 The spec says bootstrap is a "shared function called early by every Portal command" (suggesting PersistentPreRunE), and separately describes a TUI loading interstitial ("blank screen with centered text"). These are architecturally incompatible without clarification. PersistentPreRunE runs before the Bubble Tea program starts -- there's no screen to render an interstitial on. Either: (a) bootstrap runs in PersistentPreRunE and the interstitial is the first state of the TUI model, or (b) bootstrap logic lives inside the TUI model's Init/Update. The spec needs to clarify whether the "shared function" handles server start only (with the TUI owning its own loading state), or whether it encompasses the full wait-with-feedback flow. This directly determines the implementation architecture.
 
-**Proposed Addition**:
+**Proposed Addition**: Two-phase ownership section added to Bootstrap Mechanism
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added as "Two-phase ownership" subsection under Bootstrap Mechanism
 
 ---
 

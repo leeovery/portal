@@ -29,6 +29,17 @@ This means:
 
 **Caveat:** tmux's server exits by default with no sessions. The assumption is that continuum (if present) hooks in quickly enough to create sessions before this happens. If not, a keepalive session could be added later — but this is deferred unless the problem actually occurs.
 
+**Two-phase ownership:**
+
+Bootstrap has two phases with different ownership:
+
+1. **Server start** — runs in `PersistentPreRunE` (shared by all commands). Calls `tmux start-server`. Returns immediately.
+2. **Session wait** — ownership depends on context:
+   - **TUI path**: The Bubble Tea model owns the wait. The interstitial is the model's initial state. The TUI's existing refresh cycle detects sessions; after min/max bounds are satisfied, transition to the normal view.
+   - **CLI path**: The command owns the wait. Print stderr message, poll for sessions with the same timing bounds, then proceed to normal output.
+
+This cleanly separates "ensure server exists" (shared, fast) from "wait for sessions" (context-specific presentation).
+
 ### User Experience
 
 Two presentation paths share the same bootstrap logic:
