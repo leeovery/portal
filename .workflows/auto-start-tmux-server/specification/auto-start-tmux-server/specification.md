@@ -48,6 +48,21 @@ Not user-configurable. Both values should be defined as named constants in the c
 
 **Applies to both TUI and CLI paths** — same timing logic, different presentation.
 
+### Error Handling & Edge Cases
+
+Bootstrap is a one-shot attempt. Try once, wait briefly, proceed regardless. No retry loop.
+
+| Situation | What happens |
+|---|---|
+| Has continuum + saved sessions | Server starts, sessions restore, TUI shows them |
+| Has continuum + no saved data | Server starts, nothing restores, server may exit, TUI shows empty state |
+| No continuum at all | Server starts, nothing happens, server may exit, TUI shows empty state |
+| tmux already running | No bootstrap needed, fast path |
+
+All four scenarios converge to a sensible state. If the user later creates a session through Portal, `tmux new-session` starts the server implicitly — no Portal intervention needed.
+
+Portal doesn't need the server running to show its UI. It only needs tmux when the user takes an action (create/attach session), and those commands handle server lifecycle natively.
+
 ---
 
 ## Working Notes
