@@ -76,9 +76,17 @@ Use `tmux start-server` instead of creating a `_boot` session. No throwaway sess
 2. A dedicated interstitial/overlay — "Starting tmux..." — that dissolves into the normal view
 3. Small status indicator in the corner/footer
 
+### Journey
+
+Explored a Spectrum-inspired design direction with rainbow block characters, Manic Miner-style status bars, and animated progress indicators. Captured separately in `ideas/spectrum-design.md` as a broader TUI redesign exploration — out of scope for this feature.
+
+For this feature, keeping the interstitial simple: no branding overhaul, just a clear loading state.
+
 ### Decision
 
-**Option 2 — dedicated loading interstitial.** A visibly different screen so the user clearly sees something is happening. Preferred over a subtle banner that could be missed. Simple centered screen with Portal name/logo and "Starting tmux..." message, dissolves into normal TUI once sessions appear (or after timeout).
+**Option 2 — dedicated loading interstitial, kept simple.** A blank screen with centered "Starting tmux server..." text. Visibly different from the normal TUI so the user sees something is happening. No logo, no progress bar — just a clean loading state.
+
+A broader Spectrum-themed redesign may be pursued separately (see `ideas/spectrum-design.md`).
 
 ---
 
