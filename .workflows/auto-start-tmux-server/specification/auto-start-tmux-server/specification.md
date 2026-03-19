@@ -37,6 +37,17 @@ Two presentation paths share the same bootstrap logic:
 
 **CLI path:** Print a status message to stderr ("Starting tmux server...") and block briefly. Normal command output goes to stdout. Piping works cleanly since the status message is on stderr.
 
+### Timing
+
+**Session-detection with min/max bounds.** Transition out of the loading state as soon as sessions are detected, but enforce:
+
+- **Minimum 2 seconds** — prevents a jarring flash if sessions appear very quickly
+- **Maximum 6 seconds** — proceed regardless after this, even if no sessions have appeared
+
+Not user-configurable. Both values should be defined as named constants in the code for easy adjustment.
+
+**Applies to both TUI and CLI paths** — same timing logic, different presentation.
+
 ---
 
 ## Working Notes
