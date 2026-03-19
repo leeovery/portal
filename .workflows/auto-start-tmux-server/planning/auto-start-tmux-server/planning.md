@@ -1,6 +1,7 @@
 # Plan: Auto Start Tmux Server
 
 ## Phase 1: Bootstrap Core — Server Detection and Start
+<!-- status: approved, approved_at: 2026-03-19 -->
 
 **Goal**: Add the shared bootstrap function that detects whether a tmux server is running and starts one if not, integrated into `PersistentPreRunE` so all tmux-requiring commands trigger it.
 
@@ -14,6 +15,7 @@
 - [ ] All new functions use the existing `Commander` interface for testability
 
 ## Phase 2: Session Wait with Timing Bounds
+<!-- status: approved, approved_at: 2026-03-19 -->
 
 **Goal**: Implement the session-detection polling logic with min/max timing bounds and integrate it into CLI commands that need to wait for sessions after bootstrap.
 
@@ -26,6 +28,7 @@
 - [ ] Normal command output still goes to stdout; piping works cleanly
 
 ## Phase 3: TUI Loading Interstitial
+<!-- status: approved, approved_at: 2026-03-19 -->
 
 **Goal**: Add a dedicated loading view to the Bubble Tea TUI that displays "Starting tmux server..." when bootstrap started the server, transitioning to the normal view once sessions are detected or timing bounds are met.
 
