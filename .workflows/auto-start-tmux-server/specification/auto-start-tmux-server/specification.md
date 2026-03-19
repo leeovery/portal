@@ -63,6 +63,12 @@ All four scenarios converge to a sensible state. If the user later creates a ses
 
 Portal doesn't need the server running to show its UI. It only needs tmux when the user takes an action (create/attach session), and those commands handle server lifecycle natively.
 
+### LaunchAgent Removal
+
+This feature eliminates the need for the existing `com.leeovery.tmux-boot` LaunchAgent. Portal becomes self-contained for tmux server lifecycle management.
+
+The LaunchAgent file itself lives in dotfiles (not the Portal codebase). Its removal is a separate manual cleanup, not a Portal code change.
+
 ---
 
 ## Working Notes
