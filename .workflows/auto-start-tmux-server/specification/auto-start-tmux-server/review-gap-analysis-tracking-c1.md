@@ -67,10 +67,10 @@ The spec says: "Detection: `tmux list-sessions` failing (or equivalent check) in
 **Details**:
 The spec says bootstrap is "called early by every Portal command." The codebase has a `skipTmuxCheck` set (version, init, help, alias, clean) where commands bypass the tmux availability check in PersistentPreRunE. The spec doesn't address whether these commands also skip bootstrap. Logically they should (they don't need tmux), but since the spec says "every Portal command" without qualification, an implementer would need to decide. Minor in practice since the existing skip pattern is clear, but the spec should be internally consistent.
 
-**Proposed Addition**:
+**Proposed Addition**: Updated Trigger line to qualify "every command that requires tmux"
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified skip-check commands also skip bootstrap
 
 ---
 

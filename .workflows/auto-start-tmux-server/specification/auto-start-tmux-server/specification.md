@@ -21,7 +21,7 @@ This means:
 
 **Command:** `tmux start-server` — starts the tmux server without creating any sessions. No throwaway `_boot` session needed.
 
-**Trigger:** A shared bootstrap function called early by every Portal command. If tmux is already running, this is a no-op (fast path).
+**Trigger:** A shared bootstrap function called early by every Portal command that requires tmux. Commands that skip the existing tmux availability check (`version`, `init`, `help`, `alias`, `clean`) also skip bootstrap.
 
 **Detection:** None needed. `tmux start-server` is idempotent — if the server is already running, it's a no-op. Always call it; skip the detection step entirely.
 
