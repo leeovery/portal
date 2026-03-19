@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-19
 cycle: 2
 phase: Gap Analysis
@@ -34,7 +34,7 @@ This distinction is critical because it determines whether the interstitial is t
 
 The min 2-second bound also needs context: it applies only when the wait phase activates (no sessions yet), not on every launch. This should be explicit.
 
-**Proposed Addition**:
+**Proposed Addition**: Reintroduced server detection, reduced min to 1s, updated error table
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reverted "always call start-server" — bootstrap only runs when server not detected. Min bound reduced from 2s to 1s per user preference. Error table row updated to clarify fast path skips bootstrap entirely.

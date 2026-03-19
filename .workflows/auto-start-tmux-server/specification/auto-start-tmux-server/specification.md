@@ -23,7 +23,7 @@ This means:
 
 **Trigger:** A shared bootstrap function called early by every Portal command that requires tmux. Commands that skip the existing tmux availability check (`version`, `init`, `help`, `alias`, `clean`) also skip bootstrap.
 
-**Detection:** None needed. `tmux start-server` is idempotent — if the server is already running, it's a no-op. Always call it; skip the detection step entirely.
+**Detection:** Check if the tmux server is running (e.g., `tmux list-sessions` or `tmux info` succeeding). If running, skip bootstrap entirely — proceed to normal Portal operation. If not running, enter the bootstrap flow.
 
 **One-shot:** Server start is a single attempt — no retry if `tmux start-server` fails. The subsequent session wait (see Timing) is a separate concern: it polls for sessions to appear, not for the server start to succeed.
 
@@ -54,7 +54,7 @@ After the wait completes, bootstrap returns control to the command. The command 
 
 **Session-detection with min/max bounds.** Transition out of the loading state as soon as sessions are detected, but enforce:
 
-- **Minimum 2 seconds** — prevents a jarring flash if sessions appear very quickly
+- **Minimum 1 second** — prevents a jarring flash if sessions appear very quickly
 - **Maximum 6 seconds** — proceed regardless after this, even if no sessions have appeared
 
 Not user-configurable. Both values should be defined as named constants in the code for easy adjustment.
@@ -72,7 +72,7 @@ Bootstrap is a one-shot attempt. Try once, wait briefly, proceed regardless. No 
 | Has continuum + saved sessions | Server starts, sessions restore, TUI shows them |
 | Has continuum + no saved data | Server starts, nothing restores, server may exit, TUI shows empty state |
 | No continuum at all | Server starts, nothing happens, server may exit, TUI shows empty state |
-| tmux already running | No bootstrap needed, fast path |
+| tmux already running | Server detected, bootstrap skipped entirely — fast path |
 
 All four scenarios converge to a sensible state. If the user later creates a session through Portal, `tmux new-session` starts the server implicitly — no Portal intervention needed.
 
