@@ -2,6 +2,8 @@
 package cmd
 
 import (
+	"context"
+
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -53,8 +55,13 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 		bootstrapper := buildBootstrapDeps()
-		_, err := bootstrapper.EnsureServer()
-		return err
+		serverStarted, err := bootstrapper.EnsureServer()
+		if err != nil {
+			return err
+		}
+		ctx := context.WithValue(cmd.Context(), serverStartedKey, serverStarted)
+		cmd.SetContext(ctx)
+		return nil
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,

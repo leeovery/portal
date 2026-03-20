@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/spf13/cobra"
 )
 
 // resetRootCmd resets the root command's output streams and subcommand flags for testing.
@@ -224,24 +225,65 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		}
 	})
 
-	t.Run("serverStarted bool is discarded", func(t *testing.T) {
+	t.Run("PersistentPreRunE stores serverStarted=true in context", func(t *testing.T) {
 		mock := &mockServerBootstrapper{started: true}
 		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
-		listDeps = &ListDeps{
-			Lister: &mockSessionLister{sessions: []tmux.Session{}},
-			IsTTY:  func() bool { return false },
+		// Create a test command that captures the context value from RunE
+		var gotStarted bool
+		testCmd := &cobra.Command{
+			Use: "testcmd",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				gotStarted = serverWasStarted(cmd)
+				return nil
+			},
 		}
-		t.Cleanup(func() { listDeps = nil })
+		rootCmd.AddCommand(testCmd)
+		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
 
 		resetRootCmd()
-		rootCmd.SetArgs([]string{"list"})
+		rootCmd.SetArgs([]string{"testcmd"})
 		err := rootCmd.Execute()
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// No assertion on started — it should be discarded in Phase 1
+		if !gotStarted {
+			t.Error("expected serverWasStarted=true, got false")
+		}
+	})
+
+	t.Run("PersistentPreRunE stores serverStarted=false in context", func(t *testing.T) {
+		mock := &mockServerBootstrapper{started: false}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		var gotStarted bool
+		var runCalled bool
+		testCmd := &cobra.Command{
+			Use: "testcmd2",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				runCalled = true
+				gotStarted = serverWasStarted(cmd)
+				return nil
+			},
+		}
+		rootCmd.AddCommand(testCmd)
+		t.Cleanup(func() { rootCmd.RemoveCommand(testCmd) })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"testcmd2"})
+		err := rootCmd.Execute()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !runCalled {
+			t.Fatal("RunE was not called")
+		}
+		if gotStarted {
+			t.Error("expected serverWasStarted=false, got true")
+		}
 	})
 }
