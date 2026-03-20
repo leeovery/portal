@@ -49,7 +49,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List running tmux sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		bootstrapWait(cmd, nil)
+		bootstrapWait(cmd)
 
 		shortFlag, _ := cmd.Flags().GetBool("short")
 		longFlag, _ := cmd.Flags().GetBool("long")

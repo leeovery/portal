@@ -90,7 +90,7 @@ var openCmd = &cobra.Command{
 			return openTUIFunc("", command, serverWasStarted(cmd))
 		}
 
-		bootstrapWait(cmd, nil)
+		bootstrapWait(cmd)
 
 		query := destination
 

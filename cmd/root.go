@@ -32,6 +32,7 @@ var bootstrapDeps *BootstrapDeps
 type BootstrapDeps struct {
 	Bootstrapper ServerBootstrapper
 	Client       *tmux.Client
+	Waiter       func()
 }
 
 // buildBootstrapDeps returns the appropriate server bootstrapper and shared client.

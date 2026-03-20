@@ -17,9 +17,13 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(stderr)
 
 		waiterCalled := false
-		waiter := func() { waiterCalled = true }
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper: &mockServerBootstrapper{},
+			Waiter:       func() { waiterCalled = true },
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
-		bootstrapWait(cmd, waiter)
+		bootstrapWait(cmd)
 
 		want := "Starting tmux server...\n"
 		if stderr.String() != want {
@@ -35,9 +39,13 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(new(bytes.Buffer))
 
 		waiterCalled := false
-		waiter := func() { waiterCalled = true }
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper: &mockServerBootstrapper{},
+			Waiter:       func() { waiterCalled = true },
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
-		bootstrapWait(cmd, waiter)
+		bootstrapWait(cmd)
 
 		if !waiterCalled {
 			t.Error("expected waiter to be called")
@@ -52,9 +60,13 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(stderr)
 
 		waiterCalled := false
-		waiter := func() { waiterCalled = true }
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper: &mockServerBootstrapper{},
+			Waiter:       func() { waiterCalled = true },
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
-		bootstrapWait(cmd, waiter)
+		bootstrapWait(cmd)
 
 		if stderr.String() != "" {
 			t.Errorf("stderr = %q, want empty", stderr.String())
@@ -69,9 +81,13 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(new(bytes.Buffer))
 
 		waiterCalled := false
-		waiter := func() { waiterCalled = true }
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper: &mockServerBootstrapper{},
+			Waiter:       func() { waiterCalled = true },
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
-		bootstrapWait(cmd, waiter)
+		bootstrapWait(cmd)
 
 		if waiterCalled {
 			t.Error("expected waiter not to be called")
@@ -85,9 +101,13 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(stderr)
 
 		waiterCalled := false
-		waiter := func() { waiterCalled = true }
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper: &mockServerBootstrapper{},
+			Waiter:       func() { waiterCalled = true },
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
-		bootstrapWait(cmd, waiter)
+		bootstrapWait(cmd)
 
 		if stderr.String() != "" {
 			t.Errorf("stderr = %q, want empty", stderr.String())
