@@ -667,16 +667,6 @@ func TestParseCommandArgs(t *testing.T) {
 	}
 }
 
-// stubSessionLister implements tui.SessionLister for cmd-level testing.
-type stubSessionLister struct {
-	sessions []tmux.Session
-	err      error
-}
-
-func (s *stubSessionLister) ListSessions() ([]tmux.Session, error) {
-	return s.sessions, s.err
-}
-
 // stubProjectStore implements tui.ProjectStore for cmd-level testing.
 type stubProjectStore struct {
 	projects []project.Project
@@ -753,21 +743,10 @@ func (s *stubCommander) Run(args ...string) (string, error) {
 	return "", nil
 }
 
-// mockConnector implements SessionConnector for testing.
-type mockConnector struct {
-	connectedTo string
-	err         error
-}
-
-func (m *mockConnector) Connect(name string) error {
-	m.connectedTo = name
-	return m.err
-}
-
 func TestBuildTUIModel(t *testing.T) {
 	t.Run("no command and no filter creates default model", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -797,7 +776,7 @@ func TestBuildTUIModel(t *testing.T) {
 
 	t.Run("command creates model in command-pending mode", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -828,7 +807,7 @@ func TestBuildTUIModel(t *testing.T) {
 
 	t.Run("filter creates model with initial filter", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -849,7 +828,7 @@ func TestBuildTUIModel(t *testing.T) {
 
 	t.Run("command and filter combines both", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -873,7 +852,7 @@ func TestBuildTUIModel(t *testing.T) {
 
 	t.Run("inside tmux detection passes session name to model", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -899,7 +878,7 @@ func TestBuildTUIModel(t *testing.T) {
 
 	t.Run("cwd wired correctly", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -920,7 +899,7 @@ func TestBuildTUIModel(t *testing.T) {
 			{Path: "/code/portal", Name: "portal"},
 		}
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{projects: projects},
@@ -952,7 +931,7 @@ func TestBuildTUIModel(t *testing.T) {
 func TestBuildTUIModel_ServerStarted(t *testing.T) {
 	t.Run("serverStarted true starts on loading page", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -974,7 +953,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 	t.Run("serverStarted false starts on sessions page", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -996,7 +975,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 	t.Run("default serverStarted starts on sessions page", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -1014,7 +993,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 	t.Run("serverStarted true preserves other options", func(t *testing.T) {
 		cfg := tuiConfig{
-			lister:         &stubSessionLister{},
+			lister:         &mockSessionLister{},
 			killer:         &stubSessionKiller{},
 			renamer:        &stubSessionRenamer{},
 			projectStore:   &stubProjectStore{},
@@ -1042,9 +1021,9 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 
 func TestProcessTUIResult(t *testing.T) {
 	t.Run("clean exit without selection returns nil", func(t *testing.T) {
-		m := tui.New(&stubSessionLister{})
+		m := tui.New(&mockSessionLister{})
 		// m.Selected() is "" by default
-		connector := &mockConnector{}
+		connector := &mockSessionConnector{}
 
 		err := processTUIResult(m, connector)
 
@@ -1067,7 +1046,7 @@ func TestProcessTUIResult(t *testing.T) {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		m = updated.(tui.Model)
 
-		connector := &mockConnector{}
+		connector := &mockSessionConnector{}
 
 		err := processTUIResult(m, connector)
 
