@@ -62,7 +62,9 @@
             "auto-start-tmux-server-4-4": "tick-738e6c",
             "auto-start-tmux-server-5": "tick-c62d1f",
             "auto-start-tmux-server-5-1": "tick-9d5522",
-            "auto-start-tmux-server-5-2": "tick-879f38"
+            "auto-start-tmux-server-5-2": "tick-879f38",
+            "auto-start-tmux-server-6": "tick-603f53",
+            "auto-start-tmux-server-6-1": "tick-56d372"
           },
           "review_cycle": 2
         }

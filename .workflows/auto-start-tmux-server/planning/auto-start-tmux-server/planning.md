@@ -95,3 +95,15 @@
 |-------------|------|------------|
 | auto-start-tmux-server-5-1 | Consolidate duplicate test mock types across cmd test files | mockConnector vs mockSessionConnector dedup, stubSessionLister vs mockSessionLister dedup |
 | auto-start-tmux-server-5-2 | Thread cobra.Command through openTUI to eliminate implicit openCmd coupling | openTUIFunc signature change, test overrides need updated parameter |
+
+## Phase 6: Analysis (Cycle 3)
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+### Tasks
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-6-1 | Extract defaultTestTUIConfig helper in open_test.go | duplication across 11 sites, adding new tuiConfig fields |
