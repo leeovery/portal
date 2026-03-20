@@ -37,8 +37,8 @@
           "task_list_gate_mode": "gated",
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
-          "phase": 2,
-          "task": "auto-start-tmux-server-2-3",
+          "phase": 3,
+          "task": "/Users/leeovery",
           "external_id": "tick-42b5fe",
           "task_map": {
             "auto-start-tmux-server": "tick-42b5fe",
