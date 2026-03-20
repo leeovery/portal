@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Auto Start Tmux Server (Cycle 2)
 
 ## Task 1: Consolidate duplicate test mock types across cmd test files
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -34,7 +34,7 @@ sources: duplication
 - Existing tests in attach_test.go, list_test.go, and open_test.go all pass unchanged (no new tests needed — this is a pure deduplication refactor)
 
 ## Task 2: Thread cobra.Command through openTUI to eliminate implicit openCmd coupling
-status: pending
+status: approved
 severity: medium
 sources: architecture
 

@@ -82,3 +82,16 @@
 | auto-start-tmux-server-4-2 | Extract tmux.NewClient construction to a single helper | 8 construction sites reduced to 1 in PersistentPreRunE, test deps structs bypass context client |
 | auto-start-tmux-server-4-3 | Make bootstrapWait injection consistent with interface-based DI pattern | nil-check branching removed, Waiter injected via bootstrapDeps struct |
 | auto-start-tmux-server-4-4 | Eliminate package-level mutable DI vars to prevent test isolation risk | Option A (context-based) vs Option B (documented constraint), t.Parallel data race prevention |
+
+## Phase 5: Analysis (Cycle 2)
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+### Tasks
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-5-1 | Consolidate duplicate test mock types across cmd test files | mockConnector vs mockSessionConnector dedup, stubSessionLister vs mockSessionLister dedup |
+| auto-start-tmux-server-5-2 | Thread cobra.Command through openTUI to eliminate implicit openCmd coupling | openTUIFunc signature change, test overrides need updated parameter |
