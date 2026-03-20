@@ -35,10 +35,16 @@
           "format": "tick",
           "spec_commit": "fc0d76218f83ab61e6752aed352732eec52115fe",
           "task_list_gate_mode": "gated",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "phase": 1,
-          "task": "auto-start-tmux-server-1-1"
+          "task": "auto-start-tmux-server-1-2",
+          "external_id": "tick-42b5fe",
+          "task_map": {
+            "auto-start-tmux-server": "tick-42b5fe",
+            "auto-start-tmux-server-1": "tick-247d0e",
+            "auto-start-tmux-server-1-1": "tick-e5d297"
+          }
         }
       },
       "format": "tick"
