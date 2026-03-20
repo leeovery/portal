@@ -83,7 +83,7 @@ var openCmd = &cobra.Command{
 		}
 
 		if destination == "" {
-			return openTUI("", command)
+			return openTUI("", command, serverWasStarted(cmd))
 		}
 
 		bootstrapWait(cmd, nil)
@@ -104,7 +104,7 @@ var openCmd = &cobra.Command{
 		case *resolver.PathResult:
 			return openPath(r.Path, command)
 		case *resolver.FallbackResult:
-			return openTUI(r.Query, command)
+			return openTUI(r.Query, command, serverWasStarted(cmd))
 		default:
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}
@@ -283,6 +283,7 @@ type tuiConfig struct {
 	cwd            string
 	insideTmux     bool
 	currentSession string
+	serverStarted  bool
 }
 
 // buildTUIModel constructs a tui.Model from the given config and parameters.
@@ -294,6 +295,9 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		tui.WithSessionCreator(cfg.sessionCreator),
 		tui.WithDirLister(cfg.dirLister, cfg.cwd),
 		tui.WithCWD(cfg.cwd),
+	}
+	if cfg.serverStarted {
+		opts = append(opts, tui.WithServerStarted(true))
 	}
 	if cfg.projectEditor != nil {
 		opts = append(opts, tui.WithProjectEditor(cfg.projectEditor))
@@ -326,7 +330,7 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 }
 
 // openTUI launches the interactive session picker with an optional initial filter.
-func openTUI(initialFilter string, command []string) error {
+func openTUI(initialFilter string, command []string, serverStarted bool) error {
 	client := tmux.NewClient(&tmux.RealCommander{})
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
@@ -356,6 +360,7 @@ func openTUI(initialFilter string, command []string) error {
 		sessionCreator: session.NewSessionCreator(gitResolver, store, client, gen),
 		dirLister:      &osDirLister{},
 		cwd:            cwd,
+		serverStarted:  serverStarted,
 	}
 
 	if tmux.InsideTmux() {

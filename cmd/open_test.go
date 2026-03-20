@@ -936,6 +936,97 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 }
 
+func TestBuildTUIModel_ServerStarted(t *testing.T) {
+	t.Run("serverStarted true starts on loading page", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+			serverStarted:  true,
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if m.ActivePage() != tui.PageLoading {
+			t.Errorf("ActivePage() = %d, want PageLoading (%d)", m.ActivePage(), tui.PageLoading)
+		}
+		if !m.ServerStarted() {
+			t.Error("ServerStarted() = false, want true")
+		}
+	})
+
+	t.Run("serverStarted false starts on sessions page", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+			serverStarted:  false,
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
+		}
+		if m.ServerStarted() {
+			t.Error("ServerStarted() = true, want false")
+		}
+	})
+
+	t.Run("default serverStarted starts on sessions page", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("ActivePage() = %d, want PageSessions (%d)", m.ActivePage(), tui.PageSessions)
+		}
+	})
+
+	t.Run("serverStarted true preserves other options", func(t *testing.T) {
+		cfg := tuiConfig{
+			lister:         &stubSessionLister{},
+			killer:         &stubSessionKiller{},
+			renamer:        &stubSessionRenamer{},
+			projectStore:   &stubProjectStore{},
+			sessionCreator: &stubTUISessionCreator{},
+			dirLister:      &stubDirLister{},
+			cwd:            "/home/user",
+			insideTmux:     true,
+			currentSession: "dev",
+			serverStarted:  true,
+		}
+
+		m := buildTUIModel(cfg, "", nil)
+
+		if !m.ServerStarted() {
+			t.Error("ServerStarted() = false, want true")
+		}
+		if !m.InsideTmux() {
+			t.Error("InsideTmux() = false, want true")
+		}
+		if m.CurrentSession() != "dev" {
+			t.Errorf("CurrentSession() = %q, want %q", m.CurrentSession(), "dev")
+		}
+	})
+}
+
 func TestProcessTUIResult(t *testing.T) {
 	t.Run("clean exit without selection returns nil", func(t *testing.T) {
 		m := tui.New(&stubSessionLister{})

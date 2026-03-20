@@ -87,11 +87,13 @@
             "auto-start-tmux-server-2-2",
             "auto-start-tmux-server-2-3",
             "auto-start-tmux-server-3-1",
-            "auto-start-tmux-server-3-2"
+            "auto-start-tmux-server-3-2",
+            "auto-start-tmux-server-3-3"
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       },
