@@ -50,13 +50,31 @@ total: 3
      }
      ```
      Note: Options are applied after construction, so `WithServerStarted(true)` will override `activePage` to `PageLoading`.
-  5. Add a `ServerStarted() bool` accessor for testing:
+  5. Update `NewModelWithSessions()` to explicitly set `activePage: PageSessions`:
+     ```go
+     func NewModelWithSessions(sessions []tmux.Session) Model {
+         items := ToListItems(sessions)
+         l := newSessionList(items)
+         l.SetSize(80, 24)
+         pl := newProjectList()
+         pl.SetSize(80, 24)
+         m := Model{
+             sessions:    sessions,
+             sessionList: l,
+             projectList: pl,
+             activePage:  PageSessions,
+         }
+         return m
+     }
+     ```
+     This prevents existing tests from defaulting to `PageLoading` after the iota shift.
+  6. Add a `ServerStarted() bool` accessor for testing:
      ```go
      func (m Model) ServerStarted() bool {
          return m.serverStarted
      }
      ```
-  6. Update `View()` to handle `PageLoading`:
+  7. Update `View()` to handle `PageLoading`:
      ```go
      func (m Model) View() string {
          switch m.activePage {
@@ -67,7 +85,7 @@ total: 3
          }
      }
      ```
-  7. Implement `viewLoading()`:
+  8. Implement `viewLoading()`:
      ```go
      func (m Model) viewLoading() string {
          w := m.termWidth
@@ -83,7 +101,7 @@ total: 3
      }
      ```
      This uses `lipgloss.Place` for centering, which is the standard Lip Gloss utility for placing content within a bounding box.
-  8. Update the `Update()` method's `WindowSizeMsg` handler — no changes needed; it already caches `termWidth`/`termHeight`. But verify the loading page does NOT forward `WindowSizeMsg` to the session/project lists (it does currently, which is fine — it pre-warms their dimensions for when we transition).
+  9. Update the `Update()` method's `WindowSizeMsg` handler — no changes needed; it already caches `termWidth`/`termHeight`. But verify the loading page does NOT forward `WindowSizeMsg` to the session/project lists (it does currently, which is fine — it pre-warms their dimensions for when we transition).
 
 - In `/Users/leeovery/Code/portal/internal/tui/model_test.go`:
   - Add tests for the new loading page state and view.
@@ -195,26 +213,46 @@ total: 3
   5. Add a `transitionFromLoading()` method that transitions away from the loading page:
      ```go
      func (m *Model) transitionFromLoading() {
+         m.defaultPageEvaluated = false
          m.activePage = PageSessions
          m.evaluateDefaultPage()
      }
      ```
      This sets `activePage` to `PageSessions` as the default, then `evaluateDefaultPage()` may override it to `PageProjects` if there are no sessions. Note: `evaluateDefaultPage` checks `sessionsLoaded` and `projectsLoaded` — both should be true by the time transition happens (sessions were received, projects loaded in parallel). If projects haven't loaded yet, `evaluateDefaultPage` will be a no-op and the user sees the sessions page.
-  6. Update the `SessionsMsg` handler in `Update()` to handle the loading page case. After the existing `m.sessionsLoaded = true` and `m.evaluateDefaultPage()` lines, add:
+  6. Update the `SessionsMsg` handler in `Update()` to handle the loading page case. Insert the loading-page branch *after* the existing session data processing (setting sessions, filtering, items, size, title, `sessionsLoaded = true`) but *before* the `evaluateDefaultPage()` call. When on the loading page, the branch returns early — skipping `evaluateDefaultPage` so it does not prematurely set `defaultPageEvaluated = true`:
      ```go
-     if m.activePage == PageLoading {
-         if len(msg.Sessions) > 0 {
-             m.sessionsReceived = true
-             if m.minWaitDone {
-                 m.transitionFromLoading()
-             }
-             return m, nil
+     case SessionsMsg:
+         if msg.Err != nil {
+             return m, tea.Quit
          }
-         // No sessions yet — schedule another fetch after poll interval
-         return m, m.pollSessionsCmd()
-     }
+         m.sessions = msg.Sessions
+         filtered := m.filteredSessions()
+         items := ToListItems(filtered)
+         m.sessionList.SetItems(items)
+         if m.termWidth > 0 || m.termHeight > 0 {
+             m.sessionList.SetSize(m.termWidth, m.termHeight)
+         }
+         if m.insideTmux && m.currentSession != "" {
+             m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
+         }
+         m.sessionsLoaded = true
+
+         if m.activePage == PageLoading {
+             if len(msg.Sessions) > 0 {
+                 m.sessionsReceived = true
+                 if m.minWaitDone {
+                     m.transitionFromLoading()
+                 }
+                 return m, nil
+             }
+             // No sessions yet — schedule another fetch after poll interval
+             return m, m.pollSessionsCmd()
+         }
+
+         m.evaluateDefaultPage()
+         return m, nil
      ```
-     **Important**: This check must come AFTER the existing `SessionsMsg` handling (setting sessions, filtering, etc.) but the transition logic is new. The simplest approach is to add it right before the `return m, nil` at the end of the `SessionsMsg` case, checking if we're still on the loading page. When sessions are empty, `pollSessionsCmd` schedules a re-fetch after 500ms. This continues until sessions appear or `maxWaitElapsedMsg` fires and transitions away from loading.
+     When on the loading page, `evaluateDefaultPage` is never called. When `transitionFromLoading` eventually fires (via min+sessions or max timeout), it resets `defaultPageEvaluated = false` and calls `evaluateDefaultPage` fresh, correctly choosing between `PageSessions` and `PageProjects`.
   7. Add handlers for the new message types in `Update()`. Add them to the cross-view message switch:
      ```go
      case minWaitElapsedMsg:
@@ -279,7 +317,7 @@ total: 3
 - `"regular keys during loading are swallowed"` — create model on `PageLoading`, send `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}`, assert model stays on `PageLoading` and no quit command
 - `"transition goes to sessions page when sessions exist"` — create model on `PageLoading` with project store, send `SessionsMsg` with sessions, send `ProjectsLoadedMsg`, send `MinWaitElapsedMsg`, assert `ActivePage() == PageSessions`
 - `"transition goes to projects page when no sessions"`
-- `"poll stops after transition from loading"` — create model on `PageLoading`, send `MaxWaitElapsedMsg` (transitions away), then send `SessionsMsg` (from an orphaned poll), assert model handles it as a normal session refresh without re-entering loading logic — create model on `PageLoading` with project store, send `SessionsMsg` with empty sessions, send `ProjectsLoadedMsg`, send `MaxWaitElapsedMsg`, assert `ActivePage() == PageProjects`
+- `"poll stops after transition from loading"` — create model on `PageLoading`, send `MaxWaitElapsedMsg` (transitions away), then send `SessionsMsg` (from an orphaned poll), assert model handles it as a normal session refresh without re-entering loading logic
 
 **Edge Cases**:
 - Sessions before minWait (still waits): If `SessionsMsg` arrives before `MinWaitElapsedMsg`, the model sets `sessionsReceived = true` but stays on `PageLoading`. The transition only happens when `MinWaitElapsedMsg` subsequently arrives. This prevents a jarring sub-second flash of the loading screen. Spec: "Minimum 1 second — prevents a jarring flash if sessions appear very quickly."

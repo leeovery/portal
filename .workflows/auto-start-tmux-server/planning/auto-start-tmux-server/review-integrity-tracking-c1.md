@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-20
 cycle: 1
 phase: Plan Integrity Review
@@ -23,6 +23,8 @@ The `transitionFromLoading()` method sets `activePage = PageSessions` then calls
 Result: `activePage` is always set to `PageSessions` by `transitionFromLoading`, even when there are zero sessions and the correct page would be `PageProjects`.
 
 Two fixes needed: (1) `transitionFromLoading` must reset `defaultPageEvaluated` before calling `evaluateDefaultPage`. (2) The `SessionsMsg` handler's loading-page branch must be placed before the `evaluateDefaultPage()` call to prevent premature page switching during loading.
+
+**Resolution**: Fixed
 
 **Current**:
 In the Do section, step 5:
@@ -100,34 +102,7 @@ Task 3-1 correctly identifies that adding `PageLoading` as `iota` value 0 shifts
 
 The Edge Cases section mentions this ("The `NewModelWithSessions` test helper also needs to explicitly set `activePage: PageSessions` if it doesn't already") but the Do section does not include a step to fix it. An implementer following only the Do steps would miss this, causing test failures.
 
-**Current**:
-The Do section lists steps 1-8 for `model.go` changes. Step 4 covers updating `New()` to explicitly set `activePage: PageSessions`. `NewModelWithSessions` is mentioned only in the Edge Cases section, not in Do.
-
-**Proposed**:
-Add a new step after step 4 in the Do section:
-
-  5. Update `NewModelWithSessions()` to explicitly set `activePage: PageSessions`:
-     ```go
-     func NewModelWithSessions(sessions []tmux.Session) Model {
-         items := ToListItems(sessions)
-         l := newSessionList(items)
-         l.SetSize(80, 24)
-         pl := newProjectList()
-         pl.SetSize(80, 24)
-         m := Model{
-             sessions:    sessions,
-             sessionList: l,
-             projectList: pl,
-             activePage:  PageSessions,
-         }
-         return m
-     }
-     ```
-     This prevents existing tests from defaulting to `PageLoading` after the iota shift.
-
-  (Renumber subsequent steps 5-8 to 6-9.)
-
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -140,18 +115,7 @@ Add a new step after step 4 in the Do section:
 **Change Type**: update-task
 
 **Details**:
-The last test entry in the Tests section concatenates two separate test cases into one bullet. The entry starts with `"poll stops after transition from loading"` and then, mid-sentence after a dash, switches to a completely different test: `"transition goes to projects page when no sessions"`. An implementer would be confused about what this single test should actually verify.
+The last test entry in the Tests section concatenates two separate test cases into one bullet.
 
-**Current**:
-```
-- `"poll stops after transition from loading"` — create model on `PageLoading`, send `MaxWaitElapsedMsg` (transitions away), then send `SessionsMsg` (from an orphaned poll), assert model handles it as a normal session refresh without re-entering loading logic — create model on `PageLoading` with project store, send `SessionsMsg` with empty sessions, send `ProjectsLoadedMsg`, send `MaxWaitElapsedMsg`, assert `ActivePage() == PageProjects`
-```
-
-**Proposed**:
-```
-- `"poll stops after transition from loading"` — create model on `PageLoading`, send `MaxWaitElapsedMsg` (transitions away), then send `SessionsMsg` (from an orphaned poll), assert model handles it as a normal session refresh without re-entering loading logic
-- `"transition goes to projects page when no sessions"` — create model on `PageLoading` with project store, send `SessionsMsg` with empty sessions, send `ProjectsLoadedMsg`, send `MaxWaitElapsedMsg`, assert `ActivePage() == PageProjects`
-```
-
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:

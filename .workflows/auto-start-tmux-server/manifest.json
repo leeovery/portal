@@ -36,7 +36,7 @@
           "spec_commit": "fc0d76218f83ab61e6752aed352732eec52115fe",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "auto",
-          "finding_gate_mode": "gated",
+          "finding_gate_mode": "auto",
           "phase": 4,
           "task": "/Users/leeovery",
           "external_id": "tick-42b5fe",
