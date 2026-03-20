@@ -86,6 +86,8 @@ var openCmd = &cobra.Command{
 			return openTUI("", command)
 		}
 
+		bootstrapWait(cmd, nil)
+
 		query := destination
 
 		qr, err := buildQueryResolver()
