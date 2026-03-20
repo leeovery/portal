@@ -743,17 +743,23 @@ func (s *stubCommander) Run(args ...string) (string, error) {
 	return "", nil
 }
 
+// defaultTestTUIConfig returns a tuiConfig with all stub dependencies wired.
+// Tests override individual fields as needed for their specific scenario.
+func defaultTestTUIConfig() tuiConfig {
+	return tuiConfig{
+		lister:         &mockSessionLister{},
+		killer:         &stubSessionKiller{},
+		renamer:        &stubSessionRenamer{},
+		projectStore:   &stubProjectStore{},
+		sessionCreator: &stubTUISessionCreator{},
+		dirLister:      &stubDirLister{},
+		cwd:            "/home/user",
+	}
+}
+
 func TestBuildTUIModel(t *testing.T) {
 	t.Run("no command and no filter creates default model", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-		}
+		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -775,15 +781,7 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 
 	t.Run("command creates model in command-pending mode", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-		}
+		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, "", []string{"claude"})
 
@@ -806,15 +804,7 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 
 	t.Run("filter creates model with initial filter", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-		}
+		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, "myapp", nil)
 
@@ -827,15 +817,7 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 
 	t.Run("command and filter combines both", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-		}
+		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, "myapp", []string{"claude"})
 
@@ -851,17 +833,9 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 
 	t.Run("inside tmux detection passes session name to model", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-			insideTmux:     true,
-			currentSession: "my-session",
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.insideTmux = true
+		cfg.currentSession = "my-session"
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -877,15 +851,8 @@ func TestBuildTUIModel(t *testing.T) {
 	})
 
 	t.Run("cwd wired correctly", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user/projects",
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.cwd = "/home/user/projects"
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -898,17 +865,10 @@ func TestBuildTUIModel(t *testing.T) {
 		projects := []project.Project{
 			{Path: "/code/portal", Name: "portal"},
 		}
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{projects: projects},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-			projectEditor:  &stubProjectEditor{},
-			aliasEditor:    &stubAliasEditor{aliases: map[string]string{}},
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.projectStore = &stubProjectStore{projects: projects}
+		cfg.projectEditor = &stubProjectEditor{}
+		cfg.aliasEditor = &stubAliasEditor{aliases: map[string]string{}}
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -930,16 +890,8 @@ func TestBuildTUIModel(t *testing.T) {
 
 func TestBuildTUIModel_ServerStarted(t *testing.T) {
 	t.Run("serverStarted true starts on loading page", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-			serverStarted:  true,
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.serverStarted = true
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -952,16 +904,8 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 	})
 
 	t.Run("serverStarted false starts on sessions page", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-			serverStarted:  false,
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.serverStarted = false
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -974,15 +918,7 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 	})
 
 	t.Run("default serverStarted starts on sessions page", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-		}
+		cfg := defaultTestTUIConfig()
 
 		m := buildTUIModel(cfg, "", nil)
 
@@ -992,18 +928,10 @@ func TestBuildTUIModel_ServerStarted(t *testing.T) {
 	})
 
 	t.Run("serverStarted true preserves other options", func(t *testing.T) {
-		cfg := tuiConfig{
-			lister:         &mockSessionLister{},
-			killer:         &stubSessionKiller{},
-			renamer:        &stubSessionRenamer{},
-			projectStore:   &stubProjectStore{},
-			sessionCreator: &stubTUISessionCreator{},
-			dirLister:      &stubDirLister{},
-			cwd:            "/home/user",
-			insideTmux:     true,
-			currentSession: "dev",
-			serverStarted:  true,
-		}
+		cfg := defaultTestTUIConfig()
+		cfg.insideTmux = true
+		cfg.currentSession = "dev"
+		cfg.serverStarted = true
 
 		m := buildTUIModel(cfg, "", nil)
 
