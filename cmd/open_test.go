@@ -1078,7 +1078,7 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 
 	var capturedServerStarted bool
 	origFunc := openTUIFunc
-	openTUIFunc = func(initialFilter string, command []string, serverStarted bool) error {
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, serverStarted bool) error {
 		capturedServerStarted = serverStarted
 		return nil
 	}
@@ -1105,7 +1105,7 @@ func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
 
 	var capturedServerStarted bool
 	origFunc := openTUIFunc
-	openTUIFunc = func(initialFilter string, command []string, serverStarted bool) error {
+	openTUIFunc = func(_ *cobra.Command, initialFilter string, command []string, serverStarted bool) error {
 		capturedServerStarted = serverStarted
 		return nil
 	}

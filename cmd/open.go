@@ -19,7 +19,7 @@ import (
 // openTUIFunc is the function used to launch the TUI. It defaults to openTUI
 // and can be overridden in tests to capture arguments.
 // Initialized in init() to break the openTUIFunc → openTUI → openCmd → openTUIFunc cycle.
-var openTUIFunc func(string, []string, bool) error
+var openTUIFunc func(*cobra.Command, string, []string, bool) error
 
 // openDeps holds injectable dependencies for the open command.
 // When nil, real implementations are used.
@@ -87,7 +87,7 @@ var openCmd = &cobra.Command{
 		}
 
 		if destination == "" {
-			return openTUIFunc("", command, serverWasStarted(cmd))
+			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
 
 		bootstrapWait(cmd)
@@ -108,7 +108,7 @@ var openCmd = &cobra.Command{
 		case *resolver.PathResult:
 			return openPath(cmd, r.Path, command)
 		case *resolver.FallbackResult:
-			return openTUIFunc(r.Query, command, false)
+			return openTUIFunc(cmd, r.Query, command, false)
 		default:
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}
@@ -334,8 +334,8 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 }
 
 // openTUI launches the interactive session picker with an optional initial filter.
-func openTUI(initialFilter string, command []string, serverStarted bool) error {
-	client := tmuxClient(openCmd)
+func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverStarted bool) error {
+	client := tmuxClient(cmd)
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
 
