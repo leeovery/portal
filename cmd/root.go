@@ -16,6 +16,30 @@ var skipTmuxCheck = map[string]bool{
 	"clean":   true,
 }
 
+// ServerBootstrapper ensures a tmux server is running.
+type ServerBootstrapper interface {
+	EnsureServer() (bool, error)
+}
+
+// BootstrapDeps holds injectable dependencies for the bootstrap step.
+// When nil, real implementations are used.
+var bootstrapDeps *BootstrapDeps
+
+// BootstrapDeps allows injecting the server bootstrapper for testing.
+type BootstrapDeps struct {
+	Bootstrapper ServerBootstrapper
+}
+
+// buildBootstrapDeps returns the appropriate server bootstrapper.
+// When bootstrapDeps is set (testing), uses injected dependency.
+// Otherwise, builds a real tmux client with RealCommander.
+func buildBootstrapDeps() ServerBootstrapper {
+	if bootstrapDeps != nil {
+		return bootstrapDeps.Bootstrapper
+	}
+	return tmux.NewClient(&tmux.RealCommander{})
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "portal",
 	Short: "An interactive session picker for tmux",
@@ -25,7 +49,12 @@ var rootCmd = &cobra.Command{
 				return nil
 			}
 		}
-		return tmux.CheckTmuxAvailable()
+		if err := tmux.CheckTmuxAvailable(); err != nil {
+			return err
+		}
+		bootstrapper := buildBootstrapDeps()
+		_, err := bootstrapper.EnsureServer()
+		return err
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,

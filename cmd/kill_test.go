@@ -17,6 +17,9 @@ func (m *mockSessionKiller) KillSession(name string) error {
 }
 
 func TestKillCommand(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
 	t.Run("existing session calls kill-session and exits 0", func(t *testing.T) {
 		killer := &mockSessionKiller{}
 		validator := &mockSessionValidator{sessions: map[string]bool{"my-session": true}}

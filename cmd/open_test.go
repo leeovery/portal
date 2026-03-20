@@ -49,6 +49,9 @@ func (t *testDirValidator) Exists(path string) bool {
 }
 
 func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
 	resetRootCmd()
 	buf := new(bytes.Buffer)
 	rootCmd.SetErr(buf)
@@ -67,6 +70,9 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 }
 
 func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "file.txt")
 	if err := os.WriteFile(filePath, []byte("content"), 0o644); err != nil {
@@ -111,6 +117,9 @@ func TestOpenCommand_PathArgument_SkipsTUI(t *testing.T) {
 }
 
 func TestOpenCommand_QueryResolution_AliasNotFound(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
 	// When a non-path query resolves to an alias that points to a non-existent directory,
 	// the error message should indicate the directory was not found.
 	openDeps = &OpenDeps{
@@ -138,6 +147,9 @@ func TestOpenCommand_QueryResolution_AliasNotFound(t *testing.T) {
 }
 
 func TestOpenCommand_QueryResolution_ZoxideNotFound(t *testing.T) {
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
 	// When a non-path query resolves via zoxide to a non-existent directory,
 	// the error message should indicate the directory was not found.
 	openDeps = &OpenDeps{

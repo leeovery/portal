@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // resetRootCmd resets the root command's output streams and subcommand flags for testing.
@@ -148,4 +151,97 @@ func TestTmuxDependentCommandsSucceedWithTmux(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mockServerBootstrapper implements ServerBootstrapper for testing.
+type mockServerBootstrapper struct {
+	started bool
+	err     error
+	called  bool
+}
+
+func (m *mockServerBootstrapper) EnsureServer() (bool, error) {
+	m.called = true
+	return m.started, m.err
+}
+
+func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
+	t.Run("EnsureServer called for tmux-requiring commands", func(t *testing.T) {
+		mock := &mockServerBootstrapper{}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		listDeps = &ListDeps{
+			Lister: &mockSessionLister{sessions: []tmux.Session{}},
+			IsTTY:  func() bool { return false },
+		}
+		t.Cleanup(func() { listDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"list"})
+		err := rootCmd.Execute()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !mock.called {
+			t.Error("EnsureServer was not called")
+		}
+	})
+
+	t.Run("EnsureServer error propagates to caller", func(t *testing.T) {
+		mock := &mockServerBootstrapper{err: fmt.Errorf("failed to start tmux server: permission denied")}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"list"})
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		want := "failed to start tmux server: permission denied"
+		if err.Error() != want {
+			t.Errorf("error = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("EnsureServer not called for skipTmuxCheck commands", func(t *testing.T) {
+		mock := &mockServerBootstrapper{}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"version"})
+		err := rootCmd.Execute()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.called {
+			t.Error("EnsureServer should not be called for skip commands")
+		}
+	})
+
+	t.Run("serverStarted bool is discarded", func(t *testing.T) {
+		mock := &mockServerBootstrapper{started: true}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		listDeps = &ListDeps{
+			Lister: &mockSessionLister{sessions: []tmux.Session{}},
+			IsTTY:  func() bool { return false },
+		}
+		t.Cleanup(func() { listDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"list"})
+		err := rootCmd.Execute()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// No assertion on started — it should be discarded in Phase 1
+	})
 }
