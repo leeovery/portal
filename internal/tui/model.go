@@ -4,6 +4,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -86,6 +87,12 @@ type SessionsMsg struct {
 	Err      error
 }
 
+// MinWaitElapsedMsg signals that the minimum loading wait has elapsed.
+type MinWaitElapsedMsg struct{}
+
+// MaxWaitElapsedMsg signals that the maximum loading wait has elapsed.
+type MaxWaitElapsedMsg struct{}
+
 // SessionCreatedMsg is emitted when a session has been successfully created.
 type SessionCreatedMsg struct {
 	SessionName string
@@ -133,7 +140,9 @@ type Model struct {
 	commandPending    bool
 
 	// Bootstrap loading state
-	serverStarted bool
+	serverStarted    bool
+	minWaitDone      bool
+	sessionsReceived bool
 
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
@@ -562,6 +571,23 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
+// pollSessionsCmd returns a tick command that re-fetches sessions after DefaultPollInterval.
+func (m Model) pollSessionsCmd() tea.Cmd {
+	return tea.Tick(tmux.DefaultPollInterval, func(time.Time) tea.Msg {
+		sessions, err := m.sessionLister.ListSessions()
+		return SessionsMsg{Sessions: sessions, Err: err}
+	})
+}
+
+// transitionFromLoading moves from the loading page to the normal sessions page.
+// It marks sessions as loaded so evaluateDefaultPage can determine the correct
+// landing page when projects also finish loading.
+func (m *Model) transitionFromLoading() {
+	m.activePage = PageSessions
+	m.sessionsLoaded = true
+	m.evaluateDefaultPage()
+}
+
 // deleteAndRefreshProjects returns a command that removes a project and reloads the list.
 // Errors from Remove are propagated via ProjectsLoadedMsg.
 func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
@@ -576,7 +602,8 @@ func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 }
 
 // Init returns a command that fetches tmux sessions, or loads projects
-// when in command-pending mode.
+// when in command-pending mode. When on PageLoading, it also schedules
+// min/max wait tick commands for the loading interstitial.
 func (m Model) Init() tea.Cmd {
 	if m.commandPending {
 		return m.loadProjects()
@@ -586,6 +613,21 @@ func (m Model) Init() tea.Cmd {
 		return SessionsMsg{Sessions: sessions, Err: err}
 	}
 	loadProjects := m.loadProjects()
+
+	if m.activePage == PageLoading {
+		minWaitTick := tea.Tick(tmux.DefaultMinWait, func(time.Time) tea.Msg {
+			return MinWaitElapsedMsg{}
+		})
+		maxWaitTick := tea.Tick(tmux.DefaultMaxWait, func(time.Time) tea.Msg {
+			return MaxWaitElapsedMsg{}
+		})
+		cmds := []tea.Cmd{fetchSessions, minWaitTick, maxWaitTick}
+		if loadProjects != nil {
+			cmds = append(cmds, loadProjects)
+		}
+		return tea.Batch(cmds...)
+	}
+
 	if loadProjects != nil {
 		return tea.Batch(fetchSessions, loadProjects)
 	}
@@ -626,8 +668,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
 		}
 
+		// Loading-specific: track session detection and handle transitions
+		if m.activePage == PageLoading {
+			if len(msg.Sessions) > 0 {
+				m.sessionsReceived = true
+				if m.minWaitDone {
+					m.transitionFromLoading()
+				}
+				return m, nil
+			}
+			// No sessions yet — schedule a re-poll
+			return m, m.pollSessionsCmd()
+		}
+
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
+		return m, nil
+	case MinWaitElapsedMsg:
+		if m.activePage != PageLoading {
+			return m, nil
+		}
+		m.minWaitDone = true
+		if m.sessionsReceived {
+			m.transitionFromLoading()
+		}
+		return m, nil
+	case MaxWaitElapsedMsg:
+		if m.activePage != PageLoading {
+			return m, nil
+		}
+		m.transitionFromLoading()
 		return m, nil
 	case ProjectsLoadedMsg:
 		if msg.Err == nil {
