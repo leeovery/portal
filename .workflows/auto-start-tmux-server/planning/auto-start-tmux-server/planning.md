@@ -37,6 +37,14 @@
 - [ ] When the server was already running (bootstrap was skipped), no stderr message is printed and no wait occurs
 - [ ] Normal command output still goes to stdout; piping works cleanly
 
+### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-2-1 | WaitForSessions polling function | sessions before min wait (still waits), no sessions by max (returns anyway), sessions between min and max (exits early) |
+| auto-start-tmux-server-2-2 | Propagate serverStarted via command context | skipTmuxCheck commands have no context, CheckTmuxAvailable failure prevents context being set |
+| auto-start-tmux-server-2-3 | CLI bootstrap wait integration | stderr message only when serverStarted=true, open TUI path skips CLI wait, piping works (stderr vs stdout) |
+
 ## Phase 3: TUI Loading Interstitial
 <!-- status: approved, approved_at: 2026-03-19 -->
 
