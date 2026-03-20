@@ -60,6 +60,7 @@
 - [ ] The interstitial does not block or freeze — the TUI remains responsive (Ctrl+C quits)
 
 ### Tasks
+<!-- status: approved, approved_at: 2026-03-20 -->
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
