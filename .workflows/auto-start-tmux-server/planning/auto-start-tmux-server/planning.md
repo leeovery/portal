@@ -38,6 +38,7 @@
 - [ ] Normal command output still goes to stdout; piping works cleanly
 
 ### Tasks
+<!-- status: approved, approved_at: 2026-03-20 -->
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
