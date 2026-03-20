@@ -80,7 +80,8 @@
           "current_task": "/Users/leeovery",
           "completed_tasks": [
             "auto-start-tmux-server-1-1",
-            "auto-start-tmux-server-1-2"
+            "auto-start-tmux-server-1-2",
+            "auto-start-tmux-server-1-3"
           ]
         }
       },

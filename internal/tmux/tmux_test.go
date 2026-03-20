@@ -442,6 +442,101 @@ func TestStartServer(t *testing.T) {
 	})
 }
 
+func TestEnsureServer(t *testing.T) {
+	t.Run("returns false when server is already running", func(t *testing.T) {
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if args[0] == "info" {
+					return "", nil // server is running
+				}
+				t.Fatalf("unexpected command: %v", args)
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		started, err := client.EnsureServer()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if started {
+			t.Error("EnsureServer() started = true, want false")
+		}
+	})
+
+	t.Run("starts server and returns true when server is not running", func(t *testing.T) {
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if args[0] == "info" {
+					return "", fmt.Errorf("no server running")
+				}
+				if args[0] == "start-server" {
+					return "", nil
+				}
+				t.Fatalf("unexpected command: %v", args)
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		started, err := client.EnsureServer()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !started {
+			t.Error("EnsureServer() started = false, want true")
+		}
+	})
+
+	t.Run("returns true and error when start-server fails", func(t *testing.T) {
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if args[0] == "info" {
+					return "", fmt.Errorf("no server running")
+				}
+				if args[0] == "start-server" {
+					return "", fmt.Errorf("start failed")
+				}
+				t.Fatalf("unexpected command: %v", args)
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		started, err := client.EnsureServer()
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !started {
+			t.Error("EnsureServer() started = false, want true")
+		}
+	})
+
+	t.Run("does not call start-server when server is running", func(t *testing.T) {
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if args[0] == "info" {
+					return "", nil // server is running
+				}
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		_, _ = client.EnsureServer()
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		if mock.Calls[0][0] != "info" {
+			t.Errorf("expected call to %q, got %q", "info", mock.Calls[0][0])
+		}
+	})
+}
+
 func TestRenameSession(t *testing.T) {
 	t.Run("runs rename-session with old and new name", func(t *testing.T) {
 		mock := &MockCommander{}

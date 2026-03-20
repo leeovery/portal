@@ -126,6 +126,20 @@ func (c *Client) StartServer() error {
 	return nil
 }
 
+// EnsureServer checks if a tmux server is running and starts one if not.
+// Returns (false, nil) when the server was already running.
+// Returns (true, nil) when a server was successfully started.
+// Returns (true, err) when a server start was attempted but failed.
+func (c *Client) EnsureServer() (bool, error) {
+	if c.ServerRunning() {
+		return false, nil
+	}
+	if err := c.StartServer(); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 // CurrentSessionName returns the name of the tmux session that the current client
 // is attached to. It runs tmux display-message to query the session name.
 func (c *Client) CurrentSessionName() (string, error) {
