@@ -740,6 +740,17 @@ func (s *stubAliasEditor) Delete(name string) bool {
 }
 func (s *stubAliasEditor) Save() error { return nil }
 
+// stubCommander implements tmux.Commander for cmd-level testing.
+// Returns a single session so WaitForSessions detects sessions immediately.
+type stubCommander struct{}
+
+func (s *stubCommander) Run(args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "list-sessions" {
+		return "stub|1|0", nil
+	}
+	return "", nil
+}
+
 // mockConnector implements SessionConnector for testing.
 type mockConnector struct {
 	connectedTo string
@@ -1072,7 +1083,8 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	// bootstrapWait has already run. The fallback openTUI call must
 	// pass serverStarted=false to avoid a second wait.
 	mock := &mockServerBootstrapper{started: true}
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	client := tmux.NewClient(&stubCommander{})
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	// Force the resolver to return FallbackResult (no alias, no zoxide match, no dir).
@@ -1134,7 +1146,8 @@ func TestBuildSessionConnector(t *testing.T) {
 	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
 
-		connector := buildSessionConnector()
+		client := tmux.NewClient(&tmux.RealCommander{})
+		connector := buildSessionConnector(client)
 
 		if _, ok := connector.(*SwitchConnector); !ok {
 			t.Errorf("expected *SwitchConnector, got %T", connector)
@@ -1144,7 +1157,8 @@ func TestBuildSessionConnector(t *testing.T) {
 	t.Run("returns AttachConnector when outside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "")
 
-		connector := buildSessionConnector()
+		client := tmux.NewClient(&tmux.RealCommander{})
+		connector := buildSessionConnector(client)
 
 		if _, ok := connector.(*AttachConnector); !ok {
 			t.Errorf("expected *AttachConnector, got %T", connector)

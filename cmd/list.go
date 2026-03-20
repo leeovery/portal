@@ -58,7 +58,7 @@ var listCmd = &cobra.Command{
 			return fmt.Errorf("--short and --long are mutually exclusive")
 		}
 
-		lister, ttyDetect := buildListDeps()
+		lister, ttyDetect := buildListDeps(cmd)
 
 		sessions, err := lister.ListSessions()
 		if err != nil {
@@ -96,12 +96,11 @@ var listCmd = &cobra.Command{
 }
 
 // buildListDeps returns the appropriate dependencies for the list command.
-func buildListDeps() (SessionLister, func() bool) {
+func buildListDeps(cmd *cobra.Command) (SessionLister, func() bool) {
 	if listDeps != nil {
 		return listDeps.Lister, listDeps.IsTTY
 	}
-	client := tmux.NewClient(&tmux.RealCommander{})
-	return client, isTTY
+	return tmuxClient(cmd), isTTY
 }
 
 func init() {

@@ -73,7 +73,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle": 1,
           "linters": [
             "golangci-lint run ./..."
@@ -94,7 +94,8 @@
             "auto-start-tmux-server-3-1",
             "auto-start-tmux-server-3-2",
             "auto-start-tmux-server-3-3",
-            "auto-start-tmux-server-4-1"
+            "auto-start-tmux-server-4-1",
+            "auto-start-tmux-server-4-2"
           ],
           "completed_phases": [
             1,

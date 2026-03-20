@@ -28,18 +28,21 @@ type ServerBootstrapper interface {
 var bootstrapDeps *BootstrapDeps
 
 // BootstrapDeps allows injecting the server bootstrapper for testing.
+// When Client is non-nil it is stored in context; otherwise no client is set.
 type BootstrapDeps struct {
 	Bootstrapper ServerBootstrapper
+	Client       *tmux.Client
 }
 
-// buildBootstrapDeps returns the appropriate server bootstrapper.
-// When bootstrapDeps is set (testing), uses injected dependency.
+// buildBootstrapDeps returns the appropriate server bootstrapper and shared client.
+// When bootstrapDeps is set (testing), uses injected dependencies.
 // Otherwise, builds a real tmux client with RealCommander.
-func buildBootstrapDeps() ServerBootstrapper {
+func buildBootstrapDeps() (ServerBootstrapper, *tmux.Client) {
 	if bootstrapDeps != nil {
-		return bootstrapDeps.Bootstrapper
+		return bootstrapDeps.Bootstrapper, bootstrapDeps.Client
 	}
-	return tmux.NewClient(&tmux.RealCommander{})
+	client := tmux.NewClient(&tmux.RealCommander{})
+	return client, client
 }
 
 var rootCmd = &cobra.Command{
@@ -54,12 +57,15 @@ var rootCmd = &cobra.Command{
 		if err := tmux.CheckTmuxAvailable(); err != nil {
 			return err
 		}
-		bootstrapper := buildBootstrapDeps()
+		bootstrapper, client := buildBootstrapDeps()
 		serverStarted, err := bootstrapper.EnsureServer()
 		if err != nil {
 			return err
 		}
 		ctx := context.WithValue(cmd.Context(), serverStartedKey, serverStarted)
+		if client != nil {
+			ctx = context.WithValue(ctx, tmuxClientKey, client)
+		}
 		cmd.SetContext(ctx)
 		return nil
 	},

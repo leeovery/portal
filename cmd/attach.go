@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ var attachCmd = &cobra.Command{
 
 		name := args[0]
 
-		connector, validator := buildAttachDeps()
+		connector, validator := buildAttachDeps(cmd)
 
 		if !validator.HasSession(name) {
 			return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
@@ -44,13 +43,13 @@ var attachCmd = &cobra.Command{
 // buildAttachDeps returns the appropriate connector and validator for the attach command.
 // When attachDeps is set (testing), uses injected dependencies.
 // Otherwise, builds real implementations based on inside/outside tmux detection.
-func buildAttachDeps() (SessionConnector, SessionValidator) {
+func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator) {
 	if attachDeps != nil {
 		return attachDeps.Connector, attachDeps.Validator
 	}
 
-	client := tmux.NewClient(&tmux.RealCommander{})
-	connector := buildSessionConnector()
+	client := tmuxClient(cmd)
+	connector := buildSessionConnector(client)
 	return connector, client
 }
 

@@ -18,7 +18,8 @@ import (
 
 // openTUIFunc is the function used to launch the TUI. It defaults to openTUI
 // and can be overridden in tests to capture arguments.
-var openTUIFunc = openTUI
+// Initialized in init() to break the openTUIFunc → openTUI → openCmd → openTUIFunc cycle.
+var openTUIFunc func(string, []string, bool) error
 
 // openDeps holds injectable dependencies for the open command.
 // When nil, real implementations are used.
@@ -68,9 +69,8 @@ func (ac *AttachConnector) Connect(name string) error {
 
 // buildSessionConnector returns the appropriate SessionConnector based on
 // whether Portal is running inside an existing tmux session.
-func buildSessionConnector() SessionConnector {
+func buildSessionConnector(client *tmux.Client) SessionConnector {
 	if tmux.InsideTmux() {
-		client := tmux.NewClient(&tmux.RealCommander{})
 		return &SwitchConnector{client: client}
 	}
 	return &AttachConnector{}
@@ -106,7 +106,7 @@ var openCmd = &cobra.Command{
 
 		switch r := result.(type) {
 		case *resolver.PathResult:
-			return openPath(r.Path, command)
+			return openPath(cmd, r.Path, command)
 		case *resolver.FallbackResult:
 			return openTUIFunc(r.Query, command, false)
 		default:
@@ -227,8 +227,8 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 // openPath creates a new tmux session at the given resolved directory path.
 // When inside tmux, it creates the session detached and switches to it.
 // When outside tmux, it execs into tmux with the -A flag for atomic create-or-attach.
-func openPath(resolvedPath string, command []string) error {
-	client := tmux.NewClient(&tmux.RealCommander{})
+func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
+	client := tmuxClient(cmd)
 	gitResolver := &resolverAdapter{}
 	projectsPath, err := projectsFilePath()
 	if err != nil {
@@ -335,7 +335,7 @@ func processTUIResult(model tui.Model, connector SessionConnector) error {
 
 // openTUI launches the interactive session picker with an optional initial filter.
 func openTUI(initialFilter string, command []string, serverStarted bool) error {
-	client := tmux.NewClient(&tmux.RealCommander{})
+	client := tmuxClient(openCmd)
 	gitResolver := &resolverAdapter{}
 	gen := session.NewNanoIDGenerator()
 
@@ -388,7 +388,7 @@ func openTUI(initialFilter string, command []string, serverStarted bool) error {
 		return fmt.Errorf("unexpected model type: %T", finalModel)
 	}
 
-	connector := buildSessionConnector()
+	connector := buildSessionConnector(client)
 	return processTUIResult(model, connector)
 }
 
@@ -410,6 +410,7 @@ func buildQueryResolver() (*resolver.QueryResolver, error) {
 }
 
 func init() {
+	openTUIFunc = openTUI
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	rootCmd.AddCommand(openCmd)
 }

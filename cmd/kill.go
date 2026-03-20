@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ var killCmd = &cobra.Command{
 
 		name := args[0]
 
-		killer, validator := buildKillDeps()
+		killer, validator := buildKillDeps(cmd)
 
 		if !validator.HasSession(name) {
 			return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
@@ -44,12 +43,12 @@ var killCmd = &cobra.Command{
 // buildKillDeps returns the appropriate killer and validator for the kill command.
 // When killDeps is set (testing), uses injected dependencies.
 // Otherwise, builds real implementations.
-func buildKillDeps() (SessionKiller, SessionValidator) {
+func buildKillDeps(cmd *cobra.Command) (SessionKiller, SessionValidator) {
 	if killDeps != nil {
 		return killDeps.Killer, killDeps.Validator
 	}
 
-	client := tmux.NewClient(&tmux.RealCommander{})
+	client := tmuxClient(cmd)
 	return client, client
 }
 

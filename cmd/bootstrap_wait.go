@@ -19,7 +19,7 @@ func bootstrapWait(cmd *cobra.Command, waiter func()) {
 	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Starting tmux server...")
 
 	if waiter == nil {
-		client := tmux.NewClient(&tmux.RealCommander{})
+		client := tmuxClient(cmd)
 		cfg := tmux.DefaultWaitConfig(client)
 		tmux.WaitForSessions(cfg)
 		return
