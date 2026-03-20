@@ -38,13 +38,14 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "phase": 1,
-          "task": "auto-start-tmux-server-1-3",
+          "task": "auto-start-tmux-server-1-4",
           "external_id": "tick-42b5fe",
           "task_map": {
             "auto-start-tmux-server": "tick-42b5fe",
             "auto-start-tmux-server-1": "tick-247d0e",
             "auto-start-tmux-server-1-1": "tick-e5d297",
-            "auto-start-tmux-server-1-2": "tick-1ec6ed"
+            "auto-start-tmux-server-1-2": "tick-1ec6ed",
+            "auto-start-tmux-server-1-3": "tick-f4b15d"
           }
         }
       },
