@@ -16,6 +16,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// openTUIFunc is the function used to launch the TUI. It defaults to openTUI
+// and can be overridden in tests to capture arguments.
+var openTUIFunc = openTUI
+
 // openDeps holds injectable dependencies for the open command.
 // When nil, real implementations are used.
 var openDeps *OpenDeps
@@ -83,7 +87,7 @@ var openCmd = &cobra.Command{
 		}
 
 		if destination == "" {
-			return openTUI("", command, serverWasStarted(cmd))
+			return openTUIFunc("", command, serverWasStarted(cmd))
 		}
 
 		bootstrapWait(cmd, nil)
@@ -104,7 +108,7 @@ var openCmd = &cobra.Command{
 		case *resolver.PathResult:
 			return openPath(r.Path, command)
 		case *resolver.FallbackResult:
-			return openTUI(r.Query, command, serverWasStarted(cmd))
+			return openTUIFunc(r.Query, command, false)
 		default:
 			return fmt.Errorf("unexpected resolution result: %T", result)
 		}

@@ -1067,6 +1067,69 @@ func TestProcessTUIResult(t *testing.T) {
 	})
 }
 
+func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
+	// When a destination is provided but resolves to FallbackResult,
+	// bootstrapWait has already run. The fallback openTUI call must
+	// pass serverStarted=false to avoid a second wait.
+	mock := &mockServerBootstrapper{started: true}
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	// Force the resolver to return FallbackResult (no alias, no zoxide match, no dir).
+	openDeps = &OpenDeps{
+		AliasLookup:  &testAliasLookup{aliases: map[string]string{}},
+		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator: &testDirValidator{existing: map[string]bool{}},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	var capturedServerStarted bool
+	origFunc := openTUIFunc
+	openTUIFunc = func(initialFilter string, command []string, serverStarted bool) error {
+		capturedServerStarted = serverStarted
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "nonexistent-query"})
+	err := rootCmd.Execute()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedServerStarted {
+		t.Error("fallback-to-TUI path passed serverStarted=true; expected false to avoid double wait")
+	}
+}
+
+func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
+	// When no destination is provided, the direct TUI path must pass
+	// the real serverWasStarted value so the TUI shows its loading interstitial.
+	mock := &mockServerBootstrapper{started: true}
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var capturedServerStarted bool
+	origFunc := openTUIFunc
+	openTUIFunc = func(initialFilter string, command []string, serverStarted bool) error {
+		capturedServerStarted = serverStarted
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open"})
+	err := rootCmd.Execute()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !capturedServerStarted {
+		t.Error("direct TUI path passed serverStarted=false; expected true when server was just started")
+	}
+}
+
 func TestBuildSessionConnector(t *testing.T) {
 	t.Run("returns SwitchConnector when inside tmux", func(t *testing.T) {
 		t.Setenv("TMUX", "/tmp/tmux-501/default,12345,0")
