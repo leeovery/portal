@@ -58,3 +58,11 @@
 - [ ] If the maximum wait (6s) elapses with no sessions, the TUI transitions to its normal view (empty state) regardless
 - [ ] When the server was already running (bootstrap skipped), the TUI opens directly to its normal view with no interstitial
 - [ ] The interstitial does not block or freeze — the TUI remains responsive (Ctrl+C quits)
+
+### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-3-1 | Loading page state and view | terminal dimensions not yet received (fallback 80x24), serverStarted=false skips loading page |
+| auto-start-tmux-server-3-2 | Timing messages and transition logic | sessions before minWait (still waits), no sessions by maxWait (transitions anyway), Ctrl+C during loading quits |
+| auto-start-tmux-server-3-3 | Wire serverStarted into TUI launch path | server already running (no interstitial), open with destination skips TUI (Phase 2 CLI wait) |
