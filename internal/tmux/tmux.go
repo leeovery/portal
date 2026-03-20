@@ -116,6 +116,16 @@ func (c *Client) ListSessions() ([]Session, error) {
 	return sessions, nil
 }
 
+// StartServer starts the tmux server without creating any sessions.
+// Returns nil on success or a wrapped error on failure. No retry logic.
+func (c *Client) StartServer() error {
+	_, err := c.cmd.Run("start-server")
+	if err != nil {
+		return fmt.Errorf("failed to start tmux server: %w", err)
+	}
+	return nil
+}
+
 // CurrentSessionName returns the name of the tmux session that the current client
 // is attached to. It runs tmux display-message to query the session name.
 func (c *Client) CurrentSessionName() (string, error) {

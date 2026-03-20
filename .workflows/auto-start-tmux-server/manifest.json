@@ -65,7 +65,7 @@
       "items": {
         "auto-start-tmux-server": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
@@ -79,7 +79,8 @@
           "current_phase": 1,
           "current_task": "/Users/leeovery",
           "completed_tasks": [
-            "auto-start-tmux-server-1-1"
+            "auto-start-tmux-server-1-1",
+            "auto-start-tmux-server-1-2"
           ]
         }
       },

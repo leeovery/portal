@@ -387,6 +387,61 @@ func TestSwitchClient(t *testing.T) {
 	})
 }
 
+func TestStartServer(t *testing.T) {
+	t.Run("starts tmux server successfully", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.StartServer()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "start-server"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns error when start-server fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.StartServer()
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+
+		wantMsg := "failed to start tmux server"
+		if !strings.Contains(err.Error(), wantMsg) {
+			t.Errorf("error %q does not contain %q", err.Error(), wantMsg)
+		}
+
+		// Verify the original error is wrapped
+		wantWrapped := "tmux failed"
+		if !strings.Contains(err.Error(), wantWrapped) {
+			t.Errorf("error %q does not contain wrapped error %q", err.Error(), wantWrapped)
+		}
+	})
+
+	t.Run("does not retry on failure", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("server start failed")}
+		client := tmux.NewClient(mock)
+
+		_ = client.StartServer()
+
+		if len(mock.Calls) != 1 {
+			t.Errorf("expected exactly 1 call (no retry), got %d", len(mock.Calls))
+		}
+	})
+}
+
 func TestRenameSession(t *testing.T) {
 	t.Run("runs rename-session with old and new name", func(t *testing.T) {
 		mock := &MockCommander{}
