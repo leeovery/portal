@@ -31,7 +31,7 @@
     "planning": {
       "items": {
         "auto-start-tmux-server": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "fc0d76218f83ab61e6752aed352732eec52115fe",
           "task_list_gate_mode": "gated",
