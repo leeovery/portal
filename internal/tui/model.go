@@ -19,8 +19,10 @@ import (
 type page int
 
 const (
+	// PageLoading displays the loading interstitial during bootstrap.
+	PageLoading page = iota
 	// PageSessions displays the sessions list.
-	PageSessions page = iota
+	PageSessions
 	// PageProjects displays the projects list.
 	PageProjects
 	// pageFileBrowser displays the file browser sub-view.
@@ -130,6 +132,9 @@ type Model struct {
 	command           []string
 	commandPending    bool
 
+	// Bootstrap loading state
+	serverStarted bool
+
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
 
@@ -230,6 +235,11 @@ func (m *Model) SetProjectListFilter(text string) {
 // ActivePage returns the currently active page, for testing.
 func (m Model) ActivePage() page {
 	return m.activePage
+}
+
+// ServerStarted returns whether the model was configured with server bootstrap, for testing.
+func (m Model) ServerStarted() bool {
+	return m.serverStarted
 }
 
 // CommandPending returns whether the model is in command-pending mode, for testing.
@@ -345,6 +355,17 @@ func WithAliasEditor(a AliasEditor) Option {
 	}
 }
 
+// WithServerStarted configures the model to start on the loading page
+// when the tmux server was just started by bootstrap.
+func WithServerStarted(started bool) Option {
+	return func(m *Model) {
+		m.serverStarted = started
+		if started {
+			m.activePage = PageLoading
+		}
+	}
+}
+
 // WithDirLister sets the directory lister and starting path for the file browser.
 func WithDirLister(d DirLister, startPath string) Option {
 	return func(m *Model) {
@@ -451,6 +472,7 @@ func New(lister SessionLister, opts ...Option) Model {
 		sessionLister: lister,
 		sessionList:   newSessionList(nil),
 		projectList:   newProjectList(),
+		activePage:    PageSessions,
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -469,6 +491,7 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 		sessions:    sessions,
 		sessionList: l,
 		projectList: pl,
+		activePage:  PageSessions,
 	}
 	return m
 }
@@ -628,6 +651,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Delegate to the active view
 	switch m.activePage {
+	case PageLoading:
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyCtrlC {
+			return m, tea.Quit
+		}
+		return m, nil
 	case PageProjects:
 		return m.updateProjectsPage(msg)
 	case pageFileBrowser:
@@ -1146,6 +1174,8 @@ func (m Model) handleSessionListEnter() (tea.Model, tea.Cmd) {
 // View renders the current view.
 func (m Model) View() string {
 	switch m.activePage {
+	case PageLoading:
+		return m.viewLoading()
 	case PageProjects:
 		if m.commandPending {
 			listView := m.viewProjectList()
@@ -1162,6 +1192,20 @@ func (m Model) View() string {
 	default:
 		return m.viewSessionList()
 	}
+}
+
+// viewLoading renders the loading interstitial with centered text.
+func (m Model) viewLoading() string {
+	w := m.termWidth
+	h := m.termHeight
+	if w == 0 {
+		w = 80
+	}
+	if h == 0 {
+		h = 24
+	}
+	text := "Starting tmux server..."
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, text)
 }
 
 // viewProjectList renders the project list, with optional modal overlay.

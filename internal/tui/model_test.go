@@ -7357,3 +7357,115 @@ func TestHelpBarQuitBinding(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadingPage(t *testing.T) {
+	t.Run("model with WithServerStarted(true) starts on PageLoading", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		if m.ActivePage() != tui.PageLoading {
+			t.Errorf("expected PageLoading, got %d", m.ActivePage())
+		}
+		if !m.ServerStarted() {
+			t.Error("expected ServerStarted() to be true")
+		}
+	})
+
+	t.Run("model with WithServerStarted(false) starts on PageSessions", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(false))
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions, got %d", m.ActivePage())
+		}
+	})
+
+	t.Run("model without WithServerStarted starts on PageSessions", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister)
+		if m.ActivePage() != tui.PageSessions {
+			t.Errorf("expected PageSessions, got %d", m.ActivePage())
+		}
+	})
+
+	t.Run("loading view shows Starting tmux server text", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		view := model.View()
+		if !strings.Contains(view, "Starting tmux server...") {
+			t.Errorf("expected loading text, got:\n%s", view)
+		}
+	})
+
+	t.Run("loading view centers text in terminal", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		view := model.View()
+		lines := strings.Split(view, "\n")
+		// Text should not be on the first line — it should be roughly centered vertically
+		if len(lines) < 2 {
+			t.Fatal("expected multiple lines for centered layout")
+		}
+		if strings.Contains(lines[0], "Starting tmux server...") {
+			t.Error("text should not be on the first line when centered in 24-row terminal")
+		}
+		// Find which line has the text
+		textLine := -1
+		for i, line := range lines {
+			if strings.Contains(line, "Starting tmux server...") {
+				textLine = i
+				break
+			}
+		}
+		if textLine < 0 {
+			t.Fatal("loading text not found in view")
+		}
+		// Should be roughly in the middle (allowing some variance)
+		if textLine < 8 || textLine > 16 {
+			t.Errorf("expected text near vertical center (row 8-16 of 24), got row %d", textLine)
+		}
+	})
+
+	t.Run("loading view does not show session list chrome", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		view := model.View()
+		if strings.Contains(view, "Sessions") {
+			t.Error("loading view should not contain session list title 'Sessions'")
+		}
+	})
+
+	t.Run("loading view uses fallback dimensions when no WindowSizeMsg received", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		// Do NOT send WindowSizeMsg
+		view := m.View()
+		if !strings.Contains(view, "Starting tmux server...") {
+			t.Errorf("expected loading text with fallback dimensions, got:\n%s", view)
+		}
+		// Should have multiple lines (80x24 fallback centering)
+		lines := strings.Split(view, "\n")
+		if len(lines) < 2 {
+			t.Error("expected multiple lines with fallback 80x24 centering")
+		}
+	})
+
+	t.Run("Ctrl+C during loading page quits", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("expected quit command, got nil")
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("expected tea.QuitMsg, got %T", msg)
+		}
+		_ = model
+	})
+}
