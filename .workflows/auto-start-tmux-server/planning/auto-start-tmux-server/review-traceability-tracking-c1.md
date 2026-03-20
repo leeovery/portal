@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-20
 cycle: 1
 phase: Traceability Review
@@ -365,7 +365,7 @@ The fix adds a recurring session poll during the loading state using `tea.Tick` 
 **Spec Reference**: `.workflows/auto-start-tmux-server/specification/auto-start-tmux-server/specification.md` — "Timing" section, "TUI path" under "User Experience", "Two-phase ownership" under "Bootstrap Mechanism"
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

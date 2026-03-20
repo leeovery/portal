@@ -127,11 +127,11 @@ total: 3
 
 ### Task 2: Timing messages and transition logic
 
-**Problem**: Task 3-1 adds the loading page, but it has no way to transition to the normal view. The spec requires the TUI to transition out of the loading interstitial when (a) sessions are detected AND the minimum wait (1s) has elapsed, OR (b) the maximum wait (6s) elapses regardless. The TUI must remain responsive during loading — no blocking — so the timing must be message-based using Bubble Tea's `tea.Tick` pattern.
+**Problem**: Task 3-1 adds the loading page, but it has no way to transition to the normal view. The spec requires the TUI to transition out of the loading interstitial when (a) sessions are detected AND the minimum wait (1s) has elapsed, OR (b) the maximum wait (6s) elapses regardless. The TUI must remain responsive during loading — no blocking — so the timing must be message-based using Bubble Tea's `tea.Tick` pattern. Additionally, sessions may not exist on the initial fetch (continuum hasn't restored them yet), so the TUI needs to periodically re-fetch sessions during the loading state to detect them as they appear.
 
-**Solution**: Implement two custom message types (`minWaitElapsedMsg` and `maxWaitElapsedMsg`) and two corresponding `tea.Tick` commands that fire after the min and max wait durations. Track timing state with `minWaitDone bool` and `sessionsReceived bool` fields on the model. On `Init()`, when on the loading page, batch the existing session fetch with the two tick commands. When `SessionsMsg` arrives during loading, set `sessionsReceived` and transition immediately if `minWaitDone` is also true. When `minWaitElapsedMsg` arrives, set `minWaitDone` and transition immediately if `sessionsReceived` is also true. When `maxWaitElapsedMsg` arrives, transition unconditionally. Transition means setting `activePage` to the appropriate page (sessions or projects) and running `evaluateDefaultPage`.
+**Solution**: Implement two custom message types (`minWaitElapsedMsg` and `maxWaitElapsedMsg`) and two corresponding `tea.Tick` commands that fire after the min and max wait durations. Add a `pollSessionsCmd` that schedules a new session fetch after `DefaultPollInterval` (500ms). Track timing state with `minWaitDone bool` and `sessionsReceived bool` fields on the model. On `Init()`, when on the loading page, batch the existing session fetch with the two tick commands. When `SessionsMsg` arrives during loading with sessions, set `sessionsReceived` and transition immediately if `minWaitDone` is also true. When `SessionsMsg` arrives during loading with no sessions (empty or error), schedule another fetch after `DefaultPollInterval` to keep polling. When `minWaitElapsedMsg` arrives, set `minWaitDone` and transition immediately if `sessionsReceived` is also true. When `maxWaitElapsedMsg` arrives, transition unconditionally. Transition means setting `activePage` to the appropriate page (sessions or projects) and running `evaluateDefaultPage`.
 
-**Outcome**: The loading interstitial transitions to the normal TUI view when sessions appear (after min wait) or when the max wait elapses. The TUI remains responsive throughout — Ctrl+C works, window resizing works, and all timing is driven by Bubble Tea messages (no goroutine blocking).
+**Outcome**: The loading interstitial transitions to the normal TUI view when sessions appear (after min wait) or when the max wait elapses. Sessions are detected as they appear via periodic re-fetching during the loading state. The TUI remains responsive throughout — Ctrl+C works, window resizing works, and all timing is driven by Bubble Tea messages (no goroutine blocking).
 
 **Do**:
 - In `/Users/leeovery/Code/portal/internal/tui/model.go`:
@@ -149,7 +149,17 @@ total: 3
      minWaitDone      bool
      sessionsReceived bool
      ```
-  3. Modify `Init()` to batch tick commands when on the loading page:
+  3. Add a `pollSessionsCmd` method that schedules a new session fetch after `DefaultPollInterval`:
+     ```go
+     func (m Model) pollSessionsCmd() tea.Cmd {
+         return tea.Tick(tmux.DefaultPollInterval, func(time.Time) tea.Msg {
+             sessions, err := m.sessionLister.ListSessions()
+             return SessionsMsg{Sessions: sessions, Err: err}
+         })
+     }
+     ```
+     This uses `tea.Tick` to delay the fetch by 500ms, then executes the session list. The result arrives as a `SessionsMsg` which the existing handler processes. This is the TUI's equivalent of the CLI path's 500ms poll loop — it detects sessions as they appear after continuum restores them.
+  4. Modify `Init()` to batch tick commands when on the loading page:
      ```go
      func (m Model) Init() tea.Cmd {
          if m.commandPending {
@@ -181,8 +191,8 @@ total: 3
          return tea.Batch(cmds...)
      }
      ```
-     Add `"time"` and ensure `tmux` import is present. The `tmux.DefaultMinWait` and `tmux.DefaultMaxWait` constants are defined by Phase 2 Task 2-1 in `/Users/leeovery/Code/portal/internal/tmux/wait.go`.
-  4. Add a `transitionFromLoading()` method that transitions away from the loading page:
+     Add `"time"` and ensure `tmux` import is present. The `tmux.DefaultMinWait`, `tmux.DefaultMaxWait`, and `tmux.DefaultPollInterval` constants are defined by Phase 2 Task 2-1 in `/Users/leeovery/Code/portal/internal/tmux/wait.go`.
+  5. Add a `transitionFromLoading()` method that transitions away from the loading page:
      ```go
      func (m *Model) transitionFromLoading() {
          m.activePage = PageSessions
@@ -190,18 +200,22 @@ total: 3
      }
      ```
      This sets `activePage` to `PageSessions` as the default, then `evaluateDefaultPage()` may override it to `PageProjects` if there are no sessions. Note: `evaluateDefaultPage` checks `sessionsLoaded` and `projectsLoaded` — both should be true by the time transition happens (sessions were received, projects loaded in parallel). If projects haven't loaded yet, `evaluateDefaultPage` will be a no-op and the user sees the sessions page.
-  5. Update the `SessionsMsg` handler in `Update()` to handle the loading page case. After the existing `m.sessionsLoaded = true` and `m.evaluateDefaultPage()` lines, add:
+  6. Update the `SessionsMsg` handler in `Update()` to handle the loading page case. After the existing `m.sessionsLoaded = true` and `m.evaluateDefaultPage()` lines, add:
      ```go
      if m.activePage == PageLoading {
-         m.sessionsReceived = true
-         if m.minWaitDone {
-             m.transitionFromLoading()
+         if len(msg.Sessions) > 0 {
+             m.sessionsReceived = true
+             if m.minWaitDone {
+                 m.transitionFromLoading()
+             }
+             return m, nil
          }
-         return m, nil
+         // No sessions yet — schedule another fetch after poll interval
+         return m, m.pollSessionsCmd()
      }
      ```
-     **Important**: This check must come AFTER the existing `SessionsMsg` handling (setting sessions, filtering, etc.) but the transition logic is new. The simplest approach is to add it right before the `return m, nil` at the end of the `SessionsMsg` case, checking if we're still on the loading page.
-  6. Add handlers for the new message types in `Update()`. Add them to the cross-view message switch:
+     **Important**: This check must come AFTER the existing `SessionsMsg` handling (setting sessions, filtering, etc.) but the transition logic is new. The simplest approach is to add it right before the `return m, nil` at the end of the `SessionsMsg` case, checking if we're still on the loading page. When sessions are empty, `pollSessionsCmd` schedules a re-fetch after 500ms. This continues until sessions appear or `maxWaitElapsedMsg` fires and transitions away from loading.
+  7. Add handlers for the new message types in `Update()`. Add them to the cross-view message switch:
      ```go
      case minWaitElapsedMsg:
          if m.activePage == PageLoading {
@@ -217,7 +231,7 @@ total: 3
          }
          return m, nil
      ```
-  7. The loading page's key handling should only support Ctrl+C (quit). Since the `Update()` method delegates to page-specific handlers at the bottom (`switch m.activePage`), add a `PageLoading` case to that switch that swallows all key input except Ctrl+C:
+  8. The loading page's key handling should only support Ctrl+C (quit). Since the `Update()` method delegates to page-specific handlers at the bottom (`switch m.activePage`), add a `PageLoading` case to that switch that swallows all key input except Ctrl+C:
      ```go
      switch m.activePage {
      case PageLoading:
@@ -240,8 +254,9 @@ total: 3
 **Acceptance Criteria**:
 - [ ] `Init()` returns tick commands for min and max wait when `activePage` is `PageLoading`
 - [ ] `Init()` does NOT return tick commands when `activePage` is NOT `PageLoading`
-- [ ] When `SessionsMsg` arrives during loading AND `minWaitDone` is true, the model transitions to the normal view
-- [ ] When `SessionsMsg` arrives during loading but `minWaitDone` is false, the model stays on `PageLoading` (waits for min)
+- [ ] When `SessionsMsg` arrives during loading with sessions AND `minWaitDone` is true, the model transitions to the normal view
+- [ ] When `SessionsMsg` arrives during loading with sessions but `minWaitDone` is false, the model stays on `PageLoading` (waits for min)
+- [ ] When `SessionsMsg` arrives during loading with no sessions, a new session fetch is scheduled after `DefaultPollInterval` (500ms)
 - [ ] When `MinWaitElapsedMsg` arrives AND `sessionsReceived` is true, the model transitions to the normal view
 - [ ] When `MinWaitElapsedMsg` arrives but `sessionsReceived` is false, the model stays on `PageLoading` (waits for sessions or max)
 - [ ] When `MaxWaitElapsedMsg` arrives, the model transitions to the normal view unconditionally (even if no sessions)
@@ -256,16 +271,21 @@ total: 3
 - `"sessions before min wait does not transition"` — create model on `PageLoading`, send `SessionsMsg` with sessions (before sending `MinWaitElapsedMsg`), assert `ActivePage()` is still `PageLoading`
 - `"min wait elapsed with sessions transitions to normal view"` — create model on `PageLoading`, send `SessionsMsg` with sessions, then send `MinWaitElapsedMsg{}`, assert `ActivePage()` is `PageSessions`
 - `"sessions after min wait transitions immediately"` — create model on `PageLoading`, send `MinWaitElapsedMsg{}` first, then send `SessionsMsg` with sessions, assert `ActivePage()` is `PageSessions`
+- `"empty sessions during loading schedules another fetch"` — create model on `PageLoading`, send `SessionsMsg` with empty sessions, assert `ActivePage()` is still `PageLoading` and the returned `tea.Cmd` is non-nil (a poll command was scheduled)
+- `"sessions appearing on subsequent poll are detected"` — create model on `PageLoading`, send `SessionsMsg` with empty sessions (triggers re-poll), then send `MinWaitElapsedMsg`, then send `SessionsMsg` with sessions (simulating the re-poll result), assert `ActivePage()` transitions to `PageSessions`
 - `"max wait transitions even with no sessions"` — create model on `PageLoading`, send `MaxWaitElapsedMsg{}` without any `SessionsMsg`, assert `ActivePage()` is no longer `PageLoading` (should be `PageProjects` since no sessions, via `evaluateDefaultPage`)
 - `"max wait transitions even when min wait not elapsed"` — create model on `PageLoading`, send `MaxWaitElapsedMsg{}` (without `MinWaitElapsedMsg`), assert transition occurs
 - `"Ctrl+C during loading quits"` — create model on `PageLoading`, send `tea.KeyMsg{Type: tea.KeyCtrlC}`, verify quit command returned
 - `"regular keys during loading are swallowed"` — create model on `PageLoading`, send `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}`, assert model stays on `PageLoading` and no quit command
 - `"transition goes to sessions page when sessions exist"` — create model on `PageLoading` with project store, send `SessionsMsg` with sessions, send `ProjectsLoadedMsg`, send `MinWaitElapsedMsg`, assert `ActivePage() == PageSessions`
-- `"transition goes to projects page when no sessions"` — create model on `PageLoading` with project store, send `SessionsMsg` with empty sessions, send `ProjectsLoadedMsg`, send `MaxWaitElapsedMsg`, assert `ActivePage() == PageProjects`
+- `"transition goes to projects page when no sessions"`
+- `"poll stops after transition from loading"` — create model on `PageLoading`, send `MaxWaitElapsedMsg` (transitions away), then send `SessionsMsg` (from an orphaned poll), assert model handles it as a normal session refresh without re-entering loading logic — create model on `PageLoading` with project store, send `SessionsMsg` with empty sessions, send `ProjectsLoadedMsg`, send `MaxWaitElapsedMsg`, assert `ActivePage() == PageProjects`
 
 **Edge Cases**:
 - Sessions before minWait (still waits): If `SessionsMsg` arrives before `MinWaitElapsedMsg`, the model sets `sessionsReceived = true` but stays on `PageLoading`. The transition only happens when `MinWaitElapsedMsg` subsequently arrives. This prevents a jarring sub-second flash of the loading screen. Spec: "Minimum 1 second — prevents a jarring flash if sessions appear very quickly."
 - No sessions by maxWait (transitions anyway): If `MaxWaitElapsedMsg` arrives and no sessions have appeared, the model transitions unconditionally. `evaluateDefaultPage` will route to `PageProjects` (empty state). Spec: "Maximum 6 seconds — proceed regardless after this."
+- Sessions appearing after initial fetch: The primary use case — continuum restores sessions 1-3 seconds after server start. The initial `Init()` fetch returns empty. `pollSessionsCmd` re-fetches every 500ms. When sessions appear, the next `SessionsMsg` sets `sessionsReceived = true` and transitions if `minWaitDone`. This matches the spec's intent: "Transition out of the loading state as soon as sessions are detected."
+- Orphaned poll commands after transition: If `maxWaitElapsedMsg` fires and transitions away from loading, a pending `pollSessionsCmd` may still deliver a `SessionsMsg`. This is handled safely — the `SessionsMsg` handler updates the session list normally, and the `if m.activePage == PageLoading` guard is no longer true so no loading-specific logic runs.
 - Ctrl+C during loading quits: The loading page handler must check for Ctrl+C and return `tea.Quit`. All other keys are swallowed — the user cannot navigate to sessions/projects during loading.
 - Messages arriving after transition: If `MinWaitElapsedMsg` or `MaxWaitElapsedMsg` arrive when `activePage` is no longer `PageLoading` (because transition already happened), they are no-ops due to the `if m.activePage == PageLoading` guard.
 
