@@ -1,5 +1,7 @@
 package cmd
 
+// Tests in this file mutate package-level state (bootstrapDeps, attachDeps) and MUST NOT use t.Parallel.
+
 import (
 	"fmt"
 	"testing"
