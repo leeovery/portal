@@ -56,7 +56,7 @@
             "auto-start-tmux-server-3-2": "tick-b7044d",
             "auto-start-tmux-server-3-3": "tick-313884"
           },
-          "review_cycle": 1
+          "review_cycle": 2
         }
       },
       "format": "tick"
