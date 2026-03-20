@@ -67,3 +67,18 @@
 | auto-start-tmux-server-3-1 | Loading page state and view | terminal dimensions not yet received (fallback 80x24), serverStarted=false skips loading page |
 | auto-start-tmux-server-3-2 | Timing messages and transition logic | sessions before minWait (still waits), no sessions by maxWait (transitions anyway), Ctrl+C during loading quits |
 | auto-start-tmux-server-3-3 | Wire serverStarted into TUI launch path | server already running (no interstitial), open with destination skips TUI (Phase 2 CLI wait) |
+
+## Phase 4: Analysis (Cycle 1)
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+### Tasks
+<!-- status: approved, approved_at: 2026-03-20 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| auto-start-tmux-server-4-1 | Fix double session wait on open command fallback-to-TUI path | CLI bootstrapWait already ran then falls back to TUI (skip TUI interstitial), direct TUI path still shows interstitial |
+| auto-start-tmux-server-4-2 | Extract tmux.NewClient construction to a single helper | 8 construction sites reduced to 1 in PersistentPreRunE, test deps structs bypass context client |
+| auto-start-tmux-server-4-3 | Make bootstrapWait injection consistent with interface-based DI pattern | nil-check branching removed, Waiter injected via bootstrapDeps struct |
+| auto-start-tmux-server-4-4 | Eliminate package-level mutable DI vars to prevent test isolation risk | Option A (context-based) vs Option B (documented constraint), t.Parallel data race prevention |

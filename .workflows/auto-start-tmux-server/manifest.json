@@ -54,7 +54,12 @@
             "auto-start-tmux-server-3": "tick-55ff5a",
             "auto-start-tmux-server-3-1": "tick-68976a",
             "auto-start-tmux-server-3-2": "tick-b7044d",
-            "auto-start-tmux-server-3-3": "tick-313884"
+            "auto-start-tmux-server-3-3": "tick-313884",
+            "auto-start-tmux-server-4": "tick-bd7001",
+            "auto-start-tmux-server-4-1": "tick-a06ea1",
+            "auto-start-tmux-server-4-2": "tick-386271",
+            "auto-start-tmux-server-4-3": "tick-a271d4",
+            "auto-start-tmux-server-4-4": "tick-738e6c"
           },
           "review_cycle": 2
         }

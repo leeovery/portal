@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: Auto Start Tmux Server (Cycle 1)
 
 ## Task 1: Fix double session wait on open command fallback-to-TUI path
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -30,7 +30,7 @@ sources: standards
 - Test that open with no destination + server-just-started still shows TUI loading interstitial
 
 ## Task 2: Extract tmux.NewClient construction to a single helper
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -56,7 +56,7 @@ sources: duplication, architecture
 - Existing cmd test suite passes (no new tests needed — this is a pure refactor)
 
 ## Task 3: Make bootstrapWait injection consistent with interface-based DI pattern
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -84,7 +84,7 @@ sources: architecture
 - Existing command tests (attach, kill, list, open) pass with updated bootstrapWait call signatures
 
 ## Task 4: Eliminate package-level mutable DI vars to prevent test isolation risk
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
