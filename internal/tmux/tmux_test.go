@@ -122,6 +122,48 @@ func TestListSessions(t *testing.T) {
 	}
 }
 
+func TestServerRunning(t *testing.T) {
+	t.Run("returns true when tmux server is running", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		got := client.ServerRunning()
+
+		if !got {
+			t.Error("ServerRunning() = false, want true")
+		}
+	})
+
+	t.Run("returns false when no tmux server is running", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("no server running on /tmp/tmux-501/default")}
+		client := tmux.NewClient(mock)
+
+		got := client.ServerRunning()
+
+		if got {
+			t.Error("ServerRunning() = true, want false")
+		}
+	})
+
+	t.Run("calls tmux info to check server status", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		client.ServerRunning()
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"info"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		if mock.Calls[0][0] != "info" {
+			t.Errorf("called with %q, want %q", mock.Calls[0][0], "info")
+		}
+	})
+}
+
 func TestHasSession(t *testing.T) {
 	t.Run("returns true when session exists", func(t *testing.T) {
 		mock := &MockCommander{}

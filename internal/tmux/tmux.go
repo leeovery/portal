@@ -42,6 +42,13 @@ func NewClient(cmd Commander) *Client {
 	return &Client{cmd: cmd}
 }
 
+// ServerRunning reports whether a tmux server is currently running.
+// It runs "tmux info" which succeeds even with zero sessions.
+func (c *Client) ServerRunning() bool {
+	_, err := c.cmd.Run("info")
+	return err == nil
+}
+
 // HasSession reports whether a tmux session with the given name exists.
 // Returns false when the session does not exist or no tmux server is running.
 func (c *Client) HasSession(name string) bool {
