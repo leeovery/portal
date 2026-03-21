@@ -126,7 +126,26 @@
     "review": {
       "items": {
         "auto-start-tmux-server": {
-          "status": "in-progress"
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "auto-start-tmux-server-1-1",
+            "auto-start-tmux-server-1-2",
+            "auto-start-tmux-server-1-3",
+            "auto-start-tmux-server-1-4",
+            "auto-start-tmux-server-2-1",
+            "auto-start-tmux-server-2-2",
+            "auto-start-tmux-server-2-3",
+            "auto-start-tmux-server-3-1",
+            "auto-start-tmux-server-3-2",
+            "auto-start-tmux-server-3-3",
+            "auto-start-tmux-server-4-1",
+            "auto-start-tmux-server-4-2",
+            "auto-start-tmux-server-4-3",
+            "auto-start-tmux-server-4-4",
+            "auto-start-tmux-server-5-1",
+            "auto-start-tmux-server-5-2",
+            "auto-start-tmux-server-6-1"
+          ]
         }
       }
     }
