@@ -1,0 +1,16 @@
+{
+  "work_units": {
+    "auto-start-tmux-server": {
+      "work_type": "feature"
+    },
+    "tui-redesign": {
+      "work_type": "feature"
+    },
+    "tui-session-picker": {
+      "work_type": "feature"
+    },
+    "v1": {
+      "work_type": "epic"
+    }
+  }
+}

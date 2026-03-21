@@ -34,11 +34,46 @@
       "items": {
         "portal": {
           "status": "completed",
-          "type": "feature"
+          "sources": {
+            "cx-design": {
+              "status": "incorporated"
+            },
+            "zellij-multi-directory": {
+              "status": "incorporated"
+            },
+            "fzf-output-mode": {
+              "status": "incorporated"
+            },
+            "git-root-and-completions": {
+              "status": "incorporated"
+            },
+            "zellij-to-tmux-migration": {
+              "status": "incorporated"
+            },
+            "x-xctl-split": {
+              "status": "incorporated"
+            },
+            "session-launch-command": {
+              "status": "incorporated"
+            }
+          }
         },
         "zw": {
           "status": "superseded",
-          "type": "feature"
+          "sources": {
+            "cx-design": {
+              "status": "incorporated"
+            },
+            "zellij-multi-directory": {
+              "status": "incorporated"
+            },
+            "fzf-output-mode": {
+              "status": "incorporated"
+            },
+            "git-root-and-completions": {
+              "status": "incorporated"
+            }
+          }
         }
       }
     },

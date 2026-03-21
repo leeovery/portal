@@ -16,9 +16,13 @@
       "items": {
         "tui-session-picker": {
           "status": "completed",
-          "type": "feature",
           "review_cycle": 2,
-          "finding_gate_mode": "gated"
+          "finding_gate_mode": "gated",
+          "sources": {
+            "tui-session-picker": {
+              "status": "incorporated"
+            }
+          }
         }
       }
     },

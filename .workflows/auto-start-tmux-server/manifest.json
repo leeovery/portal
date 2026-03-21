@@ -16,7 +16,6 @@
       "items": {
         "auto-start-tmux-server": {
           "status": "completed",
-          "type": "feature",
           "review_cycle": 3,
           "finding_gate_mode": "gated",
           "date": "2026-03-19",
