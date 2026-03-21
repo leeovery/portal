@@ -1,7 +1,7 @@
 {
   "name": "auto-start-tmux-server",
   "work_type": "feature",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-03-17",
   "description": "Auto-bootstrap tmux server on Portal launch when no server is running, removing dependency on LaunchAgent",
   "phases": {
@@ -126,7 +126,7 @@
     "review": {
       "items": {
         "auto-start-tmux-server": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "auto-start-tmux-server-1-1",
             "auto-start-tmux-server-1-2",
