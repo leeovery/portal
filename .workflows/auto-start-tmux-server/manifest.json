@@ -123,6 +123,13 @@
       "linters": [
         "golangci-lint run ./..."
       ]
+    },
+    "review": {
+      "items": {
+        "auto-start-tmux-server": {
+          "status": "in-progress"
+        }
+      }
     }
   }
 }

@@ -22,6 +22,11 @@ H. Update progress + phase check + commit
 
 ## A. Retrieve Next Task
 
+Read the plan's `external_id` via manifest CLI:
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.js get {work_unit}.planning.{topic} external_id
+```
+
 Follow the format's **reading.md** instructions to determine the next available task.
 
 #### If no available tasks remain
@@ -262,7 +267,7 @@ node .claude/skills/workflow-manifest/scripts/manifest.js key-of {work_unit}.pla
 **Update implementation state via manifest CLI**:
 ```bash
 node .claude/skills/workflow-manifest/scripts/manifest.js set {work_unit}.implementation.{topic} current_phase {N}
-node .claude/skills/workflow-manifest/scripts/manifest.js set {work_unit}.implementation.{topic} current_task {next_task_id or ~}
+node .claude/skills/workflow-manifest/scripts/manifest.js set {work_unit}.implementation.{topic} current_task '{next_task_id or ~}'
 node .claude/skills/workflow-manifest/scripts/manifest.js push {work_unit}.implementation.{topic} completed_tasks "{internal_id}"
 ```
 If the current phase has no remaining open/in-progress tasks: `node .claude/skills/workflow-manifest/scripts/manifest.js push {work_unit}.implementation.{topic} completed_phases {N}`

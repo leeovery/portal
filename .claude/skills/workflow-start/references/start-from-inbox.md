@@ -46,7 +46,7 @@ Read the full content of the selected inbox file.
 
 Invoke `/start-bugfix` with the inbox file path as positional argument:
 
-`/start-bugfix .workflows/inbox/bugs/{file}`
+`/start-bugfix .workflows/.inbox/bugs/{file}`
 
 This skill ends. The invoked skill handles archival. Terminal.
 
@@ -60,6 +60,7 @@ What type of work unit?
 
 - **`f`/`feature`** — Single-topic feature
 - **`e`/`epic`** — Multi-topic initiative
+- **`c`/`cross-cutting`** — Cross-cutting concern (pattern or policy)
 · · · · · · · · · · · ·
 ```
 
@@ -67,12 +68,18 @@ What type of work unit?
 
 **If `f`/`feature`:**
 
-Invoke `/start-feature .workflows/inbox/ideas/{file}`.
+Invoke `/start-feature .workflows/.inbox/ideas/{file}`.
 
 This skill ends. The invoked skill handles archival. Terminal.
 
 **If `e`/`epic`:**
 
-Invoke `/start-epic .workflows/inbox/ideas/{file}`.
+Invoke `/start-epic .workflows/.inbox/ideas/{file}`.
+
+This skill ends. The invoked skill handles archival. Terminal.
+
+**If `c`/`cross-cutting`:**
+
+Invoke `/start-cross-cutting .workflows/.inbox/ideas/{file}`.
 
 This skill ends. The invoked skill handles archival. Terminal.

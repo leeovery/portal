@@ -1,17 +1,17 @@
-# Epic Name and Conflict Check
+# Name and Conflict Check
 
-*Reference for **[start-epic](../SKILL.md)***
+*Reference for **[start-cross-cutting](../SKILL.md)***
 
 ---
 
 ## A. Name Suggestion
 
-Based on the epic description, suggest a name in kebab-case. Once confirmed, this becomes `{work_unit}` for all subsequent references.
+Based on the description, suggest a name in kebab-case. Once confirmed, this becomes both `{work_unit}` and `{topic}` — for cross-cutting, they are always the same value.
 
 > *Output the next fenced block as a code block:*
 
 ```
-Suggested epic name: {work_unit}
+Suggested name: {work_unit}
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
@@ -44,13 +44,15 @@ node .claude/skills/workflow-manifest/scripts/manifest.js exists {work_unit}
 ```
 A work unit named "{work_unit}" already exists.
 
-Run /continue-epic to resume, or choose a different name.
+Run /continue-cross-cutting to resume, or choose a different name.
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 · · · · · · · · · · · ·
+What would you like to do?
+
 - **`n`/`new`** — Choose a different name
 · · · · · · · · · · · ·
 ```
@@ -64,10 +66,10 @@ Run /continue-epic to resume, or choose a different name.
 Create the work unit manifest:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.js init {work_unit} --work-type epic --description "{description}"
+node .claude/skills/workflow-manifest/scripts/manifest.js init {work_unit} --work-type cross-cutting --description "{description}"
 ```
 
-Where `{description}` is a concise one-line summary compiled from the epic context gathered in Step 1.
+Where `{description}` is a concise one-line summary compiled from the context gathered in Step 1.
 
 **If this work unit was started from an inbox file**, archive it:
 
