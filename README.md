@@ -16,7 +16,7 @@ A CLI that gives you fast, fuzzy session management from bare shell,
 
 ---
 
-Portal is a CLI that runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, and auto-detects git roots for new sessions.
+Portal is a CLI that runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, auto-detects git roots for new sessions, and automatically starts the tmux server when needed (great for post-reboot tmux-continuum/resurrect workflows).
 
 After [shell integration](#shell-integration), you interact with Portal through two functions: **`x`** (session picker / opener) and **`xctl`** (subcommands like list, kill, alias). The function names are customizable — see `--cmd` below.
 
@@ -195,6 +195,19 @@ portal init bash --cmd p
 | `q`/`Esc` | Quit |
 
 The TUI has three views: session list, project picker, and file browser.
+
+## Automatic Server Bootstrap
+
+Portal automatically starts the tmux server if it isn't already running. This eliminates the need for LaunchAgents or other workarounds to keep tmux alive across reboots — especially useful with tmux-continuum/resurrect.
+
+**How it works:**
+
+- On any command that needs tmux (`open`, `list`, `attach`, `kill`), Portal checks for a running server and starts one if missing
+- The **TUI** shows a brief "Starting tmux server..." loading screen while waiting for sessions to restore (1–6s)
+- **CLI commands** print "Starting tmux server..." to stderr, then proceed normally once ready
+- If the server is already running, there's zero overhead — commands execute immediately
+
+Portal is plugin-agnostic: it doesn't depend on continuum or resurrect. It simply starts the server and waits briefly for any session restoration to complete.
 
 ## Configuration
 
