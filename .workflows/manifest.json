@@ -11,6 +11,9 @@
     },
     "v1": {
       "work_type": "epic"
+    },
+    "resume-sessions-after-reboot": {
+      "work_type": "feature"
     }
   }
 }
