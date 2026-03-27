@@ -93,6 +93,8 @@ This is a Portal-mediated action, not a tmux hook. If someone uses raw `tmux att
 
 Row 6 (crash then reboot) is arguably correct — tool was running, didn't signal intentional shutdown, server restarted. User can close it again if unwanted.
 
+**Post-execution:** After Portal executes a restart command, it sets the volatile marker (`@portal-active-{pane_id}`) for that pane. This prevents re-execution on subsequent `portal open` calls. Self-registering tools (like Claude Code) will overwrite this marker when they call `xctl hooks set`, which is harmless — the marker is already present.
+
 **Auto-execute:** No confirmation prompt. The user already registered these commands as "restart me." The two-condition check provides sufficient safety. If something restarts that shouldn't have, the user can close it.
 
 ### Stale Registration Cleanup

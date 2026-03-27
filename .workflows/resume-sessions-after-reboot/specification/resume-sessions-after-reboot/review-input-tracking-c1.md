@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-27
 cycle: 1
 phase: Input Review
@@ -27,5 +27,5 @@ The specification should either: (a) state that Portal sets the volatile marker 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Portal sets volatile marker after executing restart command. Added to Execution Mechanics section.
