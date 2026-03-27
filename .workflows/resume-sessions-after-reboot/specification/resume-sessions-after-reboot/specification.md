@@ -74,6 +74,27 @@ Use the tmux server itself as volatile storage. Set a tmux server-level option w
 - `set-environment -g` also dies with the server and isn't restored
 - The marker's absence is a tautological indicator of "server restarted since registration"
 
+### Execution Mechanics
+
+**Trigger:** Lazy execution during Portal's connection flow. Restart commands fire when the user connects to a session via Portal (e.g., `portal open`). No eager startup, no tmux-level hooks. Bypass Portal, bypass the registry.
+
+This is a Portal-mediated action, not a tmux hook. If someone uses raw `tmux attach`, they've bypassed Portal and don't get Portal's benefits.
+
+**Two-condition execution check:** persistent entry exists AND volatile marker absent.
+
+| Scenario | Entry? | Marker? | Result |
+|----------|:---:|:---:|--------|
+| Reboot, tool was running | Yes | No (server died) | Execute |
+| Normal reattach, tool running | Yes | Yes | Skip |
+| Reattach after clean exit | No (deregistered) | No (removed) | Skip |
+| Reattach after crash/kill -9 | Yes | Yes (same server) | Skip |
+| Reboot after clean exit | No | No | Skip |
+| Reboot after crash (no deregister) | Yes | No (server died) | Execute |
+
+Row 6 (crash then reboot) is arguably correct — tool was running, didn't signal intentional shutdown, server restarted. User can close it again if unwanted.
+
+**Auto-execute:** No confirmation prompt. The user already registered these commands as "restart me." The two-condition check provides sufficient safety. If something restarts that shouldn't have, the user can close it.
+
 ---
 
 ## Working Notes
