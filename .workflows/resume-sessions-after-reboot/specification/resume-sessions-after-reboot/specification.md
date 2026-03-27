@@ -57,6 +57,23 @@ xctl hooks list
 
 Under the hood: `xctl hooks set` = `portal hooks set`.
 
+### Volatile Marker Mechanism
+
+Use the tmux server itself as volatile storage. Set a tmux server-level option when registering a hook — this marker lives only in server memory and dies when the server dies. tmux-resurrect does NOT restore tmux options.
+
+**Implementation:**
+
+- **On register (`hooks set`):** Set tmux server option `@portal-active-{pane_id}` (e.g., `set-option -s @portal-active-%3 1`)
+- **On deregister (`hooks rm`):** Remove tmux server option `@portal-active-{pane_id}`
+- **On execution check:** Query for the marker — absent means server restarted since registration
+
+**Why this works:**
+
+- `set-option -s @custom-var` works — tmux supports `@`-prefixed user options at server level
+- tmux-resurrect does not save or restore any tmux options (server, session, window, or pane level)
+- `set-environment -g` also dies with the server and isn't restored
+- The marker's absence is a tautological indicator of "server restarted since registration"
+
 ---
 
 ## Working Notes
