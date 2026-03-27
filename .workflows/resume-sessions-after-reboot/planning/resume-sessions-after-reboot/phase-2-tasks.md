@@ -71,8 +71,9 @@ total: 5
     2. If the loaded map is empty, return (no hooks registered at all)
     3. Call `lister.ListPanes(sessionName)` -- if error, return silently (session may not exist yet)
     4. If panes slice is empty, return (no panes to check)
-    5. For each pane ID in the panes slice:
-       a. Look up `hooks[paneID]` in the loaded map -- if not present, skip this pane (no hooks registered)
+    5. Build a set from the session's pane IDs (from step 3) for O(1) lookup.
+    6. Iterate over the loaded hook map's pane IDs (from step 1), following the JSON store's iteration order per spec. For each pane ID in the hook map:
+       a. Check if this pane ID is in the session's pane set (from step 5) -- if not, skip this pane (belongs to a different session)
        b. Look up `hooks[paneID]["on-resume"]` -- if not present, skip this pane (no on-resume hook)
        c. Call `checker.GetServerOption("@portal-active-"+paneID)` -- if it returns a value (no error), the marker exists, skip this pane (already active on this server lifetime)
        d. If `GetServerOption` returns an error (marker absent, meaning `tmux.ErrOptionNotFound`), the two-condition check passes: call `sender.SendKeys(paneID, command)`. If `SendKeys` returns an error, silently ignore it and continue to the next pane.

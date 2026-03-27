@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-27
 cycle: 1
 phase: Traceability Review
@@ -65,6 +65,6 @@ The correct approach per the spec: iterate over the JSON store's pane IDs (sorte
        e. After successful or failed `SendKeys`, call `checker.SetServerOption("@portal-active-"+paneID, "1")` to set the volatile marker. Ignore the error from `SetServerOption` as well (best-effort).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 The practical impact is low since `send-keys` is fire-and-forget, but the spec is explicit about iteration order coming from the JSON store. The proposed fix inverts the lookup: iterate over store entries and filter by session membership, rather than iterate over session panes and look up in the store. Go map iteration order is non-deterministic, but the spec says "pane ID iteration from the JSON store" which implies iterating the store's keys (in whatever order Go maps provide). If deterministic ordering is desired, the keys could be sorted, but the spec does not require sorted order -- it just says "from the JSON store."
