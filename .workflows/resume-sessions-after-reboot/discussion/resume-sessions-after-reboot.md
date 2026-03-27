@@ -21,8 +21,8 @@ The core problem: tmux-resurrect's `@resurrect-processes` re-runs original launc
 
 - [x] What scoping model should the registry use — per-pane, per-session, or per-window?
 - [x] When should restart commands execute — eagerly on bootstrap, lazily on session select, or hybrid?
-- [ ] Should Portal detect dead processes or just execute whatever is registered?
-- [ ] Should Portal confirm before sending commands to panes, or auto-execute?
+- [x] Should Portal detect dead processes or just execute whatever is registered?
+- [x] Should Portal confirm before sending commands to panes, or auto-execute?
 - [ ] What should the subcommand be called and what's the CLI surface?
 - [ ] What storage format and location for the registry?
 - [ ] How should stale registrations be handled (pane closed before reboot, session deleted)?
@@ -89,5 +89,59 @@ Key clarification: this is a Portal-mediated action, not a tmux hook. If someone
 ### Decision
 
 **Lazy execution, triggered during Portal's connection flow.** Restart commands fire when the user connects to a session via Portal (e.g. `portal open`). No eager startup, no tmux-level hooks. Bypass Portal, bypass the registry.
+
+---
+
+## Should Portal detect dead processes or just execute whatever is registered?
+
+### Context
+
+After reboot, panes have dead processes (empty shells). But in normal operation, a pane might still have its process running. Portal needs to know when to fire a restart command and when to skip.
+
+### Journey
+
+Initially considered two simple approaches: registry-driven (just execute if entry exists) or detection-first (check if process is dead). Both had problems — registry-driven would re-execute on normal reattach; detection couldn't distinguish "user quit Claude" from "reboot killed Claude."
+
+The real problem is distinguishing "server restarted" from "same server, process just stopped." An "executed" flag was proposed but had a flaw: if the user manually exits Claude without the exit hook firing, the flag would be unset, causing a false restart on next attach.
+
+Server PID/timestamp tracking was explored — record which server lifetime the entry was registered under, compare on attach. Felt brittle and overcomplicated.
+
+The breakthrough: **use the tmux server itself as volatile storage.** Set a tmux server-level option (`set-option -s @portal-active-{pane_id}`) when registering. This marker lives only in server memory — it dies when the server dies and resurrect does NOT restore it.
+
+Verified via research:
+- `set-option -s @custom-var` works — tmux supports `@`-prefixed user options at server level
+- tmux-resurrect does not save or restore any tmux options (server, session, window, or pane level)
+- `set-environment -g` also dies with the server and isn't restored
+
+### Decision
+
+**Two-condition check: persistent entry exists AND volatile marker absent.**
+
+- **Persistent store** (file on disk): `pane_id → restart_command` — survives reboot
+- **Volatile marker** (tmux server option): `@portal-active-{pane_id}` — dies with server
+- **On register**: write persistent entry + set volatile marker
+- **On deregister**: remove persistent entry + remove volatile marker
+- **Execute when**: entry exists AND marker absent
+
+No process detection needed. No executed flags. No server PID tracking.
+
+| Scenario | Entry? | Marker? | Result |
+|----------|:---:|:---:|--------|
+| Reboot, tool was running | Yes | No (server died) | Execute |
+| Normal reattach, tool running | Yes | Yes | Skip |
+| Reattach after clean exit | No (deregistered) | No (removed) | Skip |
+| Reattach after crash/kill -9 | Yes | Yes (same server) | Skip |
+| Reboot after clean exit | No | No | Skip |
+| Reboot after crash (no deregister) | Yes | No (server died) | Execute |
+
+Row 6 (crash then reboot) is arguably correct — tool was running, didn't signal intentional shutdown, server restarted. User can close it again if unwanted.
+
+---
+
+## Should Portal confirm before sending commands to panes, or auto-execute?
+
+### Decision
+
+**Auto-execute.** The entire point is restoring state to what it was before reboot. Confirmation would defeat the purpose — the user already registered these commands as "restart me." The two-condition check (entry + no marker) provides sufficient safety. If something restarts that shouldn't have, the user can close it.
 
 ---
