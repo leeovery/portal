@@ -257,3 +257,21 @@ Adding hook cleanup to `xctl clean` is a natural fit — it already says "remove
 **No. Out of scope.** Portal has no awareness of tmux-resurrect or any other plugin. It doesn't know or care what's in the user's tmux config. If there's a conflict, that's the user's configuration to manage.
 
 ---
+
+## Summary
+
+### Key Insights
+
+1. The tmux server itself is the ideal volatile store — server-level `@` options die with the server and resurrect doesn't restore them, making them a tautological indicator of "did the server restart?"
+2. Two-condition execution check (persistent entry + no volatile marker) eliminates the need for process detection, executed flags, or server PID tracking
+3. The hook system surface (`xctl hooks set/rm/list`) generalizes beyond resume to future lifecycle events without redesign
+4. Portal has no awareness of tmux plugins — it owns its registry and its execution flow, nothing more
+
+### Current State
+
+- All 8 questions resolved with decisions and rationale
+- Ready for specification phase
+
+### Next Steps
+
+- [ ] Specification: formalize the hook system, storage format, execution mechanics, and CLI surface
