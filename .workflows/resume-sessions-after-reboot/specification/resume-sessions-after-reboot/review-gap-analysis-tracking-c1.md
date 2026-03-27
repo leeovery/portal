@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-27
 cycle: 1
 phase: Gap Analysis
@@ -64,8 +64,8 @@ The AttachConnector case (outside tmux) is particularly important: `syscall.Exec
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added insertion point and connection path details to Execution Mechanics.
 
 ---
 
@@ -80,8 +80,8 @@ The spec says `hooks list` "shows all registered hooks across all panes" but doe
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added tab-separated output format to CLI Surface section.
 
 ---
 
@@ -96,8 +96,8 @@ The spec defines `hooks rm --on-resume` but doesn't state behavior when no hook 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Silent no-op — supports scripting use case. Added to CLI Surface section.
 
 ---
 
@@ -112,8 +112,8 @@ A session can have many panes, each with registered hooks. The spec doesn't defi
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Sequential fire-and-forget. Added to Execution Mechanics section.
 
 ---
 
@@ -128,6 +128,6 @@ The `skipTmuxCheck` map in `root.go` controls which commands bypass the tmux ser
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: hooks added to skipTmuxCheck, subcommands validate $TMUX_PANE themselves. Added to CLI Surface section.
 

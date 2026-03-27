@@ -53,11 +53,22 @@ xctl hooks list
 - Only `--on-resume` implemented initially; surface supports future event types (e.g., `--on-start`, `--on-close`)
 - Mirrors `xctl alias set`/`rm`/`list` for consistency
 
-**`hooks list`** shows all registered hooks across all panes — no filtering flags needed.
+**`hooks list`** shows all registered hooks across all panes — no filtering flags needed. Output format:
+
+```
+%3  on-resume  claude --resume abc123
+%7  on-resume  claude --resume def456
+```
+
+One line per hook, tab-separated: pane ID, event type, command.
 
 Under the hood: `xctl hooks set` = `portal hooks set`.
 
 `hooks set` and `hooks rm` require `$TMUX_PANE`. If absent (e.g., called outside tmux), the command exits with an error: "must be run from inside a tmux pane".
+
+`hooks rm` is a silent no-op if no hook is registered for the current pane. This supports scripting — tools calling `rm` in cleanup paths shouldn't fail if the hook was already removed.
+
+**tmux requirement:** `hooks` is added to `skipTmuxCheck` (like `alias`) — it doesn't need Portal's tmux bootstrap. `hooks list` only reads the JSON file and doesn't need tmux at all. `hooks set` and `hooks rm` validate `$TMUX_PANE` themselves and require a running tmux client for the volatile marker operations.
 
 ### Volatile Marker Mechanism
 
@@ -95,9 +106,13 @@ This is a Portal-mediated action, not a tmux hook. If someone uses raw `tmux att
 
 Row 6 (crash then reboot) is arguably correct — tool was running, didn't signal intentional shutdown, server restarted. User can close it again if unwanted.
 
+**Insertion point:** Hook execution happens **before** connecting to the session. This is required for `AttachConnector` (`syscall.Exec` replaces the process — nothing can run after) and consistent for `SwitchConnector`. All Portal connection paths trigger hook execution: TUI picker selection, direct path argument, and `portal attach`.
+
 **Command delivery:** Portal uses `tmux send-keys` to deliver restart commands to panes. This types the command into the pane's existing shell as if the user typed it. If the restarted process later exits, the user returns to their shell prompt.
 
 **Post-execution:** After Portal executes a restart command, it sets the volatile marker (`@portal-active-{pane_id}`) for that pane. This prevents re-execution on subsequent `portal open` calls. Self-registering tools (like Claude Code) will overwrite this marker when they call `xctl hooks set`, which is harmless — the marker is already present.
+
+**Multiple panes:** When a session has multiple panes with registered hooks, Portal executes them sequentially (fire-and-forget via `send-keys` — no waiting for completion). Order follows pane ID iteration from the JSON store.
 
 **Auto-execute:** No confirmation prompt. The user already registered these commands as "restart me." The two-condition check provides sufficient safety. If something restarts that shouldn't have, the user can close it.
 
