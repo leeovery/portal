@@ -106,13 +106,15 @@ This is a Portal-mediated action, not a tmux hook. If someone uses raw `tmux att
 
 Row 6 (crash then reboot) is arguably correct — tool was running, didn't signal intentional shutdown, server restarted. User can close it again if unwanted.
 
+**Scope:** Hook execution is scoped to the target session's panes only. Portal queries tmux for the session's panes and cross-references the registry — hooks for other sessions are not touched. After a reboot with 5 sessions restored, hooks fire incrementally as the user opens each session.
+
 **Insertion point:** Hook execution happens **before** connecting to the session. This is required for `AttachConnector` (`syscall.Exec` replaces the process — nothing can run after) and consistent for `SwitchConnector`. All Portal connection paths trigger hook execution: TUI picker selection, direct path argument, and `portal attach`.
 
 **Command delivery:** Portal uses `tmux send-keys` to deliver restart commands to panes. This types the command into the pane's existing shell as if the user typed it. If the restarted process later exits, the user returns to their shell prompt.
 
 **Post-execution:** After Portal executes a restart command, it sets the volatile marker (`@portal-active-{pane_id}`) for that pane. This prevents re-execution on subsequent `portal open` calls. Self-registering tools (like Claude Code) will overwrite this marker when they call `xctl hooks set`, which is harmless — the marker is already present.
 
-**Multiple panes:** When a session has multiple panes with registered hooks, Portal executes them sequentially (fire-and-forget via `send-keys` — no waiting for completion). Order follows pane ID iteration from the JSON store.
+**Multiple panes:** When a session has multiple panes with registered hooks, Portal executes them sequentially (fire-and-forget via `send-keys` — no waiting for completion). Order follows pane ID iteration from the JSON store. If `send-keys` fails for a pane (e.g., pane in unexpected state), the error is silently ignored and execution continues to the next pane.
 
 **Auto-execute:** No confirmation prompt. The user already registered these commands as "restart me." The two-condition check provides sufficient safety. If something restarts that shouldn't have, the user can close it.
 

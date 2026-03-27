@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-27
 cycle: 2
 phase: Gap Analysis
@@ -27,8 +27,8 @@ The per-session reading is strongly implied but should be stated explicitly to p
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added explicit per-session scoping to Execution Mechanics.
 
 ---
 
@@ -45,5 +45,5 @@ Given the fire-and-forget design, the answer is almost certainly "continue and i
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added silent error handling to multi-pane execution in Execution Mechanics.
