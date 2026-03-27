@@ -45,7 +45,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "resume-sessions-after-reboot-3-4",
+          "task": "~",
           "task_map": {
             "resume-sessions-after-reboot-1-1": "tick-a136fa",
             "resume-sessions-after-reboot-1": "tick-483f66",
@@ -62,7 +62,8 @@
             "resume-sessions-after-reboot-3-1": "tick-bf7d64",
             "resume-sessions-after-reboot-3": "tick-e9c1aa",
             "resume-sessions-after-reboot-3-2": "tick-a8e239",
-            "resume-sessions-after-reboot-3-3": "tick-49850d"
+            "resume-sessions-after-reboot-3-3": "tick-49850d",
+            "resume-sessions-after-reboot-3-4": "tick-be944f"
           },
           "external_id": "tick-695f97"
         }
