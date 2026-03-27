@@ -25,7 +25,7 @@ The core problem: tmux-resurrect's `@resurrect-processes` re-runs original launc
 - [x] Should Portal confirm before sending commands to panes, or auto-execute?
 - [x] What should the subcommand be called and what's the CLI surface?
 - [x] What storage format and location for the registry?
-- [ ] How should stale registrations be handled (pane closed before reboot, session deleted)?
+- [x] How should stale registrations be handled (pane closed before reboot, session deleted)?
 - [ ] Should Portal warn about or prevent conflicts with `@resurrect-processes`?
 
 ---
@@ -229,5 +229,23 @@ Portal stores data in `~/.config/portal/`. Existing patterns: `projects.json` (J
 ### Decision
 
 **JSON at `~/.config/portal/hooks.json`.** Follows the existing convention: structured data → JSON, simple key-value → flat file. Hooks are structured (pane × event type) and will grow to support multiple events per pane. Reuse the atomic write pattern from `project/store.go`.
+
+---
+
+## How should stale registrations be handled?
+
+### Context
+
+Over time, `hooks.json` could accumulate entries for panes that no longer exist (pane closed, session killed, etc.). These are harmless but wasteful.
+
+### Decision
+
+**Lazy cleanup on read, plus `xctl clean`.**
+
+When Portal reads hooks (during `portal open`), cross-reference pane IDs against live tmux panes. Prune entries for panes that don't exist. Invisible to the user.
+
+This mirrors the existing pattern: the TUI already calls `CleanStale()` on the project store every time it loads, automatically pruning projects whose directories no longer exist. The `clean` command provides the same capability explicitly but the real work happens lazily.
+
+Adding hook cleanup to `xctl clean` is a natural fit — it already says "remove stale projects whose directories no longer exist." Extending to "remove hook entries for panes that no longer exist" is semantically identical.
 
 ---
