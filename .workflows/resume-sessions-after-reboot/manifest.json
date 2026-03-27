@@ -45,7 +45,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "~",
+          "task": "resume-sessions-after-reboot-3-1",
           "task_map": {
             "resume-sessions-after-reboot-1-1": "tick-a136fa",
             "resume-sessions-after-reboot-1": "tick-483f66",
