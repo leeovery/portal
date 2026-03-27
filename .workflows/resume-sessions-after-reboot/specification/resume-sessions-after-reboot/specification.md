@@ -105,6 +105,12 @@ This mirrors the existing pattern: the TUI already calls `CleanStale()` on the p
 
 Adding hook cleanup to `xctl clean` is a natural fit — it already says "remove stale projects whose directories no longer exist." Extending to "remove hook entries for panes that no longer exist" is semantically identical.
 
+### Non-Goals
+
+- **No tmux-resurrect awareness.** Portal has no awareness of tmux-resurrect or any other plugin. It doesn't know or care what's in the user's tmux config. If there's a conflict with `@resurrect-processes`, that's the user's configuration to manage.
+- **No eager execution.** No process restart on server bootstrap. Only lazy, Portal-mediated triggers.
+- **No process detection.** No checking if a process is alive or dead. The volatile marker mechanism replaces any need for process inspection.
+
 ---
 
 ## Working Notes
