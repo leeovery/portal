@@ -95,6 +95,16 @@ Row 6 (crash then reboot) is arguably correct — tool was running, didn't signa
 
 **Auto-execute:** No confirmation prompt. The user already registered these commands as "restart me." The two-condition check provides sufficient safety. If something restarts that shouldn't have, the user can close it.
 
+### Stale Registration Cleanup
+
+**Lazy cleanup on read, plus `xctl clean`.**
+
+When Portal reads hooks (during `portal open`), cross-reference pane IDs against live tmux panes. Prune entries for panes that don't exist. Invisible to the user.
+
+This mirrors the existing pattern: the TUI already calls `CleanStale()` on the project store every time it loads, automatically pruning projects whose directories no longer exist. The `clean` command provides the same capability explicitly but the real work happens lazily.
+
+Adding hook cleanup to `xctl clean` is a natural fit — it already says "remove stale projects whose directories no longer exist." Extending to "remove hook entries for panes that no longer exist" is semantically identical.
+
 ---
 
 ## Working Notes
