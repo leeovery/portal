@@ -17,6 +17,17 @@
 - [ ] `hooks` is added to `skipTmuxCheck` in `root.go` so the command bypasses Portal's tmux bootstrap
 - [ ] The event type flag (`--on-resume`) is required for `set` and `rm`; running without it produces an error
 
+#### Tasks
+<!-- status: draft -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| resume-sessions-after-reboot-1-1 | Hook Store | missing file returns empty map, malformed JSON returns empty map, atomic write creates parent directory, set is idempotent (overwrites existing entry for same pane and event) |
+| resume-sessions-after-reboot-1-2 | Tmux Server Option Methods | GetServerOption returns not-found when option does not exist, DeleteServerOption for non-existent option |
+| resume-sessions-after-reboot-1-3 | Hooks List Command | empty store produces no output, hooks bypasses tmux bootstrap |
+| resume-sessions-after-reboot-1-4 | Hooks Set Command | TMUX_PANE unset produces error, idempotent overwrite of existing hook, on-resume flag is required |
+| resume-sessions-after-reboot-1-5 | Hooks Rm Command | TMUX_PANE unset produces error, silent no-op when no hook exists, on-resume flag is required |
+
 ## Phase 2: Hook Execution in Connection Flow
 <!-- status: approved | approved_at: 2026-03-27 -->
 
