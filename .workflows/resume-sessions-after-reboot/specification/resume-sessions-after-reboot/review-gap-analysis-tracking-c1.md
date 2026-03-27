@@ -42,8 +42,8 @@ The spec states pane ID is "inferred from `$TMUX_PANE`" for `hooks set` and `hoo
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added $TMUX_PANE validation to CLI Surface section.
 
 ---
 

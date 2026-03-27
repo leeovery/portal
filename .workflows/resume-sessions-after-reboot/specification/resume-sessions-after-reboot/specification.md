@@ -57,6 +57,8 @@ xctl hooks list
 
 Under the hood: `xctl hooks set` = `portal hooks set`.
 
+`hooks set` and `hooks rm` require `$TMUX_PANE`. If absent (e.g., called outside tmux), the command exits with an error: "must be run from inside a tmux pane".
+
 ### Volatile Marker Mechanism
 
 Use the tmux server itself as volatile storage. Set a tmux server-level option when registering a hook — this marker lives only in server memory and dies when the server dies. tmux-resurrect does NOT restore tmux options.
