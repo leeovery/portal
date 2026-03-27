@@ -41,12 +41,16 @@
           "format": "tick",
           "spec_commit": "ff9b31ccf8c2fb36fe3f92ab9eef956f55eff53c",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "resume-sessions-after-reboot-1-1",
-          "task_map": {}
+          "task": "resume-sessions-after-reboot-1-2",
+          "task_map": {
+            "resume-sessions-after-reboot-1-1": "tick-a136fa",
+            "resume-sessions-after-reboot-1": "tick-483f66"
+          },
+          "external_id": "tick-695f97"
         }
       }
     }
