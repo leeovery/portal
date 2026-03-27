@@ -15,5 +15,8 @@
     "resume-sessions-after-reboot": {
       "work_type": "feature"
     }
+  },
+  "defaults": {
+    "plan_format": "tick"
   }
 }

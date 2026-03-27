@@ -33,6 +33,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "resume-sessions-after-reboot": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "3a5a249dcd1046e7342f0cea934cc8875c71be02",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
