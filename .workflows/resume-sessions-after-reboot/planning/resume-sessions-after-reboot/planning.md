@@ -1,6 +1,7 @@
 # Plan: Resume Sessions After Reboot
 
 ## Phase 1: Hook Registry and CLI Surface
+<!-- status: approved | approved_at: 2026-03-27 -->
 
 **Goal**: Deliver the persistent hook store, volatile marker tmux operations, and the complete `hooks set`/`hooks rm`/`hooks list` CLI commands so external tools can register and manage restart hooks.
 
@@ -17,6 +18,7 @@
 - [ ] The event type flag (`--on-resume`) is required for `set` and `rm`; running without it produces an error
 
 ## Phase 2: Hook Execution in Connection Flow
+<!-- status: approved | approved_at: 2026-03-27 -->
 
 **Goal**: Implement the core resume behavior — when connecting to a session via Portal, check each of the session's panes for hooks that need execution (persistent entry exists, volatile marker absent) and fire restart commands via `send-keys` before connecting.
 
@@ -31,6 +33,7 @@
 - [ ] Hook execution is scoped to the target session's panes only — hooks for other sessions are not touched
 
 ## Phase 3: Stale Hook Cleanup
+<!-- status: approved | approved_at: 2026-03-27 -->
 
 **Goal**: Implement lazy cleanup of hook entries for panes that no longer exist, and extend the `xctl clean` command to include hook cleanup.
 
