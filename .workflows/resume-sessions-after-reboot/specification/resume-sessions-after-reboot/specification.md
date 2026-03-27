@@ -51,6 +51,7 @@ xctl hooks list
 - Pane ID inferred from `$TMUX_PANE` — caller doesn't need to pass it
 - `set` is idempotent — re-registering overwrites the previous command for that pane and event type
 - Only `--on-resume` implemented initially; surface supports future event types (e.g., `--on-start`, `--on-close`)
+- The event type flag (e.g., `--on-resume`) is required for `set` and `rm`. Running without an event flag is an error
 - Mirrors `xctl alias set`/`rm`/`list` for consistency
 
 **`hooks list`** shows all registered hooks across all panes — no filtering flags needed. Output format:
