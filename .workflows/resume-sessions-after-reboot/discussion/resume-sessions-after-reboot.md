@@ -23,7 +23,7 @@ The core problem: tmux-resurrect's `@resurrect-processes` re-runs original launc
 - [x] When should restart commands execute — eagerly on bootstrap, lazily on session select, or hybrid?
 - [x] Should Portal detect dead processes or just execute whatever is registered?
 - [x] Should Portal confirm before sending commands to panes, or auto-execute?
-- [ ] What should the subcommand be called and what's the CLI surface?
+- [x] What should the subcommand be called and what's the CLI surface?
 - [ ] What storage format and location for the registry?
 - [ ] How should stale registrations be handled (pane closed before reboot, session deleted)?
 - [ ] Should Portal warn about or prevent conflicts with `@resurrect-processes`?
@@ -143,5 +143,54 @@ Row 6 (crash then reboot) is arguably correct — tool was running, didn't signa
 ### Decision
 
 **Auto-execute.** The entire point is restoring state to what it was before reboot. Confirmation would defeat the purpose — the user already registered these commands as "restart me." The two-condition check (entry + no marker) provides sufficient safety. If something restarts that shouldn't have, the user can close it.
+
+---
+
+## What should the subcommand be called and what's the CLI surface?
+
+### Context
+
+Portal needs a CLI surface for external tools to register and deregister restart commands. This should sit under `xctl` (the control plane). The naming should be general enough to support future lifecycle hooks beyond just resume.
+
+### Options Considered
+
+**`xctl resume register` / `xctl resume deregister`**
+- Purpose-built for the resume use case
+- Doesn't generalize to other hook types
+
+**`xctl pane on-resume "cmd"` / `xctl pane hooks`**
+- Pane-centric namespace
+- Reads naturally but mixes concerns — pane management + hooks
+
+**`xctl hooks set --on-resume "cmd"` / `xctl hooks rm --on-resume` / `xctl hooks list`**
+- General hook system namespace
+- `set`/`rm` mirrors existing `xctl alias set`/`rm` pattern — consistent surface
+- `--on-resume` flag extends naturally to `--on-start`, `--on-close` without redesign
+- One hook per event per pane — `set` is the right verb (idempotent overwrite)
+
+### Journey
+
+Started with single-purpose naming (`resume register`). Then explored whether this should be a more general hook system for pane lifecycle events (resume, start, end, open, close). Not building all events now, but the CLI surface should accommodate them.
+
+Tried `xctl pane hook` — but three commands plus a flag plus a parameter felt verbose. Moved hooks to a top-level `xctl` namespace since they're the primary concept, not a sub-feature of "pane."
+
+`set`/`rm`/`list` mirrors the existing `xctl alias` surface, giving `xctl` a consistent feel: both alias and hooks use the same verb pattern.
+
+### Decision
+
+**`xctl hooks` with `set`/`rm`/`list` subcommands:**
+
+```
+xctl hooks set --on-resume "claude --resume $SESSION_ID"
+xctl hooks rm --on-resume
+xctl hooks list
+```
+
+- Pane ID inferred from `$TMUX_PANE` — caller doesn't need to pass it
+- `set` is idempotent — re-registering overwrites the previous command
+- Only `--on-resume` implemented initially; surface supports future event types
+- Mirrors `xctl alias set`/`rm`/`list` for consistency
+
+Under the hood: `xctl hooks set` = `portal hooks set`.
 
 ---
