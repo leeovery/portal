@@ -18,7 +18,7 @@
 - [ ] The event type flag (`--on-resume`) is required for `set` and `rm`; running without it produces an error
 
 #### Tasks
-<!-- status: draft -->
+<!-- status: approved | approved_at: 2026-03-27 -->
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
