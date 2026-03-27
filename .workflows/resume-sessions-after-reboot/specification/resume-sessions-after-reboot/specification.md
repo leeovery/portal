@@ -36,6 +36,27 @@ Pane IDs (`%0`, `%1`, etc.) are globally unique across the entire tmux server, a
 - Hooks are structured (pane × event type) and will grow to support multiple events per pane
 - Reuses the atomic write pattern from `project/store.go`
 
+### CLI Surface
+
+`xctl hooks` with `set`/`rm`/`list` subcommands:
+
+```
+xctl hooks set --on-resume "claude --resume $SESSION_ID"
+xctl hooks rm --on-resume
+xctl hooks list
+```
+
+**Behavior:**
+
+- Pane ID inferred from `$TMUX_PANE` — caller doesn't need to pass it
+- `set` is idempotent — re-registering overwrites the previous command for that pane and event type
+- Only `--on-resume` implemented initially; surface supports future event types (e.g., `--on-start`, `--on-close`)
+- Mirrors `xctl alias set`/`rm`/`list` for consistency
+
+**`hooks list`** shows all registered hooks across all panes — no filtering flags needed.
+
+Under the hood: `xctl hooks set` = `portal hooks set`.
+
 ---
 
 ## Working Notes
