@@ -24,7 +24,7 @@ The core problem: tmux-resurrect's `@resurrect-processes` re-runs original launc
 - [x] Should Portal detect dead processes or just execute whatever is registered?
 - [x] Should Portal confirm before sending commands to panes, or auto-execute?
 - [x] What should the subcommand be called and what's the CLI surface?
-- [ ] What storage format and location for the registry?
+- [x] What storage format and location for the registry?
 - [ ] How should stale registrations be handled (pane closed before reboot, session deleted)?
 - [ ] Should Portal warn about or prevent conflicts with `@resurrect-processes`?
 
@@ -192,5 +192,42 @@ xctl hooks list
 - Mirrors `xctl alias set`/`rm`/`list` for consistency
 
 Under the hood: `xctl hooks set` = `portal hooks set`.
+
+`hooks list` shows all registered hooks across all panes — no filtering flags needed.
+
+---
+
+## What storage format and location for the registry?
+
+### Context
+
+Portal stores data in `~/.config/portal/`. Existing patterns: `projects.json` (JSON, structured) and `aliases` (flat key=value, simple mappings). Hooks need a home.
+
+### Options Considered
+
+**JSON file (`~/.config/portal/hooks.json`)**
+```json
+{
+  "%3": { "on-resume": "claude --resume abc123" },
+  "%7": { "on-resume": "claude --resume def456" }
+}
+```
+- Handles nested structure naturally (pane → event → command)
+- Consistent with `projects.json` for structured data
+- Atomic write pattern already established in project store
+- Extends cleanly to multiple hooks per pane
+
+**Flat file (`~/.config/portal/hooks`)**
+```
+%3 on-resume claude --resume abc123
+%7 on-resume claude --resume def456
+```
+- Consistent with `aliases`
+- But two-level key makes parsing clunky
+- Multiple hooks per pane in future would be awkward
+
+### Decision
+
+**JSON at `~/.config/portal/hooks.json`.** Follows the existing convention: structured data → JSON, simple key-value → flat file. Hooks are structured (pane × event type) and will grow to support multiple events per pane. Reuse the atomic write pattern from `project/store.go`.
 
 ---
