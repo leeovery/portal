@@ -11,6 +11,28 @@
           "status": "completed"
         }
       }
+    },
+    "discussion": {
+      "items": {
+        "resume-sessions-after-reboot": {
+          "status": "completed"
+        }
+      }
+    },
+    "specification": {
+      "items": {
+        "resume-sessions-after-reboot": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-03-27",
+          "sources": {
+            "resume-sessions-after-reboot": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
