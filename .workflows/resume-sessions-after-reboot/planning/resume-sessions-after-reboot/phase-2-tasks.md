@@ -72,7 +72,7 @@ total: 5
     3. Call `lister.ListPanes(sessionName)` -- if error, return silently (session may not exist yet)
     4. If panes slice is empty, return (no panes to check)
     5. Build a set from the session's pane IDs (from step 3) for O(1) lookup.
-    6. Iterate over the loaded hook map's pane IDs (from step 1), following the JSON store's iteration order per spec. For each pane ID in the hook map:
+    6. Iterate over the loaded hook map's pane IDs (from step 1). Go map iteration order is non-deterministic; this is acceptable because the spec requires sequential execution but not a specific ordering. For each pane ID in the hook map:
        a. Check if this pane ID is in the session's pane set (from step 5) -- if not, skip this pane (belongs to a different session)
        b. Look up `hooks[paneID]["on-resume"]` -- if not present, skip this pane (no on-resume hook)
        c. Call `checker.GetServerOption("@portal-active-"+paneID)` -- if it returns a value (no error), the marker exists, skip this pane (already active on this server lifetime)

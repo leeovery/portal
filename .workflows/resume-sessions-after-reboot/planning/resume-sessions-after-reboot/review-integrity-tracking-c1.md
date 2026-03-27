@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-27
 cycle: 1
 phase: Plan Integrity Review
@@ -84,7 +84,7 @@ The proposed fix below adds a `ServerRunning` check to the `AllPaneLister` inter
 - No tmux server running produces no hook removal output -- `ListAllPanes` returns `([]string{}, nil)` (per Task 3-1 behavior). The clean command detects this: when the live pane list is empty but hooks exist in the store, it skips hook cleanup entirely rather than incorrectly removing all hooks. This is the safe default for an explicit user command where the server may simply not be running at the moment. No `ServerRunning()` method is needed; the heuristic "empty panes + non-empty hooks = skip" is sufficient because a running server with zero panes is an extremely transient state that does not warrant cleanup.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The `ServerRunning()` approach mentioned in the current task would require adding a new tmux method not in the plan. The proposed heuristic (skip when empty panes + non-empty hooks) avoids that dependency while achieving the same user-facing behavior.
 
 ---
@@ -128,7 +128,7 @@ The task's Do section mentions updating `buildHookExecutor` and all callers, whi
 - [ ] All tests pass: `go test ./internal/hooks/...` and `go test ./cmd/...`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The original criterion "All callers of ExecuteHooks (in cmd package) are updated to pass the new parameters" is correct but vague. The proposed version names the specific function (`buildHookExecutor`) and clarifies that `HookExecutorFunc` callers are unaffected (the func type signature does not change, only the internal implementation).
 
 ---
@@ -155,7 +155,7 @@ Since the spec's intent is just "sequential execution" (not a specific determini
     6. Iterate over the loaded hook map's pane IDs (from step 1). Go map iteration order is non-deterministic; this is acceptable because the spec requires sequential execution but not a specific ordering. For each pane ID in the hook map:
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Minor clarification that prevents an implementer from trying to preserve JSON key order unnecessarily.
 
 ---

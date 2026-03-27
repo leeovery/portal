@@ -151,7 +151,8 @@ total: 4
 - [ ] `CleanStale` error does not block hook execution (silently ignored)
 - [ ] Cleanup runs before `loader.Load()` so the load reads the cleaned store
 - [ ] All existing `ExecuteHooks` tests continue to pass with no-op cleanup mocks
-- [ ] All callers of `ExecuteHooks` (in cmd package) are updated to pass the new parameters
+- [ ] `buildHookExecutor` in the cmd package is updated to pass `*tmux.Client` as `AllPaneLister` and `*hooks.Store` as `HookCleaner` to the new `ExecuteHooks` signature
+- [ ] All cmd-package tests that mock `HookExecutorFunc` continue to pass (the func signature is unchanged; only the internal wiring changes)
 - [ ] All tests pass: `go test ./internal/hooks/...` and `go test ./cmd/...`
 
 **Tests**:
@@ -187,21 +188,21 @@ total: 4
 **Do**:
 - Modify `cmd/clean.go`:
   - Add a `cleanDeps` package-level DI struct (following the pattern from `hooksDeps` in `cmd/hooks.go`):
-    - `type CleanDeps struct { AllPaneLister AllPaneLister }` where `AllPaneLister` is an interface with `ListAllPanes() ([]string, error)` (can reuse the interface from `internal/hooks/executor.go` or define a local one in `cmd/clean.go` for simplicity -- a local definition is preferred since the cmd package should define its own small interfaces)
+    - Define a local interface in `cmd/clean.go`: `type cleanPaneLister interface { ListAllPanes() ([]string, error) }` -- satisfied by `*tmux.Client`
+    - `type CleanDeps struct { PaneLister cleanPaneLister }`
     - `var cleanDeps *CleanDeps` package-level variable
-    - Helper to get the `AllPaneLister`: if `cleanDeps != nil && cleanDeps.AllPaneLister != nil`, use it; otherwise, create `tmux.NewClient(&tmux.RealCommander{})`.
+    - Helper to get the `cleanPaneLister`: if `cleanDeps != nil && cleanDeps.PaneLister != nil`, use it; otherwise, create `tmux.NewClient(&tmux.RealCommander{})`.
   - Extend the existing `cleanCmd.RunE`:
     - After the existing project cleanup code (which calls `store.CleanStale()` and prints removed projects), add:
     1. Call `hooksFilePath()` to get the hooks file path. If error, return error.
     2. Create `hooks.NewStore(hooksPath)`
-    3. Get the `AllPaneLister` (from DI or real client)
-    4. Call `lister.ListAllPanes()` -- if error, skip hook cleanup silently (do not return error; just skip the hook section). Print nothing for hooks.
-    5. Call `hookStore.CleanStale(livePanes)` -- if error, return error (disk errors during explicit cleanup should be reported to the user, unlike the lazy path).
-    6. For each removed pane ID, iterate over its former events and print: `fmt.Fprintf(w, "Removed stale hook: %s (%s)\n", paneID, event)`. However, `CleanStale` only returns pane IDs (not the event details). To provide more useful output, either:
-       - Option A: Change the loop to just print pane IDs: `fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)`
-       - Option B: Modify `CleanStale` to return richer data. This adds complexity to the store method.
-       - Use Option A for simplicity. The output format is: `Removed stale hook: %3\n` per removed pane.
-    7. Return nil.
+    3. Call `hookStore.Load()` to check if any hooks exist. If the loaded map is empty, skip hook cleanup entirely (no hooks to clean, no output).
+    4. Get the `cleanPaneLister` (from DI or real client)
+    5. Call `lister.ListAllPanes()` -- if error, skip hook cleanup silently (do not return error; just skip the hook section). Note: `ListAllPanes` (from Task 3-1) swallows errors into empty slices, so this error check is a safety net.
+    6. If `ListAllPanes` returns an empty slice AND the hook map is non-empty, skip hook cleanup silently. Rationale: when the tmux server is not running, `ListAllPanes` returns an empty slice (per Task 3-1). An empty live-pane set would incorrectly mark all hooks as stale. Since the clean command is in `skipTmuxCheck` and does not require a running server, the user may have hooks for a server they will start later. The pre-check in step 3 ensures we only reach here when hooks exist, so an empty pane list is ambiguous (server down vs. genuinely no panes). Skipping is the safe choice.
+    7. If live panes are non-empty, call `hookStore.CleanStale(livePanes)` -- if error, return error (disk errors during explicit cleanup should be reported to the user, unlike the lazy path).
+    8. For each removed pane ID, print: `fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)`. The output format is one line per removed pane.
+    9. Return nil.
   - Add `hooksFilePath` helper if not already accessible from `cmd/hooks.go` (it was created in Phase 1 Task 3 in `cmd/hooks.go` and should be accessible since both files are in the `cmd` package).
   - Add `"github.com/leeovery/portal/internal/hooks"` to imports.
 - Extend `cmd/clean_test.go`:
@@ -234,7 +235,7 @@ total: 4
 - `"existing clean tests still pass"`
 
 **Edge Cases**:
-- No tmux server running produces no hook removal output -- `ListAllPanes` returns an error or empty slice. When it returns an error, hook cleanup is skipped entirely (the command does not know which panes are live, so it cannot determine staleness). When it returns an empty slice (per Task 1 behavior of swallowing errors), all entries would appear stale. To avoid incorrectly removing hooks when the server is simply not running, check: if `ListAllPanes` returns an empty slice AND the server is not confirmed running, skip cleanup. The simplest approach: if `ListAllPanes` returns an error, skip. Since Task 1 swallows errors into empty slices, the clean command should call `ListAllPanes` and if the result is an empty slice, also verify the server is running via a `ServerRunning()` check. If the server is not running, skip hook cleanup entirely. This prevents removing all hooks when the user simply has no tmux server running at the moment.
+- No tmux server running produces no hook removal output -- `ListAllPanes` returns `([]string{}, nil)` (per Task 3-1 behavior). The clean command detects this: when the live pane list is empty but hooks exist in the store, it skips hook cleanup entirely rather than incorrectly removing all hooks. This is the safe default for an explicit user command where the server may simply not be running at the moment. No `ServerRunning()` method is needed; the heuristic "empty panes + non-empty hooks = skip" is sufficient because a running server with zero panes is an extremely transient state that does not warrant cleanup.
 - Hooks file missing produces no hook removal output -- `hooks.Store.Load()` returns an empty map for a missing file. `CleanStale` receives an empty map and returns no removals. No output.
 - Both project and hook removals printed together -- the output interleaves naturally: project removals first (existing code), then hook removals (new code). Example output:
   ```
