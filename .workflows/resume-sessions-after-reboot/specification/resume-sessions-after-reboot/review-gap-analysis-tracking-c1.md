@@ -26,8 +26,8 @@ An implementer would have to guess which approach to use. This is a critical imp
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added send-keys as delivery mechanism to Execution Mechanics section.
 
 ---
 
