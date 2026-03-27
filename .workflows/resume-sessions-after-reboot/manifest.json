@@ -39,7 +39,7 @@
         "resume-sessions-after-reboot": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "3a5a249dcd1046e7342f0cea934cc8875c71be02",
+          "spec_commit": "ff9b31ccf8c2fb36fe3f92ab9eef956f55eff53c",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
