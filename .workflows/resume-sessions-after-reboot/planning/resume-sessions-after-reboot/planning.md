@@ -43,6 +43,17 @@
 - [ ] Multiple panes with hooks are executed sequentially; `send-keys` failures for individual panes are silently ignored
 - [ ] Hook execution is scoped to the target session's panes only — hooks for other sessions are not touched
 
+#### Tasks
+<!-- status: approved | approved_at: 2026-03-27 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| resume-sessions-after-reboot-2-1 | ListPanes and SendKeys Tmux Methods | session with no panes returns empty slice, send-keys to non-existent pane returns error |
+| resume-sessions-after-reboot-2-2 | Hook Executor Core Logic | no hooks for any pane in session, all panes already have volatile markers (skip all), mixed panes (some execute some skip), send-keys failure for one pane does not block others, hook store load error is silently ignored |
+| resume-sessions-after-reboot-2-3 | Hook Execution in Attach Command | session with no panes triggers no hook execution, hook execution runs before syscall.Exec replaces process |
+| resume-sessions-after-reboot-2-4 | Hook Execution in TUI Selection Path | user quits TUI without selection (no hook execution), selected session triggers hook execution before connect |
+| resume-sessions-after-reboot-2-5 | Hook Execution in Direct Path | new session creation (no existing panes yet) skips hook execution, inside-tmux switch path executes hooks before switch-client |
+
 ## Phase 3: Stale Hook Cleanup
 <!-- status: approved | approved_at: 2026-03-27 -->
 
