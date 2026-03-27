@@ -26,7 +26,7 @@ The core problem: tmux-resurrect's `@resurrect-processes` re-runs original launc
 - [x] What should the subcommand be called and what's the CLI surface?
 - [x] What storage format and location for the registry?
 - [x] How should stale registrations be handled (pane closed before reboot, session deleted)?
-- [ ] Should Portal warn about or prevent conflicts with `@resurrect-processes`?
+- [x] Should Portal warn about or prevent conflicts with `@resurrect-processes`?
 
 ---
 
@@ -247,5 +247,13 @@ When Portal reads hooks (during `portal open`), cross-reference pane IDs against
 This mirrors the existing pattern: the TUI already calls `CleanStale()` on the project store every time it loads, automatically pruning projects whose directories no longer exist. The `clean` command provides the same capability explicitly but the real work happens lazily.
 
 Adding hook cleanup to `xctl clean` is a natural fit — it already says "remove stale projects whose directories no longer exist." Extending to "remove hook entries for panes that no longer exist" is semantically identical.
+
+---
+
+## Should Portal warn about or prevent conflicts with `@resurrect-processes`?
+
+### Decision
+
+**No. Out of scope.** Portal has no awareness of tmux-resurrect or any other plugin. It doesn't know or care what's in the user's tmux config. If there's a conflict, that's the user's configuration to manage.
 
 ---
