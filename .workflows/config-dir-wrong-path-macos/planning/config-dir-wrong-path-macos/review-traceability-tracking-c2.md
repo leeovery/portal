@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-28
 cycle: 2
 phase: Traceability Review
@@ -87,5 +87,5 @@ In Tests list:
 - "migration does not run when XDG_CONFIG_HOME is set" [needs-info]
 ```
 
-**Resolution**: Pending
-**Notes**: The spec says migration target is ~/.config/portal/ and also says each configFilePath call checks the old path. When XDG_CONFIG_HOME is set, the resolved path is not ~/.config/portal/, creating ambiguity about whether migration should still target ~/.config/portal/ or the XDG path or not run at all. This needs explicit user decision.
+**Resolution**: Fixed
+**Notes**: Applied [needs-info] tags to AC and test in both phase-1-tasks.md and tick task. User must confirm intended behavior.
