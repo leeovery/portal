@@ -14,13 +14,19 @@ type ServerOptionSetter interface {
 	SetServerOption(name, value string) error
 }
 
-// hooksDeps holds injectable dependencies for the hooks set command.
+// ServerOptionDeleter deletes a tmux server-level option.
+type ServerOptionDeleter interface {
+	DeleteServerOption(name string) error
+}
+
+// hooksDeps holds injectable dependencies for the hooks commands.
 // When nil, real implementations are used.
 var hooksDeps *HooksDeps
 
-// HooksDeps allows injecting the ServerOptionSetter for testing.
+// HooksDeps allows injecting dependencies for testing.
 type HooksDeps struct {
-	OptionSetter ServerOptionSetter
+	OptionSetter  ServerOptionSetter
+	OptionDeleter ServerOptionDeleter
 }
 
 // buildHooksDeps returns the appropriate ServerOptionSetter.
@@ -29,6 +35,16 @@ type HooksDeps struct {
 func buildHooksDeps() ServerOptionSetter {
 	if hooksDeps != nil {
 		return hooksDeps.OptionSetter
+	}
+	return tmux.NewClient(&tmux.RealCommander{})
+}
+
+// buildHooksDeleteDeps returns the appropriate ServerOptionDeleter.
+// When hooksDeps is set (testing), uses the injected OptionDeleter.
+// Otherwise, creates a real tmux client.
+func buildHooksDeleteDeps() ServerOptionDeleter {
+	if hooksDeps != nil {
+		return hooksDeps.OptionDeleter
 	}
 	return tmux.NewClient(&tmux.RealCommander{})
 }
@@ -113,11 +129,43 @@ func hooksFilePath() (string, error) {
 	return configFilePath("PORTAL_HOOKS_FILE", "hooks.json")
 }
 
+var hooksRmCmd = &cobra.Command{
+	Use:   "rm",
+	Short: "Remove a resume hook for the current pane",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		paneID := os.Getenv("TMUX_PANE")
+		if paneID == "" {
+			return fmt.Errorf("must be run from inside a tmux pane")
+		}
+
+		store, err := loadHookStore()
+		if err != nil {
+			return err
+		}
+
+		if err := store.Remove(paneID, "on-resume"); err != nil {
+			return err
+		}
+
+		deleter := buildHooksDeleteDeps()
+		if err := deleter.DeleteServerOption("@portal-active-" + paneID); err != nil {
+			return err
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	hooksSetCmd.Flags().String("on-resume", "", "Command to run when resuming the pane")
 	_ = hooksSetCmd.MarkFlagRequired("on-resume")
 
+	hooksRmCmd.Flags().Bool("on-resume", false, "Remove the on-resume hook")
+	_ = hooksRmCmd.MarkFlagRequired("on-resume")
+
 	hooksCmd.AddCommand(hooksListCmd)
 	hooksCmd.AddCommand(hooksSetCmd)
+	hooksCmd.AddCommand(hooksRmCmd)
 	rootCmd.AddCommand(hooksCmd)
 }

@@ -30,6 +30,10 @@ func resetRootCmd() {
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
+	if f := hooksRmCmd.Flags().Lookup("on-resume"); f != nil { // reset hooks rm flags
+		_ = f.Value.Set("false")
+		f.Changed = false
+	}
 }
 
 func TestTmuxDependentCommandsFailWithoutTmux(t *testing.T) {

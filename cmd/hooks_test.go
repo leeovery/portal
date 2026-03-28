@@ -389,6 +389,273 @@ func TestHooksSetCommand(t *testing.T) {
 	})
 }
 
+// mockOptionDeleter records calls to DeleteServerOption for test assertions.
+type mockOptionDeleter struct {
+	calls []string
+	err   error
+}
+
+func (m *mockOptionDeleter) DeleteServerOption(name string) error {
+	m.calls = append(m.calls, name)
+	return m.err
+}
+
+func TestHooksRmCommand(t *testing.T) {
+	t.Run("removes hook and volatile marker for current pane", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		// Seed with an existing hook
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%3": {"on-resume": "claude --resume abc123"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify hook was removed from file
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["%3"]; ok {
+			t.Error("expected pane %3 entry to be removed from hooks file")
+		}
+
+		// Verify volatile marker was deleted
+		if len(delMock.calls) != 1 {
+			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
+		}
+		if delMock.calls[0] != "@portal-active-%3" {
+			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-%3")
+		}
+	})
+
+	t.Run("reads pane ID from TMUX_PANE environment variable", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%42")
+
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%42": {"on-resume": "some-cmd"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify the pane ID from env was used in the store removal
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["%42"]; ok {
+			t.Error("expected pane %42 entry to be removed")
+		}
+
+		// Verify the pane ID from env was used in the volatile marker deletion
+		if len(delMock.calls) != 1 {
+			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
+		}
+		if delMock.calls[0] != "@portal-active-%42" {
+			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-%42")
+		}
+	})
+
+	t.Run("returns error when TMUX_PANE is not set", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "")
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "must be run from inside a tmux pane") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "must be run from inside a tmux pane")
+		}
+
+		// Verify no side effects
+		if len(delMock.calls) != 0 {
+			t.Errorf("expected 0 DeleteServerOption calls, got %d", len(delMock.calls))
+		}
+	})
+
+	t.Run("returns error when on-resume flag is not provided", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error for missing --on-resume flag, got nil")
+		}
+		if !strings.Contains(err.Error(), "on-resume") {
+			t.Errorf("error = %q, want it to mention %q", err.Error(), "on-resume")
+		}
+	})
+
+	t.Run("silent no-op when no hook exists for pane", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%99")
+
+		// Empty hooks file
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("expected no error for non-existent hook, got: %v", err)
+		}
+
+		// Should produce no output
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty string", buf.String())
+		}
+	})
+
+	t.Run("removes correct JSON entry from hooks file", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		// Seed with multiple panes — only %3 should be removed
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%3": {"on-resume": "claude --resume abc123"},
+			"%7": {"on-resume": "npm start"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+
+		// %3 should be gone
+		if _, ok := data["%3"]; ok {
+			t.Error("expected pane %3 to be removed")
+		}
+
+		// %7 should remain
+		if data["%7"]["on-resume"] != "npm start" {
+			t.Errorf("pane %%7 on-resume = %q, want %q", data["%7"]["on-resume"], "npm start")
+		}
+	})
+
+	t.Run("deletes volatile marker with correct option name", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%7")
+
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%7": {"on-resume": "some-cmd"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(delMock.calls) != 1 {
+			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
+		}
+		wantName := "@portal-active-%7"
+		if delMock.calls[0] != wantName {
+			t.Errorf("option name = %q, want %q", delMock.calls[0], wantName)
+		}
+	})
+
+	t.Run("cleans up pane key when last event removed", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%5")
+
+		// Pane %5 has only one event — removing it should remove the pane key entirely
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%5": {"on-resume": "some-cmd"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["%5"]; ok {
+			t.Error("expected pane %5 key to be removed when last event deleted")
+		}
+		if len(data) != 0 {
+			t.Errorf("expected empty hooks file, got %d entries", len(data))
+		}
+	})
+}
+
 // readHooksJSON is a test helper that reads and parses the hooks JSON file.
 func readHooksJSON(t *testing.T, path string) map[string]map[string]string {
 	t.Helper()
