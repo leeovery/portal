@@ -95,7 +95,7 @@ Continue or restart?
 
 #### If `continue`
 
-→ Proceed to **Step 3** (skipping Steps 1–2).
+→ Proceed to **Step 3**.
 
 #### If `restart`
 
@@ -168,7 +168,15 @@ Load **[spec-review.md](references/spec-review.md)** and follow its instructions
 
 ---
 
-## Step 8: Assess Cross-Cutting & Conclude
+## Step 8: Compliance Self-Check
+
+Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
+
+→ Proceed to **Step 9**.
+
+---
+
+## Step 9: Assess Cross-Cutting & Conclude
 
 Load **[spec-completion.md](references/spec-completion.md)** and follow its instructions as written.
 

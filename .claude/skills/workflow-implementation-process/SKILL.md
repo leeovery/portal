@@ -134,6 +134,8 @@ After the loop completes:
 
 #### Otherwise
 
+**CRITICAL**: This routing applies on **every** task loop completion — including after returning from Step 7 with analysis-created tasks. Step 6 and Step 7 form a mandatory cycle: tasks execute → analysis runs → new tasks may be created → tasks execute again → analysis runs again. Never skip Step 7 after a task loop completes.
+
 → Proceed to **Step 7**.
 
 ---
@@ -152,7 +154,15 @@ Load **[analysis-loop.md](references/analysis-loop.md)** and follow its instruct
 
 ---
 
-## Step 8: Mark Implementation Complete
+## Step 8: Compliance Self-Check
+
+Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
+
+→ Proceed to **Step 9**.
+
+---
+
+## Step 9: Mark Implementation Complete
 
 Load **[conclude-implementation.md](references/conclude-implementation.md)** and follow its instructions as written.
 
