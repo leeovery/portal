@@ -112,14 +112,40 @@ On macOS, `os.UserConfigDir()` returns `~/Library/Application Support` instead o
 
 ### Chosen Approach
 
+Replace `os.UserConfigDir()` with `os.UserHomeDir()` + `/.config` to always use XDG-style paths. Add a one-shot migration that moves files from `~/Library/Application Support/portal/` to `~/.config/portal/` on macOS.
+
+**Deciding factor:** Simplest fix that matches documented behavior. `XDG_CONFIG_HOME` support is a nice-to-have but the immediate fix is hardcoding `~/.config`.
+
 ### Options Explored
+
+**Option A: Hardcode `~/.config` via `os.UserHomeDir()` + `/.config`**
+Simple, matches docs. Does not respect `XDG_CONFIG_HOME` if set, but neither does the current code. Can add `XDG_CONFIG_HOME` support later.
+
+**Option B: Check `XDG_CONFIG_HOME` first, fall back to `~/.config`**
+More correct for XDG compliance. Slightly more complex. Worth considering but may be over-engineering for the immediate bug.
+
+**Option C: Keep `os.UserConfigDir()` on macOS, update docs**
+Would mean accepting Apple-native paths. Rejected — the project has explicitly chosen XDG conventions and users/tooling expect `~/.config/portal/`.
 
 ### Discussion
 
 ### Testing Recommendations
 
+- Test `configFilePath` returns `~/.config/portal/<file>` (not `os.UserConfigDir()`)
+- Test migration moves files from old macOS path to new path
+- Test migration is a no-op when files already at correct path
+- Test migration handles partial state (some files at old path, some at new)
+- Test env var overrides still take precedence over both old and new paths
+
 ### Risk Assessment
+
+- **Fix complexity:** Low — single function change + migration logic
+- **Regression risk:** Low — migration preserves existing data; env var overrides bypass the changed code entirely
+- **Recommended approach:** Regular release
 
 ---
 
 ## Notes
+
+- The env var overrides (`PORTAL_PROJECTS_FILE`, etc.) are only used in tests, not by end users. They bypass the config directory logic entirely and are unaffected by this fix.
+- `XDG_CONFIG_HOME` support could be added as a follow-up but is not required to fix this bug.
