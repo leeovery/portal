@@ -17,6 +17,23 @@
     }
   },
   "defaults": {
-    "plan_format": "tick"
+    "plan_format": "tick",
+    "project_skills": [
+      ".claude/skills/golang-pro"
+    ],
+    "linters": [
+      {
+        "name": "go vet",
+        "command": "go vet ./..."
+      },
+      {
+        "name": "gofmt",
+        "command": "gofmt -l ."
+      },
+      {
+        "name": "golangci-lint",
+        "command": "golangci-lint run ./..."
+      }
+    ]
   }
 }
