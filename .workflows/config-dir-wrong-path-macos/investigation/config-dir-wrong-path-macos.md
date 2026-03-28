@@ -129,6 +129,8 @@ Would mean accepting Apple-native paths. Rejected — the project has explicitly
 
 ### Discussion
 
+Straightforward bug with a clear fix. Synthesis validation caught two important gaps: env var overrides are user-facing (not test-only), and the naive fix would regress Linux XDG_CONFIG_HOME support. Option B (check XDG_CONFIG_HOME, fall back to ~/.config) was agreed as the right approach. Migration on macOS is necessary since real user data exists at the old path.
+
 ### Testing Recommendations
 
 - Test `configFilePath` returns `~/.config/portal/<file>` (not `os.UserConfigDir()`)
