@@ -104,7 +104,7 @@ var hooksSetCmd = &cobra.Command{
 		}
 
 		setter := buildHooksDeps()
-		if err := setter.SetServerOption("@portal-active-"+paneID, "1"); err != nil {
+		if err := setter.SetServerOption(hooks.MarkerName(paneID), "1"); err != nil {
 			return err
 		}
 
@@ -149,7 +149,7 @@ var hooksRmCmd = &cobra.Command{
 		}
 
 		deleter := buildHooksDeleteDeps()
-		if err := deleter.DeleteServerOption("@portal-active-" + paneID); err != nil {
+		if err := deleter.DeleteServerOption(hooks.MarkerName(paneID)); err != nil {
 			return err
 		}
 

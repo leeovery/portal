@@ -33,6 +33,13 @@ type HookCleaner interface {
 	CleanStale(livePaneIDs []string) ([]string, error)
 }
 
+// MarkerName returns the tmux server option name used as the volatile marker
+// for a given pane. This is the single source of truth for the marker naming
+// convention.
+func MarkerName(paneID string) string {
+	return fmt.Sprintf("@portal-active-%s", paneID)
+}
+
 // ExecuteHooks checks each pane in the target session for hooks that need
 // re-execution (persistent entry exists AND volatile marker absent) and fires
 // restart commands via send-keys. Entirely best-effort with silent error handling.
@@ -77,7 +84,7 @@ func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, send
 			continue
 		}
 
-		markerName := fmt.Sprintf("@portal-active-%s", paneID)
+		markerName := MarkerName(paneID)
 		if _, err := checker.GetServerOption(markerName); err == nil {
 			continue
 		}
