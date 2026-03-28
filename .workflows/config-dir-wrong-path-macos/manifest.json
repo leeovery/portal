@@ -1,0 +1,16 @@
+{
+  "name": "config-dir-wrong-path-macos",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-03-28",
+  "description": "os.UserConfigDir() returns ~/Library/Application Support on macOS instead of ~/.config, causing config files to be written to wrong path",
+  "phases": {
+    "investigation": {
+      "items": {
+        "config-dir-wrong-path-macos": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}

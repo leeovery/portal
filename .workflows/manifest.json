@@ -14,6 +14,9 @@
     },
     "resume-sessions-after-reboot": {
       "work_type": "feature"
+    },
+    "config-dir-wrong-path-macos": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
