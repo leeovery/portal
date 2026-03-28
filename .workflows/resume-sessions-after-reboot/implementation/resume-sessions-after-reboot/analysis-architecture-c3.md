@@ -1,0 +1,3 @@
+AGENT: architecture
+FINDINGS: none
+SUMMARY: Implementation architecture is sound. The hooks package has clean boundaries with well-composed interfaces (TmuxOperator, HookRepository). The fileutil.AtomicWrite extraction properly consolidates the shared write pattern. Hook execution is integrated at all three connection paths (attach, open-path, TUI picker) with tested ordering guarantees. The HookExecutorFunc bridge between cmd and internal/hooks is appropriately thin. The clean command correctly handles the no-tmux-server case by preserving hooks when live pane list is empty. No architectural regressions from prior cycles.
