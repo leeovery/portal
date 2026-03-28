@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -271,4 +272,222 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("expected exit 0 (no error), got: %v", err)
 		}
 	})
+
+	t.Run("removes stale hooks and prints removal messages", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Write hooks for panes %1, %5; only %1 is live
+		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%1": {"on-resume": "cmd1"},
+			"%5": {"on-resume": "cmd5"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := "Removed stale hook: %5\n"
+		if buf.String() != want {
+			t.Errorf("output = %q, want %q", buf.String(), want)
+		}
+
+		// Verify %5 was removed from hooks file, %1 remains
+		data := readCleanHooksJSON(t, hooksFile)
+		if _, ok := data["%1"]; !ok {
+			t.Error("expected live pane %1 to remain in hooks file")
+		}
+		if _, ok := data["%5"]; ok {
+			t.Error("expected stale pane %5 to be removed from hooks file")
+		}
+	})
+
+	t.Run("no tmux server running skips hook cleanup preserving existing hooks", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Real ListAllPanes returns ([]string{}, nil) when no server is running
+		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%3": {"on-resume": "some-cmd"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// No hook removal output — hooks are preserved
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty string", buf.String())
+		}
+
+		// Verify hooks are still in the file (NOT deleted)
+		data := readCleanHooksJSON(t, hooksFile)
+		if _, ok := data["%3"]; !ok {
+			t.Error("expected hook %3 to be preserved when no tmux server is running")
+		}
+	})
+
+	t.Run("hooks file missing produces no hook removal output", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		// Do NOT create the hooks file
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty string", buf.String())
+		}
+	})
+
+	t.Run("all hooks panes still live produces no hook removal output", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%1": {"on-resume": "cmd1"},
+			"%3": {"on-resume": "cmd3"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1", "%3"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty string", buf.String())
+		}
+	})
+
+	t.Run("both project and hook removals printed together", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Stale project
+		stalePath := filepath.Join(dir, "gone")
+		content := `{"projects":[{"path":"` + stalePath + `","name":"stale","last_used":"2026-01-01T00:00:00Z"}]}`
+		if err := os.WriteFile(projectsFile, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		// Stale hook: %9 is not live
+		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+			"%9": {"on-resume": "cmd9"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := "Removed stale project: stale (" + stalePath + ")\nRemoved stale hook: %9\n"
+		if buf.String() != want {
+			t.Errorf("output = %q, want %q", buf.String(), want)
+		}
+	})
+}
+
+// mockCleanPaneLister implements AllPaneLister for clean command tests.
+type mockCleanPaneLister struct {
+	panes []string
+	err   error
+}
+
+func (m *mockCleanPaneLister) ListAllPanes() ([]string, error) {
+	return m.panes, m.err
+}
+
+// writeCleanHooksJSON is a test helper that writes a hooks JSON file for clean tests.
+func writeCleanHooksJSON(t *testing.T, path string, data map[string]map[string]string) {
+	t.Helper()
+	b, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		t.Fatalf("failed to marshal hooks JSON: %v", err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("failed to write hooks file: %v", err)
+	}
+}
+
+// readCleanHooksJSON is a test helper that reads and parses the hooks JSON file for clean tests.
+func readCleanHooksJSON(t *testing.T, path string) map[string]map[string]string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read hooks file: %v", err)
+	}
+	var data map[string]map[string]string
+	if err := json.Unmarshal(b, &data); err != nil {
+		t.Fatalf("failed to unmarshal hooks JSON: %v", err)
+	}
+	return data
 }

@@ -74,9 +74,9 @@
         "resume-sessions-after-reboot": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle": 0,
           "linters": [
             {
@@ -110,11 +110,13 @@
             "resume-sessions-after-reboot-2-5",
             "resume-sessions-after-reboot-3-1",
             "resume-sessions-after-reboot-3-2",
-            "resume-sessions-after-reboot-3-3"
+            "resume-sessions-after-reboot-3-3",
+            "resume-sessions-after-reboot-3-4"
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       }
