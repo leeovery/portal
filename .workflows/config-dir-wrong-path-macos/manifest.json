@@ -38,10 +38,11 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "config-dir-wrong-path-macos-1-2",
+          "task": "~",
           "task_map": {
             "config-dir-wrong-path-macos-1-1": "tick-7bd039",
-            "config-dir-wrong-path-macos-1": "tick-b265f3"
+            "config-dir-wrong-path-macos-1": "tick-b265f3",
+            "config-dir-wrong-path-macos-1-2": "tick-6a3514"
           },
           "external_id": "tick-c1a482"
         }
