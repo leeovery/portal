@@ -201,6 +201,39 @@ func (c *Client) GetServerOption(name string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// ListPanes returns the pane IDs belonging to the named tmux session.
+// Each ID has the form "%N" (e.g. "%0", "%3").
+func (c *Client) ListPanes(sessionName string) ([]string, error) {
+	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{pane_id}")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
+	}
+
+	if output == "" {
+		return []string{}, nil
+	}
+
+	lines := strings.Split(output, "\n")
+	panes := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		panes = append(panes, line)
+	}
+	return panes, nil
+}
+
+// SendKeys delivers a command to the specified tmux pane followed by Enter.
+func (c *Client) SendKeys(paneID string, command string) error {
+	_, err := c.cmd.Run("send-keys", "-t", paneID, command, "Enter")
+	if err != nil {
+		return fmt.Errorf("failed to send keys to pane %q: %w", paneID, err)
+	}
+	return nil
+}
+
 // DeleteServerOption removes a tmux server-level option.
 // This is a no-op if the option does not exist.
 func (c *Client) DeleteServerOption(name string) error {

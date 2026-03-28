@@ -698,3 +698,110 @@ func TestDeleteServerOption(t *testing.T) {
 		}
 	})
 }
+
+func TestListPanes(t *testing.T) {
+	t.Run("returns pane IDs for session with multiple panes", func(t *testing.T) {
+		mock := &MockCommander{Output: "%0\n%1\n%2"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanes("my-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"%0", "%1", "%2"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "list-panes -t my-session -F #{pane_id}"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns empty slice when session has no panes", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanes("empty-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(got) != 0 {
+			t.Fatalf("got %d panes, want 0", len(got))
+		}
+	})
+
+	t.Run("returns error when session does not exist", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("can't find session: nonexistent")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanes("nonexistent")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to list panes") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "nonexistent") {
+			t.Errorf("error %q does not contain session name", err.Error())
+		}
+	})
+}
+
+func TestSendKeys(t *testing.T) {
+	t.Run("sends command followed by Enter to pane", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SendKeys("%3", "claude --resume abc123")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"send-keys", "-t", "%3", "claude --resume abc123", "Enter"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("returns error when pane does not exist", func(t *testing.T) {
+		mock := &MockCommander{Err: errors.New("can't find pane: %99")}
+		client := tmux.NewClient(mock)
+
+		err := client.SendKeys("%99", "some-command")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to send keys") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "%99") {
+			t.Errorf("error %q does not contain pane ID", err.Error())
+		}
+	})
+}
