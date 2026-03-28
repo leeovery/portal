@@ -69,7 +69,9 @@
             "resume-sessions-after-reboot-4-2": "tick-867e69",
             "resume-sessions-after-reboot-4-3": "tick-c55492",
             "resume-sessions-after-reboot-4-4": "tick-ce65fa",
-            "resume-sessions-after-reboot-4-5": "tick-e83b1a"
+            "resume-sessions-after-reboot-4-5": "tick-e83b1a",
+            "resume-sessions-after-reboot-5": "tick-705cf8",
+            "resume-sessions-after-reboot-5-1": "tick-2ee721"
           },
           "external_id": "tick-695f97"
         }

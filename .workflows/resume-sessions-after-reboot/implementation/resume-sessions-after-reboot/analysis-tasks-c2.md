@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Resume Sessions After Reboot (Cycle 2)
 
 ## Task 1: Consolidate hooks set/rm shared boilerplate in cmd/hooks.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 

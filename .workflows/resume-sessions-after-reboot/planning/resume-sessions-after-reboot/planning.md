@@ -92,3 +92,15 @@
 | resume-sessions-after-reboot-4-3 | Centralize Volatile Marker Name Format | all usage sites reference single function, no hardcoded strings remain |
 | resume-sessions-after-reboot-4-4 | Group ExecuteHooks Parameters Into Composed Interfaces | small interfaces preserved, test mocks updated for composed interfaces |
 | resume-sessions-after-reboot-4-5 | Remove Duplicate AllPaneLister Interface From cmd/clean.go | no circular import introduced, field type updated throughout |
+
+## Phase 5: Analysis (Cycle 2)
+<!-- status: approved | approved_at: 2026-03-28 -->
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+<!-- status: approved | approved_at: 2026-03-28 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| resume-sessions-after-reboot-5-1 | Consolidate Hooks Set/Rm Shared Boilerplate in cmd/hooks.go | duplicated builder functions differ only in interface field returned, identical TMUX_PANE validation blocks |
