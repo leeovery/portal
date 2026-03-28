@@ -92,6 +92,7 @@ total: 2
 - [ ] If `os.Rename` fails, a warning is printed to stderr and `configFilePath` still returns the new path without error
 - [ ] The target directory (`~/.config/portal/`) is created via `MkdirAll` if it does not exist before the rename
 - [ ] Migration does NOT run when a per-file env var override is active
+- [ ] Migration does NOT run when XDG_CONFIG_HOME is set
 - [ ] `go test ./cmd/...` passes with all new and existing tests
 
 **Tests**:
@@ -103,6 +104,7 @@ total: 2
 - `"migration preserves non-empty old directory"` — create old directory with two files, call `configFilePath` for only one, verify old directory still exists (other file remains)
 - `"migration creates target directory if missing"` — ensure `<home>/.config/portal/` does not exist, create file at old path, call `configFilePath`, verify target directory was created and file was moved
 - `"migration does not run when per-file env var is set"` — set `PORTAL_PROJECTS_FILE` to a custom path, create file at old macOS path, call `configFilePath`, verify old file is NOT moved
+- `"migration does not run when XDG_CONFIG_HOME is set"` — set `XDG_CONFIG_HOME` to a custom path, create file at old macOS path, call `configFilePath`, verify old file is NOT moved
 - `"migration logs warning on rename failure"` — this is difficult to test directly without OS-level mocking; consider testing `migrateConfigFile` directly with a read-only target directory to trigger a rename failure, and capture stderr to verify warning output
 
 **Edge Cases**:

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-28
 cycle: 1
 phase: Plan Integrity Review
@@ -72,5 +72,5 @@ Task 2's Do section specifies that migration runs "on fallback path only" -- mea
 - "migration logs warning on rename failure"
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied to tick task and phase-1-tasks.md
