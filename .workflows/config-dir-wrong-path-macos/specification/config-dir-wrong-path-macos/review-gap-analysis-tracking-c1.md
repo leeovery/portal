@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-28
 cycle: 1
 phase: Gap Analysis
@@ -24,10 +24,10 @@ The spec says "On first run after the fix, check if files exist at the old path"
 
 An implementer would need to make a design decision about where to place this logic and whether to guard against repeated migration attempts.
 
-**Proposed Addition**:
+**Proposed Addition**: Migration runs inside `configFilePath()` itself. No sentinel needed — idempotent by checking old path existence.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added trigger, idempotency, and mechanism details to Migration section.
 
 ---
 
@@ -45,10 +45,10 @@ The spec does not address what happens when migration fails partway through (e.g
 
 Since migration involves file moves that could fail, an implementer would need to decide on error strategy.
 
-**Proposed Addition**:
+**Proposed Addition**: Best-effort migration — log warnings to stderr on failure, continue with remaining files. Silent on success.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added error handling paragraph to Migration section.
 
 ---
 
@@ -65,10 +65,10 @@ The spec says "move the file from old path to new path." On macOS, `~/Library/Ap
 
 For the overwhelmingly common case this is the same volume, but the spec should state the expected approach so the implementer doesn't over-engineer or under-engineer.
 
-**Proposed Addition**:
+**Proposed Addition**: Use `os.Rename` — both paths are under `$HOME`, always same volume.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added to migration behavior bullet points.
 
 ---
 
@@ -86,10 +86,10 @@ The fix changes the config directory from one that `os.UserConfigDir()` returns 
 
 The current `configFilePath` function only returns a path -- it doesn't create directories. If the callers already handle directory creation, this may be fine, but the spec should note whether the fix needs to account for this or if existing code already handles it.
 
-**Proposed Addition**:
+**Proposed Addition**: Callers already call `os.MkdirAll` before writing. Migration must also call `os.MkdirAll` on target dir before moving files.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added directory creation paragraph to Migration section. Verified callers (alias/store.go, fileutil/atomic.go) use MkdirAll.
 
 ---
 
@@ -107,10 +107,10 @@ The spec says to "check `XDG_CONFIG_HOME` environment variable first" but doesn'
 
 This is minor since Go's `filepath.Join` handles trailing slashes, and matching `os.UserConfigDir()`'s existing behavior (which doesn't validate either) is reasonable. But worth noting.
 
-**Proposed Addition**:
+**Proposed Addition**: No special handling — `filepath.Join` normalizes, matching `os.UserConfigDir()` behavior.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added XDG edge case note to Fix Approach section.
 
 ---
 
@@ -128,7 +128,7 @@ The spec states "Migration is macOS-only" but doesn't specify how the code deter
 
 The third approach would make migration platform-agnostic (just check old path existence), which may be simpler. The spec should clarify the intended approach.
 
-**Proposed Addition**:
+**Proposed Addition**: Check old path existence rather than `runtime.GOOS` — implicitly macOS-only, platform-agnostic code.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added platform detection paragraph to Migration section.

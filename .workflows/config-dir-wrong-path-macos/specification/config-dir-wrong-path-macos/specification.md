@@ -31,6 +31,8 @@ Replace `os.UserConfigDir()` in `configFilePath()` with XDG-compliant logic:
 
 **Why not just hardcode `~/.config`:** On Linux, `os.UserConfigDir()` currently respects `XDG_CONFIG_HOME`. A naive fix that only uses `os.UserHomeDir() + "/.config"` would regress Linux users who have set a custom `XDG_CONFIG_HOME`.
 
+**XDG_CONFIG_HOME edge cases:** No special handling for trailing slashes or relative paths. `filepath.Join` normalizes trailing slashes, and matching Go's `os.UserConfigDir()` behavior (which doesn't validate either) is sufficient.
+
 **Env var overrides are unchanged:** The existing per-file env var check (`PORTAL_PROJECTS_FILE`, etc.) remains first in the resolution order and is unaffected.
 
 ## Migration
@@ -39,13 +41,21 @@ Existing macOS users have real data at `~/Library/Application Support/portal/`. 
 
 **Files to migrate:** `projects.json`, `aliases`, `hooks.json`
 
+**Trigger:** Migration runs inside `configFilePath()` itself — before returning the resolved path, it checks whether files exist at the old macOS path (`~/Library/Application Support/portal/`) and moves them to the new path. No sentinel needed: migration is implicitly idempotent because it only acts when files exist at the old path and don't exist at the new path. Once files are moved, subsequent calls are a no-op.
+
+**Platform detection:** Migration does not use `runtime.GOOS`. Instead, it simply checks whether the old path (`~/Library/Application Support/portal/`) exists. This is implicitly macOS-only since that path won't exist on Linux, and keeps the logic platform-agnostic.
+
 **Migration behavior:**
-- On first run after the fix, check if files exist at `~/Library/Application Support/portal/`
-- If the target file already exists at `~/.config/portal/`, do not overwrite — skip that file
-- If the target file does not exist, move the file from old path to new path
+- For each config file, check if it exists at `~/Library/Application Support/portal/`
+- If the target file already exists at the new path, do not overwrite — skip that file
+- If the target file does not exist at the new path, move it from old path to new path
+- Use `os.Rename` for the move — both paths are under `$HOME`, always same volume
 - Handle partial state: some files may be at old path, some at new
-- Migration is macOS-only — Linux users are already at the correct path
 - After migration, clean up the old `~/Library/Application Support/portal/` directory if empty
+
+**Error handling:** Migration is best-effort. If a file move fails (e.g. permission denied), log a warning to stderr and continue with remaining files. A partial migration is acceptable — the next run will retry any files still at the old path. No user-visible output on success (silent migration).
+
+**Directory creation:** `configFilePath()` only returns a path — it does not create directories. The existing callers (alias store, hooks store, project store) already call `os.MkdirAll` before writing. Migration must also call `os.MkdirAll` on the target directory (`~/.config/portal/`) before moving files.
 
 ## Testing
 
