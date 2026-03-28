@@ -3,6 +3,7 @@
 ## Phases
 
 ### Phase 1: Fix config path resolution and migrate existing files
+<!-- status: approved | approved_at: 2026-03-28 -->
 **Goal**: Replace `os.UserConfigDir()` with XDG-compliant logic in `configFilePath()` and add one-shot migration of files from the old macOS path to the new path.
 
 **Rationale**: This is a single root cause (wrong base directory function) with a necessary migration consequence. The fix and migration are coupled inside the same function and neither is useful without the other. Splitting them would leave either broken paths or orphaned data between phases.
