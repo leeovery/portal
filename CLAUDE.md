@@ -50,6 +50,10 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 | `fileutil` | Shared utilities — `AtomicWrite` (temp file + rename) used by hooks store |
 | `fuzzy` | Substring-based fuzzy matching/filtering |
 
+### Config path resolution (cmd/config.go)
+
+All config files (`projects.json`, `aliases`, `hooks.json`) resolve via `configFilePath`: per-file env var → `XDG_CONFIG_HOME/portal/` → `~/.config/portal/`. On first access, `migrateConfigFile` performs a one-shot move from the old macOS path (`~/Library/Application Support/portal/`) — never overwrites existing files at the new path.
+
 ### DI / testing pattern
 
 All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`, `hooksDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. Integration tests in `cmd/root_integration_test.go` build the binary and test via subprocess execution.
