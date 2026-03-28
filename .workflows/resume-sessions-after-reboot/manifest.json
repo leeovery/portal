@@ -104,7 +104,8 @@
             "resume-sessions-after-reboot-1-4",
             "resume-sessions-after-reboot-1-5",
             "resume-sessions-after-reboot-2-1",
-            "resume-sessions-after-reboot-2-2"
+            "resume-sessions-after-reboot-2-2",
+            "resume-sessions-after-reboot-2-3"
           ],
           "completed_phases": [
             1

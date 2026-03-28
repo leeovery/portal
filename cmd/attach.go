@@ -3,8 +3,12 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/spf13/cobra"
 )
+
+// HookExecutorFunc executes resume hooks for a given session.
+type HookExecutorFunc func(sessionName string)
 
 // attachDeps holds injectable dependencies for the attach command.
 // When nil, real implementations are used.
@@ -17,8 +21,9 @@ type SessionValidator interface {
 
 // AttachDeps allows injecting dependencies for testing.
 type AttachDeps struct {
-	Connector SessionConnector
-	Validator SessionValidator
+	Connector    SessionConnector
+	Validator    SessionValidator
+	HookExecutor HookExecutorFunc
 }
 
 var attachCmd = &cobra.Command{
@@ -30,27 +35,48 @@ var attachCmd = &cobra.Command{
 
 		name := args[0]
 
-		connector, validator := buildAttachDeps(cmd)
+		connector, validator, hookExecutor := buildAttachDeps(cmd)
 
 		if !validator.HasSession(name) {
 			return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
+		}
+
+		if hookExecutor != nil {
+			hookExecutor(name)
 		}
 
 		return connector.Connect(name)
 	},
 }
 
-// buildAttachDeps returns the appropriate connector and validator for the attach command.
-// When attachDeps is set (testing), uses injected dependencies.
+// buildAttachDeps returns the appropriate connector, validator, and hook executor
+// for the attach command. When attachDeps is set (testing), uses injected dependencies.
 // Otherwise, builds real implementations based on inside/outside tmux detection.
-func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator) {
+func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator, HookExecutorFunc) {
 	if attachDeps != nil {
-		return attachDeps.Connector, attachDeps.Validator
+		return attachDeps.Connector, attachDeps.Validator, attachDeps.HookExecutor
 	}
 
 	client := tmuxClient(cmd)
 	connector := buildSessionConnector(client)
-	return connector, client
+	return connector, client, buildHookExecutor(client)
+}
+
+// buildHookExecutor creates a HookExecutorFunc that loads the hook store
+// and delegates to hooks.ExecuteHooks. The tmux client satisfies all
+// executor interfaces (PaneLister, KeySender, OptionChecker).
+func buildHookExecutor(client interface {
+	hooks.PaneLister
+	hooks.KeySender
+	hooks.OptionChecker
+}) HookExecutorFunc {
+	return func(sessionName string) {
+		store, err := loadHookStore()
+		if err != nil {
+			return
+		}
+		hooks.ExecuteHooks(sessionName, client, store, client, client)
+	}
 }
 
 func init() {
