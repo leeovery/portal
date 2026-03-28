@@ -201,16 +201,10 @@ func (c *Client) GetServerOption(name string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
-// ListPanes returns the pane IDs belonging to the named tmux session.
-// Each ID has the form "%N" (e.g. "%0", "%3").
-func (c *Client) ListPanes(sessionName string) ([]string, error) {
-	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{pane_id}")
-	if err != nil {
-		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
-	}
-
+// parsePaneOutput splits newline-delimited tmux output into trimmed, non-empty strings.
+func parsePaneOutput(output string) []string {
 	if output == "" {
-		return []string{}, nil
+		return []string{}
 	}
 
 	lines := strings.Split(output, "\n")
@@ -222,7 +216,17 @@ func (c *Client) ListPanes(sessionName string) ([]string, error) {
 		}
 		panes = append(panes, line)
 	}
-	return panes, nil
+	return panes
+}
+
+// ListPanes returns the pane IDs belonging to the named tmux session.
+// Each ID has the form "%N" (e.g. "%0", "%3").
+func (c *Client) ListPanes(sessionName string) ([]string, error) {
+	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{pane_id}")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
+	}
+	return parsePaneOutput(output), nil
 }
 
 // ListAllPanes returns the pane IDs for all panes across all tmux sessions.
@@ -233,21 +237,7 @@ func (c *Client) ListAllPanes() ([]string, error) {
 	if err != nil {
 		return []string{}, nil
 	}
-
-	if output == "" {
-		return []string{}, nil
-	}
-
-	lines := strings.Split(output, "\n")
-	panes := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		panes = append(panes, line)
-	}
-	return panes, nil
+	return parsePaneOutput(output), nil
 }
 
 // SendKeys delivers a command to the specified tmux pane followed by Enter.

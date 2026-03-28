@@ -82,7 +82,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 1,
+          "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
             {
@@ -101,7 +101,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 3,
+          "current_phase": 4,
           "current_task": "~",
           "completed_tasks": [
             "resume-sessions-after-reboot-1-1",
@@ -117,7 +117,8 @@
             "resume-sessions-after-reboot-3-1",
             "resume-sessions-after-reboot-3-2",
             "resume-sessions-after-reboot-3-3",
-            "resume-sessions-after-reboot-3-4"
+            "resume-sessions-after-reboot-3-4",
+            "resume-sessions-after-reboot-4-1"
           ],
           "completed_phases": [
             1,
