@@ -63,7 +63,13 @@
             "resume-sessions-after-reboot-3": "tick-e9c1aa",
             "resume-sessions-after-reboot-3-2": "tick-a8e239",
             "resume-sessions-after-reboot-3-3": "tick-49850d",
-            "resume-sessions-after-reboot-3-4": "tick-be944f"
+            "resume-sessions-after-reboot-3-4": "tick-be944f",
+            "resume-sessions-after-reboot-4": "tick-df41eb",
+            "resume-sessions-after-reboot-4-1": "tick-444b6b",
+            "resume-sessions-after-reboot-4-2": "tick-867e69",
+            "resume-sessions-after-reboot-4-3": "tick-c55492",
+            "resume-sessions-after-reboot-4-4": "tick-ce65fa",
+            "resume-sessions-after-reboot-4-5": "tick-e83b1a"
           },
           "external_id": "tick-695f97"
         }

@@ -76,3 +76,19 @@
 | resume-sessions-after-reboot-3-2 | Hook Store CleanStale Method | empty store returns no removals, all panes still live returns no removals, no live panes removes all entries, file only saved when at least one entry removed |
 | resume-sessions-after-reboot-3-3 | Lazy Cleanup in Execution Flow | no tmux server running skips cleanup gracefully, cleanup errors do not block hook execution, cleanup runs before pane-matching logic |
 | resume-sessions-after-reboot-3-4 | Extend Clean Command with Hook Cleanup | no tmux server running produces no hook removal output, hooks file missing produces no hook removal output, both project and hook removals printed together |
+
+## Phase 4: Analysis (Cycle 1)
+<!-- status: approved | approved_at: 2026-03-28 -->
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+<!-- status: approved | approved_at: 2026-03-28 -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| resume-sessions-after-reboot-4-1 | Extract Pane Output Parsing Helper in Tmux Package | empty output returns empty slice, whitespace-only lines filtered |
+| resume-sessions-after-reboot-4-2 | Extract Atomic JSON Write Utility | parent directory creation, temp file cleanup on each error path |
+| resume-sessions-after-reboot-4-3 | Centralize Volatile Marker Name Format | all usage sites reference single function, no hardcoded strings remain |
+| resume-sessions-after-reboot-4-4 | Group ExecuteHooks Parameters Into Composed Interfaces | small interfaces preserved, test mocks updated for composed interfaces |
+| resume-sessions-after-reboot-4-5 | Remove Duplicate AllPaneLister Interface From cmd/clean.go | no circular import introduced, field type updated throughout |

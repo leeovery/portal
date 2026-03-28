@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: resume-sessions-after-reboot (Cycle 1)
 
 ## Task 1: Extract pane output parsing helper in tmux package
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -48,7 +48,7 @@ sources: duplication
 - All existing tests pass: `go test ./cmd/...`
 
 ## Task 2: Extract atomic JSON write utility
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -103,7 +103,7 @@ sources: duplication
 - All existing tests pass: `go test ./cmd/...`
 
 ## Task 3: Centralize volatile marker name format
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -135,7 +135,7 @@ sources: architecture
 - All existing tests pass: `go test ./cmd/...`
 
 ## Task 4: Group ExecuteHooks parameters into composed interfaces
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -179,7 +179,7 @@ sources: architecture
 - All existing tests pass: `go test ./cmd/...`
 
 ## Task 5: Remove duplicate AllPaneLister interface from cmd/clean.go
-status: pending
+status: approved
 severity: low
 sources: duplication, architecture
 
