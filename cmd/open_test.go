@@ -259,6 +259,28 @@ func (m *mockExecer) Exec(argv0 string, argv []string, envv []string) error {
 	return m.err
 }
 
+// orderTrackingSwitcher wraps SwitchClienter to track call ordering.
+type orderTrackingSwitcher struct {
+	inner     SwitchClienter
+	callOrder *[]string
+}
+
+func (o *orderTrackingSwitcher) SwitchClient(name string) error {
+	*o.callOrder = append(*o.callOrder, "switch")
+	return o.inner.SwitchClient(name)
+}
+
+// orderTrackingExecer wraps execer to track call ordering.
+type orderTrackingExecer struct {
+	inner     execer
+	callOrder *[]string
+}
+
+func (o *orderTrackingExecer) Exec(argv0 string, argv []string, envv []string) error {
+	*o.callOrder = append(*o.callOrder, "exec")
+	return o.inner.Exec(argv0, argv, envv)
+}
+
 func TestPathOpener(t *testing.T) {
 	t.Run("inside tmux creates session detached then switches", func(t *testing.T) {
 		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
@@ -495,6 +517,189 @@ func TestPathOpener(t *testing.T) {
 
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("inside tmux executes hooks before switch-client", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "myproject-abc123"}
+		switcher := &mockSwitchClient{}
+
+		var callOrder []string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			callOrder = append(callOrder, "hooks")
+		})
+
+		origSwitcher := switcher
+		// Wrap switcher to track call order
+		trackingSwitcher := &orderTrackingSwitcher{
+			inner:     origSwitcher,
+			callOrder: &callOrder,
+		}
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   trackingSwitcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+			hookExec:   hookExec,
+		}
+
+		err := opener.Open("/home/user/project", nil)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(callOrder) != 2 {
+			t.Fatalf("expected 2 calls, got %d: %v", len(callOrder), callOrder)
+		}
+		if callOrder[0] != "hooks" {
+			t.Errorf("expected hooks to run first, got %q", callOrder[0])
+		}
+		if callOrder[1] != "switch" {
+			t.Errorf("expected switch to run second, got %q", callOrder[1])
+		}
+	})
+
+	t.Run("inside tmux hook executor receives session name from CreateFromDir", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "portal-z9y8x7"}
+		switcher := &mockSwitchClient{}
+
+		var receivedName string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			receivedName = sessionName
+		})
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+			hookExec:   hookExec,
+		}
+
+		err := opener.Open("/some/dir", nil)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if receivedName != "portal-z9y8x7" {
+			t.Errorf("hook executor received %q, want %q", receivedName, "portal-z9y8x7")
+		}
+	})
+
+	t.Run("outside tmux executes hooks before exec", func(t *testing.T) {
+		qs := &mockQuickStarter{
+			result: &session.QuickStartResult{
+				SessionName: "myproject-abc123",
+				Dir:         "/home/user/project",
+				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
+			},
+		}
+
+		var callOrder []string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			callOrder = append(callOrder, "hooks")
+		})
+		execMock := &orderTrackingExecer{
+			inner:     &mockExecer{},
+			callOrder: &callOrder,
+		}
+
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs:         qs,
+			execer:     execMock,
+			tmuxPath:   "/usr/bin/tmux",
+			hookExec:   hookExec,
+		}
+
+		err := opener.Open("/home/user/project", nil)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(callOrder) != 2 {
+			t.Fatalf("expected 2 calls, got %d: %v", len(callOrder), callOrder)
+		}
+		if callOrder[0] != "hooks" {
+			t.Errorf("expected hooks to run first, got %q", callOrder[0])
+		}
+		if callOrder[1] != "exec" {
+			t.Errorf("expected exec to run second, got %q", callOrder[1])
+		}
+	})
+
+	t.Run("outside tmux hook executor receives session name from QuickStart", func(t *testing.T) {
+		qs := &mockQuickStarter{
+			result: &session.QuickStartResult{
+				SessionName: "portal-w1x2y3",
+				Dir:         "/home/user/project",
+				ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "portal-w1x2y3", "-c", "/home/user/project"},
+			},
+		}
+
+		var receivedName string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			receivedName = sessionName
+		})
+
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs:         qs,
+			execer:     &mockExecer{},
+			tmuxPath:   "/usr/bin/tmux",
+			hookExec:   hookExec,
+		}
+
+		err := opener.Open("/home/user/project", nil)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if receivedName != "portal-w1x2y3" {
+			t.Errorf("hook executor received %q, want %q", receivedName, "portal-w1x2y3")
+		}
+	})
+
+	t.Run("new session creation has no hooks to execute", func(t *testing.T) {
+		creator := &mockSessionCreator{sessionName: "newproject-abc123"}
+		switcher := &mockSwitchClient{}
+
+		var receivedName string
+		hookCalled := false
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			hookCalled = true
+			receivedName = sessionName
+		})
+
+		opener := &PathOpener{
+			insideTmux: true,
+			creator:    creator,
+			switcher:   switcher,
+			qs:         &mockQuickStarter{},
+			execer:     &mockExecer{},
+			hookExec:   hookExec,
+		}
+
+		err := opener.Open("/home/user/newproject", nil)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// hookExec IS called with the session name — the executor's internal
+		// behavior handles the no-op (ExecuteHooks silently does nothing when
+		// no hooks exist for this session).
+		if !hookCalled {
+			t.Error("expected hookExec to be called even for new sessions")
+		}
+		if receivedName != "newproject-abc123" {
+			t.Errorf("hook executor received %q, want %q", receivedName, "newproject-abc123")
 		}
 	})
 }

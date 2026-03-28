@@ -202,6 +202,7 @@ type PathOpener struct {
 	qs         quickStarter
 	execer     execer
 	tmuxPath   string
+	hookExec   HookExecutorFunc
 }
 
 // Open creates a session at the given path and connects to it.
@@ -213,6 +214,9 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 		if err != nil {
 			return err
 		}
+		if po.hookExec != nil {
+			po.hookExec(sessionName)
+		}
 		return po.switcher.SwitchClient(sessionName)
 	}
 
@@ -221,6 +225,9 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 		return err
 	}
 
+	if po.hookExec != nil {
+		po.hookExec(result.SessionName)
+	}
 	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
 }
 
@@ -245,6 +252,7 @@ func openPath(cmd *cobra.Command, resolvedPath string, command []string) error {
 		switcher:   client,
 		qs:         &quickStartAdapter{qs: session.NewQuickStart(gitResolver, store, client, gen)},
 		execer:     &realExecer{},
+		hookExec:   buildHookExecutor(client),
 	}
 
 	if !insideTmux {
