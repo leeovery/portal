@@ -73,7 +73,7 @@
       "items": {
         "resume-sessions-after-reboot": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
@@ -99,7 +99,8 @@
           "current_task": "~",
           "completed_tasks": [
             "resume-sessions-after-reboot-1-1",
-            "resume-sessions-after-reboot-1-2"
+            "resume-sessions-after-reboot-1-2",
+            "resume-sessions-after-reboot-1-3"
           ]
         }
       }

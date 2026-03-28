@@ -16,6 +16,7 @@ var skipTmuxCheck = map[string]bool{
 	"help":    true,
 	"alias":   true,
 	"clean":   true,
+	"hooks":   true,
 }
 
 // ServerBootstrapper ensures a tmux server is running.
