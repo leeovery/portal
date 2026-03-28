@@ -19,3 +19,11 @@
 - [ ] Migration cleans up the old `~/Library/Application Support/portal/` directory if empty after file moves
 - [ ] Migration failures log a warning to stderr and do not prevent `configFilePath` from returning the correct path
 - [ ] All existing tests continue to pass
+
+#### Tasks
+<!-- status: draft -->
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| config-dir-wrong-path-macos-1-1 | Fix configFilePath to use XDG-compliant base directory | XDG_CONFIG_HOME set to empty string, XDG_CONFIG_HOME with trailing slash, os.UserHomeDir failure |
+| config-dir-wrong-path-macos-1-2 | Add one-shot file migration from old macOS path | old file exists but new file also exists (no overwrite), old directory does not exist (no-op), target directory does not yet exist (must MkdirAll), rename failure (log warning and continue), old directory non-empty after partial migration (do not remove), old directory empty after migration (remove it), permission denied on old file |
