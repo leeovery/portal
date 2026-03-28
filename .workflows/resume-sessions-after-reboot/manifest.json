@@ -80,12 +80,12 @@
     "implementation": {
       "items": {
         "resume-sessions-after-reboot": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
-          "analysis_cycle": 3,
+          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
