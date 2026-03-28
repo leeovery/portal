@@ -112,17 +112,17 @@ On macOS, `os.UserConfigDir()` returns `~/Library/Application Support` instead o
 
 ### Chosen Approach
 
-Replace `os.UserConfigDir()` with `os.UserHomeDir()` + `/.config` to always use XDG-style paths. Add a one-shot migration that moves files from `~/Library/Application Support/portal/` to `~/.config/portal/` on macOS.
+Replace `os.UserConfigDir()` with XDG-compliant logic: check `XDG_CONFIG_HOME` first, fall back to `~/.config`. Add a one-shot migration that moves files from `~/Library/Application Support/portal/` to `~/.config/portal/` on macOS.
 
-**Deciding factor:** Simplest fix that matches documented behavior. `XDG_CONFIG_HOME` support is a nice-to-have but the immediate fix is hardcoding `~/.config`.
+**Deciding factor:** Fixes macOS while preserving Linux `XDG_CONFIG_HOME` support. Avoids regressing existing Linux users who have a custom `XDG_CONFIG_HOME`.
 
 ### Options Explored
 
 **Option A: Hardcode `~/.config` via `os.UserHomeDir()` + `/.config`**
-Simple, matches docs. Does not respect `XDG_CONFIG_HOME` if set, but neither does the current code. Can add `XDG_CONFIG_HOME` support later.
+Simple, matches docs. However, would regress Linux behavior — `os.UserConfigDir()` currently respects `XDG_CONFIG_HOME` on Linux. Not recommended.
 
-**Option B: Check `XDG_CONFIG_HOME` first, fall back to `~/.config`**
-More correct for XDG compliance. Slightly more complex. Worth considering but may be over-engineering for the immediate bug.
+**Option B: Check `XDG_CONFIG_HOME` first, fall back to `~/.config`** (recommended)
+Fixes macOS, preserves Linux `XDG_CONFIG_HOME` support. Slightly more code but avoids a regression.
 
 **Option C: Keep `os.UserConfigDir()` on macOS, update docs**
 Would mean accepting Apple-native paths. Rejected — the project has explicitly chosen XDG conventions and users/tooling expect `~/.config/portal/`.
@@ -147,5 +147,5 @@ Would mean accepting Apple-native paths. Rejected — the project has explicitly
 
 ## Notes
 
-- The env var overrides (`PORTAL_PROJECTS_FILE`, etc.) are only used in tests, not by end users. They bypass the config directory logic entirely and are unaffected by this fix.
-- `XDG_CONFIG_HOME` support could be added as a follow-up but is not required to fix this bug.
+- The env var overrides (`PORTAL_PROJECTS_FILE`, etc.) are documented as user-facing in the README, not test-only. They bypass the config directory logic entirely and are unaffected by this fix.
+- On Linux, `os.UserConfigDir()` already respects `XDG_CONFIG_HOME`. A naive fix that hardcodes `~/.config` would regress this. The fix should check `XDG_CONFIG_HOME` first, then fall back to `~/.config` — this preserves Linux behavior and fixes macOS.
