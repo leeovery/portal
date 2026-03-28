@@ -39,22 +39,28 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 
 | Package | Role |
 |---------|------|
-| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec`). Client methods: ListSessions, NewSession, HasSession, SwitchClient, EnsureServer, WaitForSessions |
+| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec`). Client methods: ListSessions, NewSession, HasSession, SwitchClient, EnsureServer, WaitForSessions, ListPanes, ListAllPanes, SendKeys, GetServerOption, SetServerOption, DeleteServerOption |
 | `session` | Session creation pipeline: git root resolution → project persistence → name generation (`{project}-{nanoid}`) → tmux session creation. `QuickStart` for atomic create-or-attach |
 | `resolver` | Path resolution chain with interface-based DI (AliasLookup, ZoxideQuerier, DirValidator) |
 | `tui` | Bubble Tea model with page state machine: Loading → Sessions → Projects → FileBrowser |
 | `project` | JSON-backed store (`~/.config/portal/projects.json`) with atomic writes |
 | `alias` | Flat key=value file store (`~/.config/portal/aliases`) |
 | `browser` | Directory listing with symlink detection |
+| `hooks` | Resume-hook system: JSON-backed `Store` (`~/.config/portal/hooks.json`) for per-pane on-resume commands + `ExecuteHooks` executor that fires hooks on session attach using volatile tmux server-option markers to prevent duplicate runs |
+| `fileutil` | Shared utilities — `AtomicWrite` (temp file + rename) used by hooks store |
 | `fuzzy` | Substring-based fuzzy matching/filtering |
 
 ### DI / testing pattern
 
-All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. Integration tests in `cmd/root_integration_test.go` build the binary and test via subprocess execution.
+All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`, `hooksDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. Integration tests in `cmd/root_integration_test.go` build the binary and test via subprocess execution.
 
 ### Server bootstrap
 
 `PersistentPreRunE` calls `EnsureServer()` for commands needing tmux (all except version, init, help, alias, clean). If the server was just started, TUI shows a loading page; CLI commands call `bootstrapWait()` which prints to stderr and polls for session restoration (1–6s window).
+
+### Resume hooks
+
+Per-pane hooks registered via `portal hooks set --on-resume "cmd"`. On `attach`/`open`, `ExecuteHooks` fires stored commands for panes in the target session using `tmux send-keys`. Dual-level tracking: persistent JSON store on disk + volatile `@portal-active-<pane>` tmux server options as one-shot markers (lost on reboot, so hooks re-fire after restart). Stale hooks cleaned lazily on attach and explicitly via `portal clean`.
 
 ## Release
 

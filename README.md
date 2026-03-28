@@ -157,9 +157,21 @@ xctl alias rm work                   # remove alias
 xctl alias list                      # list all aliases
 ```
 
+### `xctl hooks`
+
+Register per-pane commands that re-execute automatically when a session is attached after a reboot. Must be run from inside a tmux pane.
+
+```bash
+xctl hooks set --on-resume "npm start"    # register a resume hook
+xctl hooks rm --on-resume                 # remove the hook
+xctl hooks list                           # list all hooks
+```
+
+Hooks fire via `tmux send-keys` when you attach/open a session. A volatile marker prevents duplicate execution within the same boot cycle — after a reboot the markers are gone and hooks re-fire.
+
 ### `xctl clean`
 
-Remove stale projects whose directories no longer exist on disk.
+Remove stale projects whose directories no longer exist on disk, and prune hooks for panes that no longer exist.
 
 ```bash
 xctl clean
@@ -209,6 +221,8 @@ Portal automatically starts the tmux server if it isn't already running. This el
 
 Portal is plugin-agnostic: it doesn't depend on continuum or resurrect. It simply starts the server and waits briefly for any session restoration to complete.
 
+Pair this with [resume hooks](#xctl-hooks) to automatically re-run pane commands (dev servers, editors, etc.) after a reboot.
+
 ## Configuration
 
 Portal stores config in `~/.config/portal/`:
@@ -217,6 +231,7 @@ Portal stores config in `~/.config/portal/`:
 |---|---|---|
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
+| `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
 
