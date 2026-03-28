@@ -763,6 +763,73 @@ func TestListPanes(t *testing.T) {
 	})
 }
 
+func TestListAllPanes(t *testing.T) {
+	t.Run("returns pane IDs across multiple sessions", func(t *testing.T) {
+		mock := &MockCommander{Output: "%0\n%1\n%5\n%12"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"%0", "%1", "%5", "%12"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+	})
+
+	t.Run("returns empty slice when no tmux server running", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("no server running on /tmp/tmux-501/default")}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %d panes, want 0", len(got))
+		}
+	})
+
+	t.Run("returns empty slice when output is empty", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %d panes, want 0", len(got))
+		}
+	})
+
+	t.Run("calls list-panes with -a flag", func(t *testing.T) {
+		mock := &MockCommander{Output: "%0"}
+		client := tmux.NewClient(mock)
+
+		_, _ = client.ListAllPanes()
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "list-panes -a -F #{pane_id}"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+}
+
 func TestSendKeys(t *testing.T) {
 	t.Run("sends command followed by Enter to pane", func(t *testing.T) {
 		mock := &MockCommander{}

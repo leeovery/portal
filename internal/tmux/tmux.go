@@ -225,6 +225,31 @@ func (c *Client) ListPanes(sessionName string) ([]string, error) {
 	return panes, nil
 }
 
+// ListAllPanes returns the pane IDs for all panes across all tmux sessions.
+// Each ID has the form "%N" (e.g. "%0", "%3").
+// Returns an empty slice and nil error when no tmux server is running.
+func (c *Client) ListAllPanes() ([]string, error) {
+	output, err := c.cmd.Run("list-panes", "-a", "-F", "#{pane_id}")
+	if err != nil {
+		return []string{}, nil
+	}
+
+	if output == "" {
+		return []string{}, nil
+	}
+
+	lines := strings.Split(output, "\n")
+	panes := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		panes = append(panes, line)
+	}
+	return panes, nil
+}
+
 // SendKeys delivers a command to the specified tmux pane followed by Enter.
 func (c *Client) SendKeys(paneID string, command string) error {
 	_, err := c.cmd.Run("send-keys", "-t", paneID, command, "Enter")
