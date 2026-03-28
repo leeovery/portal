@@ -19,10 +19,14 @@ func resetRootCmd() {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	_ = initCmd.Flags().Set("cmd", "x")     // reset to default; value is always valid
+	_ = initCmd.Flags().Set("cmd", "x")       // reset to default; value is always valid
 	_ = listCmd.Flags().Set("short", "false") // reset list flags
 	_ = listCmd.Flags().Set("long", "false")
 	if f := openCmd.Flags().Lookup("exec"); f != nil { // reset exec flag
+		_ = f.Value.Set("")
+		f.Changed = false
+	}
+	if f := hooksSetCmd.Flags().Lookup("on-resume"); f != nil { // reset hooks set flags
 		_ = f.Value.Set("")
 		f.Changed = false
 	}
