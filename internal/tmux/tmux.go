@@ -1,11 +1,15 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// ErrOptionNotFound is returned when a tmux server option does not exist.
+var ErrOptionNotFound = errors.New("option not found")
 
 // Session represents a running tmux session.
 type Session struct {
@@ -174,6 +178,35 @@ func (c *Client) SwitchClient(name string) error {
 	_, err := c.cmd.Run("switch-client", "-t", name)
 	if err != nil {
 		return fmt.Errorf("failed to switch to session %q: %w", name, err)
+	}
+	return nil
+}
+
+// SetServerOption sets a tmux server-level option.
+func (c *Client) SetServerOption(name, value string) error {
+	_, err := c.cmd.Run("set-option", "-s", name, value)
+	if err != nil {
+		return fmt.Errorf("failed to set server option %q: %w", name, err)
+	}
+	return nil
+}
+
+// GetServerOption returns the value of a tmux server-level option.
+// Returns ErrOptionNotFound when the option does not exist.
+func (c *Client) GetServerOption(name string) (string, error) {
+	output, err := c.cmd.Run("show-option", "-sv", name)
+	if err != nil {
+		return "", ErrOptionNotFound
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// DeleteServerOption removes a tmux server-level option.
+// This is a no-op if the option does not exist.
+func (c *Client) DeleteServerOption(name string) error {
+	_, err := c.cmd.Run("set-option", "-su", name)
+	if err != nil {
+		return fmt.Errorf("failed to delete server option %q: %w", name, err)
 	}
 	return nil
 }

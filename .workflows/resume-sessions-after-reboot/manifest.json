@@ -98,7 +98,8 @@
           "current_phase": 1,
           "current_task": "~",
           "completed_tasks": [
-            "resume-sessions-after-reboot-1-1"
+            "resume-sessions-after-reboot-1-1",
+            "resume-sessions-after-reboot-1-2"
           ]
         }
       }
