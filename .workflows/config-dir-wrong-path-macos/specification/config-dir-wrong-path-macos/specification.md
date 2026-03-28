@@ -41,12 +41,12 @@ Existing macOS users have real data at `~/Library/Application Support/portal/`. 
 
 **Files to migrate:** `projects.json`, `aliases`, `hooks.json`
 
-**Trigger:** Migration runs inside `configFilePath()` itself — before returning the resolved path, it checks whether files exist at the old macOS path (`~/Library/Application Support/portal/`) and moves them to the new path. No sentinel needed: migration is implicitly idempotent because it only acts when files exist at the old path and don't exist at the new path. Once files are moved, subsequent calls are a no-op.
+**Trigger:** Migration runs inside `configFilePath()` itself — before returning the resolved path, it migrates only the single file it was called with (e.g., a call with `"aliases"` only migrates `aliases`). No sentinel needed: migration is implicitly idempotent because it only acts when the file exists at the old path and doesn't exist at the new path. Once moved, subsequent calls are a no-op.
 
 **Platform detection:** Migration does not use `runtime.GOOS`. Instead, it simply checks whether the old path (`~/Library/Application Support/portal/`) exists. This is implicitly macOS-only since that path won't exist on Linux, and keeps the logic platform-agnostic.
 
 **Migration behavior:**
-- For each config file, check if it exists at `~/Library/Application Support/portal/`
+- Each `configFilePath()` call checks if its own file exists at `~/Library/Application Support/portal/`
 - If the target file already exists at the new path, do not overwrite — skip that file
 - If the target file does not exist at the new path, move it from old path to new path
 - Use `os.Rename` for the move — both paths are under `$HOME`, always same volume

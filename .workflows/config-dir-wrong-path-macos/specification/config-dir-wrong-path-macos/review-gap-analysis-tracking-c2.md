@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-03-28
 cycle: 2
 phase: Gap Analysis
@@ -24,7 +24,7 @@ The spec says migration runs inside `configFilePath()` and describes the behavio
 
 Option (a) is simpler and avoids maintaining a duplicate file list, but the "For each config file" language reads like option (b). Both work correctly with the idempotency and cleanup behavior described, but an implementer would need to choose.
 
-**Proposed Addition**:
+**Proposed Addition**: Each `configFilePath()` call migrates only its own file, not all three. Avoids hardcoded file list.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified trigger and migration behavior bullet points in specification.
