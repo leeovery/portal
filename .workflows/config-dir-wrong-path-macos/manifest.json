@@ -77,7 +77,11 @@
           "current_phase": 1,
           "current_task": "~",
           "completed_tasks": [
-            "config-dir-wrong-path-macos-1-1"
+            "config-dir-wrong-path-macos-1-1",
+            "config-dir-wrong-path-macos-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }
