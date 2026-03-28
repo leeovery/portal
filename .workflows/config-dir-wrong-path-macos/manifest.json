@@ -85,6 +85,17 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "config-dir-wrong-path-macos": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "config-dir-wrong-path-macos-1-1",
+            "config-dir-wrong-path-macos-1-2"
+          ]
+        }
+      }
     }
   }
 }
