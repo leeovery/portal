@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "config-dir-wrong-path-macos": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-03-28",
+          "sources": {
+            "config-dir-wrong-path-macos": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
