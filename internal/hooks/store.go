@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
+
+	"github.com/leeovery/portal/internal/fileutil"
 )
 
 // Hook represents a single hook entry for list output.
@@ -52,39 +53,12 @@ func (s *Store) Load() (hooksFile, error) {
 // Save writes hooks to the JSON file using atomic write (temp file + rename).
 // Creates the parent directory if it does not exist.
 func (s *Store) Save(h hooksFile) error {
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
 	data, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal hooks: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, "hooks-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
+	return fileutil.AtomicWrite(s.path, data)
 }
 
 // Set adds or overwrites a hook for the given pane and event.

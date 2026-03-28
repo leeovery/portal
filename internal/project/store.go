@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/leeovery/portal/internal/fileutil"
 )
 
 // Project represents a remembered project directory.
@@ -55,40 +56,13 @@ func (s *Store) Load() ([]Project, error) {
 // Save writes projects to the JSON file using atomic write (temp file + rename).
 // Creates the parent directory if it does not exist.
 func (s *Store) Save(projects []Project) error {
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
-	}
-
 	f := projectsFile{Projects: projects}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal projects: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, "projects-*.json.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-
-	return nil
+	return fileutil.AtomicWrite(s.path, data)
 }
 
 // Upsert adds a new project or updates an existing one matched by path.
