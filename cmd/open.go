@@ -323,12 +323,16 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 }
 
 // processTUIResult handles the result of a TUI run.
-// If the user selected a session, it connects via the given connector.
+// If the user selected a session, it executes hooks (when hookExec is non-nil)
+// then connects via the given connector.
 // If the user quit without selecting, it returns nil.
-func processTUIResult(model tui.Model, connector SessionConnector) error {
+func processTUIResult(model tui.Model, connector SessionConnector, hookExec HookExecutorFunc) error {
 	selected := model.Selected()
 	if selected == "" {
 		return nil
+	}
+	if hookExec != nil {
+		hookExec(selected)
 	}
 	return connector.Connect(selected)
 }
@@ -389,7 +393,8 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	}
 
 	connector := buildSessionConnector(client)
-	return processTUIResult(model, connector)
+	hookExec := buildHookExecutor(client)
+	return processTUIResult(model, connector, hookExec)
 }
 
 // buildQueryResolver creates a QueryResolver with appropriate dependencies.

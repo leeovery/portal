@@ -953,7 +953,7 @@ func TestProcessTUIResult(t *testing.T) {
 		// m.Selected() is "" by default
 		connector := &mockSessionConnector{}
 
-		err := processTUIResult(m, connector)
+		err := processTUIResult(m, connector, nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -976,13 +976,97 @@ func TestProcessTUIResult(t *testing.T) {
 
 		connector := &mockSessionConnector{}
 
-		err := processTUIResult(m, connector)
+		err := processTUIResult(m, connector, nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if connector.connectedTo != "dev" {
 			t.Errorf("connector called with %q, want %q", connector.connectedTo, "dev")
+		}
+	})
+
+	t.Run("selected session triggers hook execution before connect", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "my-project", Windows: 2},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(tui.Model)
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(tui.Model)
+
+		var callOrder []string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			callOrder = append(callOrder, "hooks")
+		})
+		connector := &orderTrackingConnector{
+			inner:     &mockSessionConnector{},
+			callOrder: &callOrder,
+		}
+
+		err := processTUIResult(m, connector, hookExec)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(callOrder) != 2 {
+			t.Fatalf("expected 2 calls, got %d: %v", len(callOrder), callOrder)
+		}
+		if callOrder[0] != "hooks" {
+			t.Errorf("expected hooks to run first, got %q", callOrder[0])
+		}
+		if callOrder[1] != "connect" {
+			t.Errorf("expected connect to run second, got %q", callOrder[1])
+		}
+	})
+
+	t.Run("hook executor receives selected session name", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev-project", Windows: 1},
+		}
+		m := tui.NewModelWithSessions(sessions)
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(tui.Model)
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(tui.Model)
+
+		var receivedName string
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			receivedName = sessionName
+		})
+		connector := &mockSessionConnector{}
+
+		err := processTUIResult(m, connector, hookExec)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if receivedName != "dev-project" {
+			t.Errorf("hook executor received %q, want %q", receivedName, "dev-project")
+		}
+	})
+
+	t.Run("user quits TUI without selection triggers no hook execution", func(t *testing.T) {
+		m := tui.New(&mockSessionLister{})
+		// m.Selected() is "" by default — simulates quit without selection
+
+		hookCalled := false
+		hookExec := HookExecutorFunc(func(sessionName string) {
+			hookCalled = true
+		})
+		connector := &mockSessionConnector{}
+
+		err := processTUIResult(m, connector, hookExec)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hookCalled {
+			t.Error("hook executor should not be called when user quits without selection")
+		}
+		if connector.connectedTo != "" {
+			t.Errorf("connector should not be called on quit, but was called with %q", connector.connectedTo)
 		}
 	})
 }

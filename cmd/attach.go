@@ -3,12 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/leeovery/portal/internal/hooks"
 	"github.com/spf13/cobra"
 )
-
-// HookExecutorFunc executes resume hooks for a given session.
-type HookExecutorFunc func(sessionName string)
 
 // attachDeps holds injectable dependencies for the attach command.
 // When nil, real implementations are used.
@@ -60,23 +56,6 @@ func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator, Ho
 	client := tmuxClient(cmd)
 	connector := buildSessionConnector(client)
 	return connector, client, buildHookExecutor(client)
-}
-
-// buildHookExecutor creates a HookExecutorFunc that loads the hook store
-// and delegates to hooks.ExecuteHooks. The tmux client satisfies all
-// executor interfaces (PaneLister, KeySender, OptionChecker).
-func buildHookExecutor(client interface {
-	hooks.PaneLister
-	hooks.KeySender
-	hooks.OptionChecker
-}) HookExecutorFunc {
-	return func(sessionName string) {
-		store, err := loadHookStore()
-		if err != nil {
-			return
-		}
-		hooks.ExecuteHooks(sessionName, client, store, client, client)
-	}
 }
 
 func init() {
