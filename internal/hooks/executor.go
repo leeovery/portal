@@ -23,10 +23,29 @@ type HookLoader interface {
 	Load() (map[string]map[string]string, error)
 }
 
+// AllPaneLister returns the pane IDs for all panes across all tmux sessions.
+type AllPaneLister interface {
+	ListAllPanes() ([]string, error)
+}
+
+// HookCleaner removes hook entries for panes that no longer exist.
+type HookCleaner interface {
+	CleanStale(livePaneIDs []string) ([]string, error)
+}
+
 // ExecuteHooks checks each pane in the target session for hooks that need
 // re-execution (persistent entry exists AND volatile marker absent) and fires
 // restart commands via send-keys. Entirely best-effort with silent error handling.
-func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, sender KeySender, checker OptionChecker) {
+//
+// Before executing hooks, it prunes stale entries from the hook store by
+// querying all live panes and removing entries for panes that no longer exist.
+// Cleanup errors are silently ignored.
+func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, sender KeySender, checker OptionChecker, allLister AllPaneLister, cleaner HookCleaner) {
+	// Best-effort cleanup: prune stale hook entries before loading.
+	if livePanes, err := allLister.ListAllPanes(); err == nil {
+		_, _ = cleaner.CleanStale(livePanes)
+	}
+
 	hookMap, err := loader.Load()
 	if err != nil {
 		return
