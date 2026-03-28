@@ -26,6 +26,26 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "config-dir-wrong-path-macos": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "a5d93015bf80222393fab1260af1677ab8a858c8",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "config-dir-wrong-path-macos-1-2",
+          "task_map": {
+            "config-dir-wrong-path-macos-1-1": "tick-7bd039",
+            "config-dir-wrong-path-macos-1": "tick-b265f3"
+          },
+          "external_id": "tick-c1a482"
+        }
+      }
     }
   }
 }
