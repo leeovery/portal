@@ -21,7 +21,7 @@
 - [ ] All existing tests continue to pass
 
 #### Tasks
-<!-- status: draft -->
+<!-- status: approved | approved_at: 2026-03-28 -->
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
