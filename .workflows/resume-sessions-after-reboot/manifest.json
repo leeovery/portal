@@ -103,7 +103,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 4,
+          "current_phase": 5,
           "current_task": "~",
           "completed_tasks": [
             "resume-sessions-after-reboot-1-1",
@@ -124,13 +124,15 @@
             "resume-sessions-after-reboot-4-2",
             "resume-sessions-after-reboot-4-3",
             "resume-sessions-after-reboot-4-4",
-            "resume-sessions-after-reboot-4-5"
+            "resume-sessions-after-reboot-4-5",
+            "resume-sessions-after-reboot-5-1"
           ],
           "completed_phases": [
             1,
             2,
             3,
-            4
+            4,
+            5
           ]
         }
       }

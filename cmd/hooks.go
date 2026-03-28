@@ -29,23 +29,19 @@ type HooksDeps struct {
 	OptionDeleter ServerOptionDeleter
 }
 
-// buildHooksDeps returns the appropriate ServerOptionSetter.
-// When hooksDeps is set (testing), uses the injected OptionSetter.
-// Otherwise, creates a real tmux client.
-func buildHooksDeps() ServerOptionSetter {
-	if hooksDeps != nil {
-		return hooksDeps.OptionSetter
+// requireTmuxPane reads TMUX_PANE from the environment and returns an
+// error if empty. This is the single validation point for both set and rm.
+func requireTmuxPane() (string, error) {
+	paneID := os.Getenv("TMUX_PANE")
+	if paneID == "" {
+		return "", fmt.Errorf("must be run from inside a tmux pane")
 	}
-	return tmux.NewClient(&tmux.RealCommander{})
+	return paneID, nil
 }
 
-// buildHooksDeleteDeps returns the appropriate ServerOptionDeleter.
-// When hooksDeps is set (testing), uses the injected OptionDeleter.
-// Otherwise, creates a real tmux client.
-func buildHooksDeleteDeps() ServerOptionDeleter {
-	if hooksDeps != nil {
-		return hooksDeps.OptionDeleter
-	}
+// buildHooksTmuxClient creates a real tmux.Client for hooks commands.
+// Only called when hooksDeps is nil (production path).
+func buildHooksTmuxClient() *tmux.Client {
 	return tmux.NewClient(&tmux.RealCommander{})
 }
 
@@ -84,9 +80,9 @@ var hooksSetCmd = &cobra.Command{
 	Short: "Register a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paneID := os.Getenv("TMUX_PANE")
-		if paneID == "" {
-			return fmt.Errorf("must be run from inside a tmux pane")
+		paneID, err := requireTmuxPane()
+		if err != nil {
+			return err
 		}
 
 		command, err := cmd.Flags().GetString("on-resume")
@@ -103,7 +99,12 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		setter := buildHooksDeps()
+		var setter ServerOptionSetter
+		if hooksDeps != nil {
+			setter = hooksDeps.OptionSetter
+		} else {
+			setter = buildHooksTmuxClient()
+		}
 		if err := setter.SetServerOption(hooks.MarkerName(paneID), "1"); err != nil {
 			return err
 		}
@@ -134,9 +135,9 @@ var hooksRmCmd = &cobra.Command{
 	Short: "Remove a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paneID := os.Getenv("TMUX_PANE")
-		if paneID == "" {
-			return fmt.Errorf("must be run from inside a tmux pane")
+		paneID, err := requireTmuxPane()
+		if err != nil {
+			return err
 		}
 
 		store, err := loadHookStore()
@@ -148,7 +149,12 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
-		deleter := buildHooksDeleteDeps()
+		var deleter ServerOptionDeleter
+		if hooksDeps != nil {
+			deleter = hooksDeps.OptionDeleter
+		} else {
+			deleter = buildHooksTmuxClient()
+		}
 		if err := deleter.DeleteServerOption(hooks.MarkerName(paneID)); err != nil {
 			return err
 		}
