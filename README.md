@@ -225,7 +225,7 @@ Pair this with [resume hooks](#xctl-hooks) to automatically re-run pane commands
 
 ## Configuration
 
-Portal stores config in `~/.config/portal/`:
+Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if set, otherwise `~/.config/portal/`. Each file also has a per-file env var override that takes full precedence.
 
 | File | Purpose | Env override |
 |---|---|---|
