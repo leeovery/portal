@@ -150,6 +150,40 @@ func (s *Store) List() ([]Hook, error) {
 	return list, nil
 }
 
+// CleanStale removes hook entries for panes not present in livePaneIDs.
+// Returns the removed pane IDs. The file is only saved if at least one entry
+// was removed.
+func (s *Store) CleanStale(livePaneIDs []string) ([]string, error) {
+	h, err := s.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load hooks: %w", err)
+	}
+
+	live := make(map[string]struct{}, len(livePaneIDs))
+	for _, id := range livePaneIDs {
+		live[id] = struct{}{}
+	}
+
+	kept := make(hooksFile)
+	var removed []string
+
+	for paneID, events := range h {
+		if _, ok := live[paneID]; ok {
+			kept[paneID] = events
+		} else {
+			removed = append(removed, paneID)
+		}
+	}
+
+	if len(removed) > 0 {
+		if err := s.Save(kept); err != nil {
+			return nil, fmt.Errorf("failed to save after cleaning stale hooks: %w", err)
+		}
+	}
+
+	return removed, nil
+}
+
 // Get returns the event map for a specific pane, or an empty map if the pane
 // has no hooks.
 func (s *Store) Get(paneID string) (map[string]string, error) {

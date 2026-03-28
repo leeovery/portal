@@ -3,6 +3,7 @@ package hooks_test
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/leeovery/portal/internal/hooks"
@@ -441,6 +442,199 @@ func TestGet(t *testing.T) {
 
 		if len(events) != 0 {
 			t.Errorf("got %d events, want 0", len(events))
+		}
+	})
+}
+
+func TestCleanStale(t *testing.T) {
+	t.Run("removes entries for panes not in live set", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		removed, err := store.CleanStale([]string{"%3"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 1 {
+			t.Fatalf("got %d removed, want 1", len(removed))
+		}
+		if removed[0] != "%7" {
+			t.Errorf("removed[0] = %q, want %%7", removed[0])
+		}
+
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(h) != 1 {
+			t.Fatalf("got %d panes, want 1", len(h))
+		}
+		if _, ok := h["%3"]; !ok {
+			t.Error("pane %3 should have been kept")
+		}
+		if _, ok := h["%7"]; ok {
+			t.Error("pane %7 should have been removed")
+		}
+	})
+
+	t.Run("returns empty slice when store is empty", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		removed, err := store.CleanStale([]string{"%3", "%7"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 0 {
+			t.Errorf("got %d removed, want 0", len(removed))
+		}
+	})
+
+	t.Run("returns empty slice when all panes are live", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		removed, err := store.CleanStale([]string{"%3", "%7"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 0 {
+			t.Errorf("got %d removed, want 0", len(removed))
+		}
+	})
+
+	t.Run("removes all entries when live set is empty", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		removed, err := store.CleanStale([]string{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 2 {
+			t.Fatalf("got %d removed, want 2", len(removed))
+		}
+
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(h) != 0 {
+			t.Errorf("got %d panes, want 0", len(h))
+		}
+	})
+
+	t.Run("only saves file when entries were removed", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		// Record mod time before CleanStale
+		infoBefore, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+
+		removed, err := store.CleanStale([]string{"%3"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 0 {
+			t.Errorf("got %d removed, want 0", len(removed))
+		}
+
+		// Mod time should be unchanged since no save occurred
+		infoAfter, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+		if !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
+			t.Error("file was modified when no entries were removed")
+		}
+	})
+
+	t.Run("handles mix of live and stale panes", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("%3", "on-resume", "cmd3"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%5", "on-resume", "cmd5"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%7", "on-resume", "cmd7"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("%9", "on-resume", "cmd9"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		// %3 and %9 are live; %5 and %7 are stale
+		removed, err := store.CleanStale([]string{"%3", "%9"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 2 {
+			t.Fatalf("got %d removed, want 2", len(removed))
+		}
+
+		// Sort removed for deterministic checking
+		sort.Strings(removed)
+		if removed[0] != "%5" {
+			t.Errorf("removed[0] = %q, want %%5", removed[0])
+		}
+		if removed[1] != "%7" {
+			t.Errorf("removed[1] = %q, want %%7", removed[1])
+		}
+
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(h) != 2 {
+			t.Fatalf("got %d panes, want 2", len(h))
+		}
+		if _, ok := h["%3"]; !ok {
+			t.Error("pane %3 should have been kept")
+		}
+		if _, ok := h["%9"]; !ok {
+			t.Error("pane %9 should have been kept")
 		}
 	})
 }
