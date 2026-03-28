@@ -68,6 +68,22 @@
           "external_id": "tick-695f97"
         }
       }
+    },
+    "implementation": {
+      "items": {
+        "resume-sessions-after-reboot": {
+          "status": "in-progress",
+          "task_gate_mode": "gated",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "fix_attempts": 0,
+          "analysis_cycle": 0,
+          "linters": [],
+          "project_skills": [],
+          "current_phase": 1,
+          "current_task": "~"
+        }
+      }
     }
   }
 }
