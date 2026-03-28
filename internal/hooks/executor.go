@@ -33,6 +33,20 @@ type HookCleaner interface {
 	CleanStale(livePaneIDs []string) ([]string, error)
 }
 
+// TmuxOperator groups the tmux interfaces needed by ExecuteHooks.
+type TmuxOperator interface {
+	PaneLister
+	KeySender
+	OptionChecker
+	AllPaneLister
+}
+
+// HookRepository groups the hook store interfaces needed by ExecuteHooks.
+type HookRepository interface {
+	HookLoader
+	HookCleaner
+}
+
 // MarkerName returns the tmux server option name used as the volatile marker
 // for a given pane. This is the single source of truth for the marker naming
 // convention.
@@ -47,13 +61,13 @@ func MarkerName(paneID string) string {
 // Before executing hooks, it prunes stale entries from the hook store by
 // querying all live panes and removing entries for panes that no longer exist.
 // Cleanup errors are silently ignored.
-func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, sender KeySender, checker OptionChecker, allLister AllPaneLister, cleaner HookCleaner) {
+func ExecuteHooks(sessionName string, tmux TmuxOperator, store HookRepository) {
 	// Best-effort cleanup: prune stale hook entries before loading.
-	if livePanes, err := allLister.ListAllPanes(); err == nil {
-		_, _ = cleaner.CleanStale(livePanes)
+	if livePanes, err := tmux.ListAllPanes(); err == nil {
+		_, _ = store.CleanStale(livePanes)
 	}
 
-	hookMap, err := loader.Load()
+	hookMap, err := store.Load()
 	if err != nil {
 		return
 	}
@@ -61,7 +75,7 @@ func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, send
 		return
 	}
 
-	panes, err := lister.ListPanes(sessionName)
+	panes, err := tmux.ListPanes(sessionName)
 	if err != nil {
 		return
 	}
@@ -85,11 +99,11 @@ func ExecuteHooks(sessionName string, lister PaneLister, loader HookLoader, send
 		}
 
 		markerName := MarkerName(paneID)
-		if _, err := checker.GetServerOption(markerName); err == nil {
+		if _, err := tmux.GetServerOption(markerName); err == nil {
 			continue
 		}
 
-		_ = sender.SendKeys(paneID, command)
-		_ = checker.SetServerOption(markerName, "1")
+		_ = tmux.SendKeys(paneID, command)
+		_ = tmux.SetServerOption(markerName, "1")
 	}
 }
