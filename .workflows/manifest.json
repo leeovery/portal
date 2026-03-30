@@ -20,6 +20,9 @@
     },
     "migrate-stat-error-handling": {
       "work_type": "quick-fix"
+    },
+    "clean-test-isolation-hooks-file": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
