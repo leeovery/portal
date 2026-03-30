@@ -1,7 +1,7 @@
 {
   "name": "clean-test-isolation-hooks-file",
   "work_type": "quick-fix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-03-30",
   "description": "Add PORTAL_HOOKS_FILE env var to older project-only clean tests to prevent accidental interaction with real hook data",
   "phases": {
