@@ -23,6 +23,9 @@
     },
     "clean-test-isolation-hooks-file": {
       "work_type": "quick-fix"
+    },
+    "config-homedir-error-test": {
+      "work_type": "feature"
     }
   },
   "defaults": {
