@@ -13,6 +13,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		stalePath := filepath.Join(dir, "gone")
 		content := `{"projects":[{"path":"` + stalePath + `","name":"stale","last_used":"2026-01-01T00:00:00Z"}]}`
@@ -50,6 +51,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		existingDir := t.TempDir()
 		content := `{"projects":[{"path":"` + existingDir + `","name":"exists","last_used":"2026-01-01T00:00:00Z"}]}`
@@ -86,6 +88,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		// Create a parent dir, then a child inside it, then remove perms on parent
 		parentDir := filepath.Join(dir, "restricted")
@@ -135,6 +138,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		existingDir1 := t.TempDir()
 		existingDir2 := t.TempDir()
@@ -166,6 +170,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		stalePath1 := filepath.Join(dir, "gone1")
 		stalePath2 := filepath.Join(dir, "gone2")
@@ -210,6 +215,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		existingDir := t.TempDir()
 		stalePath1 := filepath.Join(dir, "gone1")
@@ -260,6 +266,7 @@ func TestCleanCommand(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(t.TempDir(), "hooks.json"))
 
 		buf := new(bytes.Buffer)
 		resetRootCmd()
