@@ -17,6 +17,9 @@
     },
     "config-dir-wrong-path-macos": {
       "work_type": "bugfix"
+    },
+    "migrate-stat-error-handling": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
