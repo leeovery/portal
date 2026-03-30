@@ -17,6 +17,8 @@ func migrateConfigFile(oldPath, newPath string) {
 
 	if _, err := os.Stat(newPath); err == nil {
 		return
+	} else if !os.IsNotExist(err) {
+		return
 	}
 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {

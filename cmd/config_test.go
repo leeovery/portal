@@ -300,12 +300,13 @@ func TestMigrateConfigFile(t *testing.T) {
 			t.Fatalf("failed to write old file: %v", err)
 		}
 
-		// Create target directory as read-only to cause rename to fail
+		// Create target directory as read+execute only (no write) to cause rename to fail.
+		// 0o555 allows stat to succeed (file not found) but blocks rename.
 		newDir := filepath.Join(tmpDir, ".config", "portal")
 		if err := os.MkdirAll(newDir, 0o755); err != nil {
 			t.Fatalf("failed to create new dir: %v", err)
 		}
-		if err := os.Chmod(newDir, 0o444); err != nil {
+		if err := os.Chmod(newDir, 0o555); err != nil {
 			t.Fatalf("failed to chmod new dir: %v", err)
 		}
 		t.Cleanup(func() {
@@ -341,6 +342,42 @@ func TestMigrateConfigFile(t *testing.T) {
 		// Old file should still exist
 		if _, err := os.Stat(oldPath); err != nil {
 			t.Errorf("old file should still exist after failed rename: %v", err)
+		}
+	})
+
+	t.Run("migration is skipped when stat of new path returns non-not-found error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// Create old file that would normally be migrated.
+		oldDir := filepath.Join(tmpDir, "Library", "Application Support", "portal")
+		if err := os.MkdirAll(oldDir, 0o755); err != nil {
+			t.Fatalf("failed to create old dir: %v", err)
+		}
+		oldPath := filepath.Join(oldDir, "projects.json")
+		if err := os.WriteFile(oldPath, []byte("old data"), 0o644); err != nil {
+			t.Fatalf("failed to write old file: %v", err)
+		}
+
+		// Create the parent of newPath but make it unreadable so that
+		// os.Stat(newPath) returns a permission error (not "not exist").
+		newDir := filepath.Join(tmpDir, ".config", "portal")
+		if err := os.MkdirAll(newDir, 0o755); err != nil {
+			t.Fatalf("failed to create new dir: %v", err)
+		}
+		if err := os.Chmod(newDir, 0o000); err != nil {
+			t.Fatalf("failed to chmod new dir: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.Chmod(newDir, 0o755)
+		})
+
+		newPath := filepath.Join(newDir, "projects.json")
+
+		migrateConfigFile(oldPath, newPath)
+
+		// Old file must still exist — migration should have been skipped.
+		if _, err := os.Stat(oldPath); err != nil {
+			t.Errorf("old file should still exist when stat of new path fails with non-not-found error: %v", err)
 		}
 	})
 
