@@ -11,6 +11,31 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "clean-test-isolation-hooks-file": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "1a316437c0ece9b840abb5a6afdef887347be7e9",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "clean-test-isolation-hooks-file-1-1": "tick-33c79e"
+          }
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "clean-test-isolation-hooks-file": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
