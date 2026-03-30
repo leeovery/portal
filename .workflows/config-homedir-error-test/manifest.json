@@ -1,0 +1,16 @@
+{
+  "name": "config-homedir-error-test",
+  "work_type": "feature",
+  "status": "in-progress",
+  "created": "2026-03-30",
+  "description": "Add unit test for configFilePath os.UserHomeDir failure path via DI extraction",
+  "phases": {
+    "discussion": {
+      "items": {
+        "config-homedir-error-test": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}
