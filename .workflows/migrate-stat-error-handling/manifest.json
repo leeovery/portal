@@ -1,0 +1,16 @@
+{
+  "name": "migrate-stat-error-handling",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-03-30",
+  "description": "Use os.IsNotExist explicitly in migrateConfigFile stat check instead of treating any error as file-not-found",
+  "phases": {
+    "specification": {
+      "items": {
+        "migrate-stat-error-handling": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
