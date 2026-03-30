@@ -36,6 +36,43 @@
           "status": "completed"
         }
       }
+    },
+    "implementation": {
+      "items": {
+        "migrate-stat-error-handling": {
+          "status": "in-progress",
+          "task_gate_mode": "auto",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "fix_attempts": 0,
+          "analysis_cycle": 1,
+          "linters": [
+            {
+              "name": "go vet",
+              "command": "go vet ./..."
+            },
+            {
+              "name": "gofmt",
+              "command": "gofmt -l ."
+            },
+            {
+              "name": "golangci-lint",
+              "command": "golangci-lint run ./..."
+            }
+          ],
+          "project_skills": [
+            ".claude/skills/golang-pro"
+          ],
+          "current_phase": 1,
+          "current_task": "~",
+          "completed_tasks": [
+            "migrate-stat-error-handling-1-1"
+          ],
+          "completed_phases": [
+            1
+          ]
+        }
+      }
     }
   }
 }
