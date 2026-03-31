@@ -1,8 +1,8 @@
 {
-  "/Users/leeovery/Code/agentic-workflows": {
-    "ref": null,
-    "commit": null,
-    "installedAt": "2026-03-30T19:07:07.398Z",
+  "leeovery/agentic-workflows": {
+    "ref": "v0.2.1",
+    "commit": "0e1f88eef032c8e487ffff9d11f0c007b6e40ab0",
+    "installedAt": "2026-03-31T20:44:36.902Z",
     "agents": [
       "claude"
     ],
@@ -404,6 +404,7 @@
       ".claude/agents/workflow-specification-review-gap-analysis.md",
       ".claude/agents/workflow-specification-review-input.md"
     ],
-    "cloneUrl": null
+    "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
+    "constraint": "^0.2.1"
   }
 }
