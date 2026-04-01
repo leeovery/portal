@@ -72,10 +72,22 @@ Resume hooks registered in `hooks.json` should survive tmux server restarts and 
 
 ### Root Cause
 
-`ExecuteHooks()` in `executor.go:66-68` calls `CleanStale()` with the result of `ListAllPanes()` without checking whether the live pane list is empty. After a tmux server restart, `ListAllPanes()` returns an empty slice (no error) because the new server has no sessions yet. `CleanStale()` interprets this as "no panes exist" and removes all hook entries from `hooks.json`.
+Two distinct problems prevent resume hooks from working after a tmux server restart:
+
+**Problem 1 — Hook deletion (data loss):**
+`ExecuteHooks()` in `executor.go:66-68` calls `CleanStale()` with the result of `ListAllPanes()` without checking whether the live pane list is empty. After a server restart, `ListAllPanes()` returns an empty slice (no error, it swallows errors at `tmux.go:237-238`). `CleanStale()` interprets this as "no panes exist" and removes all hook entries from `hooks.json`.
+
+**Problem 2 — Pane ID instability (broken mapping):**
+Even if hooks survive the restart (problem 1 fixed), the tracking mechanism is fundamentally broken. Hooks are keyed by tmux pane ID (`%0`, `%1`, etc.) — ephemeral identifiers that reset when the tmux server restarts. After restart:
+- Old hooks reference old pane IDs (e.g., `%0` → `claude --resume abc123`)
+- New sessions get new pane IDs starting from `%0` again
+- A new `%0` is a completely different pane in a potentially different session/project
+- Hooks either fire in the wrong context (ID collision) or never fire (no matching ID)
+
+The hook registration (`cmd/hooks.go:83-98`) uses `$TMUX_PANE` as the key, but pane IDs provide no durable link between the hook and the session or project it belongs to. Session names are also non-durable (`{project}-{nanoid}` format, `session/naming.go:41`), but the **session name is at least passed to `ExecuteHooks`** and could serve as a scoping mechanism.
 
 **Why this happens:**
-The cleanup logic assumes that if `ListAllPanes` succeeds, the returned list is a reliable view of all panes. But `ListAllPanes` never returns an error — it swallows errors and returns an empty slice. An empty result is ambiguous: it could mean "no panes exist" or "the server just restarted and sessions haven't been restored yet."
+The dual-level tracking design (persistent `hooks.json` + volatile tmux server options) was built assuming pane IDs persist across restarts. The CLAUDE.md docs describe the intent: "volatile markers lost on reboot, so hooks re-fire after restart." But pane IDs are just as volatile as the markers — they're both assigned by tmux and lost on server restart.
 
 ### Contributing Factors
 
@@ -83,23 +95,28 @@ The cleanup logic assumes that if `ListAllPanes` succeeds, the returned list is 
 - `CleanStale` is a pure filter with no awareness of whether an empty live set is meaningful
 - The `clean` command (`cmd/clean.go:77-80`) already has the correct guard (`if len(livePanes) == 0 { return nil }`) but this wasn't replicated in `ExecuteHooks`
 - The cleanup in `ExecuteHooks` is "best-effort" (errors silently ignored) but the consequence of incorrect cleanup is data loss, not just a missed cleanup
+- Hooks are keyed solely by pane ID with no additional context (session name, project path) to enable remapping after restart
+- Session names are non-durable (`{project}-{nanoid}`), so even if hooks stored session names, they couldn't match by session name alone — but the project name prefix is stable
 
 ### Why It Wasn't Caught
 
 - The test "no tmux server running skips cleanup gracefully" (`executor_test.go:537-568`) explicitly **validates the buggy behavior**: it passes an empty live-panes list to `CleanStale` and asserts it was called, effectively testing that hooks would be wiped
 - The mock-based test doesn't capture the real-world consequence because `CleanStale` is mocked and doesn't actually remove data
 - No integration test covers the server-restart scenario end-to-end
-- The feature was implemented on a machine where the server was always running, so the restart path was never exercised until a fresh MacBook install
+- The pane ID instability was never apparent because the feature was built and tested on a machine where the tmux server was always running
+- The feature was first exercised against a real server restart on a freshly installed MacBook Pro (2026-04-01)
 
 ### Blast Radius
 
 **Directly affected:**
-- `internal/hooks/executor.go` — `ExecuteHooks` cleanup path
-- All resume hook functionality — hooks are permanently destroyed on any server restart
+- `internal/hooks/executor.go` — `ExecuteHooks` cleanup path (problem 1) and hook matching logic (problem 2)
+- `internal/hooks/store.go` — hook data model keyed by pane ID (problem 2)
+- `cmd/hooks.go` — hook registration uses `$TMUX_PANE` as sole key (problem 2)
+- All resume hook functionality — hooks are either destroyed or orphaned after any server restart
 
 **Potentially affected:**
-- `cmd/clean.go` — already has the guard, but shares the pattern. Worth verifying consistency
-- Any future code that calls `CleanStale` with `ListAllPanes` output
+- `cmd/clean.go` — already has the empty-pane guard, but `CleanStale` is called with the same pane-ID-based model
+- `internal/hooks/executor_test.go` — test validates buggy behavior, needs correction
 
 ---
 
@@ -107,32 +124,28 @@ The cleanup logic assumes that if `ListAllPanes` succeeds, the returned list is 
 
 ### Chosen Approach
 
-Add an empty-pane guard in `ExecuteHooks` (`executor.go:66-68`), matching the existing pattern in `clean.go:77-80`. Skip `CleanStale` when `len(livePanes) == 0`.
-
-**Deciding factor:** Minimal change, proven pattern already exists in the codebase, and stale entries that survive are harmless (they won't match any live panes during hook execution at lines 91-93).
+*To be determined — requires discussion on problem 2 (pane ID instability).*
 
 ### Options Explored
 
-Only one approach — the guard pattern from `clean.go` is the obvious and correct fix. No alternatives needed.
+*To be determined after discussion.*
 
 ### Discussion
 
-Straightforward bug with a clear fix. The guard pattern is already established in `clean.go`, so this is about consistency. User confirmed findings matched understanding and agreed with the fix direction without discussion.
+*To be captured during discussion.*
 
 ### Testing Recommendations
 
-- Update the existing test "no tmux server running skips cleanup gracefully" (`executor_test.go:537-568`) to assert `CleanStale` is **NOT** called when `livePanes` is empty
-- Add a test that verifies hooks survive when `ListAllPanes` returns an empty list (the post-restart scenario)
+*To be determined.*
 
 ### Risk Assessment
 
-- **Fix complexity:** Low
-- **Regression risk:** Low — the guard only skips cleanup when there's nothing to clean against; all other paths unchanged
-- **Recommended approach:** Regular release
+*To be determined.*
 
 ---
 
 ## Notes
 
-- The synthesis agent independently confirmed the root cause with high confidence and no gaps
+- The synthesis agent independently confirmed the root cause (problem 1) with high confidence and no gaps
 - `clean.go` guard was added during the `resume-sessions-after-reboot` feature work but wasn't applied to `ExecuteHooks` at the same time
+- Problem 1 (empty-pane guard) is straightforward; problem 2 (pane ID durability) needs discussion about the right keying/matching strategy
