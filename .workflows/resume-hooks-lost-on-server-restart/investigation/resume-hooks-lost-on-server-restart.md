@@ -30,6 +30,9 @@ Resume hooks registered in `hooks.json` should survive tmux server restarts and 
 
 - **Affected environments:** Local (any system using tmux + Portal)
 - **User conditions:** Multiple panes with registered resume hooks
+- **First observed:** 2026-04-01, on freshly installed MacBook Pro — first real test of this functionality on new hardware
+- **Workaround:** None — hooks are destroyed before they can be used
+- **History:** Likely always been this way; never tested against a server restart scenario before
 
 ### Impact
 
