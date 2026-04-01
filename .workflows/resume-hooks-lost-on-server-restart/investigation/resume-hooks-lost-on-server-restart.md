@@ -107,26 +107,32 @@ The cleanup logic assumes that if `ListAllPanes` succeeds, the returned list is 
 
 ### Chosen Approach
 
-*To be determined after findings review.*
+Add an empty-pane guard in `ExecuteHooks` (`executor.go:66-68`), matching the existing pattern in `clean.go:77-80`. Skip `CleanStale` when `len(livePanes) == 0`.
+
+**Deciding factor:** Minimal change, proven pattern already exists in the codebase, and stale entries that survive are harmless (they won't match any live panes during hook execution at lines 91-93).
 
 ### Options Explored
 
-*To be determined.*
+Only one approach — the guard pattern from `clean.go` is the obvious and correct fix. No alternatives needed.
 
 ### Discussion
 
-*To be captured during findings review.*
+Straightforward bug with a clear fix. The guard pattern is already established in `clean.go`, so this is about consistency. User confirmed findings matched understanding and agreed with the fix direction without discussion.
 
 ### Testing Recommendations
 
-*To be determined.*
+- Update the existing test "no tmux server running skips cleanup gracefully" (`executor_test.go:537-568`) to assert `CleanStale` is **NOT** called when `livePanes` is empty
+- Add a test that verifies hooks survive when `ListAllPanes` returns an empty list (the post-restart scenario)
 
 ### Risk Assessment
 
-*To be determined.*
+- **Fix complexity:** Low
+- **Regression risk:** Low — the guard only skips cleanup when there's nothing to clean against; all other paths unchanged
+- **Recommended approach:** Regular release
 
 ---
 
 ## Notes
 
-*Additional observations during investigation.*
+- The synthesis agent independently confirmed the root cause with high confidence and no gaps
+- `clean.go` guard was added during the `resume-sessions-after-reboot` feature work but wasn't applied to `ExecuteHooks` at the same time
