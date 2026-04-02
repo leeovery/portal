@@ -124,28 +124,67 @@ The dual-level tracking design (persistent `hooks.json` + volatile tmux server o
 
 ### Chosen Approach
 
-*To be determined — requires discussion on problem 2 (pane ID instability).*
+Two-part fix addressing both problems:
+
+**Problem 1 — Empty-pane guard:** Add `len(livePanes) > 0` check in `ExecuteHooks` before calling `CleanStale`, matching the existing guard in `clean.go:77-80`. Prevents hook data loss on server restart.
+
+**Problem 2 — Replace pane ID keying with structural keys:** Change the hook storage model from `pane_id → events` to `session_name:window_index.pane_index → events`. This uses tmux's structural addressing (which survives tmux-resurrect) instead of ephemeral pane IDs (which don't).
+
+Changes required:
+1. **Hook registration** (`cmd/hooks.go`): Instead of using `$TMUX_PANE` as the key, query tmux for the current pane's session name, window index, and pane index. Store hooks keyed by `session_name:window_index.pane_index`.
+2. **Hook execution** (`internal/hooks/executor.go`): Match hooks by structural key instead of pane ID. When `ExecuteHooks(sessionName)` runs, query the session's panes with their window/pane indices and look up hooks by `sessionName:windowIndex.paneIndex`.
+3. **Hook storage** (`internal/hooks/store.go`): The data model changes from `map[paneID]map[event]command` to `map[structuralKey]map[event]command`. The structural key format is `session_name:window_index.pane_index`.
+4. **Volatile markers**: Change marker naming from `@portal-active-%paneID` to `@portal-active-session:window.pane` (or similar).
+5. **Stale cleanup** (`CleanStale`): Cross-reference structural keys against live tmux structure instead of pane IDs. Plus the empty-result guard (problem 1).
+6. **`portal clean`** (`cmd/clean.go`): Update to use structural key model for cleanup.
+
+**Graceful failure (no tmux-resurrect):** If resurrect is not present, the server restarts with no sessions. Hooks remain on disk (problem 1 fix prevents deletion) but no matching structure exists — hooks simply don't fire. No errors, no data loss. This is correct best-effort behavior.
+
+**Deciding factor:** The original design was built on the false assumption that tmux pane IDs persist across tmux-resurrect (stated in both the research and specification docs). They don't — resurrect assigns new pane IDs. But session names, window indices, and pane indices DO survive resurrect, making them the correct durable key. This was confirmed by examining tmux-resurrect's save/restore scripts — it explicitly uses `session_name:window_index.pane_index` for targeting `send-keys` and `select-pane` during restore.
 
 ### Options Explored
 
-*To be determined after discussion.*
+**Option A — Empty-pane guard only (problem 1 fix):** Add `len(livePanes) > 0` check. Prevents data loss but hooks still can't find their target panes after restart because pane IDs change. Insufficient.
+
+**Option B — Key by project path:** Use the project directory path as the hook key. Durable across restarts, but can't distinguish between multiple panes in the same project — a project with 3 Claude sessions would have one hook entry, not three. Insufficient for the multi-pane requirement.
+
+**Option C — Key by structural position (chosen):** Use `session_name:window_index.pane_index`. Survives tmux-resurrect, uniquely identifies each pane, and maps correctly after restore. Handles multiple panes per session. Fails gracefully without resurrect.
 
 ### Discussion
 
-*To be captured during discussion.*
+The investigation initially focused only on problem 1 (hook deletion via `CleanStale`). User correctly identified that the inbox bug report also flagged pane ID instability as a fundamental issue — fixing data loss alone would leave the feature broken.
+
+Research into tmux-resurrect's approach revealed it uses structural keys (`session_name + window_index + pane_index`) rather than pane IDs, confirming that pane IDs are ephemeral across restarts. This led to discovering that the original spec's assumption ("Pane IDs persist across tmux-resurrect" — specification line 24, research line 42) was incorrect.
+
+User priorities:
+- Feature must actually work end-to-end, not just fix one piece
+- tmux-resurrect is the expected setup but Portal shouldn't check for it or depend on it explicitly
+- Must fail gracefully without resurrect (no errors, no data loss, hooks just don't fire)
+- Must handle multiple panes per session — each with its own hook
+
+The structural key approach satisfies all requirements. It's the same addressing scheme tmux-resurrect itself uses, so it's well-tested in practice.
 
 ### Testing Recommendations
 
-*To be determined.*
+- Fix existing test "no tmux server running skips cleanup gracefully" (`executor_test.go:537-568`) to assert `CleanStale` is NOT called when `livePanes` is empty
+- Add test for hook survival when `ListAllPanes` returns empty (post-restart, pre-resurrect)
+- Add tests for structural key registration, lookup, and matching
+- Add tests for hooks with multiple panes in same session using structural keys
+- Add test verifying graceful no-op when structural keys don't match any live panes (no-resurrect scenario)
+- Update all existing hook tests to use structural keys instead of pane IDs
 
 ### Risk Assessment
 
-*To be determined.*
+- **Fix complexity:** Medium — the keying model change touches registration, execution, storage, cleanup, and CLI surface. But each change is mechanical (swap pane ID for structural key).
+- **Regression risk:** Medium — hooks.json format changes (existing hooks become invalid). Acceptable since the feature doesn't work anyway.
+- **Recommended approach:** Regular release. Breaking change to hooks.json format is fine since the current format produces broken behavior.
 
 ---
 
 ## Notes
 
-- The synthesis agent independently confirmed the root cause (problem 1) with high confidence and no gaps
+- The synthesis agent independently confirmed problem 1 root cause with high confidence and no gaps
 - `clean.go` guard was added during the `resume-sessions-after-reboot` feature work but wasn't applied to `ExecuteHooks` at the same time
-- Problem 1 (empty-pane guard) is straightforward; problem 2 (pane ID durability) needs discussion about the right keying/matching strategy
+- The original spec's core assumption about pane ID persistence was incorrect — this is the root cause of problem 2
+- tmux-resurrect's restore code explicitly depends on pane indices surviving (uses `session:window.pane` for send-keys targeting), confirming this is a reliable approach
+- Portal has no awareness of tmux-resurrect by design — the structural key approach works with resurrect and fails gracefully without it
