@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "resume-hooks-lost-on-server-restart": {
+          "status": "in-progress",
+          "review_cycle": 1,
+          "finding_gate_mode": "gated",
+          "date": "2026-04-02",
+          "sources": {
+            "resume-hooks-lost-on-server-restart": {
+              "status": "incorporated"
+            }
+          }
+        }
+      }
     }
   }
 }
