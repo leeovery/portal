@@ -26,6 +26,9 @@
     },
     "config-homedir-error-test": {
       "work_type": "feature"
+    },
+    "resume-hooks-lost-on-server-restart": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
