@@ -46,6 +46,27 @@ This is the same addressing scheme tmux-resurrect uses for targeting panes durin
 
 **Clean command (`cmd/clean.go`):** Update to use structural key model for cleanup. The existing empty-pane guard remains.
 
+### Behavioral Requirements
+
+**Graceful failure without tmux-resurrect:** If resurrect is not installed or not used, the server restarts with no sessions. Hooks remain on disk (empty-pane guard prevents deletion) but no matching structure exists — hooks simply don't fire. No errors, no data loss. This is correct best-effort behavior.
+
+**No resurrect dependency:** Portal must not check for, detect, or explicitly depend on tmux-resurrect. The structural key approach works with resurrect naturally and fails gracefully without it.
+
+**Multi-pane support:** Each pane in a session has its own hook entry keyed by its unique structural position. A session with three panes has three independent hook entries (e.g., `proj-abc:0.0`, `proj-abc:0.1`, `proj-abc:0.2`).
+
+**Silent operation:** Hook execution failures (no matching panes, stale keys) are silent — no errors surfaced to the user. This matches the current best-effort design.
+
+**Breaking change to `hooks.json`:** Existing hook entries keyed by pane ID become invalid. Old pane-ID-keyed entries (e.g., `%0`) are automatically cleaned by `CleanStale` on the first run with live panes after upgrading — they won't match any live structural key. No explicit migration step required. This is acceptable since the current format produces broken behavior anyway.
+
+### Testing Requirements
+
+- Fix existing test "no tmux server running skips cleanup gracefully" (`executor_test.go:537-568`) to assert `CleanStale` is **not** called when `livePanes` is empty
+- Add test for hook survival when `ListAllPanes` returns empty (post-restart, pre-resurrect scenario)
+- Add tests for structural key construction, registration, and lookup
+- Add tests for hooks with multiple panes in the same session using structural keys
+- Add test verifying graceful no-op when structural keys don't match any live panes (no-resurrect scenario)
+- Update all existing hook tests to use structural keys instead of pane IDs
+
 ---
 
 ## Working Notes
