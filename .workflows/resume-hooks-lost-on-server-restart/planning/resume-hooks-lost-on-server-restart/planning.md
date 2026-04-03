@@ -18,7 +18,7 @@ approved_at: 2026-04-03
 
 | # | ID | Task | Edge Cases | Status |
 |---|-----|------|------------|--------|
-| 1 | resume-hooks-lost-on-server-restart-1-1 | Guard CleanStale from empty pane list in ExecuteHooks | ListAllPanes returns nil vs empty slice; ListAllPanes error path (no regression) | pending |
+| 1 | resume-hooks-lost-on-server-restart-1-1 | Guard CleanStale from empty pane list in ExecuteHooks | ListAllPanes returns nil vs empty slice; ListAllPanes error path (no regression) | approved |
 
 ## Phase 2: Structural Key Infrastructure and Pane Querying
 status: approved
