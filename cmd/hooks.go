@@ -53,6 +53,30 @@ func buildHooksTmuxClient() *tmux.Client {
 	return tmux.NewClient(&tmux.RealCommander{})
 }
 
+// resolveCurrentPaneKey reads TMUX_PANE from the environment, resolves
+// it to a structural key (e.g. "my-session:0.0") via the injected or
+// default StructuralKeyResolver, and returns the result.
+func resolveCurrentPaneKey() (string, error) {
+	paneID, err := requireTmuxPane()
+	if err != nil {
+		return "", err
+	}
+
+	var keyResolver StructuralKeyResolver
+	if hooksDeps != nil && hooksDeps.KeyResolver != nil {
+		keyResolver = hooksDeps.KeyResolver
+	} else {
+		keyResolver = buildHooksTmuxClient()
+	}
+
+	structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve structural key for current pane: %w", err)
+	}
+
+	return structuralKey, nil
+}
+
 var hooksCmd = &cobra.Command{
 	Use:   "hooks",
 	Short: "Manage resume hooks",
@@ -88,21 +112,9 @@ var hooksSetCmd = &cobra.Command{
 	Short: "Register a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paneID, err := requireTmuxPane()
+		structuralKey, err := resolveCurrentPaneKey()
 		if err != nil {
 			return err
-		}
-
-		var keyResolver StructuralKeyResolver
-		if hooksDeps != nil && hooksDeps.KeyResolver != nil {
-			keyResolver = hooksDeps.KeyResolver
-		} else {
-			keyResolver = buildHooksTmuxClient()
-		}
-
-		structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
-		if err != nil {
-			return fmt.Errorf("failed to resolve structural key for current pane: %w", err)
 		}
 
 		command, err := cmd.Flags().GetString("on-resume")
@@ -155,21 +167,9 @@ var hooksRmCmd = &cobra.Command{
 	Short: "Remove a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		paneID, err := requireTmuxPane()
+		structuralKey, err := resolveCurrentPaneKey()
 		if err != nil {
 			return err
-		}
-
-		var keyResolver StructuralKeyResolver
-		if hooksDeps != nil && hooksDeps.KeyResolver != nil {
-			keyResolver = hooksDeps.KeyResolver
-		} else {
-			keyResolver = buildHooksTmuxClient()
-		}
-
-		structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
-		if err != nil {
-			return fmt.Errorf("failed to resolve structural key for current pane: %w", err)
 		}
 
 		store, err := loadHookStore()
