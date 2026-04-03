@@ -37,6 +37,15 @@ approved_at: 2026-04-03
 - [ ] `CleanStale` parameter renamed and works with structural keys
 - [ ] Unit tests cover structural key construction, resolution method, and updated `ListPanes`/`ListAllPanes` output parsing
 
+### Tasks
+
+| # | ID | Task | Edge Cases | Status |
+|---|-----|------|------------|--------|
+| 1 | resume-hooks-lost-on-server-restart-2-1 | Update ListPanes and ListAllPanes to Return Structural Keys | session names with colons or dots; multi-window multi-pane output | pending |
+| 2 | resume-hooks-lost-on-server-restart-2-2 | Add ResolveStructuralKey Method to tmux.Client | invalid pane ID; tmux command failure | pending |
+| 3 | resume-hooks-lost-on-server-restart-2-3 | Update Hook Struct and Store Semantics for Structural Keys | — | pending |
+| 4 | resume-hooks-lost-on-server-restart-2-4 | Update MarkerName Format and Executor Tests to Structural Keys | — | pending |
+
 ## Phase 3: Consumer Migration to Structural Keys
 status: approved
 approved_at: 2026-04-03
