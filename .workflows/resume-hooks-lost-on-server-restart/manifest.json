@@ -65,12 +65,12 @@
     "implementation": {
       "items": {
         "resume-hooks-lost-on-server-restart": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 2,
+          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
