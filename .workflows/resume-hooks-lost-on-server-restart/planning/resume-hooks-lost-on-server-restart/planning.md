@@ -14,6 +14,12 @@ approved_at: 2026-04-03
 - [ ] `ExecuteHooks` skips `CleanStale` when `livePanes` has length zero
 - [ ] All existing tests pass without modification (beyond the corrected test)
 
+### Tasks
+
+| # | ID | Task | Edge Cases | Status |
+|---|-----|------|------------|--------|
+| 1 | resume-hooks-lost-on-server-restart-1-1 | Guard CleanStale from empty pane list in ExecuteHooks | ListAllPanes returns nil vs empty slice; ListAllPanes error path (no regression) | pending |
+
 ## Phase 2: Structural Key Infrastructure and Pane Querying
 status: approved
 approved_at: 2026-04-03
