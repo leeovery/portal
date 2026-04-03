@@ -74,3 +74,16 @@ approved_at: 2026-04-03
 | 3 | resume-hooks-lost-on-server-restart-3-3 | Migrate hooks rm to Structural Keys | ResolveStructuralKey failure returns user-facing error | approved |
 | 4 | resume-hooks-lost-on-server-restart-3-4 | Migrate clean Command Tests to Structural Keys | — | approved |
 | 5 | resume-hooks-lost-on-server-restart-3-5 | Add Multi-Pane and Graceful No-Op Acceptance Tests | hooks referencing non-existent structural positions | approved |
+
+## Phase 4: Analysis (Cycle 1)
+status: open
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+### Tasks
+
+| # | ID | Task | Edge Cases | Status |
+|---|-----|------|------------|--------|
+| 1 | resume-hooks-lost-on-server-restart-4-1 | Consolidate Duplicate Hooks JSON Test Helpers | — | open |
+| 2 | resume-hooks-lost-on-server-restart-4-2 | Extract Shared Pane Structural-Key Resolution Helper in Hooks Commands | — | open |
+| 3 | resume-hooks-lost-on-server-restart-4-3 | Rename Residual paneID Parameter Names to Structural-Key Terminology | — | open |

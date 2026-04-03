@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: resume-hooks-lost-on-server-restart (Cycle 1)
 
 ## Task 1: Consolidate duplicate hooks JSON test helpers
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -32,7 +32,7 @@ sources: duplication, architecture
 - `go test ./cmd/...` passes with no failures
 
 ## Task 2: Extract shared pane structural-key resolution helper in hooks commands
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -57,7 +57,7 @@ sources: duplication
 - `go test ./cmd/... -run TestHooks` passes with no failures
 
 ## Task 3: Rename residual paneID parameter names to structural-key terminology
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 

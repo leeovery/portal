@@ -52,7 +52,11 @@
             "resume-hooks-lost-on-server-restart-3-2": "tick-310fb7",
             "resume-hooks-lost-on-server-restart-3-3": "tick-bd2554",
             "resume-hooks-lost-on-server-restart-3-4": "tick-557972",
-            "resume-hooks-lost-on-server-restart-3-5": "tick-4056c4"
+            "resume-hooks-lost-on-server-restart-3-5": "tick-4056c4",
+            "resume-hooks-lost-on-server-restart-4": "tick-dff7f3",
+            "resume-hooks-lost-on-server-restart-4-1": "tick-76eb73",
+            "resume-hooks-lost-on-server-restart-4-2": "tick-3c7af9",
+            "resume-hooks-lost-on-server-restart-4-3": "tick-0a981c"
           },
           "external_id": "tick-8e68d6"
         }
@@ -64,7 +68,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
