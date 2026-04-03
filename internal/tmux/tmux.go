@@ -254,10 +254,11 @@ func (c *Client) ListAllPanes() ([]string, error) {
 }
 
 // SendKeys delivers a command to the specified tmux pane followed by Enter.
-func (c *Client) SendKeys(paneID string, command string) error {
-	_, err := c.cmd.Run("send-keys", "-t", paneID, command, "Enter")
+// The target parameter is a structural key (e.g. "my-session:0.1").
+func (c *Client) SendKeys(target string, command string) error {
+	_, err := c.cmd.Run("send-keys", "-t", target, command, "Enter")
 	if err != nil {
-		return fmt.Errorf("failed to send keys to pane %q: %w", paneID, err)
+		return fmt.Errorf("failed to send keys to pane %q: %w", target, err)
 	}
 	return nil
 }

@@ -88,7 +88,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 3,
+          "current_phase": 4,
           "current_task": "~",
           "completed_tasks": [
             "resume-hooks-lost-on-server-restart-1-1",
@@ -102,12 +102,14 @@
             "resume-hooks-lost-on-server-restart-3-4",
             "resume-hooks-lost-on-server-restart-3-5",
             "resume-hooks-lost-on-server-restart-4-1",
-            "resume-hooks-lost-on-server-restart-4-2"
+            "resume-hooks-lost-on-server-restart-4-2",
+            "resume-hooks-lost-on-server-restart-4-3"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4
           ]
         }
       }

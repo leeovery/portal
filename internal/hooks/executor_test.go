@@ -32,11 +32,11 @@ type keySend struct {
 	command string
 }
 
-func (m *mockKeySender) SendKeys(paneID string, command string) error {
-	if m.failFor != nil && m.failFor[paneID] {
-		return fmt.Errorf("send-keys failed for %s", paneID)
+func (m *mockKeySender) SendKeys(target string, command string) error {
+	if m.failFor != nil && m.failFor[target] {
+		return fmt.Errorf("send-keys failed for %s", target)
 	}
-	m.sent = append(m.sent, keySend{paneID: paneID, command: command})
+	m.sent = append(m.sent, keySend{paneID: target, command: command})
 	return nil
 }
 
@@ -103,9 +103,9 @@ type mockHookCleaner struct {
 	called            bool
 }
 
-func (m *mockHookCleaner) CleanStale(livePaneIDs []string) ([]string, error) {
+func (m *mockHookCleaner) CleanStale(liveKeys []string) ([]string, error) {
 	m.called = true
-	m.livePanesReceived = livePaneIDs
+	m.livePanesReceived = liveKeys
 	if m.err != nil {
 		return nil, m.err
 	}

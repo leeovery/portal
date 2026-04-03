@@ -10,7 +10,7 @@ type PaneLister interface {
 
 // KeySender delivers a command to a tmux pane identified by structural key.
 type KeySender interface {
-	SendKeys(paneID string, command string) error
+	SendKeys(target string, command string) error
 }
 
 // OptionChecker reads and writes tmux server-level options.
@@ -32,7 +32,7 @@ type AllPaneLister interface {
 
 // HookCleaner removes hook entries for structural keys that no longer exist.
 type HookCleaner interface {
-	CleanStale(livePaneIDs []string) ([]string, error)
+	CleanStale(liveKeys []string) ([]string, error)
 }
 
 // TmuxOperator groups the tmux interfaces needed by ExecuteHooks.
