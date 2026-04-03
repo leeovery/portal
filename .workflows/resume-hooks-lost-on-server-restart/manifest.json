@@ -38,14 +38,15 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "resume-hooks-lost-on-server-restart-2-1",
+          "task": "~",
           "task_map": {
             "resume-hooks-lost-on-server-restart-1-1": "tick-303a31",
             "resume-hooks-lost-on-server-restart-1": "tick-61bebb",
             "resume-hooks-lost-on-server-restart-2-1": "tick-29f81a",
             "resume-hooks-lost-on-server-restart-2": "tick-d34cbe",
             "resume-hooks-lost-on-server-restart-2-2": "tick-a415a7",
-            "resume-hooks-lost-on-server-restart-2-3": "tick-77abcf"
+            "resume-hooks-lost-on-server-restart-2-3": "tick-77abcf",
+            "resume-hooks-lost-on-server-restart-2-4": "tick-6f568e"
           },
           "external_id": "tick-8e68d6"
         }
