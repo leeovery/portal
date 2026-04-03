@@ -952,6 +952,62 @@ func TestListAllPanes(t *testing.T) {
 	})
 }
 
+func TestResolveStructuralKey(t *testing.T) {
+	t.Run("returns structural key for valid pane ID", func(t *testing.T) {
+		mock := &MockCommander{Output: "my-project:0.1"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ResolveStructuralKey("%3")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "my-project:0.1" {
+			t.Errorf("ResolveStructuralKey() = %q, want %q", got, "my-project:0.1")
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "display-message -p -t %3 #{session_name}:#{window_index}.#{pane_index}"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns error for invalid pane ID", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("can't find pane: %%99")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ResolveStructuralKey("%99")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "%99") {
+			t.Errorf("error %q does not contain pane ID", err.Error())
+		}
+	})
+
+	t.Run("returns error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("no server running")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ResolveStructuralKey("%0")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to resolve structural key") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "%0") {
+			t.Errorf("error %q does not contain pane ID", err.Error())
+		}
+	})
+}
+
 func TestSendKeys(t *testing.T) {
 	t.Run("sends command followed by Enter to pane", func(t *testing.T) {
 		mock := &MockCommander{}

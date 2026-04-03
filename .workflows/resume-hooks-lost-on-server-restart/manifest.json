@@ -88,7 +88,8 @@
           "current_task": "~",
           "completed_tasks": [
             "resume-hooks-lost-on-server-restart-1-1",
-            "resume-hooks-lost-on-server-restart-2-1"
+            "resume-hooks-lost-on-server-restart-2-1",
+            "resume-hooks-lost-on-server-restart-2-2"
           ],
           "completed_phases": [
             1

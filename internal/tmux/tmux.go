@@ -154,6 +154,17 @@ func (c *Client) CurrentSessionName() (string, error) {
 	return output, nil
 }
 
+// ResolveStructuralKey resolves a pane ID (e.g. "%3") to its structural key
+// (e.g. "my-project:0.1") by querying tmux for the pane's session name,
+// window index, and pane index.
+func (c *Client) ResolveStructuralKey(paneID string) (string, error) {
+	output, err := c.cmd.Run("display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}.#{pane_index}")
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve structural key for pane %q: %w", paneID, err)
+	}
+	return output, nil
+}
+
 // KillSession kills the tmux session with the given name.
 func (c *Client) KillSession(name string) error {
 	_, err := c.cmd.Run("kill-session", "-t", name)
