@@ -460,13 +460,14 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		t.Setenv("TMUX_PANE", "%3")
 
-		// Seed with an existing hook
+		// Seed with an existing hook keyed by structural key
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
+			"my-session:0.0": {"on-resume": "claude --resume abc123"},
 		})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -477,33 +478,34 @@ func TestHooksRmCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify hook was removed from file
+		// Verify hook was removed from file using structural key
 		data := readHooksJSON(t, hooksFile)
-		if _, ok := data["%3"]; ok {
-			t.Error("expected pane %3 entry to be removed from hooks file")
+		if _, ok := data["my-session:0.0"]; ok {
+			t.Error("expected structural key my-session:0.0 entry to be removed from hooks file")
 		}
 
-		// Verify volatile marker was deleted
+		// Verify volatile marker was deleted using structural key
 		if len(delMock.calls) != 1 {
 			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
 		}
-		if delMock.calls[0] != "@portal-active-%3" {
-			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-%3")
+		if delMock.calls[0] != "@portal-active-my-session:0.0" {
+			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-my-session:0.0")
 		}
 	})
 
-	t.Run("reads pane ID from TMUX_PANE environment variable", func(t *testing.T) {
+	t.Run("reads pane ID from TMUX_PANE and resolves structural key", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		t.Setenv("TMUX_PANE", "%42")
 
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%42": {"on-resume": "some-cmd"},
+			"proj-xyz:1.2": {"on-resume": "some-cmd"},
 		})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "proj-xyz:1.2"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -514,18 +516,21 @@ func TestHooksRmCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify the pane ID from env was used in the store removal
+		// Verify structural key was used in the store removal (not raw pane ID)
 		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["proj-xyz:1.2"]; ok {
+			t.Error("expected structural key proj-xyz:1.2 entry to be removed")
+		}
 		if _, ok := data["%42"]; ok {
-			t.Error("expected pane %42 entry to be removed")
+			t.Error("raw pane ID %42 should not be used as key")
 		}
 
-		// Verify the pane ID from env was used in the volatile marker deletion
+		// Verify structural key was used in the volatile marker deletion
 		if len(delMock.calls) != 1 {
 			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
 		}
-		if delMock.calls[0] != "@portal-active-%42" {
-			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-%42")
+		if delMock.calls[0] != "@portal-active-proj-xyz:1.2" {
+			t.Errorf("delete option name = %q, want %q", delMock.calls[0], "@portal-active-proj-xyz:1.2")
 		}
 	})
 
@@ -536,7 +541,8 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "")
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "unused:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -564,7 +570,8 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%3")
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -590,7 +597,8 @@ func TestHooksRmCommand(t *testing.T) {
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "some-session:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		buf := new(bytes.Buffer)
@@ -614,14 +622,15 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		t.Setenv("TMUX_PANE", "%3")
 
-		// Seed with multiple panes — only %3 should be removed
+		// Seed with multiple keys — only the resolved one should be removed
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
-			"%7": {"on-resume": "npm start"},
+			"my-session:0.0": {"on-resume": "claude --resume abc123"},
+			"other-proj:0.0": {"on-resume": "npm start"},
 		})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -634,14 +643,14 @@ func TestHooksRmCommand(t *testing.T) {
 
 		data := readHooksJSON(t, hooksFile)
 
-		// %3 should be gone
-		if _, ok := data["%3"]; ok {
-			t.Error("expected pane %3 to be removed")
+		// my-session:0.0 should be gone
+		if _, ok := data["my-session:0.0"]; ok {
+			t.Error("expected structural key my-session:0.0 to be removed")
 		}
 
-		// %7 should remain
-		if data["%7"]["on-resume"] != "npm start" {
-			t.Errorf("pane %%7 on-resume = %q, want %q", data["%7"]["on-resume"], "npm start")
+		// other-proj:0.0 should remain
+		if data["other-proj:0.0"]["on-resume"] != "npm start" {
+			t.Errorf("other-proj:0.0 on-resume = %q, want %q", data["other-proj:0.0"]["on-resume"], "npm start")
 		}
 	})
 
@@ -652,11 +661,12 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
 
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%7": {"on-resume": "some-cmd"},
+			"proj-abc:2.1": {"on-resume": "some-cmd"},
 		})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "proj-abc:2.1"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -670,7 +680,7 @@ func TestHooksRmCommand(t *testing.T) {
 		if len(delMock.calls) != 1 {
 			t.Fatalf("expected 1 DeleteServerOption call, got %d", len(delMock.calls))
 		}
-		wantName := "@portal-active-%7"
+		wantName := "@portal-active-proj-abc:2.1"
 		if delMock.calls[0] != wantName {
 			t.Errorf("option name = %q, want %q", delMock.calls[0], wantName)
 		}
@@ -682,13 +692,14 @@ func TestHooksRmCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 		t.Setenv("TMUX_PANE", "%5")
 
-		// Pane %5 has only one event — removing it should remove the pane key entirely
+		// Structural key has only one event — removing it should remove the key entirely
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%5": {"on-resume": "some-cmd"},
+			"my-session:0.0": {"on-resume": "some-cmd"},
 		})
 
 		delMock := &mockOptionDeleter{}
-		hooksDeps = &HooksDeps{OptionDeleter: delMock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -700,11 +711,48 @@ func TestHooksRmCommand(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if _, ok := data["%5"]; ok {
-			t.Error("expected pane %5 key to be removed when last event deleted")
+		if _, ok := data["my-session:0.0"]; ok {
+			t.Error("expected structural key my-session:0.0 to be removed when last event deleted")
 		}
 		if len(data) != 0 {
 			t.Errorf("expected empty hooks file, got %d entries", len(data))
+		}
+	})
+
+	t.Run("ResolveStructuralKey failure returns user-facing error", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"my-session:0.0": {"on-resume": "some-cmd"},
+		})
+
+		delMock := &mockOptionDeleter{}
+		resolver := &mockKeyResolver{err: fmt.Errorf("tmux not responding")}
+		hooksDeps = &HooksDeps{OptionDeleter: delMock, KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "resolve") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "resolve")
+		}
+
+		// Verify no side effects: hook still in file, no DeleteServerOption calls
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["my-session:0.0"]; !ok {
+			t.Error("hook should not have been removed on resolver failure")
+		}
+		if len(delMock.calls) != 0 {
+			t.Errorf("expected 0 DeleteServerOption calls, got %d", len(delMock.calls))
 		}
 	})
 }

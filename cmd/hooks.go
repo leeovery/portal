@@ -160,12 +160,24 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
+		var keyResolver StructuralKeyResolver
+		if hooksDeps != nil && hooksDeps.KeyResolver != nil {
+			keyResolver = hooksDeps.KeyResolver
+		} else {
+			keyResolver = buildHooksTmuxClient()
+		}
+
+		structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve structural key for current pane: %w", err)
+		}
+
 		store, err := loadHookStore()
 		if err != nil {
 			return err
 		}
 
-		if err := store.Remove(paneID, "on-resume"); err != nil {
+		if err := store.Remove(structuralKey, "on-resume"); err != nil {
 			return err
 		}
 
@@ -175,7 +187,7 @@ var hooksRmCmd = &cobra.Command{
 		} else {
 			deleter = buildHooksTmuxClient()
 		}
-		if err := deleter.DeleteServerOption(hooks.MarkerName(paneID)); err != nil {
+		if err := deleter.DeleteServerOption(hooks.MarkerName(structuralKey)); err != nil {
 			return err
 		}
 
