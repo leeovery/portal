@@ -1,7 +1,8 @@
 # Plan: Resume Hooks Lost On Server Restart
 
 ## Phase 1: Empty-Pane Guard
-status: draft
+status: approved
+approved_at: 2026-04-03
 
 **Goal**: Fix the immediate data loss bug where `ExecuteHooks` calls `CleanStale` with an empty pane list after server restart, deleting all hook entries. Surgical fix matching the existing guard in `cmd/clean.go:77-80`.
 
@@ -14,7 +15,8 @@ status: draft
 - [ ] All existing tests pass without modification (beyond the corrected test)
 
 ## Phase 2: Structural Key Infrastructure and Pane Querying
-status: draft
+status: approved
+approved_at: 2026-04-03
 
 **Goal**: Introduce the structural key model (`session_name:window_index.pane_index`) at the tmux and hooks-store layers. Change `ListPanes` and `ListAllPanes` to return structural keys instead of pane IDs. Add new `tmux.Client` method to resolve a pane ID (`$TMUX_PANE`) to its structural key. Update `MarkerName` to accept structural keys. Update `Hook` struct and `Store` method semantics.
 
@@ -30,7 +32,8 @@ status: draft
 - [ ] Unit tests cover structural key construction, resolution method, and updated `ListPanes`/`ListAllPanes` output parsing
 
 ## Phase 3: Consumer Migration to Structural Keys
-status: draft
+status: approved
+approved_at: 2026-04-03
 
 **Goal**: Update all consumers of the structural key infrastructure: `ExecuteHooks` (executor), `hooks set`, `hooks rm`, `hooks list` (cmd/hooks.go), and `clean` command (cmd/clean.go). All hook registration, execution, removal, listing, and cleanup now use structural keys end-to-end.
 
