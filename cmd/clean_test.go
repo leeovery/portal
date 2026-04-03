@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -288,7 +287,7 @@ func TestCleanCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
 		// Write hooks for two panes; only my-session:0.0 is live
-		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"my-session:0.0":    {"on-resume": "cmd1"},
 			"other-session:1.0": {"on-resume": "cmd5"},
 		})
@@ -314,7 +313,7 @@ func TestCleanCommand(t *testing.T) {
 		}
 
 		// Verify other-session:1.0 was removed from hooks file, my-session:0.0 remains
-		data := readCleanHooksJSON(t, hooksFile)
+		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.0"]; !ok {
 			t.Error("expected live pane my-session:0.0 to remain in hooks file")
 		}
@@ -331,7 +330,7 @@ func TestCleanCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
 		// Real ListAllPanes returns ([]string{}, nil) when no server is running
-		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"my-session:0.1": {"on-resume": "some-cmd"},
 		})
 
@@ -356,7 +355,7 @@ func TestCleanCommand(t *testing.T) {
 		}
 
 		// Verify hooks are still in the file (NOT deleted)
-		data := readCleanHooksJSON(t, hooksFile)
+		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.1"]; !ok {
 			t.Error("expected hook my-session:0.1 to be preserved when no tmux server is running")
 		}
@@ -397,7 +396,7 @@ func TestCleanCommand(t *testing.T) {
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"my-session:0.0": {"on-resume": "cmd1"},
 			"my-session:0.1": {"on-resume": "cmd3"},
 		})
@@ -437,7 +436,7 @@ func TestCleanCommand(t *testing.T) {
 		}
 
 		// Stale hook: other-session:1.1 is not live
-		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"other-session:1.1": {"on-resume": "cmd9"},
 		})
 
@@ -471,30 +470,4 @@ type mockCleanPaneLister struct {
 
 func (m *mockCleanPaneLister) ListAllPanes() ([]string, error) {
 	return m.panes, m.err
-}
-
-// writeCleanHooksJSON is a test helper that writes a hooks JSON file for clean tests.
-func writeCleanHooksJSON(t *testing.T, path string, data map[string]map[string]string) {
-	t.Helper()
-	b, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		t.Fatalf("failed to marshal hooks JSON: %v", err)
-	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
-		t.Fatalf("failed to write hooks file: %v", err)
-	}
-}
-
-// readCleanHooksJSON is a test helper that reads and parses the hooks JSON file for clean tests.
-func readCleanHooksJSON(t *testing.T, path string) map[string]map[string]string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("failed to read hooks file: %v", err)
-	}
-	var data map[string]map[string]string
-	if err := json.Unmarshal(b, &data); err != nil {
-		t.Fatalf("failed to unmarshal hooks JSON: %v", err)
-	}
-	return data
 }

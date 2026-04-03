@@ -100,7 +100,8 @@
             "resume-hooks-lost-on-server-restart-3-2",
             "resume-hooks-lost-on-server-restart-3-3",
             "resume-hooks-lost-on-server-restart-3-4",
-            "resume-hooks-lost-on-server-restart-3-5"
+            "resume-hooks-lost-on-server-restart-3-5",
+            "resume-hooks-lost-on-server-restart-4-1"
           ],
           "completed_phases": [
             1,
