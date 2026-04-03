@@ -19,6 +19,13 @@ type ServerOptionDeleter interface {
 	DeleteServerOption(name string) error
 }
 
+// StructuralKeyResolver resolves a tmux pane ID (e.g. "%3") to its structural
+// key (e.g. "my-session:0.0") by querying tmux for session name, window index,
+// and pane index.
+type StructuralKeyResolver interface {
+	ResolveStructuralKey(paneID string) (string, error)
+}
+
 // hooksDeps holds injectable dependencies for the hooks commands.
 // When nil, real implementations are used.
 var hooksDeps *HooksDeps
@@ -27,6 +34,7 @@ var hooksDeps *HooksDeps
 type HooksDeps struct {
 	OptionSetter  ServerOptionSetter
 	OptionDeleter ServerOptionDeleter
+	KeyResolver   StructuralKeyResolver
 }
 
 // requireTmuxPane reads TMUX_PANE from the environment and returns an
@@ -85,6 +93,18 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
+		var keyResolver StructuralKeyResolver
+		if hooksDeps != nil && hooksDeps.KeyResolver != nil {
+			keyResolver = hooksDeps.KeyResolver
+		} else {
+			keyResolver = buildHooksTmuxClient()
+		}
+
+		structuralKey, err := keyResolver.ResolveStructuralKey(paneID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve structural key for current pane: %w", err)
+		}
+
 		command, err := cmd.Flags().GetString("on-resume")
 		if err != nil {
 			return err
@@ -95,7 +115,7 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		if err := store.Set(paneID, "on-resume", command); err != nil {
+		if err := store.Set(structuralKey, "on-resume", command); err != nil {
 			return err
 		}
 
@@ -105,7 +125,7 @@ var hooksSetCmd = &cobra.Command{
 		} else {
 			setter = buildHooksTmuxClient()
 		}
-		if err := setter.SetServerOption(hooks.MarkerName(paneID), "1"); err != nil {
+		if err := setter.SetServerOption(hooks.MarkerName(structuralKey), "1"); err != nil {
 			return err
 		}
 

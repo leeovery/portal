@@ -4,6 +4,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,6 +144,16 @@ func TestHooksListCommand(t *testing.T) {
 	})
 }
 
+// mockKeyResolver implements StructuralKeyResolver for testing.
+type mockKeyResolver struct {
+	key string
+	err error
+}
+
+func (m *mockKeyResolver) ResolveStructuralKey(_ string) (string, error) {
+	return m.key, m.err
+}
+
 // mockOptionSetter records calls to SetServerOption for test assertions.
 type mockOptionSetter struct {
 	calls []serverOptionCall
@@ -167,7 +178,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%3")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -178,18 +190,18 @@ func TestHooksSetCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify hook was written to file
+		// Verify hook was written under structural key
 		data := readHooksJSON(t, hooksFile)
-		if data["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("hook command = %q, want %q", data["%3"]["on-resume"], "claude --resume abc123")
+		if data["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("hook command = %q, want %q", data["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
 
-		// Verify volatile marker was set
+		// Verify volatile marker uses structural key
 		if len(mock.calls) != 1 {
 			t.Fatalf("expected 1 SetServerOption call, got %d", len(mock.calls))
 		}
-		if mock.calls[0].name != "@portal-active-%3" {
-			t.Errorf("option name = %q, want %q", mock.calls[0].name, "@portal-active-%3")
+		if mock.calls[0].name != "@portal-active-my-session:0.0" {
+			t.Errorf("option name = %q, want %q", mock.calls[0].name, "@portal-active-my-session:0.0")
 		}
 		if mock.calls[0].value != "1" {
 			t.Errorf("option value = %q, want %q", mock.calls[0].value, "1")
@@ -203,7 +215,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%99")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "proj-xyz:1.2"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -214,18 +227,21 @@ func TestHooksSetCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify the pane ID from env was used in the store
+		// Verify structural key was used in the store (not raw pane ID)
 		data := readHooksJSON(t, hooksFile)
-		if _, ok := data["%99"]; !ok {
-			t.Error("expected hook entry for pane %99, not found")
+		if _, ok := data["proj-xyz:1.2"]; !ok {
+			t.Error("expected hook entry for structural key proj-xyz:1.2, not found")
+		}
+		if _, ok := data["%99"]; ok {
+			t.Error("raw pane ID %99 should not be used as key")
 		}
 
-		// Verify the pane ID from env was used in the volatile marker
+		// Verify structural key was used in the volatile marker
 		if len(mock.calls) != 1 {
 			t.Fatalf("expected 1 SetServerOption call, got %d", len(mock.calls))
 		}
-		if mock.calls[0].name != "@portal-active-%99" {
-			t.Errorf("option name = %q, want %q", mock.calls[0].name, "@portal-active-%99")
+		if mock.calls[0].name != "@portal-active-proj-xyz:1.2" {
+			t.Errorf("option name = %q, want %q", mock.calls[0].name, "@portal-active-proj-xyz:1.2")
 		}
 	})
 
@@ -236,7 +252,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "unused:0.0"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -267,7 +284,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%3")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -290,7 +308,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%3")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		// First set
@@ -310,8 +329,8 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 
 		data := readHooksJSON(t, hooksFile)
-		if data["%3"]["on-resume"] != "new-cmd" {
-			t.Errorf("hook command = %q, want %q", data["%3"]["on-resume"], "new-cmd")
+		if data["my-session:0.0"]["on-resume"] != "new-cmd" {
+			t.Errorf("hook command = %q, want %q", data["my-session:0.0"]["on-resume"], "new-cmd")
 		}
 
 		// Verify marker was set both times
@@ -327,7 +346,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%3")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "my-session:0.0"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -340,18 +360,18 @@ func TestHooksSetCommand(t *testing.T) {
 		// Read the raw JSON and verify the structure
 		data := readHooksJSON(t, hooksFile)
 
-		// Should have exactly one pane entry
+		// Should have exactly one entry under structural key
 		if len(data) != 1 {
-			t.Fatalf("expected 1 pane entry, got %d", len(data))
+			t.Fatalf("expected 1 entry, got %d", len(data))
 		}
 
-		// The pane entry should have exactly one event
-		events, ok := data["%3"]
+		// The entry should be keyed by structural key, not raw pane ID
+		events, ok := data["my-session:0.0"]
 		if !ok {
-			t.Fatal("expected entry for pane %3")
+			t.Fatal("expected entry for structural key my-session:0.0")
 		}
 		if len(events) != 1 {
-			t.Fatalf("expected 1 event for pane %%3, got %d", len(events))
+			t.Fatalf("expected 1 event for my-session:0.0, got %d", len(events))
 		}
 		if events["on-resume"] != "claude --resume abc123" {
 			t.Errorf("on-resume = %q, want %q", events["on-resume"], "claude --resume abc123")
@@ -365,7 +385,8 @@ func TestHooksSetCommand(t *testing.T) {
 		t.Setenv("TMUX_PANE", "%7")
 
 		mock := &mockOptionSetter{}
-		hooksDeps = &HooksDeps{OptionSetter: mock}
+		resolver := &mockKeyResolver{key: "proj-abc:2.1"}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
 		t.Cleanup(func() { hooksDeps = nil })
 
 		resetRootCmd()
@@ -378,13 +399,45 @@ func TestHooksSetCommand(t *testing.T) {
 		if len(mock.calls) != 1 {
 			t.Fatalf("expected 1 SetServerOption call, got %d", len(mock.calls))
 		}
-		wantName := "@portal-active-%7"
+		wantName := "@portal-active-proj-abc:2.1"
 		if mock.calls[0].name != wantName {
 			t.Errorf("option name = %q, want %q", mock.calls[0].name, wantName)
 		}
 		wantValue := "1"
 		if mock.calls[0].value != wantValue {
 			t.Errorf("option value = %q, want %q", mock.calls[0].value, wantValue)
+		}
+	})
+
+	t.Run("ResolveStructuralKey failure returns user-facing error", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%3")
+
+		mock := &mockOptionSetter{}
+		resolver := &mockKeyResolver{err: fmt.Errorf("tmux not responding")}
+		hooksDeps = &HooksDeps{OptionSetter: mock, KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "some-cmd"})
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "resolve") {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), "resolve")
+		}
+
+		// Verify no side effects: no file written, no SetServerOption calls
+		if _, statErr := os.Stat(hooksFile); statErr == nil {
+			t.Error("hooks file should not have been created")
+		}
+		if len(mock.calls) != 0 {
+			t.Errorf("expected 0 SetServerOption calls, got %d", len(mock.calls))
 		}
 	})
 }
