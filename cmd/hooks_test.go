@@ -17,7 +17,7 @@ func TestHooksListCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
 		data := map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
+			"my-project-abc123:0.0": {"on-resume": "claude --resume abc123"},
 		}
 		writeHooksJSON(t, hooksFile, data)
 
@@ -31,7 +31,7 @@ func TestHooksListCommand(t *testing.T) {
 		}
 
 		got := buf.String()
-		want := "%3\ton-resume\tclaude --resume abc123\n"
+		want := "my-project-abc123:0.0\ton-resume\tclaude --resume abc123\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}
@@ -81,15 +81,15 @@ func TestHooksListCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("outputs hooks sorted by pane ID", func(t *testing.T) {
+	t.Run("outputs hooks sorted by key then event", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
 		data := map[string]map[string]string{
-			"%7": {"on-resume": "claude --resume def456"},
-			"%3": {"on-resume": "claude --resume abc123"},
-			"%1": {"on-resume": "npm start"},
+			"proj-abc:1.0":   {"on-resume": "claude --resume def456"},
+			"proj-abc:0.0":   {"on-resume": "claude --resume abc123"},
+			"other-proj:0.0": {"on-resume": "npm start"},
 		}
 		writeHooksJSON(t, hooksFile, data)
 
@@ -103,7 +103,7 @@ func TestHooksListCommand(t *testing.T) {
 		}
 
 		got := buf.String()
-		want := "%1\ton-resume\tnpm start\n%3\ton-resume\tclaude --resume abc123\n%7\ton-resume\tclaude --resume def456\n"
+		want := "other-proj:0.0\ton-resume\tnpm start\nproj-abc:0.0\ton-resume\tclaude --resume abc123\nproj-abc:1.0\ton-resume\tclaude --resume def456\n"
 		if got != want {
 			t.Errorf("output = %q, want %q", got, want)
 		}

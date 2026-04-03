@@ -66,7 +66,7 @@ var hooksListCmd = &cobra.Command{
 		}
 
 		for _, h := range list {
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", h.PaneID, h.Event, h.Command); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", h.Key, h.Event, h.Command); err != nil {
 				return err
 			}
 		}
