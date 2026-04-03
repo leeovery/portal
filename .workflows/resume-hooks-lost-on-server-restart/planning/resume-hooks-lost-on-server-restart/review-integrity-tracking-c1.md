@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-03
 cycle: 1
 phase: Plan Integrity Review
@@ -78,7 +78,7 @@ Add Do section to each task:
 4. Run go test ./internal/hooks/... then go test ./...
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -143,7 +143,7 @@ Add Tests section to each task:
 - "empty pane list after restart preserves hooks and skips CleanStale"
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -176,7 +176,7 @@ Task 2-4 Do step says: "Update 'no tmux server running' test to assert CleanStal
    ...
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -208,7 +208,7 @@ Add Context section to Task 2-3 after Edge Cases (or after last field):
 > Renaming the exported Hook.PaneID field to Hook.Key will cause a compile error in cmd/hooks.go (line 69 references h.PaneID). This is intentional — the fix is Phase 3 Task 3-1 which is the first task in the next phase. Full-suite `go test ./...` will not pass until Task 3-1 completes. Scope this task's verification to `go test ./internal/hooks/...` only.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -233,5 +233,5 @@ Add Context section to Task 3-1 after Acceptance Criteria:
 > Phase 2 Task 2-3 already renamed Hook.PaneID to Hook.Key in internal/hooks/store.go (struct field, List() sort, all store tests). The only remaining reference is cmd/hooks.go line 69 which uses h.PaneID in the list output formatting. This task fixes that single reference and updates the cmd-layer tests.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:

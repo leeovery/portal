@@ -206,12 +206,9 @@ total: 4
   - In `mockOptionChecker.options`: change `"@portal-active-%3"` to `"@portal-active-my-session:0.0"` etc.
   - In `mockKeySender.failFor`: change `"%3"` to `"my-session:0.0"` etc.
   - Update all assertion strings in `t.Errorf` / `t.Error` calls
-- Update the specific test `"no tmux server running skips cleanup gracefully"` (line 537-568):
-  - This test currently asserts `CleanStale` IS called with an empty list. Phase 1 added the empty-pane guard to `ExecuteHooks`, so `CleanStale` should NOT be called when `livePanes` is empty.
-  - Change the assertion from `if !store.called` to `if store.called` with message `"expected CleanStale NOT to be called when livePanes is empty"`
-  - Remove the assertion `if len(store.livePanesReceived) != 0` since CleanStale should not be called at all
+- Rename test `"no tmux server running skips cleanup gracefully"` to `"empty pane list skips cleanup and continues hook execution"`
+  - Update its mock values from pane IDs to structural keys (assertion already corrected by Phase 1 Task 1-1)
   - Keep the assertion that hook execution still proceeds (send-keys still fires)
-  - Rename the test to `"empty pane list skips cleanup and continues hook execution"` for clarity
 - In the test `"skips pane not in session"`: the hook for `%7` (which is not in `"my-session"`) should use a key that clearly belongs to a different session, e.g., `"other-session:0.0"`. The `mockPaneLister` returns `["my-session:0.0"]` for `"my-session"`, so the hook keyed by `"other-session:0.0"` correctly does not match.
 - In the test `"executes hooks for multiple qualifying panes"`: use three structural keys for the same session: `"my-session:0.0"`, `"my-session:0.1"`, `"my-session:1.0"`. Update the `mockPaneLister` to return all three for `"my-session"`. Update assertions for sent commands and marker names.
 
