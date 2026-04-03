@@ -32,6 +32,8 @@ Two-part fix:
 
 This is the same addressing scheme tmux-resurrect uses for targeting panes during restore.
 
+**Key assumption:** Structural keys depend on session names, window indices, and pane indices surviving tmux-resurrect. This has been verified: tmux-resurrect's save/restore scripts explicitly use `session_name:window_index.pane_index` for targeting `send-keys` and `select-pane` during restore. Pane IDs (`%N`) do not survive — they are reassigned by the tmux server on restart.
+
 ### Component Changes
 
 **Hook registration (`cmd/hooks.go`):** Instead of using `$TMUX_PANE` as the key, query tmux for the current pane's session name, window index, and pane index. Build the structural key `session_name:window_index.pane_index` and use it as the hook storage key.
@@ -42,7 +44,13 @@ This is the same addressing scheme tmux-resurrect uses for targeting panes durin
 
 **Hook storage (`internal/hooks/store.go`):** Update the data model — the map key changes from pane ID to structural key. `CleanStale` cross-references structural keys against live tmux structure instead of pane IDs.
 
+**Pane querying (`internal/tmux/tmux.go`):** The current `ListPanes(sessionName)` returns only pane IDs (`[]string`). Hook execution and stale cleanup need to build structural keys from live tmux state. Either `ListPanes` must return richer data (window index, pane index per pane) or a new method is needed to query panes with their structural position.
+
 **Volatile markers:** Change marker naming from `@portal-active-%paneID` to a structural-key-based format (e.g., `@portal-active-session:window.pane`).
+
+**Hook removal (`cmd/hooks.go` — `hooks rm`):** Update to resolve the current pane's structural key instead of using `$TMUX_PANE`. Remove the hook entry and volatile marker using the structural key.
+
+**Hook listing (`cmd/hooks.go` — `hooks list`, `internal/hooks/store.go` — `Hook` struct and `List()`):** The `Hook` struct's `PaneID` field becomes a structural key field. `List()` populates it with structural keys. The `hooks list` CLI output displays structural keys instead of pane IDs.
 
 **Clean command (`cmd/clean.go`):** Update to use structural key model for cleanup. The existing empty-pane guard remains.
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-02
 cycle: 1
 phase: Input Review
@@ -20,9 +20,10 @@ topic: resume-hooks-lost-on-server-restart
 The `hooks rm` command uses `requireTmuxPane()` / `$TMUX_PANE` to identify which hook to remove, and also deletes the volatile marker using the pane-ID-based `MarkerName(paneID)`. It needs the same structural key change as `hooks set`. The specification's Component Changes section covers registration (`hooks set`), execution, storage, clean, and volatile markers, but omits the removal path.
 
 **Proposed Addition**:
+**Hook removal (`cmd/hooks.go` — `hooks rm`):** Update to resolve the current pane's structural key instead of using `$TMUX_PANE`. Remove the hook entry and volatile marker using the structural key.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved
 
 ---
 
@@ -36,9 +37,10 @@ The `hooks rm` command uses `requireTmuxPane()` / `$TMUX_PANE` to identify which
 The `Hook` struct has a `PaneID` field, and the `List()` method populates it. The `hooks list` CLI command outputs this field. Both need updating to use structural keys. The specification's storage model section describes the key format change but doesn't mention the `Hook` struct, `List()` method, or `hooks list` command output.
 
 **Proposed Addition**:
+**Hook listing (`cmd/hooks.go` — `hooks list`, `internal/hooks/store.go` — `Hook` struct and `List()`):** The `Hook` struct's `PaneID` field becomes a structural key field. `List()` populates it with structural keys. The `hooks list` CLI output displays structural keys instead of pane IDs.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved
 
 ---
 
@@ -52,9 +54,10 @@ The `Hook` struct has a `PaneID` field, and the `List()` method populates it. Th
 The specification says ExecuteHooks should "query the session's panes with their window/pane indices and look up hooks by `sessionName:windowIndex.paneIndex`." However, the current `ListPanes(sessionName)` interface only returns pane IDs (`[]string` of `%N` values). The specification doesn't address that either `ListPanes` needs to return richer data (window index, pane index per pane) or a new query method is needed. This is also relevant to `CleanStale` which needs to build structural keys from live tmux state.
 
 **Proposed Addition**:
+**Pane querying (`internal/tmux/tmux.go`):** The current `ListPanes(sessionName)` returns only pane IDs (`[]string`). Hook execution and stale cleanup need to build structural keys from live tmux state. Either `ListPanes` must return richer data (window index, pane index per pane) or a new method is needed to query panes with their structural position.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved
 
 ---
 
@@ -68,6 +71,7 @@ The specification says ExecuteHooks should "query the session's panes with their
 The investigation notes session names use `{project}-{nanoid}` format and are "non-durable" (line 99). The structural key approach depends entirely on session names surviving tmux-resurrect. The investigation's Fix Direction confirms resurrect preserves session names (line 143: "session names, window indices, and pane indices DO survive resurrect"), but the specification never explicitly states this assumption or why it holds. Given that the entire bug stems from a false assumption about pane ID persistence, it would be prudent to explicitly state the verified assumption about session name persistence.
 
 **Proposed Addition**:
+**Key assumption:** Structural keys depend on session names, window indices, and pane indices surviving tmux-resurrect. This has been verified: tmux-resurrect's save/restore scripts explicitly use `session_name:window_index.pane_index` for targeting `send-keys` and `select-pane` during restore. Pane IDs (`%N`) do not survive — they are reassigned by the tmux server on restart.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved
