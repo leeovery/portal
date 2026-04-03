@@ -586,6 +586,58 @@ func TestCleanStale(t *testing.T) {
 		}
 	})
 
+	t.Run("old pane-ID entries cleaned on first run after upgrade", func(t *testing.T) {
+		// After upgrading from pane-ID keys (%0, %3) to structural keys,
+		// old entries won't match any live structural key and should be
+		// removed by CleanStale. New structural-key entries are preserved.
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+
+		// Write a hooks.json with a mix of old pane-ID and new structural keys
+		content := `{"%0":{"on-resume":"claude --resume old1"},"%3":{"on-resume":"claude --resume old2"},"my-session:0.0":{"on-resume":"claude --resume new1"}}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := hooks.NewStore(filePath)
+
+		// Live panes only contain structural keys
+		removed, err := store.CleanStale([]string{"my-session:0.0"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(removed) != 2 {
+			t.Fatalf("got %d removed, want 2", len(removed))
+		}
+
+		sort.Strings(removed)
+		if removed[0] != "%0" {
+			t.Errorf("removed[0] = %q, want %q", removed[0], "%0")
+		}
+		if removed[1] != "%3" {
+			t.Errorf("removed[1] = %q, want %q", removed[1], "%3")
+		}
+
+		// Verify only the structural key entry remains
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(h) != 1 {
+			t.Fatalf("got %d keys, want 1", len(h))
+		}
+		if _, ok := h["my-session:0.0"]; !ok {
+			t.Error("key my-session:0.0 should have been kept")
+		}
+		if _, ok := h["%0"]; ok {
+			t.Error("key %%0 should have been removed")
+		}
+		if _, ok := h["%3"]; ok {
+			t.Error("key %%3 should have been removed")
+		}
+	})
+
 	t.Run("handles mix of live and stale keys", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")

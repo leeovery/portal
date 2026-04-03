@@ -362,6 +362,84 @@ func TestExecuteHooks(t *testing.T) {
 		}
 	})
 
+	t.Run("multi-pane independent hooks fire correctly with structural key targets", func(t *testing.T) {
+		// 3 panes across 2 windows: 0.0, 0.1 in window 0, 1.0 in window 1.
+		// Each has an independent on-resume hook. All three should fire.
+		tmux := noopTmux()
+		tmux.mockPaneLister = &mockPaneLister{
+			panes: map[string][]string{"my-session": {"my-session:0.0", "my-session:0.1", "my-session:1.0"}},
+		}
+		store := noopStore()
+		store.mockHookLoader = &mockHookLoader{
+			data: map[string]map[string]string{
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
+				"my-session:0.1": {"on-resume": "npm run dev"},
+				"my-session:1.0": {"on-resume": "claude --resume def456"},
+			},
+		}
+
+		hooks.ExecuteHooks("my-session", tmux, store)
+
+		if len(tmux.sent) != 3 {
+			t.Fatalf("expected 3 send-keys calls, got %d", len(tmux.sent))
+		}
+
+		sentPanes := make(map[string]string)
+		for _, s := range tmux.sent {
+			sentPanes[s.paneID] = s.command
+		}
+		if sentPanes["my-session:0.0"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 command = %q, want %q", sentPanes["my-session:0.0"], "claude --resume abc123")
+		}
+		if sentPanes["my-session:0.1"] != "npm run dev" {
+			t.Errorf("my-session:0.1 command = %q, want %q", sentPanes["my-session:0.1"], "npm run dev")
+		}
+		if sentPanes["my-session:1.0"] != "claude --resume def456" {
+			t.Errorf("my-session:1.0 command = %q, want %q", sentPanes["my-session:1.0"], "claude --resume def456")
+		}
+
+		// Each pane gets its own volatile marker
+		if len(tmux.setLog) != 3 {
+			t.Fatalf("expected 3 SetServerOption calls, got %d", len(tmux.setLog))
+		}
+		markerSet := make(map[string]bool)
+		for _, opt := range tmux.setLog {
+			markerSet[opt.name] = true
+		}
+		for _, key := range []string{"my-session:0.0", "my-session:0.1", "my-session:1.0"} {
+			marker := hooks.MarkerName(key)
+			if !markerSet[marker] {
+				t.Errorf("expected marker %q to be set", marker)
+			}
+		}
+	})
+
+	t.Run("orphaned structural keys produce no errors and no send-keys calls", func(t *testing.T) {
+		// Hooks keyed by structural positions that no longer exist in the
+		// session's pane list. Should silently skip with no send-keys calls.
+		tmux := noopTmux()
+		tmux.mockPaneLister = &mockPaneLister{
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
+		}
+		store := noopStore()
+		store.mockHookLoader = &mockHookLoader{
+			data: map[string]map[string]string{
+				"my-session:0.1": {"on-resume": "claude --resume gone1"},
+				"my-session:1.0": {"on-resume": "claude --resume gone2"},
+				"my-session:2.0": {"on-resume": "claude --resume gone3"},
+			},
+		}
+
+		hooks.ExecuteHooks("my-session", tmux, store)
+
+		if len(tmux.sent) != 0 {
+			t.Errorf("expected 0 send-keys calls for orphaned keys, got %d", len(tmux.sent))
+		}
+		if len(tmux.setLog) != 0 {
+			t.Errorf("expected 0 SetServerOption calls, got %d", len(tmux.setLog))
+		}
+	})
+
 	t.Run("executes hooks for multiple qualifying panes", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
@@ -562,6 +640,38 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		// Hook execution still proceeds normally
 		if len(tmux.sent) != 1 {
 			t.Fatalf("expected 1 send-keys call, got %d", len(tmux.sent))
+		}
+	})
+
+	t.Run("empty pane list preserves hooks for post-restart survival", func(t *testing.T) {
+		// After a server restart, ListAllPanes returns empty because no
+		// sessions exist yet (pre-resurrect). CleanStale must NOT be called
+		// so hooks remain on disk for when sessions are restored. The hooks
+		// store data should be completely untouched.
+		tmux := noopTmux()
+		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{}}
+		tmux.mockPaneLister = &mockPaneLister{
+			panes: map[string][]string{}, // no session panes either
+		}
+		store := noopStore()
+		store.mockHookLoader = &mockHookLoader{
+			data: map[string]map[string]string{
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
+				"my-session:0.1": {"on-resume": "npm run dev"},
+				"my-session:1.0": {"on-resume": "claude --resume def456"},
+			},
+		}
+
+		hooks.ExecuteHooks("my-session", tmux, store)
+
+		// CleanStale must NOT have been called
+		if store.called {
+			t.Error("expected CleanStale NOT to be called when ListAllPanes returns empty (post-restart)")
+		}
+
+		// No send-keys because no panes exist yet
+		if len(tmux.sent) != 0 {
+			t.Errorf("expected 0 send-keys calls, got %d", len(tmux.sent))
 		}
 	})
 
