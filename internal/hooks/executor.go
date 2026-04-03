@@ -63,7 +63,7 @@ func MarkerName(paneID string) string {
 // Cleanup errors are silently ignored.
 func ExecuteHooks(sessionName string, tmux TmuxOperator, store HookRepository) {
 	// Best-effort cleanup: prune stale hook entries before loading.
-	if livePanes, err := tmux.ListAllPanes(); err == nil {
+	if livePanes, err := tmux.ListAllPanes(); err == nil && len(livePanes) > 0 {
 		_, _ = store.CleanStale(livePanes)
 	}
 

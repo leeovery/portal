@@ -535,8 +535,9 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 	})
 
 	t.Run("no tmux server running skips cleanup gracefully", func(t *testing.T) {
-		// When ListAllPanes returns empty (no server), CleanStale should
-		// still be called with the empty list, and hook execution continues.
+		// When ListAllPanes returns empty (no server / post-restart),
+		// CleanStale must NOT be called — otherwise it would delete all
+		// stored hooks. Hook execution still proceeds normally.
 		tmux := noopTmux()
 		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{}}
 		tmux.mockPaneLister = &mockPaneLister{
@@ -554,11 +555,38 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		if !tmux.called {
 			t.Error("expected ListAllPanes to be called")
 		}
-		if !store.called {
-			t.Error("expected CleanStale to be called with empty list")
+		if store.called {
+			t.Error("expected CleanStale NOT to be called when ListAllPanes returns empty")
 		}
-		if len(store.livePanesReceived) != 0 {
-			t.Errorf("expected empty live panes, got %v", store.livePanesReceived)
+
+		// Hook execution still proceeds normally
+		if len(tmux.sent) != 1 {
+			t.Fatalf("expected 1 send-keys call, got %d", len(tmux.sent))
+		}
+	})
+
+	t.Run("ListAllPanes returns nil skips cleanup gracefully", func(t *testing.T) {
+		// When ListAllPanes returns nil (e.g. no server), CleanStale must
+		// NOT be called — same guard as empty slice. Hook execution proceeds.
+		tmux := noopTmux()
+		tmux.mockAllPaneLister = &mockAllPaneLister{panes: nil}
+		tmux.mockPaneLister = &mockPaneLister{
+			panes: map[string][]string{"my-session": {"%3"}},
+		}
+		store := noopStore()
+		store.mockHookLoader = &mockHookLoader{
+			data: map[string]map[string]string{
+				"%3": {"on-resume": "claude --resume abc123"},
+			},
+		}
+
+		hooks.ExecuteHooks("my-session", tmux, store)
+
+		if !tmux.called {
+			t.Error("expected ListAllPanes to be called")
+		}
+		if store.called {
+			t.Error("expected CleanStale NOT to be called when ListAllPanes returns nil")
 		}
 
 		// Hook execution still proceeds normally
