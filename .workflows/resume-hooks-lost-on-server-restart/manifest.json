@@ -26,6 +26,26 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "resume-hooks-lost-on-server-restart": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "c1d3d83e49a068e5811ff048b5c23b165bcb5923",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 2,
+          "task": "~",
+          "task_map": {
+            "resume-hooks-lost-on-server-restart-1-1": "tick-303a31",
+            "resume-hooks-lost-on-server-restart-1": "tick-61bebb"
+          },
+          "external_id": "tick-8e68d6"
+        }
+      }
     }
   }
 }
