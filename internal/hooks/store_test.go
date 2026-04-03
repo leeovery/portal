@@ -47,7 +47,7 @@ func TestLoad(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 
-		content := `{"%3":{"on-resume":"claude --resume abc123"},"%7":{"on-resume":"claude --resume def456"}}`
+		content := `{"my-session:0.0":{"on-resume":"claude --resume abc123"},"my-session:0.1":{"on-resume":"claude --resume def456"}}`
 		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 			t.Fatalf("failed to write test file: %v", err)
 		}
@@ -59,14 +59,14 @@ func TestLoad(t *testing.T) {
 		}
 
 		if len(h) != 2 {
-			t.Fatalf("got %d panes, want 2", len(h))
+			t.Fatalf("got %d keys, want 2", len(h))
 		}
 
-		if h["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("%%3 on-resume = %q, want %q", h["%3"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
-		if h["%7"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("%%7 on-resume = %q, want %q", h["%7"]["on-resume"], "claude --resume def456")
+		if h["my-session:0.1"]["on-resume"] != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"], "claude --resume def456")
 		}
 	})
 }
@@ -79,7 +79,7 @@ func TestSave(t *testing.T) {
 		store := hooks.NewStore(filePath)
 
 		h := map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
+			"my-session:0.0": {"on-resume": "claude --resume abc123"},
 		}
 
 		if err := store.Save(h); err != nil {
@@ -101,8 +101,8 @@ func TestSave(t *testing.T) {
 		store := hooks.NewStore(filePath)
 
 		h := map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
-			"%7": {"on-resume": "claude --resume def456"},
+			"my-session:0.0": {"on-resume": "claude --resume abc123"},
+			"my-session:0.1": {"on-resume": "claude --resume def456"},
 		}
 
 		if err := store.Save(h); err != nil {
@@ -115,13 +115,13 @@ func TestSave(t *testing.T) {
 		}
 
 		if len(loaded) != 2 {
-			t.Fatalf("got %d panes, want 2", len(loaded))
+			t.Fatalf("got %d keys, want 2", len(loaded))
 		}
-		if loaded["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("%%3 on-resume = %q, want %q", loaded["%3"]["on-resume"], "claude --resume abc123")
+		if loaded["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", loaded["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
-		if loaded["%7"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("%%7 on-resume = %q, want %q", loaded["%7"]["on-resume"], "claude --resume def456")
+		if loaded["my-session:0.1"]["on-resume"] != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", loaded["my-session:0.1"]["on-resume"], "claude --resume def456")
 		}
 	})
 
@@ -131,7 +131,7 @@ func TestSave(t *testing.T) {
 		store := hooks.NewStore(filePath)
 
 		h := map[string]map[string]string{
-			"%3": {"on-resume": "claude --resume abc123"},
+			"my-session:0.0": {"on-resume": "claude --resume abc123"},
 		}
 
 		if err := store.Save(h); err != nil {
@@ -162,12 +162,12 @@ func TestSave(t *testing.T) {
 }
 
 func TestSet(t *testing.T) {
-	t.Run("adds a new hook for a new pane", func(t *testing.T) {
+	t.Run("adds a new hook for a new key", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -177,22 +177,22 @@ func TestSet(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("%%3 on-resume = %q, want %q", h["%3"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
 	})
 
-	t.Run("adds a second event to an existing pane", func(t *testing.T) {
+	t.Run("adds a second event to an existing key", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("%3", "on-start", "echo hello"); err != nil {
+		if err := store.Set("my-session:0.0", "on-start", "echo hello"); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -202,28 +202,28 @@ func TestSet(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if len(h["%3"]) != 2 {
-			t.Fatalf("got %d events for %%3, want 2", len(h["%3"]))
+		if len(h["my-session:0.0"]) != 2 {
+			t.Fatalf("got %d events for my-session:0.0, want 2", len(h["my-session:0.0"]))
 		}
-		if h["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("%%3 on-resume = %q, want %q", h["%3"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
-		if h["%3"]["on-start"] != "echo hello" {
-			t.Errorf("%%3 on-start = %q, want %q", h["%3"]["on-start"], "echo hello")
+		if h["my-session:0.0"]["on-start"] != "echo hello" {
+			t.Errorf("my-session:0.0 on-start = %q, want %q", h["my-session:0.0"]["on-start"], "echo hello")
 		}
 	})
 
-	t.Run("overwrites existing entry for same pane and event", func(t *testing.T) {
+	t.Run("overwrites existing entry for same key and event", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("%3", "on-resume", "claude --resume xyz789"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume xyz789"); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -233,13 +233,13 @@ func TestSet(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if len(h["%3"]) != 1 {
-			t.Fatalf("got %d events for %%3, want 1", len(h["%3"]))
+		if len(h["my-session:0.0"]) != 1 {
+			t.Fatalf("got %d events for my-session:0.0, want 1", len(h["my-session:0.0"]))
 		}
-		if h["%3"]["on-resume"] != "claude --resume xyz789" {
-			t.Errorf("%%3 on-resume = %q, want %q", h["%3"]["on-resume"], "claude --resume xyz789")
+		if h["my-session:0.0"]["on-resume"] != "claude --resume xyz789" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume xyz789")
 		}
 	})
 }
@@ -250,14 +250,14 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("%3", "on-resume"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-resume"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -267,13 +267,13 @@ func TestRemove(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if _, ok := h["%3"]; ok {
-			t.Error("pane %3 should have been removed")
+		if _, ok := h["my-session:0.0"]; ok {
+			t.Error("key my-session:0.0 should have been removed")
 		}
-		if h["%7"]["on-resume"] != "claude --resume def456" {
-			t.Errorf("%%7 on-resume = %q, want %q", h["%7"]["on-resume"], "claude --resume def456")
+		if h["my-session:0.1"]["on-resume"] != "claude --resume def456" {
+			t.Errorf("my-session:0.1 on-resume = %q, want %q", h["my-session:0.1"]["on-resume"], "claude --resume def456")
 		}
 	})
 
@@ -282,11 +282,11 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("%3", "on-resume"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-resume"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -296,23 +296,23 @@ func TestRemove(t *testing.T) {
 		}
 
 		if len(h) != 0 {
-			t.Fatalf("got %d panes, want 0 (outer key should be cleaned up)", len(h))
+			t.Fatalf("got %d keys, want 0 (outer key should be cleaned up)", len(h))
 		}
-		if _, ok := h["%3"]; ok {
-			t.Error("pane %3 should have been removed from outer map")
+		if _, ok := h["my-session:0.0"]; ok {
+			t.Error("key my-session:0.0 should have been removed from outer map")
 		}
 	})
 
-	t.Run("is a no-op when pane does not exist", func(t *testing.T) {
+	t.Run("is a no-op when key does not exist", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("%99", "on-resume"); err != nil {
+		if err := store.Remove("nonexistent:9.9", "on-resume"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -322,20 +322,20 @@ func TestRemove(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1 (original should remain)", len(h))
+			t.Fatalf("got %d keys, want 1 (original should remain)", len(h))
 		}
 	})
 
-	t.Run("is a no-op when event does not exist for pane", func(t *testing.T) {
+	t.Run("is a no-op when event does not exist for key", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("%3", "on-start"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-start"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -345,10 +345,10 @@ func TestRemove(t *testing.T) {
 		}
 
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if h["%3"]["on-resume"] != "claude --resume abc123" {
-			t.Errorf("%%3 on-resume = %q, want %q", h["%3"]["on-resume"], "claude --resume abc123")
+		if h["my-session:0.0"]["on-resume"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 on-resume = %q, want %q", h["my-session:0.0"]["on-resume"], "claude --resume abc123")
 		}
 	})
 }
@@ -368,12 +368,12 @@ func TestList(t *testing.T) {
 		}
 	})
 
-	t.Run("returns hooks sorted by pane ID then event", func(t *testing.T) {
+	t.Run("returns hooks sorted by key then event", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 
 		// Write hooks in non-sorted order
-		content := `{"%7":{"on-resume":"cmd7"},"%3":{"on-start":"cmd3s","on-resume":"cmd3r"}}`
+		content := `{"my-session:0.1":{"on-resume":"cmd1"},"my-session:0.0":{"on-start":"cmd0s","on-resume":"cmd0r"}}`
 		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 			t.Fatalf("failed to write test file: %v", err)
 		}
@@ -388,14 +388,14 @@ func TestList(t *testing.T) {
 			t.Fatalf("got %d hooks, want 3", len(list))
 		}
 
-		// Expected order: %3/on-resume, %3/on-start, %7/on-resume
-		wantPanes := []string{"%3", "%3", "%7"}
+		// Expected order: my-session:0.0/on-resume, my-session:0.0/on-start, my-session:0.1/on-resume
+		wantKeys := []string{"my-session:0.0", "my-session:0.0", "my-session:0.1"}
 		wantEvents := []string{"on-resume", "on-start", "on-resume"}
-		wantCmds := []string{"cmd3r", "cmd3s", "cmd7"}
+		wantCmds := []string{"cmd0r", "cmd0s", "cmd1"}
 
 		for i, hook := range list {
-			if hook.PaneID != wantPanes[i] {
-				t.Errorf("list[%d].PaneID = %q, want %q", i, hook.PaneID, wantPanes[i])
+			if hook.Key != wantKeys[i] {
+				t.Errorf("list[%d].Key = %q, want %q", i, hook.Key, wantKeys[i])
 			}
 			if hook.Event != wantEvents[i] {
 				t.Errorf("list[%d].Event = %q, want %q", i, hook.Event, wantEvents[i])
@@ -408,16 +408,16 @@ func TestList(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	t.Run("returns event map for registered pane", func(t *testing.T) {
+	t.Run("returns event map for registered key", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		events, err := store.Get("%3")
+		events, err := store.Get("my-session:0.0")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -430,12 +430,12 @@ func TestGet(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty map for unregistered pane", func(t *testing.T) {
+	t.Run("returns empty map for unregistered key", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		events, err := store.Get("%99")
+		events, err := store.Get("nonexistent:9.9")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -447,19 +447,19 @@ func TestGet(t *testing.T) {
 }
 
 func TestCleanStale(t *testing.T) {
-	t.Run("removes entries for panes not in live set", func(t *testing.T) {
+	t.Run("removes entries for keys not in live set", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale([]string{"%3"})
+		removed, err := store.CleanStale([]string{"my-session:0.0"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -467,8 +467,8 @@ func TestCleanStale(t *testing.T) {
 		if len(removed) != 1 {
 			t.Fatalf("got %d removed, want 1", len(removed))
 		}
-		if removed[0] != "%7" {
-			t.Errorf("removed[0] = %q, want %%7", removed[0])
+		if removed[0] != "my-session:0.1" {
+			t.Errorf("removed[0] = %q, want %q", removed[0], "my-session:0.1")
 		}
 
 		h, err := store.Load()
@@ -476,13 +476,13 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to load: %v", err)
 		}
 		if len(h) != 1 {
-			t.Fatalf("got %d panes, want 1", len(h))
+			t.Fatalf("got %d keys, want 1", len(h))
 		}
-		if _, ok := h["%3"]; !ok {
-			t.Error("pane %3 should have been kept")
+		if _, ok := h["my-session:0.0"]; !ok {
+			t.Error("key my-session:0.0 should have been kept")
 		}
-		if _, ok := h["%7"]; ok {
-			t.Error("pane %7 should have been removed")
+		if _, ok := h["my-session:0.1"]; ok {
+			t.Error("key my-session:0.1 should have been removed")
 		}
 	})
 
@@ -490,7 +490,7 @@ func TestCleanStale(t *testing.T) {
 		dir := t.TempDir()
 		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
 
-		removed, err := store.CleanStale([]string{"%3", "%7"})
+		removed, err := store.CleanStale([]string{"my-session:0.0", "my-session:0.1"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -500,19 +500,19 @@ func TestCleanStale(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty slice when all panes are live", func(t *testing.T) {
+	t.Run("returns empty slice when all keys are live", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		removed, err := store.CleanStale([]string{"%3", "%7"})
+		removed, err := store.CleanStale([]string{"my-session:0.0", "my-session:0.1"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -527,10 +527,10 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%7", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -548,7 +548,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to load: %v", err)
 		}
 		if len(h) != 0 {
-			t.Errorf("got %d panes, want 0", len(h))
+			t.Errorf("got %d keys, want 0", len(h))
 		}
 	})
 
@@ -557,7 +557,7 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -567,7 +567,7 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to stat file: %v", err)
 		}
 
-		removed, err := store.CleanStale([]string{"%3"})
+		removed, err := store.CleanStale([]string{"my-session:0.0"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -586,26 +586,26 @@ func TestCleanStale(t *testing.T) {
 		}
 	})
 
-	t.Run("handles mix of live and stale panes", func(t *testing.T) {
+	t.Run("handles mix of live and stale keys", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("%3", "on-resume", "cmd3"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "cmd0"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%5", "on-resume", "cmd5"); err != nil {
+		if err := store.Set("other-session:0.0", "on-resume", "cmd-other0"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%7", "on-resume", "cmd7"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "cmd1"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("%9", "on-resume", "cmd9"); err != nil {
+		if err := store.Set("other-session:0.1", "on-resume", "cmd-other1"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		// %3 and %9 are live; %5 and %7 are stale
-		removed, err := store.CleanStale([]string{"%3", "%9"})
+		// my-session:0.0 and other-session:0.1 are live; other-session:0.0 and my-session:0.1 are stale
+		removed, err := store.CleanStale([]string{"my-session:0.0", "other-session:0.1"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -616,11 +616,11 @@ func TestCleanStale(t *testing.T) {
 
 		// Sort removed for deterministic checking
 		sort.Strings(removed)
-		if removed[0] != "%5" {
-			t.Errorf("removed[0] = %q, want %%5", removed[0])
+		if removed[0] != "my-session:0.1" {
+			t.Errorf("removed[0] = %q, want %q", removed[0], "my-session:0.1")
 		}
-		if removed[1] != "%7" {
-			t.Errorf("removed[1] = %q, want %%7", removed[1])
+		if removed[1] != "other-session:0.0" {
+			t.Errorf("removed[1] = %q, want %q", removed[1], "other-session:0.0")
 		}
 
 		h, err := store.Load()
@@ -628,13 +628,13 @@ func TestCleanStale(t *testing.T) {
 			t.Fatalf("failed to load: %v", err)
 		}
 		if len(h) != 2 {
-			t.Fatalf("got %d panes, want 2", len(h))
+			t.Fatalf("got %d keys, want 2", len(h))
 		}
-		if _, ok := h["%3"]; !ok {
-			t.Error("pane %3 should have been kept")
+		if _, ok := h["my-session:0.0"]; !ok {
+			t.Error("key my-session:0.0 should have been kept")
 		}
-		if _, ok := h["%9"]; !ok {
-			t.Error("pane %9 should have been kept")
+		if _, ok := h["other-session:0.1"]; !ok {
+			t.Error("key other-session:0.1 should have been kept")
 		}
 	})
 }

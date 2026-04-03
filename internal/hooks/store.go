@@ -1,4 +1,4 @@
-// Package hooks provides persistence for pane-level hook registrations.
+// Package hooks provides persistence for hook registrations keyed by structural keys.
 package hooks
 
 import (
@@ -13,12 +13,12 @@ import (
 
 // Hook represents a single hook entry for list output.
 type Hook struct {
-	PaneID  string
+	Key     string
 	Event   string
 	Command string
 }
 
-// hooksFile is the on-disk JSON structure: map[paneID]map[event]command.
+// hooksFile is the on-disk JSON structure: map[structural_key]map[event]command.
 type hooksFile = map[string]map[string]string
 
 // Store manages persistence of hook data to a JSON file.
@@ -61,42 +61,42 @@ func (s *Store) Save(h hooksFile) error {
 	return fileutil.AtomicWrite(s.path, data)
 }
 
-// Set adds or overwrites a hook for the given pane and event.
-// Creates the inner map for the pane if it does not exist.
-func (s *Store) Set(paneID, event, command string) error {
+// Set adds or overwrites a hook for the given key and event.
+// Creates the inner map for the key if it does not exist.
+func (s *Store) Set(key, event, command string) error {
 	h, err := s.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	if h[paneID] == nil {
-		h[paneID] = make(map[string]string)
+	if h[key] == nil {
+		h[key] = make(map[string]string)
 	}
-	h[paneID][event] = command
+	h[key][event] = command
 
 	return s.Save(h)
 }
 
-// Remove deletes a hook for the given pane and event.
+// Remove deletes a hook for the given key and event.
 // Removes the outer key if the inner map becomes empty.
-// No-op (no error) if the pane or event does not exist.
-func (s *Store) Remove(paneID, event string) error {
+// No-op (no error) if the key or event does not exist.
+func (s *Store) Remove(key, event string) error {
 	h, err := s.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	if events, ok := h[paneID]; ok {
+	if events, ok := h[key]; ok {
 		delete(events, event)
 		if len(events) == 0 {
-			delete(h, paneID)
+			delete(h, key)
 		}
 	}
 
 	return s.Save(h)
 }
 
-// List returns a flat slice of Hook structs sorted by pane ID then event type.
+// List returns a flat slice of Hook structs sorted by key then event type.
 func (s *Store) List() ([]Hook, error) {
 	h, err := s.Load()
 	if err != nil {
@@ -104,10 +104,10 @@ func (s *Store) List() ([]Hook, error) {
 	}
 
 	var list []Hook
-	for paneID, events := range h {
+	for key, events := range h {
 		for event, command := range events {
 			list = append(list, Hook{
-				PaneID:  paneID,
+				Key:     key,
 				Event:   event,
 				Command: command,
 			})
@@ -115,8 +115,8 @@ func (s *Store) List() ([]Hook, error) {
 	}
 
 	sort.Slice(list, func(i, j int) bool {
-		if list[i].PaneID != list[j].PaneID {
-			return list[i].PaneID < list[j].PaneID
+		if list[i].Key != list[j].Key {
+			return list[i].Key < list[j].Key
 		}
 		return list[i].Event < list[j].Event
 	})
@@ -124,28 +124,28 @@ func (s *Store) List() ([]Hook, error) {
 	return list, nil
 }
 
-// CleanStale removes hook entries for panes not present in livePaneIDs.
-// Returns the removed pane IDs. The file is only saved if at least one entry
+// CleanStale removes hook entries for keys not present in liveKeys.
+// Returns the removed keys. The file is only saved if at least one entry
 // was removed.
-func (s *Store) CleanStale(livePaneIDs []string) ([]string, error) {
+func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 	h, err := s.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load hooks: %w", err)
 	}
 
-	live := make(map[string]struct{}, len(livePaneIDs))
-	for _, id := range livePaneIDs {
-		live[id] = struct{}{}
+	live := make(map[string]struct{}, len(liveKeys))
+	for _, k := range liveKeys {
+		live[k] = struct{}{}
 	}
 
 	kept := make(hooksFile)
 	var removed []string
 
-	for paneID, events := range h {
-		if _, ok := live[paneID]; ok {
-			kept[paneID] = events
+	for key, events := range h {
+		if _, ok := live[key]; ok {
+			kept[key] = events
 		} else {
-			removed = append(removed, paneID)
+			removed = append(removed, key)
 		}
 	}
 
@@ -158,15 +158,15 @@ func (s *Store) CleanStale(livePaneIDs []string) ([]string, error) {
 	return removed, nil
 }
 
-// Get returns the event map for a specific pane, or an empty map if the pane
+// Get returns the event map for a specific key, or an empty map if the key
 // has no hooks.
-func (s *Store) Get(paneID string) (map[string]string, error) {
+func (s *Store) Get(key string) (map[string]string, error) {
 	h, err := s.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	events, ok := h[paneID]
+	events, ok := h[key]
 	if !ok {
 		return map[string]string{}, nil
 	}
