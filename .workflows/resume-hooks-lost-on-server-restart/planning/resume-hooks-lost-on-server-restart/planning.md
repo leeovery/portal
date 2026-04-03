@@ -69,8 +69,8 @@ approved_at: 2026-04-03
 
 | # | ID | Task | Edge Cases | Status |
 |---|-----|------|------------|--------|
-| 1 | resume-hooks-lost-on-server-restart-3-1 | Migrate hooks list to Structural Keys | — | pending |
-| 2 | resume-hooks-lost-on-server-restart-3-2 | Add Key Resolver and Migrate hooks set | ResolveStructuralKey failure returns user-facing error | pending |
-| 3 | resume-hooks-lost-on-server-restart-3-3 | Migrate hooks rm to Structural Keys | ResolveStructuralKey failure returns user-facing error | pending |
-| 4 | resume-hooks-lost-on-server-restart-3-4 | Migrate clean Command Tests to Structural Keys | — | pending |
-| 5 | resume-hooks-lost-on-server-restart-3-5 | Add Multi-Pane and Graceful No-Op Acceptance Tests | hooks referencing non-existent structural positions | pending |
+| 1 | resume-hooks-lost-on-server-restart-3-1 | Migrate hooks list to Structural Keys | — | approved |
+| 2 | resume-hooks-lost-on-server-restart-3-2 | Add Key Resolver and Migrate hooks set | ResolveStructuralKey failure returns user-facing error | approved |
+| 3 | resume-hooks-lost-on-server-restart-3-3 | Migrate hooks rm to Structural Keys | ResolveStructuralKey failure returns user-facing error | approved |
+| 4 | resume-hooks-lost-on-server-restart-3-4 | Migrate clean Command Tests to Structural Keys | — | approved |
+| 5 | resume-hooks-lost-on-server-restart-3-5 | Add Multi-Pane and Graceful No-Op Acceptance Tests | hooks referencing non-existent structural positions | approved |
