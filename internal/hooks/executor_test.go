@@ -151,12 +151,12 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("executes hook when persistent entry exists and marker absent", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -165,8 +165,8 @@ func TestExecuteHooks(t *testing.T) {
 		if len(tmux.sent) != 1 {
 			t.Fatalf("expected 1 send-keys call, got %d", len(tmux.sent))
 		}
-		if tmux.sent[0].paneID != "%3" {
-			t.Errorf("paneID = %q, want %%3", tmux.sent[0].paneID)
+		if tmux.sent[0].paneID != "my-session:0.0" {
+			t.Errorf("paneID = %q, want %q", tmux.sent[0].paneID, "my-session:0.0")
 		}
 		if tmux.sent[0].command != "claude --resume abc123" {
 			t.Errorf("command = %q, want %q", tmux.sent[0].command, "claude --resume abc123")
@@ -176,15 +176,15 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("skips pane when volatile marker present", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		tmux.mockOptionChecker = &mockOptionChecker{
-			options: map[string]string{"@portal-active-%3": "1"},
+			options: map[string]string{"@portal-active-my-session:0.0": "1"},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -198,13 +198,13 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("skips pane not in session", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
-				"%7": {"on-resume": "claude --resume def456"},
+				"my-session:0.0":    {"on-resume": "claude --resume abc123"},
+				"other-session:0.0": {"on-resume": "claude --resume def456"},
 			},
 		}
 
@@ -213,20 +213,20 @@ func TestExecuteHooks(t *testing.T) {
 		if len(tmux.sent) != 1 {
 			t.Fatalf("expected 1 send-keys call, got %d", len(tmux.sent))
 		}
-		if tmux.sent[0].paneID != "%3" {
-			t.Errorf("paneID = %q, want %%3", tmux.sent[0].paneID)
+		if tmux.sent[0].paneID != "my-session:0.0" {
+			t.Errorf("paneID = %q, want %q", tmux.sent[0].paneID, "my-session:0.0")
 		}
 	})
 
 	t.Run("skips pane with no on-resume event", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-start": "echo hello"},
+				"my-session:0.0": {"on-start": "echo hello"},
 			},
 		}
 
@@ -240,12 +240,12 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("sets volatile marker after executing hook", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -254,8 +254,8 @@ func TestExecuteHooks(t *testing.T) {
 		if len(tmux.setLog) != 1 {
 			t.Fatalf("expected 1 SetServerOption call, got %d", len(tmux.setLog))
 		}
-		if tmux.setLog[0].name != "@portal-active-%3" {
-			t.Errorf("option name = %q, want %q", tmux.setLog[0].name, "@portal-active-%3")
+		if tmux.setLog[0].name != "@portal-active-my-session:0.0" {
+			t.Errorf("option name = %q, want %q", tmux.setLog[0].name, "@portal-active-my-session:0.0")
 		}
 		if tmux.setLog[0].value != "1" {
 			t.Errorf("option value = %q, want %q", tmux.setLog[0].value, "1")
@@ -265,34 +265,34 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("continues to next pane when SendKeys fails", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3", "%7"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0", "my-session:0.1"}},
 		}
 		tmux.mockKeySender = &mockKeySender{
-			failFor: map[string]bool{"%3": true},
+			failFor: map[string]bool{"my-session:0.0": true},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
-				"%7": {"on-resume": "claude --resume def456"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
+				"my-session:0.1": {"on-resume": "claude --resume def456"},
 			},
 		}
 
 		hooks.ExecuteHooks("my-session", tmux, store)
 
-		// %7 should still have been sent
+		// my-session:0.1 should still have been sent
 		if len(tmux.sent) != 1 {
-			t.Fatalf("expected 1 send-keys call (for %%7), got %d", len(tmux.sent))
+			t.Fatalf("expected 1 send-keys call (for my-session:0.1), got %d", len(tmux.sent))
 		}
-		if tmux.sent[0].paneID != "%7" {
-			t.Errorf("paneID = %q, want %%7", tmux.sent[0].paneID)
+		if tmux.sent[0].paneID != "my-session:0.1" {
+			t.Errorf("paneID = %q, want %q", tmux.sent[0].paneID, "my-session:0.1")
 		}
 	})
 
 	t.Run("silent return when hook store Load fails", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
@@ -315,7 +315,7 @@ func TestExecuteHooks(t *testing.T) {
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -329,7 +329,7 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("no-op when hook store is empty", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
@@ -351,7 +351,7 @@ func TestExecuteHooks(t *testing.T) {
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -365,14 +365,14 @@ func TestExecuteHooks(t *testing.T) {
 	t.Run("executes hooks for multiple qualifying panes", func(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3", "%5", "%7"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0", "my-session:0.1", "my-session:0.2"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
-				"%5": {"on-resume": "npm start"},
-				"%7": {"on-resume": "claude --resume def456"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
+				"my-session:0.1": {"on-resume": "npm start"},
+				"my-session:0.2": {"on-resume": "claude --resume def456"},
 			},
 		}
 
@@ -387,14 +387,14 @@ func TestExecuteHooks(t *testing.T) {
 		for _, s := range tmux.sent {
 			sentPanes[s.paneID] = s.command
 		}
-		if sentPanes["%3"] != "claude --resume abc123" {
-			t.Errorf("%%3 command = %q, want %q", sentPanes["%3"], "claude --resume abc123")
+		if sentPanes["my-session:0.0"] != "claude --resume abc123" {
+			t.Errorf("my-session:0.0 command = %q, want %q", sentPanes["my-session:0.0"], "claude --resume abc123")
 		}
-		if sentPanes["%5"] != "npm start" {
-			t.Errorf("%%5 command = %q, want %q", sentPanes["%5"], "npm start")
+		if sentPanes["my-session:0.1"] != "npm start" {
+			t.Errorf("my-session:0.1 command = %q, want %q", sentPanes["my-session:0.1"], "npm start")
 		}
-		if sentPanes["%7"] != "claude --resume def456" {
-			t.Errorf("%%7 command = %q, want %q", sentPanes["%7"], "claude --resume def456")
+		if sentPanes["my-session:0.2"] != "claude --resume def456" {
+			t.Errorf("my-session:0.2 command = %q, want %q", sentPanes["my-session:0.2"], "claude --resume def456")
 		}
 
 		// Verify all three markers were set
@@ -407,14 +407,14 @@ func TestExecuteHooks(t *testing.T) {
 func TestExecuteHooks_Cleanup(t *testing.T) {
 	t.Run("cleanup calls ListAllPanes and CleanStale before hook execution", func(t *testing.T) {
 		tmux := noopTmux()
-		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"%3", "%5"}}
+		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"my-session:0.0", "my-session:0.1"}}
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -427,15 +427,15 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 			t.Error("expected CleanStale to be called")
 		}
 		if len(store.livePanesReceived) != 2 {
-			t.Fatalf("expected 2 live pane IDs passed to CleanStale, got %d", len(store.livePanesReceived))
+			t.Fatalf("expected 2 live keys passed to CleanStale, got %d", len(store.livePanesReceived))
 		}
-		// Verify the pane IDs were forwarded correctly
-		paneSet := make(map[string]bool)
-		for _, id := range store.livePanesReceived {
-			paneSet[id] = true
+		// Verify the structural keys were forwarded correctly
+		keySet := make(map[string]bool)
+		for _, k := range store.livePanesReceived {
+			keySet[k] = true
 		}
-		if !paneSet["%3"] || !paneSet["%5"] {
-			t.Errorf("expected live panes [%%3, %%5], got %v", store.livePanesReceived)
+		if !keySet["my-session:0.0"] || !keySet["my-session:0.1"] {
+			t.Errorf("expected live keys [my-session:0.0, my-session:0.1], got %v", store.livePanesReceived)
 		}
 
 		// Hook execution still proceeds
@@ -448,12 +448,12 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockAllPaneLister = &mockAllPaneLister{err: errors.New("tmux not running")}
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -474,15 +474,15 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 
 	t.Run("CleanStale error skips cleanup and continues", func(t *testing.T) {
 		tmux := noopTmux()
-		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"%3"}}
+		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"my-session:0.0"}}
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookCleaner = &mockHookCleaner{err: errors.New("disk error")}
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -503,7 +503,7 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		var callOrder []string
 
 		tmux := noopTmux()
-		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"%3"}}
+		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{"my-session:0.0"}}
 		tmux.mockPaneLister = &mockPaneLister{
 			panes: map[string][]string{"my-session": {}},
 		}
@@ -534,19 +534,19 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		// and the other cleanup tests would catch regressions.
 	})
 
-	t.Run("no tmux server running skips cleanup gracefully", func(t *testing.T) {
+	t.Run("empty pane list skips cleanup and continues hook execution", func(t *testing.T) {
 		// When ListAllPanes returns empty (no server / post-restart),
 		// CleanStale must NOT be called — otherwise it would delete all
 		// stored hooks. Hook execution still proceeds normally.
 		tmux := noopTmux()
 		tmux.mockAllPaneLister = &mockAllPaneLister{panes: []string{}}
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 
@@ -571,12 +571,12 @@ func TestExecuteHooks_Cleanup(t *testing.T) {
 		tmux := noopTmux()
 		tmux.mockAllPaneLister = &mockAllPaneLister{panes: nil}
 		tmux.mockPaneLister = &mockPaneLister{
-			panes: map[string][]string{"my-session": {"%3"}},
+			panes: map[string][]string{"my-session": {"my-session:0.0"}},
 		}
 		store := noopStore()
 		store.mockHookLoader = &mockHookLoader{
 			data: map[string]map[string]string{
-				"%3": {"on-resume": "claude --resume abc123"},
+				"my-session:0.0": {"on-resume": "claude --resume abc123"},
 			},
 		}
 

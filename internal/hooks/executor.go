@@ -2,12 +2,13 @@ package hooks
 
 import "fmt"
 
-// PaneLister returns the pane IDs belonging to a tmux session.
+// PaneLister returns the structural keys belonging to a tmux session.
+// Each key uses the format session_name:window_index.pane_index.
 type PaneLister interface {
 	ListPanes(sessionName string) ([]string, error)
 }
 
-// KeySender delivers a command to a tmux pane.
+// KeySender delivers a command to a tmux pane identified by structural key.
 type KeySender interface {
 	SendKeys(paneID string, command string) error
 }
@@ -23,12 +24,13 @@ type HookLoader interface {
 	Load() (map[string]map[string]string, error)
 }
 
-// AllPaneLister returns the pane IDs for all panes across all tmux sessions.
+// AllPaneLister returns the structural keys for all panes across all tmux sessions.
+// Each key uses the format session_name:window_index.pane_index.
 type AllPaneLister interface {
 	ListAllPanes() ([]string, error)
 }
 
-// HookCleaner removes hook entries for panes that no longer exist.
+// HookCleaner removes hook entries for structural keys that no longer exist.
 type HookCleaner interface {
 	CleanStale(livePaneIDs []string) ([]string, error)
 }
@@ -48,18 +50,22 @@ type HookRepository interface {
 }
 
 // MarkerName returns the tmux server option name used as the volatile marker
-// for a given pane. This is the single source of truth for the marker naming
-// convention.
-func MarkerName(paneID string) string {
-	return fmt.Sprintf("@portal-active-%s", paneID)
+// for a given structural key (session_name:window_index.pane_index). This is
+// the single source of truth for the marker naming convention.
+func MarkerName(key string) string {
+	return fmt.Sprintf("@portal-active-%s", key)
 }
 
 // ExecuteHooks checks each pane in the target session for hooks that need
 // re-execution (persistent entry exists AND volatile marker absent) and fires
-// restart commands via send-keys. Entirely best-effort with silent error handling.
+// restart commands via send-keys. Panes are identified by structural keys
+// (session_name:window_index.pane_index). Entirely best-effort with silent
+// error handling.
 //
 // Before executing hooks, it prunes stale entries from the hook store by
-// querying all live panes and removing entries for panes that no longer exist.
+// querying all live structural keys and removing entries for keys that no
+// longer exist. Cleanup is skipped when the live key list is empty (e.g.
+// post-restart before tmux-resurrect restores sessions) to prevent data loss.
 // Cleanup errors are silently ignored.
 func ExecuteHooks(sessionName string, tmux TmuxOperator, store HookRepository) {
 	// Best-effort cleanup: prune stale hook entries before loading.
