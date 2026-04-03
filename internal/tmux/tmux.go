@@ -219,21 +219,23 @@ func parsePaneOutput(output string) []string {
 	return panes
 }
 
-// ListPanes returns the pane IDs belonging to the named tmux session.
-// Each ID has the form "%N" (e.g. "%0", "%3").
+// ListPanes returns the structural keys for panes belonging to the named tmux session.
+// Each key has the form "session_name:window_index.pane_index" (e.g. "my-project:0.0").
+// Structural keys survive tmux server restarts (unlike ephemeral pane IDs).
 func (c *Client) ListPanes(sessionName string) ([]string, error) {
-	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{pane_id}")
+	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{session_name}:#{window_index}.#{pane_index}")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
 	}
 	return parsePaneOutput(output), nil
 }
 
-// ListAllPanes returns the pane IDs for all panes across all tmux sessions.
-// Each ID has the form "%N" (e.g. "%0", "%3").
+// ListAllPanes returns the structural keys for all panes across all tmux sessions.
+// Each key has the form "session_name:window_index.pane_index" (e.g. "my-project:0.0").
+// Structural keys survive tmux server restarts (unlike ephemeral pane IDs).
 // Returns an empty slice and nil error when no tmux server is running.
 func (c *Client) ListAllPanes() ([]string, error) {
-	output, err := c.cmd.Run("list-panes", "-a", "-F", "#{pane_id}")
+	output, err := c.cmd.Run("list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}")
 	if err != nil {
 		return []string{}, nil
 	}

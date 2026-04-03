@@ -700,8 +700,8 @@ func TestDeleteServerOption(t *testing.T) {
 }
 
 func TestListPanes(t *testing.T) {
-	t.Run("returns pane IDs for session with multiple panes", func(t *testing.T) {
-		mock := &MockCommander{Output: "%0\n%1\n%2"}
+	t.Run("returns structural keys for session with multiple panes", func(t *testing.T) {
+		mock := &MockCommander{Output: "my-session:0.0\nmy-session:0.1\nmy-session:0.2"}
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListPanes("my-session")
@@ -710,7 +710,7 @@ func TestListPanes(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := []string{"%0", "%1", "%2"}
+		want := []string{"my-session:0.0", "my-session:0.1", "my-session:0.2"}
 		if len(got) != len(want) {
 			t.Fatalf("got %d panes, want %d", len(got), len(want))
 		}
@@ -723,10 +723,71 @@ func TestListPanes(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "list-panes -t my-session -F #{pane_id}"
+		wantArgs := "list-panes -t my-session -F #{session_name}:#{window_index}.#{pane_index}"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns structural keys for multi-window multi-pane session", func(t *testing.T) {
+		mock := &MockCommander{Output: "my-session:0.0\nmy-session:0.1\nmy-session:1.0\nmy-session:1.1"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanes("my-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"my-session:0.0", "my-session:0.1", "my-session:1.0", "my-session:1.1"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+	})
+
+	t.Run("handles session names with colons", func(t *testing.T) {
+		mock := &MockCommander{Output: "my:project:0.0\nmy:project:0.1"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanes("my:project")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"my:project:0.0", "my:project:0.1"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+	})
+
+	t.Run("handles session names with dots", func(t *testing.T) {
+		mock := &MockCommander{Output: "my.project:0.0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanes("my.project")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"my.project:0.0"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		if got[0] != want[0] {
+			t.Errorf("pane[0] = %q, want %q", got[0], want[0])
 		}
 	})
 
@@ -764,8 +825,8 @@ func TestListPanes(t *testing.T) {
 }
 
 func TestListAllPanes(t *testing.T) {
-	t.Run("returns pane IDs across multiple sessions", func(t *testing.T) {
-		mock := &MockCommander{Output: "%0\n%1\n%5\n%12"}
+	t.Run("returns structural keys across multiple sessions", func(t *testing.T) {
+		mock := &MockCommander{Output: "dev-abc:0.0\ndev-abc:0.1\nwork-xyz:0.0\nwork-xyz:1.0"}
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListAllPanes()
@@ -774,7 +835,7 @@ func TestListAllPanes(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := []string{"%0", "%1", "%5", "%12"}
+		want := []string{"dev-abc:0.0", "dev-abc:0.1", "work-xyz:0.0", "work-xyz:1.0"}
 		if len(got) != len(want) {
 			t.Fatalf("got %d panes, want %d", len(got), len(want))
 		}
@@ -782,6 +843,67 @@ func TestListAllPanes(t *testing.T) {
 			if pane != want[i] {
 				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
 			}
+		}
+	})
+
+	t.Run("returns structural keys for multi-window multi-pane session", func(t *testing.T) {
+		mock := &MockCommander{Output: "proj:0.0\nproj:0.1\nproj:1.0\nproj:1.1\nproj:2.0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"proj:0.0", "proj:0.1", "proj:1.0", "proj:1.1", "proj:2.0"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+	})
+
+	t.Run("handles session names with colons", func(t *testing.T) {
+		mock := &MockCommander{Output: "my:project:0.0\nmy:project:0.1"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"my:project:0.0", "my:project:0.1"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		for i, pane := range got {
+			if pane != want[i] {
+				t.Errorf("pane[%d] = %q, want %q", i, pane, want[i])
+			}
+		}
+	})
+
+	t.Run("handles session names with dots", func(t *testing.T) {
+		mock := &MockCommander{Output: "my.project:0.0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"my.project:0.0"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d panes, want %d", len(got), len(want))
+		}
+		if got[0] != want[0] {
+			t.Errorf("pane[0] = %q, want %q", got[0], want[0])
 		}
 	})
 
@@ -813,8 +935,8 @@ func TestListAllPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("calls list-panes with -a flag", func(t *testing.T) {
-		mock := &MockCommander{Output: "%0"}
+	t.Run("calls list-panes with -a flag and structural key format", func(t *testing.T) {
+		mock := &MockCommander{Output: "sess:0.0"}
 		client := tmux.NewClient(mock)
 
 		_, _ = client.ListAllPanes()
@@ -822,7 +944,7 @@ func TestListAllPanes(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "list-panes -a -F #{pane_id}"
+		wantArgs := "list-panes -a -F #{session_name}:#{window_index}.#{pane_index}"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
