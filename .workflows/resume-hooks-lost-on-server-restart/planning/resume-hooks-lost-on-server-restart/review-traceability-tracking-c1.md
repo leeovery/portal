@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-03
 cycle: 1
 phase: Traceability Review
@@ -67,7 +67,7 @@ The specification explicitly describes the upgrade path behavior: old pane-ID-ke
 - "empty pane list preserves hooks for post-restart survival"
 - "old pane-ID entries cleaned on first run after upgrade"
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 The spec explicitly calls out this upgrade behavior as a conscious decision ("This is acceptable since the current format produces broken behavior anyway"). A dedicated test documents this intentional breaking change and ensures CleanStale handles mixed old/new key formats correctly.
 
