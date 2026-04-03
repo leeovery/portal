@@ -44,9 +44,9 @@ This is the same addressing scheme tmux-resurrect uses for targeting panes durin
 
 **Hook storage (`internal/hooks/store.go`):** Update the data model — the map key changes from pane ID to structural key. `CleanStale` cross-references structural keys against live tmux structure instead of pane IDs.
 
-**Pane querying (`internal/tmux/tmux.go`):** The current `ListPanes(sessionName)` returns only pane IDs (`[]string`). Hook execution and stale cleanup need to build structural keys from live tmux state. Either `ListPanes` must return richer data (window index, pane index per pane) or a new method is needed to query panes with their structural position.
+**Pane querying (`internal/tmux/tmux.go`):** `ListPanes(sessionName)` and `ListAllPanes()` change their tmux format strings to return structural keys instead of pane IDs. Add a new method to resolve the current pane's structural key from a pane ID (for use by `hooks set` and `hooks rm`).
 
-**Volatile markers:** Change marker naming from `@portal-active-%paneID` to a structural-key-based format (e.g., `@portal-active-session:window.pane`).
+**Volatile markers:** Marker naming changes from `@portal-active-%paneID` to `@portal-active-{structural_key}` (e.g., `@portal-active-my-project-abc:0.0`). `MarkerName` takes a structural key parameter.
 
 **Hook removal (`cmd/hooks.go` — `hooks rm`):** Update to resolve the current pane's structural key instead of using `$TMUX_PANE`. Remove the hook entry and volatile marker using the structural key.
 
@@ -65,6 +65,18 @@ This is the same addressing scheme tmux-resurrect uses for targeting panes durin
 **Silent operation:** Hook execution failures (no matching panes, stale keys) are silent — no errors surfaced to the user. This matches the current best-effort design.
 
 **Breaking change to `hooks.json`:** Existing hook entries keyed by pane ID become invalid. Old pane-ID-keyed entries (e.g., `%0`) are automatically cleaned by `CleanStale` on the first run with live panes after upgrading — they won't match any live structural key. No explicit migration step required. This is acceptable since the current format produces broken behavior anyway.
+
+### Design Decisions
+
+**SendKeys targeting:** Use structural keys directly as tmux `-t` targets. tmux natively accepts `session:window.pane` format for targeting panes (e.g., `tmux send-keys -t "my-project-abc:0.1" "command" Enter`). No need to resolve structural keys back to pane IDs. This is the same approach tmux-resurrect uses.
+
+**Pane querying approach:** `ListPanes` and `ListAllPanes` return structural keys (`[]string`) instead of pane IDs. The underlying tmux commands change their `-F` format string to output `#{session_name}:#{window_index}.#{pane_index}` instead of `#{pane_id}`. Function signatures remain `[]string` — the semantic meaning of the strings changes from pane IDs to structural keys. For registration and removal, a new `tmux.Client` method resolves the current pane's structural key from `$TMUX_PANE` (e.g., `tmux display-message -p -t "$TMUX_PANE" "#{session_name}:#{window_index}.#{pane_index}"`).
+
+**CleanStale contract:** `CleanStale(liveKeys []string)` — same signature, parameter renamed. Callers pass structural keys from `ListAllPanes`. The function cross-references hook map keys against `liveKeys` — semantics unchanged, just the key format changes.
+
+**Interface changes:** `PaneLister`, `AllPaneLister`, and `KeySender` interface signatures remain `[]string` / `string` — the values change from pane IDs to structural keys. `SendKeys(target string, command string)` accepts structural keys (tmux resolves them). No new interfaces needed. Mocks in tests update to use structural key values instead of pane ID values.
+
+**Volatile marker format:** Definitive format is `@portal-active-{structural_key}` where structural key uses the standard format. Example: `@portal-active-my-project-abc:0.0`. tmux user options accept colons and dots in names.
 
 ### Testing Requirements
 
