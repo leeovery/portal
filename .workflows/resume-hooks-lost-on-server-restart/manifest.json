@@ -15,10 +15,10 @@
     "specification": {
       "items": {
         "resume-hooks-lost-on-server-restart": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 2,
           "finding_gate_mode": "auto",
-          "date": "2026-04-02",
+          "date": "2026-04-03",
           "sources": {
             "resume-hooks-lost-on-server-restart": {
               "status": "incorporated"
