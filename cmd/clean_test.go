@@ -287,14 +287,14 @@ func TestCleanCommand(t *testing.T) {
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// Write hooks for panes %1, %5; only %1 is live
+		// Write hooks for two panes; only my-session:0.0 is live
 		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%1": {"on-resume": "cmd1"},
-			"%5": {"on-resume": "cmd5"},
+			"my-session:0.0":    {"on-resume": "cmd1"},
+			"other-session:1.0": {"on-resume": "cmd5"},
 		})
 
 		cleanDeps = &CleanDeps{
-			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
 		}
 		t.Cleanup(func() { cleanDeps = nil })
 
@@ -308,18 +308,18 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := "Removed stale hook: %5\n"
+		want := "Removed stale hook: other-session:1.0\n"
 		if buf.String() != want {
 			t.Errorf("output = %q, want %q", buf.String(), want)
 		}
 
-		// Verify %5 was removed from hooks file, %1 remains
+		// Verify other-session:1.0 was removed from hooks file, my-session:0.0 remains
 		data := readCleanHooksJSON(t, hooksFile)
-		if _, ok := data["%1"]; !ok {
-			t.Error("expected live pane %1 to remain in hooks file")
+		if _, ok := data["my-session:0.0"]; !ok {
+			t.Error("expected live pane my-session:0.0 to remain in hooks file")
 		}
-		if _, ok := data["%5"]; ok {
-			t.Error("expected stale pane %5 to be removed from hooks file")
+		if _, ok := data["other-session:1.0"]; ok {
+			t.Error("expected stale pane other-session:1.0 to be removed from hooks file")
 		}
 	})
 
@@ -332,7 +332,7 @@ func TestCleanCommand(t *testing.T) {
 
 		// Real ListAllPanes returns ([]string{}, nil) when no server is running
 		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%3": {"on-resume": "some-cmd"},
+			"my-session:0.1": {"on-resume": "some-cmd"},
 		})
 
 		cleanDeps = &CleanDeps{
@@ -357,8 +357,8 @@ func TestCleanCommand(t *testing.T) {
 
 		// Verify hooks are still in the file (NOT deleted)
 		data := readCleanHooksJSON(t, hooksFile)
-		if _, ok := data["%3"]; !ok {
-			t.Error("expected hook %3 to be preserved when no tmux server is running")
+		if _, ok := data["my-session:0.1"]; !ok {
+			t.Error("expected hook my-session:0.1 to be preserved when no tmux server is running")
 		}
 	})
 
@@ -371,7 +371,7 @@ func TestCleanCommand(t *testing.T) {
 		// Do NOT create the hooks file
 
 		cleanDeps = &CleanDeps{
-			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
 		}
 		t.Cleanup(func() { cleanDeps = nil })
 
@@ -398,12 +398,12 @@ func TestCleanCommand(t *testing.T) {
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
 		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%1": {"on-resume": "cmd1"},
-			"%3": {"on-resume": "cmd3"},
+			"my-session:0.0": {"on-resume": "cmd1"},
+			"my-session:0.1": {"on-resume": "cmd3"},
 		})
 
 		cleanDeps = &CleanDeps{
-			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1", "%3"}},
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0", "my-session:0.1"}},
 		}
 		t.Cleanup(func() { cleanDeps = nil })
 
@@ -436,13 +436,13 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("failed to write test file: %v", err)
 		}
 
-		// Stale hook: %9 is not live
+		// Stale hook: other-session:1.1 is not live
 		writeCleanHooksJSON(t, hooksFile, map[string]map[string]string{
-			"%9": {"on-resume": "cmd9"},
+			"other-session:1.1": {"on-resume": "cmd9"},
 		})
 
 		cleanDeps = &CleanDeps{
-			AllPaneLister: &mockCleanPaneLister{panes: []string{"%1"}},
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
 		}
 		t.Cleanup(func() { cleanDeps = nil })
 
@@ -456,7 +456,7 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := "Removed stale project: stale (" + stalePath + ")\nRemoved stale hook: %9\n"
+		want := "Removed stale project: stale (" + stalePath + ")\nRemoved stale hook: other-session:1.1\n"
 		if buf.String() != want {
 			t.Errorf("output = %q, want %q", buf.String(), want)
 		}
