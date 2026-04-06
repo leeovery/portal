@@ -66,22 +66,22 @@ total: 2
 
 **Problem**: The existing tests verify `StartServer()` and `EnsureServer()` in isolation, but there is no test that validates the full bootstrap-to-query flow: starting the server via `EnsureServer()` and then immediately querying sessions via `ListSessions()`. This end-to-end flow is exactly the sequence Portal uses in production, and the bug manifested because the server died between these two calls.
 
-**Solution**: Add a new test in `internal/tmux/tmux_test.go` that exercises the full flow: `EnsureServer()` starts the server (mock verifies `new-session -d`), then `ListSessions()` returns sessions, then `ServerRunning()` returns true. The mock's `RunFunc` handles four commands in sequence: `info` (fails, server not running) -> `new-session -d` (succeeds) -> `list-sessions` (returns session data) -> `info` (succeeds). This validates that the bootstrap approach produces a queryable, running server state.
+**Solution**: Add TestEnsureServerThenListSessions that exercises the full flow. Mock RunFunc handles 4 commands in sequence: info (fails) -> new-session -d (succeeds) -> list-sessions (returns "0|1|0" -- pipe-delimited format matching ListSessions' format string "#{session_name}|#{session_windows}|#{session_attached}") -> info (succeeds).
 
 **Outcome**: A new test exists that proves the bootstrap-to-query flow works end-to-end through mock expectations, including verifying `ServerRunning()` returns true after bootstrap.
 
 **Do**:
-1. Add TestEnsureServerThenListSessions in internal/tmux/tmux_test.go with mock RunFunc handling info (fail), new-session -d (succeed), list-sessions (return session "0"), and info (succeed)
-2. Assert EnsureServer() returns (true, nil), ListSessions() returns 1 session named "0", ServerRunning() returns true
-3. Verify exactly 4 mock calls in correct order
+1. Add TestEnsureServerThenListSessions in internal/tmux/tmux_test.go with mock RunFunc that switches on args[0]: "info" (first call returns error, subsequent calls return nil), "new-session" (returns "", nil), "list-sessions" (returns "0|1|0" -- matching the pipe-delimited format #{session_name}|#{session_windows}|#{session_attached})
+2. Assert EnsureServer() returns (true, nil), ListSessions() returns 1 session with Name "0", Windows 1, Attached false, ServerRunning() returns true
+3. Verify exactly 4 mock calls in correct order: ["info"], ["new-session", "-d"], ["list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}"], ["info"]
 4. Run go test ./...
 
 **Acceptance Criteria**:
 - [ ] New test function exists exercising EnsureServer() followed by ListSessions() and ServerRunning()
 - [ ] Mock verifies command sequence: info (fail) -> new-session -d -> list-sessions -> info (succeed)
-- [ ] Mock returns session "0" from list-sessions
+- [ ] Mock returns "0|1|0" (pipe-delimited format) from list-sessions, producing Session{Name: "0", Windows: 1, Attached: false}
 - [ ] Test asserts EnsureServer() returns (true, nil)
-- [ ] Test asserts ListSessions() returns 1 session named "0"
+- [ ] Test asserts ListSessions() returns 1 session with Name "0"
 - [ ] Test asserts ServerRunning() returns true after bootstrap
 - [ ] Test asserts exactly 4 mock calls in correct order
 - [ ] go test ./... passes
