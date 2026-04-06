@@ -59,8 +59,8 @@ The investigation explicitly recommends an integration-level test: "bootstrap ->
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added integration test requirement to testing section.
 
 ---
 
