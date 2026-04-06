@@ -135,7 +135,39 @@ Verified failure sequence (backed by tmux source code and tmux-continuum source 
 
 ## Fix Direction
 
-_To be determined after findings review_
+### Chosen Approach
+
+Replace `tmux start-server` with `tmux new-session -d` to create a bootstrap session that keeps the server alive during plugin initialization and continuum's delayed restore.
+
+This is the same pattern tmux-continuum uses in its own systemd/launchd bootstrap. Resurrect has built-in "restoring from scratch" handling: when it detects exactly 1 pane, it replaces the bootstrap session with saved state and cleans up the default session "0" if it wasn't in the save file.
+
+**Deciding factor:** This follows tmux-continuum's own proven bootstrap pattern rather than inventing a new mechanism. The fix is scoped entirely to server bootstrap — no changes needed to hooks, TUI, or polling logic.
+
+### Options Explored
+
+Only one approach was presented — it directly addresses the root cause using the same mechanism tmux-continuum itself uses. No alternatives were needed.
+
+### Discussion
+
+The investigation initially speculated about `exit-empty` and continuum internals. User correctly pushed back on unverified assumptions, which led to research against tmux source code (`server.c`, `cmd-kill-server.c`), tmux-continuum source (`continuum.tmux`, `continuum_restore.sh`), and tmux-resurrect source (`restore.sh`). This research confirmed the root cause and revealed the exact mechanism: continuum's restore is async with a 1-second sleep, the server dies from `exit-empty` in that gap, and continuum's own bootstrap uses `new-session -d` to avoid this.
+
+User priorities:
+- Fix should be minimal and targeted — server bootstrap only
+- No changes to hooks, TUI, or polling logic
+- Works correctly with resurrect installed, degrades gracefully without
+
+### Testing Recommendations
+
+- Test that `EnsureServer` / `StartServer` creates a detached session (server stays alive)
+- Test that `ServerRunning()` returns true after the new bootstrap
+- Integration test: bootstrap → poll for sessions → verify server persists
+- Test graceful behavior when resurrect is not installed (bootstrap session "0" persists)
+
+### Risk Assessment
+
+- **Fix complexity:** Low — change `start-server` to `new-session -d` in `StartServer()`
+- **Regression risk:** Low — the bootstrap session is either replaced by resurrect or harmlessly persists
+- **Recommended approach:** Regular release
 
 ---
 
