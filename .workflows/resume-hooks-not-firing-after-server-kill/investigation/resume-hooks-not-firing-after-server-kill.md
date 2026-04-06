@@ -20,16 +20,20 @@ Portal boots tmux but goes straight to the projects page instead of the sessions
 
 1. Open Portal, initiate two Claude Code sessions — resume hooks register successfully
 2. Run `tmux kill-server` to kill the tmux server
-3. Open a new terminal and press `x` (Portal shortcut)
-4. Portal boots tmux but shows the projects page — no sessions restored
+3. Open Ghostty terminal and type `x` (Portal alias) — not inside any tmux session
+4. Portal shows "starting tmux server" loading page, then lands on projects page — no sessions restored
+5. Running `tmux list-sessions` from another terminal shows "no server running"
 
 **Reproducibility:** Confirmed on at least one system
+
+**Critical finding:** After Portal's bootstrap, the tmux server is not running at all. The server either fails to start properly or starts and immediately dies. This means tmux-resurrect/continuum never get a chance to restore sessions.
 
 ### Environment
 
 - **Affected environments:** Local (tested on a separate MacBook Pro, not the dev machine)
-- **Platform:** macOS
-- **User conditions:** tmux-resurrect plugin may or may not be installed on the test machine — this is a prerequisite for session restoration
+- **Platform:** macOS (Ghostty terminal)
+- **tmux plugins confirmed:** tmux-resurrect + tmux-continuum installed with `@continuum-restore 'on'` and `@resurrect-capture-pane-contents 'on'`
+- **No error output** from Portal during startup
 
 ### Impact
 
@@ -47,9 +51,10 @@ Portal boots tmux but goes straight to the projects page instead of the sessions
 
 ### Initial Hypotheses
 
-- tmux-resurrect may not be installed on the test machine, which is a prerequisite for session restoration
-- The resume hooks implementation may have a bug in the session resurrection or hook execution flow
-- Pane ID changes after server restart may not be handled correctly
+- ~~tmux-resurrect may not be installed on the test machine~~ — CONFIRMED installed with auto-restore on
+- Portal's EnsureServer / server bootstrap may start the server in a way that doesn't persist (e.g., server starts, Portal's TUI runs, server dies when Portal exits)
+- The tmux server may start but without loading tmux.conf / TPM plugins, so resurrect never triggers
+- Portal may be using `tmux new-session` in a way that creates and immediately destroys the server
 
 ### Code Trace
 
