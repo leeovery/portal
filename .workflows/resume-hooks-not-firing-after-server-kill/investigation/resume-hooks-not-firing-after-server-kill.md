@@ -144,3 +144,5 @@ _To be determined after findings review_
 - The previous bugfix was about hook storage durability — this bug is about server lifecycle and session restoration
 - There may also be a tmux-continuum trigger issue: continuum might only auto-restore on session creation, not on bare `start-server`. This is a secondary concern — if the server dies immediately, the trigger mechanism is moot
 - The user's tmux.conf does NOT set `exit-empty off`
+- **Prior art:** The `exit-empty` risk was explicitly acknowledged in the original `auto-start-tmux-server` discussion (`.workflows/auto-start-tmux-server/discussion/auto-start-tmux-server.md:67`): "tmux docs say the server exits by default with no sessions. Assumption is that continuum hooks into the process quickly enough to create sessions before this happens. If not, a keepalive session could be added later." The edge case has now materialized.
+- Synthesis agent validated root cause with high confidence — all code paths independently verified

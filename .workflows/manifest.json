@@ -29,6 +29,9 @@
     },
     "resume-hooks-lost-on-server-restart": {
       "work_type": "bugfix"
+    },
+    "resume-hooks-not-firing-after-server-kill": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
