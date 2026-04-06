@@ -38,8 +38,14 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "resume-hooks-not-firing-after-server-kill-1-1",
-          "task_map": {}
+          "task": "resume-hooks-not-firing-after-server-kill-1-2",
+          "task_map": {
+            "resume-hooks-not-firing-after-server-kill": "tick-ed0985",
+            "resume-hooks-not-firing-after-server-kill-1": "tick-93769b",
+            "resume-hooks-not-firing-after-server-kill-1-1": "tick-351e93",
+            "resume-hooks-not-firing-after-server-kill-1-2": "tick-a0dabc"
+          },
+          "external_id": "tick-ed0985"
         }
       }
     }
