@@ -1,6 +1,7 @@
 # Plan: Resume Hooks Not Firing After Server Kill
 
 ## Phase 1: Fix Server Bootstrap and Add Regression Tests
+<!-- status: approved | approved_at: 2026-04-06 -->
 
 **Goal**: Replace `tmux start-server` with `tmux new-session -d` in `StartServer()` so the server stays alive during plugin initialization and session restoration, and cover the fix with regression tests.
 
