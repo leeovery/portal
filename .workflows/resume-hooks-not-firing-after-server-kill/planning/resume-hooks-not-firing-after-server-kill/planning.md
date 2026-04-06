@@ -16,3 +16,11 @@
 - [ ] `EnsureServer()` return contract unchanged: `(false, nil)` when running, `(true, nil)` on successful start, `(true, err)` on failed start
 - [ ] New end-to-end unit test: EnsureServer starts server then ListSessions returns sessions, validating the bootstrap-to-query flow
 - [ ] `go test ./...` passes with zero failures
+
+### Tasks
+<!-- status: draft -->
+
+| # | Internal ID | Name | Edge Cases |
+|---|-------------|------|------------|
+| 1 | resume-hooks-not-firing-after-server-kill-1-1 | Fix StartServer and update existing tests | error wrapping message remains descriptive, no-retry behavior unchanged, EnsureServer return contract preserved |
+| 2 | resume-hooks-not-firing-after-server-kill-1-2 | Add bootstrap-to-query regression test | none |
