@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "resume-hooks-not-firing-after-server-kill-1-1",
           "task_map": {}
         }
       }

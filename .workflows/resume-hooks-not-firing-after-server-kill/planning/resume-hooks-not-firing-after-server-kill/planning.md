@@ -18,7 +18,7 @@
 - [ ] `go test ./...` passes with zero failures
 
 ### Tasks
-<!-- status: draft -->
+<!-- status: approved | approved_at: 2026-04-06 -->
 
 | # | Internal ID | Name | Edge Cases |
 |---|-------------|------|------------|
