@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "resume-hooks-not-firing-after-server-kill": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
