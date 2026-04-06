@@ -36,17 +36,25 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
+
+#### If the `/workflow-migrate` skill has already been invoked in this conversation
+
+→ Proceed to **Step 1**.
+
+#### Otherwise
+
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 > Running migrations to keep workflow files in sync.
 ```
 
-Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
-
 **Run migrations — this is mandatory. You must complete it before proceeding.**
 
 Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
+
+**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to Step 1 below. Do not stop after migration completes.
 
 → Proceed to **Step 1**.
 
@@ -228,6 +236,7 @@ Invoke the appropriate skill based on the user's menu selection:
 | Start review for {topic} | `/workflow-review-entry epic {work_unit} {topic}` |
 | Start specification | `/workflow-specification-entry epic {work_unit}` |
 | Start new discussion topic | `/workflow-discussion-entry epic {work_unit}` |
+| Discuss pending topic {topic} | `/workflow-discussion-entry epic {work_unit} {topic}` |
 | Start new research | `/workflow-research-entry epic {work_unit}` |
 
 Skills receive positional arguments: `$0` = work_type (`epic`), `$1` = work_unit, `$2` = topic (when provided).

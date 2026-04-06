@@ -38,12 +38,12 @@ No work started yet.
 ●───────────────────────────────────────────────●
 
 @foreach(phase in phases)
-@if(phase.items)
-  {phase:(titlecase)}
+@if(phase.items or (phase == discussion and gating.has_pending_discussions))
+  {phase:(titlecase)} ({phase.count_summary})
 @foreach(item in phase.items)
-    └─ {item.name:(titlecase)} ({item.status})@if(phase == planning and item.format) [{item.format}]@endif
+    @if(last_item_in_phase and not (phase == discussion and gating.has_pending_discussions)) └─ @else ├─ @endif {item.name:(titlecase)} [{item.status}]@if(phase == planning and item.format) · {item.format}@endif
 @if(phase == specification and item.sources)
-       └─ {source.topic:(titlecase)} ({source.status})
+       └─ {source.topic:(titlecase)} [{source.status}]
 @endif
 @if(phase == implementation and item.current_phase)
        └─ Phase {item.current_phase}, {item.completed_tasks.length} task(s) completed
@@ -53,33 +53,48 @@ No work started yet.
 @endif
 @endif
 @endforeach
+@if(phase == discussion and gating.has_pending_discussions)
+@foreach(topic in pending_from_research)
+    @if(last_pending_topic) └─ @else ├─ @endif {topic.name:(titlecase)} [pending from research]
+@endforeach
+@endif
 @endif
 
 @endforeach
+@if(gating.has_pending_discussions and not phases.discussion)
+  Discussion ({pending_from_research.length} pending)
+@foreach(topic in pending_from_research)
+    @if(last_pending_topic) └─ @else ├─ @endif {topic.name:(titlecase)} [pending from research]
+@endforeach
+
+@endif
 @if(recommendation)
-{recommendation text}
+  ⚑ {recommendation text}
 @endif
 ```
 
 **Display rules:**
 
-- Phase headers as section labels (titlecased)
-- Items under each phase use `└─` branches with titlecased names and parenthetical status
-- Planning items show format in brackets after status
+- Phase headers as section labels (titlecased) with a parenthetical count summary — e.g., `Discussion (3 completed, 1 pending)`, `Research (1 completed)`, `Specification (2 in-progress)`. Combine statuses present in that phase; omit zero counts
+- Items under each phase use proper tree grammar: `├─` for non-final siblings, `└─` for the final item. Pending discussion topics from research count as siblings when determining the final item
+- Planning items show format after status, separated by a middle dot: `[in-progress] · linear`
 - Specification items show their source discussions as a sub-tree beneath, one `└─` per source
-- Source status: `(incorporated)` or `(pending)` from manifest
+- Source status: `[incorporated]` or `[pending]` from manifest
 - Implementation items show progress: `Phase {N}, {M} task(s) completed` if in-progress with current_phase; `{M} task(s) completed` otherwise
-- Phases with no items don't appear
+- Pending discussion topics from research appear under the Discussion phase heading with `[pending from research]` status, after any existing discussion items. If no discussion items exist yet, render a Discussion section with only the pending topics
+- Phases with no items don't appear (except Discussion, which appears if pending topics from research exist)
 - Blank line between phase sections
+- No trailing blank line after the last phase section (the code block ends immediately after the last item or recommendation)
 
-**Recommendations:** Check the following conditions in order. Show the first that applies as a line within the state display code block, separated by a blank line from the last phase section. If none apply, no recommendation.
+**Recommendations:** Check the following conditions in order. Show the first that applies as a `⚑`-prefixed line within the state display code block, 2-space indented and separated by a blank line from the last phase section. If the recommendation text is long, wrap it across two lines (both 2-space indented, only the first has `⚑`). If none apply, no recommendation.
 
 | Condition | Recommendation |
 |-----------|---------------|
 | In-progress items across multiple phases | No recommendation |
 | Some research in-progress, some completed | "Consider completing remaining research before starting discussion. Topic analysis works best with all research available." |
 | Some discussions in-progress, some completed | "Consider completing remaining discussions before starting specification. The grouping analysis works best with all discussions available." |
-| All discussions completed, specs not started | "All discussions are completed. Specification will analyze and group them." |
+| All discussions completed, specs not started, `gating.has_pending_discussions` is false | "All discussions are completed. Specification will analyze and group them." |
+| All discussions completed, specs not started, `gating.has_pending_discussions` is true | "Pending discussion topic(s) from research remain. Consider starting these before specification." |
 | Some specs completed, some in-progress | "Completing all specifications before planning helps identify cross-cutting dependencies." |
 | Some plans completed, some in-progress | "Completing all plans before implementation helps surface task dependencies across plans." |
 | Reopened discussion that's a source in a spec | "{Spec} specification sources the reopened {Discussion} discussion. Once that discussion concludes, the specification will need revisiting to extract new content." |
@@ -89,9 +104,9 @@ No work started yet.
 > *Output the next fenced block as a code block:*
 
 ```
-Plans not ready for implementation:
-These plans have unresolved dependencies that must be
-addressed first.
+⚑ Plans not ready for implementation:
+  These plans have unresolved dependencies that must be
+  addressed first.
 
 @foreach(plan in plans_with_deps_blocking)
   {topic:(titlecase)}
@@ -115,16 +130,16 @@ Show only statuses and categories that appear in the current display. No `---` s
 > *Output the next fenced block as a code block:*
 
 ```
-Key:
+  Key:
+    Status:
+      in-progress — work is ongoing
+      completed            — phase or implementation done
+      pending from research — identified by research, not yet discussed
+      promoted             — moved to its own cross-cutting work unit
 
-  Status:
-    in-progress — work is ongoing
-    completed   — phase or implementation done
-    promoted    — moved to its own cross-cutting work unit
-
-  Blocking reason:
-    blocked by {plan}:{task} — depends on another plan's task
-    blocked by {plan}        — dependency unresolved
+    Blocking reason:
+      blocked by {plan}:{task} — depends on another plan's task
+      blocked by {plan}        — dependency unresolved
 ```
 
 → Proceed to **C. Menu**.
@@ -133,30 +148,28 @@ Key:
 
 ## C. Menu
 
-Build a numbered menu with three sections:
+Build a menu with two types of options:
 
-**Section 1 — In-progress items** (always first):
-- Any item with status `in-progress` in any phase
-- Planning in-progress: `Continue "{topic:(titlecase)}" — planning (in-progress)`
-- Implementation in-progress with progress: `Continue "{topic:(titlecase)}" — implementation (Phase {N}, Task {M})`
-- Implementation in-progress without progress: `Continue "{topic:(titlecase)}" — implementation (in-progress)`
-- Other phases: `Continue "{topic:(titlecase)}" — {phase} (in-progress)`
+**Numbered items** — topic-targeting actions where you're selecting a specific topic. Use sequential numbers. These include:
+- Continue items: any item with status `in-progress` in any phase
+  - Planning in-progress: `Continue "{topic:(titlecase)}" — planning [in-progress]`
+  - Implementation in-progress with progress: `Continue "{topic:(titlecase)}" — implementation (Phase {N}, Task {M})`
+  - Implementation in-progress without progress: `Continue "{topic:(titlecase)}" — implementation [in-progress]`
+  - Other phases: `Continue "{topic:(titlecase)}" — {phase} [in-progress]`
+- Next-phase-ready items from `next_phase_ready` in discovery output:
+  - Completed spec with no plan: `Start planning for "{topic:(titlecase)}" — spec completed`
+  - Completed plan with no implementation:
+    - If `blocked`: show but mark as not selectable: `Start implementation of "{topic:(titlecase)}" — blocked by {dep_topic}:{internal_id}`
+    - Otherwise: `Start implementation of "{topic:(titlecase)}" — plan completed`
+  - Completed implementation with no review: `Start review for "{topic:(titlecase)}" — implementation completed`
 
-**Section 2 — Next-phase-ready items:**
-- From `next_phase_ready` in discovery output
-- Completed spec with no plan: `Start planning for "{topic:(titlecase)}" — spec completed`
-- Completed plan with no implementation:
-  - If `blocked`: show but mark as not selectable: `Start implementation of "{topic:(titlecase)}" — blocked by {dep_topic}:{internal_id}`
-  - Otherwise: `Start implementation of "{topic:(titlecase)}" — plan completed`
-- Completed implementation with no review: `Start review for "{topic:(titlecase)}" — implementation completed`
-- Unaccounted discussions (from `unaccounted_discussions`): `Start specification — {N} discussion(s) not yet in a spec`
-  - Only show if `gating.can_start_specification` is true (at least one completed discussion)
-
-**Section 3 — Standing options:**
-- `Start new discussion topic` (always present)
-- `Start new research` (always present)
-- `Resume a completed topic` (only shown when `completed` items exist)
-- `Stop here — resume later with /workflow-start` (always present)
+**Command options** — entry-point actions that launch a flow handling its own selection. Use letter shortcuts (first letter of command; second letter if disambiguation needed):
+- **`s`/`spec`** — Start specification — {N} discussion(s) not yet in a spec (only shown if `gating.can_start_specification` is true and `unaccounted_discussions` has items)
+- **`d`/`discuss`** — Start new discussion (always present). When `gating.has_pending_discussions` is true, append ` — {N} pending from research` (count from `pending_from_research.length`)
+- **`p`/`pending`** — Manage pending discussion topics (only shown when `gating.has_pending_discussions` is true)
+- **`r`/`research`** — Start new research (always present)
+- **`c`/`completed`** — Resume a completed topic (only shown when `completed` items exist)
+- **`m`/`map`** — View epic dependency map (always present when at least one phase has items)
 
 **Phase-forward gating:**
 - No "Start planning" unless `gating.can_start_planning` is true
@@ -164,14 +177,17 @@ Build a numbered menu with three sections:
 - No "Start review" unless `gating.can_start_review` is true
 - No "Start specification" unless `gating.can_start_specification` is true
 
-**Recommendation marking:** Mark one item as `(recommended)` based on phase completion state:
-- All discussions completed, no specifications exist → "Start specification (recommended)"
+**Ordering:** The recommended item always appears first. Mark one item as `(recommended)` based on phase completion state:
+- All discussions completed, no specifications exist, `gating.has_pending_discussions` is false → `s`/`spec` (recommended)
+- All discussions completed, no specifications exist, `gating.has_pending_discussions` is true → `d`/`discuss` (recommended)
 - All plannable specifications completed, some without plans → first plannable spec "(recommended)"
 - All plans completed (and deps satisfied), some without implementations → first implementable plan "(recommended)"
 - All implementations completed, some without reviews → first reviewable implementation "(recommended)"
 - Otherwise → no recommendation (complete in-progress work first)
 
-**Promoted items:** Items with `(promoted)` status are shown in the state display but are **not listed in the menu** — they've been moved to their own cross-cutting work unit and are no longer actionable in this epic.
+After the recommended item, list remaining numbered items, then command options.
+
+**Promoted items:** Items with `[promoted]` status are shown in the state display but are **not listed in the menu** — they've been moved to their own cross-cutting work unit and are no longer actionable in this epic.
 
 **Blocked items:** Items marked `blocked` in `next_phase_ready` are shown in the menu but are **not selectable**. If the user picks a blocked item, explain why it's blocked and re-present the menu.
 
@@ -181,22 +197,22 @@ Build a numbered menu with three sections:
 · · · · · · · · · · · ·
 What would you like to do?
 
-1. Continue "Auth Flow" — discussion (in-progress)
-2. Continue "Data Model" — specification (in-progress)
-3. Start planning for "User Profiles" — spec completed
-4. Continue "Caching" — planning (in-progress)
-5. Start implementation of "Notifications" — plan completed (recommended)
-6. Start implementation of "Reporting" — blocked by core-features:core-2-3
-7. Start specification — 3 discussion(s) not yet in a spec
-8. Start new discussion topic
-9. Start new research
-10. Resume a completed topic
+- **`1`** — Start implementation of "Notifications" — plan completed (recommended)
+- **`2`** — Continue "Auth Flow" — discussion [in-progress]
+- **`3`** — Continue "Caching" — planning [in-progress]
+- **`4`** — Start planning for "User Profiles" — spec completed
+- **`5`** — Start implementation of "Reporting" — blocked by core-features:core-2-3
+- **`s`/`spec`** — Start specification — 3 discussion(s) not yet in a spec
+- **`d`/`discuss`** — Start new discussion
+- **`r`/`research`** — Start new research
+- **`c`/`completed`** — Resume a completed topic
+- **`m`/`map`** — View epic dependency map
 
-Select an option (enter number):
+Select an option:
 · · · · · · · · · · · ·
 ```
 
-Recreate with actual items from discovery. Blank line between sections.
+Recreate with actual items from discovery.
 
 **STOP.** Wait for user response.
 
@@ -205,19 +221,6 @@ Recreate with actual items from discovery. Blank line between sections.
 ---
 
 ## D. Handle Selection
-
-#### If user chose `Stop here`
-
-> *Output the next fenced block as a code block:*
-
-```
-Session Paused
-
-To resume later, run /workflow-start — it will discover your
-current state and present all available options.
-```
-
-**STOP.** Do not proceed — terminal condition.
 
 #### If user chose a blocked item
 
@@ -260,7 +263,17 @@ Commit the change.
 
 → Return to **C. Menu**.
 
-#### If user chose `Resume a completed topic`
+#### If user chose `m`/`map`
+
+Load **[display-epic-map.md](display-epic-map.md)** and follow its instructions as written.
+
+→ Return to **C. Menu**.
+
+#### If user chose `p`/`pending`
+
+→ Proceed to **G. Manage Pending**.
+
+#### If user chose `c`/`completed`
 
 → Proceed to **F. Resume Completed**.
 
@@ -270,8 +283,9 @@ Commit the change.
 
 | User selected phase | Condition | Gate message |
 |---------------------|-----------|--------------|
-| discussion (new or continue) | `gating.has_research` is true and some research items are in-progress | "{N} of {M} research topics still in-progress. Discussion topic analysis works best with all research available." |
-| specification (new or continue) | discussion items exist with some in-progress | "{N} of {M} discussions still in-progress. Specification grouping analysis works best with all discussions available." |
+| discussion (new or continue) | `gating.has_research` is true and some research items are in-progress | "{N} of {M} research topics still in-progress. Topic analysis works best with all research available." |
+| specification (new or continue) | discussion items exist with some in-progress | "{N} of {M} discussions still in-progress. Grouping analysis works best with all discussions available." |
+| specification (new or continue) | `gating.has_pending_discussions` is true | "{N} pending discussion topic(s) from research have not been started. Starting these first ensures the specification covers all identified topics." |
 | planning | specification items exist with some in-progress | "{N} of {M} specifications still in-progress. Cross-cutting dependencies are easier to identify with all completed." |
 | implementation | planning items exist with some in-progress | "{N} of {M} plans still in-progress. Task dependencies across plans may be missed." |
 
@@ -281,7 +295,7 @@ Commit the change.
 
 ```
 · · · · · · · · · · · ·
-{N} of {M} {phase items} still in-progress. {Gate message}.
+{Gate message}
 
 The system will re-analyse if you revisit later — proceeding
 now is safe, but may require rework.
@@ -290,6 +304,8 @@ now is safe, but may require rework.
 - **`b`/`back`** — Return to menu
 · · · · · · · · · · · ·
 ```
+
+Gate messages are self-contained first lines. For "N of M in-progress" conditions, compose the count prefix into the message (e.g., "3 of 5 research topics still in-progress. Discussion topic analysis works best with all research available.").
 
 **STOP.** Wait for user response.
 
@@ -322,7 +338,8 @@ Store the selected action, phase, and topic (if applicable). Map to a routing en
 | Start implementation of {topic} | implementation | {topic} |
 | Start review for {topic} | review | {topic} |
 | Start specification | specification | — |
-| Start new discussion topic | discussion | — |
+| Start new discussion | discussion | — |
+| Discuss pending topic {topic} | discussion | {topic} |
 | Start new research | research | — |
 
 → Return to caller.
@@ -344,7 +361,7 @@ Completed Topics
 @if(phase.completed_items)
   {phase:(titlecase)}
 @foreach(item in completed where item.phase == phase)
-    └─ {item.name:(titlecase)} (completed)
+    └─ {item.name:(titlecase)} [completed]
 @endforeach
 @endif
 
@@ -359,11 +376,11 @@ Only show phases with completed items. Blank line between phase sections.
 · · · · · · · · · · · ·
 Which topic would you like to resume?
 
-1. Resume "{item.name:(titlecase)}" — {item.phase}
-2. ...
-{N}. Back to main menu
+- **`1`** — Resume "{item.name:(titlecase)}" — {item.phase}
+- **`2`** — ...
+- **`{N}`** — Back to main menu
 
-Select an option (enter number):
+Select an option:
 · · · · · · · · · · · ·
 ```
 
@@ -380,3 +397,81 @@ List all completed items across all phases.
 Store the selected phase and topic.
 
 → Return to caller.
+
+---
+
+## G. Manage Pending
+
+Display pending discussion topics from research and let the user take action on them. Uses `pending_from_research` from discovery output.
+
+> *Output the next fenced block as a code block:*
+
+```
+Pending Discussion Topics
+
+Topics identified by research analysis that have not yet
+been discussed.
+
+@foreach(topic in pending_from_research)
+  {N}. {topic.name:(titlecase)}
+@endforeach
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+· · · · · · · · · · · ·
+Start a discussion for a pending topic, or skip one:
+
+- **`1`** — Start discussion for "{topic_1.name:(titlecase)}"
+- **`2`** — Start discussion for "{topic_2.name:(titlecase)}"
+- **`s`/`skip`** — Remove a topic from pending list
+- **`b`/`back`** — Return to menu
+· · · · · · · · · · · ·
+```
+
+Numbered items correspond to the list above. Recreate with actual topics from discovery.
+
+**STOP.** Wait for user response.
+
+#### If user chose `back`
+
+→ Return to **C. Menu**.
+
+#### If user chose a numbered topic
+
+Set selection to "Discuss pending topic {topic}" with the selected topic name.
+
+→ Return to **E. Route Selection**.
+
+#### If user chose `skip`
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+· · · · · · · · · · · ·
+Which topic would you like to skip? Pick from the list above:
+· · · · · · · · · · · ·
+```
+
+**STOP.** Wait for user response.
+
+Remove the topic from the surfaced_topics array via the `pull` command:
+
+```bash
+node .claude/skills/workflow-manifest/scripts/manifest.cjs pull {work_unit}.research surfaced_topics "{topic}"
+```
+
+> *Output the next fenced block as a code block:*
+
+```
+Removed "{topic:(titlecase)}" from pending topics.
+```
+
+**If no more pending topics remain:**
+
+→ Return to **C. Menu**.
+
+**If pending topics still remain:**
+
+→ Return to **G. Manage Pending**.

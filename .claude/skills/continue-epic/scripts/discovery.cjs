@@ -1,6 +1,6 @@
 'use strict';
 
-const { loadActiveManifests, loadAllManifests, loadManifest, phaseItems, phaseData } = require('../../workflow-shared/scripts/discovery-utils.cjs');
+const { loadActiveManifests, loadAllManifests, loadManifest, phaseItems, phaseData, computePendingFromResearch } = require('../../workflow-shared/scripts/discovery-utils.cjs');
 
 const EPIC_PHASES = ['research', 'discussion', 'specification', 'planning', 'implementation', 'review'];
 
@@ -62,8 +62,11 @@ function buildEpicDetail(cwd, manifest) {
       const entry = { name: item.name, status: item.status || 'unknown' };
 
       if (phase === 'specification' && item.sources) {
-        entry.sources = item.sources;
-        for (const src of item.sources) {
+        const sourcesArr = Array.isArray(item.sources)
+          ? item.sources
+          : Object.entries(item.sources).map(([topic, data]) => ({ topic, ...data }));
+        entry.sources = sourcesArr;
+        for (const src of sourcesArr) {
           allSourcedDiscussions.add(src.topic || src.name);
         }
       }
@@ -154,6 +157,9 @@ function buildEpicDetail(cwd, manifest) {
   const hasCompletedDiscussion = discussionItems.some(d => d.status === 'completed');
   const hasCompletedImpl = implItems.some(i => i.status === 'completed');
 
+  const pendingFromResearch = computePendingFromResearch(manifest);
+  const hasPendingDiscussions = pendingFromResearch.length > 0;
+
   return {
     phases,
     in_progress: inProgressItems,
@@ -161,8 +167,10 @@ function buildEpicDetail(cwd, manifest) {
     next_phase_ready: nextPhaseReady,
     unaccounted_discussions: unaccountedDiscussions,
     reopened_discussions: reopenedDiscussions,
+    pending_from_research: pendingFromResearch.map(t => ({ name: t, phase: 'discussion' })),
     gating: {
       has_research: hasResearch,
+      has_pending_discussions: hasPendingDiscussions,
       can_start_discussion: hasCompletedResearch,
       can_start_specification: hasCompletedDiscussion,
       can_start_planning: hasCompletedSpec,
@@ -238,7 +246,10 @@ function format(result) {
       for (const item of items) {
         let line = `      - ${item.name} (${item.status})`;
         if (item.sources) {
-          const srcNames = item.sources.map(s => `${s.topic || s.name}:${s.status || '?'}`);
+          const sourcesArr = Array.isArray(item.sources)
+            ? item.sources
+            : Object.entries(item.sources).map(([topic, data]) => ({ topic, ...data }));
+          const srcNames = sourcesArr.map(s => `${s.topic || s.name}:${s.status || '?'}`);
           line += ` [sources: ${srcNames.join(', ')}]`;
         }
         if (item.format) line += ` [format: ${item.format}]`;
@@ -271,6 +282,9 @@ function format(result) {
     }
     if (d.reopened_discussions.length > 0) {
       lines.push(`    reopened_discussions: ${d.reopened_discussions.join(', ')}`);
+    }
+    if (d.pending_from_research.length > 0) {
+      lines.push(`    pending_from_research: ${d.pending_from_research.map(p => p.name).join(', ')}`);
     }
     if (d.completed.length > 0) {
       lines.push('    completed:');
