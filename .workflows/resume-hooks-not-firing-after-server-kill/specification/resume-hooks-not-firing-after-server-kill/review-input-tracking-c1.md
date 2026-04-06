@@ -33,8 +33,8 @@ The spec's "Behavior After Fix" table only describes TUI scenarios (portal open 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added CLI bootstrap path row to behavior table.
 
 ---
 

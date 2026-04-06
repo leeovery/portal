@@ -31,6 +31,7 @@ Replace `tmux start-server` with `tmux new-session -d` in `StartServer()`. This 
 | Server killed, resurrect installed, no save | Bootstrap session "0" persists → Portal shows sessions page with one session |
 | Server killed, resurrect NOT installed | Bootstrap session "0" persists → Portal shows sessions page with one session |
 | Server already running | No change — `EnsureServer()` returns `(false, nil)`, `StartServer()` not called |
+| CLI with path arg, server killed | Bootstrap session keeps server alive → `bootstrapWait()` polls find restored sessions → command proceeds normally |
 
 ### `EnsureServer` Return Contract
 
