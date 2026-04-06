@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-06
 cycle: 1
 phase: Gap Analysis
@@ -23,8 +23,8 @@ The requirement as written is misleading -- it implies the implementer should on
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Replaced requirement #4 to clarify mocks must be updated.
 
 ---
 
@@ -46,7 +46,7 @@ This matters because the project has an established integration test pattern (su
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Clarified test lives in internal/tmux using mocks, not a real tmux server.
 
 ---

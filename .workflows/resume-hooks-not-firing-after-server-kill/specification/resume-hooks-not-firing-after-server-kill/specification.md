@@ -47,8 +47,8 @@ Replace `tmux start-server` with `tmux new-session -d` in `StartServer()`. This 
 1. `StartServer()` creates a detached session (server stays alive after call returns)
 2. `ServerRunning()` returns true after the new bootstrap
 3. When resurrect is not installed, bootstrap session "0" persists harmlessly
-4. Existing `EnsureServer()` tests pass — return contract unchanged
-5. Integration test: `EnsureServer()` bootstrap → `ListSessions()` returns non-empty → server still running after poll window
+4. Existing `EnsureServer()` tests updated to expect `new-session -d` instead of `start-server` — return contract unchanged
+5. End-to-end unit test in `internal/tmux`: `EnsureServer()` starts server (mock verifies `new-session -d`) → `ListSessions()` returns sessions — validates the full bootstrap→query flow through mock expectations
 
 ### Out of Scope
 
