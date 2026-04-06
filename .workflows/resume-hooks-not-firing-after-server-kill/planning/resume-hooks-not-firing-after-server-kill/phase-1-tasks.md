@@ -66,82 +66,32 @@ total: 2
 
 **Problem**: The existing tests verify `StartServer()` and `EnsureServer()` in isolation, but there is no test that validates the full bootstrap-to-query flow: starting the server via `EnsureServer()` and then immediately querying sessions via `ListSessions()`. This end-to-end flow is exactly the sequence Portal uses in production, and the bug manifested because the server died between these two calls.
 
-**Solution**: Add a new test in `internal/tmux/tmux_test.go` within `TestEnsureServer` (or as a sibling test function) that exercises the full flow: `EnsureServer()` starts the server (mock verifies `new-session -d`), then `ListSessions()` returns sessions. The mock's `RunFunc` handles all three commands in sequence: `info` (fails, server not running) -> `new-session -d` (succeeds) -> `list-sessions` (returns session data). This validates that the bootstrap approach produces a queryable server state.
+**Solution**: Add a new test in `internal/tmux/tmux_test.go` that exercises the full flow: `EnsureServer()` starts the server (mock verifies `new-session -d`), then `ListSessions()` returns sessions, then `ServerRunning()` returns true. The mock's `RunFunc` handles four commands in sequence: `info` (fails, server not running) -> `new-session -d` (succeeds) -> `list-sessions` (returns session data) -> `info` (succeeds). This validates that the bootstrap approach produces a queryable, running server state.
 
-**Outcome**: A new test exists that proves the bootstrap-to-query flow works end-to-end through mock expectations. The test documents the critical invariant: after `EnsureServer()` starts the server, `ListSessions()` must find sessions.
+**Outcome**: A new test exists that proves the bootstrap-to-query flow works end-to-end through mock expectations, including verifying `ServerRunning()` returns true after bootstrap.
 
 **Do**:
-1. In `internal/tmux/tmux_test.go`, add a new test function `TestEnsureServerThenListSessions` (or add it as a subtest within `TestEnsureServer` -- either approach works, but a standalone function makes the regression test more visible):
-   ```go
-   func TestEnsureServerThenListSessions(t *testing.T) {
-       t.Run("bootstrap session is queryable after EnsureServer starts server", func(t *testing.T) {
-           mock := &MockCommander{
-               RunFunc: func(args ...string) (string, error) {
-                   if args[0] == "info" {
-                       return "", fmt.Errorf("no server running")
-                   }
-                   if args[0] == "new-session" {
-                       return "", nil
-                   }
-                   if args[0] == "list-sessions" {
-                       return "0|1|0", nil // bootstrap session "0", 1 window, not attached
-                   }
-                   t.Fatalf("unexpected command: %v", args)
-                   return "", nil
-               },
-           }
-           client := tmux.NewClient(mock)
-
-           started, err := client.EnsureServer()
-           if err != nil {
-               t.Fatalf("EnsureServer() error: %v", err)
-           }
-           if !started {
-               t.Fatal("EnsureServer() started = false, want true")
-           }
-
-           sessions, err := client.ListSessions()
-           if err != nil {
-               t.Fatalf("ListSessions() error: %v", err)
-           }
-           if len(sessions) != 1 {
-               t.Fatalf("ListSessions() returned %d sessions, want 1", len(sessions))
-           }
-           if sessions[0].Name != "0" {
-               t.Errorf("session name = %q, want %q", sessions[0].Name, "0")
-           }
-
-           // Verify the exact command sequence
-           if len(mock.Calls) != 3 {
-               t.Fatalf("expected 3 calls, got %d: %v", len(mock.Calls), mock.Calls)
-           }
-           wantSequence := []string{"info", "new-session", "list-sessions"}
-           for i, want := range wantSequence {
-               if mock.Calls[i][0] != want {
-                   t.Errorf("call %d: got %q, want %q", i, mock.Calls[i][0], want)
-               }
-           }
-       })
-   }
-   ```
-2. Run `go test ./internal/tmux/...` to verify the new test passes.
-3. Run `go test ./...` to verify no regressions.
+1. Add TestEnsureServerThenListSessions in internal/tmux/tmux_test.go with mock RunFunc handling info (fail), new-session -d (succeed), list-sessions (return session "0"), and info (succeed)
+2. Assert EnsureServer() returns (true, nil), ListSessions() returns 1 session named "0", ServerRunning() returns true
+3. Verify exactly 4 mock calls in correct order
+4. Run go test ./...
 
 **Acceptance Criteria**:
-- [ ] New test function exists in `internal/tmux/tmux_test.go` that exercises `EnsureServer()` followed by `ListSessions()`
-- [ ] Mock verifies the command sequence: `info` -> `new-session -d` -> `list-sessions`
-- [ ] Mock returns session "0" with 1 window and not attached from `list-sessions`
-- [ ] Test asserts `EnsureServer()` returns `(true, nil)`
-- [ ] Test asserts `ListSessions()` returns exactly 1 session named "0"
-- [ ] Test asserts exactly 3 mock calls in the correct order
-- [ ] `go test ./...` passes with zero failures
+- [ ] New test function exists exercising EnsureServer() followed by ListSessions() and ServerRunning()
+- [ ] Mock verifies command sequence: info (fail) -> new-session -d -> list-sessions -> info (succeed)
+- [ ] Mock returns session "0" from list-sessions
+- [ ] Test asserts EnsureServer() returns (true, nil)
+- [ ] Test asserts ListSessions() returns 1 session named "0"
+- [ ] Test asserts ServerRunning() returns true after bootstrap
+- [ ] Test asserts exactly 4 mock calls in correct order
+- [ ] go test ./... passes
 
 **Tests**:
-- `"bootstrap session is queryable after EnsureServer starts server"` -- full flow: EnsureServer starts server via `new-session -d`, then ListSessions returns the bootstrap session "0". Verifies the exact command sequence through mock call recording.
+- `"bootstrap session is queryable and server is running after EnsureServer starts server"` -- full flow: EnsureServer starts server via new-session -d, then ListSessions returns the bootstrap session "0", then ServerRunning() returns true. Verifies the exact command sequence through mock call recording.
 
 **Edge Cases**: None specified for this task.
 
 **Context**:
-> The specification (Testing Requirements item 5) explicitly calls for: "End-to-end unit test in `internal/tmux`: `EnsureServer()` starts server (mock verifies `new-session -d`) -> `ListSessions()` returns sessions -- validates the full bootstrap->query flow through mock expectations." The session name "0" is significant: it is what tmux defaults to when no `-s` flag is given, and it is what tmux-resurrect expects to find during its "restoring from scratch" cleanup.
+> The specification (Testing Requirements items 2 and 5) requires both the bootstrap-to-query flow and ServerRunning() verification. The session name "0" is significant: it is what tmux defaults to when no `-s` flag is given, and it is what tmux-resurrect expects to find during its "restoring from scratch" cleanup.
 
-**Spec Reference**: `.workflows/resume-hooks-not-firing-after-server-kill/specification/resume-hooks-not-firing-after-server-kill/specification.md` -- section "Testing Requirements" item 5, and "Session naming" for the "0" session name rationale.
+**Spec Reference**: `.workflows/resume-hooks-not-firing-after-server-kill/specification/resume-hooks-not-firing-after-server-kill/specification.md` -- Testing Requirements items 2 and 5, and "Session naming" for the "0" session name rationale.

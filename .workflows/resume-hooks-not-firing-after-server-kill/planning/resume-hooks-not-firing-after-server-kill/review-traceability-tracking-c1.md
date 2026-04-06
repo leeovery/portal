@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-06
 cycle: 1
 phase: Traceability Review
@@ -63,7 +63,7 @@ Tests:
 - "bootstrap session is queryable and server is running after EnsureServer starts server" -- full flow: EnsureServer starts server via new-session -d, then ListSessions returns the bootstrap session "0", then ServerRunning() returns true. Verifies the exact command sequence through mock call recording.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
