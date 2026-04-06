@@ -16,7 +16,7 @@
       "items": {
         "resume-hooks-not-firing-after-server-kill": {
           "status": "in-progress",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "finding_gate_mode": "gated",
           "date": "2026-04-06",
           "sources": {
