@@ -19,6 +19,8 @@
 
 Replace `tmux start-server` with `tmux new-session -d` in `StartServer()`. This creates a detached bootstrap session that keeps the server alive during plugin initialization and continuum's delayed restore.
 
+**Session naming:** Use bare `tmux new-session -d` with no explicit session name. tmux defaults to session name "0". Resurrect's "restoring from scratch" logic detects exactly 1 pane and cleans up session "0" if it wasn't in the save file — a custom name would not be recognized by this cleanup.
+
 **Scope:** `internal/tmux/tmux.go` — `StartServer()` function only. No changes to hooks, TUI, polling, or any other component.
 
 **Precedent:** This is the same pattern tmux-continuum uses in its own systemd/launchd bootstrap. Resurrect has built-in "restoring from scratch" handling — when it detects exactly 1 pane, it replaces the bootstrap session with saved state and cleans up the default session "0" if it wasn't in the save file.

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-06
 cycle: 1
 phase: Input Review
@@ -84,6 +84,6 @@ Replace `tmux start-server` with `tmux new-session -d` in `StartServer()`. This 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added session naming detail to Fix section.
 
