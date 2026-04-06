@@ -88,46 +88,48 @@ Portal boots tmux but goes straight to the projects page instead of the sessions
 
 ### Root Cause
 
-**`tmux start-server` combined with tmux's default `exit-empty on` causes the server to exit immediately because no sessions exist.**
+**Portal uses `tmux start-server` to bootstrap tmux, but this command creates a sessionless server that immediately exits under tmux's default `exit-empty on` — killing the server before tmux-continuum can restore sessions.**
 
-Portal's `EnsureServer()` calls `tmux start-server`, which starts the tmux server process and sources `.tmux.conf`. However, with `exit-empty on` (the tmux default), the server exits as soon as it detects there are no active sessions. This creates a race condition:
+Verified failure sequence (backed by tmux source code and tmux-continuum source code):
 
-1. Server starts, begins sourcing `.tmux.conf`
-2. TPM plugin manager initializes via `run-shell` (potentially async)
-3. tmux-continuum should detect `@continuum-restore 'on'` and trigger session restoration
-4. But the server exits (or is scheduled to exit) because `exit-empty` sees 0 sessions
-5. Session restoration either never starts or is aborted mid-flight
+1. Portal's `EnsureServer()` calls `tmux start-server` — the server daemon forks, sources `.tmux.conf`
+2. TPM runs via `run-shell`, initializes plugins including tmux-continuum
+3. Continuum detects a fresh server (via `#{start_time}` check) and **backgrounds** `continuum_restore.sh` — which **sleeps 1 second** before calling resurrect's `restore.sh`
+4. The `start-server` client completes and disconnects (it's not attached to any session)
+5. The tmux server loop checks `exit-empty` (on by default) and sees zero sessions → **server exits**
+6. After 1 second, `continuum_restore.sh` wakes up and tries to run `restore.sh` — but the server is dead, so session creation fails silently
+7. Portal's TUI polls for sessions but `ListSessions()` returns `[]Session{}, nil` (swallows errors from dead server)
+8. After 6s MaxWait, TUI transitions to projects page
 
-Portal's TUI polls for sessions every 500ms for up to 6 seconds, but every poll hits a dead server. `ListSessions()` swallows the error and returns an empty slice, so Portal sees "no sessions" rather than "server died." After MaxWait (6s), the TUI transitions to the projects page.
+**Key evidence from tmux man page:** *"start-server — Start the tmux server, if not already running, without creating any sessions. Note that as by default the tmux server will exit with no sessions, this is only useful if a session is created in ~/.tmux.conf, exit-empty is turned off, or another command is run as part of the same command sequence."* (Sources: [tmux issue #182](https://github.com/tmux/tmux/issues/182), [tmux issue #936](https://github.com/tmux/tmux/issues/936))
 
-**Why this happens:** The `EnsureServer` / `StartServer` approach was designed to start a tmux server and wait for sessions to appear (via resurrect/continuum). But `tmux start-server` creates a sessionless server, and tmux's default behavior is to exit a sessionless server immediately. The 6-second polling window is meaningless when the server is already dead.
+**Key evidence from tmux-continuum source:** Continuum's own systemd/launchd bootstrap uses `tmux new-session -d` — NOT `tmux start-server`. This is because continuum knows the server needs at least one session to stay alive while the 1-second delayed restore runs. Resurrect's `restore.sh` has a "restoring from scratch" mode that detects exactly 1 pane and replaces the bootstrap session with saved state. (Source: [tmux-continuum continuum.tmux](https://github.com/tmux-plugins/tmux-continuum/blob/master/continuum.tmux), [tmux-resurrect restore.sh](https://github.com/tmux-plugins/tmux-resurrect/blob/master/scripts/restore.sh))
 
 ### Contributing Factors
 
-- **`exit-empty on` (tmux default):** The server self-terminates with no sessions. Users would need to explicitly set `exit-empty off` in their `.tmux.conf` — but Portal doesn't document this requirement and most users won't have it set.
-- **`ListSessions()` swallows errors:** Returns `[]Session{}, nil` on failure — Portal can't distinguish "no sessions yet" from "server is dead." The polling loop silently retries against a dead server.
-- **`tmux start-server` is a fire-and-forget:** It starts the server but doesn't guarantee the server will stay alive. The `.tmux.conf` processing (including plugin initialization) may be partially async.
-- **No session anchor:** The server has nothing keeping it alive. A single dummy/bootstrap session would prevent `exit-empty` from triggering while plugins initialize.
-- **tmux-continuum trigger mechanism:** Continuum's auto-restore may depend on session creation events rather than bare server start, meaning `start-server` alone may not trigger restoration at all.
+- **`exit-empty on` (tmux default):** The server self-terminates with zero sessions. The tmux server loop checks `!RB_EMPTY(&sessions)` on every iteration — with no sessions, it returns 1 and exits. (Source: tmux `server.c`)
+- **Continuum restore is async + delayed:** `continuum_restore.sh` runs in the background with a `sleep 1` before invoking resurrect. The server dies in that 1-second gap.
+- **`ListSessions()` swallows errors:** Returns `[]Session{}, nil` on failure — Portal can't distinguish "no sessions yet" from "server is dead." The TUI polling loop silently retries against a dead server for 6 seconds.
+- **Portal chose `start-server` over `new-session -d`:** The original design discussion (`.workflows/auto-start-tmux-server/discussion/auto-start-tmux-server.md:65-67`) explicitly rejected creating a bootstrap session to avoid lifecycle complexity. The assumption was *"continuum hooks into the process quickly enough to create sessions before [exit-empty] happens."* This assumption was wrong — continuum's restore is async with a 1-second delay.
 
 ### Why It Wasn't Caught
 
-- The previous bugfix (`resume-hooks-lost-on-server-restart`) focused on hook storage and keying — it assumed tmux-resurrect would handle session restoration and didn't test the server bootstrap path
-- The dev machine likely has an active tmux server (user noted "too many things running"), so `EnsureServer` would return `(false, nil)` — the `start-server` path is never exercised
-- The 6-second MaxWait was designed for the gap between server start and session restoration, but nobody tested what happens when the server dies within that window
-- No test covers the `tmux start-server` → `exit-empty` → server dies → no restoration scenario
+- The previous bugfix focused on hook storage — it assumed tmux-resurrect would handle session restoration
+- The dev machine has an active tmux server, so `EnsureServer` returns `(false, nil)` — the `start-server` path is never exercised in development
+- The `exit-empty` risk was acknowledged as a deferred edge case in the original design discussion but never tested
+- No test covers the `start-server` → `exit-empty` → server dies → no restoration scenario
 
 ### Blast Radius
 
 **Directly affected:**
-- `internal/tmux/tmux.go:125-131` — `StartServer()` — the mechanism that starts the server
-- `internal/tmux/tmux.go:137-145` — `EnsureServer()` — orchestrates server start
+- `internal/tmux/tmux.go:125-131` — `StartServer()` — uses `start-server` instead of `new-session -d`
+- `internal/tmux/tmux.go:137-145` — `EnsureServer()` — orchestrates the broken bootstrap
 - All resume hook functionality — hooks can't fire without sessions
 - TUI loading page — polls a dead server
 
 **Potentially affected:**
-- `cmd/bootstrap_wait.go` — CLI bootstrap wait also polls for sessions against a dead server
-- Any command that depends on `PersistentPreRunE` starting the server (attach, open, kill, list)
+- `cmd/bootstrap_wait.go` — CLI bootstrap wait also polls against a dead server
+- Any command depending on `PersistentPreRunE` starting the server (attach, open, kill, list)
 
 ---
 
@@ -142,7 +144,8 @@ _To be determined after findings review_
 - User explicitly asked not to kill tmux server on the dev machine during investigation
 - tmux-resurrect and tmux-continuum are confirmed installed with auto-restore on
 - The previous bugfix was about hook storage durability — this bug is about server lifecycle and session restoration
-- There may also be a tmux-continuum trigger issue: continuum might only auto-restore on session creation, not on bare `start-server`. This is a secondary concern — if the server dies immediately, the trigger mechanism is moot
 - The user's tmux.conf does NOT set `exit-empty off`
 - **Prior art:** The `exit-empty` risk was explicitly acknowledged in the original `auto-start-tmux-server` discussion (`.workflows/auto-start-tmux-server/discussion/auto-start-tmux-server.md:67`): "tmux docs say the server exits by default with no sessions. Assumption is that continuum hooks into the process quickly enough to create sessions before this happens. If not, a keepalive session could be added later." The edge case has now materialized.
-- Synthesis agent validated root cause with high confidence — all code paths independently verified
+- Synthesis agent validated root cause — all Portal code paths independently verified
+- Root cause verified against tmux source code (server.c, cmd-kill-server.c, server-client.c), tmux-continuum source (continuum.tmux, continuum_restore.sh), and tmux-resurrect source (restore.sh)
+- tmux-continuum's own bootstrap mechanism uses `tmux new-session -d`, not `tmux start-server` — this is the pattern Portal should follow
