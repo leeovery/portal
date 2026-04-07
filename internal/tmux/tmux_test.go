@@ -402,7 +402,7 @@ func TestStartServer(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "start-server"
+		wantArgs := "new-session -d"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -419,7 +419,7 @@ func TestStartServer(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 
-		wantMsg := "failed to start tmux server"
+		wantMsg := "failed to start tmux server (bootstrap session)"
 		if !strings.Contains(err.Error(), wantMsg) {
 			t.Errorf("error %q does not contain %q", err.Error(), wantMsg)
 		}
@@ -472,7 +472,7 @@ func TestEnsureServer(t *testing.T) {
 				if args[0] == "info" {
 					return "", fmt.Errorf("no server running")
 				}
-				if args[0] == "start-server" {
+				if args[0] == "new-session" {
 					return "", nil
 				}
 				t.Fatalf("unexpected command: %v", args)
@@ -497,7 +497,7 @@ func TestEnsureServer(t *testing.T) {
 				if args[0] == "info" {
 					return "", fmt.Errorf("no server running")
 				}
-				if args[0] == "start-server" {
+				if args[0] == "new-session" {
 					return "", fmt.Errorf("start failed")
 				}
 				t.Fatalf("unexpected command: %v", args)

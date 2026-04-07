@@ -120,12 +120,16 @@ func (c *Client) ListSessions() ([]Session, error) {
 	return sessions, nil
 }
 
-// StartServer starts the tmux server without creating any sessions.
+// StartServer starts the tmux server by creating a detached bootstrap session.
+// Uses "new-session -d" instead of "start-server" so the server has at least one
+// session, preventing tmux's default "exit-empty on" from terminating the server
+// before plugins like tmux-continuum can restore saved sessions.
+// The unnamed session defaults to "0", which tmux-resurrect recognizes and cleans up.
 // Returns nil on success or a wrapped error on failure. No retry logic.
 func (c *Client) StartServer() error {
-	_, err := c.cmd.Run("start-server")
+	_, err := c.cmd.Run("new-session", "-d")
 	if err != nil {
-		return fmt.Errorf("failed to start tmux server: %w", err)
+		return fmt.Errorf("failed to start tmux server (bootstrap session): %w", err)
 	}
 	return nil
 }
