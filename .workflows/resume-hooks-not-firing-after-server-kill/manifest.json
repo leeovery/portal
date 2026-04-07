@@ -1,7 +1,7 @@
 {
   "name": "resume-hooks-not-firing-after-server-kill",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-04-06",
   "description": "Resume hooks not firing after tmux server kill — sessions not resurrected and Claude sessions not resumed when reopening Portal after tmux kill-server",
   "phases": {
