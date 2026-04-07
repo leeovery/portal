@@ -14,4 +14,73 @@ A key design choice inspired by Zellij: commands should start suspended by defau
 
 Portal's advantages over the plugin approach: event-driven saves at the moments that matter, Go implementation with direct tmux API calls and proper error handling, no race conditions since restoration is part of bootstrap, Zellij-style suspended commands for safer restoration, integrated awareness of which sessions are Portal-managed, and no separate plugin installation or TPM dependency.
 
-Open questions include whether to resurrect only Portal-managed sessions or all tmux sessions, how to handle the default "0" session tmux creates on server start, and what to do about panes running commands that can't be meaningfully restarted (SSH connections, long-running builds). Full design notes and tmux API research in `IDEA-session-resurrection.md`.
+## Resurrection vs Resume Hooks
+
+These are separate concerns that complement each other:
+
+- **Resurrection** recreates the tmux structure — sessions, windows, panes, splits, working directories, running commands. This is the new feature.
+- **Resume hooks** fire registered commands into panes — e.g. `claude --resume <uuid>`. This already exists.
+
+Resurrection runs first, hooks run after. Resurrection creates the panes; hooks fill them with the right processes. With Portal controlling resurrection, it can guarantee that structural keys match for hooks to fire — no more depending on a third-party plugin to recreate things in the right shape.
+
+For generic commands (not registered as hooks), Portal can use Zellij-style suspended restoration — show what would run, let the user press Enter to confirm, or auto-run with a `--force` flag.
+
+## How Zellij Captures Running Commands
+
+Zellij captures the **currently running foreground process**, not the original command that spawned the pane. It does this via `ps -ao ppid,args`, finding child processes of each pane's shell PID. So if you open a shell and type `claude`, Zellij captures `claude` — not `zsh`.
+
+On resurrection, it recreates the pane with that captured command in suspended state. The user presses Enter to re-run it. This means Zellij can only replay `claude` (a fresh session), not `claude --resume <uuid>` — the resume UUID is created after the process starts and is not visible in the process tree.
+
+This is exactly the gap Portal's resume hooks fill. Resurrection gets the tmux structure back; hooks provide the Claude-specific resume command with the correct conversation UUID. Zellij has no equivalent — it would just start a fresh Claude session.
+
+Zellij also supports layout files that can specify commands with arguments upfront (e.g. `command "claude"` with `args "--resume"`), but this requires pre-configuring the layout rather than capturing live state.
+
+## tmux APIs Available
+
+tmux provides sufficient APIs for capturing and restoring all the state Portal needs.
+
+### Capture
+
+| Data | Command / Format |
+|------|-----------------|
+| Sessions | `tmux list-sessions -F '#{session_name}\t#{session_attached}\t#{session_path}'` |
+| Windows | `tmux list-windows -a -F '#{session_name}\t#{window_index}\t#{window_name}\t#{window_layout}\t#{window_active}\t#{window_flags}\t#{window_zoomed_flag}'` |
+| Panes | `tmux list-panes -a -F '#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{pane_active}\t#{pane_title}'` |
+| Full command | `ps -ao ppid,args` filtered by `#{pane_pid}` |
+| Pane contents | `tmux capture-pane -epJ -S -<history_size> -t <pane_id>` |
+| Client state | `tmux display-message -p -F '#{client_session}\t#{client_last_session}'` |
+
+### Restore
+
+| Action | Command |
+|--------|---------|
+| Create session | `tmux new-session -d -s <name> -c <dir>` |
+| Create window | `tmux new-window -d -t <session>:<index> -c <dir>` |
+| Split pane | `tmux split-window -t <session>:<window> -c <dir>` |
+| Apply layout | `tmux select-layout -t <session>:<window> '<layout_string>'` |
+| Set focus | `tmux select-pane -t <target>`, `tmux select-window -t <target>` |
+| Rename window | `tmux rename-window -t <target> <name>` |
+| Set zoom | `tmux resize-pane -t <target> -Z` |
+| Send command | `tmux send-keys -t <target> '<command>' C-m` |
+| Set pane title | `tmux select-pane -t <target> -T '<title>'` |
+
+The `#{window_layout}` string is the key primitive for restoring splits. It's a recursive tree encoding the full pane geometry. Applying via `select-layout` automatically adjusts all pane sizes. The target window must have at least as many panes as the layout describes.
+
+### Limitations
+
+Things tmux cannot provide:
+- Shell internal state (env vars, functions, aliases, unexported vars, history)
+- Running process state (a mid-flight script cannot be suspended and resumed)
+- Pipe/socket/network connections within panes
+- Exact terminal state (cursor position within apps, scroll position)
+- Full command line — `#{pane_current_command}` only gives the short name (e.g. `vim`), full args require `ps` parsing which is fragile for complex pipelines and backgrounded processes
+- `#{pane_current_path}` relies on the shell/program sending OSC 7 escape sequences; may be stale if the program doesn't do this
+
+## Open Questions
+
+- Should Portal only resurrect Portal-managed sessions, or all tmux sessions?
+- Should this replace resurrect/continuum entirely, or coexist?
+- How to handle the default "0" session that tmux always creates on server start?
+- Should Portal support grouped sessions?
+- What to do about panes running commands that can't be meaningfully restarted (SSH connections, long-running builds)?
+- Save format and location — `~/.config/portal/sessions.json` or `~/.local/share/portal/snapshots/`?
