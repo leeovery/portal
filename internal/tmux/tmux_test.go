@@ -1008,6 +1008,83 @@ func TestResolveStructuralKey(t *testing.T) {
 	})
 }
 
+func TestEnsureServerThenListSessions(t *testing.T) {
+	t.Run("bootstrap session is queryable and server is running after EnsureServer starts server", func(t *testing.T) {
+		infoCallCount := 0
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "info":
+					infoCallCount++
+					if infoCallCount == 1 {
+						return "", fmt.Errorf("no server running")
+					}
+					return "", nil
+				case "new-session":
+					return "", nil
+				case "list-sessions":
+					return "0|1|0", nil
+				default:
+					t.Fatalf("unexpected command: %v", args)
+					return "", nil
+				}
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		// Step 1: EnsureServer should start the server
+		started, err := client.EnsureServer()
+		if err != nil {
+			t.Fatalf("EnsureServer() unexpected error: %v", err)
+		}
+		if !started {
+			t.Error("EnsureServer() started = false, want true")
+		}
+
+		// Step 2: ListSessions should return the bootstrap session
+		sessions, err := client.ListSessions()
+		if err != nil {
+			t.Fatalf("ListSessions() unexpected error: %v", err)
+		}
+		if len(sessions) != 1 {
+			t.Fatalf("ListSessions() returned %d sessions, want 1", len(sessions))
+		}
+		if sessions[0].Name != "0" {
+			t.Errorf("session.Name = %q, want %q", sessions[0].Name, "0")
+		}
+		if sessions[0].Windows != 1 {
+			t.Errorf("session.Windows = %d, want 1", sessions[0].Windows)
+		}
+		if sessions[0].Attached {
+			t.Error("session.Attached = true, want false")
+		}
+
+		// Step 3: ServerRunning should return true
+		if !client.ServerRunning() {
+			t.Error("ServerRunning() = false, want true")
+		}
+
+		// Verify exactly 4 mock calls in correct order
+		if len(mock.Calls) != 4 {
+			t.Fatalf("expected 4 calls, got %d: %v", len(mock.Calls), mock.Calls)
+		}
+
+		wantCalls := [][]string{
+			{"info"},
+			{"new-session", "-d"},
+			{"list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}"},
+			{"info"},
+		}
+		for i, wantArgs := range wantCalls {
+			gotArgs := strings.Join(mock.Calls[i], " ")
+			wantJoined := strings.Join(wantArgs, " ")
+			if gotArgs != wantJoined {
+				t.Errorf("call[%d] = %q, want %q", i, gotArgs, wantJoined)
+			}
+		}
+	})
+}
+
 func TestSendKeys(t *testing.T) {
 	t.Run("sends command followed by Enter to pane", func(t *testing.T) {
 		mock := &MockCommander{}

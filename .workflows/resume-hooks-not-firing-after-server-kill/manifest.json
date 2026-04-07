@@ -78,7 +78,11 @@
           "current_phase": 1,
           "current_task": "~",
           "completed_tasks": [
-            "resume-hooks-not-firing-after-server-kill-1-1"
+            "resume-hooks-not-firing-after-server-kill-1-1",
+            "resume-hooks-not-firing-after-server-kill-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }
