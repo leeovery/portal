@@ -4,7 +4,7 @@ Portal should own the full session lifecycle: server start → session restorati
 
 ## The Problem
 
-Portal's resume hooks feature can restart processes in panes (e.g., `claude --resume <uuid>`), but it depends on the session structure already existing. That structure is supposed to be restored by tmux-resurrect/continuum after a reboot, but those plugins have never worked reliably — sessions simply don't come back. This means the resume feature is effectively broken end-to-end despite the code being correct.
+Portal's resume hooks feature can restart processes in panes (e.g., `claude --resume <uuid>`), but it depends on the session structure already existing. That structure is supposed to be restored by tmux-resurrect/continuum after a reboot, but those plugins have never worked — not intermittently, but a 100% failure rate. Sessions simply don't come back. This means the resume feature is effectively broken end-to-end despite the code being correct.
 
 The resume system also has an undocumented dependency on these plugins. Portal doesn't mention that you need resurrect/continuum installed for the resume workflow to function across reboots. This was a deliberate choice to avoid coupling to buggy plugins, but the result is a feature that silently doesn't work in the most important scenario (reboot recovery).
 
@@ -20,7 +20,9 @@ Portal owns the full chain. No external plugin dependencies.
 
 **Portal doesn't maintain a separate session registry.** It reads tmux directly via `list-sessions`. Resurrection follows the same pattern: capture everything tmux has, restore everything captured. Non-Portal sessions get structure restoration for free; Portal sessions additionally get resume hooks.
 
-**Portal-only vs native tmux is a non-issue.** Since `list-panes -a` captures all sessions regardless of origin, and Portal's bootstrap starts the server, non-Portal sessions are captured naturally. No extra work to include them, extra work to exclude them.
+**Portal-only vs native tmux is a non-issue.** Since `list-panes -a` captures all sessions regardless of origin, and Portal's bootstrap starts the server, non-Portal sessions are captured naturally. No extra work to include them, extra work to exclude them. Verified in code: `ListSessions` (`internal/tmux/tmux.go:79`) runs `tmux list-sessions` with no filtering — raw tmux sessions already appear in Portal's session picker. Resurrection capturing everything is consistent with how Portal already works.
+
+**Portal is always the entry point.** The user never starts tmux directly — always via Portal. This makes the bootstrap the natural and reliable place for restoration.
 
 ## Research Findings
 
