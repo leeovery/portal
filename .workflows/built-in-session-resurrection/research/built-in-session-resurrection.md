@@ -73,10 +73,41 @@ Portal's architecture addresses all of these: atomic writes (no corruption), dir
 A TPM plugin that piggybacks on resurrect/continuum, adding AI-assistant-specific session ID capture. Depends entirely on resurrect for structure — the exact dependency Portal eliminates.
 
 **Worth noting:**
-- Two-guard restore pattern (check shell running + no existing process before sending commands). Portal may not need this since it creates panes fresh during restoration — nothing else could be running. But worth keeping in mind for edge cases.
+- Two-guard restore pattern (check shell running + no existing process before sending commands). Portal doesn't need this — it creates panes fresh during restoration, so nothing else is running. The guard is needed by assistant-resurrect because it piggybacks on resurrect which might have already sent commands via its own process list.
 - CLI args preservation (stripping session args, keeping user flags). Not Portal's concern — the hook system is generic, and it's the caller's responsibility to register the correct resume command with all needed flags.
 
 **Confirms Portal's advantages:** generic hook system, full lifecycle ownership, one-shot + re-registration model avoids stale session IDs.
+
+### Shell Readiness After Pane Creation — SOLVABLE
+
+After restoration creates panes, shells need time to initialize before resume commands can be sent via `send-keys`. Shell startup ranges from 5ms (bare bash) to 2-5s (heavy zsh configs with oh-my-zsh, nvm, pyenv).
+
+**No existing tool has solved this well.** tmux-resurrect sends immediately (no delay). tmuxinator has a known bug with lost commands. tmuxp offers configurable fixed sleeps.
+
+**Best available approach: capture-pane polling.** Poll `tmux capture-pane -p` every 50-100ms, looking for prompt characters (`$`, `%`, `>`, `❯`) on the last non-empty line. Timeout after 5s and send anyway (best-effort fallback). This adapts to actual shell speed rather than guessing with a fixed delay.
+
+**Gotcha:** Powerlevel10k's "instant prompt" renders a fake prompt before zsh finishes loading. A 200ms minimum wait before starting to poll mitigates this.
+
+**Future ideal:** tmux 3.5+ supports OSC 133 semantic prompt markers (shells signal "prompt displayed"), but tmux doesn't expose this via its API yet. If tmux ever adds a `#{pane_has_prompt}` format variable, that would be the gold standard.
+
+### Restoration Timing in Bootstrap — CLEAR
+
+Current flow: `PersistentPreRunE` → `EnsureServer()` → `WaitForSessions` (polls for sessions to appear, hoping resurrect/continuum populates them).
+
+New flow: `PersistentPreRunE` → `EnsureServer()` → **Portal restores saved state directly** → sessions exist because Portal created them.
+
+The `WaitForSessions` polling mechanism (`internal/tmux/wait.go`) becomes unnecessary in its current form. Portal doesn't need to poll and hope — it did the restoration itself and knows when it's done. The `bootstrapWait` function would be replaced/reworked to call restoration logic directly. The loading page still makes sense (restoration takes a moment) but the "poll and pray" step goes away.
+
+### Hook Volatile Markers — COMPATIBLE AS-IS
+
+The resume hook system's volatile markers (`@portal-active-<pane>` tmux server options) work correctly with restoration without changes:
+
+1. Reboot → tmux server dies → markers lost (they're in-memory server options)
+2. `portal open` → starts fresh server → restores session structure
+3. User selects session → `ExecuteHooks` runs → no markers → hooks fire → markers set
+4. User detaches/reattaches → markers exist → hooks correctly skip
+
+Restoration only recreates structure. Hooks fire when a user *enters* a session (via `portal open`/`portal attach`), not during structural restoration. The marker design is already compatible.
 
 ## Open Research Threads
 
@@ -102,10 +133,5 @@ tmux hooks available for event-driven saves. Still need to determine:
 **Status: needs investigation**
 
 Resurrect has ~20-30% failure rate for complex layouts. Portal should do better with deterministic ordering (create all panes first, apply layout once). But terminal dimension changes between save and restore are a tmux limitation Portal can't fully solve.
-
-### Restoration Timing
-**Status: needs thought**
-
-When exactly does restoration happen in Portal's lifecycle? During bootstrap (`PersistentPreRunE`)? Before the TUI loads? The loading page already exists for the server-start case — restoration could extend that.
 
 ---
