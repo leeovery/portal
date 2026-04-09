@@ -32,6 +32,9 @@
     },
     "resume-hooks-not-firing-after-server-kill": {
       "work_type": "bugfix"
+    },
+    "built-in-session-resurrection": {
+      "work_type": "feature"
     }
   },
   "defaults": {
