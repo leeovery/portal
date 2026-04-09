@@ -109,29 +109,36 @@ The resume hook system's volatile markers (`@portal-active-<pane>` tmux server o
 
 Restoration only recreates structure. Hooks fire when a user *enters* a session (via `portal open`/`portal attach`), not during structural restoration. The marker design is already compatible.
 
-## Open Research Threads
+## Topics for Discussion Phase
+
+The following are design decisions, not open research questions. The technical feasibility is established — what remains is choosing between known options.
 
 ### Hook Lifecycle Redesign
-**Status: needs exploration**
 
-With Portal owning restoration, the hook design might change. Two models:
-- **One-shot:** Fire hook, remove it, rely on the resumed process to re-register. Portal's perspective is simple. Works when the process has its own hook that re-registers (e.g., Claude).
+Two viable models exist. Both are technically feasible:
+- **One-shot:** Fire hook, remove it, rely on the resumed process to re-register. Works when the process has its own hook (e.g., Claude re-registers on resume).
 - **Persistent:** Hook survives across reboots without re-registration. Useful for processes that don't self-register (e.g., a static `npm start` command).
 
-Could be configurable per-hook.
+Could be configurable per-hook. The current hook store structure (`map[structural_key]map[event]command`) supports both — it's a question of whether Portal removes the entry after firing.
 
-### Save Triggers
-**Status: partially researched**
+### Save-Side Architecture
 
-tmux hooks available for event-driven saves. Still need to determine:
-- Which events to hook (session-created, session-closed, window-linked — anything that changes structure)
-- Whether periodic saves are also needed (crash safety — hooks don't fire on SIGKILL)
-- Where to save (likely `~/.config/portal/` alongside existing stores)
-- Save format (JSON, consistent with existing stores)
+The research confirms the building blocks exist:
+- **Trigger mechanism:** tmux global hooks (`set-hook -g`) can call `portal save-state` (or similar) on structural events. Periodic saves also needed as crash safety net (hooks don't fire on SIGKILL). Which specific events to hook, debouncing strategy, and whether the save runs in-process or spawns a Portal subprocess are design choices.
+- **Format:** JSON, consistent with existing stores (`projects.json`, `hooks.json`). Schema design (fields per session/window/pane, single file vs per-session) is a spec-level detail.
+- **Concurrency:** `AtomicWrite` prevents partial-write corruption. Concurrent read-modify-write races from rapid event-driven saves need debouncing or serialization — standard concurrency problem, not a research question.
+- **Storage location:** `~/.config/portal/` alongside existing config files, resolved via the same `configFilePath` mechanism.
 
 ### Layout Restoration Reliability
-**Status: needs investigation**
 
-Resurrect has ~20-30% failure rate for complex layouts. Portal should do better with deterministic ordering (create all panes first, apply layout once). But terminal dimension changes between save and restore are a tmux limitation Portal can't fully solve.
+Portal uses the same tmux primitives as resurrect (`split-window` then `select-layout`). The improvement comes from Go's deterministic execution and error handling vs bash's fragile string parsing, not a fundamentally different algorithm. Terminal dimension changes between save and restore are a tmux-level constraint that neither Portal nor any other tool can fully solve — `select-layout` does its best to fit the saved layout into the available space.
+
+### Other Design Items for Discussion
+
+- **Session naming / project store interaction:** Restored sessions carry their original names (`{project}-{nanoid}`). How this interacts with `projects.json` timestamps and mappings is a design question.
+- **Environment variables / shell state:** tmux cannot capture shell-internal state (env vars, virtualenvs, nvm versions). This is a known limitation — same as resurrect. Portal's hook system could partially compensate (hooks that re-source environments) but that's the hook consumer's responsibility, not Portal's.
+- **tmux version compatibility:** Minimum supported tmux version needs to be determined during planning. Core APIs (`list-panes -a -F`, `set-hook -g`, `select-layout`) have been available since tmux 2.6+. Shell readiness polling via `capture-pane -p` is also long-standing.
+- **Ephemeral session opt-out:** Whether users should be able to mark sessions as "don't restore." Design decision — trivially implementable if desired.
+- **`CleanStale` guard behavior change:** The existing guard skips cleanup when `livePanes` is empty (to avoid deleting hooks before resurrect restores). With Portal owning restoration, panes will always exist before hooks run. The guard's rationale changes — worth noting during implementation.
 
 ---
