@@ -32,23 +32,40 @@ Key design principles established in research:
   └─ Per-hook configurability [decided]
 
   Save-Side Architecture [pending]
-  ├─ Trigger mechanism (events vs periodic vs hybrid) [pending]
+  ├─ Execution model (daemon vs subprocess-per-event) [pending]
+  ├─ Trigger mechanism (which tmux events to hook) [pending]
+  ├─ Crash safety / periodic save cadence [pending]
   ├─ Debouncing / serialization strategy [pending]
   ├─ Save format and schema [pending]
-  └─ In-process vs subprocess execution [pending]
+  ├─ save-state CLI surface and contract [pending]
+  └─ tmux hook registration lifecycle (install/uninstall/upgrade) [pending]
 
   Restore-Side Architecture [pending]
   ├─ Bootstrap integration [pending]
+  ├─ Fate of WaitForSessions / bootstrapWait [pending]
   ├─ Shell readiness detection [pending]
   └─ Layout restoration approach [pending]
+
+  Failure Modes & Recovery [pending]
+  ├─ Corrupt / partial saved state [pending]
+  ├─ Missing working directories on restore [pending]
+  ├─ Layout fit failures (terminal size drift) [pending]
+  └─ User feedback on partial restore [pending]
+
+  Observability & Diagnostics [pending]
+  ├─ Save-state introspection command [pending]
+  ├─ Logging strategy [pending]
+  └─ Health signals for silent failures [pending]
+
+  CleanStale Guard Behavior [pending]
+  ├─ Guard rationale change post-restoration [pending]
+  └─ Stale-hook detection criteria (binary/dir/project missing) [pending]
 
   Session & Project Store Interaction [pending]
   ├─ Restored session naming [pending]
   └─ projects.json timestamp handling [pending]
 
   Ephemeral Session Opt-Out [pending]
-
-  CleanStale Guard Behavior [pending]
 
   Scope Boundaries [pending]
   ├─ Environment / shell state (explicit non-goal) [pending]
@@ -98,23 +115,41 @@ No slam-dunk use case for `once`. The decisive argument came from re-reading the
 
 > Portal's hook system is generic. No awareness of what consumers do with it. Portal stores and fires a command string — it's the caller's responsibility to make that command correct.
 
-One-shot vs persistent is *policy*. Portal provides the *mechanism*. If a caller wants one-shot behavior, they implement it at the command level:
+One-shot vs persistent is *policy*. Portal provides the *mechanism*. If a caller wants one-shot behavior, they implement it at the command level — not inside Portal.
+
+### False path: `&&` chaining
+
+An initial framing proposed that one-shot callers could self-remove via shell chaining:
 
 ```
-portal hooks set --on-resume "my-cmd && portal hooks remove --pane $(tmux display -p '#{pane_id}')"
+portal hooks set --on-resume "my-cmd && portal hooks rm --on-resume"
 ```
 
-Self-removing command. Caller owns the policy, Portal owns the mechanism — consistent with the rest of the hook design.
+**This doesn't work for the flagship use case.** The canonical hook commands are long-running processes — `claude --resume <uuid>`, `npm start`, `tail -f`. These never exit, so the `&&` clause never fires, and the hook never removes itself. The proposed pattern was architecturally broken for the exact class of commands hooks exist to serve.
+
+Verified against the codebase: the actual CLI is `portal hooks set --on-resume "..."` and `portal hooks rm --on-resume`, both inferring the current pane from `TMUX_PANE` and keying hooks by structural key (`session:window.pane`). The API shape is fine; shell chaining is not.
+
+### The actual caller pattern: wrapper-script lifecycle management
+
+The correct model — and the one the user already described from their Claude setup — is that long-running processes are invoked by a wrapper script which *owns* the hook lifecycle:
+
+- Wrapper registers a Portal hook when the process starts (using current state, e.g., resume UUID)
+- Wrapper re-registers on each resume if the hook command is dynamic
+- Wrapper removes the hook on explicit process exit (via exit trap or explicit teardown)
+
+Portal is never involved in deciding when to remove; it just exposes `set`/`rm` primitives that the wrapper calls at the appropriate lifecycle moments. This keeps Portal fully generic while giving callers precise control.
 
 ### Decision
 
-**Do not add a `mode` field.** Portal keeps its single behavior: hooks persist across reboots until explicitly removed. Callers wanting one-shot semantics implement it by having the command remove its own hook as the final step.
+**Do not add a `mode` field.** Portal keeps its single behavior: hooks persist in the store across reboots until explicitly removed via `portal hooks rm`. Callers that want one-shot or bounded-lifetime semantics manage it from a wrapper script around the target process — using set/rm as primitives at start/exit points.
 
-**Trade-off accepted**: callers shoulder one-shot policy instead of Portal. Small extension of existing caller responsibility — callers already own the entire command string.
+**Trade-off accepted**: callers of long-running processes shoulder the responsibility of wiring up wrapper-script hook management. This is consistent with the rest of Portal's hook design — callers already own the command string entirely, and wrapping a long-running process is standard operational practice.
 
-**Confidence**: high. YAGNI-compliant; a mode field can always be added later if a concrete use case emerges.
+**Confidence**: high. YAGNI-compliant; a mode field can be added later if a concrete use case emerges where wrapper-script management is genuinely impractical.
 
-**False path noted**: the research framing of "one-shot vs persistent as two viable models" overstated the design space. On inspection, `always` (current behavior) handles every real use case with minor caller-side wrapping.
+**False paths documented**:
+1. *"One-shot vs persistent as two viable models"* (original research framing) — overstated the design space. `always` (current behavior) handles every real use case with caller-side wrapping.
+2. *"`&&` chaining for self-removal"* — architecturally broken for long-running processes, the exact class of commands hooks serve.
 
 ---
 
@@ -127,5 +162,6 @@ Self-removing command. Caller owns the policy, Portal owns the mechanism — con
 *(To be completed during discussion)*
 
 ### Current State
-- Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via self-removing commands
-- Remaining: Save-Side Architecture, Restore-Side Architecture, Session & Project Store Interaction, Ephemeral Session Opt-Out, CleanStale Guard Behavior, Scope Boundaries
+- Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management (not `&&` chaining)
+- Map expanded post-review to include Failure Modes & Recovery, Observability & Diagnostics, and several previously-missing sub-concerns under Save-Side and Restore-Side
+- Remaining: Save-Side Architecture, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
