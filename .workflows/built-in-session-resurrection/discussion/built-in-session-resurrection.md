@@ -31,6 +31,13 @@ Key design principles established in research:
   ├─ One-shot vs persistent hooks [decided]
   └─ Per-hook configurability [decided]
 
+  Save Content & Scope [decided]
+  ├─ Structural state capture [decided]
+  ├─ Scrollback / pane contents capture [decided]
+  ├─ Ephemeral interaction state exclusion [decided]
+  ├─ History size policy (no artificial caps) [decided]
+  └─ Security / file permissions [decided]
+
   Save-Side Architecture [pending]
   ├─ Execution model (daemon vs subprocess-per-event) [pending]
   ├─ Trigger mechanism (which tmux events to hook) [pending]
@@ -153,6 +160,86 @@ Portal is never involved in deciding when to remove; it just exposes `set`/`rm` 
 
 ---
 
+## Save Content & Scope
+
+### Context
+
+Before any save-side architecture decisions (when to save, how to write, by what mechanism), we need to decide *what* gets saved. The initial discussion had been progressing toward plumbing (daemon vs subprocess, debouncing strategy) without first nailing down the content profile — a gap the user caught by asking whether scrollback was in scope.
+
+The answer reframes the whole save-side discussion. "Structural resurrection" (sessions + windows + panes + layouts + cwds) is functional but hollow. Every pane comes back empty; history continuity is lost. Zellij's session persistence captures *pane contents by default* and is consistently cited as one of its best features. If Portal is going to own the full lifecycle, it has to at least match that standard — otherwise the feature name is aspirational and users who know Zellij will rightly feel shortchanged.
+
+### Journey
+
+Initial framing implicitly excluded scrollback. I was deep in architectural plumbing and never stopped to enumerate content. User corrected with an unambiguous product directive: *"Scrollback 100% MUST be captured. This is useless without it. I want Zellij but in tmux!! Whatever we can save we should."*
+
+That directive became the organizing principle: **capture everything that persists as meaningful state, exclude only ephemeral interaction state, accept the uncapturable as out of scope.**
+
+### Options Considered
+
+**A: Structural-only** (original implicit framing)
+- Pros: Smallest save files, fastest, simplest security story.
+- Cons: Panes come back empty. No history continuity. "Resurrection" in name only. Zellij users would scoff.
+
+**B: Structural + scrollback, opt-in** (resurrect's model)
+- Pros: Safety-conscious default, users opt in if they want it.
+- Cons: Most users don't opt in and never experience the full benefit. The feature exists but doesn't feel right out of the box. Fails the "Zellij in tmux" product goal.
+
+**C: Everything capturable, on by default, ephemeral excluded** (user's directive)
+- Pros: Resurrection actually feels like resurrection. Matches Zellij UX standard. Simple mental model ("whatever was there, comes back").
+- Cons: Larger save files, more data on disk, security consideration for sensitive output.
+
+### Content Inventory
+
+**IN SCOPE** (captured on save, restored on resurrection):
+
+*Structural:*
+- Session names and deviating session options
+- Window indices, names, layout strings, active/zoom flags
+- Pane indices, current working directories, active flag, last-pane tracking
+- Marks (`<prefix>m`-set position markers)
+
+*Content:*
+- Full pane scrollback with ANSI escape sequences — colors, attributes, formatting preserved via `tmux capture-pane -e -p -S - -t <pane>`
+- tmux per-session environment via `show-environment -t <session>` (the tmux-level env used for initializing new panes, not live shell env)
+
+*Already stored:*
+- Resume hooks (already in `hooks.json`, not new)
+
+**OUT OF SCOPE — explicitly ephemeral:**
+- Copy mode state
+- Active selections
+- Paste buffers
+- Cursor position within panes
+- Scroll position within scrollback
+- Per-client state (which client has which pane focused, client-specific dimensions)
+
+**OUT OF SCOPE — uncapturable by tmux** (research-confirmed, not Portal's problem to solve):
+- Live shell environment variables — tmux can't observe shell-side `export`. Callers can compensate via resume hooks if they care.
+- Running process state (REPL state, interactive sessions) — hence the resume hook system exists at all
+- Open file descriptors, pipes, sockets, ptrace state, etc.
+
+### Decision
+
+**Capture everything tmux exposes that persists as meaningful state. On by default. No opt-in.**
+
+- Scrollback capture is non-negotiable and always on
+- History size: no artificial Portal cap — save whatever tmux has in the history buffer (respects user's `history-limit`). A cap can be added later if storage becomes a real issue. YAGNI.
+- Security: saved state lives in `~/.config/portal/` alongside existing config, with `0600` permissions on any file containing scrollback. Same local-filesystem trust model as shell history (`~/.bash_history`, `~/.zsh_history`). No encryption at rest — overkill, adds key management complexity, matches neither resurrect nor Zellij.
+- Per-session opt-out for sensitive sessions is handled separately under the Ephemeral Session Opt-Out subtopic — that gives users a safety valve without compromising the default experience.
+
+### Impact on Save-Side Architecture (flagged, not decided here)
+
+Saves are now content-heavy (scrollback per pane + structural), not lightweight JSON. Implications:
+
+- Each save does N `capture-pane` calls + a JSON write — still fast (~ms per pane), but not negligible at burst frequency.
+- Debouncing matters more — avoiding storms of large saves is valuable.
+- Format probably wants per-pane scrollback files referenced from a main state JSON, rather than one giant state blob. Debuggable, selectively restorable, partial-corruption tolerant.
+- These concerns feed into the upcoming Save-Side Architecture and Failure Modes subtopics — noted here, decided there.
+
+**Confidence**: High. Product direction is unambiguous, tmux capture APIs are verified, architectural ripple effects are understood and manageable.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -163,5 +250,5 @@ Portal is never involved in deciding when to remove; it just exposes `set`/`rm` 
 
 ### Current State
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management (not `&&` chaining)
-- Map expanded post-review to include Failure Modes & Recovery, Observability & Diagnostics, and several previously-missing sub-concerns under Save-Side and Restore-Side
+- Save Content & Scope: **decided** — capture everything tmux exposes as meaningful state (structural + scrollback + env + marks), on by default, no opt-in. Target is "Zellij in tmux" resurrection quality. Ephemeral interaction state excluded.
 - Remaining: Save-Side Architecture, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
