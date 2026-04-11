@@ -174,6 +174,16 @@ Initial framing implicitly excluded scrollback. I was deep in architectural plum
 
 That directive became the organizing principle: **capture everything that persists as meaningful state, exclude only ephemeral interaction state, accept the uncapturable as out of scope.**
 
+**Main screen vs alternate screen — a phantom problem resolved**: A follow-up tangent worried that `capture-pane -p -S -` returns "stale" content for panes running `vim`, `htop`, `less`, `man`, etc. — because those programs use tmux's *alternate screen buffer*, not the main screen. Initial (wrong) concern: "a pane in vim for 3 hours returns empty/stale scrollback because vim's content isn't captured."
+
+Resolution: tmux distinguishes two separate buffers per pane:
+- **Main screen buffer** — the normal terminal output that scrolls. This *is* scrollback. `capture-pane -p -S -` captures this.
+- **Alternate screen buffer** — what alt-screen programs draw into. It temporarily replaces the visible area while the program runs, then disappears when the program exits and the main screen becomes visible again. It is *not* part of scrollback.
+
+So the capture is correct: the main screen buffer *is* the real shell history, just temporarily hidden by the alt-screen overlay. A pane that's been in vim for 3 hours still has the actual scrollback (everything up to and including `vim main.go`) in its main screen buffer — and that's what gets captured and restored. There is no "stale content" — there is the scrollback as it exists.
+
+**Implication: no special handling for alt-screen panes.** Portal captures scrollback. Programs like vim are *not* scrollback. If a user wants vim auto-relaunched on restore, they register a hook — same as Claude, same as any other process. Portal doesn't guess, doesn't infer, doesn't try to capture alt-screen contents. The user's framing: *"If I was to start something that overtook the window, like a special command like vim, I wouldn't expect you to capture that because it's outside of the scrollback."* Correct.
+
 ### Options Considered
 
 **A: Structural-only** (original implicit framing)
@@ -226,6 +236,30 @@ That directive became the organizing principle: **capture everything that persis
 - History size: no artificial Portal cap — save whatever tmux has in the history buffer (respects user's `history-limit`). A cap can be added later if storage becomes a real issue. YAGNI.
 - Security: saved state lives in `~/.config/portal/` alongside existing config, with `0600` permissions on any file containing scrollback. Same local-filesystem trust model as shell history (`~/.bash_history`, `~/.zsh_history`). No encryption at rest — overkill, adds key management complexity, matches neither resurrect nor Zellij.
 - Per-session opt-out for sensitive sessions is handled separately under the Ephemeral Session Opt-Out subtopic — that gives users a safety valve without compromising the default experience.
+
+### Capture feasibility (tmux APIs)
+
+What tmux actually exposes for each item on the in-scope list:
+
+**Verified against research / tmux docs:**
+
+| Content | tmux mechanism |
+|---|---|
+| Session/window/pane structure | `list-panes -a -F` with format variables |
+| Window layout strings | `#{window_layout}` (pre-zoom form, research-verified) |
+| Pane working directory | `#{pane_current_path}` |
+| Pane active / zoom state | `#{pane_active}`, `#{window_zoomed_flag}` |
+| Pane current command (short name) | `#{pane_current_command}` (research-verified: short name only, no args — not a Portal problem) |
+| Main-screen scrollback with ANSI | `capture-pane -e -p -S - -t <pane>` (research-verified) |
+| tmux per-session environment | `show-environment -t <session>` (standard tmux) |
+| Session/window/pane options | `show-options -s`, `show-options -w`, `show-options -p` |
+
+**Soft spots — items that need capture-side verification during implementation:**
+
+- **Last-pane tracking** (the `<prefix>;` target). tmux supports the concept but I don't know of a format variable that exposes "which pane is 'last' for this window." May require observing pane-focus events and tracking it externally, or dropping it from the inventory if it's not worth the complexity. To verify during save-side implementation.
+- **"Deviating" session/window options** — capturable via `show-options`, but selection criteria (what counts as "matters for restore") and explicit exclusion of Portal's own `set-hook -g` definitions are not yet specified. This is a real risk of recursion on restore if we capture our own hooks. Flagged here, resolved in Save-Side Architecture.
+
+Nothing on the in-scope list is known to be uncapturable — but a couple of items need pinning down before they're safe to rely on.
 
 ### Impact on Save-Side Architecture (flagged, not decided here)
 
