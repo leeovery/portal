@@ -238,7 +238,8 @@ So the capture is correct: the main screen buffer *is* the real shell history, j
 
 - Scrollback capture is non-negotiable and always on
 - History size: no artificial Portal cap — save whatever tmux has in the history buffer (respects user's `history-limit`). A cap can be added later if storage becomes a real issue. YAGNI.
-- Security: saved state lives in `~/.config/portal/` alongside existing config, with `0600` permissions on any file containing scrollback. Same local-filesystem trust model as shell history (`~/.bash_history`, `~/.zsh_history`). No encryption at rest — overkill, adds key management complexity, matches neither resurrect nor Zellij.
+- Storage: saved state lives in `~/.config/portal/` alongside existing config files, resolved via the same `configFilePath` mechanism. Considered `~/.local/state/portal/` (`XDG_STATE_HOME`) for separation from synced config, but all existing Portal config (`hooks.json`, `projects.json`, `aliases`) is machine-specific too — splitting would be inconsistent. One location, no migration. Can reorganize later if needed.
+- Security: state files written with `0600` permissions. Scrollback contains command *output* (potentially more sensitive than shell history — `kubectl get secret`, `gh auth token`, debug logs with API keys). Same local-filesystem trust model as shell history and debug logs users already have on disk. No encryption at rest — overkill, adds key management complexity, matches neither resurrect nor Zellij.
 - Per-session opt-out for sensitive sessions is handled separately under the Ephemeral Session Opt-Out subtopic — that gives users a safety valve without compromising the default experience.
 
 ### Capture feasibility (tmux APIs)
