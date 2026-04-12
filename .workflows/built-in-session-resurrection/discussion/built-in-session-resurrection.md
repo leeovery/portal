@@ -182,6 +182,11 @@ Resolution: tmux distinguishes two separate buffers per pane:
 
 So the capture is correct: the main screen buffer *is* the real shell history, just temporarily hidden by the alt-screen overlay. A pane that's been in vim for 3 hours still has the actual scrollback (everything up to and including `vim main.go`) in its main screen buffer — and that's what gets captured and restored. There is no "stale content" — there is the scrollback as it exists.
 
+**Items removed from inventory post-review:**
+- **Marks** (`<prefix>m`) — initially listed as "position markers." In reality, tmux's `<prefix>m` sets a *pane-level* marked state (used by `swap-pane -m`, one pane at a time across the server) — not a scrollback position bookmark. The useful thing (copy-mode position marks) has no tmux API to capture or restore. Neither version justifies the complexity. Removed.
+- **"Deviating session options"** — initially listed as "session names and deviating session options." On inspection, nearly all tmux options are set globally via `~/.tmux.conf` and apply on restore automatically. Per-session/per-window overrides (e.g., `synchronize-panes`, `monitor-activity`) are niche. Capturing them generically requires diffing `show-options` against global defaults — complexity not worth it. Also carried a recursion risk if Portal's own `set-hook -g` definitions were captured. Dropped generic options capture entirely. If a specific flag (like `synchronize-panes`) is missed, it can be added as an explicit per-window boolean later. YAGNI.
+- **Last-pane tracking** — no confirmed tmux format variable exposes "which pane is 'last' for this window." To verify during implementation; dropped from the guaranteed inventory for now.
+
 **Implication: no special handling for alt-screen panes.** Portal captures scrollback. Programs like vim are *not* scrollback. If a user wants vim auto-relaunched on restore, they register a hook — same as Claude, same as any other process. Portal doesn't guess, doesn't infer, doesn't try to capture alt-screen contents. The user's framing: *"If I was to start something that overtook the window, like a special command like vim, I wouldn't expect you to capture that because it's outside of the scrollback."* Correct.
 
 ### Options Considered
@@ -203,10 +208,9 @@ So the capture is correct: the main screen buffer *is* the real shell history, j
 **IN SCOPE** (captured on save, restored on resurrection):
 
 *Structural:*
-- Session names and deviating session options
+- Session names
 - Window indices, names, layout strings, active/zoom flags
-- Pane indices, current working directories, active flag, last-pane tracking
-- Marks (`<prefix>m`-set position markers)
+- Pane indices, current working directories, active flag
 
 *Content:*
 - Full pane scrollback with ANSI escape sequences — colors, attributes, formatting preserved via `tmux capture-pane -e -p -S - -t <pane>`
@@ -254,12 +258,7 @@ What tmux actually exposes for each item on the in-scope list:
 | tmux per-session environment | `show-environment -t <session>` (standard tmux) |
 | Session/window/pane options | `show-options -s`, `show-options -w`, `show-options -p` |
 
-**Soft spots — items that need capture-side verification during implementation:**
-
-- **Last-pane tracking** (the `<prefix>;` target). tmux supports the concept but I don't know of a format variable that exposes "which pane is 'last' for this window." May require observing pane-focus events and tracking it externally, or dropping it from the inventory if it's not worth the complexity. To verify during save-side implementation.
-- **"Deviating" session/window options** — capturable via `show-options`, but selection criteria (what counts as "matters for restore") and explicit exclusion of Portal's own `set-hook -g` definitions are not yet specified. This is a real risk of recursion on restore if we capture our own hooks. Flagged here, resolved in Save-Side Architecture.
-
-Nothing on the in-scope list is known to be uncapturable — but a couple of items need pinning down before they're safe to rely on.
+**All items on the in-scope list are verified as capturable via standard tmux APIs.** Three soft-spot items (marks, deviating session options, last-pane tracking) were removed from the inventory during review — see Journey notes above.
 
 ### Impact on Save-Side Architecture (flagged, not decided here)
 
