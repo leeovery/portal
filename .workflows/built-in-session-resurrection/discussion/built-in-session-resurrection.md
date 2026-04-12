@@ -214,7 +214,7 @@ So the capture is correct: the main screen buffer *is* the real shell history, j
 
 *Content:*
 - Full pane scrollback with ANSI escape sequences — colors, attributes, formatting preserved via `tmux capture-pane -e -p -S - -t <pane>`
-- tmux per-session environment via `show-environment -t <session>` (the tmux-level env used for initializing new panes, not live shell env)
+- tmux per-session environment via `show-environment -t <session>` (the tmux-level env used for initializing new panes, not live shell env). Restored in full without filtering — tmux's own `update-environment` mechanism automatically refreshes stale values (`SSH_AUTH_SOCK`, `DISPLAY`, etc.) from the attaching client's env on session attach. No Portal-side filtering needed.
 
 *Already stored:*
 - Resume hooks (already in `hooks.json`, not new)
