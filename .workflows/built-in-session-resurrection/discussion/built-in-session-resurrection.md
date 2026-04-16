@@ -38,10 +38,11 @@ Key design principles established in research:
   ├─ History size policy (no artificial caps) [decided]
   └─ Security / file permissions [decided]
 
-  Save-Side Architecture [pending]
-  ├─ Execution model (daemon vs subprocess-per-event) [pending]
-  ├─ Trigger mechanism (which tmux events to hook) [pending]
-  ├─ Crash safety / periodic save cadence [pending]
+  Save-Side Architecture [exploring]
+  ├─ Execution model (daemon vs subprocess-per-event vs hosted process) [decided]
+  ├─ Trigger mechanism (event-driven + periodic + opportunistic) [decided]
+  ├─ Crash safety / periodic save cadence (30s default) [decided]
+  ├─ Signal handling (SIGHUP from PTY close, SIGTERM for direct kill) [decided]
   ├─ Debouncing / serialization strategy [pending]
   ├─ Save format and schema [pending]
   ├─ save-state CLI surface and contract [pending]
@@ -274,6 +275,88 @@ Saves are now content-heavy (scrollback per pane + structural), not lightweight 
 
 ---
 
+## Save-Side Architecture (partial — execution model + triggers + signals)
+
+### Context
+
+With Save Content & Scope decided (capture structural state + scrollback + per-session env on every save), the next question is *how* saves get triggered and *what* runs them. Scrollback capture fundamentally changes the save profile: content drifts continuously as users type and processes output, so structural-event triggers alone are insufficient. Periodic saves become necessary to catch scrollback changes between structural events.
+
+The architectural question: where does the periodic save *run*? Portal is a one-shot CLI tool today — there's no long-lived process to hang a timer off.
+
+### Options Considered
+
+**A: Subprocess-per-event only** (original lean)
+- tmux hooks fire `portal save-state` on structural events. No periodic save.
+- Pros: matches Portal's CLI architecture, no new runtime model.
+- Cons: misses scrollback drift between events. User sitting in one pane with Claude outputting for hours → no save → crash loses everything.
+
+**B: Full daemon** (the Zellij path)
+- Long-running `portal state-daemon` process managed by launchd/systemd/fallback-double-fork.
+- Pros: clean separation, native timers, platform-native supervision where available.
+- Cons: ~500 LOC of platform-specific lifecycle code (install, supervise, PID files, IPC, upgrade). Silent-failure mode on fallback platform (the exact problem Portal exists to avoid). The "decoupled from tmux" benefit is largely theoretical — the daemon has nothing useful to do when tmux is dead.
+
+**C: Detached tmux session hosting a long-running Go process** (chosen)
+- At bootstrap, Portal creates `tmux new-session -d -s _portal-saver "portal save-state --periodic"`. The Go process inside runs an internal 30s ticker loop.
+- Pros: tmux owns the lifecycle, no platform-specific service management, crash recovery via next Portal invocation, minimal new code (~50 LOC of idempotent session creation).
+- Cons: session visible in `tmux ls` (filterable from Portal's own picker), pattern is niche (tmux-slay is the only public precedent).
+
+### Journey
+
+Initial lean was A. The user asked a sharpening question — "if I'm sitting in this pane right now with Claude outputting, how does THIS conversation get saved?" — and exposed that A misses the dominant real-world case. Structural events don't fire when content is just accumulating. Periodic saves are necessary, not optional.
+
+That opened B as the "real" answer. Zellij solves the same problem elegantly via a tokio task inside its always-running server thread. But Zellij's architecture is client-server from day one; the daemon is *intrinsic to the tool*. Portal bolting on a daemon for one feature is a different proposition — the engineering investment is large (per-platform service management, silent-failure mode on fallback, upgrade complexity) and the daemon's value evaporates when tmux is dead.
+
+The user's framing crystallized option C: *"It's like doing it in the documentation, saying if you want sessions to save, you need to open up a new terminal and run Portal process execute. Of course, that's a pain, but that's really what's happening here, isn't it? Except Portal is opening it itself and binds it to the same tmux."*
+
+That reframe is honest: there IS a long-running save process; we're not pretending otherwise. We're delegating its supervision to tmux, which already owns the process lifecycle for every pane a user runs. No new infrastructure — existing tmux mechanisms, used for their normal purpose.
+
+**Research-verified concerns and answers** (see `research/detached-session-host-verification.md`):
+
+1. *Session lifecycle when the Go process exits*: session auto-destroys (default tmux behavior). Portal's next bootstrap sees `has-session -t _portal-saver` return false and recreates. Clean crash recovery, no `remain-on-exit` tuning needed.
+
+2. *Signal propagation on `tmux kill-server` or server shutdown*: tmux closes the PTY master fd; the kernel delivers **SIGHUP** (not SIGTERM) to the hosted Go process. This is a subtle but important implementation detail — Portal's save loop must trap SIGHUP explicitly. Direct `kill <pid>` from outside tmux sends SIGTERM, so trap both. Handler flushes the current save atomically via `AtomicWrite` and exits. No configurable grace period.
+
+3. *Visibility in `tmux ls`*: yes, `_portal-saver` shows up; no tmux mechanism to hide it. Portal filters it from its own picker via name-prefix check in `ListSessions`. Minor cosmetic cost.
+
+4. *tmux 3.5/3.6 periodic primitives*: confirmed none exist. No interval hooks, no `set-hook` enhancements. The detached-session pattern is the only viable in-tmux approach.
+
+5. *`destroy-unattached` defensive case*: a user with `set-option -g destroy-unattached on` in their `.tmux.conf` could have their global setting kill `_portal-saver` immediately on creation (since it's `-d` and has zero attached clients). Portal explicitly sets `destroy-unattached off` on the saver session after creation as a safety measure.
+
+### Decision
+
+**Execution model**: Option C. Portal creates a detached tmux session named `_portal-saver` during bootstrap, hosting a long-running Go process (`portal save-state --periodic`) that runs an internal 30-second ticker loop.
+
+**Trigger mechanism** (three layers):
+- *Event-driven* (immediate): `set-hook -g` on structural events (`session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out`) triggers a save via a thin `run-shell` handoff. Catches structural changes as they happen.
+- *Periodic* (every 30s): the hosted Go process's internal ticker. Catches scrollback content drift and cwd changes that structural events miss.
+- *Opportunistic*: every `portal open` / `portal attach` checks last-save age and fires a save if stale. Covers "active user" cases where no structural events have fired recently.
+
+**Crash safety cadence**: 30 seconds. Bounds worst-case data loss to ~30s of scrollback on unexpected tmux/system termination. Configurable later if needed. Matches Zellij's default (`DEFAULT_SERIALIZATION_INTERVAL = 60000ms`, was 1s pre-v0.39.2, raised due to disk-write complaints per [Zellij PR #2951](https://github.com/zellij-org/zellij/pull/2951)) — 30s is a reasonable compromise between data loss and disk write volume.
+
+**Signal handling**: the Go process traps SIGHUP (from PTY close on tmux shutdown — the dominant path) and SIGTERM (direct kill). Handler flushes the current save via existing `AtomicWrite` (no corruption risk), exits. No mid-write corruption concerns because atomic rename guarantees either the old or new state file is always valid.
+
+**Idempotency & bootstrap flow**: `EnsureServer()` in `PersistentPreRunE` calls `has-session -t _portal-saver`. If present, no-op. If missing, create via `new-session -d -s _portal-saver "<portal-binary> save-state --periodic"`, then `set-option -t _portal-saver destroy-unattached off` as defensive measure. Portal's own session picker filters names starting with `_` to hide it.
+
+**Confidence**: High. All five research questions have source-level answers. The pattern has precedent (tmux-slay) and the concerns are concrete and addressed.
+
+### Impact on remaining Save-Side subtopics
+
+Several sub-decisions stay open:
+- **Debouncing / serialization strategy**: event-driven + periodic can collide. The ticker could fire mid-event-handler. Need a cooldown file or mutex, TBD.
+- **Save format and schema**: scrollback per pane plus structural JSON. Exact layout (one file vs. per-session dir, pane file naming, index format) still to decide.
+- **save-state CLI surface**: the `--periodic` flag is one entry point. What's the full CLI surface (`portal save-state` manual? `portal save-state status`? exit codes?) needs fleshing out.
+- **tmux hook registration lifecycle**: when Portal uninstalls or upgrades, what happens to registered `set-hook -g` entries and to `_portal-saver`? Needs explicit lifecycle management.
+
+These continue in the next round of discussion.
+
+### False paths documented
+
+1. *"Event-driven only is sufficient"* — true for structural state, false once scrollback is in scope. Content drift between events is the dominant case.
+2. *"`run-shell -b 'while true; do ...; done'` as a poor-man's daemon"* — research found no TPM plugin uses this pattern after ~10 years. Known tmux bugs around `-b` flag ([tmux#1843](https://github.com/tmux/tmux/issues/1843), [#2306](https://github.com/tmux/tmux/issues/2306)). Detached-session hosting is more battle-tested.
+3. *"Full daemon like Zellij"* — Zellij has one because it IS a multiplexer; the daemon is intrinsic. Portal bolting on a daemon for one feature is a different calculus, and the "decoupled from tmux" benefit largely evaporates given that the daemon has nothing useful to do when tmux is dead.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -283,6 +366,7 @@ Saves are now content-heavy (scrollback per pane + structural), not lightweight 
 *(To be completed during discussion)*
 
 ### Current State
-- Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management (not `&&` chaining)
-- Save Content & Scope: **decided** — capture everything tmux exposes as meaningful state (structural + scrollback + env + marks), on by default, no opt-in. Target is "Zellij in tmux" resurrection quality. Ephemeral interaction state excluded.
-- Remaining: Save-Side Architecture, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
+- Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
+- Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
+- Save-Side Architecture: **partially decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic + opportunistic), crash cadence (30s), signal handling (SIGHUP + SIGTERM). Debouncing, save format, CLI surface, hook registration lifecycle still pending.
+- Remaining: finish Save-Side Architecture sub-items, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
