@@ -39,12 +39,12 @@ Key design principles established in research:
   └─ Security / file permissions [decided]
 
   Save-Side Architecture [exploring]
-  ├─ Execution model (daemon vs subprocess-per-event vs hosted process) [decided]
-  ├─ Trigger mechanism (event-driven + periodic + opportunistic) [decided]
-  ├─ Crash safety / periodic save cadence (30s default) [decided]
+  ├─ Execution model (detached tmux session host) [decided]
+  ├─ Trigger mechanism (event-driven + 30s periodic; opportunistic dropped) [decided]
+  ├─ Crash safety / periodic save cadence (30s max-gap) [decided]
   ├─ Signal handling (SIGHUP from PTY close, SIGTERM for direct kill) [decided]
-  ├─ Debouncing / serialization strategy [pending]
-  ├─ Save format and schema [pending]
+  ├─ Debouncing / serialization (single-writer via hosted process + dirty flag) [decided]
+  ├─ Save format and schema [exploring]
   ├─ save-state CLI surface and contract [pending]
   └─ tmux hook registration lifecycle (install/uninstall/upgrade) [pending]
 
@@ -342,12 +342,69 @@ That reframe is honest: there IS a long-running save process; we're not pretendi
 ### Impact on remaining Save-Side subtopics
 
 Several sub-decisions stay open:
-- **Debouncing / serialization strategy**: event-driven + periodic can collide. The ticker could fire mid-event-handler. Need a cooldown file or mutex, TBD.
 - **Save format and schema**: scrollback per pane plus structural JSON. Exact layout (one file vs. per-session dir, pane file naming, index format) still to decide.
 - **save-state CLI surface**: the `--periodic` flag is one entry point. What's the full CLI surface (`portal save-state` manual? `portal save-state status`? exit codes?) needs fleshing out.
 - **tmux hook registration lifecycle**: when Portal uninstalls or upgrades, what happens to registered `set-hook -g` entries and to `_portal-saver`? Needs explicit lifecycle management.
 
 These continue in the next round of discussion.
+
+---
+
+## Save-Side Debouncing / Serialization
+
+### Context
+
+Three trigger layers (event-driven, 30s periodic, opportunistic) can collide — a user creating a new window fires `session-created` + `window-linked` + `window-layout-changed` within ~100ms, plus the ticker could fire during any of them. Without coordination, 3+ saves could race for the state file. `AtomicWrite` prevents corruption but doesn't prevent duplicate work or inconsistent reads mid-save.
+
+### Options Considered
+
+**A: Everyone writes, coordinate via filesystem** — each trigger path writes directly; cooldown files or file locks prevent storms.
+- Pros: each path is independent.
+- Cons: concurrency-by-default; every trigger path has to implement cooldown correctly; hard to debug races.
+
+**B: Single writer through the hosted process** — events and other triggers only *signal* "state is dirty"; the hosted process owns all writes.
+- Pros: single writer by construction — no write races possible; debouncing becomes in-memory and trivial; clean ownership.
+- Cons: requires a notification mechanism between trigger subprocesses and the hosted process.
+
+### Decision
+
+**Option B, with a file-based dirty flag** as the notification mechanism.
+
+**How it works:**
+
+1. tmux fires a structural event → `set-hook -g ... 'run-shell "portal save-state --notify"'`
+2. `portal save-state --notify` is a ~20-line Go program: open/touch `~/.config/portal/save.requested` (the dirty flag file), exit.
+3. The hosted Go process (running inside `_portal-saver`) has a 1-second ticker. Each tick checks: *is the dirty flag set, OR has it been ≥30s since the last save?* If either, capture state and clear the flag. Otherwise, wait.
+
+**Key properties:**
+- **Single writer**: only the hosted process writes state files. No filesystem coordination needed beyond the dirty flag.
+- **Natural coalescing**: 5 events firing in 100ms all set the flag; the next tick does exactly one save.
+- **Max-gap guarantee**: 30 seconds is the ceiling on save staleness, even during idle periods with no events.
+- **Event latency**: ≤1 second from tmux event to save completion (one tick).
+- **Crash coverage**: worst-case data loss is 30 seconds of scrollback on sudden tmux/system termination.
+
+**Opportunistic trigger dropped.** Earlier framing had `portal open`/`portal attach` also firing saves. Redundant under B: if the hosted process is running, it's already saving via events + ticker. If it's not running, `portal open`'s `EnsureServer()` recreates `_portal-saver` and its first tick fires within ~1 second. Dropping opportunistic removes a code path that would race with the hosted process for no coverage benefit.
+
+### Hosted-process loop (pseudocode)
+
+```go
+for {
+    select {
+    case <-ticker.C:  // 1 second
+        if isDirty() || timeSinceLastSave() >= 30*time.Second {
+            captureAndWrite()
+            clearDirty()
+        }
+    case <-ctx.Done():  // SIGHUP or SIGTERM
+        captureAndWrite()  // flush once on shutdown
+        return
+    }
+}
+```
+
+### False path documented
+
+*"Each trigger path implements its own cooldown"* — Option A. Rejected because concurrency correctness becomes distributed across every handler that might save, and every new trigger path has to re-implement the coordination primitive. Option B localizes all concurrency into one writer and makes debouncing a one-line check.
 
 ### False paths documented
 
