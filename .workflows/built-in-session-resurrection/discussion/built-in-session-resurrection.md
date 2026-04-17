@@ -44,7 +44,8 @@ Key design principles established in research:
   ├─ Crash safety / periodic save cadence (30s max-gap) [decided]
   ├─ Signal handling (SIGHUP from PTY close, SIGTERM for direct kill) [decided]
   ├─ Debouncing / serialization (single-writer via hosted process + dirty flag) [decided]
-  ├─ Save format and schema [exploring]
+  ├─ Save format and schema (per-pane scrollback files + sessions.json index) [decided]
+  ├─ Content-hash dedup (skip unchanged scrollback writes) [decided]
   ├─ save-state CLI surface and contract [pending]
   └─ tmux hook registration lifecycle (install/uninstall/upgrade) [pending]
 
@@ -406,6 +407,135 @@ for {
 
 *"Each trigger path implements its own cooldown"* — Option A. Rejected because concurrency correctness becomes distributed across every handler that might save, and every new trigger path has to re-implement the coordination primitive. Option B localizes all concurrency into one writer and makes debouncing a one-line check.
 
+---
+
+## Save Format & Schema
+
+### Context
+
+The save payload has two very different shapes: **structural state** (session/window/pane tree, cwds, env, layouts — small JSON) and **scrollback content** (binary, potentially megabytes per pane). One file vs many files is the core design fork.
+
+### Decision
+
+**Many files.** Per-pane scrollback files plus a single structural index JSON that references them.
+
+**Layout:**
+
+```
+~/.config/portal/state/
+├── sessions.json              # structural index — the "commit"
+└── scrollback/
+    ├── <session>__<window>.<pane>.bin   # raw capture-pane -e output per pane
+    ├── work__0.0.bin
+    ├── work__0.1.bin
+    └── ...
+```
+
+- Scrollback files are raw `capture-pane -e -p -S -` output (ANSI escapes inline). Filesystem-safe pane key: `<session>__<window>.<pane>.bin`, with a simple sanitizer for special characters in session names and a hash-suffix fallback for collisions.
+- `sessions.json` is the structural index: sessions → windows → panes, with cwd, active/zoom flags, layout strings, per-session environment, and `scrollback_file` paths (relative to state dir).
+
+**Schema sketch:**
+
+```json
+{
+  "version": 1,
+  "saved_at": "2026-04-17T10:30:00Z",
+  "sessions": [
+    {
+      "name": "work",
+      "environment": { "LANG": "en_US.UTF-8", "TERM": "xterm-256color" },
+      "windows": [
+        {
+          "index": 0,
+          "name": "main",
+          "layout": "b25f,200x50,0,0{...tmux layout string...}",
+          "zoomed": false,
+          "active": true,
+          "panes": [
+            {
+              "index": 0,
+              "cwd": "/Users/leeovery/Code/portal",
+              "active": true,
+              "current_command": "zsh",
+              "scrollback_file": "scrollback/work__0.0.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `version` for future schema evolution (loader reads the field and handles known versions).
+- `saved_at` for observability — `portal state status` can render "last saved 12s ago."
+- No `options` field (dropped). No `marks` field (dropped).
+
+### Cross-file atomicity via commit discipline
+
+`AtomicWrite` gives per-file atomicity, but the state is many files. The discipline:
+
+1. Capture all state in memory (list-panes, show-environment, capture-pane per pane).
+2. Write each pane's scrollback to its file via `AtomicWrite` (temp + rename).
+3. Write `sessions.json` last via `AtomicWrite` — **this is the atomic commit.**
+
+Failure modes:
+- Crash before step 3 → old `sessions.json` still points to old scrollback files, which still exist → restore works as before.
+- Crash mid-step 3 → `AtomicWrite` guarantees either the old or new JSON, never partial.
+- Orphaned new scrollback files → GC handles them (below).
+
+### GC / purge logic
+
+After every successful save, after `sessions.json` is atomically committed:
+
+1. Read the new `sessions.json` and collect every `scrollback_file` path it references.
+2. List everything in `scrollback/`.
+3. Any file on disk but NOT referenced by the new index is orphaned → delete.
+
+Handles every way files can become stale:
+- Pane closed → file not in new index → deleted.
+- Session renamed (`work` → `project`) → old-named files deleted, new-named ones written.
+- Window renumbered → same.
+- Previous save crashed mid-way leaving orphans → next successful save's GC cleans them up. Self-healing.
+
+Idempotent. Runs synchronously, once per save.
+
+### Content-hash dedup (skip unchanged scrollback)
+
+The naive "rewrite every scrollback file every 30s" plan would generate ~86GB/day of writes in a heavy-scrollback scenario (power user with `history-limit 50000` and 10 panes). Most of those writes are unchanged content — wasteful, SSD-wearing.
+
+**The hosted process holds an in-memory map** `paneKey → hash of last-written scrollback`. On each save cycle, per pane:
+
+1. Capture scrollback (cheap — in-memory inside tmux).
+2. Hash it (xxhash or similar, few ms per MB).
+3. Compare to stored hash.
+4. If identical → skip the disk write, no change.
+5. If different → `AtomicWrite` the scrollback file, update the stored hash.
+
+`sessions.json` is written only if anything actually changed (structural delta or at least one pane's hash differed). If literally nothing changed for a full 30s cycle, zero disk activity.
+
+This turns worst-case 86GB/day into single-digit MB/day for realistic workloads. Only actively-changing panes incur write cost.
+
+### Tick cadence (recap — why 1s)
+
+The hosted process's 1s ticker is purely a **dirty-flag poll**, not a save cadence. Idle cost per tick: stat the dirty flag file + compare `time.Since(lastSave)` against the 30s threshold. Microseconds. Heavy work (capture/hash/write) only fires on dirty-flag set OR 30s max-gap elapsed. Responsiveness: event → save within 1 second.
+
+Not load-bearing — could swap to fsnotify later for sub-10ms responsiveness at the cost of cross-platform filesystem-watcher complexity. Current polling approach is simpler and good enough.
+
+### Retention policy
+
+**Current state only.** Single `sessions.json`, no historical snapshots.
+
+- `AtomicWrite` makes mid-write corruption vanishingly rare — temp + rename means the previous version is always fully intact until the new one is fully written.
+- Historical snapshots would 5-10× disk use for zero restore benefit.
+- If corruption becomes an issue in practice (e.g., disk-full mid-write), can add a `sessions.json.previous` backup later. YAGNI for now.
+
+### Deferred (not decided here)
+
+- **Compression** of scrollback files. ANSI text is highly compressible (5-10×) but adds CPU cost and makes debugging harder. Skipping for now; revisit if disk use becomes a complaint.
+- **Parallel capture** for users with many panes. For now, sequential capture is fine — round-trip cost per pane is ~10ms, and realistic pane counts stay under ~20. Optimize if a complaint surfaces.
+- **Schema migration** (version N → N+1). Standard practice: loader reads `version`, applies transforms or graceful fallbacks. Not a design decision now.
+
 ### False paths documented
 
 1. *"Event-driven only is sufficient"* — true for structural state, false once scrollback is in scope. Content drift between events is the dominant case.
@@ -425,5 +555,5 @@ for {
 ### Current State
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
 - Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
-- Save-Side Architecture: **partially decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic + opportunistic), crash cadence (30s), signal handling (SIGHUP + SIGTERM). Debouncing, save format, CLI surface, hook registration lifecycle still pending.
+- Save-Side Architecture: **mostly decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes). CLI surface and hook registration lifecycle still pending.
 - Remaining: finish Save-Side Architecture sub-items, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
