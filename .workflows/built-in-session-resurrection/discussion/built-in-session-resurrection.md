@@ -52,7 +52,7 @@ Key design principles established in research:
       ├─ Subsequent invocation on bootstrapped server [decided]
       ├─ Portal upgrade with running server [decided]
       ├─ Portal uninstall with running server [decided]
-      ├─ Portal binary replaced (brew upgrade) [pending]
+      ├─ Portal binary replaced (brew upgrade) [decided — composed from 3+4]
       ├─ User restarts tmux server [pending]
       └─ Hook collision with other plugins [pending]
 
@@ -670,6 +670,17 @@ If `portal` is absent, the hook fires but the `command -v` short-circuit prevent
 **Optional `portal state cleanup` command.** For users who want explicit teardown before uninstalling — kills `_portal-saver`, unsets the global hooks, optionally removes the state directory. Documented in the README's uninstall section. *Not* relied upon for correctness — the defensive hooks handle the forgot-to-run-cleanup case.
 
 **User data left on disk.** `~/.config/portal/state/` and the existing config files (`hooks.json`, `projects.json`, `aliases`) stay put after uninstall. Standard Unix convention — uninstalling the tool doesn't destroy user data. Reinstalling picks up where the user left off.
+
+### Scenario 5: Portal binary replaced (brew upgrade) — DECIDED (composed from 3+4)
+
+No new rules. The transient window during `brew upgrade` is fully covered by the combination of scenarios 3 and 4:
+
+- **During the atomic swap** (a brief window while the binary at the install path is being replaced): if a tmux hook fires and momentarily can't resolve `portal`, scenario 4's defensive `command -v` wrapper short-circuits the invocation. No error.
+- **After the swap**: scenario 3's version-marker detection picks up the version change on the next `portal open` and recreates `_portal-saver` with the new binary.
+
+Install-path migration (e.g., Intel → Apple Silicon Homebrew) is also covered — hooks reference `portal` on `$PATH`, the running daemon doesn't care about path changes (it's in memory), and the version marker triggers a restart on the next bootstrap.
+
+Noted here for completeness; no separate code path required.
 
 ### False paths documented
 
