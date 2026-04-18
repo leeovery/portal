@@ -38,7 +38,7 @@ Key design principles established in research:
   ├─ History size policy (no artificial caps) [decided]
   └─ Security / file permissions [decided]
 
-  Save-Side Architecture [exploring]
+  Save-Side Architecture [decided]
   ├─ Execution model (detached tmux session host) [decided]
   ├─ Trigger mechanism (event-driven + 30s periodic; opportunistic dropped) [decided]
   ├─ Crash safety / periodic save cadence (30s max-gap) [decided]
@@ -47,14 +47,14 @@ Key design principles established in research:
   ├─ Save format and schema (per-pane scrollback files + sessions.json index) [decided]
   ├─ Content-hash dedup (skip unchanged scrollback writes) [decided]
   ├─ CLI surface (state status only; daemon + notify internal) [decided]
-  └─ tmux hook registration lifecycle [exploring]
+  └─ tmux hook registration lifecycle [decided]
       ├─ Fresh-server bootstrap [decided]
       ├─ Subsequent invocation on bootstrapped server [decided]
       ├─ Portal upgrade with running server [decided]
       ├─ Portal uninstall with running server [decided]
       ├─ Portal binary replaced (brew upgrade) [decided — composed from 3+4]
       ├─ User restarts tmux server [decided]
-      └─ Hook collision with other plugins [pending]
+      └─ Hook collision with other plugins [decided]
 
   Restore-Side Architecture [pending]
   ├─ Bootstrap integration [pending]
@@ -594,14 +594,16 @@ The subtopic covers seven scenarios. Each is a sub-decision. Going one at a time
 
 The simplest case. User runs `portal open` on a machine where `tmux` isn't running. `EnsureServer()` starts the server and Portal needs to set up its plumbing.
 
-**Decided approach:**
+**Decided approach** (amended after scenario 7 decision — see below):
 
 On every `EnsureServer()` call (not just fresh-server cases):
 
-1. **Always re-register hooks** via `set-hook -g`. tmux's `set-hook -g` is effectively idempotent — setting the same value a second time is a no-op, setting a different value overwrites. Cost per bootstrap: ~7ms across 7 hooks. Negligible.
+1. **Conditionally register hooks via `set-hook -ga` with read-before-write** (not naive "always re-register"). For each target event, `show-hooks -g` is parsed to check whether any array entry already contains `portal state notify` — if present, skip; if absent, append via `-ga`. Cost per bootstrap: ~1 tmux round-trip to read, plus 0–7 round-trips for writes (zero on a bootstrapped server, seven on a fresh one). Self-healing preserved — if our entries get stripped, next bootstrap re-adds them.
 2. **Conditionally create `_portal-saver`** via `has-session -t _portal-saver` check. If present, skip. If absent, `new-session -d -s _portal-saver "portal state daemon"`.
-3. **Defensively set `destroy-unattached off`** on the saver session (guards against users with `destroy-unattached on` globally in `.tmux.conf`).
+3. **Defensively set `destroy-unattached off`** on the saver session — always (even if the session already exists), via `set-option` which is idempotent. Guards against users with `destroy-unattached on` globally in `.tmux.conf`.
 4. **Filter `_*` session names** from the TUI picker and from `sessions.json` capture — Portal's internal sessions don't pollute user-visible state or get "restored" on reboot.
+
+**Note on the amendment**: earlier framing of this scenario proposed "always re-register via `set-hook -g`" on the (correct) premise that plain `set-hook -g` is idempotent. That framing used the non-`-a` (replace) variant, which would overwrite any user or other-plugin hook on the same event. Scenario 7 decided to use `-a` (append) instead for coexistence — but `-a` is *not* idempotent (identical appends accumulate duplicates). The read-before-write check replaces the "set is cheap to repeat" assumption with a content-based idempotency check, preserving self-healing without accumulation.
 
 ### Journey (scenario 1)
 
@@ -699,6 +701,57 @@ Server dies via `kill-server`, `killall tmux`, reboot, crash, etc. Next `portal 
 
 Cross-reference: restoration itself (recreating user sessions + replaying scrollback) is orthogonal to hook lifecycle and lives under Restore-Side Architecture.
 
+### Scenario 7: Hook collision with other plugins — DECIDED
+
+The naive plan (scenario 1's original framing) was to overwrite hooks via `set-hook -g`, which meant stomping on any user `.tmux.conf` hooks or other-plugin hooks on the same events. Research (see `research/detached-session-host-verification.md` continuation) confirmed:
+
+- tmux 3.0+ supports `set-hook -a` (append) — hooks become array-indexed options with per-index entries.
+- `-a` does NOT deduplicate — identical appends accumulate duplicates. "Always re-register" without a check would grow the array indefinitely.
+- Major TPM plugins (continuum, resurrect, sessionist, logging, yank) don't use `set-hook` at all. Real collision risk is with users' own `.tmux.conf` hooks, not other plugins.
+- Per-index removal works: `set-hook -gu 'EVENT[N]'` removes a single entry, leaves others untouched. Sparse arrays fire correctly.
+
+**Decided approach: append + content-based idempotency + index-based removal.**
+
+**Registration shape** (combined with scenario 4's defensive wrapper):
+
+```
+set-hook -ga session-created 'run-shell "command -v portal >/dev/null 2>&1 && portal state notify"'
+```
+
+The substring `portal state notify` serves as Portal's natural identity token — it's unique enough that no other tool will ever emit that exact sequence. No separate marker comment needed.
+
+**Idempotency check at bootstrap:**
+
+1. Run `tmux show-hooks -g` and capture stdout.
+2. For each target event, parse lines matching `^<event>\[(\d+)\] .*portal state notify` — extract indices where our entry is present.
+3. If the index set is non-empty → Portal's hook is registered → skip.
+4. If empty → `set-hook -ga <event> '<command>'` to append.
+
+**Removal (uninstall / `portal state cleanup`):**
+
+1. Run `tmux show-hooks -g`.
+2. Parse for all our indices (per the regex above, for each event).
+3. Remove each via `set-hook -gu 'EVENT[N]'`, in reverse index order (defensive — research showed tmux doesn't renumber after removal, but reverse-order is cheap insurance).
+
+**Parsing lives in Go**, using the existing `Commander` interface. Compiled regex per event, table-driven tests with canned `show-hooks` output strings — no shell pipelines, no external-utility dependency.
+
+**Quoting caveat** (from research): tmux may render the stored command with different outer quoting than we set. Doesn't affect us — we match on the `portal state notify` substring which is raw text inside the command, untouched by tmux's outer quoting.
+
+**Preserved properties:**
+- **Coexistence** — user's own hooks and any other plugin's hooks on the same events are left intact. We add; we don't replace.
+- **Self-healing** — if our entries get stripped (user ran `set-hook -gu`, another tool misbehaved), next bootstrap's idempotency check finds none and re-appends.
+- **Clean uninstall** — targeted removal of only our entries, per-index, without disturbing others.
+
+### False paths documented
+
+1. *"Use plain `set-hook -g` (replace) and rely on idempotency"* — original scenario 1 framing. Rejected because it stomps on user and other-plugin hooks on the same events. `-a` (append) is the correct primitive for coexistence.
+2. *"`set-hook -a` is idempotent if the command matches"* — tested empirically by research and disproven. `-a` always appends; identical appends accumulate duplicates.
+3. *"Embed a `# portal-resurrect` marker comment for identification"* — unnecessary. The `portal state notify` command name is already a unique-enough identifier; adding a marker is noise.
+
+### Minimum tmux version implication
+
+This scenario requires tmux 3.0+ (Feb 2020). Array-indexed hooks (the foundation for `-a` semantics) were added then. Earlier tmux versions don't support this model at all — they'd need the replace-based fallback, which we've rejected for coexistence reasons. **Min-tmux-version decision belongs in Scope Boundaries**, but noting here that it's now constrained to ≥3.0.
+
 ### False paths documented
 
 1. *"Event-driven only is sufficient"* — true for structural state, false once scrollback is in scope. Content drift between events is the dominant case.
@@ -718,5 +771,5 @@ Cross-reference: restoration itself (recreating user sessions + replaying scroll
 ### Current State
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
 - Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
-- Save-Side Architecture: **mostly decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal). Only hook registration lifecycle still pending.
+- Save-Side Architecture: **decided in full** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal), tmux hook registration lifecycle (append-based coexistence via `set-hook -ga` with content-based idempotency and per-index removal; min tmux 3.0+).
 - Remaining: finish Save-Side Architecture sub-items, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
