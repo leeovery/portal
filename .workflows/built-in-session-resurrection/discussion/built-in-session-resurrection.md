@@ -50,8 +50,8 @@ Key design principles established in research:
   └─ tmux hook registration lifecycle [exploring]
       ├─ Fresh-server bootstrap [decided]
       ├─ Subsequent invocation on bootstrapped server [decided]
-      ├─ Portal upgrade with running server [pending]
-      ├─ Portal uninstall with running server [pending]
+      ├─ Portal upgrade with running server [decided]
+      ├─ Portal uninstall with running server [decided]
       ├─ Portal binary replaced (brew upgrade) [pending]
       ├─ User restarts tmux server [pending]
       └─ Hook collision with other plugins [pending]
@@ -628,6 +628,48 @@ Common path: server's been running for days, hooks registered, `_portal-saver` t
 Net result: every `EnsureServer()` call performs a uniform ~8ms block of idempotent tmux calls to ensure plumbing consistency, regardless of whether the server is fresh or long-running. Single code path, no "first invocation vs subsequent" branching.
 
 Explicitly *not* separately branched in code — scenario 1 and scenario 2 are the same code. The distinction only exists in this document to confirm both cases are covered by the chosen rules.
+
+### Scenario 3: Portal upgrade with running server — DECIDED
+
+User runs `brew upgrade portal` (or equivalent). New binary is on disk. tmux server still running, `_portal-saver` still hosting a daemon that was `exec`'d from the *old* binary. Hooks reference `portal state notify`, which resolves through `$PATH` at each invocation → they pick up the new binary automatically.
+
+**The only stale thing is the running daemon.** It holds the old binary in memory until it exits. If the upgrade changed the daemon's save logic, schema, dirty-flag protocol, or signal handling, users won't see fixes until it restarts.
+
+**Decided approach: version-marker-based restart detection.**
+
+1. On startup, `portal state daemon` writes its version (e.g., `v0.4.2`) to `~/.config/portal/state/daemon.version`.
+2. On every `EnsureServer()` call, Portal reads `daemon.version` and compares to `cmd.version` (the currently-invoking binary's version).
+3. If they differ (upgrade occurred), Portal runs `kill-session -t _portal-saver` then recreates it with the new binary. The replacement daemon overwrites the version file on startup.
+4. If the version file is absent (first-ever bootstrap), treat as mismatch and (re)create. No special case.
+
+Cost: one file read per `portal open` (microseconds). One `kill-session` + `new-session` on an actual upgrade (~50ms). Worst-case user visibility: a brief pause on the first `portal open` after upgrade. Invisible to anyone who's not watching.
+
+Data safety: the old daemon gets SIGHUP via PTY close when its session is killed; its signal handler flushes the final save atomically (via `AtomicWrite`) before exit. The new daemon takes over cleanly. Worst-case data loss: whatever was uncaptured in the ~1s since the last dirty-flag check.
+
+**No backward compatibility layer needed** — since nothing's implemented, every version that ships will include the version-marker behavior from day one. The "version file missing" branch is defensive, not transitional.
+
+### Scenario 4: Portal uninstall with running server — DECIDED
+
+User runs `brew uninstall portal`. Binary gone. tmux server still running. Two failure surfaces:
+
+1. **Hook-fire error spam**: every structural event tries to `run-shell "portal state notify"` → `portal: command not found` in tmux's error buffer. Noisy.
+2. **`_portal-saver` eventually dies**: the in-memory binary survives until the daemon exits or the server restarts. Once gone, can't be recreated. But this is silent — Portal's uninstalled, there's nothing to do.
+
+The real problem is #1.
+
+**Decided approach: defensive hook shell + optional cleanup command.**
+
+**Defensive hooks.** Every `set-hook -g` registration wraps the invocation in a binary existence check:
+
+```
+set-hook -g session-created 'run-shell "command -v portal >/dev/null 2>&1 && portal state notify"'
+```
+
+If `portal` is absent, the hook fires but the `command -v` short-circuit prevents the invocation. No error, no spam. Runs `command -v` (a shell built-in, ~microseconds) on every structural event — imperceptible overhead for a big UX win: the uninstall "just works" regardless of how the user uninstalled (Homebrew, direct delete, package swap, whatever).
+
+**Optional `portal state cleanup` command.** For users who want explicit teardown before uninstalling — kills `_portal-saver`, unsets the global hooks, optionally removes the state directory. Documented in the README's uninstall section. *Not* relied upon for correctness — the defensive hooks handle the forgot-to-run-cleanup case.
+
+**User data left on disk.** `~/.config/portal/state/` and the existing config files (`hooks.json`, `projects.json`, `aliases`) stay put after uninstall. Standard Unix convention — uninstalling the tool doesn't destroy user data. Reinstalling picks up where the user left off.
 
 ### False paths documented
 
