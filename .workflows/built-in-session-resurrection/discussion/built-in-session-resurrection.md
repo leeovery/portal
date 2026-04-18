@@ -47,7 +47,14 @@ Key design principles established in research:
   ├─ Save format and schema (per-pane scrollback files + sessions.json index) [decided]
   ├─ Content-hash dedup (skip unchanged scrollback writes) [decided]
   ├─ CLI surface (state status only; daemon + notify internal) [decided]
-  └─ tmux hook registration lifecycle (install/uninstall/upgrade) [exploring]
+  └─ tmux hook registration lifecycle [exploring]
+      ├─ Fresh-server bootstrap [decided]
+      ├─ Subsequent invocation on bootstrapped server [pending]
+      ├─ Portal upgrade with running server [pending]
+      ├─ Portal uninstall with running server [pending]
+      ├─ Portal binary replaced (brew upgrade) [pending]
+      ├─ User restarts tmux server [pending]
+      └─ Hook collision with other plugins [pending]
 
   Restore-Side Architecture [pending]
   ├─ Bootstrap integration [pending]
@@ -572,6 +579,45 @@ Namespace (`portal state`) retained even though only one command lives under it 
 ### Confidence
 
 High. The internal subcommands are dictated by the architecture (the hosted process needs an entry point, the notifier needs an entry point). The user-facing surface is minimal and driven by actual use cases rather than speculation.
+
+---
+
+## tmux Hook Registration Lifecycle
+
+### Context
+
+Portal's resurrection plumbing — the `set-hook -g` entries for structural events, plus the `_portal-saver` session — is tmux server-level state. That state has to be reasoned about across a matrix of transitions: first install, subsequent invocations, upgrades, uninstalls, manual server restarts, collisions with user-installed plugins. This subtopic walks each scenario and captures the resulting bootstrap/teardown rules.
+
+The subtopic covers seven scenarios. Each is a sub-decision. Going one at a time to keep the mental model clean.
+
+### Scenario 1: Fresh-server bootstrap — DECIDED
+
+The simplest case. User runs `portal open` on a machine where `tmux` isn't running. `EnsureServer()` starts the server and Portal needs to set up its plumbing.
+
+**Decided approach:**
+
+On every `EnsureServer()` call (not just fresh-server cases):
+
+1. **Always re-register hooks** via `set-hook -g`. tmux's `set-hook -g` is effectively idempotent — setting the same value a second time is a no-op, setting a different value overwrites. Cost per bootstrap: ~7ms across 7 hooks. Negligible.
+2. **Conditionally create `_portal-saver`** via `has-session -t _portal-saver` check. If present, skip. If absent, `new-session -d -s _portal-saver "portal state daemon"`.
+3. **Defensively set `destroy-unattached off`** on the saver session (guards against users with `destroy-unattached on` globally in `.tmux.conf`).
+4. **Filter `_*` session names** from the TUI picker and from `sessions.json` capture — Portal's internal sessions don't pollute user-visible state or get "restored" on reboot.
+
+### Journey (scenario 1)
+
+Initial proposal gated all setup behind the `has-session -t _portal-saver` check — skip everything if the saver was already running. User correctly flagged a failure mode: if hooks got stripped for any reason (accidental `set-hook -gu`, another plugin overwriting, obscure tmux edge case) while `_portal-saver` was still alive, a saver-only idempotency check would leave hooks broken.
+
+Fix: separate the idempotency concerns. Hook registration is cheap and idempotent via `set-hook -g` semantics, so just always re-register. Only the session creation (which can't gracefully no-op on existing sessions) needs a guard.
+
+The self-healing property is a small UX win: if any failure mode strips hooks, the next `portal open` restores them automatically without the user needing to know anything went wrong.
+
+### Note carried to later scenarios
+
+"Always re-register" also means Portal always overwrites whatever value was previously in those hook slots. If another plugin had set `set-hook -g session-created ...` to do its own thing, Portal stomps on it. That's a real concern for scenario 7 (collision with other plugins) — deferred there, not re-litigated here.
+
+### Ordering note
+
+Register hooks *before* creating `_portal-saver`. Creating `_portal-saver` fires a `session-created` event, which triggers our hook, which touches the dirty flag, which the hosted process picks up on its first tick — so within ~1 second of bootstrap, Portal has captured initial state. Ordering the other way would miss that initial save trigger (not critical, the 30s max-gap covers it anyway, but aesthetically cleaner the chosen way).
 
 ### False paths documented
 
