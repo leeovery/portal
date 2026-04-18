@@ -46,8 +46,8 @@ Key design principles established in research:
   ├─ Debouncing / serialization (single-writer via hosted process + dirty flag) [decided]
   ├─ Save format and schema (per-pane scrollback files + sessions.json index) [decided]
   ├─ Content-hash dedup (skip unchanged scrollback writes) [decided]
-  ├─ save-state CLI surface and contract [pending]
-  └─ tmux hook registration lifecycle (install/uninstall/upgrade) [pending]
+  ├─ CLI surface (state status only; daemon + notify internal) [decided]
+  └─ tmux hook registration lifecycle (install/uninstall/upgrade) [exploring]
 
   Restore-Side Architecture [pending]
   ├─ Bootstrap integration [pending]
@@ -536,6 +536,43 @@ Not load-bearing — could swap to fsnotify later for sub-10ms responsiveness at
 - **Parallel capture** for users with many panes. For now, sequential capture is fine — round-trip cost per pane is ~10ms, and realistic pane counts stay under ~20. Optimize if a complaint surfaces.
 - **Schema migration** (version N → N+1). Standard practice: loader reads `version`, applies transforms or graceful fallbacks. Not a design decision now.
 
+---
+
+## CLI Surface
+
+### Context
+
+The save-side design references several Portal invocations: the long-running hosted process, the thin notifier called by tmux hooks, and potentially user-facing commands for manual save and status. What's actually exposed to users vs. hidden as implementation detail?
+
+### Decision
+
+**One user-facing command, two hidden internal subcommands, all under a `portal state` namespace.**
+
+**User-facing:**
+- `portal state status` — liveness check for `_portal-saver`, last-save timestamp ("saved 12s ago"), session/pane count, disk use under `~/.config/portal/state/`. Purpose: let users verify resurrection is working, diagnose when it isn't, see what's captured.
+
+**Internal (hidden from `portal --help`):**
+- `portal state daemon` — the long-running process invoked as the command of the `_portal-saver` session. Holds the in-memory hash map, runs the 1s ticker, handles signals.
+- `portal state notify` — ~20-line binary invoked from `set-hook -g ... 'run-shell "portal state notify"'`. Touches `~/.config/portal/save.requested` and exits.
+
+### Journey
+
+Originally considered `portal state save` (manual synchronous save) as a user-facing command. On examination, every ostensible use case is already covered:
+
+- *"Save before reboot"* — SIGHUP flush on tmux server shutdown + 30s max-gap covers it.
+- *"Scripting/automation"* — speculative; no concrete workflow identified.
+- *"Pre-risky-action save"* — same as reboot case.
+- *"Psychological reassurance"* — not a technical need.
+- *"Debugging the save mechanism"* — developer concern, not a user surface; can touch the dirty flag manually.
+
+None of these justify a user-facing command. Dropped. If a real automation use case surfaces later, it can be added — YAGNI until then.
+
+Namespace (`portal state`) retained even though only one command lives under it initially. Gives natural room for future user-facing commands (`portal state gc`, `portal state reset`, etc.) if they ever become necessary — though none planned now.
+
+### Confidence
+
+High. The internal subcommands are dictated by the architecture (the hosted process needs an entry point, the notifier needs an entry point). The user-facing surface is minimal and driven by actual use cases rather than speculation.
+
 ### False paths documented
 
 1. *"Event-driven only is sufficient"* — true for structural state, false once scrollback is in scope. Content drift between events is the dominant case.
@@ -555,5 +592,5 @@ Not load-bearing — could swap to fsnotify later for sub-10ms responsiveness at
 ### Current State
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
 - Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
-- Save-Side Architecture: **mostly decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes). CLI surface and hook registration lifecycle still pending.
+- Save-Side Architecture: **mostly decided** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal). Only hook registration lifecycle still pending.
 - Remaining: finish Save-Side Architecture sub-items, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
