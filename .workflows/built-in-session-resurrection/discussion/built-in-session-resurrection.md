@@ -49,7 +49,7 @@ Key design principles established in research:
   ├─ CLI surface (state status only; daemon + notify internal) [decided]
   └─ tmux hook registration lifecycle [exploring]
       ├─ Fresh-server bootstrap [decided]
-      ├─ Subsequent invocation on bootstrapped server [pending]
+      ├─ Subsequent invocation on bootstrapped server [decided]
       ├─ Portal upgrade with running server [pending]
       ├─ Portal uninstall with running server [pending]
       ├─ Portal binary replaced (brew upgrade) [pending]
@@ -618,6 +618,16 @@ The self-healing property is a small UX win: if any failure mode strips hooks, t
 ### Ordering note
 
 Register hooks *before* creating `_portal-saver`. Creating `_portal-saver` fires a `session-created` event, which triggers our hook, which touches the dirty flag, which the hosted process picks up on its first tick — so within ~1 second of bootstrap, Portal has captured initial state. Ordering the other way would miss that initial save trigger (not critical, the 30s max-gap covers it anyway, but aesthetically cleaner the chosen way).
+
+### Scenario 2: Subsequent invocation on bootstrapped server — DECIDED
+
+Common path: server's been running for days, hooks registered, `_portal-saver` ticking. User runs `portal open` again.
+
+**Decided approach:** the scenario 1 rules already cover this with one consistency tweak — **always** set `destroy-unattached off` on `_portal-saver`, not just on creation. Same self-healing principle as the hook re-registration: `set-option` is idempotent when the current value matches, so the cost is ~1ms per bootstrap, and we gain protection against the (unlikely but possible) case where something flipped that option after creation.
+
+Net result: every `EnsureServer()` call performs a uniform ~8ms block of idempotent tmux calls to ensure plumbing consistency, regardless of whether the server is fresh or long-running. Single code path, no "first invocation vs subsequent" branching.
+
+Explicitly *not* separately branched in code — scenario 1 and scenario 2 are the same code. The distinction only exists in this document to confirm both cases are covered by the chosen rules.
 
 ### False paths documented
 
