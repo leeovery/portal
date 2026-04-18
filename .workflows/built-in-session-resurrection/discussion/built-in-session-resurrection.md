@@ -53,7 +53,7 @@ Key design principles established in research:
       ├─ Portal upgrade with running server [decided]
       ├─ Portal uninstall with running server [decided]
       ├─ Portal binary replaced (brew upgrade) [decided — composed from 3+4]
-      ├─ User restarts tmux server [pending]
+      ├─ User restarts tmux server [decided]
       └─ Hook collision with other plugins [pending]
 
   Restore-Side Architecture [pending]
@@ -681,6 +681,23 @@ No new rules. The transient window during `brew upgrade` is fully covered by the
 Install-path migration (e.g., Intel → Apple Silicon Homebrew) is also covered — hooks reference `portal` on `$PATH`, the running daemon doesn't care about path changes (it's in memory), and the version marker triggers a restart on the next bootstrap.
 
 Noted here for completeness; no separate code path required.
+
+### Scenario 6: User restarts tmux server — DECIDED
+
+Server dies via `kill-server`, `killall tmux`, reboot, crash, etc. Next `portal open` starts a fresh server.
+
+**Server-level state** (hooks, `_portal-saver`, user sessions) — all gone. **On-disk state** (sessions.json, scrollback files, daemon.version, save.requested) — preserved.
+
+**No new rules.** The existing bootstrap flow from scenarios 1/2 handles server restart end-to-end:
+
+- Hooks get registered fresh on the new server (scenarios 1/2).
+- `_portal-saver` is absent, gets recreated (scenario 1's `has-session` guard).
+- Version check runs, matches-or-mismatches harmlessly since the daemon is newly spawned either way.
+- Restoration of user sessions from `sessions.json` happens — but that's Restore-Side Architecture's problem, not hook lifecycle's.
+
+**One defensive behavior to add in implementation:** the daemon should clear `save.requested` on startup, in case the file is left over from the previous run that didn't get to process it. Cheap belt-and-braces — prevents a stale dirty flag from immediately triggering a save of a mid-restore state. (Though even without this, the save would just capture whatever tmux looks like at that moment, which eventually converges correctly — the cleanup is about avoiding a redundant save during the restore window, not correctness.)
+
+Cross-reference: restoration itself (recreating user sessions + replaying scrollback) is orthogonal to hook lifecycle and lives under Restore-Side Architecture.
 
 ### False paths documented
 
