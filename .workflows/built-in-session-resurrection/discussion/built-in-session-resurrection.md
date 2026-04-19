@@ -56,11 +56,15 @@ Key design principles established in research:
       ├─ User restarts tmux server [decided]
       └─ Hook collision with other plugins [decided]
 
-  Restore-Side Architecture [pending]
-  ├─ Bootstrap integration [pending]
-  ├─ Fate of WaitForSessions / bootstrapWait [pending]
+  Restore-Side Architecture [exploring]
+  ├─ Restoration trigger (restore all, name-idempotent) [decided]
+  ├─ Skeleton vs content split (skeleton-eager, scrollback-lazy via hook) [decided]
+  ├─ Marker coordination (awaiting-hydration + restoring-in-progress) [decided]
+  ├─ Scrollback restore mechanics (load-buffer vs send-keys vs cat) [pending]
   ├─ Shell readiness detection [pending]
-  └─ Layout restoration approach [pending]
+  ├─ Layout restoration approach [pending]
+  ├─ Fate of WaitForSessions / bootstrapWait [pending]
+  └─ Bootstrap integration (full flow diagram) [pending]
 
   Failure Modes & Recovery [pending]
   ├─ Corrupt / partial saved state [pending]
@@ -760,6 +764,115 @@ This scenario requires tmux 3.0+ (Feb 2020). Array-indexed hooks (the foundation
 
 ---
 
+## Restore-Side Architecture (partial — trigger + skeleton/content split + coordination)
+
+### Context
+
+Restoration is the reverse of save: read `sessions.json` + per-pane scrollback files from disk, reconstruct tmux sessions, inject scrollback so the user returns to their work as it was. Three foundational questions need resolving before mechanical details (injection format, layout replay, shell readiness):
+
+1. **When** does restoration trigger?
+2. **What** is restored eagerly vs lazily?
+3. **How** does the save process avoid destroying saved state during the restoration window?
+
+### Decision 1: Restoration trigger — restore all, idempotent by name
+
+Run restoration on every `portal open` invocation. No `serverStarted` gate, no explicit user command. For each entry in `sessions.json`:
+
+- If a live session with that name already exists → **skip** (user's current reality is authoritative).
+- If not → **restore the skeleton** (see decision 2).
+
+**Why:** no concrete threat model justified defensive gating. Name-collision handling addresses the one real risk — users with manually-created tmux sessions sharing names with saved Portal sessions. Portal's `{project}-{nanoid}` naming makes collisions between Portal-created sessions practically impossible.
+
+**Cost in steady state** (all saved sessions already live): ~20ms — one JSON read + one `list-sessions` call + diff → no-op. Invisible.
+
+### Decision 2: Skeleton-eager + scrollback-lazy (via attach hook)
+
+Rebuild each missing session's **structure** immediately (eager), defer **scrollback injection** until the user attaches to that session (lazy).
+
+**Skeleton-eager:** `new-session -d`, `new-window`, `split-window`, `select-layout`, set cwds, active/zoom flags. Cost ~600ms for a heavy 10-session config. Covered by the loading page already shown during bootstrap.
+
+**Scrollback-lazy:** scrollback bytes are NOT injected during bootstrap. Files on disk left intact. Injection happens on *attach* via a tmux `client-session-changed` hook running a Portal binary.
+
+**Why skeleton-eager** (vs sessions-only-eager): preserves tmux self-containment. After bootstrap, native tmux commands, third-party plugins, shell aliases, and direct `tmux attach` all see the real structure. Sessions-only would leave non-Portal paths seeing broken empty sessions. The ~500ms extra cost buys Portal being additive rather than invasive.
+
+**Why scrollback-lazy** (vs fully-eager): at realistic power-user scrollback sizes (`history-limit 50000`), `paste-buffer` injection costs 300-600ms per pane. 30 panes eagerly ≈ 15s of boot delay — unacceptable. Lazy amortizes across attaches; never-touched sessions cost nothing.
+
+**Why hook-driven hydration** (vs Portal-attach-code-driven): `client-session-changed` fires on *any* attach path — `portal open` picker, direct `tmux attach -t NAME`, `switch-client`, anything. Universal coverage, single code path.
+
+**Why synchronous injection** (vs async-progressive): injection completes before the user sees the pane. No "empty pane gradually filling in" UX. User clicks attach → brief pause (~1.5s heavy-case) → session appears ready. Analogous to opening a large file in an editor. If `run-shell` blocking proves annoying, can optimize with `-b` + coordination later.
+
+**Rejected alternative — background prefetch.** Initially proposed post-bootstrap background hydration of every session. User raised race conditions (user attaches a session mid-fill). Pure-lazy + marker coordination is simpler and race-free.
+
+### Decision 3: Marker coordination — awaiting-hydration + restoring-in-progress
+
+Two volatile tmux server-option markers coordinate restoration and saving.
+
+**`@portal-skeleton-<key>`** (awaiting hydration):
+- Set by skeleton-restore on each pane it creates (keyed by structural position `session:window.pane`).
+- Semantic: "this pane was skeleton-restored; its saved scrollback file on disk holds pre-boot state that must not be overwritten until injected."
+- Save process **skips** panes with this marker — doesn't capture, doesn't update sessions.json entry. Files preserved.
+- Hydration (on attach) **unsets** the marker after successful injection; normal save resumes.
+- **User-created panes never get this marker** — brand-new post-boot sessions/panes capture normally from the start.
+- **Inverse semantic matters**: "needs hydration" is active state set by restore; default absence means "safe to capture." Keeps new-session case working without a separate code path.
+- **Volatile** (server option): cleared on server restart. On next boot, skeleton restore sets them again. No stale state across server lifetimes.
+
+**`@portal-restoring`** (restoration in progress):
+- Set at start of skeleton restore, unset after completion.
+- Skeleton restore fires `session-created` / `window-linked` / `window-layout-changed` cascades. Hooks fire `portal state notify` → dirty flag → saves would capture half-built state.
+- `portal state notify` and the hosted daemon's tick both check `@portal-restoring` and no-op while set.
+- Volatile. Portal crash mid-restore → option gone with the server → next bootstrap starts fresh.
+
+### Decision 4: Failure-mode behavior for hydration
+
+Injection failure (file missing, disk read error, etc.):
+- **Unset the marker anyway.** Pane stays empty; normal save resumes. Degraded, not stuck.
+- **Log a warning.** Failure observable but not spam.
+- **Do not retry.** Missing file is likely permanent; retrying on every attach would produce repeat errors.
+
+Keeps one pane's broken state from poisoning forever. User gets an empty shell instead of history — disappointing but workable.
+
+### Full bootstrap flow
+
+`EnsureServer()` on every `portal open`:
+
+1. Start tmux server if not running.
+2. Register hooks idempotently via `set-hook -ga` + content-based check:
+   - `session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out` → `portal state notify`
+   - `client-session-changed` → `portal state hydrate` (new)
+3. Create `_portal-saver` if missing; always set `destroy-unattached off` on it.
+4. **Set `@portal-restoring 1`.**
+5. Read `sessions.json`. For each saved session:
+   - Already live → skip.
+   - Else → skeleton restore. Create session, windows, panes, apply layouts, set cwds. For each created pane, set `@portal-skeleton-<key> 1`.
+6. **Unset `@portal-restoring`.**
+7. TUI proceeds. Hosted daemon ticks, captures state (skipping skeleton-marked panes). First attach to each skeleton-restored session triggers hydration.
+
+### Journey highlights
+
+- **Trigger question**: proposed gating on `serverStarted AND no sessions exist`. User asked what I was defending against. Honest audit found no concrete threat. Simplified.
+- **Pane-level laziness**: scrollback sizes at `history-limit 50000` make fully-eager restoration take ~15s. Concrete math shifted the call toward lazy.
+- **Sessions-only laziness (rejected)**: would break direct `tmux attach`. Self-containment won.
+- **Background prefetch (rejected)**: race conditions. Pure-lazy via hook is cleaner.
+- **Marker inverse semantic**: first framed as "has been hydrated." User's question about new sessions exposed the bug — new panes shouldn't need a marker. Flipped to "awaiting hydration."
+- **Restore-in-progress guard**: surfaced late. Skeleton restore fires a cascade of hooks; without a guard, saves would capture partial state.
+
+### Confirmed properties (answers to user questions)
+
+- **Dormant session files persist indefinitely**: `@portal-skeleton-` marker prevents save-overwrite. Days/weeks of ignored sessions → files on disk intact.
+- **New panes/sessions captured immediately**: no marker = normal save path.
+- **Scrollback truncation at head**: tmux's history buffer is a ring; `capture-pane` returns current buffer. File size bounded by `history-limit × avg-line-bytes`. Natural.
+- **Direct `tmux attach` path**: fires `client-session-changed` hook, same hydration runs. Universal.
+
+### What's still pending under Restore-Side
+
+- **Scrollback restore mechanics** (next): `load-buffer` + `paste-buffer` vs `send-keys -l` vs shell `cat` on startup. UX implications.
+- **Shell readiness detection**: pre-injection polling / prompt detection trade-offs.
+- **Layout restoration approach**: mostly mechanical, but research flagged edge cases.
+- **Fate of `WaitForSessions` / `bootstrapWait`**: existing polling becomes unnecessary; explicit refactor decision needed.
+- **Bootstrap integration**: tie into existing `PersistentPreRunE` / `EnsureServer` code paths.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -772,4 +885,5 @@ This scenario requires tmux 3.0+ (Feb 2020). Array-indexed hooks (the foundation
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
 - Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
 - Save-Side Architecture: **decided in full** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal), tmux hook registration lifecycle (append-based coexistence via `set-hook -ga` with content-based idempotency and per-index removal; min tmux 3.0+).
-- Remaining: finish Save-Side Architecture sub-items, Restore-Side Architecture, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
+- Restore-Side Architecture: **partially decided** — trigger (restore all, idempotent by name), eagerness split (skeleton-eager, scrollback-lazy via `client-session-changed` hook), marker coordination (`@portal-skeleton-<key>` + `@portal-restoring`), failure-mode behavior (degrade to empty pane, unset marker, log). Scrollback injection mechanics, shell readiness, layout replay, `WaitForSessions` fate, and bootstrap integration still pending.
+- Remaining: finish Restore-Side Architecture sub-items, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
