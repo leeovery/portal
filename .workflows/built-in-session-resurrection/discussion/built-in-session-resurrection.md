@@ -77,9 +77,9 @@ Key design principles established in research:
   ├─ Logging strategy [pending]
   └─ Health signals for silent failures [pending]
 
-  CleanStale Guard Behavior [pending]
-  ├─ Guard rationale change post-restoration [pending]
-  └─ Stale-hook detection criteria (binary/dir/project missing) [pending]
+  CleanStale Guard Behavior [decided]
+  ├─ Guard removed (no longer needed under new design) [decided]
+  └─ Stale-hook detection criteria (structural-key match against live panes) [decided]
 
   Session & Project Store Interaction [pending]
   ├─ Restored session naming [pending]
@@ -1275,6 +1275,39 @@ These belong in the Planning phase, not here.
 ### Confidence
 
 High. All sub-items check out individually; the ordering tweak (set `@portal-restoring` before `_portal-saver` creation) is the only integration-level gotcha and it's been captured.
+
+---
+
+## CleanStale Guard Behavior
+
+### Context
+
+`CleanStale` removes entries from `hooks.json` whose structural keys don't match any currently-live pane. Under the old design it had a guard: skip cleanup when `list-panes -a` returns empty, to avoid nuking all hooks before resurrect/continuum had a chance to restore panes after reboot.
+
+That guard was a hedge against Portal not owning restoration.
+
+### Decision
+
+**Delete the `livePanes empty → skip` guard.** CleanStale runs unconditionally, trusting live tmux state.
+
+Under the new bootstrap flow, CleanStale runs in step 7 of `PersistentPreRunE`, *after* skeleton restore completes. At that point, live panes include both pre-existing panes and skeleton-restored ones — so if `list-panes -a` is empty, there genuinely are no sessions, and any hooks.json entries are genuinely orphaned.
+
+### Where CleanStale runs
+
+- **Bootstrap step 7**: every `PersistentPreRunE` invocation, after skeleton restore. Keeps `hooks.json` consistent with every Portal command.
+- **Explicit `portal clean` command**: user-initiated. Same logic, no guard.
+
+### Refactor scope
+
+Delete the `if len(livePanes) == 0 { return }` early return in CleanStale's current implementation. Everything else (structural-key matching, atomic write of updated `hooks.json`) stays. A few lines removed, net simpler.
+
+### Stale-hook detection criteria (unchanged)
+
+Keep the existing criterion: an entry is stale if its structural key (`session:window.pane`) doesn't match any live pane enumerated by `list-panes -a`. Review-002 raised whether we should also detect stale hooks by "binary missing" or "project removed from projects.json" — not needed. Those are user-responsibility concerns (if your binary is missing, your hook fails; that's a runtime error, not a stale-hook issue). Keeping the criteria narrow matches the generic-hook design principle.
+
+### Confidence
+
+High. Small mechanical change removing an obsoleted workaround.
 
 ---
 
