@@ -82,9 +82,9 @@ Key design principles established in research:
   ├─ Guard removed (no longer needed under new design) [decided]
   └─ Stale-hook detection criteria (structural-key match against live panes) [decided]
 
-  Session & Project Store Interaction [pending]
-  ├─ Restored session naming [pending]
-  └─ projects.json timestamp handling [pending]
+  Session & Project Store Interaction [decided]
+  ├─ Restored session naming (exact saved names, no regeneration) [decided]
+  └─ projects.json timestamp handling (only on user attach, not on restore) [decided]
 
   Ephemeral Session Opt-Out [pending]
 
@@ -1425,6 +1425,32 @@ One-liner only. No banners, colors, or attention-demanding UI. Just enough signa
 ### Confidence
 
 High. Observability is deliberately modest — enough to diagnose when things break, not so much that it becomes a feature in its own right. `portal state status` is the single user-facing diagnostic entry point; log file is the deeper-inspection path.
+
+---
+
+## Session & Project Store Interaction
+
+### Context
+
+Portal uses `{project}-{nanoid}` session naming (e.g., `portal-7fj8E6`) and tracks projects in `projects.json`. Restoration needs to decide: do restored sessions keep their saved names, and how do `projects.json` timestamps react to restoration?
+
+### Decisions
+
+**Restored sessions keep their saved names exactly.** No regeneration of the nanoid, no normalization, no rewriting. Names are what make "your session came back" feel right — users may have shell aliases, tmux keybindings, or scripts referencing specific session names.
+
+**`projects.json` timestamps update only on user-initiated attach, not on restoration.** Restoration is Portal plumbing, not a user action. If a user hasn't touched a project in 3 months and reboots, Portal shouldn't rewrite the timestamp to "just used." The timestamp tracks user intent; it only advances when the user actually attaches the restored session (via picker, `portal attach`, etc.).
+
+Caveat: direct `tmux attach` bypasses Portal's attach flow and won't bump the timestamp. Consistent with current Portal behavior — direct tmux commands aren't tracked.
+
+**Restoration never creates new `projects.json` entries.** If `projects.json` doesn't have an entry for a saved session's project path, restoration doesn't add one. `projects.json` stays authoritative for "projects the user has interacted with via Portal" — session restoration is a separate concern.
+
+### Edge case
+
+User ran `portal open /some/path` months ago (creating a `projects.json` entry), later removed the entry manually or via some future tooling, but the session's save data persists in `sessions.json`. On reboot: session restored, entry not re-added. This is fine — the session exists as raw tmux state, `projects.json` reflects user intent. No forced linkage.
+
+### Confidence
+
+High. Consistent with existing Portal semantics — name stability, minimal-intrusion timestamps, clear separation between "session exists" and "user engages with project."
 
 ---
 
