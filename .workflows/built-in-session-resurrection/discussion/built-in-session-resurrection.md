@@ -62,7 +62,7 @@ Key design principles established in research:
   ├─ Marker coordination (awaiting-hydration + restoring-in-progress) [decided, amended]
   ├─ Scrollback restore mechanics (blocking helper pre-shell via FIFO) [decided]
   ├─ Shell readiness + hook firing redesign (helper exec chain) [decided]
-  ├─ Layout restoration approach [pending]
+  ├─ Layout restoration approach [decided]
   ├─ Fate of WaitForSessions / bootstrapWait [pending]
   └─ Bootstrap integration (full flow diagram) [pending]
 
@@ -1059,6 +1059,53 @@ Net simplification: a whole execution path is removed, replaced by inclusion of 
 ### Confidence
 
 High. The realization that hooks belong only in the helper exec chain is a clean mental model — and removing the attach-time firing eliminates an entire workaround layer (the marker-at-registration hack). The scenarios check out identically to current expected behavior for all real use cases.
+
+---
+
+## Layout Restoration Approach
+
+### Context
+
+For each window being restored, tmux's `select-layout` applies a saved layout string to a set of panes. Research confirmed `window_layout` (the format variable we capture) returns the pre-zoom form — correct for restoration. This sub-item is mostly mechanical; the interesting parts are ordering, edge cases, and failure handling.
+
+### Decision
+
+**Per-window restoration order:**
+
+1. Create the window (`new-window` in our case — first pane is created implicitly).
+2. Create remaining panes via `split-window` to reach the saved pane count. Direction arguments are arbitrary — the next step rearranges.
+3. `select-layout "<saved layout string>"` — tmux parses the string and fits the panes to the saved geometry.
+4. `select-pane -t <saved active pane index>` to set the active pane within the window.
+5. If `window_zoomed_flag` was true at save time: `resize-pane -Z` on the active pane to re-apply zoom.
+
+This order matches tmux-resurrect's proven approach. Zoom must come after layout because `resize-pane -Z` operates on the current layout geometry.
+
+### Edge cases
+
+**Pane count mismatch.** `select-layout` requires the pane count to match the saved string. Portal's restoration creates exactly the right count from `sessions.json` before applying layout. If state is corrupted (JSON says 3 panes, we only created 2), `select-layout` fails.
+
+**Failure handling**: if `select-layout` returns an error:
+- Log a warning identifying the session/window/pane count mismatch.
+- Fall back to `select-layout tiled` (tmux's auto-balanced tiled layout) so panes are at least visible in a sane arrangement.
+- Continue restoring other windows/sessions.
+
+Degraded but not stuck. Consistent with the scrollback "missing file → empty pane, log, proceed" pattern.
+
+**Terminal size drift.** Layout strings encode absolute pane dimensions. If saved on 200×50 and restored into 80×24, `select-layout` does best-effort fitting — proportions shift, some panes may be cramped. Neither Portal nor any other tool solves this at the tmux level; it's a fundamental tmux constraint.
+
+We don't do any special handling for this. `select-layout` fits as best it can; the user can resize their terminal to match their saved layout if they care. `select-layout -E` ("spread evenly") is an option but it loses the saved proportions — trading faithful-but-cramped for even-but-different. Default to faithful.
+
+### What about zoom state being stored in the layout string itself?
+
+Research was explicit: `window_layout` returns the pre-zoom form, which is what we want — trying to save a zoomed layout string and re-applying it would collapse panes incorrectly. Portal captures `window_layout` (not `window_visible_layout`) and `window_zoomed_flag` separately, and re-applies zoom as step 5.
+
+### Summary
+
+- Order: create window → create all panes → `select-layout "<saved>"` → `select-pane -t <active>` → `resize-pane -Z` if zoomed.
+- On `select-layout` failure: log warning, fall back to `select-layout tiled`, continue.
+- No special handling for terminal size drift — tmux's best-effort fit is accepted as the limit.
+
+Mechanical and low-risk. Confidence: high.
 
 ---
 
