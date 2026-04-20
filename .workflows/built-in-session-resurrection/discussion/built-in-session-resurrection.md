@@ -66,11 +66,12 @@ Key design principles established in research:
   ├─ Fate of WaitForSessions / bootstrapWait [decided]
   └─ Bootstrap integration (full flow diagram) [decided]
 
-  Failure Modes & Recovery [pending]
-  ├─ Corrupt / partial saved state [pending]
-  ├─ Missing working directories on restore [pending]
-  ├─ Layout fit failures (terminal size drift) [pending]
-  └─ User feedback on partial restore [pending]
+  Failure Modes & Recovery [decided]
+  ├─ Corrupt / partial saved state [decided]
+  ├─ Missing scrollback files on restore [decided]
+  ├─ Layout fit failures (terminal size drift) [decided]
+  ├─ Disk full during save [decided]
+  └─ User-race scenarios during restoration [decided]
 
   Observability & Diagnostics [pending]
   ├─ Save-state introspection command [pending]
@@ -1308,6 +1309,53 @@ Keep the existing criterion: an entry is stale if its structural key (`session:w
 ### Confidence
 
 High. Small mechanical change removing an obsoleted workaround.
+
+---
+
+## Failure Modes & Recovery
+
+### Context
+
+Many failure cases have been handled inline as we worked through architectural decisions — scrollback file missing, hydrate timeout, layout parse errors, etc. This section consolidates the complete picture and fills gaps that weren't explicitly captured.
+
+### Principle
+
+**Degrade locally, log, continue.** No single failure should crash Portal or leave it stuck. User is never blocked. Logs capture context for diagnosis. Self-healing where possible.
+
+### Consolidated failure-handling table
+
+| Failure | Handling |
+|---|---|
+| Scrollback file missing at hydrate time | Helper logs warning, emits reset preamble only (no dump), exec's shell. Empty pane, not stuck. |
+| `select-layout` fails (corrupt string, pane-count mismatch) | Log warning, fall back to `select-layout tiled`. Panes visible, structure approximated. |
+| Hydrate signal never arrives (hook failure, FIFO issue) | 3s timeout; helper degrades to empty shell + logs warning. `@portal-skeleton-<key>` marker stays set, next attach retries. |
+| AtomicWrite mid-crash | Temp file + rename guarantees either old or new file is intact. Next successful save produces fresh state. |
+| Skeleton restore crashes partway | `@portal-restoring` cleared on server restart; next bootstrap retries from scratch. `sessions.json` still holds pre-crash state. Partial tmux structure from the crashed attempt doesn't block re-restore because `has-session` check skips already-live names; newly-created partial state becomes the live state. |
+| Orphaned scrollback files after interrupted save | GC step at end of each successful save removes files not referenced by new `sessions.json`. Self-healing. |
+| Orphan FIFO from crashed helper | State-dir scan on bootstrap sweeps stale `hydrate-*.fifo` files before re-creating new ones. |
+| tmux server dies mid-save | Hosted daemon in `_portal-saver` dies with server; gets SIGHUP, flushes final save, exits. Next bootstrap re-creates saver. |
+| `sessions.json` corrupt / unparseable | Log warning, skip restoration entirely, continue bootstrap. User sees empty picker. Can diagnose via file inspection. Next save will overwrite with valid content. |
+| Disk full during save | `AtomicWrite` fails at write or rename step. Log error, daemon continues ticking, retries on next tick. Previous save state intact. When disk space frees, save resumes normally. Daemon never crashes from disk-full. |
+| User creates new session mid-restoration | No special handling needed. Skeleton restore only touches saved sessions from `sessions.json`; pre-existing live sessions (including just-created ones) coexist. `@portal-restoring` blocks save mid-build, but user commands aren't gated. |
+| Hydrate helper itself crashes mid-dump | Pane ends up with partial scrollback + dead process. Shell never starts. User sees stuck pane. Recovery: kill the pane manually; next bootstrap re-skeletons it. This is a "shouldn't happen" case but documented for completeness. |
+
+### What's NOT handled specially
+
+- **Terminal size drift on restoration**: `select-layout` does best-effort fit. Some panes may be cramped if terminal is smaller than save-time. Not Portal's problem to solve — documented as limitation.
+- **Non-existent cwd on restore**: pane creation with `-c /path/that/no/longer/exists` — tmux's fallback is to start the shell in the user's home directory. Acceptable — no Portal-side handling needed.
+- **Binary missing at runtime** (hook references `claude` but claude isn't installed): the hook fails at exec time, shell falls through via `;` chain. User sees an error message + shell prompt. Not Portal's problem; user-facing diagnostic is clear.
+
+### User feedback on partial restore
+
+If anything went wrong during restoration (corrupt JSON, missing files, layout fallback fired), the user should be able to find out. Two channels:
+
+1. **Log file**: Portal writes warnings/errors to a log file in the state dir. Never silent. `portal state status` (from Observability subtopic) can surface recent warnings. Explicit diagnostic path.
+
+2. **Visual**: no extra banners or "restoration partially failed" UI. Silent degradation is the right default — failures are rare, and nagging users about every sub-optimal restore adds friction. Log file is the diagnostic path.
+
+### Confidence
+
+High. All failure modes identified during architectural decisions have consistent "log + degrade locally + continue" handling. The only ambiguous case is helper-crashed-mid-dump (stuck pane requiring manual cleanup), and that's rare enough to document rather than engineer around.
 
 ---
 
