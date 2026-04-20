@@ -88,9 +88,14 @@ Key design principles established in research:
 
   Ephemeral Session Opt-Out [decided — skipped, YAGNI]
 
-  Scope Boundaries [pending]
-  ├─ Environment / shell state (explicit non-goal) [pending]
-  └─ tmux version compatibility [pending]
+  Scope Boundaries [decided]
+  ├─ Environment / shell state (explicit non-goal) [decided]
+  ├─ Running process state (explicit non-goal — use hooks) [decided]
+  ├─ tmux server config / plugin config (out of scope) [decided]
+  ├─ Multi-server / remote sync (out of scope) [decided]
+  ├─ Non-tmux multiplexers (out of scope) [decided]
+  ├─ Shell-specific customization (out of scope) [decided]
+  └─ Minimum tmux version: 3.0+ [decided]
 
 ---
 
@@ -1484,17 +1489,84 @@ Include a brief "Privacy considerations" section in the README: scrollback is sa
 
 ---
 
+## Scope Boundaries
+
+### Context
+
+Explicit non-goals and version constraints — captured so planning and future feature requests don't accidentally pull them back into scope. Many of these surfaced implicitly during other decisions; this is the consolidation pass.
+
+### Minimum versions
+
+- **tmux ≥ 3.0** (Feb 2020). Array-indexed hooks (`set-hook -a` semantics) require 3.0; the hook-lifecycle decisions depend on them. Any modern system has 3.0+ by now — every mainstream package manager ships a newer version.
+- **Go, macOS, Linux**: inherits Portal's existing requirements. No change.
+
+### Explicit non-goals
+
+**Live shell environment variables.** tmux cannot observe `export FOO=bar` run interactively inside a shell. Portal captures tmux's own per-session environment (`show-environment`) but not shell-interior env. Users needing env restoration use resume hooks (wrapper script sources env file before exec'ing the target process).
+
+**Running process state.** REPL contents, interactive session state, mid-`vim` state, mid-`less` state — none of it is capturable by tmux. This is the raison d'être of resume hooks: Portal restores the *visual* history (scrollback) and the structural shape, hooks handle relaunch of whatever process the pane had.
+
+**tmux server-level options and user's `.tmux.conf` customizations.** Portal reads tmux's current state via the standard APIs; it doesn't introspect or capture config files. Restoration uses the user's current `.tmux.conf` as the baseline — if they change their config between save and restore, new settings apply. Portal's own plumbing (its `set-hook -ga` entries, `_portal-saver` session options) sits on top.
+
+**Third-party tmux plugin state.** Portal coexists with other TPM plugins via hook-append semantics but doesn't capture, understand, or interact with their state.
+
+**Multi-server, multi-host, remote sync.** Portal works with one tmux server per machine — the user's own local one. No cross-machine session sync, no remote tmux over SSH, no tmux session groups distributed across machines.
+
+**Non-tmux multiplexers.** Portal is tmux-specific. Zellij, GNU screen, wezterm, abduco — out of scope.
+
+**Shell-specific behavior.** Portal is shell-agnostic. Helper `exec`s `$SHELL` — whatever that points to. Prompt aesthetics, history files, shell init semantics are all shell-managed. No special-casing bash/zsh/fish.
+
+**Mouse state / clipboard state.** Decided in Save Content & Scope (ephemeral interaction state).
+
+### Not non-goals, just deferred
+
+- **Ephemeral session opt-out**: YAGNI per its own subtopic. Not an architectural non-goal — could be added later based on user demand.
+- **Scrollback compression**: deferred until disk use becomes a complaint.
+- **Parallel capture for many-pane setups**: deferred until perf complaints.
+- **Schema migration (v1 → v2)**: not a design decision now; handled when we bump the schema version.
+- **Background prefetch optimization**: already rejected in favor of pure-lazy hydration, but could be reconsidered if attach-time latency becomes a complaint.
+
+### Confidence
+
+High. Most items listed here were already implicit outcomes of other decisions; this section makes them searchable in one place for future reference.
+
+---
+
 ## Summary
 
 ### Key Insights
-*(To be completed during discussion)*
+
+1. **Portal must own the full lifecycle to solve the problem.** Resurrect/continuum's failures were implementation quality, not architecture — but relying on external plugins left Portal with no recourse when they broke. Owning save/restore end-to-end is the only path to reliable resurrection.
+
+2. **"Zellij in tmux" is the organizing UX principle.** Full scrollback capture is non-negotiable; without it the feature is a hollow shell. Everything downstream (save size, architecture choice, attach latency, injection mechanics) follows from this commitment.
+
+3. **Tmux's input commands (`paste-buffer`, `send-keys`, `pipe-pane -I`) all target the wrong side of the PTY for scrollback injection.** They deliver bytes to shell stdin, corrupting ANSI. Only a process inside the pane writing to its stdout (or direct `/dev/pts` writes) can deliver bytes to the display path. This realization reframed the entire scrollback restore mechanism.
+
+4. **A detached tmux session makes an elegant host for a long-running save process.** No platform-specific service management (launchd/systemd), no daemon install story, no silent-failure mode unique to Portal — tmux already supervises the process. One of the most important structural decisions in the design.
+
+5. **The existing hook-firing-on-attach (`ExecuteHooks` + marker-at-registration) was a workaround for not owning restoration.** Once Portal owns restoration, hooks fire naturally as part of the hydrate helper's exec chain. An entire mechanism deletes cleanly.
+
+6. **Single-writer architecture eliminates an entire class of concurrency bugs.** Funneling all save writes through the hosted daemon, with other triggers merely signaling via a dirty flag, made debouncing trivial and race-free.
+
+7. **Inverse marker semantics matter.** "Awaiting hydration" as active state set by restoration (absence = safe to capture) keeps the new-session-creation path from needing special handling.
+
+8. **YAGNI rigorously, without apology.** Ephemeral opt-out, background prefetch, options-capture, scrollback compression, schema migration tooling — all skipped pending real user demand. Keeps the implementation surface small.
 
 ### Open Threads
-*(To be completed during discussion)*
 
-### Current State
-- Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
-- Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
-- Save-Side Architecture: **decided in full** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal), tmux hook registration lifecycle (append-based coexistence via `set-hook -ga` with content-based idempotency and per-index removal; min tmux 3.0+).
-- Restore-Side Architecture: **decided in full** — trigger (restore all, idempotent by name), eagerness split (skeleton-eager, scrollback-lazy), marker coordination (`@portal-skeleton-<key>` + `@portal-restoring`), scrollback injection mechanics (blocking helper pre-shell via FIFO with reset preamble/postamble and 3s timeout), hook firing redesign (delete `ExecuteHooks` + marker-at-registration, fire via helper exec chain), layout restoration (standard tmux flow with tiled fallback on failure), `WaitForSessions` deleted (replaced with synchronous `Restore()` + 1.2s min loading page), bootstrap integration ordering (set `@portal-restoring` before `_portal-saver` creation).
-- Remaining: Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
+None. All subtopics on the Discussion Map are decided. Items flagged as "deferred" (in Scope Boundaries) are explicit choices, not unresolved questions — they're things we've decided to defer.
+
+### Current State — all decided
+
+- **Hook Lifecycle Redesign**: single persistent behavior, caller-level policy via wrapper scripts.
+- **Save Content & Scope**: capture everything tmux exposes (structural + scrollback + env), on by default. Ephemeral interaction state excluded.
+- **Save-Side Architecture**: detached tmux session hosts long-running Go daemon. Event-driven via `set-hook -ga` + 30s periodic ticker. Single-writer via dirty flag. Per-pane scrollback files + `sessions.json` index with commit discipline. Content-hash dedup. `portal state status` user-facing; `daemon` and `notify` internal. Full tmux hook lifecycle handling (fresh bootstrap, upgrade, uninstall, collision). Min tmux 3.0+.
+- **Restore-Side Architecture**: restore all, idempotent by name. Skeleton-eager + scrollback-lazy via blocking helper pre-shell using FIFO signaling. Hook firing via helper exec chain (no `send-keys`). Standard layout flow with `tiled` fallback. `WaitForSessions` deleted, replaced with synchronous `Restore()` + 1.2s min loading page.
+- **CleanStale Guard Behavior**: empty-panes guard removed; runs unconditionally post-restore.
+- **Failure Modes**: degrade-locally-log-continue everywhere. No single failure crashes Portal or leaves it stuck.
+- **Observability**: log file at `~/.config/portal/state/portal.log` with 2-file 1MB rotation. `portal state status` shows daemon liveness, last save, counts, disk use, recent warnings. Silent by default; stderr one-liner only on genuinely-broken bootstrap.
+- **Session & Project Store Interaction**: restored sessions keep exact names. `projects.json` timestamps update only on user-initiated attach. Restoration never creates new `projects.json` entries.
+- **Ephemeral Session Opt-Out**: skipped (YAGNI). `history-limit 0` is the tmux-native workaround documented in README.
+- **Scope Boundaries**: explicit non-goals captured (live shell env, running process state, server config, multi-host, non-tmux multiplexers, shell customization). Min tmux 3.0.
+
+Discussion complete. Design is ready for specification phase.
