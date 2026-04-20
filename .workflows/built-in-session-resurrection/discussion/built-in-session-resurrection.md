@@ -63,7 +63,7 @@ Key design principles established in research:
   ├─ Scrollback restore mechanics (blocking helper pre-shell via FIFO) [decided]
   ├─ Shell readiness + hook firing redesign (helper exec chain) [decided]
   ├─ Layout restoration approach [decided]
-  ├─ Fate of WaitForSessions / bootstrapWait [pending]
+  ├─ Fate of WaitForSessions / bootstrapWait [decided]
   └─ Bootstrap integration (full flow diagram) [pending]
 
   Failure Modes & Recovery [pending]
@@ -1106,6 +1106,68 @@ Research was explicit: `window_layout` returns the pre-zoom form, which is what 
 - No special handling for terminal size drift — tmux's best-effort fit is accepted as the limit.
 
 Mechanical and low-risk. Confidence: high.
+
+---
+
+## Fate of WaitForSessions / bootstrapWait
+
+### Context
+
+Current flow (per `CLAUDE.md` and research):
+
+> `PersistentPreRunE` calls `EnsureServer()`... If the server was just started, TUI shows a loading page; CLI commands call `bootstrapWait()` which prints to stderr and polls for session restoration (1–6s window).
+
+`WaitForSessions` and `bootstrapWait` exist because Portal had no control over *when* resurrect/continuum would populate sessions. They were polling hedges against the upstream plugins being slow or failing. Under the new design, Portal owns restoration directly — there's nothing to wait for.
+
+### Decision
+
+**Delete `WaitForSessions` and `bootstrapWait` entirely.** Replace with a synchronous `Restore()` call in `PersistentPreRunE` right after `EnsureServer()`. When `Restore()` returns, skeleton-restored sessions exist because Portal just created them. No polling needed.
+
+**Keep the loading page for the TUI path, with a minimum display time.**
+
+Skeleton restoration typically completes in ~600ms for a heavy 10-session config — fast enough that the loading page could flash in and out too quickly to register as intentional UX. That "flash" feels like a glitch rather than a deliberate moment. Standard fix: enforce a minimum display time.
+
+**Minimum loading-page duration: 1.2 seconds.**
+- Long enough to feel intentional.
+- Not so long it becomes friction.
+- Middle of the 1-1.5s range we discussed.
+
+Implementation:
+```go
+start := time.Now()
+// show loading page ...
+// skeleton restore runs ...
+elapsed := time.Since(start)
+if elapsed < minLoadingDuration {
+    time.Sleep(minLoadingDuration - elapsed)
+}
+// dismiss loading page
+```
+
+If restoration happens to take longer than 1.2s (many sessions, slow disk), the loading page stays until restoration completes. If faster, it stays for 1.2s total.
+
+**CLI path (non-TUI invocations like `portal attach NAME`): silent wait.** No loading page, no stderr progress output. Typical restoration is ~600ms — fast enough to not need user-facing progress. If someone later complains about long-feeling CLI waits, we can add a "Restoring..." line to stderr if elapsed > 2s. YAGNI until then.
+
+### Code shape
+
+- `internal/tmux/wait.go` (where `WaitForSessions` lives) → deleted.
+- `bootstrapWait` function → deleted.
+- `PersistentPreRunE` flow becomes: `EnsureServer()` → `Restore()` (sync). TUI path wraps this with loading-page + min-duration logic. CLI path just calls through.
+
+### What stays
+
+- `EnsureServer()` — keeps its job of starting the tmux server if not running.
+- `serverStarted` flag in context — still used elsewhere (e.g., decision whether to show bootstrap messages).
+- The loading page itself — retained for the TUI path with minimum-display-time padding.
+
+### Improvement over current behavior
+
+- Current: "waiting for sessions to populate (up to 6s)"
+- New: "restoring sessions" — bounded by the minimum display time floor (1.2s) and restoration's actual cost (~600ms). No external dependency, deterministic timing.
+
+### Confidence
+
+High. Straightforward refactor — removing polling code that existed to hedge against an external dependency that no longer exists.
 
 ---
 
