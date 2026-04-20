@@ -73,10 +73,10 @@ Key design principles established in research:
   ├─ Disk full during save [decided]
   └─ User-race scenarios during restoration [decided]
 
-  Observability & Diagnostics [pending]
-  ├─ Save-state introspection command [pending]
-  ├─ Logging strategy [pending]
-  └─ Health signals for silent failures [pending]
+  Observability & Diagnostics [decided]
+  ├─ Save-state introspection command (portal state status) [decided]
+  ├─ Logging strategy (portal.log, 2-file rotation at 1MB) [decided]
+  └─ Health signals (silent default, critical warnings on bootstrap) [decided]
 
   CleanStale Guard Behavior [decided]
   ├─ Guard removed (no longer needed under new design) [decided]
@@ -1356,6 +1356,75 @@ If anything went wrong during restoration (corrupt JSON, missing files, layout f
 ### Confidence
 
 High. All failure modes identified during architectural decisions have consistent "log + degrade locally + continue" handling. The only ambiguous case is helper-crashed-mid-dump (stuck pane requiring manual cleanup), and that's rare enough to document rather than engineer around.
+
+---
+
+## Observability & Diagnostics
+
+### Context
+
+Review-002 flagged silent failure as one of resurrect/continuum's most-cited problems — users lost data without any indication something had gone wrong. Portal replacing those plugins risks the same opacity if we don't build in diagnostics deliberately.
+
+### Decisions
+
+**Log file location**: `~/.config/portal/state/portal.log`. Lives next to state data, not config data.
+
+**Log format**: single line per entry, `timestamp | level | component | message`. Human-readable and grep-friendly.
+
+**Log level**: warnings and errors by default. `PORTAL_LOG_LEVEL=debug` env var for verbose tracing during debugging.
+
+**What gets logged**:
+- Save failures (disk full, write errors, permission issues)
+- Restoration warnings (missing scrollback file, layout fallback, corrupt `sessions.json`)
+- Hydrate timeouts (3s signal didn't arrive)
+- Helper crashes
+- Bootstrap events at debug level only
+
+**Rotation**: simple 2-file cap at 1MB each. On reaching 1MB, rename `portal.log` → `portal.log.old` (replacing any existing old file), start fresh. Total disk usage bounded at 2MB. Portal's process handles rotation itself — no external logrotate dependency.
+
+### `portal state status` (human-readable diagnostic)
+
+Example output:
+
+```
+Portal state:
+  Save daemon: running (pid 12345, version v0.4.2)
+  Last save: 12 seconds ago
+  Sessions captured: 10 (0 ephemeral-skipped)
+  Panes captured: 34
+  State size: 18.2 MB on disk
+  Recent warnings: 0 (last: none)
+```
+
+Data sources:
+- Daemon liveness: `has-session -t _portal-saver` + process verification.
+- Last save time: `sessions.json.saved_at` field.
+- Session/pane counts: parsed from `sessions.json`.
+- State size: disk usage of `~/.config/portal/state/`.
+- Recent warnings: scan `portal.log` for entries in the last hour.
+
+**Exit code** reflects health: `0` for healthy, non-zero for notable problems (daemon not running, last save > 5 minutes old, recent errors). Scriptable as well as human-readable.
+
+### Proactive health signals
+
+**Default: silent.** Portal doesn't nag about every transient issue. Users opt in to visibility via `portal state status`.
+
+**Exception: genuinely broken states on bootstrap.** If `PersistentPreRunE` detects something critical:
+
+- `_portal-saver` can't be created after retry attempts → stderr warning: *"Portal save daemon failed to start — sessions won't be captured. Run `portal state status` for details."*
+- `sessions.json` exists but is unparseable → stderr warning: *"Portal state file is corrupt — restoration skipped. Check `portal state status` or `~/.config/portal/state/portal.log`."*
+
+One-liner only. No banners, colors, or attention-demanding UI. Just enough signal that the user knows to check if they care.
+
+### Non-goals
+
+- No metrics endpoint, no telemetry, no dashboard. This is a CLI tool, not a service.
+- No desktop notifications. User wouldn't want macOS Notification Center alerts about tmux save status.
+- No syslog integration. Single log file, single tool, local scope.
+
+### Confidence
+
+High. Observability is deliberately modest — enough to diagnose when things break, not so much that it becomes a feature in its own right. `portal state status` is the single user-facing diagnostic entry point; log file is the deeper-inspection path.
 
 ---
 
