@@ -56,7 +56,7 @@ Key design principles established in research:
       ├─ User restarts tmux server [decided]
       └─ Hook collision with other plugins [decided]
 
-  Restore-Side Architecture [exploring]
+  Restore-Side Architecture [decided]
   ├─ Restoration trigger (restore all, name-idempotent) [decided]
   ├─ Skeleton vs content split (skeleton-eager, scrollback-lazy via hook) [decided, amended]
   ├─ Marker coordination (awaiting-hydration + restoring-in-progress) [decided, amended]
@@ -64,7 +64,7 @@ Key design principles established in research:
   ├─ Shell readiness + hook firing redesign (helper exec chain) [decided]
   ├─ Layout restoration approach [decided]
   ├─ Fate of WaitForSessions / bootstrapWait [decided]
-  └─ Bootstrap integration (full flow diagram) [pending]
+  └─ Bootstrap integration (full flow diagram) [decided]
 
   Failure Modes & Recovery [pending]
   ├─ Corrupt / partial saved state [pending]
@@ -1171,6 +1171,113 @@ High. Straightforward refactor — removing polling code that existed to hedge a
 
 ---
 
+## Bootstrap Integration (Full Flow)
+
+### Context
+
+Everything we've decided so far needs to stitch together into a single, coherent bootstrap path. This sub-item isn't a new decision — it's the integration pass that checks all the pieces fit and orders correctly.
+
+### The full flow
+
+**`PersistentPreRunE` on every `portal open` / `portal attach` / `portal hooks set` / etc. (any Portal command that needs tmux):**
+
+1. **`EnsureServer()`** — start tmux server if not running. Set `serverStarted=true` in context if we started it.
+
+2. **Register global hooks via `set-hook -ga` with content-based idempotency check**:
+   - Structural save triggers → `portal state notify`: `session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out`.
+   - Hydration trigger → `portal state signal-hydrate`: `client-session-changed`.
+   - All wrapped in `command -v portal >/dev/null 2>&1 && ...` defensive guard.
+   - Parse `show-hooks -g` first; skip events that already have the target Portal command present.
+
+3. **Set `@portal-restoring 1`** — save process will skip all captures while set. Must happen *before* `_portal-saver` creation so any `session-created` fired by subsequent steps doesn't race the daemon's first tick.
+
+4. **`_portal-saver` session setup** (idempotent):
+   - `has-session -t _portal-saver` → if present, skip creation.
+   - If absent: `new-session -d -s _portal-saver "portal state daemon"`.
+   - Check `daemon.version` file against `cmd.version` — if mismatch, `kill-session -t _portal-saver` and recreate.
+   - Always `set-option -t _portal-saver destroy-unattached off` (defensive).
+
+5. **`Restore()` — skeleton-only restoration** (loading page shown for TUI path; silent for CLI):
+   - If `sessions.json` doesn't exist: no-op.
+   - Read `sessions.json`, parse.
+   - For each saved session:
+     - `has-session -t <name>` → live exists → skip this session.
+     - Else: skeleton-create.
+       - Compute FIFO path per pane (`~/.config/portal/state/hydrate-<paneKey>.fifo`).
+       - `mkfifo` for each pane before creating the pane.
+       - `new-session -d -s <name> -c <root_cwd> "portal state hydrate --fifo <F> --file <scrollback>"` for the first pane.
+       - `new-window`, `split-window` for remaining windows/panes to match saved structure; each with its own `hydrate` command.
+       - `select-layout "<saved>"` per window → `select-pane -t <active>` → `resize-pane -Z` if zoomed.
+       - For each created pane: `set-option @portal-skeleton-<key> 1`.
+
+6. **Unset `@portal-restoring`.** Save loop resumes normal operation on its next tick.
+
+7. **`CleanStale()`** — prune stale entries from `hooks.json` whose structural keys don't match any currently-live pane. Runs here because by this point, live panes include both pre-existing and skeleton-restored ones.
+
+8. **Return to the calling command.** TUI wraps steps 1-7 with loading page (1.2s min display); CLI returns immediately.
+
+### Attach flow (after bootstrap, when user selects or attaches a session)
+
+1. Portal's open/attach code resolves the target session.
+2. `tmux switch-client -t <session>` (inside tmux) or `exec tmux attach -t <session>` (outside). This is Portal's existing AttachConnector / SwitchConnector logic.
+3. `client-session-changed` hook fires automatically (tmux event — we registered the hook globally in step 2 of bootstrap).
+4. Hook command runs `portal state signal-hydrate` as a subprocess, with the attached session name available via tmux format expansion.
+5. Subprocess:
+   - Enumerates panes in the attached session.
+   - For each pane with `@portal-skeleton-<key>` set:
+     - Writes a byte to its FIFO to unblock the helper.
+     - Unsets `@portal-skeleton-<key>` so save loop resumes capturing this pane.
+6. Helpers unblock, each does:
+   - Reset preamble → dump scrollback → reset postamble.
+   - Read `hooks.json`, look up hook for own pane key.
+   - If hook exists: `exec sh -c 'HOOK; exec $SHELL'`.
+   - Else: `exec $SHELL`.
+7. User is now in the session with restored scrollback, hook running (or shell if no hook).
+
+### Save loop (continuous, inside `_portal-saver`)
+
+Recapped for completeness from Save-Side Architecture decisions:
+
+- 1s ticker in the hosted Go daemon.
+- Each tick: check `@portal-restoring` — if set, skip entire tick.
+- Otherwise: check `save.requested` dirty flag OR `timeSinceLastSave >= 30s` max-gap. If either, capture.
+- Capture: for each live pane whose `@portal-skeleton-<key>` is NOT set, capture structural + scrollback. Content-hash dedup (skip unchanged).
+- Write scrollback files atomically (temp + rename), write `sessions.json` atomically last (the commit).
+- GC: remove orphaned scrollback files not referenced by the new `sessions.json`.
+
+### Ordering correctness check
+
+The critical ordering: `@portal-restoring` must be set (step 3) **before** `_portal-saver` is created (step 4), because creating `_portal-saver` fires `session-created` which in our new flow touches the dirty flag. Without `@portal-restoring`, the daemon's first tick could try to save while restoration is mid-build.
+
+With the ordering above:
+- `@portal-restoring` set → daemon's first tick no-ops.
+- Restoration runs → more `session-created`/`window-linked` events fire → dirty flag bumped many times.
+- `@portal-restoring` unset → next daemon tick runs, captures the now-complete state. Clean.
+
+Similarly, `@portal-skeleton-<key>` markers are set as each pane is created, so even after `@portal-restoring` is unset, the daemon won't try to save unhydrated panes.
+
+### Return-to-caller timing
+
+**TUI path**: bootstrap runs, 1.2s minimum loading-page display, TUI appears with populated picker. User selects, attach flow runs.
+
+**CLI path** (e.g. `portal attach NAME`): bootstrap runs silently, then `attach NAME` logic resolves the target and attaches. If the target wasn't in sessions.json (fresh session), it just works. If it was in sessions.json, skeleton was restored before attach, so `has-session -t NAME` returns true when needed.
+
+### What's decided vs. implementation
+
+Everything on the Restore-Side decision tree is now settled at the design level. Implementation will have smaller details to pin down:
+- Exact tmux command sequences for session creation (flags, error handling on each).
+- Go error-propagation strategy for partial failures.
+- FIFO cleanup for panes whose helpers never got signalled (state-dir scan on bootstrap to remove stale FIFOs).
+- Unit tests using isolated tmux sockets for restoration correctness.
+
+These belong in the Planning phase, not here.
+
+### Confidence
+
+High. All sub-items check out individually; the ordering tweak (set `@portal-restoring` before `_portal-saver` creation) is the only integration-level gotcha and it's been captured.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -1183,5 +1290,5 @@ High. Straightforward refactor — removing polling code that existed to hedge a
 - Hook Lifecycle Redesign: **decided** — no mode field; single persistent behavior; one-shot is a caller-level policy via wrapper-script lifecycle management
 - Save Content & Scope: **decided** — capture structural state + scrollback + tmux per-session env on by default. Ephemeral interaction state excluded.
 - Save-Side Architecture: **decided in full** — execution model (detached tmux session hosts long-running Go process), trigger mechanism (event + 30s periodic; opportunistic dropped), crash cadence (30s), signal handling (SIGHUP + SIGTERM), debouncing (single-writer via dirty flag), save format (per-pane scrollback files + sessions.json index), content-hash dedup (skip unchanged writes), CLI surface (`portal state status` user-facing; `state daemon` and `state notify` internal), tmux hook registration lifecycle (append-based coexistence via `set-hook -ga` with content-based idempotency and per-index removal; min tmux 3.0+).
-- Restore-Side Architecture: **partially decided** — trigger (restore all, idempotent by name), eagerness split (skeleton-eager, scrollback-lazy via `client-session-changed` hook), marker coordination (`@portal-skeleton-<key>` + `@portal-restoring`), failure-mode behavior (degrade to empty pane, unset marker, log). Scrollback injection mechanics, shell readiness, layout replay, `WaitForSessions` fate, and bootstrap integration still pending.
-- Remaining: finish Restore-Side Architecture sub-items, Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
+- Restore-Side Architecture: **decided in full** — trigger (restore all, idempotent by name), eagerness split (skeleton-eager, scrollback-lazy), marker coordination (`@portal-skeleton-<key>` + `@portal-restoring`), scrollback injection mechanics (blocking helper pre-shell via FIFO with reset preamble/postamble and 3s timeout), hook firing redesign (delete `ExecuteHooks` + marker-at-registration, fire via helper exec chain), layout restoration (standard tmux flow with tiled fallback on failure), `WaitForSessions` deleted (replaced with synchronous `Restore()` + 1.2s min loading page), bootstrap integration ordering (set `@portal-restoring` before `_portal-saver` creation).
+- Remaining: Failure Modes & Recovery, Observability & Diagnostics, CleanStale Guard Behavior, Session & Project Store Interaction, Ephemeral Session Opt-Out, Scope Boundaries
