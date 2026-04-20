@@ -86,7 +86,7 @@ Key design principles established in research:
   ├─ Restored session naming (exact saved names, no regeneration) [decided]
   └─ projects.json timestamp handling (only on user attach, not on restore) [decided]
 
-  Ephemeral Session Opt-Out [pending]
+  Ephemeral Session Opt-Out [decided — skipped, YAGNI]
 
   Scope Boundaries [pending]
   ├─ Environment / shell state (explicit non-goal) [pending]
@@ -1451,6 +1451,36 @@ User ran `portal open /some/path` months ago (creating a `projects.json` entry),
 ### Confidence
 
 High. Consistent with existing Portal semantics — name stability, minimal-intrusion timestamps, clear separation between "session exists" and "user engages with project."
+
+---
+
+## Ephemeral Session Opt-Out — SKIPPED (YAGNI)
+
+### Context
+
+Research framed this as "a design decision — trivially implementable if desired." Review-002 added sub-questions about session-level vs pane-level granularity. The motivating scenario was scrollback capturing sensitive command output (`kubectl get secret`, `aws sts`, etc.).
+
+### Decision
+
+**Don't build it.** The speculative user need wasn't validated by any concrete request, and the complexity cost (new CLI commands, new persistent JSON store, save-process marker checks, documentation, user discoverability) outweighs the speculative benefit.
+
+### Why this is the right call for v1
+
+- The 0600 permission model already protects scrollback from other users on the same machine.
+- If the machine itself is compromised, scrollback is one of many exposed things (shell history, ssh agents, browser keychains). Ephemeral opt-out doesn't materially change the threat model.
+- Users with genuinely sensitive content in specific windows have existing tmux options:
+  - `tmux set-option -w history-limit 0` on the sensitive window — nothing accumulates in scrollback, so nothing to capture.
+  - `tmux clear-history` manually after sensitive output.
+  - Avoid using Portal for that specific workflow.
+- Most users don't proactively opt specific things out of persistence. They either trust local-filesystem storage or they don't.
+
+### Trigger for reconsidering
+
+If a real user request surfaces post-launch with specific use cases (and ideally preferred granularity), revisit. By then we'll know whether session-level, pane-level, or some other shape is actually needed — better than guessing up front.
+
+### Documentation note for v1 release
+
+Include a brief "Privacy considerations" section in the README: scrollback is saved to `~/.config/portal/state/` with `0600` permissions, same trust model as shell history; users with sensitive workflows can set `history-limit 0` on specific windows to prevent scrollback accumulation.
 
 ---
 
