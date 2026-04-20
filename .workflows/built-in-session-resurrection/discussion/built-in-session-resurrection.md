@@ -61,7 +61,7 @@ Key design principles established in research:
   ├─ Skeleton vs content split (skeleton-eager, scrollback-lazy via hook) [decided, amended]
   ├─ Marker coordination (awaiting-hydration + restoring-in-progress) [decided, amended]
   ├─ Scrollback restore mechanics (blocking helper pre-shell via FIFO) [decided]
-  ├─ Shell readiness detection [pending]
+  ├─ Shell readiness + hook firing redesign (helper exec chain) [decided]
   ├─ Layout restoration approach [pending]
   ├─ Fate of WaitForSessions / bootstrapWait [pending]
   └─ Bootstrap integration (full flow diagram) [pending]
@@ -964,6 +964,101 @@ The earlier framing had the attach hook injecting scrollback directly (via paste
 ### Confidence
 
 High on mechanism, medium on fine details. Validated empirically on isolated tmux. The FIFO/timeout/reset-sequence specifics are small enough that if something needs tuning (timeout length, whether to reset before as well as after), it's a localized change, not an architecture revision.
+
+---
+
+## Shell Readiness + Hook Firing Redesign
+
+### Context
+
+The existing Portal hook system fires stored commands via `tmux send-keys` on attach (via `ExecuteHooks` called from `cmd/open.go` / `cmd/attach.go`). To make this work with reboot-recovery semantics, it uses a workaround: `portal hooks set` sets a volatile `@portal-active-<pane>` server-option marker at registration time, and `ExecuteHooks` skips any pane with the marker already set. The marker is volatile (cleared on server restart), so post-reboot the hook fires on first attach. This was designed before Portal took charge of resurrection — the marker-at-registration is a hack to suppress the "fire on every attach" behavior of the underlying send-keys model.
+
+The `send-keys` path also brings a shell-readiness problem: if the shell isn't ready to accept input when `send-keys` fires, keystrokes get queued and processed once the shell is ready — mostly fine in practice, but fragile under slow shell startup (zsh + oh-my-zsh + nvm + pyenv can be 2-5s).
+
+Under the new restore design, both concerns collapse together.
+
+### The insight
+
+Hooks are for reboot recovery. A hook "firing" means "re-launch this process when the pane comes back from the dead." The only moments when a pane comes back from the dead are:
+
+1. After a server restart — skeleton restore creates the pane fresh with the hydrate helper chain.
+2. That's it.
+
+Within a single server lifetime, a pane that still exists doesn't need its hook fired again — the process either still exists or was explicitly killed by the user. Firing `claude --resume` on a detach/reattach of a pane that already has Claude running would actively break things.
+
+So: **hook firing belongs in the hydrate helper's exec chain**, and nowhere else.
+
+### Decision
+
+**Delete the existing `ExecuteHooks` attach-time firing and its `@portal-active-<pane>` marker entirely.** Replace with helper-driven hook execution as part of the restoration path.
+
+**New hydrate helper flow:**
+
+```
+portal state hydrate --fifo F --file S:
+  1. open FIFO for reading, block (3s timeout)
+  2. on signal: close + unlink FIFO
+  3. emit reset preamble to stdout
+  4. copy scrollback file to stdout
+  5. emit reset postamble + CRLF
+  6. read hooks.json, look up hook for this pane's structural key
+  7. if hook exists: exec `sh -c 'HOOK; exec $SHELL'`
+     else:          exec $SHELL
+```
+
+When the hook command exits, `exec $SHELL` takes over (via the chained `; exec $SHELL` after `HOOK`). User is dropped into an interactive shell cleanly.
+
+**What gets deleted:**
+- `ExecuteHooks` function and its call sites in `cmd/open.go` / `cmd/attach.go`.
+- `@portal-active-<pane>` marker logic in `portal hooks set` — registration becomes a pure write to `hooks.json`.
+- All attach-time hook checking.
+
+**What stays:**
+- `hooks.json` storage.
+- CLI: `portal hooks set`, `portal hooks list`, `portal hooks rm` — unchanged user-facing surface, just the internals are simpler.
+- `CleanStale` for pruning orphaned hook entries.
+
+### Why this isn't a regression
+
+The only scenario where this would behave differently from the current design is "hook registered on a pane that hasn't gone through a Portal save/restore cycle yet, user reattaches before reboot." In the old design, `ExecuteHooks` would have fired the hook via `send-keys` (once per server lifetime, thanks to the marker). In the new design, the hook doesn't fire until reboot triggers skeleton restoration.
+
+But this "live attach firing" was the *problem*, not a feature:
+- Firing `claude --resume` on a live pane that already has Claude running would break things.
+- The marker-at-registration workaround existed specifically to prevent this.
+- The only reason it sort-of worked was that the marker made firing a one-shot per server lifetime.
+
+Under the new design, this correctly-desired behavior falls out naturally: hooks fire exactly when a pane is freshly recreated from saved state. Not before, not after. Matches the user's mental model of "hooks are for reboot recovery."
+
+### Coverage across attach paths
+
+Because `client-session-changed` is registered globally by Portal's bootstrap, hook execution works regardless of attach path:
+
+- `portal open` / `portal attach` / picker selection → client-session-changed fires → signal handler triggers helper FIFO signals
+- `tmux attach -t NAME` directly → same `client-session-changed` fires → same path
+- `switch-client` from inside tmux → same path
+
+Identical UX across all paths. The user doesn't need to know "hooks only work if you use Portal to attach."
+
+### Shell readiness — no longer a concern
+
+Under the old model, the `send-keys` path needed the shell to be ready to accept keystrokes. Under the new model, nothing uses `send-keys` for hook firing. Hook exec happens from inside the pane's helper process, replacing itself with the hook (or shell) via `exec` — no shell needed to be "ready" because no shell is receiving anything.
+
+There's still a shell running after the hook exits (`exec $SHELL` via the `;` chain). But by the time the user is interacting with it, it's fully initialized. No readiness detection needed.
+
+### What this does to Portal's code shape
+
+- `cmd/hook_executor.go` → deleted (or gutted to a no-op stub, then removed in a cleanup pass).
+- `cmd/open.go` / `cmd/attach.go` → attach flow no longer calls `ExecuteHooks`.
+- `internal/hooks/executor.go` → deleted.
+- `cmd/hooks.go::hooksSetCmd` → no longer calls `SetServerOption` for the marker.
+- `portal state hydrate` (new subcommand) → reads `hooks.json`, does the exec chain.
+- `portal state signal-hydrate` (new subcommand, invoked by the `client-session-changed` hook) → iterates skeleton-marked panes in the attached session, writes to their FIFOs.
+
+Net simplification: a whole execution path is removed, replaced by inclusion of the hook into an exec chain that was going to exist for hydration anyway.
+
+### Confidence
+
+High. The realization that hooks belong only in the helper exec chain is a clean mental model — and removing the attach-time firing eliminates an entire workaround layer (the marker-at-registration hack). The scenarios check out identically to current expected behavior for all real use cases.
 
 ---
 
