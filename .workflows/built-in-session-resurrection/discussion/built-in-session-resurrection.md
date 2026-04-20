@@ -803,7 +803,7 @@ Rebuild each missing session's **structure** immediately (eager), defer **scroll
 
 **Why scrollback-lazy** (vs fully-eager): at realistic power-user scrollback sizes (`history-limit 50000`), `paste-buffer` injection costs 300-600ms per pane. 30 panes eagerly ≈ 15s of boot delay — unacceptable. Lazy amortizes across attaches; never-touched sessions cost nothing.
 
-**Why hook-driven hydration** (vs Portal-attach-code-driven): `client-session-changed` fires on *any* attach path — `portal open` picker, direct `tmux attach -t NAME`, `switch-client`, anything. Universal coverage, single code path.
+**Why hook-driven hydration** (vs Portal-attach-code-driven): by registering both `client-attached` (initial attach, NULL → session) and `client-session-changed` (existing client switching sessions), hydration fires on *any* attach path — `portal open` picker, direct `tmux attach -t NAME`, `switch-client`, anything. Universal coverage, single code path. Double-firing across the two events for a single logical attach is harmless — `signal-hydrate` is idempotent via the skeleton marker check.
 
 **Why synchronous injection** (vs async-progressive): injection completes before the user sees the pane. No "empty pane gradually filling in" UX. User clicks attach → brief pause (~1.5s heavy-case) → session appears ready. Analogous to opening a large file in an editor. If `run-shell` blocking proves annoying, can optimize with `-b` + coordination later.
 
@@ -844,7 +844,7 @@ Keeps one pane's broken state from poisoning forever. User gets an empty shell i
 1. Start tmux server if not running.
 2. Register hooks idempotently via `set-hook -ga` + content-based check:
    - `session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out` → `portal state notify`
-   - `client-session-changed` → `portal state hydrate` (new)
+   - `client-attached` + `client-session-changed` → `portal state signal-hydrate #{session_name}` (both events registered; session name passed as argv)
 3. Create `_portal-saver` if missing; always set `destroy-unattached off` on it.
 4. **Set `@portal-restoring 1`.**
 5. Read `sessions.json`. For each saved session:
@@ -1037,11 +1037,14 @@ Under the new design, this correctly-desired behavior falls out naturally: hooks
 
 ### Coverage across attach paths
 
-Because `client-session-changed` is registered globally by Portal's bootstrap, hook execution works regardless of attach path:
+Two hooks registered globally: `client-attached` (fires on initial attach, NULL → session) and `client-session-changed` (fires when an existing client switches sessions). Between them, every attach path is covered:
 
-- `portal open` / `portal attach` / picker selection → client-session-changed fires → signal handler triggers helper FIFO signals
-- `tmux attach -t NAME` directly → same `client-session-changed` fires → same path
-- `switch-client` from inside tmux → same path
+- `portal open` that starts the tmux server → `client-attached` on first attach → signal-hydrate
+- `portal attach NAME` / picker selection while already in tmux → `client-session-changed` → signal-hydrate
+- `tmux attach -t NAME` directly from bare shell → `client-attached` → signal-hydrate
+- `tmux switch-client -t NAME` from inside tmux → `client-session-changed` → signal-hydrate
+
+Both events run the same `portal state signal-hydrate #{session_name}` command — the session name flows from tmux's format expansion into the subprocess as argv. Subprocess enumerates panes in that specific session and signals any that still have the skeleton marker set. Idempotent for already-hydrated panes (cheap no-op).
 
 Identical UX across all paths. The user doesn't need to know "hooks only work if you use Portal to attach."
 
@@ -1191,7 +1194,7 @@ Everything we've decided so far needs to stitch together into a single, coherent
 
 2. **Register global hooks via `set-hook -ga` with content-based idempotency check**:
    - Structural save triggers → `portal state notify`: `session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out`.
-   - Hydration trigger → `portal state signal-hydrate`: `client-session-changed`.
+   - Hydration triggers → `portal state signal-hydrate #{session_name}`: `client-attached` (initial attach NULL → session) AND `client-session-changed` (existing client switches sessions). Both registered; session name passed as argv via tmux format expansion.
    - All wrapped in `command -v portal >/dev/null 2>&1 && ...` defensive guard.
    - Parse `show-hooks -g` first; skip events that already have the target Portal command present.
 
@@ -1226,8 +1229,8 @@ Everything we've decided so far needs to stitch together into a single, coherent
 
 1. Portal's open/attach code resolves the target session.
 2. `tmux switch-client -t <session>` (inside tmux) or `exec tmux attach -t <session>` (outside). This is Portal's existing AttachConnector / SwitchConnector logic.
-3. `client-session-changed` hook fires automatically (tmux event — we registered the hook globally in step 2 of bootstrap).
-4. Hook command runs `portal state signal-hydrate` as a subprocess, with the attached session name available via tmux format expansion.
+3. `client-attached` or `client-session-changed` hook fires automatically (tmux event — registered globally in step 2 of bootstrap). Which one fires depends on attach path: `client-attached` for initial attach, `client-session-changed` for existing-client session switch.
+4. Hook command runs `portal state signal-hydrate <session-name>` as a subprocess. `<session-name>` comes from tmux's `#{session_name}` format expansion, passed as argv.
 5. Subprocess:
    - Enumerates panes in the attached session.
    - For each pane with `@portal-skeleton-<key>` set:
