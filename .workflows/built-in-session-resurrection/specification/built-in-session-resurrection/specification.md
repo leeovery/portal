@@ -83,6 +83,40 @@ Not Portal's problem to solve. Users can compensate via resume hooks where meani
 - **Schema migration (v1 → v2).** Standard practice when the time comes; not a v1 design decision.
 - **Background prefetch / full-eager hydration.** Rejected in favor of pure-lazy hydration; can be reconsidered if attach-time latency becomes a complaint.
 
+## Hook System Lifecycle Behavior
+
+### Behavior
+
+Portal's resume hook system has **a single persistent behavior**. Hooks registered via `portal hooks set --on-resume "cmd"` live in `hooks.json` across reboots and survive tmux server restarts. They are removed only by explicit `portal hooks rm --on-resume` invocation.
+
+There is no `mode` field, no `once` vs `always` flag, no per-hook lifetime configuration. Portal is a mechanism; hook lifecycle policy (one-shot, bounded-lifetime, dynamic re-registration) is the caller's responsibility.
+
+### Caller Pattern for Dynamic or One-Shot Semantics
+
+Long-running processes that need dynamic hook management (e.g., `claude --resume <uuid>` where the UUID changes each session) are invoked via a wrapper script that owns the hook lifecycle:
+
+- Wrapper calls `portal hooks set --on-resume "<cmd>"` when the process starts, inferring the current pane from `TMUX_PANE`.
+- Wrapper re-registers on each resume if the command includes dynamic state (e.g., a new resume UUID).
+- Wrapper calls `portal hooks rm --on-resume` on explicit process exit, via an exit trap or teardown routine.
+
+Portal exposes `set` and `rm` as primitives; callers wire them into their own lifecycle hooks.
+
+### Rejected Alternative: `&&` Shell-Chaining for Self-Removal
+
+A pattern like `portal hooks set --on-resume "my-cmd && portal hooks rm --on-resume"` does **not** work for the flagship class of hook commands. Long-running processes (`claude --resume`, `npm start`, `tail -f`) never exit, so the `&&` clause never fires, and the hook never self-removes. This pattern is architecturally broken for the exact use case hooks exist to serve and is not supported as a recommendation.
+
+### CLI Surface (Unchanged User-Facing Shape)
+
+- `portal hooks set --on-resume "<cmd>"` — register or replace the resume hook for the current pane (pane inferred from `TMUX_PANE`, keyed by structural key `session:window.pane`).
+- `portal hooks list` — list registered hooks.
+- `portal hooks rm --on-resume` — remove the resume hook for the current pane.
+
+The storage file (`hooks.json`) and structural-key scheme are unchanged. Internal implementation changes are covered in "Resume Hook Firing" and "CleanStale Behavior" sections below.
+
+### Rationale
+
+A mode field can be added later if a concrete use case surfaces where wrapper-script management is genuinely impractical. None was identified during discussion — the flagship Claude use case is satisfied by caller-side wrapping, and static commands (`npm start`, file watchers, `tail -f`) only make sense as persistent.
+
 ---
 
 ## Working Notes
