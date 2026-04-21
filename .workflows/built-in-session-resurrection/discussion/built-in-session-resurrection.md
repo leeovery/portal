@@ -1263,7 +1263,8 @@ Recapped for completeness from Save-Side Architecture decisions:
 - 1s ticker in the hosted Go daemon.
 - Each tick: check `@portal-restoring` — if set, skip entire tick.
 - Otherwise: check `save.requested` dirty flag OR `timeSinceLastSave >= 30s` max-gap. If either, capture.
-- Capture: for each live pane whose `@portal-skeleton-<key>` is NOT set, capture structural + scrollback. Content-hash dedup (skip unchanged).
+- Enumerate live sessions. **Skip any session whose name starts with `_`** — Portal reserves the `_`-prefix for internal machinery (`_portal-saver` and any future internal sessions). Without this filter, the saver session itself would be captured and then "restored" by the next bootstrap's skeleton pass, which would break the daemon lifecycle.
+- For each eligible (non-`_`) session: for each pane whose `@portal-skeleton-<key>` is NOT set, capture structural + scrollback. Content-hash dedup (skip unchanged).
 - Write scrollback files atomically (temp + rename), write `sessions.json` atomically last (the commit).
 - GC: remove orphaned scrollback files not referenced by the new `sessions.json`.
 
