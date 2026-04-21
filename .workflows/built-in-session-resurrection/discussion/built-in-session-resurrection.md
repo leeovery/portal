@@ -916,8 +916,8 @@ portal state hydrate --fifo FIFO --file SCROLLBACK; exec $SHELL
 Bytes flow through the helper's stdout → PTY slave → tmux's VT parser → rendered into scrollback natively with full ANSI fidelity. The subsequent `exec $SHELL` takes over the same process, producing zero shell history pollution (the shell never sees `cat` or `portal state hydrate`).
 
 **Signal mechanism: FIFO per pane.**
-- Skeleton restore `mkfifo ~/.config/portal/state/hydrate-{paneKey}.fifo` before creating each pane.
-- `client-session-changed` hook fires `portal state signal-hydrate` or similar, which for each skeleton-marked pane in the attached session writes a byte to the FIFO.
+- Skeleton restore creates `~/.config/portal/state/hydrate-{paneKey}.fifo` before creating each pane. Creation is defensive: `os.Remove` the path first (ignore ENOENT), then `syscall.Mkfifo` with mode `0600`. This handles stale FIFOs from prior crashed bootstraps or dead helpers without a separate sweep step.
+- `client-attached` / `client-session-changed` hook fires `portal state signal-hydrate` or similar, which for each skeleton-marked pane in the attached session writes a byte to the FIFO.
 - Helper's blocked `read()` returns, helper proceeds to dump-and-exit.
 - Helper unlinks its own FIFO on wake; lingering FIFOs from crashed helpers get swept by a state-dir scan on next bootstrap.
 
@@ -1228,7 +1228,7 @@ Everything we've decided so far needs to stitch together into a single, coherent
      - `has-session -t <name>` → live exists → skip this session.
      - Else: skeleton-create.
        - Compute FIFO path per pane (`~/.config/portal/state/hydrate-<paneKey>.fifo`).
-       - `mkfifo` for each pane before creating the pane.
+       - `mkfifo` for each pane before creating the pane. **Defensive against stale FIFOs**: `os.Remove(path)` first (ignore "not exist" errors), then `syscall.Mkfifo(path, 0600)`. Handles pre-existing FIFOs from a prior crashed bootstrap or dead helper without needing a separate sweep step. Safe because stale FIFOs only exist when no live helper holds them — helpers die with the tmux server.
        - `new-session -d -s <name> -c <root_cwd> "portal state hydrate --fifo <F> --file <scrollback>"` for the first pane.
        - `new-window`, `split-window` for remaining windows/panes to match saved structure; each with its own `hydrate` command.
        - `select-layout "<saved>"` per window → `select-pane -t <active>` → `resize-pane -Z` if zoomed.
