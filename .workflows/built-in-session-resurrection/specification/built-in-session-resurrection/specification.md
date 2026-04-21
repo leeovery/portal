@@ -260,6 +260,151 @@ This polling approach is not load-bearing. It could be swapped for `fsnotify`-st
 - **Mid-write crash:** `AtomicWrite` (temp file + rename) guarantees either the old or new file is intact. No partial-file states exist on disk.
 - **Orphan scrollback files** from an interrupted save are cleaned up by the GC step on the next successful save (see Save Format & Schema section).
 
+## Save Format & Schema
+
+### Storage Location
+
+Saved state lives at `~/.config/portal/state/`, resolved via Portal's existing `configFilePath` mechanism (per-file env var → `XDG_CONFIG_HOME/portal/` → `~/.config/portal/`). Same location as other Portal config (`hooks.json`, `projects.json`, `aliases`) — no separate XDG state directory.
+
+All files written with mode `0600` (owner read/write only). Matches the trust model of shell history and debug logs already on the user's filesystem. No encryption at rest.
+
+### Directory Layout
+
+```
+~/.config/portal/state/
+├── sessions.json                        # structural index (the atomic commit)
+├── save.requested                       # dirty flag (touched by portal state notify)
+├── daemon.version                       # daemon binary version marker
+├── portal.log                           # current log file
+├── portal.log.old                       # previous rotated log
+├── hydrate-<paneKey>.fifo               # per-pane hydration FIFOs (transient)
+└── scrollback/
+    ├── <session>__<window>.<pane>.bin   # raw capture-pane output per pane
+    ├── work__0.0.bin
+    ├── work__0.1.bin
+    └── ...
+```
+
+### Scrollback Files
+
+Each live pane has its own scrollback file containing raw `capture-pane -e -p -S -` output (ANSI escape sequences preserved inline, no encoding transformation).
+
+**Filename scheme:** `<session>__<window>.<pane>.bin`
+
+- `session` is the session name, passed through a filesystem-safe sanitizer (replace characters that conflict with filesystem conventions: `/`, null bytes, leading `.`, etc.). On collision (two sanitized session names map to the same file key), append a hash suffix.
+- `window` is the numeric window index; `pane` is the numeric pane index.
+- `.bin` extension indicates binary (non-textual) content due to embedded ANSI escapes.
+
+### Structural Index: `sessions.json`
+
+Single JSON file at the root of the state directory. Contains the complete structural topology plus references to scrollback files.
+
+**Schema (version 1):**
+
+```json
+{
+  "version": 1,
+  "saved_at": "2026-04-17T10:30:00Z",
+  "sessions": [
+    {
+      "name": "work",
+      "environment": { "LANG": "en_US.UTF-8", "TERM": "xterm-256color" },
+      "windows": [
+        {
+          "index": 0,
+          "name": "main",
+          "layout": "b25f,200x50,0,0{...tmux layout string...}",
+          "zoomed": false,
+          "active": true,
+          "panes": [
+            {
+              "index": 0,
+              "cwd": "/Users/leeovery/Code/portal",
+              "active": true,
+              "current_command": "zsh",
+              "scrollback_file": "scrollback/work__0.0.bin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Field semantics:**
+
+- `version` — integer. Starts at 1. Bumped on schema-breaking changes (loader reads this and applies known-version logic).
+- `saved_at` — RFC 3339 UTC timestamp, used by `portal state status` to render "last saved Xs ago."
+- `sessions[].name` — exact session name at save time; restored verbatim.
+- `sessions[].environment` — key-value map from `show-environment -t <session>`. Written as-is; tmux's `update-environment` refreshes stale values on client attach.
+- `sessions[].windows[].layout` — pre-zoom layout string from `#{window_layout}` (not `window_visible_layout`). Correct for `select-layout` replay.
+- `sessions[].windows[].zoomed` — boolean from `#{window_zoomed_flag}`. Re-applied separately after layout.
+- `sessions[].windows[].active` — boolean from `#{window_active}`.
+- `sessions[].windows[].panes[].cwd` — from `#{pane_current_path}`.
+- `sessions[].windows[].panes[].active` — from `#{pane_active}`.
+- `sessions[].windows[].panes[].current_command` — short command name from `#{pane_current_command}` (no args — that's a tmux limitation). Captured for diagnostic visibility in `portal state status`; not load-bearing for restoration.
+- `sessions[].windows[].panes[].scrollback_file` — path relative to the state directory.
+
+**Omitted fields (explicitly not captured):**
+- `options` (generic per-session/per-window/per-pane option capture): dropped per Scope.
+- `marks`: dropped per Scope.
+- `last_pane`: dropped per Scope.
+
+### Atomic Commit Discipline
+
+Multi-file state with per-file atomicity. The commit order:
+
+1. **In-memory capture.** Enumerate live sessions (skipping `_*` names), call `list-panes -a -F ...`, `show-environment -t <session>` per session, and `capture-pane -e -p -S - -t <pane>` per eligible pane. All reads run to completion before any writes.
+2. **Per-pane scrollback writes.** For each pane whose scrollback hash changed (see Content-Hash Dedup below), write its `.bin` file via `AtomicWrite` (temp file + rename). Unchanged panes are skipped.
+3. **Structural index write.** `sessions.json` written last, via `AtomicWrite`. **This rename is the atomic commit.** If the rename succeeds, all referenced scrollback files are present on disk.
+
+**Failure modes:**
+- Crash before step 3 → old `sessions.json` still valid, still references old scrollback files. Restore works as of the previous save.
+- Crash mid-step 3 → `AtomicWrite` guarantees either the old or new `sessions.json`, never a partial. Still consistent.
+- Orphan new scrollback files from a partial save → cleaned by GC on the next successful save.
+
+### Content-Hash Dedup
+
+To avoid rewriting unchanged scrollback on every tick (which would generate gigabytes per day for heavy-history configurations), the daemon holds an in-memory map `paneKey → hash-of-last-written-scrollback`.
+
+Per pane per capture cycle:
+1. Capture scrollback bytes (cheap — tmux internal buffer).
+2. Hash the bytes (xxhash or equivalent fast non-cryptographic hash).
+3. Compare to the stored hash for this pane.
+4. If identical → skip the disk write; no change.
+5. If different → `AtomicWrite` the scrollback file, update the stored hash.
+
+`sessions.json` is written at the end of the cycle only if *anything* changed (structural delta or at least one pane's hash differed). If a full 30-second cycle produces zero changes, zero disk activity occurs.
+
+### GC / Orphan Cleanup
+
+After every successful save (after `sessions.json` is atomically committed), run GC synchronously:
+
+1. Read the freshly-written `sessions.json` and collect every `scrollback_file` path it references.
+2. List everything under `scrollback/`.
+3. Any file present on disk but NOT referenced by the new index → `os.Remove`.
+
+Handles every stale-file scenario:
+- Pane closed → file no longer referenced → deleted.
+- Session renamed → old-name files deleted, new-name files written.
+- Window or pane renumbered → same.
+- Orphan files from a previous mid-save crash → cleaned on next successful save.
+
+Idempotent. Runs once per save. Self-healing by construction.
+
+### Retention Policy
+
+**Current state only.** No historical snapshots. Single `sessions.json`, no `.0`/`.1` rotation.
+
+- `AtomicWrite` makes mid-write corruption vanishingly rare (temp + rename).
+- Historical snapshots would 5-10× disk use for no restore benefit.
+- If real-world corruption surfaces, a `sessions.json.previous` single-slot backup can be added later. YAGNI for v1.
+
+### FIFO Files
+
+Per-pane FIFOs for hydration (`hydrate-<paneKey>.fifo`) live in the state directory during the restoration window. They are created just before pane creation, unlinked by the helper on signal (or timeout), and swept defensively by `os.Remove + syscall.Mkfifo` on each bootstrap. Not part of the save schema; treated as transient coordination artifacts.
+
 ---
 
 ## Working Notes
