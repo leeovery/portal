@@ -18,6 +18,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "built-in-session-resurrection": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-04-21",
+          "sources": {
+            "built-in-session-resurrection": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
