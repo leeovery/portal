@@ -169,6 +169,97 @@ No configurable grace period. Atomic rename guarantees either the old or new sta
 - **Recreation:** the next `portal open` after destruction runs bootstrap, finds `_portal-saver` absent, and recreates it.
 - **Version-based restart:** see the "tmux Hook Registration Lifecycle" section for the version-marker restart protocol.
 
+## Save-Side Architecture: Triggers & Serialization
+
+### Trigger Layers
+
+Two complementary trigger mechanisms ensure both responsiveness and bounded data loss:
+
+**1. Event-driven (immediate response).** tmux global hooks (`set-hook -ga`) fire on structural events. Each event runs `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`, which signals that state is dirty.
+
+The events:
+- `session-created`
+- `session-closed`
+- `session-renamed`
+- `window-linked`
+- `window-unlinked`
+- `window-layout-changed`
+- `pane-focus-out`
+
+These catch structural changes (session/window/pane topology, renames, layout changes, focus transitions) as they happen.
+
+**2. Periodic (bounded worst-case).** The hosted daemon runs a 1-second ticker internally. Each tick: if the dirty flag is set OR it has been ≥30 seconds since the last save, capture and persist state; otherwise no-op.
+
+- **Dirty-flag check** produces ≤1 second event-to-save latency.
+- **30-second max-gap** bounds worst-case scrollback loss on unexpected tmux/system termination at 30 seconds, even during periods with zero structural events.
+
+### No Opportunistic Trigger
+
+Earlier framing proposed additional saves fired from `portal open` / `portal attach` based on last-save staleness. This is **not** included. If the hosted daemon is running, it is already saving via events + ticker. If it is not running, `EnsureServer()` will recreate `_portal-saver` and its first tick fires within ~1 second — coverage is already complete. An opportunistic trigger would only add a code path racing with the hosted process.
+
+### Single-Writer Serialization via Dirty Flag
+
+All state-file writes flow through the hosted daemon. Other trigger paths only *signal*. This eliminates write races by construction.
+
+**Mechanism:**
+
+1. tmux fires a structural event.
+2. The hook command runs `portal state notify`.
+3. `portal state notify` is a small binary: touch (create or bump mtime of) `~/.config/portal/state/save.requested`, exit.
+4. The hosted daemon's 1-second ticker checks on each tick:
+   - Is `save.requested` present? → capture, then clear the flag.
+   - Has it been ≥30 seconds since the last save? → capture, then clear the flag.
+   - Neither? → no-op.
+5. Capture inspects `@portal-restoring` first; if set, skip the tick entirely (restoration in progress).
+
+**Properties:**
+
+- **Single writer by construction.** Only the hosted daemon writes scrollback files and `sessions.json`. No filesystem coordination beyond the dirty flag.
+- **Natural coalescing.** Five events firing in 100ms all just set the flag; the next tick does exactly one save.
+- **Max-gap guarantee.** 30 seconds is the ceiling on save staleness, even during idle periods.
+- **Event latency.** ≤1 second from tmux event to save completion (bounded by the ticker interval).
+- **Restoration guard.** The daemon's tick checks `@portal-restoring` at the top of the cycle. While set (during the skeleton-restore window), no capture runs, regardless of dirty-flag state.
+
+### Daemon Tick Loop (Pseudocode)
+
+```
+for {
+    select {
+    case <-ticker.C:  // 1 second
+        if isRestoringFlagSet() {
+            continue  // skip entire tick during restore
+        }
+        if isDirty() || timeSinceLastSave() >= 30*time.Second {
+            captureAndWrite()
+            clearDirty()
+        }
+    case <-ctx.Done():  // SIGHUP or SIGTERM
+        if !isRestoringFlagSet() {
+            captureAndWrite()  // flush final state on shutdown
+        }
+        return
+    }
+}
+```
+
+### Defensive Dirty-Flag Clear on Daemon Startup
+
+On daemon startup, the first action is to clear `save.requested` if present. This prevents a stale dirty flag from a prior (crashed or version-mismatch-restarted) daemon from triggering an immediate save of a mid-restore state.
+
+Correctness does not depend on this — even without it, the eventual capture converges to the correct state once restoration completes and `@portal-restoring` is cleared. The clear is a belt-and-braces cleanup that avoids a redundant capture during the restore window.
+
+### Tick Cadence Rationale
+
+The 1-second ticker is a **poll cadence**, not a save cadence. Per-tick idle cost is a filesystem stat of `save.requested` and a `time.Since` comparison — measured in microseconds. Heavy work (capture-pane, hashing, writes) only fires when the dirty flag is set or the 30-second max-gap elapses.
+
+This polling approach is not load-bearing. It could be swapped for `fsnotify`-style filesystem watching for sub-10ms responsiveness, at the cost of cross-platform watcher complexity. Current polling is simpler and good enough for the responsiveness target.
+
+### Crash Safety
+
+- **Mid-capture crash:** in-memory state discarded. On-disk `sessions.json` still points to the previous save's scrollback files. Previous save remains fully valid.
+- **Mid-write crash:** `AtomicWrite` (temp file + rename) guarantees either the old or new file is intact. No partial-file states exist on disk.
+- **Orphan scrollback files** from an interrupted save are cleaned up by the GC step on the next successful save (see Save Format & Schema section).
+
 ---
 
 ## Working Notes
