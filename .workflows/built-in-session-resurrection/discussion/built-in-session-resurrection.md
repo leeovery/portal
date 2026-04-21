@@ -563,14 +563,17 @@ The save-side design references several Portal invocations: the long-running hos
 
 ### Decision
 
-**One user-facing command, two hidden internal subcommands, all under a `portal state` namespace.**
+**Two user-facing commands, four hidden internal subcommands, all under a `portal state` namespace.**
 
 **User-facing:**
 - `portal state status` — liveness check for `_portal-saver`, last-save timestamp ("saved 12s ago"), session/pane count, disk use under `~/.config/portal/state/`. Purpose: let users verify resurrection is working, diagnose when it isn't, see what's captured.
+- `portal state cleanup` — explicit teardown for users removing Portal. Kills `_portal-saver`, removes Portal's `set-hook -ga` entries via index-based removal, optionally clears the state directory. Not required for uninstall (defensive hooks + self-healing make implicit teardown safe), but provided as a clean option.
 
 **Internal (hidden from `portal --help`):**
-- `portal state daemon` — the long-running process invoked as the command of the `_portal-saver` session. Holds the in-memory hash map, runs the 1s ticker, handles signals.
-- `portal state notify` — ~20-line binary invoked from `set-hook -g ... 'run-shell "portal state notify"'`. Touches `~/.config/portal/save.requested` and exits.
+- `portal state daemon` — long-running process invoked as the command of the `_portal-saver` session. Holds the in-memory hash map, runs the 1s ticker, handles signals.
+- `portal state notify` — ~20-line binary invoked from `set-hook -ga ... 'run-shell "portal state notify"'` on structural events. Touches `~/.config/portal/state/save.requested` and exits.
+- `portal state signal-hydrate <session-name>` — invoked from `client-attached` / `client-session-changed` hooks. Enumerates panes in the named session, writes a byte to each skeleton-marked pane's FIFO to unblock its helper. Does not touch the marker (helper owns unset).
+- `portal state hydrate --fifo F --file S` — the pane's initial command at skeleton restore time. Blocks on FIFO read, dumps scrollback on signal, sleeps 100ms, unsets own marker, exec's hook or shell.
 
 ### Journey
 
@@ -584,7 +587,7 @@ Originally considered `portal state save` (manual synchronous save) as a user-fa
 
 None of these justify a user-facing command. Dropped. If a real automation use case surfaces later, it can be added — YAGNI until then.
 
-Namespace (`portal state`) retained even though only one command lives under it initially. Gives natural room for future user-facing commands (`portal state gc`, `portal state reset`, etc.) if they ever become necessary — though none planned now.
+Namespace (`portal state`) retained so related commands cluster naturally. `portal state cleanup` was originally considered "optional/nice to have," but given scenarios 4 and 7 reference it explicitly as the explicit uninstall path, it earns first-class user-facing status.
 
 ### Confidence
 
@@ -725,23 +728,33 @@ The naive plan (scenario 1's original framing) was to overwrite hooks via `set-h
 **Registration shape** (combined with scenario 4's defensive wrapper):
 
 ```
+# Save-trigger events:
 set-hook -ga session-created 'run-shell "command -v portal >/dev/null 2>&1 && portal state notify"'
+# ... other save-trigger events similarly
+
+# Hydration-trigger events:
+set-hook -ga client-attached 'run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"'
+set-hook -ga client-session-changed 'run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"'
 ```
 
-The substring `portal state notify` serves as Portal's natural identity token — it's unique enough that no other tool will ever emit that exact sequence. No separate marker comment needed.
+Each event has a specific expected Portal command (`portal state notify` for save-triggers, `portal state signal-hydrate` for hydration-triggers). Those command substrings serve as Portal's identity tokens — unique enough that no other tool will emit them. No separate marker comment needed.
 
-**Idempotency check at bootstrap:**
+**Idempotency check at bootstrap — per-event, per-command:**
 
+For each (event, expected_command) pair:
 1. Run `tmux show-hooks -g` and capture stdout.
-2. For each target event, parse lines matching `^<event>\[(\d+)\] .*portal state notify` — extract indices where our entry is present.
-3. If the index set is non-empty → Portal's hook is registered → skip.
-4. If empty → `set-hook -ga <event> '<command>'` to append.
+2. Parse lines matching `^<event>\[(\d+)\] .*<expected_command>` — extract indices where our entry is present.
+3. If the index set is non-empty → Portal's hook for this event is registered → skip.
+4. If empty → `set-hook -ga <event> '<full command>'` to append.
+
+**The check is scoped per-event-per-command.** Looking for `portal state notify` inside a `client-session-changed` entry would return false even if the entry is our hydration hook — the command substrings are distinct, so each event's check looks only for its own expected command.
 
 **Removal (uninstall / `portal state cleanup`):**
 
 1. Run `tmux show-hooks -g`.
-2. Parse for all our indices (per the regex above, for each event).
-3. Remove each via `set-hook -gu 'EVENT[N]'`, in reverse index order (defensive — research showed tmux doesn't renumber after removal, but reverse-order is cheap insurance).
+2. For each (event, expected_command) pair we ever register: parse for our indices (lines matching `^<event>\[(\d+)\] .*<expected_command>`).
+3. Remove each match via `set-hook -gu 'EVENT[N]'`, in reverse index order (defensive — research showed tmux doesn't renumber after removal, but reverse-order is cheap insurance).
+4. Entries matching other commands on the same events are left alone — user or other-plugin hooks untouched.
 
 **Parsing lives in Go**, using the existing `Commander` interface. Compiled regex per event, table-driven tests with canned `show-hooks` output strings — no shell pipelines, no external-utility dependency.
 
