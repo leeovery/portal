@@ -11,6 +11,13 @@
           "status": "completed"
         }
       }
+    },
+    "discussion": {
+      "items": {
+        "built-in-session-resurrection": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
