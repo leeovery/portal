@@ -414,7 +414,13 @@ for {
             clearDirty()
         }
     case <-ctx.Done():  // SIGHUP or SIGTERM
-        captureAndWrite()  // flush once on shutdown
+        if !isRestoringFlagSet() {
+            captureAndWrite()  // flush final state on shutdown
+        }
+        // Skip flush if @portal-restoring is set — this happens during
+        // upgrade-triggered restart (scenario 3). New daemon will capture
+        // fresh state on its first tick. Flushing here would capture
+        // mid-transition state.
         return
     }
 }
@@ -656,6 +662,10 @@ User runs `brew upgrade portal` (or equivalent). New binary is on disk. tmux ser
 2. On every `EnsureServer()` call, Portal reads `daemon.version` and compares to `cmd.version` (the currently-invoking binary's version).
 3. If they differ (upgrade occurred), Portal runs `kill-session -t _portal-saver` then recreates it with the new binary. The replacement daemon overwrites the version file on startup.
 4. If the version file is absent (first-ever bootstrap), treat as mismatch and (re)create. No special case.
+
+**Dev / empty version handling.** `cmd.version` is injected via ldflags (`-X github.com/leeovery/portal/cmd.version=...`) and can be `dev` or empty in development builds. Rule:
+- If `cmd.version` is empty or literally `"dev"`: **always restart the daemon on bootstrap** — treat as mismatch regardless of stored version. This handles the common dev workflow where a developer rebuilds Portal repeatedly and wants each rebuild to pick up daemon code changes.
+- Otherwise (release build, `cmd.version` is a real semver string): compare `cmd.version` to stored version as raw strings; restart only on mismatch.
 
 Cost: one file read per `portal open` (microseconds). One `kill-session` + `new-session` on an actual upgrade (~50ms). Worst-case user visibility: a brief pause on the first `portal open` after upgrade. Invisible to anyone who's not watching.
 
@@ -1075,6 +1085,8 @@ Two hooks registered globally: `client-attached` (fires on initial attach, NULL 
 Both events run the same `portal state signal-hydrate #{session_name}` command — the session name flows from tmux's format expansion into the subprocess as argv. Subprocess enumerates panes in that specific session and signals any that still have the skeleton marker set. Idempotent for already-hydrated panes (cheap no-op).
 
 Identical UX across all paths. The user doesn't need to know "hooks only work if you use Portal to attach."
+
+**`run-shell` blocking note.** `signal-hydrate` does more work than `notify` (enumerate panes, check markers, write N FIFOs). For a 30-pane session restoration, it's ~50-150ms of work. Tmux `run-shell` is synchronous by default and blocks the server during that window. Acceptable for initial release — the user is actively attaching, a sub-150ms hitch during the attach moment is imperceptible. If real-world use shows problems (e.g. other clients feeling laggy during heavy attaches), switch to `run-shell -b` (async). Research flagged `run-shell -b` historical bugs but they appear settled on tmux 3.0+. Defer the switch until there's evidence the blocking matters.
 
 ### Shell readiness — no longer a concern
 
