@@ -23,6 +23,66 @@ This replaces reliance on external plugins with a built-in save/restore mechanis
 - **Single-writer architecture.** All state-file writes funnel through one long-running process. Other triggers signal via a dirty flag. Eliminates write races by construction.
 - **YAGNI rigorously.** Speculative features (ephemeral opt-out, background prefetch, compression, multi-host sync) are deferred until concrete user demand surfaces.
 
+## Scope & Constraints
+
+### Minimum Versions
+
+- **tmux ≥ 3.0** (Feb 2020). Array-indexed hooks (`set-hook -a` semantics) require 3.0; the hook-lifecycle coexistence model depends on them.
+- **Go, macOS, Linux**: inherits Portal's existing requirements. No change.
+
+### In Scope — Captured and Restored
+
+**Structural state:**
+- Session names
+- Window indices, names, layout strings, active flag, zoom flag
+- Pane indices, current working directories, active flag
+
+**Content:**
+- Full pane main-screen scrollback with ANSI escape sequences — colors, attributes, formatting preserved via `tmux capture-pane -e -p -S - -t <pane>`
+- tmux per-session environment via `show-environment -t <session>` — the tmux-level env used for initializing new panes (not live shell env). Restored in full without filtering; tmux's own `update-environment` refreshes stale values (`SSH_AUTH_SOCK`, `DISPLAY`) on client attach.
+
+**Already stored elsewhere (unchanged):**
+- Resume hooks (`hooks.json`)
+
+### Out of Scope — Ephemeral Interaction State
+
+Excluded from capture even though tmux exposes them, because they are transient:
+- Copy mode state
+- Active selections
+- Paste buffers
+- Cursor position within panes
+- Scroll position within scrollback
+- Per-client state (which client has which pane focused, client-specific dimensions)
+
+### Out of Scope — Uncapturable by tmux
+
+Not Portal's problem to solve. Users can compensate via resume hooks where meaningful:
+- Live shell environment variables — tmux cannot observe shell-side `export`. Callers compensate via resume hooks if they care.
+- Running process state (REPL state, interactive sessions like vim/htop/less) — alt-screen buffer contents are explicitly not scrollback. The resume hook system exists specifically for process relaunch.
+- Open file descriptors, pipes, sockets, ptrace state.
+
+### Explicit Non-Goals
+
+- **Live shell environment variables.** Scope-boundary non-goal; see above.
+- **Running process state.** Same.
+- **tmux server-level options and user's `.tmux.conf` customizations.** Portal reads live tmux state via standard APIs; does not introspect or capture config files. Restoration uses the user's current `.tmux.conf` as baseline.
+- **Third-party tmux plugin state.** Portal coexists with other TPM plugins via hook-append semantics but does not capture, understand, or interact with their state.
+- **Multi-server, multi-host, remote sync.** Portal works with a single local tmux server per machine. No cross-machine sync, no remote tmux, no session groups distributed across hosts.
+- **Non-tmux multiplexers.** Portal is tmux-specific. Zellij, GNU screen, wezterm, abduco — not supported.
+- **Shell-specific behavior.** Portal is shell-agnostic. Helper `exec`s `$SHELL`. No special-casing bash/zsh/fish.
+- **Mouse state / clipboard state.** Ephemeral interaction state.
+- **Generic tmux option capture** (session/window/pane options). Nearly all tmux options are set globally via `~/.tmux.conf` and apply on restore automatically. Per-session overrides are niche. Capturing them requires diffing `show-options` against global defaults — complexity not justified. If a specific flag becomes important, add it as an explicit field later.
+- **Marks / position bookmarks.** tmux's `<prefix>m` marks panes (not scrollback positions), and copy-mode position marks have no tmux API to capture or restore. No functional gain.
+- **Last-pane tracking.** No confirmed tmux format variable exposes this.
+
+### Deferred (Not Non-Goals, Just Not Now)
+
+- **Ephemeral session opt-out** (per-session/per-pane exclusion from capture). Speculative without concrete user demand. `history-limit 0` on a window is the tmux-native workaround documented in the README.
+- **Scrollback compression.** Deferred until disk usage becomes a complaint.
+- **Parallel capture** for many-pane configurations. Deferred until performance complaints surface.
+- **Schema migration (v1 → v2).** Standard practice when the time comes; not a v1 design decision.
+- **Background prefetch / full-eager hydration.** Rejected in favor of pure-lazy hydration; can be reconsidered if attach-time latency becomes a complaint.
+
 ---
 
 ## Working Notes
