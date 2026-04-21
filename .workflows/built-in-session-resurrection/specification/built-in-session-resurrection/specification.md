@@ -117,6 +117,58 @@ The storage file (`hooks.json`) and structural-key scheme are unchanged. Interna
 
 A mode field can be added later if a concrete use case surfaces where wrapper-script management is genuinely impractical. None was identified during discussion — the flagship Claude use case is satisfied by caller-side wrapping, and static commands (`npm start`, file watchers, `tail -f`) only make sense as persistent.
 
+## Save-Side Architecture: Execution Model
+
+### Host Process: Detached tmux Session
+
+Portal hosts its long-running save process inside a detached tmux session named `_portal-saver`. The session's command is `portal state daemon` — a long-running Go process. tmux owns the process lifecycle: when tmux terminates, the PTY is closed, the kernel delivers SIGHUP to the daemon, and the daemon flushes its final state before exiting.
+
+**Why a detached tmux session (not a platform-specific service and not subprocess-per-event):**
+
+- tmux already owns process supervision. No launchd/systemd per-platform code, no install/uninstall service lifecycle, no double-fork fallback with silent-failure mode.
+- The daemon has nothing useful to do when tmux is dead, so tying its lifetime to tmux's is correct.
+- Portal creates `_portal-saver` idempotently at bootstrap. Crash recovery is automatic — a dead session is recreated on the next `portal open`.
+- Pattern has real-world precedent (tmux-slay). The concerns are concrete and addressed.
+
+**Why not subprocess-per-event:** structural-event-driven saves miss scrollback drift. A user sitting in one pane with a program outputting for hours produces no structural events; crash loses everything since the last event.
+
+**Why not a full external daemon (Zellij path):** ~500 LOC of platform-specific lifecycle code (install, supervise, PID files, IPC, upgrade). Zellij's daemon is intrinsic to the tool; Portal bolting one on for one feature is a different engineering calculus.
+
+### Session Visibility and Filtering
+
+`_portal-saver` shows up in `tmux ls`. There is no tmux mechanism to hide it. Portal filters sessions whose names begin with `_` (underscore prefix is reserved for Portal internals) from:
+
+- The TUI session picker.
+- `sessions.json` capture (the save process skips `_*` sessions when enumerating live state).
+- Any future internal-only sessions.
+
+This keeps the internal machinery invisible in Portal's own UX while remaining inspectable via `tmux ls` for debugging.
+
+### Defensive Session Setup
+
+On every `EnsureServer()` call, Portal runs `set-option -t _portal-saver destroy-unattached off` unconditionally (idempotent). This defends against users with `destroy-unattached on` set globally in `.tmux.conf` — without this override, their global setting would kill `_portal-saver` immediately on creation (the session is `-d` and has zero attached clients).
+
+### Signal Handling
+
+The daemon traps two signals:
+
+- **SIGHUP** — delivered by the kernel when tmux closes the PTY master fd. This is the dominant shutdown path (tmux `kill-server`, server crash, reboot). Discussion verified the kernel sends SIGHUP, not SIGTERM, in this case — Portal must trap SIGHUP explicitly.
+- **SIGTERM** — delivered by direct `kill <pid>` from outside tmux. Less common but handled for completeness.
+
+Handler behavior:
+
+1. If the `@portal-restoring` marker is set, skip the final flush (an in-progress restore is underway; capturing now would capture mid-transition state).
+2. Otherwise, flush the current state atomically via `AtomicWrite` and exit.
+
+No configurable grace period. Atomic rename guarantees either the old or new state file is always valid on disk, so there is no mid-write corruption risk from signal-timing.
+
+### Lifecycle Summary
+
+- **Creation:** `EnsureServer()` calls `has-session -t _portal-saver`. If absent, `new-session -d -s _portal-saver "portal state daemon"`.
+- **Auto-destroy:** when the daemon exits (normal shutdown, crash, or version-mismatch restart), tmux's default session-auto-destroy behavior removes the session. No `remain-on-exit` tuning required.
+- **Recreation:** the next `portal open` after destruction runs bootstrap, finds `_portal-saver` absent, and recreates it.
+- **Version-based restart:** see the "tmux Hook Registration Lifecycle" section for the version-marker restart protocol.
+
 ---
 
 ## Working Notes
