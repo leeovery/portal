@@ -903,12 +903,15 @@ portal state hydrate --fifo FIFO --file SCROLLBACK; exec $SHELL
 ```
 
 **`portal state hydrate`** (Go binary, internal subcommand) on startup:
-1. Opens FIFO for reading, blocks.
+1. Opens FIFO for reading, blocks (3s timeout).
 2. When signal arrives: close FIFO, `os.Remove` it.
 3. Emit terminal-state reset **preamble** to stdout: `\033[?25h\033[?1049l\033[0m` (cursor visible, exit alt-screen defensively, SGR reset).
 4. Copy scrollback file bytes to stdout.
 5. Emit reset **postamble** + `\r\n`: `\033[?25h\033[?1049l\033[0m\r\n`.
-6. Exit.
+6. `time.Sleep(100 * time.Millisecond)` — give tmux's PTY reader time to finish parsing the bytes we just wrote. See race discussion below.
+7. Read `hooks.json`, look up hook for this pane's structural key.
+8. `tmux set-option -s @portal-skeleton-<key> ""` — unset the skeleton marker. Save loop may now capture this pane.
+9. If hook exists: `exec sh -c 'HOOK; exec $SHELL'`. Else: `exec $SHELL`.
 
 Bytes flow through the helper's stdout → PTY slave → tmux's VT parser → rendered into scrollback natively with full ANSI fidelity. The subsequent `exec $SHELL` takes over the same process, producing zero shell history pollution (the shell never sees `cat` or `portal state hydrate`).
 
@@ -946,12 +949,22 @@ Mechanism validated empirically on an isolated tmux socket (`tmux -L portal-hydr
 The earlier framing had the attach hook injecting scrollback directly (via paste-buffer). That was broken. Amended flow:
 
 - Skeleton restore sets `@portal-skeleton-<key> 1` for each pane. Same semantic as before — means "awaiting hydration, save process must skip this pane."
-- `client-session-changed` hook fires `portal state signal-hydrate`, which for each pane in the attached session:
+- `client-attached` / `client-session-changed` hook fires `portal state signal-hydrate <session-name>`, which for each pane in the attached session:
   1. Checks for `@portal-skeleton-<key>` marker.
-  2. If set: writes byte to FIFO to unblock helper; unsets marker (after confirming helper likely woke — a small delay or blocking write to the FIFO is fine).
+  2. If set: writes byte to FIFO to unblock helper. **Does NOT unset the marker.**
   3. If absent: no-op (pane already hydrated, or was never skeleton-restored).
-- Helper wakes, dumps, exits. Shell starts.
-- Marker was unset as part of the signal step, so save process starts capturing this pane normally on the next tick.
+- Helper wakes, dumps preamble + scrollback + postamble, sleeps 100ms, **unsets the marker itself** (`tmux set-option -s @portal-skeleton-<key> ""`), then exec's hook-or-shell.
+- After the helper's marker unset, save process may capture this pane on the next tick.
+
+### The race and why the helper owns marker-unset
+
+If `signal-hydrate` unset the marker immediately (right after writing the FIFO byte), the save loop could tick while the helper is mid-dump — `capture-pane` would return partial scrollback, and content-hash dedup would overwrite the real scrollback file with the partial state.
+
+By making the helper responsible for unsetting the marker, "marker cleared" becomes synonymous with "helper's output is complete and the pane's scrollback is in its final form." The 100ms sleep before the unset is a safe margin against tmux's async PTY-parser lag — the helper's `write()` returning doesn't mean tmux has finished parsing the written bytes (separate process, separate event loop). 100ms is generous vs. the ~1ms typical tmux read-lag; cost is imperceptible against the 500-1500ms dump it follows.
+
+**Timeout path** (3s FIFO read times out, signal never arrived): helper still does the marker unset. Emits reset preamble only (no scrollback dump), skips the sleep, unsets marker, exec's shell. Pane degrades to empty shell; save loop resumes capturing it. Log warning written.
+
+**Crash path** (helper process dies between steps 1-8): marker stays set. Save loop keeps skipping pane. Pane is stuck empty. Recovery: user kills the pane; next bootstrap re-skeletons it. Documented as a "shouldn't happen" case.
 
 ### Failure modes
 
@@ -1007,8 +1020,10 @@ portal state hydrate --fifo F --file S:
   3. emit reset preamble to stdout
   4. copy scrollback file to stdout
   5. emit reset postamble + CRLF
-  6. read hooks.json, look up hook for this pane's structural key
-  7. if hook exists: exec `sh -c 'HOOK; exec $SHELL'`
+  6. sleep 100ms — let tmux's PTY parser catch up with the writes above
+  7. read hooks.json, look up hook for this pane's structural key
+  8. tmux set-option -s @portal-skeleton-<key> "" — unset marker; save loop may now capture
+  9. if hook exists: exec `sh -c 'HOOK; exec $SHELL'`
      else:          exec $SHELL
 ```
 
@@ -1232,16 +1247,14 @@ Everything we've decided so far needs to stitch together into a single, coherent
 3. `client-attached` or `client-session-changed` hook fires automatically (tmux event — registered globally in step 2 of bootstrap). Which one fires depends on attach path: `client-attached` for initial attach, `client-session-changed` for existing-client session switch.
 4. Hook command runs `portal state signal-hydrate <session-name>` as a subprocess. `<session-name>` comes from tmux's `#{session_name}` format expansion, passed as argv.
 5. Subprocess:
-   - Enumerates panes in the attached session.
-   - For each pane with `@portal-skeleton-<key>` set:
-     - Writes a byte to its FIFO to unblock the helper.
-     - Unsets `@portal-skeleton-<key>` so save loop resumes capturing this pane.
+   - Enumerates panes in the attached session (`list-panes -t <session-name>`).
+   - For each pane with `@portal-skeleton-<key>` set: writes a byte to its FIFO to unblock the helper. **Does NOT touch the marker** — the helper unsets it after completing its dump.
+   - For each pane without the marker: no-op (already hydrated or never skeleton-restored).
 6. Helpers unblock, each does:
-   - Reset preamble → dump scrollback → reset postamble.
-   - Read `hooks.json`, look up hook for own pane key.
-   - If hook exists: `exec sh -c 'HOOK; exec $SHELL'`.
-   - Else: `exec $SHELL`.
-7. User is now in the session with restored scrollback, hook running (or shell if no hook).
+   - Reset preamble → dump scrollback → reset postamble → sleep 100ms → unset own marker → exec hook-or-shell.
+   - The 100ms sleep gives tmux's PTY parser time to finish rendering the written bytes before the marker is cleared, closing the "capture mid-dump" race.
+7. Save loop's next tick (could be sub-second) captures the now-hydrated pane normally. Content-hash dedup skips rewrites unless scrollback has legitimately changed.
+8. User is now in the session with restored scrollback, hook running (or shell if no hook).
 
 ### Save loop (continuous, inside `_portal-saver`)
 
