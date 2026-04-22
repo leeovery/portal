@@ -900,6 +900,116 @@ if zoomed: resize-pane -Z       # re-apply zoom
 
 Mechanical and low-risk. No special logic beyond the fallback on `select-layout` failure.
 
+## Bootstrap Flow (Integrated)
+
+### `PersistentPreRunE` Sequence
+
+Every Portal command that needs tmux (all commands except `version`, `init`, `help`, `alias`, `clean`) runs this sequence, in this order:
+
+**1. `EnsureServer()`** — start tmux server if not running. Set `serverStarted=true` in `cmd.Context()` if Portal started it.
+
+**2. Register global hooks idempotently** (`set-hook -ga` with content-based check):
+- Save-trigger events (`session-created`, `session-closed`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out`) → `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`.
+- Hydration-trigger events (`client-attached`, `client-session-changed`) → `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`.
+- For each (event, expected-command) pair, parse `show-hooks -g` and append only if the Portal entry for that event is absent.
+
+**3. Set `@portal-restoring 1`** as a server-level option. Must happen *before* `_portal-saver` is created, because creating `_portal-saver` fires `session-created` which triggers the dirty-flag notify path; `@portal-restoring` ensures that notify is a no-op while bootstrap is still running.
+
+**4. `_portal-saver` session setup** (idempotent):
+- `has-session -t _portal-saver` — if present, skip creation.
+- If absent: `new-session -d -s _portal-saver "portal state daemon"`.
+- Read `~/.config/portal/state/daemon.version`; compare to `cmd.version`:
+  - If `cmd.version` is empty or `"dev"` → always restart (kill + recreate) on bootstrap.
+  - If version file is absent → treat as mismatch (first-ever bootstrap).
+  - If stored version differs from `cmd.version` → `kill-session -t _portal-saver`, then recreate with the new binary.
+  - Else → leave running.
+- Always run `set-option -t _portal-saver destroy-unattached off` (defensive, idempotent).
+
+**5. `Restore()` — skeleton-only restoration.** TUI path wraps this step (and steps 6-7) with the loading page (1.2s minimum display). CLI path runs silently.
+
+- If `~/.config/portal/state/sessions.json` does not exist → no-op; continue to step 6.
+- If `sessions.json` is unparseable (corrupt JSON) → log warning, print one-line stderr warning, skip restoration entirely; continue to step 6.
+- Otherwise, parse `sessions.json`. For each saved session:
+  - `has-session -t <name>` → if live, skip this session.
+  - Else, skeleton-create it:
+    1. For each pane: compute FIFO path (`~/.config/portal/state/hydrate-<paneKey>.fifo`); `os.Remove(path)` (ignore `ENOENT`); `syscall.Mkfifo(path, 0600)`.
+    2. `new-session -d -s <name> -c <root_cwd> "sh -c 'portal state hydrate --fifo <F> --file <scrollback>; exec $SHELL'"` for the first pane.
+    3. `new-window` / `split-window` for remaining windows and panes, each created with its own `hydrate` command as the pane's initial process.
+    4. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
+    5. For each created pane: `set-option @portal-skeleton-<paneKey> 1` (at the server-option level for volatility).
+- On `select-layout` failure for a window: fall back to `select-layout tiled`, log, continue.
+- On any per-session error: log, skip that session, continue with the next.
+
+**6. Unset `@portal-restoring`.** Save loop resumes normal operation on its next tick. Daemon will capture new user state and skip skeleton-marked panes.
+
+**7. `CleanStale()`** — prune stale entries from `hooks.json` whose structural keys do not match any currently-live pane. Runs unconditionally (no empty-panes guard — see CleanStale Behavior section). Runs here because by this point live panes include both pre-existing and skeleton-restored ones.
+
+**8. Return to the calling command.** TUI: loading page is dismissed once the 1.2s minimum has elapsed AND restoration completed. CLI: returns immediately after step 7.
+
+### Ordering Rationale
+
+The critical ordering — `@portal-restoring` is set in step 3 **before** `_portal-saver` is created in step 4 — exists because step 4 fires `session-created`, which the hook pipeline would otherwise use to dirty the flag. Without `@portal-restoring` set first, the daemon's first tick could attempt to capture while the restoration is still building structure.
+
+With the ordering above:
+- `@portal-restoring` set → daemon's first tick no-ops.
+- Restoration runs → more structural events fire → every one is a no-op on the notify side because `@portal-restoring` is still set.
+- `@portal-restoring` cleared → next daemon tick captures the now-complete post-restoration state.
+
+`@portal-skeleton-<paneKey>` markers are set as each pane is created, so even after `@portal-restoring` clears, the daemon correctly skips unhydrated panes until their helpers complete.
+
+### Attach Flow (After Bootstrap)
+
+When the user selects a session via the picker, runs `portal attach NAME`, or issues any other attach command:
+
+1. Portal's open/attach code resolves the target session (alias, path, direct name, or TUI selection).
+2. `tmux switch-client -t <session>` if Portal is running inside tmux; else `exec tmux attach-session -A -t <session>` (handing off the process via `syscall.Exec`).
+3. tmux fires `client-attached` (bare-shell attach) or `client-session-changed` (inside-tmux switch).
+4. The registered hook runs `portal state signal-hydrate <session-name>` as a `run-shell` subprocess. `<session-name>` comes from `#{session_name}` format expansion, passed as argv.
+5. Subprocess work:
+   - `list-panes -t <session-name>` → enumerate panes in the attached session.
+   - For each pane with `@portal-skeleton-<paneKey>` set: write a byte to the pane's FIFO. Do **not** touch the marker.
+   - For each pane without the marker: no-op (already hydrated or never skeleton-restored).
+6. Per-pane helpers unblock, dump scrollback, sleep 100ms, unset own markers, exec hook-or-shell.
+7. Daemon's next tick (sub-second away) captures now-hydrated panes normally. Content-hash dedup skips rewrites unless scrollback has legitimately changed.
+8. User is in the session. Scrollback is rendered. Hook (if any) is running; shell takes over when hook exits.
+
+### Return-to-Caller Timing
+
+- **TUI path:** bootstrap runs. Loading page shows for minimum 1.2s (padded if restoration was faster; natural if slower). TUI appears with populated picker. User selects → attach flow runs.
+- **CLI path** (e.g., `portal attach NAME`, `portal hooks set ...`): bootstrap runs silently; command-specific logic runs next. For `portal attach NAME` where the target was in `sessions.json`, skeleton was restored before the attach logic runs, so `has-session -t NAME` returns true by the time the attach needs it.
+
+### Loading-Page Minimum Display (TUI Only)
+
+Skeleton restoration typically completes in ~600ms for a heavy 10-session configuration. A loading page that flashes in and out sub-second reads as a UI glitch rather than a deliberate moment. Portal enforces a **minimum display duration of 1.2 seconds** for the loading page:
+
+```
+start := time.Now()
+// show loading page
+// bootstrap steps 1-7 run
+elapsed := time.Since(start)
+if elapsed < 1200*time.Millisecond {
+    time.Sleep(1200*time.Millisecond - elapsed)
+}
+// dismiss loading page
+```
+
+- If bootstrap is faster than 1.2s → padded to exactly 1.2s.
+- If bootstrap is slower than 1.2s → loading page stays until bootstrap returns.
+
+1.2s is intentional: long enough to register as an intentional UX beat, short enough to not become friction.
+
+**CLI path has no loading page, no "Restoring..." output.** Typical bootstrap is ~600ms; fast enough to not need a progress indicator. If long waits surface as user complaints, a stderr one-liner can be added later when `elapsed > 2s`. YAGNI for v1.
+
+### Scope of Bootstrap Decisions vs. Implementation
+
+Everything in this section is design-level. Implementation will pin down:
+- Exact tmux command sequences (specific flags, error-handling on each call).
+- Go error-propagation strategy for partial failures during restoration.
+- Stale-FIFO cleanup on bootstrap (state-directory scan to remove any leftover `hydrate-*.fifo` files that do not match an active pane).
+- Unit tests using isolated tmux sockets (`tmux -L <socket>`) for restoration correctness.
+
+These belong in the Planning phase, not in this specification.
+
 ---
 
 ## Working Notes
