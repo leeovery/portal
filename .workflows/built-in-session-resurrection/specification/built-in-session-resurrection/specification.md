@@ -1074,6 +1074,122 @@ Keeping the criteria narrow matches the generic-hook design principle: Portal st
 
 Small mechanical change: remove the `len(livePanes) == 0` early-return branch. Everything else (structural-key matching, atomic write of updated `hooks.json`) stays as it is today.
 
+## CLI Surface
+
+### User-Facing Commands (Under `portal state`)
+
+#### `portal state status`
+
+Liveness check and diagnostic output. Readable in a terminal; exit code is scriptable.
+
+**Output (example):**
+
+```
+Portal state:
+  Save daemon: running (pid 12345, version v0.4.2)
+  Last save: 12 seconds ago
+  Sessions captured: 10 (0 ephemeral-skipped)
+  Panes captured: 34
+  State size: 18.2 MB on disk
+  Recent warnings: 0 (last: none)
+```
+
+**Data sources:**
+- **Daemon liveness:** `has-session -t _portal-saver` plus process verification (pane command resolves to `portal state daemon`).
+- **Last save time:** `sessions.json.saved_at`.
+- **Session / pane counts:** parsed from `sessions.json`.
+- **State size:** total disk usage under `~/.config/portal/state/`.
+- **Recent warnings:** scan `portal.log` for entries within the last hour.
+
+**Exit code:**
+- `0` — healthy (daemon running, last save recent, no recent warnings).
+- non-zero — notable problem (daemon not running, last save older than 5 minutes, recent errors in the log).
+
+Scriptable as well as human-readable.
+
+#### `portal state cleanup`
+
+Explicit teardown for users removing Portal or wanting a clean slate.
+
+Actions:
+- `kill-session -t _portal-saver` to terminate the daemon (SIGHUP → final flush on the way out).
+- Remove Portal's `set-hook -ga` entries via index-based `set-hook -gu '<EVENT>[N]'` for each event/command pair Portal registers (see tmux Hook Registration Lifecycle for the removal protocol).
+- Optionally remove `~/.config/portal/state/` (prompt or explicit flag — planning-phase decision; design intent is "offer the clean-up, don't surprise the user into losing data").
+
+**Not required for correctness.** The defensive hook guard (`command -v portal`) and self-healing idempotency checks handle the "user uninstalled without running cleanup" case transparently. `portal state cleanup` is a first-class option for users who want a deliberate teardown.
+
+### Internal Subcommands (Hidden from `portal --help`)
+
+These subcommands are invoked by tmux hooks and the hosted daemon. They are Portal-internal and not intended for direct user invocation, so they are excluded from `--help` output (Cobra's `Hidden: true` pattern or equivalent).
+
+#### `portal state daemon`
+
+The long-running process invoked as the `command` of the `_portal-saver` session. Responsibilities:
+
+- Write `~/.config/portal/state/daemon.version` on startup with `cmd.version`.
+- Clear `save.requested` on startup (defensive).
+- Hold the in-memory `paneKey → scrollback-hash` map for content-hash dedup.
+- Run the 1-second ticker loop.
+- Honor `@portal-restoring` (skip ticks while set).
+- Trap SIGHUP and SIGTERM; flush final state (unless `@portal-restoring` is set).
+
+#### `portal state notify`
+
+A small binary (~20 lines of Go) invoked by tmux save-trigger hooks. Responsibilities:
+
+- Touch `~/.config/portal/state/save.requested` (create if absent, bump mtime otherwise).
+- Exit 0.
+
+That is the entire behavior. No tmux calls, no state file reads, no logging beyond critical errors. Designed for minimum latency on the hot path of every structural event.
+
+#### `portal state signal-hydrate <session-name>`
+
+Invoked by `client-attached` / `client-session-changed` hooks. Responsibilities:
+
+- `list-panes -t <session-name>` → enumerate panes in the attached session.
+- For each pane with `@portal-skeleton-<paneKey>` set: open the pane's FIFO for writing, write a single byte, close.
+- For each pane without the marker: no-op.
+- Idempotent (safe to double-fire across `client-attached` + `client-session-changed` for a single logical attach).
+
+Does **not** unset skeleton markers. The helper owns that.
+
+#### `portal state hydrate --fifo F --file S`
+
+The pane's initial command at skeleton restore time, wrapped in `sh -c 'portal state hydrate ...; exec $SHELL'`. Responsibilities per Scrollback Restore Mechanics:
+
+- Block on FIFO read (3s timeout).
+- On signal: close + unlink FIFO, emit reset preamble, dump scrollback file, emit reset postamble + CRLF, sleep 100ms, read hooks.json, unset skeleton marker, exec hook-or-shell.
+- On timeout: emit reset preamble only, leave marker set, log warning, exec bare shell.
+- On file missing: emit reset preamble only, log warning, clear marker (by the signal path reaching step g), exec hook-or-shell.
+
+### No User-Facing Manual Save Command
+
+`portal state save` (manual synchronous save) was considered and **rejected**. Every proposed use case was already covered:
+
+- *"Save before reboot"* — SIGHUP flush on tmux server shutdown + 30-second max-gap already cover this.
+- *"Scripting / automation"* — speculative; no concrete workflow identified.
+- *"Pre-risky-action save"* — same as the reboot case.
+- *"Psychological reassurance"* — not a technical need.
+- *"Debugging the save mechanism"* — developer concern; can touch the dirty flag manually.
+
+YAGNI. Can be added later if a concrete automation workflow surfaces.
+
+### Namespace Rationale
+
+All eight resurrection-related commands (two user-facing + four internal) cluster under `portal state`. This keeps related commands grouped logically in `portal --help` output (only the user-facing commands are shown), and the internal commands are all reachable via the same `state` prefix when needed for debugging.
+
+Existing Portal CLI top-level namespaces (`portal hooks`, `portal alias`, `portal clean`, `portal attach`, `portal open`, etc.) are unchanged.
+
+### Unchanged User-Facing Surface
+
+- `portal open` / `portal x` — unchanged, now benefits from automatic restoration at bootstrap.
+- `portal attach <name>` — unchanged.
+- `portal hooks set --on-resume "<cmd>"` — unchanged surface; internals no longer set `@portal-active-<pane>` marker (see Resume Hook Firing).
+- `portal hooks list` — unchanged.
+- `portal hooks rm --on-resume` — unchanged.
+- `portal clean` — unchanged surface; internals no longer have the `livePanes empty` guard (see CleanStale Behavior).
+- `portal alias ...`, `portal init`, `portal version` — unchanged.
+
 ---
 
 ## Working Notes
