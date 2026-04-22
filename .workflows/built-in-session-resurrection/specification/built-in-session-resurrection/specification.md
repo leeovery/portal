@@ -657,6 +657,129 @@ Functionally identical to `portal open` picker attach.
 - **Fully-eager scrollback injection.** 2-15s added boot delay at realistic scales. Rejected; can be revisited if attach-time latency surfaces as a user complaint.
 - **Restore gated on `serverStarted` AND "no sessions exist."** No threat model justified the defensive gate. Simplified to "restore all, skip live by name."
 
+## Scrollback Restore Mechanics
+
+### Injection Path: Blocking Helper Pre-Shell via FIFO
+
+Each skeleton-restored pane is created with a shell-pipeline command as its initial process:
+
+```
+sh -c 'portal state hydrate --fifo <FIFO> --file <SCROLLBACK>; exec $SHELL'
+```
+
+`portal state hydrate` is a Go subcommand that runs *inside the pane, before the shell*. Its stdout is connected directly to the pane's PTY slave. Bytes written to its stdout flow out through the PTY → tmux's VT parser → rendered into scrollback natively with full ANSI fidelity.
+
+When the helper exits (normally or via timeout), the trailing `exec $SHELL` takes over the same process. The shell replaces the helper without spawning a new process. The shell never sees the helper's command line; no history pollution.
+
+### Why This Mechanism Was Chosen
+
+**All tmux-native input commands (`paste-buffer`, `send-keys`, `pipe-pane -I`) write to the PTY master bufferevent, which is the shell's *stdin*.** ESC bytes arriving as stdin get interpreted by readline as meta-key prefixes, not rendered as ANSI color sequences. The paste-buffer path is fundamentally wrong for scrollback injection.
+
+Only two mechanisms deliver bytes to the pane's **output (display) path**:
+1. A process inside the pane writing to its own stdout. Bytes flow through the PTY slave → tmux's VT parser → rendered correctly.
+2. External process writing directly to the pane's slave PTY device (`/dev/pts/<N>` via `#{pane_tty}`). Faster but has positioning race issues (the shell has already prompted by the time the external writer arrives).
+
+Option 1 (helper pre-shell) avoids the positioning race entirely: the shell does not exist yet when the bytes are written.
+
+### Signal Mechanism: FIFO Per Pane
+
+**FIFO path:** `~/.config/portal/state/hydrate-<paneKey>.fifo` (paneKey = `<session>__<window>.<pane>` — same sanitization as scrollback filenames).
+
+**Creation (bootstrap, before creating the pane):**
+1. `os.Remove(path)` — ignore `ENOENT`; defensive sweep of any stale FIFO from a prior crashed bootstrap or dead helper.
+2. `syscall.Mkfifo(path, 0600)` — create the FIFO with owner-only permissions.
+
+This defensive pattern eliminates the need for a separate stale-FIFO sweep step. Stale FIFOs only exist when no live helper holds them (helpers die with the tmux server, same lifetime as the FIFOs they block on).
+
+**Signal (attach time):**
+The `client-attached` / `client-session-changed` hook runs `portal state signal-hydrate <session-name>`, which:
+1. Enumerates panes in the attached session (`list-panes -t <session-name>`).
+2. For each pane whose `@portal-skeleton-<key>` marker is set: open the pane's FIFO for writing and write a single byte.
+3. For each pane whose marker is absent: no-op (already hydrated or never skeleton-restored).
+
+`signal-hydrate` **does not touch the marker**. The helper owns marker-unset timing to close the capture-mid-dump race (see below).
+
+### Helper Behavior on Startup
+
+```
+portal state hydrate --fifo F --file S:
+  1. Open FIFO for reading, block with 3-second timeout.
+  2. On signal arrival:
+     a. Close + os.Remove the FIFO.
+     b. Emit reset preamble to stdout:   \033[?25h\033[?1049l\033[0m
+        (cursor visible + exit alt-screen defensively + SGR reset).
+     c. Copy the scrollback file's bytes to stdout.
+     d. Emit reset postamble + CRLF:      \033[?25h\033[?1049l\033[0m\r\n
+     e. time.Sleep(100 * time.Millisecond).
+     f. Read hooks.json; look up this pane's resume hook by structural key.
+     g. tmux set-option -s @portal-skeleton-<paneKey> ""  (unset marker).
+     h. If hook exists: exec sh -c 'HOOK; exec $SHELL'.
+        Else:           exec $SHELL.
+  3. On 3-second timeout (no signal arrived):
+     a. Emit reset preamble only (no content dump).
+     b. Skip the 100ms sleep.
+     c. Do NOT unset the skeleton marker — next attach will re-signal and retry.
+     d. Log a warning to portal.log.
+     e. exec $SHELL (bare shell; no hook firing on this path).
+  4. On scrollback file missing / unreadable:
+     a. Emit reset preamble only.
+     b. Log a warning.
+     c. Marker was already cleared by the signal path's step g — skip (empty pane).
+     d. Continue to hook/shell exec.
+```
+
+Reset sequences are short strings (~20 bytes total preamble + postamble). Overhead is imperceptible against the 500–1500ms dump they bracket.
+
+### Timeout: 3 Seconds
+
+- Normal signal latency: ~10–50ms.
+- Slow-but-legit upper bound (NFS home, heavy system load, slow hook script): ~1–2s.
+- 3s ≈ 2× the slow-legit tail. Fast enough to degrade snappily on real failures without cutting off rare slow-legit cases.
+
+### The 100ms Settle Sleep (Why the Helper Owns Marker-Unset)
+
+The helper's `write()` to stdout returning does **not** mean tmux has finished parsing the written bytes. tmux runs the VT parser in a separate process with its own event loop; there is an asynchronous lag between bytes arriving at the PTY slave and those bytes being added to the pane's scrollback ring.
+
+If `signal-hydrate` unset the marker immediately (right after writing the FIFO byte), the daemon's next tick could run while the helper is still mid-dump. `capture-pane` would return partial scrollback; content-hash dedup would compute a hash based on the partial state and overwrite the full saved scrollback file with a truncated version.
+
+Transferring marker-unset ownership to the helper makes "marker cleared" synonymous with "helper's output is complete and the pane's scrollback is in its final form." The 100ms sleep before the unset is a safe margin against tmux's PTY-parser lag (typical lag is ~1ms; 100ms is generous without being user-perceptible against the 500–1500ms dump).
+
+### Marker Lifecycle Summary
+
+- **Skeleton-restore sets** `@portal-skeleton-<paneKey>` when creating each pane.
+- **Save loop skips** any pane with the marker set.
+- **`signal-hydrate` writes to FIFO** but does not touch the marker.
+- **Helper unsets marker** after dump + 100ms sleep, or immediately if the scrollback file was missing (empty pane path).
+- **Helper does NOT unset marker** on FIFO timeout — next attach re-signals, retry happens naturally.
+- **Save loop resumes capturing** the pane on the next tick once the marker is cleared.
+
+### Failure Modes (Mechanism-Level)
+
+- **Scrollback file missing on helper startup.** Helper logs a warning, emits reset preamble only, skips content dump, unsets marker, exec's hook/shell. Empty pane, not stuck.
+- **FIFO pre-opened but hook handler crashed before writing.** Helper blocks until 3-second timeout, degrades to empty shell, logs a warning. Marker stays set — next attach retries.
+- **Helper crashes mid-dump.** Pane ends up with partial content + dead process. Shell never starts. User sees a stuck pane. Recovery: user kills the pane manually; next bootstrap re-skeletons the structure (scrollback file may be mid-written or corrupt, so some bytes may be missing — truncation, not corruption). Documented as a "shouldn't happen" case.
+- **Signal fires twice somehow** (e.g., both `client-attached` and `client-session-changed` fire for the same logical attach). Second write to the FIFO goes nowhere (the helper has already closed and unlinked the FIFO). Harmless.
+
+### Implementation Notes
+
+- FIFOs are POSIX primitives; `syscall.Mkfifo` is the Go entry point. Supported on Linux and macOS, consistent with Portal's existing platform targets.
+- The `; exec $SHELL` chain is a shell construct; the pane's command must be invoked as `sh -c '...'` so the shell parses the `;` correctly.
+- The helper's blocking FIFO read must implement a timeout. Go's standard `os.File.Read` on a FIFO does not time out on its own. Use a goroutine + `time.After` channel + `select` (or equivalent I/O-with-deadline pattern).
+
+### Validation Reference
+
+The mechanism was empirically validated on an isolated tmux socket during discussion:
+- `cat FILE; exec bash` pattern: 1000-line ANSI scrollback rendered correctly; clean `bash-5.3$` prompt at end.
+- Shell history contained only post-test commands — no helper, no `cat`, no scrollback content.
+- Blocking-FIFO variant: pane empty before signal; after `echo "go" > fifo`, scrollback rendered and shell prompt appeared.
+
+### Rejected Alternatives
+
+- **`paste-buffer` / `send-keys` / `pipe-pane -I`.** Broken. Target the shell's stdin, not the pane's display. Confirmed via tmux source review.
+- **Direct `/dev/pts/<N>` write.** Viable but has a positioning race (shell has already prompted). Mitigation via `\033[2J\033[H` + SIGWINCH redraw is feasible but more complex. Rejected in favor of helper pre-shell.
+- **Fully-eager at skeleton restore time.** Would eliminate attach-time latency entirely at the cost of 2–15s boot delay. Rejected in favor of pure-lazy.
+- **Zellij-style confirmation prompt before scrollback injection.** Portal's resume hooks are already explicit opt-in via `portal hooks set`; scrollback injection is just replaying the user's own history into their own pane. No second-stage confirmation needed.
+
 ---
 
 ## Working Notes
