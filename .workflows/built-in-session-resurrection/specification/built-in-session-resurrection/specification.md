@@ -839,6 +839,67 @@ tmux's `run-shell` is synchronous by default and blocks the server during hook e
 
 A whole execution path is removed: attach-time hook firing + shell-readiness workaround + registration-side marker. Hook firing is folded into the hydrate helper's exec chain — an `exec` replacement that was going to exist for scrollback injection anyway. The hook fires exactly once, exactly at the right moment, with no `send-keys`, no polling, no racing.
 
+## Layout Restoration
+
+### Per-Window Restoration Order
+
+For each window being restored:
+
+1. **Create the window** (`new-window` — the first pane is created implicitly).
+2. **Create remaining panes** via `split-window` to reach the saved pane count. Direction arguments are arbitrary — the next step rearranges.
+3. **`select-layout "<saved layout string>"`** — tmux parses the string and fits the panes to the saved geometry.
+4. **`select-pane -t <saved active pane index>`** — set the active pane within the window.
+5. **`resize-pane -Z`** on the active pane if `window_zoomed_flag` was true at save time.
+
+Zoom **must come after** layout. `resize-pane -Z` operates on the current layout geometry, and applying it before `select-layout` would produce incorrect results. This ordering matches tmux-resurrect's proven approach.
+
+### Layout String Source
+
+Portal captures `#{window_layout}` (pre-zoom form), not `#{window_visible_layout}`. The pre-zoom form is the correct input for `select-layout` replay. Storing the zoomed form would cause `select-layout` to collapse panes incorrectly on re-application.
+
+Zoom state is captured separately as a boolean (`zoomed` field in `sessions.json`) and re-applied after layout, via `resize-pane -Z`.
+
+### Pane-Count Mismatch / `select-layout` Failure
+
+`select-layout` requires the current pane count to match the saved layout string. Portal's restoration creates exactly the right count from `sessions.json` before applying the layout, so under normal conditions there is no mismatch.
+
+**If `select-layout` returns an error** (corrupt layout string, pane-count mismatch from partial restore, unexpected tmux behavior):
+
+1. Log a warning to `portal.log` identifying the session, window, and the mismatch.
+2. Fall back to `select-layout tiled` — tmux's built-in auto-balanced tiled layout. Panes are visible in a sane default arrangement.
+3. Continue restoring the remaining windows and sessions. One broken layout does not block other restorations.
+
+Degraded but not stuck. Consistent with the broader "degrade locally, log, continue" principle.
+
+### Terminal Size Drift
+
+Layout strings encode absolute pane dimensions. If a session was saved on a 200×50 terminal and restored into an 80×24 terminal, `select-layout` does best-effort fitting — proportions shift, some panes may be cramped.
+
+Neither Portal nor any other tool solves this at the tmux level; it is a fundamental tmux constraint. Portal does no special handling for this case:
+
+- `select-layout "<saved>"` is always applied as-is.
+- tmux fits as best it can.
+- If the user cares, they can resize their terminal to match the save-time dimensions.
+- `select-layout -E` ("spread evenly") is not used as a fallback — it loses the saved proportions, trading faithful-but-cramped for even-but-different. Default to faithful.
+
+### Zoom State
+
+- Captured at save time as `window_zoomed_flag` (boolean).
+- Stored in `sessions.json` as `zoomed: true|false` per window.
+- Re-applied via `resize-pane -Z` on the active pane after `select-layout`, if true. `resize-pane -Z` is a toggle; applying it when already zoomed would un-zoom. The restore flow assumes zoom is off immediately after layout application (the saved layout string is pre-zoom), so an unconditional `-Z` when `zoomed` is true produces the correct state.
+
+### Summary of Order
+
+```
+new-window <name> -c <cwd>      # window + first pane
+split-window × (N-1)            # remaining panes
+select-layout "<saved>"         # apply geometry
+select-pane -t <active>         # set active pane
+if zoomed: resize-pane -Z       # re-apply zoom
+```
+
+Mechanical and low-risk. No special logic beyond the fallback on `select-layout` failure.
+
 ---
 
 ## Working Notes
