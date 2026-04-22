@@ -780,6 +780,65 @@ The mechanism was empirically validated on an isolated tmux socket during discus
 - **Fully-eager at skeleton restore time.** Would eliminate attach-time latency entirely at the cost of 2–15s boot delay. Rejected in favor of pure-lazy.
 - **Zellij-style confirmation prompt before scrollback injection.** Portal's resume hooks are already explicit opt-in via `portal hooks set`; scrollback injection is just replaying the user's own history into their own pane. No second-stage confirmation needed.
 
+## Resume Hook Firing
+
+### Firing Point: Inside the Helper's Exec Chain
+
+Resume hooks fire **only** from inside the hydrate helper's exec chain, at the end of successful hydration. There is no attach-time hook firing, no `send-keys` involvement, and no shell-readiness polling.
+
+After the helper has dumped scrollback, slept 100ms, and unset its skeleton marker (see Scrollback Restore Mechanics), the helper:
+
+1. Reads `hooks.json`.
+2. Looks up the resume hook for this pane's structural key (`session:window.pane`).
+3. If a hook exists → `exec sh -c 'HOOK; exec $SHELL'`. When the hook command exits (or immediately, if it's a background process), `exec $SHELL` takes over the same process.
+4. If no hook exists → `exec $SHELL` directly.
+
+### Why Firing Belongs Only in the Helper
+
+**Hooks are for reboot recovery.** A hook "firing" means "re-launch this process when the pane comes back from the dead." The only moments when a pane comes back from the dead are:
+
+1. After a server restart — skeleton restore creates the pane fresh with the hydrate helper chain.
+
+That is the complete list. Within a single server lifetime, a pane that still exists does not need its hook re-fired — the hook's process either still exists or was explicitly killed by the user. Firing `claude --resume <uuid>` on a detach/reattach of a pane that already has Claude running would actively break things.
+
+### What Is Deleted from the Previous Design
+
+- **`ExecuteHooks` function.** Deleted. No more attach-time hook execution.
+- **Call sites of `ExecuteHooks` in `cmd/open.go` and `cmd/attach.go`.** Deleted.
+- **`internal/hooks/executor.go`.** Deleted.
+- **`cmd/hook_executor.go`.** Deleted.
+- **`@portal-active-<pane>` volatile marker** set during `portal hooks set` as a one-shot-per-server-lifetime gate. Deleted. The registration path (`portal hooks set`) becomes a pure write to `hooks.json` with no tmux-side marker management.
+- **All attach-time hook checking.** Deleted.
+- **Shell-readiness polling** for `send-keys` delivery. Eliminated — nothing uses `send-keys` for hook firing any more.
+
+### What Stays Unchanged
+
+- **`hooks.json` storage** and its on-disk schema.
+- **User-facing CLI:** `portal hooks set --on-resume "<cmd>"`, `portal hooks list`, `portal hooks rm --on-resume`. Surface unchanged; internals simplified.
+- **Structural-key scheme** (`session:window.pane`) for identifying hooks.
+- **`CleanStale`** for pruning orphaned hook entries (with the guard change described in "CleanStale Behavior").
+
+### Behavior Change: No "Live Attach" Firing
+
+The only scenario where new behavior differs from old:
+
+- **Old:** a hook registered on a pane that has not yet gone through a save/restore cycle; user detaches and reattaches within the same server lifetime. Old design fired the hook via `send-keys` once per server lifetime (one-shot via the `@portal-active-<pane>` marker).
+- **New:** the hook does not fire until the next server restart triggers skeleton restoration.
+
+This is correct behavior by design. The old "live attach firing" was the exact misbehavior the `@portal-active-<pane>` marker existed to mitigate — firing `claude --resume` on a pane that already has Claude running breaks things. The marker-at-registration approach worked only because it happened to be a one-shot-per-server-lifetime gate; it was never the right model.
+
+Under the new design, hooks fire exactly when a pane is freshly recreated from saved state. This matches the user's mental model of "hooks are for reboot recovery" and aligns with the semantic of the hook system being a reboot-recovery mechanism.
+
+### `run-shell` Blocking Note
+
+`signal-hydrate` (fired from `client-attached` / `client-session-changed` hooks) does non-trivial work: enumerate panes in the attached session, check markers, write to up to N FIFOs. For a 30-pane session, cost is ~50–150ms.
+
+tmux's `run-shell` is synchronous by default and blocks the server during hook execution. Acceptable for initial release — the user is actively attaching; sub-150ms is imperceptible at the moment of attach. If real-world use reveals problems (other clients feeling laggy during heavy attaches), switch to `run-shell -b` (async). tmux 3.0+ has settled `-b` behavior; defer the switch until there is evidence the blocking matters.
+
+### Net Simplification
+
+A whole execution path is removed: attach-time hook firing + shell-readiness workaround + registration-side marker. Hook firing is folded into the hydrate helper's exec chain — an `exec` replacement that was going to exist for scrollback injection anyway. The hook fires exactly once, exactly at the right moment, with no `send-keys`, no polling, no racing.
+
 ---
 
 ## Working Notes
