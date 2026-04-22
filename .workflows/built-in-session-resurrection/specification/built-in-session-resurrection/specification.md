@@ -548,6 +548,115 @@ Covered by the `-ga` append semantics and content-based idempotency above. Resea
 - **Assumption that `set-hook -a` is idempotent if the command matches.** Empirically disproven; identical appends accumulate. Content-based check is required.
 - **Marker-comment in the hook command (e.g. `# portal-resurrect`).** Unnecessary. The `portal state notify` / `portal state signal-hydrate` command substrings are already unique identifiers.
 
+## Restore-Side Architecture
+
+### Restoration Trigger
+
+Restoration runs on every `portal open` invocation (or any other Portal command that reaches `PersistentPreRunE`). No `serverStarted` gate, no explicit user command, no last-save staleness check.
+
+**For each entry in `sessions.json`:**
+- If a live tmux session already exists with that name → **skip**. User's current reality is authoritative; Portal never clobbers live sessions.
+- If no live session with that name → **skeleton-restore** it (structure only; scrollback lazy).
+
+**Steady-state cost** (all saved sessions already live): ~20ms — one JSON read + one `list-sessions` call + diff → no-op. Invisible.
+
+Portal's `{project}-{nanoid}` naming makes collisions between Portal-created sessions practically impossible; the skip-on-live behavior addresses the only real risk, which is a user's manually-created tmux session happening to share a name with a saved Portal session.
+
+### Skeleton-Eager + Scrollback-Lazy
+
+**Skeleton (structure) is restored eagerly during bootstrap.** For each missing saved session:
+- `new-session -d -s <name> -c <root_cwd> "<hydrate command for first pane>"`
+- `new-window`, `split-window` for remaining windows/panes to match saved structure. Each pane's command is `portal state hydrate --fifo <F> --file <S>` (see Scrollback Restore Mechanics).
+- `select-layout "<saved>"` per window
+- `select-pane -t <active>` per window
+- `resize-pane -Z` on the active pane if `zoomed` was true
+- `@portal-skeleton-<paneKey>` marker set on each created pane
+
+Cost: ~600ms for a heavy 10-session configuration. Covered by the loading page (see Bootstrap Flow).
+
+**Scrollback (content) is NOT injected during bootstrap.** Scrollback files on disk are left intact. Injection happens at *attach time*, triggered by tmux's `client-attached` / `client-session-changed` hooks.
+
+### Why Skeleton-Eager
+
+Preserves tmux self-containment. After bootstrap:
+- Native tmux commands (`tmux attach -t NAME`, `tmux switch-client -t NAME`, `tmux list-sessions`) see the real structure.
+- Third-party tmux plugins see live sessions, not a placeholder state.
+- Shell aliases and keybindings that reference specific session names work identically to before a reboot.
+
+The ~500ms extra cost (versus a sessions-only-eager approach) buys Portal being *additive* rather than *invasive*.
+
+### Why Scrollback-Lazy
+
+Fully-eager scrollback injection at realistic power-user sizes (`history-limit 50000` per pane × 30 panes) would add ~15 seconds to boot — unacceptable UX. Lazy hydration amortizes cost across attaches; sessions the user never touches today cost zero to hydrate.
+
+Mechanism details are in the Scrollback Restore Mechanics section.
+
+### Why Hook-Driven Hydration
+
+Both `client-attached` and `client-session-changed` are registered globally. This covers every attach path:
+
+- `portal open` picker attach
+- `portal attach NAME` (from bare shell or inside tmux)
+- Direct `tmux attach -t NAME` from a bare shell
+- `tmux switch-client -t NAME` from inside tmux
+
+All run the same `portal state signal-hydrate #{session_name}` command (session name passed as argv via tmux format expansion). The subprocess enumerates panes in the specified session and signals the FIFO of any pane still carrying the `@portal-skeleton-<key>` marker. Idempotent for already-hydrated panes.
+
+Users do not need to know "hooks only work if you attach via Portal."
+
+### Marker Coordination
+
+Two volatile tmux server-option markers coordinate restoration and saving. Both are **volatile** (server-option scope): they clear automatically on server restart, so stale markers cannot persist across tmux lifetimes.
+
+#### `@portal-skeleton-<paneKey>` — "awaiting hydration"
+
+- **Set by:** skeleton-restore, on each pane it creates. Key is the structural position `session:window.pane`.
+- **Semantic:** "this pane was skeleton-restored; its saved scrollback file on disk holds pre-boot state that must not be overwritten until the pane has been hydrated."
+- **Effect on save:** the daemon's capture loop **skips** panes whose marker is set. Neither the scrollback file nor the pane's `sessions.json` entry is updated. Disk file preserved.
+- **Cleared by:** the hydrate helper, *after* successful content dump + 100ms settle sleep (see Scrollback Restore Mechanics). "Marker cleared" is synonymous with "helper output is complete and the pane's scrollback is in its final form."
+- **User-created panes never receive this marker.** Brand-new post-boot panes are captured normally from the start.
+- **Inverse semantic is deliberate:** "needs hydration" is *active state set by restore*; default absence means "safe to capture." This keeps the new-session creation path from requiring a special code branch.
+
+#### `@portal-restoring` — "restoration in progress"
+
+- **Set by:** bootstrap, at the start of the skeleton-restore phase.
+- **Unset by:** bootstrap, after skeleton-restore completes.
+- **Semantic:** "bootstrap is mid-skeleton-build; save captures would see half-built state."
+- **Effect on save:** both `portal state notify` (no-op if set; does not even touch the dirty flag) and the hosted daemon's tick loop (skip the entire tick if set) honor this marker. Restore can fire a cascade of structural events (`session-created`, `window-linked`, `window-layout-changed`) without triggering partial-state saves.
+- **Effect on daemon shutdown handler:** SIGHUP/SIGTERM handler skips the final flush if `@portal-restoring` is set (see Save-Side Execution Model). Prevents capturing mid-transition state during upgrade-triggered restart.
+
+### Failure-Mode Behavior for Hydration
+
+If scrollback injection fails (file missing, disk read error, helper timeout without signal):
+
+1. **Unset the marker anyway.** The pane remains empty; the save loop resumes normal capture. Degraded, not stuck.
+2. **Log a warning** to `portal.log` (`file not found`, `FIFO timeout`, `I/O error`, etc.). Failure is observable but not spam.
+3. **Do not retry automatically** on the failure path itself. A missing file is likely permanent; the pane's future save captures whatever is on screen.
+
+For the FIFO-timeout path specifically, the helper takes a different course that allows retry on the *next* attach (see Scrollback Restore Mechanics) — but within a single hydration attempt, failure is terminal for that attempt.
+
+### User-Created Sessions Mid-Restore
+
+No special handling required. Skeleton-restore only operates on saved sessions listed in `sessions.json`. Pre-existing live sessions — including sessions the user just created — are neither touched nor captured while `@portal-restoring` is set. User commands are not gated.
+
+### Direct `tmux attach` Path
+
+Universal coverage via `client-attached` / `client-session-changed` registration. A user who attaches directly with `tmux attach -t NAME`:
+
+1. `client-attached` fires.
+2. The hook runs `portal state signal-hydrate NAME`.
+3. Portal enumerates panes in session NAME, signals any skeleton-marked pane's FIFO.
+4. Helpers unblock, dump scrollback, exec hook-or-shell.
+
+Functionally identical to `portal open` picker attach.
+
+### Rejected Alternatives
+
+- **Background prefetch hydration after bootstrap.** Race conditions (user attaches mid-fill), more code paths, no win over pure-lazy with marker coordination.
+- **Sessions-only-eager (create sessions, skip windows/panes).** Would leave direct `tmux attach` seeing empty sessions. Breaks tmux self-containment.
+- **Fully-eager scrollback injection.** 2-15s added boot delay at realistic scales. Rejected; can be revisited if attach-time latency surfaces as a user complaint.
+- **Restore gated on `serverStarted` AND "no sessions exist."** No threat model justified the defensive gate. Simplified to "restore all, skip live by name."
+
 ---
 
 ## Working Notes
