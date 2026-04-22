@@ -1382,6 +1382,40 @@ All of the above are natural extensions of Portal's existing design:
 
 No architectural changes to `projects.json` or the project store are required by this specification.
 
+## Documentation Deliverables
+
+### README "Privacy Considerations" Section
+
+The v1 release includes a brief **Privacy Considerations** section in the README covering:
+
+- Scrollback is persisted to `~/.config/portal/state/` with file mode `0600` (owner-only read/write).
+- Same local-filesystem trust model as shell history and debug logs users already have on disk.
+- No encryption at rest.
+- Users with genuinely sensitive workflows can set `tmux set-option -w history-limit 0` on the relevant window so nothing accumulates in scrollback for Portal to capture; `tmux clear-history` after sensitive output is a related manual mitigation.
+
+This documentation exists because v1 ships without an ephemeral-session opt-out mechanism (deferred per Scope). The README note gives users the tmux-native workarounds so they are not surprised by scrollback persistence for sensitive contexts.
+
+### README Uninstall Section
+
+Document the two supported uninstall paths:
+
+1. **Just remove the binary** (standard package manager uninstall). The defensive `command -v portal` hook guard handles residual tmux state transparently — no error spam, no broken hooks. User data on disk is preserved (standard Unix convention).
+2. **Explicit teardown first** via `portal state cleanup` — kills the saver daemon, removes Portal's `set-hook -ga` entries, optionally clears the state directory. For users who want a deliberate clean slate before removing the binary.
+
+### Existing User-Facing Documentation Updates
+
+Changes to existing docs required by this specification:
+
+- **Hooks documentation** (existing `portal hooks` section of the README or any `docs/` page): clarify that hooks fire **on reboot recovery** (when the pane is freshly recreated from saved state), not on every detach/reattach within a server lifetime. Update any examples that assumed the old `ExecuteHooks` attach-time firing semantics.
+- **Installation requirements:** document the **tmux ≥ 3.0** requirement.
+- **Storage location:** note that Portal now writes to `~/.config/portal/state/` in addition to `~/.config/portal/{hooks.json,projects.json,aliases}`.
+
+### Not Documentation Scope
+
+- **Exhaustive tmux API references** — users don't need to understand `capture-pane -e` internals.
+- **Internal architecture diagrams** — the hidden `portal state daemon` / `notify` / `signal-hydrate` / `hydrate` commands are internal; user docs don't need to explain their interplay.
+- **Changelog entries** — handled by standard release process, not specified here.
+
 ---
 
 ## Working Notes
