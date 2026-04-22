@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-21
 cycle: 3
 phase: Gap Analysis
@@ -32,8 +32,8 @@ This is a genuinely load-bearing inconsistency: hooks will be silently lost on a
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -54,7 +54,7 @@ An implementer must decide: does "marker cleared" mean (i) user option removed v
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
