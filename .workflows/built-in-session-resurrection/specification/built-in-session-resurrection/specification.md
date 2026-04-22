@@ -1010,6 +1010,70 @@ Everything in this section is design-level. Implementation will pin down:
 
 These belong in the Planning phase, not in this specification.
 
+## WaitForSessions / bootstrapWait Removal
+
+### What Is Deleted
+
+- **`internal/tmux/wait.go`** — where `WaitForSessions` lives. Deleted entirely.
+- **`bootstrapWait` function** (in the `cmd` package). Deleted.
+- **All call sites** of both functions. Deleted.
+
+### Why
+
+`WaitForSessions` and `bootstrapWait` existed because Portal had no control over *when* resurrect/continuum would finish populating sessions after startup. They polled (1–6s window, stderr progress output) as a hedge against upstream plugins being slow or failing.
+
+Under the new design, Portal owns restoration directly. When `Restore()` returns, skeleton-restored sessions exist because Portal just created them synchronously. There is nothing to wait for.
+
+### Replacement
+
+A single synchronous `Restore()` call in `PersistentPreRunE`, immediately after `EnsureServer()` and the hook-registration / `_portal-saver` setup steps. When it returns, live tmux state reflects every saved session that was not already live. No polling, no external dependency, deterministic timing.
+
+### What Stays
+
+- **`EnsureServer()`** — keeps its job of starting the tmux server if not running.
+- **`serverStarted` flag** in `cmd.Context()` — still used by other call sites (e.g., decision whether to show bootstrap messages).
+- **The loading page itself** — retained for the TUI path, with the 1.2s minimum-display-time padding described in Bootstrap Flow.
+
+### Behavioral Improvement
+
+- **Previous:** "Waiting for sessions to populate (up to 6s)" — unpredictable, external-dependency-driven.
+- **New:** Bounded by the 1.2s minimum display time and restoration's actual cost (~600ms for heavy configs). No external dependency; timing is deterministic.
+
+## CleanStale Behavior
+
+### Change
+
+**Delete the `if len(livePanes) == 0 { return }` early return** from `CleanStale`'s current implementation. `CleanStale` now runs unconditionally, trusting live tmux state whenever it is invoked.
+
+### Why the Guard Existed
+
+The current guard skipped cleanup when `list-panes -a` returned empty — a hedge against Portal running CleanStale before resurrect/continuum had a chance to restore panes after reboot, which would have nuked all hooks prematurely.
+
+That guard was a workaround for Portal not owning restoration.
+
+### Why It Is Removed
+
+Under the new bootstrap flow, `CleanStale` runs in **step 7 of `PersistentPreRunE`** — *after* skeleton restore completes in steps 5-6. By that point, live panes include both pre-existing panes and skeleton-restored ones. If `list-panes -a` is genuinely empty at step 7, there really are no sessions, and any hooks.json entries are genuinely orphaned.
+
+### Where CleanStale Runs
+
+- **Bootstrap step 7** (every `PersistentPreRunE` invocation, post-restore). Keeps `hooks.json` consistent with live state on every Portal command.
+- **`portal clean` command** (user-initiated). Same logic, same unconditional execution.
+
+### Stale-Hook Detection Criteria (Unchanged)
+
+An entry in `hooks.json` is considered stale if its structural key (`session:window.pane`) does not match any live pane enumerated by `list-panes -a`.
+
+**Explicitly NOT criteria for staleness:**
+- Hook command's binary missing. That is a runtime execution error when the hook fires, not a stale-entry condition. Portal does not validate hook commands.
+- Project removed from `projects.json`. Portal's hook system is generic and has no coupling to `projects.json`.
+
+Keeping the criteria narrow matches the generic-hook design principle: Portal stores and fires commands; validation is the caller's responsibility.
+
+### Refactor Scope
+
+Small mechanical change: remove the `len(livePanes) == 0` early-return branch. Everything else (structural-key matching, atomic write of updated `hooks.json`) stays as it is today.
+
 ---
 
 ## Working Notes
