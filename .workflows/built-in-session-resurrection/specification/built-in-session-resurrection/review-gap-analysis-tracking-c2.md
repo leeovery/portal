@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-21
 cycle: 2
 phase: Gap Analysis
@@ -32,8 +32,8 @@ Each variant changes the latency profile on the hot path. The "Planning-phase de
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -53,8 +53,8 @@ Without this, the captured `environment` field is either dead data or implemente
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -76,8 +76,8 @@ Three consistent options exist (all-saved, all-live, mixed with explicit mapping
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -97,8 +97,8 @@ An implementer must decide: on file-missing, does the pane stay in "awaiting hyd
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -118,8 +118,8 @@ The CLI path has no conflict. The spec treats "emit to stderr" uniformly across 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -138,8 +138,8 @@ Options: (i) persist the hash map to disk alongside sessions.json (small JSON ad
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -160,8 +160,8 @@ An implementer must design the failure model from scratch. Given cleanup is "del
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -189,8 +189,8 @@ The spec's "in-process" rotation is silently assuming a single writer. Either pi
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -211,8 +211,8 @@ Either the helper receives the saved key from bootstrap at pane creation (safe) 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -237,8 +237,8 @@ For CLI path, does the command propagate an error (non-zero exit) or continue in
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -265,8 +265,8 @@ Without a precise predicate, false positives (treating a non-daemon pane as live
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---
 
@@ -283,7 +283,7 @@ Not a critical flaw — the file contents are the sensitive part — but the Pri
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode.
 
 ---

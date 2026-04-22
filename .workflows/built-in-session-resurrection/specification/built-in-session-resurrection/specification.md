@@ -167,7 +167,7 @@ No configurable grace period. Atomic rename guarantees either the old or new sta
 ### Lifecycle Summary
 
 - **Creation:** `EnsureServer()` calls `has-session -t _portal-saver`. If absent, `new-session -d -s _portal-saver "portal state daemon"`.
-- **Liveness verification.** `has-session` returning true is not sufficient proof the daemon is running — the session could have been left behind with a dead process inside. Bootstrap additionally verifies the first pane's `#{pane_current_command}` resolves to the daemon binary (e.g., contains `portal` and the pane is still active). If the session exists but the daemon is dead, Portal treats it as absent: `kill-session -t _portal-saver` (tolerant of already-dead) then recreate. This closes the "empty session survives" edge case independent of the version-marker restart path.
+- **Liveness verification.** `has-session` returning true is not sufficient proof the daemon is running — the session could have been left behind with a dead process inside. The daemon writes its OS PID to `~/.config/portal/state/daemon.pid` on startup (alongside `daemon.version`). Bootstrap reads `daemon.pid` and tests the process via `kill(pid, 0)` (Go: `syscall.Kill`; signal 0 tests existence without signalling). If the PID file is missing, unparseable, or the process check fails, Portal treats the daemon as absent: `kill-session -t _portal-saver` (tolerant of already-dead) then recreate. `#{pane_current_command}` is not used as a liveness predicate — it returns only a short process name, which is too imprecise (any `portal <subcommand>` invocation would match). The PID-file + signal-0 check is definitive.
 - **Auto-destroy:** when the daemon exits (normal shutdown, crash, or version-mismatch restart), tmux's default session-auto-destroy behavior removes the session. No `remain-on-exit` tuning required.
 - **Recreation:** the next `portal open` after destruction runs bootstrap, finds `_portal-saver` absent, and recreates it.
 - **Version-based restart:** see the "tmux Hook Registration Lifecycle" section for the version-marker restart protocol.
@@ -212,7 +212,9 @@ All state-file writes flow through the hosted daemon. Other trigger paths only *
 
 1. tmux fires a structural event.
 2. The hook command runs `portal state notify`.
-3. `portal state notify` is a small binary: touch (create or bump mtime of) `~/.config/portal/state/save.requested`, exit. The file's **contents are irrelevant** — `notify` writes an empty file, and the daemon only checks for presence (not content). The file is never cleaned up outside of daemon-startup and explicit capture: if Portal is uninstalled and tmux is never restarted, a stale `save.requested` simply lingers on disk until the next daemon starts. Harmless.
+3. `portal state notify` is a small binary: touch (create or bump mtime of) `~/.config/portal/state/save.requested`, exit. **No tmux calls. No state-file reads. No conditional logic.** The binary is deliberately dumb: it always sets the dirty flag, even during restoration. The daemon (not `notify`) is responsible for honouring `@portal-restoring` and suppressing captures. The file's **contents are irrelevant** — `notify` writes an empty file, and the daemon only checks for presence (not content). The file is never cleaned up outside of daemon-startup and explicit capture: if Portal is uninstalled and tmux is never restarted, a stale `save.requested` simply lingers on disk until the next daemon starts. Harmless.
+
+Any behavioural augmentation (session-rename migration, diagnostic fan-out, etc.) lives in a **separate internal subcommand** invoked by a dedicated tmux hook — it does not accrue into `notify`. See Resume Hook Firing → Session Rename: Hook Key Migration for the rename path.
 4. The hosted daemon's 1-second ticker checks on each tick:
    - Is `save.requested` present? → capture, then clear the flag.
    - Has it been ≥30 seconds since the last save? → capture, then clear the flag.
@@ -283,7 +285,7 @@ No per-tick locking is required. Correctness relies on: (a) the daemon being sin
 
 Saved state lives at `~/.config/portal/state/`, resolved via Portal's existing `configFilePath` mechanism (per-file env var → `XDG_CONFIG_HOME/portal/` → `~/.config/portal/`). Same location as other Portal config (`hooks.json`, `projects.json`, `aliases`) — no separate XDG state directory.
 
-All files written with mode `0600` (owner read/write only). Matches the trust model of shell history and debug logs already on the user's filesystem. No encryption at rest.
+All files written with mode `0600` (owner read/write only). New directories (`state/`, `state/scrollback/`) created with mode `0700` to prevent other users on a multi-user system from listing filenames — keeping scrollback content private even at the metadata level. Matches the trust model of shell history and debug logs already on the user's filesystem. No encryption at rest.
 
 ### Directory Layout
 
@@ -292,6 +294,7 @@ All files written with mode `0600` (owner read/write only). Matches the trust mo
 ├── sessions.json                        # structural index (the atomic commit)
 ├── save.requested                       # dirty flag (touched by portal state notify)
 ├── daemon.version                       # daemon binary version marker
+├── daemon.pid                           # daemon OS PID (liveness verification)
 ├── portal.log                           # current log file
 ├── portal.log.old                       # previous rotated log
 ├── hydrate-<paneKey>.fifo               # per-pane hydration FIFOs (transient)
@@ -340,7 +343,15 @@ where `sanitize()` replaces `/`, null bytes, leading `.`, and other filesystem-u
 - FIFO filename: `hydrate-<paneKey>.fifo`
 - Skeleton marker name: `@portal-skeleton-<paneKey>` (as a tmux server-option name)
 
+**Indices used in paneKey are always *live* indices (post-restoration).** At save time, save == live, so the saved file is written under the live paneKey. At restore time, if `base-index`/`pane-base-index` changed, the *newly-created* panes have indices that may differ from what was written to disk. Portal bridges this by:
+
+- Passing the **saved scrollback file path** directly to each helper as `--file <path>`, read from `sessions.json` at bootstrap time. The helper does not compute the path from its own environment — so it reads from the saved-indexed file regardless of any index drift.
+- Setting `@portal-skeleton-<paneKey>` and creating `hydrate-<paneKey>.fifo` using **live** paneKey (re-queried via `list-panes` after pane creation). So the daemon's enumeration, `signal-hydrate`, and the FIFO signal path all agree on live indices.
+- On the first post-hydration capture, the daemon writes the scrollback under the live paneKey; GC removes the old saved-indexed file. From that tick forward, disk and live indices are in sync.
+
 **Hook structural keys** (`session:window.pane` in `hooks.json`) use the **raw** (un-sanitized) session name, window index, and pane index. Hooks.json is JSON, so any character valid in a session name is valid in the key. This is intentional: hook keys are content-addressable by the tmux identifier the user sees, not by a filesystem representation.
+
+**Helper hook lookup under index drift.** The helper is invoked with a `--hook-key "<raw-session>:<saved-window>.<saved-pane>"` flag populated from `sessions.json` at bootstrap. The helper uses that flag (not its own live position) to look up hooks in `hooks.json`. This preserves hooks across `base-index`/`pane-base-index` changes between save and restore — the hook stays addressable by its saved identity regardless of how live tmux has numbered the recreated pane.
 
 When session renames occur, the hook migration (see Resume Hook Firing) updates the raw-name portion of the hook key; the paneKey regenerates on the next capture cycle via the new sanitized name.
 
@@ -425,6 +436,8 @@ Per pane per capture cycle:
 5. If different → `AtomicWrite` the scrollback file, update the stored hash.
 
 `sessions.json` is written at the end of the cycle only if *anything* changed (structural delta or at least one pane's hash differed). If a full 30-second cycle produces zero changes, zero disk activity occurs.
+
+**Daemon-startup seed.** On startup the in-memory hash map is empty; without a seed step, the first tick after every daemon start (including the version-mismatch restart that fires on every `portal open` during `dev`/empty-version builds) would rewrite every scrollback file. The daemon avoids this by **seeding the hash map from disk on startup**: read each existing `scrollback/*.bin`, hash the bytes, populate the `paneKey → hash` map. Seed cost scales with total on-disk scrollback (~30 panes × 500 KB × few ms/MB = sub-second). After seeding, the first tick only writes panes whose live scrollback genuinely differs from what is on disk — typical case is a near-no-op.
 
 ### GC / Orphan Cleanup
 
@@ -674,7 +687,7 @@ Two volatile tmux server-option markers coordinate restoration and saving. Both 
 - **Set by:** bootstrap, at the start of the skeleton-restore phase.
 - **Unset by:** bootstrap, after skeleton-restore completes.
 - **Semantic:** "bootstrap is mid-skeleton-build; save captures would see half-built state."
-- **Effect on save:** both `portal state notify` (no-op if set; does not even touch the dirty flag) and the hosted daemon's tick loop (skip the entire tick if set) honor this marker. Restore can fire a cascade of structural events (`session-created`, `window-linked`, `window-layout-changed`) without triggering partial-state saves.
+- **Effect on save:** the hosted daemon's tick loop honours this marker (skip the entire tick if set). `portal state notify` itself is unaware of the marker — it always touches the dirty flag, including during restore; the daemon's entry-check is the single suppression point. Restore can fire a cascade of structural events (`session-created`, `window-linked`, `window-layout-changed`) without triggering partial-state saves, because every dirty-flag set is ignored by the next tick while `@portal-restoring` is set.
 - **Effect on daemon shutdown handler:** SIGHUP/SIGTERM handler skips the final flush if `@portal-restoring` is set (see Save-Side Execution Model). Prevents capturing mid-transition state during upgrade-triggered restart.
 
 ### Failure-Mode Behavior for Hydration
@@ -777,11 +790,12 @@ portal state hydrate --fifo F --file S:
      c. Do NOT unset the skeleton marker — next attach will re-signal and retry.
      d. Log a warning to portal.log.
      e. exec $SHELL (bare shell; no hook firing on this path).
-  4. On scrollback file missing / unreadable:
-     a. Emit reset preamble only.
+  4. On scrollback file missing / unreadable (detected at step 2c of the signal path):
+     a. Emit reset preamble only (no content dump).
      b. Log a warning.
-     c. Marker was already cleared by the signal path's step g — skip (empty pane).
-     d. Continue to hook/shell exec.
+     c. Skip the 100ms sleep (nothing was dumped).
+     d. tmux set-option -s @portal-skeleton-<paneKey> "" — unset the marker inline so the save loop resumes capturing this empty pane.
+     e. Continue to step h (hook/shell exec). Hook runs if registered; else bare shell.
 ```
 
 Reset sequences are short strings (~20 bytes total preamble + postamble). Overhead is imperceptible against the 500–1500ms dump they bracket.
@@ -900,11 +914,11 @@ A whole execution path is removed: attach-time hook firing + shell-readiness wor
 
 Hook structural keys are of the form `session:window.pane`. When a user runs `tmux rename-session`, the `session-renamed` event fires and Portal must migrate any affected hook keys so they remain addressable on the renamed session.
 
-**Migration behavior.** The registered `session-renamed` save-trigger hook (which also fires `portal state notify`) is augmented: Portal observes that the rename occurred and updates `hooks.json` by rewriting every key matching `<old-name>:*` to `<new-name>:*`, atomically via `AtomicWrite`. The rename is observable through tmux's `#{hook_session_name}` format expansion and `list-sessions` diff (pre/post).
+**Migration mechanism.** Portal registers a **separate internal subcommand** — `portal state migrate-rename <old-name> <new-name>` — against the `session-renamed` tmux hook, in addition to the existing `portal state notify` registration. The two hooks coexist on the same event via the same content-based idempotency pattern applied to every other hook (see tmux Hook Registration Lifecycle). `migrate-rename` reads `hooks.json`, rewrites every key matching `<old-name>:*` to `<new-name>:*`, and writes via `AtomicWrite`. `portal state notify` stays minimal (no tmux reads, no hooks.json reads).
 
-Without migration, renamed-session hooks would silently become orphaned and get pruned by the next `CleanStale` run. Documented as a known side-effect if the migration path fails for any reason: re-register the hook against the new name.
+**Argument source.** tmux's `session-renamed` event exposes both names via format expansions (e.g., `#{hook_session_name}` for the current name; the prior name via `#{client_last_session}` is not reliable). Portal's implementation passes the session name via `#{session_name}` at hook-fire time and reconciles against an in-memory "last-seen names" map maintained by the daemon — or, more simply, uses the `session-renamed` hook's exposed variables (tmux versions vary in what is accessible). Planning-phase decides the exact wiring; the contract from the spec: hook keys are migrated atomically on rename events, the migration path is a distinct subcommand (not `notify`), and best-effort logging on failure.
 
-**Implementation note.** The rename-aware logic can live either inside `portal state notify` (it already fires on `session-renamed`) or as a separate `portal state migrate-rename` internal subcommand invoked by a dedicated hook. Planning-phase decision. The contract from the spec: hook keys are migrated atomically on rename events, with best-effort logging on failure.
+**Failure mode.** If migration fails (malformed names, I/O error), hooks for the renamed session get orphaned and pruned by the next `CleanStale` run. User-visible recovery: re-register the hook against the new session name. Migration is best-effort — no retry storm on failure.
 
 ## Layout Restoration
 
@@ -1001,9 +1015,10 @@ Every Portal command that needs tmux runs this sequence, in this order. The **ex
   - Else, skeleton-create it:
     1. For each pane: compute FIFO path (`~/.config/portal/state/hydrate-<paneKey>.fifo`); `os.Remove(path)` (ignore `ENOENT`); `syscall.Mkfifo(path, 0600)`.
     2. `new-session -d -s <name> -c <root_cwd> "sh -c 'portal state hydrate --fifo <F> --file <scrollback>; exec $SHELL'"` for the first pane.
-    3. `new-window` / `split-window` for remaining windows and panes, each created with its own `hydrate` command as the pane's initial process.
-    4. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
-    5. For each created pane: `set-option @portal-skeleton-<paneKey> 1` (at the server-option level for volatility).
+    3. **Apply captured session environment** before creating any additional windows/panes: for each key/value in the saved `environment` map, run `tmux set-environment -t <name> <KEY> <VAL>`. This happens **after** `new-session` but **before** any subsequent `new-window` or `split-window`, so every subsequent pane inherits the saved per-session env at creation time. Removed-form variables (`-r` in tmux's on-wire syntax) were not captured; only plain set values round-trip.
+    4. `new-window` / `split-window` for remaining windows and panes, each created with its own `hydrate` command as the pane's initial process.
+    5. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
+    6. For each created pane: `set-option @portal-skeleton-<paneKey> 1` (at the server-option level for volatility).
 - On `select-layout` failure for a window: fall back to `select-layout tiled`, log, continue.
 - On any per-session error: log, skip that session, continue with the next.
 
@@ -1184,10 +1199,14 @@ Scriptable as well as human-readable.
 
 Explicit teardown for users removing Portal or wanting a clean slate.
 
-Actions:
-- `kill-session -t _portal-saver` to terminate the daemon (SIGHUP → final flush on the way out).
-- Remove Portal's `set-hook -ga` entries via index-based `set-hook -gu '<EVENT>[N]'` for each event/command pair Portal registers (see tmux Hook Registration Lifecycle for the removal protocol).
-- Optionally remove `~/.config/portal/state/` (prompt or explicit flag — planning-phase decision; design intent is "offer the clean-up, don't surprise the user into losing data").
+Actions (in order):
+1. `kill-session -t _portal-saver` to terminate the daemon (SIGHUP → final flush on the way out). Idempotent: absent session is not an error.
+2. Remove Portal's `set-hook -ga` entries via index-based `set-hook -gu '<EVENT>[N]'` for each event/command pair Portal registers (see tmux Hook Registration Lifecycle for the removal protocol). Already-absent entries are not an error.
+3. Remove `~/.config/portal/state/` only when explicitly requested via the `--purge` flag. Default behaviour leaves the state directory intact so re-installing Portal picks up where the user left off.
+
+**Exit codes:**
+- `0` — all requested actions completed successfully (including idempotent no-ops when nothing needed to be cleaned).
+- non-zero — one or more actions failed (e.g., tmux `set-hook -gu` errored, `kill-session` failed for non-"session-absent" reasons, `--purge` specified but rmdir failed). Partial failures still attempt subsequent actions — `cleanup` never aborts partway to leave mixed state — but the exit code reflects that at least one action did not succeed. Failures are also logged to `portal.log`.
 
 **Not required for correctness.** The defensive hook guard (`command -v portal`) and self-healing idempotency checks handle the "user uninstalled without running cleanup" case transparently. `portal state cleanup` is a first-class option for users who want a deliberate teardown.
 
@@ -1200,7 +1219,10 @@ These subcommands are invoked by tmux hooks and the hosted daemon. They are Port
 The long-running process invoked as the `command` of the `_portal-saver` session. Responsibilities:
 
 - Write `~/.config/portal/state/daemon.version` on startup with `cmd.version`.
+- Write `~/.config/portal/state/daemon.pid` on startup with the daemon's OS PID.
 - Clear `save.requested` on startup (defensive).
+- Perform log-rotation check on startup (rotate `portal.log` → `portal.log.old` if the current log is ≥1 MB).
+- Seed the in-memory `paneKey → scrollback-hash` map from existing `scrollback/*.bin` files (avoids full-rewrite on every startup).
 - Hold the in-memory `paneKey → scrollback-hash` map for content-hash dedup.
 - Run the 1-second ticker loop.
 - Honor `@portal-restoring` (skip ticks while set).
@@ -1304,6 +1326,8 @@ Simple 2-file cap at **1 MB per file**.
 - Total disk usage bounded at ~2 MB.
 - Portal performs rotation itself in-process. No external `logrotate` dependency.
 
+**Concurrent-writer discipline.** Multiple Portal processes can log concurrently (daemon + CLI commands + hydrate helpers + signal-hydrate subprocesses). To avoid rotation races (two processes both observing ≥1 MB and both renaming, clobbering `portal.log.old`), **only the daemon rotates.** Every other Portal writer appends to `portal.log` with `O_APPEND` (POSIX guarantees atomic appends for writes smaller than `PIPE_BUF` — trivially satisfied by a one-line log entry). CLI / helper / subprocess writers do not check size and do not rotate. If no daemon is running and log size grows past 1 MB, it continues to grow until the next daemon starts, at which point the daemon's startup sequence performs a rotation check and rotates if needed. This is acceptable because: (a) daemon downtime is rare and short; (b) append-only growth during that window is bounded by how much logging happens without a daemon, which is modest.
+
 ### `portal state status` (Human-Readable Diagnostic)
 
 Primary user-facing diagnostic entry point. Single invocation surfaces the most useful operational data without requiring the user to know where the log file lives. See CLI Surface section for the full command description.
@@ -1331,6 +1355,19 @@ The output includes a "recent warnings" line that scans `portal.log` for entries
   ```
 
 One line. No banners, no colors, no interactive UI. Just enough signal that the user knows to investigate if they care, and quiet enough not to intrude on normal use.
+
+**TUI interaction.** While the Bubble Tea loading page is active, direct stderr writes would corrupt the rendered UI. The TUI path therefore **buffers** bootstrap warnings in memory during the loading window and emits them to stderr *after* the loading page is dismissed (before the TUI picker renders, or immediately before exit on fatal error). The CLI path writes to stderr directly as described. Both paths log the same content to `portal.log` regardless of stderr behaviour.
+
+### Fatal Bootstrap Errors
+
+"Soft" bootstrap failures (corrupt `sessions.json`, one session fails to restore, `_portal-saver` creation fails after retry) degrade locally and continue. **Fatal** failures — the underlying machinery can't even start — are handled differently:
+
+- **`tmux -V` check fails** (version < 3.0 or `tmux` binary absent): Portal emits the user-facing error immediately to stderr, exits non-zero, does not enter the TUI.
+- **`EnsureServer()` fails** (tmux server cannot start, e.g., permission error): emit stderr error, exit non-zero.
+- **`set-hook -ga` calls fail** en masse (version check passed but hook calls error anyway): log, emit one-line stderr warning if on CLI path; on TUI path, dismiss loading page cleanly, emit error, exit non-zero.
+- **`@portal-restoring` set-option fails**: same as `set-hook` failure.
+
+TUI path: loading page never "hangs forever." Any unrecoverable error tears down the Bubble Tea program cleanly, emits the error, exits. The loading page is only kept up while bootstrap is making progress.
 
 ### What Is Explicitly NOT in Scope
 
