@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-21
 cycle: 1
 phase: Gap Analysis
@@ -21,8 +21,8 @@ Bootstrap Flow says `CleanStale()` runs as step 7 of `PersistentPreRunE`. CLAUDE
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -36,8 +36,8 @@ Spec says `set-option -t _portal-saver destroy-unattached off`. In tmux, `destro
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -51,8 +51,8 @@ Bootstrap uses `has-session -t _portal-saver` to decide whether to create the sa
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -71,8 +71,8 @@ If `pane-base-index` changed between save and restore (unlikely but possible), t
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -88,8 +88,8 @@ Filename scheme `<session>__<window>.<pane>.bin` depends on the index matching. 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -107,8 +107,8 @@ Mitigations to consider: open with `O_NONBLOCK | O_WRONLY` and `EAGAIN` retry, o
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -127,8 +127,8 @@ This matters for daemon tick performance (the whole point of skeleton markers is
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -144,8 +144,8 @@ This silently deletes user-registered hooks when sessions rename. The spec doesn
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -163,8 +163,8 @@ This is by design (per "Out of Scope — Uncapturable by tmux") but the spec lea
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -183,8 +183,8 @@ What's unclear: does the spec handle the case where skeleton restore was *partia
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -202,8 +202,8 @@ Need consistency: either one sanitization scheme used everywhere (filename, FIFO
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -226,8 +226,8 @@ Either pin down each event's reasoning or note that 30s max-gap is the backstop.
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -245,8 +245,8 @@ Two-axis check (version file present + session present) would disambiguate: (a) 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -264,8 +264,8 @@ Should bootstrap query `tmux -V`, compare, and emit a clear error if below 3.0? 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -285,8 +285,8 @@ What's missing: explicit statement about in-flight captures vs `@portal-restorin
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -304,8 +304,8 @@ Spec's restoration pseudocode assumes `panes` non-empty. Worth stating that rest
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -324,8 +324,8 @@ This might exist already from the prior design (CLAUDE.md mentions a loading pag
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -344,8 +344,8 @@ Minor ambiguity but worth pinning down so exit-code semantics are stable.
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -366,8 +366,8 @@ So bootstrap sets up everything, and the command tears it down immediately. Wast
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -383,8 +383,8 @@ Also: what cleans up `save.requested` when daemon is not running? The spec says 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
 
@@ -418,7 +418,7 @@ This meta-finding is a roadmap; remove it once others are resolved.
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolution synthesized and applied in auto mode — see spec edits in this commit.
 
 ---
