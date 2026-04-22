@@ -1270,6 +1270,61 @@ One line. No banners, no colors, no interactive UI. Just enough signal that the 
 
 Observability is deliberately modest — enough to diagnose when things break, not so elaborate that it becomes a feature in its own right. The single log file + `portal state status` diagnostic command covers the realistic inspection needs for v1. More elaborate tooling can be added later if real-world usage reveals a gap.
 
+## Failure Modes & Recovery
+
+### Guiding Principle
+
+**Degrade locally, log, continue.** No single failure may crash Portal or leave it stuck. The user is never blocked. Logs capture context for diagnosis. Self-healing where possible.
+
+### Consolidated Failure-Handling Table
+
+| Failure | Handling |
+|---|---|
+| Scrollback file missing at hydrate time | Helper logs a warning, emits reset preamble only (no dump), exec's shell or hook. Empty pane, not stuck. |
+| `select-layout` fails (corrupt string, pane-count mismatch) | Log warning, fall back to `select-layout tiled`. Panes visible in a sane default arrangement; structure approximated. |
+| Hydrate signal never arrives (hook failure, FIFO issue) | 3-second timeout; helper degrades to empty shell + logs warning. `@portal-skeleton-<key>` marker stays set; next attach re-signals and retries. |
+| `AtomicWrite` mid-crash | Temp file + rename guarantees either the old or new file is intact on disk. Next successful save produces fresh state. |
+| Skeleton restore crashes partway | `@portal-restoring` cleared on server restart (volatile marker); next bootstrap retries from scratch. `sessions.json` still holds pre-crash state. Partial tmux structure from the crashed attempt does not block re-restore because `has-session` check skips already-live names; newly-created partial state becomes the live state. |
+| Orphaned scrollback files after an interrupted save | GC step at end of each successful save removes files not referenced by the new `sessions.json`. Self-healing. |
+| Orphan FIFO from a crashed helper | Defensive `os.Remove` + `syscall.Mkfifo` on each bootstrap sweeps stale `hydrate-*.fifo` files before creating new ones. Additional state-dir scan on bootstrap removes any stale FIFOs not matching a restored pane. |
+| tmux server dies mid-save | Hosted daemon in `_portal-saver` dies with the server. Kernel delivers SIGHUP; handler flushes the final save atomically (via `AtomicWrite`) before exit. Next bootstrap recreates the daemon. |
+| `sessions.json` corrupt / unparseable | Log warning, emit one-line stderr warning (see Observability), skip restoration entirely, continue bootstrap. User sees an empty picker. Diagnosable via log file or file inspection. Next successful save overwrites with valid content. |
+| Disk full during save | `AtomicWrite` fails at write or rename step. Daemon logs the error, continues ticking, and retries on the next tick (or on the next dirty-flag set). Previous save state remains intact on disk. When disk space frees, save resumes normally. Daemon never crashes from disk-full alone. |
+| User creates new session mid-restoration | No special handling. Skeleton restore only touches saved sessions from `sessions.json`; pre-existing live sessions (including just-created ones) coexist. `@portal-restoring` blocks captures mid-build, but user commands are not gated. |
+| Hydrate helper crashes mid-dump | Pane ends with partial content + dead process. Shell never starts. User sees a stuck pane. Recovery: user kills the pane manually; next bootstrap re-skeletons the structure (scrollback file may be mid-written, so some bytes may be missing — truncation, not corruption). Documented as a "shouldn't happen" case. |
+| `_portal-saver` creation fails at bootstrap | Portal retries a small number of times. On persistent failure: log, emit stderr warning (see Observability), continue bootstrap without the save daemon. User can still use Portal; saves are paused until the next successful bootstrap. |
+| Upgrade-triggered daemon restart during a save | `kill-session -t _portal-saver` delivers SIGHUP. Handler flushes current state atomically. If `@portal-restoring` is set (edge case), handler skips flush; new daemon captures fresh on first tick. No corruption; worst case is ≤1s of scrollback drift lost. |
+
+### What Is Explicitly NOT Handled Specially
+
+- **Terminal size drift on restoration.** `select-layout` does best-effort fit. Some panes may be cramped if the current terminal is smaller than the save-time terminal. Not Portal's problem to solve — documented as a limitation.
+- **Non-existent `cwd` on restore.** If a pane is restored with `-c /path/that/no/longer/exists`, tmux's fallback is to start the shell in the user's home directory. Acceptable; no Portal-side handling.
+- **Hook command's referenced binary missing at runtime.** If a hook references `claude` but `claude` is not installed, the hook fails at `exec` time and falls through via the `;` chain to `$SHELL`. User sees the error output, then a shell prompt. Not Portal's problem; the user-facing diagnostic is clear.
+
+### User Feedback on Partial Restoration
+
+Two channels keep failures observable without being intrusive:
+
+1. **Log file.** All warnings and errors go to `~/.config/portal/state/portal.log`. Never silent at the component level.
+2. **`portal state status`.** Surfaces recent warnings (last hour). Explicit diagnostic path.
+
+**No in-TUI banners or "restoration partially failed" interstitial UI.** Silent degradation is the right default — failures are rare, and nagging users about every sub-optimal restore adds friction. Log file is the diagnostic path.
+
+### Recovery Self-Healing Properties
+
+Many failure modes self-heal without user intervention:
+
+- **Orphan scrollback files** → cleaned by GC on next successful save.
+- **Orphan FIFOs** → swept on next bootstrap.
+- **Stripped hooks** (user or other tool runs `set-hook -gu`) → next bootstrap's content-based idempotency check re-appends.
+- **Missing `_portal-saver`** → next bootstrap's `has-session` check recreates it.
+- **Stale `save.requested` flag** → cleared on daemon startup.
+- **Corrupt `sessions.json`** → next successful save overwrites with valid content.
+- **Skeleton marker stuck set** (helper crashed before unset) → cleared on server restart (volatile).
+- **`@portal-restoring` stuck set** (bootstrap crashed mid-restore) → cleared on server restart (volatile).
+
+User-invoked recovery is almost never required. The only explicit recovery action documented is "kill the stuck pane manually" for the rare helper-crashed-mid-dump case.
+
 ---
 
 ## Working Notes
