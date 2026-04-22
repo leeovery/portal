@@ -22,10 +22,10 @@
     "specification": {
       "items": {
         "built-in-session-resurrection": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 4,
           "finding_gate_mode": "auto",
-          "date": "2026-04-21",
+          "date": "2026-04-22",
           "sources": {
             "built-in-session-resurrection": {
               "status": "incorporated"
