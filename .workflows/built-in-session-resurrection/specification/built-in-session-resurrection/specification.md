@@ -1325,6 +1325,63 @@ Many failure modes self-heal without user intervention:
 
 User-invoked recovery is almost never required. The only explicit recovery action documented is "kill the stuck pane manually" for the rare helper-crashed-mid-dump case.
 
+## Session & Project Store Interaction
+
+### Restored Session Names
+
+**Restored sessions keep their saved names exactly.** No regeneration of the nanoid, no normalization, no rewriting.
+
+Portal's existing naming scheme is `{project}-{nanoid}` (e.g., `portal-7fj8E6`). When restoration creates a session from `sessions.json`, it uses the `name` field verbatim — identical to how the name appeared in tmux before the reboot.
+
+**Why:** name stability is what makes "your session came back" feel right. Users may have:
+- Shell aliases referencing specific session names.
+- tmux keybindings scoped to named sessions.
+- Scripts that call `tmux attach -t <name>` with hardcoded names.
+- Muscle memory for specific session names.
+
+Regenerating the nanoid on restore would break all of these silently.
+
+### `projects.json` Timestamp Handling
+
+**`projects.json` timestamps update only on user-initiated attach, not on restoration.**
+
+Restoration is Portal plumbing — it happens automatically on every `portal open` invocation, regardless of whether the user is actively working with a specific project. If a user has not touched a project in 3 months and then reboots, Portal should not rewrite the timestamp to reflect "just used."
+
+The timestamp semantically tracks **user intent**, not tmux mechanical state. It advances only when the user explicitly engages with the project via Portal's attach flow:
+- Selecting a session in the TUI picker.
+- Running `portal attach <name>`.
+- Any other Portal-initiated attach pathway.
+
+**Caveat:** direct `tmux attach -t <name>` from a bare shell **does not** update `projects.json`. This is consistent with Portal's current behavior — direct tmux commands bypass Portal's tracking. Documented as a known, intentional property.
+
+### Restoration Never Creates New `projects.json` Entries
+
+If `projects.json` does not have an entry for a saved session's project path (perhaps the user manually removed the entry), restoration does not re-create it. `projects.json` stays authoritative for "projects the user has interacted with via Portal."
+
+Session restoration and project tracking are separate concerns. A session existing in tmux does not imply or require a `projects.json` entry.
+
+### Edge Case: Orphan Saved Session
+
+**Scenario:** a user ran `portal open /some/path` months ago (creating a `projects.json` entry). The save mechanism captured the session. Later, the user manually removed the `projects.json` entry (or some future tooling did). The session's saved state persists in `sessions.json`.
+
+**On reboot:** the session is skeleton-restored from `sessions.json`. The `projects.json` entry is **not** re-added. This is the correct behavior:
+
+- The session exists as live tmux state — user can attach via any path.
+- `projects.json` reflects user intent — the user removed it deliberately (or effectively).
+- No forced linkage between "session exists" and "project tracked in Portal."
+
+If the user attaches to the restored session via Portal's attach flow, Portal's existing logic for new-attach would engage (which may or may not add a project entry depending on invocation shape — governed by existing Portal behavior, not changed by this spec).
+
+### Consistency With Existing Semantics
+
+All of the above are natural extensions of Portal's existing design:
+
+- Name stability matches how Portal already treats session names as user-visible identifiers.
+- Minimal-intrusion timestamp updates match how `projects.json` already tracks engagement rather than existence.
+- Clear separation between tmux state and `projects.json` state matches Portal's existing "live tmux is the source of truth" principle.
+
+No architectural changes to `projects.json` or the project store are required by this specification.
+
 ---
 
 ## Working Notes
