@@ -1190,6 +1190,86 @@ Existing Portal CLI top-level namespaces (`portal hooks`, `portal alias`, `porta
 - `portal clean` — unchanged surface; internals no longer have the `livePanes empty` guard (see CleanStale Behavior).
 - `portal alias ...`, `portal init`, `portal version` — unchanged.
 
+## Observability & Diagnostics
+
+### Motivation
+
+Silent failure was one of tmux-resurrect / continuum's most-cited problems — users lost data without any indication something had gone wrong. Portal replacing those plugins risks the same opacity if diagnostics are not built in deliberately.
+
+### Log File
+
+**Location:** `~/.config/portal/state/portal.log`. Lives alongside state data, not in the config directory.
+
+**Format:** single line per entry.
+
+```
+timestamp | level | component | message
+```
+
+- `timestamp` — RFC 3339 UTC.
+- `level` — one of `DEBUG`, `INFO`, `WARN`, `ERROR`.
+- `component` — short identifier for the subsystem (`daemon`, `restore`, `hydrate`, `notify`, `hooks`, `bootstrap`).
+- `message` — free-form, human-readable.
+
+Human-readable and grep-friendly. No structured / JSON format in v1 (YAGNI).
+
+**Log level:** warnings and errors by default. `PORTAL_LOG_LEVEL=debug` env var enables verbose tracing for debugging sessions.
+
+**What gets logged:**
+
+- Save failures (disk full, write errors, permission issues).
+- Restoration warnings (missing scrollback file, layout fallback, corrupt `sessions.json`).
+- Hydrate timeouts (3-second signal did not arrive).
+- Helper crashes (in the rare cases where they can be observed).
+- Bootstrap events at `DEBUG` level only.
+
+### Log Rotation
+
+Simple 2-file cap at **1 MB per file**.
+
+- On reaching 1 MB during a write, Portal renames `portal.log` → `portal.log.old` (replacing any existing old file), then starts a fresh `portal.log`.
+- Total disk usage bounded at ~2 MB.
+- Portal performs rotation itself in-process. No external `logrotate` dependency.
+
+### `portal state status` (Human-Readable Diagnostic)
+
+Primary user-facing diagnostic entry point. Single invocation surfaces the most useful operational data without requiring the user to know where the log file lives. See CLI Surface section for the full command description.
+
+The output includes a "recent warnings" line that scans `portal.log` for entries within the last hour, giving users a quick pointer to recent failures without needing to read the log manually.
+
+### Proactive Health Signals
+
+**Default: silent.** Portal does not nag about transient issues. Users opt in to visibility by running `portal state status`.
+
+**Exception: genuinely broken states detected during `PersistentPreRunE`.** Portal emits a single line to stderr when a critical problem is detected at bootstrap:
+
+- `_portal-saver` cannot be created after retry attempts:
+
+  ```
+  Portal save daemon failed to start — sessions won't be captured.
+  Run `portal state status` for details.
+  ```
+
+- `sessions.json` exists but is unparseable:
+
+  ```
+  Portal state file is corrupt — restoration skipped.
+  Check `portal state status` or ~/.config/portal/state/portal.log.
+  ```
+
+One line. No banners, no colors, no interactive UI. Just enough signal that the user knows to investigate if they care, and quiet enough not to intrude on normal use.
+
+### What Is Explicitly NOT in Scope
+
+- **Metrics endpoint / Prometheus exporter / telemetry.** This is a CLI tool, not a service.
+- **Desktop notifications.** Users would not want macOS Notification Center alerts about tmux save status.
+- **syslog integration.** Single log file, single tool, local scope.
+- **Log search / filter tooling.** `grep` / `awk` over `portal.log` is sufficient.
+
+### Confidence and Scope Rationale
+
+Observability is deliberately modest — enough to diagnose when things break, not so elaborate that it becomes a feature in its own right. The single log file + `portal state status` diagnostic command covers the realistic inspection needs for v1. More elaborate tooling can be added later if real-world usage reveals a gap.
+
 ---
 
 ## Working Notes
