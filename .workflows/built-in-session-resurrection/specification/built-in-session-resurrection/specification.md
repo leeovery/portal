@@ -79,7 +79,7 @@ Not Portal's problem to solve. Users can compensate via resume hooks where meani
 
 - **Ephemeral session opt-out** (per-session/per-pane exclusion from capture). Speculative without concrete user demand. `history-limit 0` on a window is the tmux-native workaround documented in the README.
 - **Scrollback compression.** Deferred until disk usage becomes a complaint.
-- **Parallel capture** for many-pane configurations. Deferred until performance complaints surface.
+- **Parallel capture** for many-pane configurations. Deferred until performance complaints surface. Sequential capture is adequate at realistic scale: per-pane round-trip cost is ~10ms and realistic pane counts stay under ~20, keeping capture well inside the 1-second tick budget.
 - **Schema migration (v1 → v2).** Standard practice when the time comes; not a v1 design decision.
 - **Background prefetch / full-eager hydration.** Rejected in favor of pure-lazy hydration; can be reconsidered if attach-time latency becomes a complaint.
 
@@ -128,7 +128,7 @@ Portal hosts its long-running save process inside a detached tmux session named 
 - tmux already owns process supervision. No launchd/systemd per-platform code, no install/uninstall service lifecycle, no double-fork fallback with silent-failure mode.
 - The daemon has nothing useful to do when tmux is dead, so tying its lifetime to tmux's is correct.
 - Portal creates `_portal-saver` idempotently at bootstrap. Crash recovery is automatic — a dead session is recreated on the next `portal open`.
-- Pattern has real-world precedent (tmux-slay). The concerns are concrete and addressed.
+- Pattern has real-world precedent (tmux-slay, the only public tool known to host a long-running process inside a detached tmux session). The concerns are concrete and addressed, but the pattern is niche — new territory relative to common tmux integrations.
 
 **Why not subprocess-per-event:** structural-event-driven saves miss scrollback drift. A user sitting in one pane with a program outputting for hours produces no structural events; crash loses everything since the last event.
 
@@ -192,6 +192,8 @@ These catch structural changes (session/window/pane topology, renames, layout ch
 
 - **Dirty-flag check** produces ≤1 second event-to-save latency.
 - **30-second max-gap** bounds worst-case scrollback loss on unexpected tmux/system termination at 30 seconds, even during periods with zero structural events.
+
+**30-second cadence rationale.** The 30-second figure is informed by Zellij's trajectory — Zellij originally defaulted to 1-second serialization, then raised to 60 seconds in v0.39.2 after disk-write volume complaints (Zellij PR #2951). Portal's 30s is a compromise between Zellij's pre- and post-complaint positions, reflecting both the write-volume concern and Portal's narrower YAGNI-first disk budget.
 
 ### No Opportunistic Trigger
 
@@ -289,6 +291,8 @@ All files written with mode `0600` (owner read/write only). Matches the trust mo
 
 Each live pane has its own scrollback file containing raw `capture-pane -e -p -S -` output (ANSI escape sequences preserved inline, no encoding transformation).
 
+Scrollback size per pane is naturally bounded by `history-limit × avg-line-bytes` — tmux's history buffer is a ring that discards oldest lines at the head when the limit is exceeded. No Portal-side cap is needed to keep files bounded.
+
 **Filename scheme:** `<session>__<window>.<pane>.bin`
 
 - `session` is the session name, passed through a filesystem-safe sanitizer (replace characters that conflict with filesystem conventions: `/`, null bytes, leading `.`, etc.). On collision (two sanitized session names map to the same file key), append a hash suffix.
@@ -366,7 +370,7 @@ Multi-file state with per-file atomicity. The commit order:
 
 ### Content-Hash Dedup
 
-To avoid rewriting unchanged scrollback on every tick (which would generate gigabytes per day for heavy-history configurations), the daemon holds an in-memory map `paneKey → hash-of-last-written-scrollback`.
+To avoid rewriting unchanged scrollback on every tick — which would generate on the order of 86 GB/day of writes in a heavy-history configuration (`history-limit 50000` × 10 panes) and cause significant SSD wear — the daemon holds an in-memory map `paneKey → hash-of-last-written-scrollback`. Content-hash dedup reduces worst-case write volume to single-digit MB/day for realistic workloads.
 
 Per pane per capture cycle:
 1. Capture scrollback bytes (cheap — tmux internal buffer).
@@ -587,7 +591,7 @@ The ~500ms extra cost (versus a sessions-only-eager approach) buys Portal being 
 
 ### Why Scrollback-Lazy
 
-Fully-eager scrollback injection at realistic power-user sizes (`history-limit 50000` per pane × 30 panes) would add ~15 seconds to boot — unacceptable UX. Lazy hydration amortizes cost across attaches; sessions the user never touches today cost zero to hydrate.
+Fully-eager scrollback injection at realistic power-user sizes (`history-limit 50000` per pane × 30 panes) would add 2–15 seconds to boot depending on pane scrollback fullness — unacceptable UX even at the low end. Lazy hydration amortizes cost across attaches; sessions the user never touches today cost zero to hydrate.
 
 Mechanism details are in the Scrollback Restore Mechanics section.
 
@@ -616,6 +620,7 @@ Two volatile tmux server-option markers coordinate restoration and saving. Both 
 - **Cleared by:** the hydrate helper, *after* successful content dump + 100ms settle sleep (see Scrollback Restore Mechanics). "Marker cleared" is synonymous with "helper output is complete and the pane's scrollback is in its final form."
 - **User-created panes never receive this marker.** Brand-new post-boot panes are captured normally from the start.
 - **Inverse semantic is deliberate:** "needs hydration" is *active state set by restore*; default absence means "safe to capture." This keeps the new-session creation path from requiring a special code branch.
+- **User-visible property:** for sessions the user never attaches to, the skeleton marker stays set indefinitely, the save loop keeps skipping, and the pre-boot scrollback file on disk remains intact. A user who reboots and then leaves a session dormant for weeks will still have their pre-boot history available the first time they attach.
 
 #### `@portal-restoring` — "restoration in progress"
 
@@ -772,6 +777,7 @@ The mechanism was empirically validated on an isolated tmux socket during discus
 - `cat FILE; exec bash` pattern: 1000-line ANSI scrollback rendered correctly; clean `bash-5.3$` prompt at end.
 - Shell history contained only post-test commands — no helper, no `cat`, no scrollback content.
 - Blocking-FIFO variant: pane empty before signal; after `echo "go" > fifo`, scrollback rendered and shell prompt appeared.
+- Default-socket sessions were verified identical before and after the test — validation does not contaminate the user's live tmux state. The isolated socket pattern (`tmux -L <unique-name>`) is the recommended approach for future mechanism verification.
 
 ### Rejected Alternatives
 
@@ -833,7 +839,7 @@ Under the new design, hooks fire exactly when a pane is freshly recreated from s
 
 `signal-hydrate` (fired from `client-attached` / `client-session-changed` hooks) does non-trivial work: enumerate panes in the attached session, check markers, write to up to N FIFOs. For a 30-pane session, cost is ~50–150ms.
 
-tmux's `run-shell` is synchronous by default and blocks the server during hook execution. Acceptable for initial release — the user is actively attaching; sub-150ms is imperceptible at the moment of attach. If real-world use reveals problems (other clients feeling laggy during heavy attaches), switch to `run-shell -b` (async). tmux 3.0+ has settled `-b` behavior; defer the switch until there is evidence the blocking matters.
+tmux's `run-shell` is synchronous by default and blocks the server during hook execution. Acceptable for initial release — the user is actively attaching; sub-150ms is imperceptible at the moment of attach. If real-world use reveals problems (other clients feeling laggy during heavy attaches), switch to `run-shell -b` (async). tmux 3.0+ appears to have settled earlier `-b` flag issues (see tmux#1843, tmux#2306 for the historical context); however, the primitive remains unused by mainstream tmux plugins as a poor-man's-daemon pattern. Defer the async switch until there is evidence the synchronous blocking matters in practice.
 
 ### Net Simplification
 
@@ -1088,7 +1094,7 @@ Liveness check and diagnostic output. Readable in a terminal; exit code is scrip
 Portal state:
   Save daemon: running (pid 12345, version v0.4.2)
   Last save: 12 seconds ago
-  Sessions captured: 10 (0 ephemeral-skipped)
+  Sessions captured: 10
   Panes captured: 34
   State size: 18.2 MB on disk
   Recent warnings: 0 (last: none)
