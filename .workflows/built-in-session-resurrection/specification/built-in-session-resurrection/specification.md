@@ -73,7 +73,7 @@ Not Portal's problem to solve. Users can compensate via resume hooks where meani
 - **Non-tmux multiplexers.** Portal is tmux-specific. Zellij, GNU screen, wezterm, abduco — not supported.
 - **Shell-specific behavior.** Portal is shell-agnostic. Helper `exec`s `$SHELL`. No special-casing bash/zsh/fish.
 - **Mouse state / clipboard state.** Ephemeral interaction state.
-- **Generic tmux option capture** (session/window/pane options). Nearly all tmux options are set globally via `~/.tmux.conf` and apply on restore automatically. Per-session overrides are niche. Capturing them requires diffing `show-options` against global defaults — complexity not justified. If a specific flag becomes important, add it as an explicit field later.
+- **Generic tmux option capture** (session/window/pane options). Nearly all tmux options are set globally via `~/.tmux.conf` and apply on restore automatically. Per-session overrides are niche. Capturing them requires diffing `show-options` against global defaults — complexity not justified. Also carries a recursion risk: Portal's own `set-hook -g` definitions would be captured and replayed on restore, creating a feedback loop on its own plumbing. If a specific flag becomes important, add it as an explicit per-window/per-session field later.
 - **Marks / position bookmarks.** tmux's `<prefix>m` marks panes (not scrollback positions), and copy-mode position marks have no tmux API to capture or restore. No functional gain.
 - **Last-pane tracking.** No confirmed tmux format variable exposes this.
 
@@ -1021,6 +1021,8 @@ With the ordering above:
 - `@portal-restoring` set → daemon's first tick no-ops.
 - Restoration runs → more structural events fire → every one is a no-op on the notify side because `@portal-restoring` is still set.
 - `@portal-restoring` cleared → next daemon tick captures the now-complete post-restoration state.
+
+Hook registration (step 2) similarly precedes `_portal-saver` creation (step 4). Creating `_portal-saver` fires a `session-created` event; with hooks already registered, the notify pathway is intact from the daemon's very first moment of existence. The `@portal-restoring` marker suppresses the initial capture, but the ordering keeps the hook pipeline fully wired rather than racing registration against the new session's first event.
 
 `@portal-skeleton-<paneKey>` markers are set as each pane is created, so even after `@portal-restoring` clears, the daemon correctly skips unhydrated panes until their helpers complete.
 

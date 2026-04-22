@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-21
 cycle: 2
 phase: Input Review
@@ -25,8 +25,8 @@ The discussion grounds the rejection of generic options capture in two reasons: 
 **Proposed Addition**:
 Append a sentence: "Also carries a recursion risk — Portal's own `set-hook -g` definitions would be captured and replayed on restore, creating a feedback loop on its own plumbing. If a specific flag becomes important, add it as an explicit per-window/per-session field later."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied in auto mode.
 
 ---
 
@@ -42,7 +42,7 @@ The spec's Ordering Rationale (line 1016) explains why `@portal-restoring` must 
 **Proposed Addition**:
 Extend the Ordering Rationale section to note: "Hook registration (step 2) similarly precedes `_portal-saver` creation (step 4). Creating `_portal-saver` fires a `session-created` event; with hooks already registered, the notify pathway is intact from the daemon's very first moment of existence. The `@portal-restoring` marker suppresses the initial capture, but the ordering keeps the hook pipeline fully wired rather than racing registration against the new session's first event."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied in auto mode.
 
 ---
