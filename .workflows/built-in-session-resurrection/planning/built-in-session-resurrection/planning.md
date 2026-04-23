@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Portal state CLI scaffolding & tmux hook registration
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: Establish the `portal state` command namespace, the tmux ≥ 3.0 version guard, and the idempotent global-hook registration / removal plumbing — the foundation every subsequent phase builds on.
 
@@ -19,7 +20,8 @@ status: draft
 - [ ] `portal state cleanup` command exists and removes Portal's hook entries (daemon teardown and `--purge` land in Phase 6)
 
 ### Phase 2: Save daemon, triggers, and on-disk state format
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: Bring up `_portal-saver` hosting `portal state daemon`, wire the dirty-flag + 1-second ticker capture loop, and land the full `sessions.json` + `scrollback/` directory layout with atomic writes, content-hash dedup, GC, and version-marker-driven daemon restart.
 
@@ -39,7 +41,8 @@ status: draft
 - [ ] SIGHUP and SIGTERM handlers flush a final atomic write via `AtomicWrite`, unless `@portal-restoring` is set
 
 ### Phase 3: Skeleton restore and lazy scrollback hydration
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: On bootstrap, read `sessions.json` and skeleton-restore every missing saved session (windows, panes, layout, zoom, session environment, CWDs) wired to the hydrate-helper FIFO mechanism; on client attach, `signal-hydrate` unblocks the helpers which dump scrollback with ANSI fidelity and degrade locally on every failure mode the spec enumerates.
 
@@ -58,7 +61,8 @@ status: draft
 - [ ] Integration test on an isolated `tmux -L` socket verifies a multi-session, multi-window save round-trips structure + ANSI scrollback
 
 ### Phase 4: Resume-hook lifecycle migration
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: Move hook firing out of the old attach-time `ExecuteHooks` path into the hydrate helper's exec chain; add `session-renamed` key migration via a separate internal subcommand; update `CleanStale` to run unconditionally.
 
@@ -74,7 +78,8 @@ status: draft
 - [ ] `portal hooks set`, `portal hooks list`, `portal hooks rm --on-resume` retain their existing user-facing surface; behavioural change is documented: hooks fire on skeleton-restored panes only, not on live detach/reattach within a server lifetime
 
 ### Phase 5: Bootstrap integration and `WaitForSessions` removal
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: Stitch the full `PersistentPreRunE` sequence together in the specified order, delete `WaitForSessions` / `bootstrapWait` and their call sites, and land the TUI loading-page 1.2-second minimum-display treatment.
 
@@ -91,7 +96,8 @@ status: draft
 - [ ] `portal attach NAME` and `portal open` continue to resolve names that only exist in `sessions.json` at bootstrap time (skeleton is created before the command's own attach logic runs)
 
 ### Phase 6: Observability, user commands, and documentation
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 **Goal**: Deliver the `portal state status` diagnostic, finish `portal state cleanup` (daemon kill and `--purge`), land `portal.log` with rotation + concurrent-writer discipline, emit stderr one-liners for fatal and soft bootstrap errors, and ship the required README sections.
 
