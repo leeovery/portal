@@ -56,6 +56,25 @@ approved_at: 2026-04-23
 - [ ] Version mismatch (including empty / `"dev"` version) triggers `kill-session -t _portal-saver` + recreate on the next bootstrap
 - [ ] SIGHUP and SIGTERM handlers flush a final atomic write via `AtomicWrite`, unless `@portal-restoring` is set
 
+#### Tasks
+status: approved
+approved_at: 2026-04-23
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-2-1 | Add state-directory path helpers and paneKey sanitizer | `/`, null bytes, leading `.` in session names, collision hash-suffix, directories created with `0700`, XDG overrides, per-file env vars |
+| built-in-session-resurrection-2-2 | Implement `portal state notify` subcommand | state directory missing (create with `0700`), existing file bumped mtime, permission error surfaces via exit code only, stray args are harmless |
+| built-in-session-resurrection-2-3 | Define `sessions.json` v1 schema types and encoder/decoder | unknown fields ignored on decode, missing optional fields round-trip, empty `environment` map, empty `panes` slice serializes as `[]` not `null` |
+| built-in-session-resurrection-2-4 | Add daemon.pid + signal(0) liveness check and version-marker read/write helpers | PID file missing, unparseable, whitespace, PID reused by a different process (accepted), version file missing, empty version, `"dev"` version |
+| built-in-session-resurrection-2-5 | Implement idempotent `_portal-saver` bootstrap with defensive `destroy-unattached off -t` | `has-session` true but PID liveness false → `kill-session` then recreate, `-t` scoping (never `-g`), concurrent bootstraps race, transient new-session failure then retry, `destroy-unattached off` is idempotent |
+| built-in-session-resurrection-2-6 | Wire version-marker-driven restart into bootstrap | version file absent while `_portal-saver` live (accepted unnecessary restart), empty-string version, `"dev"` always restarts, release semver equality, `kill-session` tolerant of already-dead session |
+| built-in-session-resurrection-2-7 | Scaffold `portal state daemon` entrypoint with startup side-effects and signal wiring | state directory missing, existing `portal.log.old` replaced on rotation, log file absent (no rotation), repeated startup overwrites pid/version defensively, SIGHUP and SIGTERM both cancel context |
+| built-in-session-resurrection-2-8 | Implement structural capture: enumerate sessions, panes, and per-session environment | `_*` sessions filtered, zero live sessions → empty `sessions` array (not `null`), environment `-r` removed-form entries ignored, multi-byte UTF-8 session names, empty environment map round-trips |
+| built-in-session-resurrection-2-9 | Implement per-pane scrollback capture with xxhash content dedup and startup seed | first-ever capture (empty map), identical scrollback across ticks produces zero writes, empty scrollback, unreadable existing `.bin` during seed logs and continues, hash collision accepted per xxhash guarantees |
+| built-in-session-resurrection-2-10 | Atomic commit of `sessions.json` plus post-commit orphan GC | zero-change cycle skips both write and GC, GC tolerates `ENOENT`, GC preserves files for still-skeleton-marked panes, rename failure leaves prior state intact, per-file GC failure logs and continues |
+| built-in-session-resurrection-2-11 | Marker-aware capture via single `show-options -sv` per cycle | `show-options -sv` empty output, unrelated `@` options present, marker values other than `1` still treated as present, skeleton-marked pane's `.bin` and `sessions.json` entry preserved, marker cleared mid-cycle → next cycle captures |
+| built-in-session-resurrection-2-12 | Ticker trigger logic, defensive startup clear, and shutdown final flush | dirty flag set during restore suppressed by `@portal-restoring`, 30s max-gap fires with zero dirty signals, `@portal-restoring` set at shutdown skips final flush, in-flight capture started before flag set commits normally, `save.requested` race between clear and next notify picked up on following tick |
+
 ### Phase 3: Skeleton restore and lazy scrollback hydration
 status: approved
 approved_at: 2026-04-23
