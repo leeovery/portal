@@ -19,6 +19,21 @@ approved_at: 2026-04-23
 - [ ] All new tmux invocations go through the existing `Commander` interface and are covered by table-driven unit tests with canned `show-hooks` outputs
 - [ ] `portal state cleanup` command exists and removes Portal's hook entries (daemon teardown and `--purge` land in Phase 6)
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-1-1 | Scaffold `portal state` command namespace with stub subcommands | hidden subcommands excluded from `--help`, bare `portal state` prints help, exemption applies to nested subcommands |
+| built-in-session-resurrection-1-2 | Add tmux version detection and >= 3.0 guard | suffixed versions (`3.0a`, `3.3-rc`), `tmux-next`/OpenBSD build strings, malformed output, missing binary, leading/trailing whitespace |
+| built-in-session-resurrection-1-3 | Wire the version guard into `PersistentPreRunE` (memoized, exempt-aware) | repeated `PersistentPreRunE` invocations run check once, exempt commands bypass entirely, failure short-circuits before any `set-hook` call |
+| built-in-session-resurrection-1-4 | Add `show-hooks` / `set-hook -ga` / `set-hook -gu` wrappers on `tmux.Client` | empty `show-hooks -g` output, commands containing single quotes, Commander errors bubble verbatim |
+| built-in-session-resurrection-1-5 | Parse `show-hooks -g` output into an indexed per-event map | sparse indices from prior removals, hyphenated event names, leading whitespace, unrelated lines, non-indexed entries |
+| built-in-session-resurrection-1-6 | Implement content-based idempotent registration (`RegisterHookIfAbsent`) | unrelated user/plugin entries on same event preserved, Portal entry already present is a no-op, `show-hooks` failure propagates without partial append |
+| built-in-session-resurrection-1-7 | Register the full Phase 1 hook table at bootstrap | partial prior registration, per-event failure does not silently skip later events, double-bootstrap produces no duplicates |
+| built-in-session-resurrection-1-8 | Implement Portal hook removal in reverse index order | sparse arrays with Portal and non-Portal entries interleaved, already-absent entries are a no-op, two Portal entries on same event (`notify` + `migrate-rename` on `session-renamed`) both removed |
+| built-in-session-resurrection-1-9 | Implement the Phase 1 slice of `portal state cleanup` | no tmux server running is not an error, partial failure still attempts subsequent removals, running twice in a row is a clean no-op the second time |
+
 ### Phase 2: Save daemon, triggers, and on-disk state format
 status: approved
 approved_at: 2026-04-23
