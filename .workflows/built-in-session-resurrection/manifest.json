@@ -39,7 +39,7 @@
         "built-in-session-resurrection": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "364e5af3544815622b0cad40b59fb545eac84efa",
+          "spec_commit": "9b35acd19aba9f50a5542e4bd988635427b9246f",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
