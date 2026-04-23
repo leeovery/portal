@@ -20,7 +20,8 @@ approved_at: 2026-04-23
 - [ ] `portal state cleanup` command exists and removes Portal's hook entries (daemon teardown and `--purge` land in Phase 6)
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-04-23
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
