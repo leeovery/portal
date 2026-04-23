@@ -33,6 +33,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "built-in-session-resurrection": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "364e5af3544815622b0cad40b59fb545eac84efa",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
