@@ -45,7 +45,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 6,
-          "task": "built-in-session-resurrection-6-2",
+          "task": "built-in-session-resurrection-6-3",
           "task_map": {
             "built-in-session-resurrection": "tick-45287e",
             "built-in-session-resurrection-1": "tick-86cb46",
@@ -104,7 +104,8 @@
             "built-in-session-resurrection-5-9": "tick-81c28e",
             "built-in-session-resurrection-5-10": "tick-7c18c4",
             "built-in-session-resurrection-6": "tick-27d572",
-            "built-in-session-resurrection-6-1": "tick-784bc9"
+            "built-in-session-resurrection-6-1": "tick-784bc9",
+            "built-in-session-resurrection-6-2": "tick-3d0065"
           },
           "external_id": "tick-45287e"
         }
