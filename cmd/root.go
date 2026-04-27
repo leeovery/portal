@@ -30,21 +30,25 @@ var bootstrapDeps *BootstrapDeps
 
 // BootstrapDeps allows injecting the server bootstrapper for testing.
 // When Client is non-nil it is stored in context; otherwise no client is set.
+// RegisterHooks is the seam for Portal's global tmux hook registration; when
+// nil (production default), tmux.RegisterPortalHooks is used.
 type BootstrapDeps struct {
-	Bootstrapper ServerBootstrapper
-	Client       *tmux.Client
-	Waiter       func()
+	Bootstrapper  ServerBootstrapper
+	Client        *tmux.Client
+	Waiter        func()
+	RegisterHooks func(*tmux.Client) error
 }
 
-// buildBootstrapDeps returns the appropriate server bootstrapper and shared client.
-// When bootstrapDeps is set (testing), uses injected dependencies.
-// Otherwise, builds a real tmux client with RealCommander.
-func buildBootstrapDeps() (ServerBootstrapper, *tmux.Client) {
+// buildBootstrapDeps returns the appropriate server bootstrapper, shared
+// client, and hook-registration function. When bootstrapDeps is set
+// (testing), uses injected dependencies. Otherwise, builds a real tmux
+// client with RealCommander and uses tmux.RegisterPortalHooks.
+func buildBootstrapDeps() (ServerBootstrapper, *tmux.Client, func(*tmux.Client) error) {
 	if bootstrapDeps != nil {
-		return bootstrapDeps.Bootstrapper, bootstrapDeps.Client
+		return bootstrapDeps.Bootstrapper, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
 	}
 	client := tmux.NewClient(&tmux.RealCommander{})
-	return client, client
+	return client, client, tmux.RegisterPortalHooks
 }
 
 var rootCmd = &cobra.Command{
@@ -62,7 +66,7 @@ var rootCmd = &cobra.Command{
 		if err := runVersionCheck(); err != nil {
 			return err
 		}
-		bootstrapper, client := buildBootstrapDeps()
+		bootstrapper, client, registerHooks := buildBootstrapDeps()
 		serverStarted, err := bootstrapper.EnsureServer()
 		if err != nil {
 			return err
@@ -72,6 +76,11 @@ var rootCmd = &cobra.Command{
 			ctx = context.WithValue(ctx, tmuxClientKey, client)
 		}
 		cmd.SetContext(ctx)
+		if registerHooks != nil && client != nil {
+			if err := registerHooks(client); err != nil {
+				return err
+			}
+		}
 		return nil
 	},
 	SilenceUsage:  true,

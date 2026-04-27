@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -294,6 +295,132 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		}
 		if gotStarted {
 			t.Error("expected serverWasStarted=false, got true")
+		}
+	})
+}
+
+// recordingHookRegistrar records every call to its Register method along
+// with the *tmux.Client argument it received. Substituted into BootstrapDeps
+// to assert PersistentPreRunE invokes hook registration after bootstrap.
+type recordingHookRegistrar struct {
+	calls   int
+	gotNil  bool
+	gotSame bool
+	want    *tmux.Client
+	err     error
+}
+
+func (r *recordingHookRegistrar) Register(c *tmux.Client) error {
+	r.calls++
+	if c == nil {
+		r.gotNil = true
+	}
+	if r.want != nil && c == r.want {
+		r.gotSame = true
+	}
+	return r.err
+}
+
+func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
+	t.Run("RegisterHooks is called once after EnsureServer for non-exempt commands", func(t *testing.T) {
+		mockBoot := &mockServerBootstrapper{}
+		client := tmux.NewClient(&tmux.RealCommander{})
+		registrar := &recordingHookRegistrar{want: client}
+
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper:  mockBoot,
+			Client:        client,
+			RegisterHooks: registrar.Register,
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		listDeps = &ListDeps{
+			Lister: &mockSessionLister{sessions: []tmux.Session{}},
+			IsTTY:  func() bool { return false },
+		}
+		t.Cleanup(func() { listDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"list"})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !mockBoot.called {
+			t.Error("EnsureServer was not called")
+		}
+		if registrar.calls != 1 {
+			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
+		}
+		if registrar.gotNil {
+			t.Error("RegisterHooks received nil client")
+		}
+		if !registrar.gotSame {
+			t.Error("RegisterHooks did not receive the bootstrapped client instance")
+		}
+	})
+
+	t.Run("RegisterHooks is NOT called for exempt commands", func(t *testing.T) {
+		exempt := []struct {
+			name string
+			args []string
+		}{
+			{name: "portal version", args: []string{"version"}},
+			{name: "portal state status", args: []string{"state", "status"}},
+		}
+		for _, tt := range exempt {
+			t.Run(tt.name, func(t *testing.T) {
+				registrar := &recordingHookRegistrar{}
+				bootstrapDeps = &BootstrapDeps{
+					Bootstrapper:  &mockServerBootstrapper{},
+					RegisterHooks: registrar.Register,
+				}
+				t.Cleanup(func() { bootstrapDeps = nil })
+
+				resetRootCmd()
+				resetStateCmdFlags()
+				rootCmd.SetArgs(tt.args)
+				if err := rootCmd.Execute(); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+
+				if registrar.calls != 0 {
+					t.Errorf("RegisterHooks call count for exempt command = %d, want 0", registrar.calls)
+				}
+			})
+		}
+	})
+
+	t.Run("RegisterHooks error propagates from PersistentPreRunE", func(t *testing.T) {
+		sentinel := errors.New("hook registration failed")
+		client := tmux.NewClient(&tmux.RealCommander{})
+		registrar := &recordingHookRegistrar{err: sentinel}
+
+		bootstrapDeps = &BootstrapDeps{
+			Bootstrapper:  &mockServerBootstrapper{},
+			Client:        client,
+			RegisterHooks: registrar.Register,
+		}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
+		listDeps = &ListDeps{
+			Lister: &mockSessionLister{sessions: []tmux.Session{}},
+			IsTTY:  func() bool { return false },
+		}
+		t.Cleanup(func() { listDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetArgs([]string{"list"})
+		err := rootCmd.Execute()
+
+		if err == nil {
+			t.Fatal("expected error from RegisterHooks, got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
+		}
+		if registrar.calls != 1 {
+			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
 		}
 	})
 }
