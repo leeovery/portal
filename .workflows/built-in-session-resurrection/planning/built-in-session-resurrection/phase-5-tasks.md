@@ -94,6 +94,7 @@ total: 10
     - `type RestoringMarker interface { Set() error; Clear() error }` — `@portal-restoring` server-option. Backed by `*tmux.Client.SetServerOption("@portal-restoring", "1")` and `UnsetServerOption("@portal-restoring")`.
     - `type SaverBootstrapper interface { EnsureSaver() error }` — Phase 2 task 2-5 + 2-6 (idempotent `_portal-saver` bootstrap with version-marker-driven restart).
     - `type Restorer interface { Restore() error }` — Phase 3 task 3-6 `Restore()` orchestrator.
+    - `type FIFOSweeper interface { SweepOrphanFIFOs() error }` — wraps Phase 3 task 3-12 `state.SweepOrphanFIFOs(dir, liveMarkerKeys, logger)`. The implementation derives `liveMarkerKeys` from a fresh `fetchSkeletonMarkers` call so the sweep sees the post-Restore marker set.
     - `type StaleCleaner interface { CleanStale() error }` — existing `hooks.CleanStale` (Phase 4 task 4-7 removes its empty-panes guard).
   - `type Orchestrator struct` holding one field per interface.
   - `func NewOrchestrator(client *tmux.Client) *Orchestrator` wiring production implementations. This factory is the production-path entry; tests construct `Orchestrator` literals directly.
@@ -104,12 +105,13 @@ total: 10
     4. `if err := o.Saver.EnsureSaver(); err != nil` → log best-effort, continue. Per spec "Failure Modes → `_portal-saver` creation fails at bootstrap": "retries a small number of times. On persistent failure: log, emit stderr warning, continue bootstrap without the save daemon." Capture the underlying error in a Phase-6-bound buffer (via the `Warnings []bootstrap.Warning` accumulator that task 6-9 introduces); for Phase 5's slice, `EnsureSaver` failure is logged via the orchestrator's logger and execution continues. The `Warning` type lands in Phase 6 task 6-9; this task's only obligation is "continue, log, do not short-circuit". No `SaverDownError` sentinel type — soft warnings flow through the `[]Warning` accumulator pattern.
     5. `restoreErr := o.Restore.Restore()`; capture — do not return yet. Per spec "Restore-Side Architecture → Restoration Trigger": "a missing or unparseable `sessions.json` is a non-fatal no-op warning" — so `Restore()` should already swallow its own per-session errors; an error surfacing here is exceptional.
     6. `if err := o.Restoring.Clear(); err != nil` → log WARN and continue. The marker stays set; the daemon will skip ticks until the next server restart (volatile server-option, self-heals). This is degraded but bounded — better than failing the whole bootstrap at the tail of otherwise-successful work. Matches task 3-7's clear-failure-is-soft contract. The clear is also wrapped in a `defer` off of step 3 for safety (so a panic between 3 and 6 still attempts the clear); the deferred and explicit calls are both no-ops on success.
-    7. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
-    8. Return `(serverStarted, restoreErr)` — if `Restore()` errored, surface it; otherwise `nil`.
+    7. `if err := o.Sweeper.SweepOrphanFIFOs(); err != nil` → log WARN and continue. Per task 3-12, sweep failures are best-effort: the next bootstrap retries. Sweep runs AFTER `Restoring.Clear` and BEFORE `CleanStale` so live skeleton-marker FIFOs from the just-completed restore are preserved (they are referenced via the post-Restore marker set).
+    8. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
+    9. Return `(serverStarted, restoreErr)` — if `Restore()` errored, surface it; otherwise `nil`.
   - Document the step ordering in a leading comment block that mirrors the spec's "Bootstrap Flow → PersistentPreRunE Sequence" section. Copy the exact 1–8 numbering so a future reader can diff implementation against spec.
 - Create `cmd/bootstrap/bootstrap_test.go`:
   - Build a `stepRecorder` struct implementing all interfaces and appending its method name + args to a `[]string` log on each call.
-  - `"it executes steps 1 through 8 in spec order"`: construct `Orchestrator` with the recorder; call `Run`; assert the recorded log equals `["EnsureServer", "RegisterPortalHooks", "Restoring.Set", "EnsureSaver", "Restore", "Restoring.Clear", "CleanStale"]`. (Seven entries — step 8 is "return", no call.)
+  - `"it executes steps 1 through 8 in spec order"`: construct `Orchestrator` with the recorder; call `Run`; assert the recorded log equals `["EnsureServer", "RegisterPortalHooks", "Restoring.Set", "EnsureSaver", "Restore", "Restoring.Clear", "SweepOrphanFIFOs", "CleanStale"]`. (Eight call entries — the spec's "step 8" is the implicit return.)
   - `"it propagates EnsureServer errors and skips subsequent steps"`: recorder returns error from `EnsureServer`; assert only `"EnsureServer"` is in the log.
   - `"it propagates RegisterPortalHooks errors and skips subsequent steps"`: similarly.
   - `"it propagates Restoring.Set errors and skips EnsureSaver / Restore"`: recorder errors on `Restoring.Set`; log is `["EnsureServer", "RegisterPortalHooks", "Restoring.Set"]` — critically, `EnsureSaver` is NOT called, preventing the race.
@@ -122,7 +124,9 @@ total: 10
 
 **Acceptance Criteria**:
 - [ ] `cmd/bootstrap/bootstrap.go` defines `Orchestrator`, `NewOrchestrator`, and `(o *Orchestrator) Run(ctx) (bool, error)`.
-- [ ] `Run` executes 7 step calls in the order `EnsureServer → RegisterPortalHooks → Restoring.Set → EnsureSaver → Restore → Restoring.Clear → CleanStale`.
+- [ ] `Run` executes 8 step calls in the order `EnsureServer → RegisterPortalHooks → Restoring.Set → EnsureSaver → Restore → Restoring.Clear → SweepOrphanFIFOs → CleanStale`.
+- [ ] `SweepOrphanFIFOs` runs AFTER `Restoring.Clear` and BEFORE `CleanStale` (ordering asserted via recorder).
+- [ ] `SweepOrphanFIFOs` failure logs WARN and does NOT short-circuit `Run` (subsequent `CleanStale` still executes).
 - [ ] `Restoring.Set` is called BEFORE `EnsureSaver` (ordering asserted via recorder).
 - [ ] `Restoring.Clear` runs AFTER `Restore` even when `Restore` returns an error.
 - [ ] `EnsureServer` failure short-circuits — no subsequent steps run.
@@ -146,6 +150,8 @@ total: 10
 - `"it is idempotent across repeated invocations (no internal memoisation)"`
 - `"it returns the serverStarted flag from EnsureServer verbatim"`
 - `"it does not call EnsureSaver when Restoring.Set fails (ordering invariant)"`
+- `"it runs SweepOrphanFIFOs between Restoring.Clear and CleanStale"`
+- `"it logs and continues when SweepOrphanFIFOs fails"`
 
 **Edge Cases**:
 - Step 3 MUST precede step 4. A subtle implementation bug (e.g., `defer o.Restoring.Set()` instead of calling inline) would create the exact race the spec warns about — `_portal-saver` creation fires `session-created` BEFORE the marker is set, the first daemon tick runs mid-build. The `"it does not call EnsureSaver when Restoring.Set fails"` test is the regression guard.

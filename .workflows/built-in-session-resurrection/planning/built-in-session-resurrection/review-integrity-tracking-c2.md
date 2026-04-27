@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-27
 cycle: 2
 phase: Plan Integrity Review
@@ -148,7 +148,7 @@ RunE: func(cmd *cobra.Command, args []string) error {
       // surfaces that condition through RecentWarnings rather than failing the call.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Both fixes are purely naming/signature alignment — the design intent (read-only path resolution; tolerant index read) is unchanged.
 
 ---
@@ -201,7 +201,7 @@ An implementer landing task 3-13 will write `orchestrator.RestoreWithMarker()` a
   19. Re-run restore: invoke `orchestrator.SetRestoring()`, `orchestrator.Restore()`, `orchestrator.ClearRestoring()` again. Assert: zero new tmux calls beyond `list-sessions` (live-skip path). Structural state unchanged.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical rename — the test's behavioural intent is unchanged; only the API surface name needs updating to match task 3-7's post-cycle-1 shape.
 
 ---
@@ -297,7 +297,7 @@ Add to the **Tests** list:
 - `"it logs and continues when SweepOrphanFIFOs fails"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This finding mirrors task 3-12's promise into Phase 5's orchestrator. Without the sweep wired in, task 3-12's primitive is unreachable from the bootstrap path — a slow-burn integrity bug.
 
 ---
@@ -374,7 +374,7 @@ Add to **Acceptance Criteria** (replacing the implicit / contradictory bullets):
 - [ ] Per-command silencing (`stateStatusCmd`, `stateCleanupCmd`) is the only place `SilenceErrors`/`SilenceUsage` are flipped to true.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The two contradictory bullets are an unresolved planning negotiation. The "Recommended" alternative is the one that satisfies the existing acceptance criterion about usage errors; pinning it as the chosen approach removes the contradiction and clarifies which path the implementer should take.
 
 ---
@@ -475,7 +475,7 @@ An implementer landing 3-3 first then 3-6 hits a compile error on every call sit
 - [ ] `SessionRestorer` carries a `Logger *log.Logger` field (standard library logger for Phase 3; migrated to `*state.Logger` in Phase 6 task 6-2).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This finding aligns task 3-3's declaration with task 3-6's call sites. The `(baseIdx, paneBaseIdx)` lift-out is the simpler design — the option read happens once per session in the orchestrator, not three times across `Restore` / `ApplyWindowGeometry` / `ApplySkeletonMarkers` (tasks 3-4 and 3-5 already take the pair as arguments).
 
 ---

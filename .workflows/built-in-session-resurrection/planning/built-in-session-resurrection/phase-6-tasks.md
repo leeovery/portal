@@ -357,9 +357,9 @@ total: 11
       if v, err := ReadVersionFile(dir); err == nil {
           r.DaemonVersion = v
       }
-      // Last save + counts from sessions.json
-      idx, err := ReadSessionsJSON(dir) // Phase 3 task 3-1 reader
-      if err == nil && idx != nil {
+      // Last save + counts from sessions.json (Phase 3 task 3-1 reader)
+      idx, skip, ridxErr := ReadIndex(dir)
+      if !skip && ridxErr == nil {
           r.HasLastSave = true
           r.LastSaveAt = idx.SavedAt
           r.SessionsCount = len(idx.Sessions)
@@ -369,6 +369,10 @@ total: 11
               }
           }
       }
+      // skip=true (missing file or unparseable) → HasLastSave stays false; counts stay 0.
+      // ridxErr is intentionally swallowed for status — task 3-1's reader returns
+      // a non-nil err on corrupt/permission cases alongside skip=true, and status
+      // surfaces that condition through RecentWarnings rather than failing the call.
       // State size: walk dir, sum sizes
       size, _ := computeStateSize(dir)
       r.StateSize = size
@@ -541,7 +545,7 @@ total: 11
 **Problem**: Task 6-4 provides the data (`StatusReport`). This task wires `cmd/state_status.go`'s `RunE` to call `CollectStatus`, render the documented output, and compute the exit code. Rendering is simple but has several display-formatting concerns: "12 seconds ago" relative time, "18.2 MB on disk" binary-unit formatting, "(last: none)" vs "(last: <log line snippet>)". Exit code has three non-zero conditions: daemon not running, last save > 5 minutes ago, any recent WARN/ERROR in the log. The spec excludes `--json` from v1.
 
 **Solution**: In `cmd/state_status.go`, replace the stub `RunE` with:
-1. Resolve state directory via `state.ResolveDir()` (no create — status should be read-only).
+1. Resolve state directory via `state.Dir()` (no create — status should be read-only; `state.Dir` is task 2-1's no-create resolver vs `state.EnsureDir` which creates).
 2. Call `state.CollectStatus(dir, time.Now())`.
 3. Render the six-line output using `fmt.Fprintln` on `cmd.OutOrStdout()`.
 4. Compute exit code: `0` if all healthy; non-zero if any of (a) `!DaemonRunning`, (b) `HasLastSave && now.Sub(LastSaveAt) > 5*time.Minute`, (c) `RecentWarnings > 0`. Return a sentinel error (`ErrStatusUnhealthy`) that Cobra surfaces as exit 1. Set `cmd.SilenceErrors = true` on the status command so the sentinel does not print — the output has already been rendered on stdout.
@@ -577,7 +581,7 @@ and exits 1.
   - Replace stub `RunE`:
     ```go
     RunE: func(cmd *cobra.Command, args []string) error {
-        dir, err := state.ResolveDir()
+        dir, err := state.Dir()
         if err != nil {
             return fmt.Errorf("resolve state dir: %w", err)
         }
@@ -879,7 +883,7 @@ and exits 1.
         }
     }
     ```
-    where `dir` was resolved at the top of `RunE` via `state.ResolveDir()`.
+    where `dir` was resolved at the top of `RunE` via `state.Dir()` (the no-create resolver from task 2-1).
   - Implement `purgeStateDir(dir string, logger *state.Logger) error`:
     1. `info, err := os.Lstat(dir)` — if `ENOENT`, return nil (idempotent).
     2. If `info.Mode()&os.ModeSymlink != 0`, return an error: `"refusing to purge symlinked state dir: %s"` with a `logger.Warn` line. The caller can `readlink` the path and `rm -rf` the target manually if intentional.
@@ -945,7 +949,7 @@ and exits 1.
 > Spec "CLI Surface → `portal state cleanup` → Exit codes":
 > "non-zero — one or more actions failed (e.g., ... `--purge` specified but rmdir failed). Partial failures still attempt subsequent actions — `cleanup` never aborts partway to leave mixed state — but the exit code reflects that at least one action did not succeed."
 >
-> Spec "Scope & Constraints → Storage Location": state is under `~/.config/portal/state/` resolved via Portal's existing `configFilePath` mechanism. The resolved path is what `--purge` targets. Env-var overrides (`PORTAL_STATE_DIR`, if defined in Phase 2) are respected automatically because `state.ResolveDir()` honours them.
+> Spec "Scope & Constraints → Storage Location": state is under `~/.config/portal/state/` resolved via Portal's existing `configFilePath` mechanism. The resolved path is what `--purge` targets. Env-var overrides (`PORTAL_STATE_DIR`, defined in Phase 2 task 2-1) are respected automatically because `state.Dir()` honours them.
 >
 > Spec "Observability & Diagnostics → What gets logged":
 > "Save failures (disk full, write errors, permission issues). ... " — `--purge` failures are a category of "write errors" and log to `portal.log` at ERROR.
@@ -996,7 +1000,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - Step 6 `Restoring.Clear` failure: NOT fatal — log WARN via ComponentBootstrap and continue. Spec's "Fatal Bootstrap Errors" list names `@portal-restoring set-option fails` for the SET only; clear failure is soft (matches task 3-7's clear-failure-is-soft contract and task 5-2's step-6 handling). The marker stays set; the daemon will skip ticks until next server restart (volatile server-option self-heals).
   - At each wrap site, also log ERROR to `portal.log` via `logger.Error(state.ComponentBootstrap, "<single-line>: %v", err)` BEFORE returning — ensures log entry exists even if stderr write later fails.
 - Edit `cmd/root.go` (or `main.go` — wherever `cmd.Execute()` lives):
-  - Set `rootCmd.SilenceErrors = true` and `rootCmd.SilenceUsage = true` at declaration.
+  - Keep `SilenceErrors = false` on `rootCmd` (Cobra default) so usage errors render through Cobra's normal path. Set `SilenceErrors = true` only on commands whose `RunE` already wrote complete output (e.g., `stateStatusCmd` per task 6-5, `stateCleanupCmd` per task 6-6) so a non-zero exit there does not double-print.
   - In `main.go` (or `Execute()`):
     ```go
     if err := cmd.Execute(); err != nil {
@@ -1005,14 +1009,13 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
             fmt.Fprintln(os.Stderr, fatal.UserMessage)
             os.Exit(1)
         }
-        // Non-fatal error: Cobra already swallowed printing due to SilenceErrors;
-        // emit minimal diagnostic.
-        fmt.Fprintln(os.Stderr, err.Error())
+        // Non-fatal error: Cobra has already printed usage / error per its
+        // default path (SilenceErrors=false on rootCmd). Just exit non-zero.
         os.Exit(1)
     }
     ```
-  - For Cobra usage errors (invalid args, missing required flag): preserve existing Cobra behaviour via conditional unwrap — if the error is a Cobra usage error (not a `*FatalError`), print usage and exit. Implementation: check `strings.HasPrefix(err.Error(), "unknown command") || strings.HasPrefix(err.Error(), "required flag")` etc., or rely on Cobra's own classification. Simpler: let Cobra's normal path handle usage errors by NOT setting `SilenceErrors = true` globally; instead, set it only on commands whose errors are already fully rendered (status, cleanup). For bootstrap: the FatalError path at the `Execute()` handler takes priority via `errors.As` check.
-    - Recommended: keep `SilenceErrors = false` (Cobra default) but override in the `main.go` handler. The `errors.As` check intercepts `FatalError` first and emits the single line; all other errors fall through to Cobra's default path. This preserves usage-error UX (Cobra prints usage + "Error: ...").
+  - The `errors.As` check intercepts `*FatalError` first — fatal-bootstrap path emits the single user-message line and exits, bypassing Cobra's printing. All other errors (Cobra usage errors, command-specific errors) fall through to Cobra's default path that already ran inside `Execute()` — `main.go` only needs to set the exit code.
+  - For per-command silencing (task 6-5 `stateStatusCmd`, task 6-6 `stateCleanupCmd`): those commands set their own `SilenceErrors = true` + `SilenceUsage = true` because their `RunE` already wrote the user-facing output and the returned error is just an exit-code carrier.
 - Tests in `cmd/bootstrap/bootstrap_test.go` (extending task 5-2's suite):
   - `"EnsureServer failure returns a FatalError with the specified user message"`.
   - `"RegisterPortalHooks mass failure returns a FatalError"`.
@@ -1040,6 +1043,9 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
 - [ ] `main.go` / `Execute()` intercepts `*FatalError` via `errors.As` and emits `UserMessage` on a single stderr line, followed by `os.Exit(1)`.
 - [ ] Stderr output is exactly one line (no banners, no colors, no usage block).
 - [ ] Cobra usage errors (unknown command, missing required flag) still print Cobra's default output.
+- [ ] `rootCmd.SilenceErrors` is left at the Cobra default (`false`) so usage errors render via Cobra's standard path.
+- [ ] `rootCmd.SilenceUsage` is left at the Cobra default (`false`) for the same reason.
+- [ ] Per-command silencing (`stateStatusCmd`, `stateCleanupCmd`) is the only place `SilenceErrors`/`SilenceUsage` are flipped to true.
 - [ ] The four fatal user-message copies match the spec verbatim.
 - [ ] TUI path: on fatal, `openTUI` is never called (PersistentPreRunE returns first); no loading page to tear down.
 - [ ] Exit code is distinguishable from Cobra usage errors via the absence of the usage-block stderr signal.

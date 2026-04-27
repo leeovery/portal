@@ -189,8 +189,9 @@ Planning has chosen Option A (prediction). User should confirm or override befor
 
 **Do**:
 - Create `internal/restore/session.go` with:
-  - `type SessionRestorer struct { Client *tmux.Client; StateDir string }`.
-  - `func (r *SessionRestorer) Restore(sess state.Session) error` — orchestrates creation of one session.
+  - `type SessionRestorer struct { Client *tmux.Client; StateDir string; Logger *log.Logger }` — `Logger` is the standard-library logger Phase 3 uses; Phase 6 task 6-2 retrofits to `*state.Logger` as part of the cross-component logger migration.
+  - `func (r *SessionRestorer) PredictLiveIndices(saved state.Session) (baseIdx, paneBaseIdx int, err error)` — exported because the orchestrator in task 3-6 calls it before invoking `Restore`. Reads `@base-index` and `@pane-base-index` via `tmux.Client.GetServerOption` (or `show-options -gv` with fallback to defaults 0, 0 if unset). Predict: window_live_index[N] = baseIdx + N (0-based N across saved windows in order); pane_live_index[M] = paneBaseIdx + M within each window.
+  - `func (r *SessionRestorer) Restore(sess state.Session, baseIdx, paneBaseIdx int) error` — takes the predicted indices as arguments rather than re-reading them, so task 3-6's orchestrator can pass the same `(baseIdx, paneBaseIdx)` pair to `Restore` → `ApplyWindowGeometry` → `ApplySkeletonMarkers` without three separate option reads.
   - `func (r *SessionRestorer) buildHydrateCommand(fifoPath, scrollbackAbs, hookKey string) string` — returns the `sh -c '...'` invocation with every interpolated value POSIX-shell-safe. Implementation: use the "close-quote / escaped-quote / re-open-quote" pattern (`'` → `'\''`) on every argument before interpolation. The fifoPath and scrollbackAbs are paneKey-sanitized so they never contain `'`, but the hookKey carries the **raw** session name per spec "Save Format & Schema → Helper hook lookup under index drift" — session names can contain `'` (tmux permits it). A naive single-quote concatenation breaks the outer `sh -c '...'` body and either fails the helper launch or, worse, executes shell fragments from the session name. Concrete shape:
     ```go
     func quoteForSingleQuoted(s string) string {
@@ -204,24 +205,22 @@ Planning has chosen Option A (prediction). User should confirm or override befor
     }
     ```
     The `quoteForSingleQuoted` helper is shared with task 4-3's `migrate-rename` body if that task ever needs it (it does not in v1; document the helper here).
-  - `func (r *SessionRestorer) predictLiveIndices(saved state.Session) (baseIdx, paneBaseIdx int, err error)` — reads `@base-index` and `@pane-base-index` via `tmux.Client.GetServerOption` (or `show-options -gv` with fallback to defaults 0, 0 if unset). Predict: window_live_index[N] = baseIdx + N (0-based N across saved windows in order); pane_live_index[M] = paneBaseIdx + M within each window.
-- Flow of `Restore(sess state.Session)`:
-  1. `baseIdx, paneBaseIdx, err := r.predictLiveIndices(sess)` → on error, return wrapped.
-  2. For each saved window `win` at saved position `wi` (0-based) and each saved pane `pn` at saved position `pj`:
+- Flow of `Restore(sess state.Session, baseIdx, paneBaseIdx int)` (the orchestrator in task 3-6 is responsible for calling `PredictLiveIndices` once per session and threading the result into `Restore`, `ApplyWindowGeometry`, and `ApplySkeletonMarkers`):
+  1. For each saved window `win` at saved position `wi` (0-based) and each saved pane `pn` at saved position `pj`:
      - `liveWin := baseIdx + wi`, `livePane := paneBaseIdx + pj`.
      - `livePaneKey := state.SanitizePaneKey(sess.Name, liveWin, livePane)`.
      - `fifoPath := state.FIFOPath(r.StateDir, livePaneKey)`.
      - `state.CreateFIFO(fifoPath)` → on error, log and return wrapped error.
-     - Store `(liveWin, livePane, fifoPath)` in an in-memory plan keyed by `(wi, pj)` for use in step 3.
-  3. Build hydrate command for window 0 / pane 0 using the plan and the saved `scrollback_file` + saved hook-key (`fmt.Sprintf("%s:%d.%d", sess.Name, sess.Windows[0].Index, sess.Windows[0].Panes[0].Index)`).
-  4. Compute `rootCWD` = `sess.Windows[0].Panes[0].CWD`.
-  5. `tmux.Client.NewSession(sess.Name, rootCWD, hydrateCmdW0P0)` — wraps `tmux new-session -d -s <name> -c <cwd>` with the command. If an existing `NewSession` method does not accept a command argument, extend `tmux.Client` with `NewSessionWithCommand(name, cwd, cmd string) error` that calls `tmux new-session -d -s <name> -c <cwd> <cmd>`.
-  6. If `len(sess.Environment) > 0`: for each `(k, v)` in deterministic (sorted) order, run `tmux set-environment -t <sess.Name> <k> <v>`. Deterministic order ensures tests can assert call sequences. Add `tmux.Client.SetSessionEnvironment(session, key, value string) error` if absent. On any error here, log and continue (per spec's "degrade locally, log, continue" — a missing env key does not block window/pane creation).
-  7. For remaining panes in window 0 (indices `pj = 1..len(panes)-1`): `tmux split-window -t <sess.Name>:<liveWin0> -c <pane.CWD> <hydrateCmd>`. Add `tmux.Client.SplitWindow(target, cwd, cmd string) error` if absent.
-  8. For each subsequent window `wi = 1..len(windows)-1`:
+     - Store `(liveWin, livePane, fifoPath)` in an in-memory plan keyed by `(wi, pj)` for use in step 2.
+  2. Build hydrate command for window 0 / pane 0 using the plan and the saved `scrollback_file` + saved hook-key (`fmt.Sprintf("%s:%d.%d", sess.Name, sess.Windows[0].Index, sess.Windows[0].Panes[0].Index)`).
+  3. Compute `rootCWD` = `sess.Windows[0].Panes[0].CWD`.
+  4. `tmux.Client.NewSession(sess.Name, rootCWD, hydrateCmdW0P0)` — wraps `tmux new-session -d -s <name> -c <cwd>` with the command. If an existing `NewSession` method does not accept a command argument, extend `tmux.Client` with `NewSessionWithCommand(name, cwd, cmd string) error` that calls `tmux new-session -d -s <name> -c <cwd> <cmd>`.
+  5. If `len(sess.Environment) > 0`: for each `(k, v)` in deterministic (sorted) order, run `tmux set-environment -t <sess.Name> <k> <v>`. Deterministic order ensures tests can assert call sequences. Add `tmux.Client.SetSessionEnvironment(session, key, value string) error` if absent. On any error here, log and continue (per spec's "degrade locally, log, continue" — a missing env key does not block window/pane creation).
+  6. For remaining panes in window 0 (indices `pj = 1..len(panes)-1`): `tmux split-window -t <sess.Name>:<liveWin0> -c <pane.CWD> <hydrateCmd>`. Add `tmux.Client.SplitWindow(target, cwd, cmd string) error` if absent.
+  7. For each subsequent window `wi = 1..len(windows)-1`:
      - `tmux new-window -t <sess.Name>: -n <win.Name> -c <pane0.CWD> <hydrateCmdWiP0>` (add `tmux.Client.NewWindow(target, name, cwd, cmd string) error`).
      - For each pane `pj = 1..len(panes)-1`: `tmux split-window -t <sess.Name>:<liveWin> -c <pane.CWD> <hydrateCmd>`.
-  9. Return `nil`. Layout/active/zoom (task 3-4) and marker-setting (task 3-5) are the orchestrator's next step in task 3-6.
+  8. Return `nil`. Layout/active/zoom (task 3-4) and marker-setting (task 3-5) are the orchestrator's next step in task 3-6.
 - Error handling:
   - Session creation failure: return wrapped error; `RestoreSession` has no cleanup (the orchestrator in 3-6 will see the error, log, and move to the next session).
   - `set-environment` per-key failure: log the specific key/value and continue. Partial env is better than no session.
@@ -253,7 +252,9 @@ Planning has chosen Option A (prediction). User should confirm or override befor
 - [ ] `--file` is absolute (joined with state dir) and corresponds to the saved `pane.ScrollbackFile`.
 - [ ] `--hook-key` is the saved structural identifier `<raw-session-name>:<saved-window-index>.<saved-pane-index>` — NOT the live-index form and NOT the sanitized-paneKey form.
 - [ ] FIFO paths use the *live* paneKey (base-index + N / pane-base-index + M predicted from saved structural position).
-- [ ] Live indices are predicted once per session from `tmux show-options -gv base-index` / `pane-base-index`, defaulting to 0 when unset.
+- [ ] Live indices are predicted by `PredictLiveIndices` (exported, callable from the task 3-6 orchestrator) which reads `tmux show-options -gv base-index` / `pane-base-index` once per session, defaulting to 0 when unset.
+- [ ] `Restore(sess, baseIdx, paneBaseIdx)` accepts the predicted indices as arguments — does NOT re-read tmux options internally — so the orchestrator can pass the same pair to `ApplyWindowGeometry` and `ApplySkeletonMarkers` without redundant reads.
+- [ ] `SessionRestorer` carries a `Logger *log.Logger` field (standard library logger for Phase 3; migrated to `*state.Logger` in Phase 6 task 6-2).
 - [ ] Multibyte UTF-8 session names survive round-trip to `new-session` unchanged.
 - [ ] Sanitized-collision session names produce hash-suffixed paneKeys (via `state.SanitizePaneKey` from task 2-1); hook-key uses the raw unsanitized name.
 - [ ] `set-environment` failure for one key logs and continues to the next key; does not abort session build.
@@ -1291,7 +1292,7 @@ Re-read spec for FIFO unlink semantics on file-missing path: the spec says "2. O
   - `(s *tmuxSocket) CapturePane(t *testing.T, session string, window, pane int) []byte` — runs `capture-pane -e -p -S - -t <session>:<window>.<pane>` and returns raw bytes (including ANSI).
   - `(s *tmuxSocket) SetEnv(t *testing.T, session, key, value string)` — `set-environment -t <session> <key> <value>`.
   - `(s *tmuxSocket) RunShell(t *testing.T, cmdStr string)` — synchronous `run-shell` (useful for triggering `portal state signal-hydrate`).
-- Test seam: a `test-only` entry point in `internal/restore` that lets the integration test invoke `Orchestrator.RestoreWithMarker()` + `state.SweepOrphanFIFOs()` against a `tmux.Client` pointed at the isolated socket. Alternative: shell out to the built binary with `TMUX_STATE_DIR=<tempdir>` and appropriate env vars — more realistic but slower. Prefer the direct-call approach for this task's integration test to keep wall-clock under 5s per test; Phase 5 adds the full binary-subprocess test.
+- Test seam: the integration test invokes the orchestrator's three primitives directly — `Orchestrator.SetRestoring()` → `Orchestrator.Restore()` → `Orchestrator.ClearRestoring()` (per task 3-7's no-composite-wrapper decision) — plus `state.SweepOrphanFIFOs()`, all against a `tmux.Client` pointed at the isolated socket. Alternative: shell out to the built binary with `TMUX_STATE_DIR=<tempdir>` and appropriate env vars — more realistic but slower. Prefer the direct-call approach for this task's integration test to keep wall-clock under 5s per test; Phase 5 adds the full binary-subprocess test.
 - Primary test `TestPhase3_SaveRestoreRoundTrip`:
   1. `sock := newTmuxSocket(t)`. `sock.StartServer(t)`.
   2. Set `@base-index 1`, `@pane-base-index 1` server options (to exercise the base-index drift edge case).
@@ -1303,7 +1304,7 @@ Re-read spec for FIFO unlink semantics on file-missing path: the spec says "2. O
   8. Invoke the save path directly: `daemon.CaptureAndWrite()` or equivalent test entry point. Verify `sessions.json` exists, scrollback `.bin` files exist.
   9. `sock.KillServer(t)`. Confirm via `sock.Cmd("list-sessions").Run()` returning error.
   10. `sock.StartServer(t)` again on same socket (fresh server). Set `@base-index 0`, `@pane-base-index 0` this time (drift edge case).
-  11. Invoke the restore path: `orchestrator.RestoreWithMarker()`.
+  11. Invoke the restore path as the spec's three-step sequence: `orchestrator.SetRestoring()`, `orchestrator.Restore()`, `orchestrator.ClearRestoring()` — the same primitive sequence Phase 5 task 5-2's bootstrap calls, exposed for direct invocation by integration tests per task 3-7's no-composite-wrapper decision.
   12. Assert live sessions: `sock.ListSessions(t)` contains `alpha`, `beta`, `seed` (the original seed session from server start — new server's initial session). `_portal-saver` would appear if we started the daemon; for this test the daemon is NOT started (save was tested separately, restore is the focus here).
   13. Per-pane markers: for every expected pane, verify `@portal-skeleton-<livePaneKey>` is set via `sock.Cmd("show-options", "-sv").Output()` parsing.
   14. Per-window geometry: `sock.ListPanes(t, "alpha")` returns panes in saved structural order with the saved layout string; `w2` is zoomed; active panes match.
@@ -1311,7 +1312,7 @@ Re-read spec for FIFO unlink semantics on file-missing path: the spec says "2. O
   16. Invoke `signal-hydrate alpha` and `signal-hydrate beta` via the test seam (or by running `portal state signal-hydrate` as a subprocess against the state dir).
   17. Wait for helpers to complete (poll for `@portal-skeleton-*` markers to disappear via `show-options -sv`; max 5s wait).
   18. Per-pane scrollback: `sock.CapturePane(t, session, window, pane)` returns bytes containing the saved ANSI content. Assert bytes include the raw `\x1b[31m` / `\x1b[0m` sequences from step 5.
-  19. Re-run restore: `orchestrator.RestoreWithMarker()` again. Assert: zero new tmux calls beyond `list-sessions` (live-skip path). Structural state unchanged.
+  19. Re-run restore: invoke `orchestrator.SetRestoring()`, `orchestrator.Restore()`, `orchestrator.ClearRestoring()` again. Assert: zero new tmux calls beyond `list-sessions` (live-skip path). Structural state unchanged.
   20. `t.Cleanup` runs `sock.KillServer(t)` — belt-and-braces on top of `StartServer`'s registered cleanup.
 - Additional focused tests (OPTIONAL — Phase 3 spec acceptance is satisfied by the primary round-trip test alone; the following expand coverage at the cost of additional integration-test surface area, CI runtime, and timing flakiness exposure):
   - `TestPhase3_HydrateTimeout` is the highest-value supplementary because the timeout path involves real tmux + real FIFO-block timing that unit tests cannot fully simulate. **Recommended: keep this one.**
