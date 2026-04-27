@@ -98,7 +98,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -162,7 +162,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -209,7 +209,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -236,7 +236,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -258,7 +258,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -278,7 +278,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -300,7 +300,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -327,7 +327,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -353,7 +353,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -376,7 +376,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -409,7 +409,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -434,7 +434,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -452,7 +452,7 @@ func TestCaptureStructure(t *testing.T) {
 		client := tmux.NewClient(mock)
 
 		before := time.Now().UTC()
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		after := time.Now().UTC()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -473,7 +473,7 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		idx, err := state.CaptureStructure(client)
+		idx, err := state.CaptureStructure(client, nil, nil)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -493,9 +493,221 @@ func TestCaptureStructure(t *testing.T) {
 		}
 		client := tmux.NewClient(mock)
 
-		_, err := state.CaptureStructure(client)
+		_, err := state.CaptureStructure(client, nil, nil)
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+// findPane locates the pane in idx by session name, window index, and pane
+// index. Returns nil when the path is missing — tests use that to assert
+// presence/absence after the merge.
+func findPane(idx state.Index, session string, window, pane int) *state.Pane {
+	for si := range idx.Sessions {
+		s := &idx.Sessions[si]
+		if s.Name != session {
+			continue
+		}
+		for wi := range s.Windows {
+			w := &s.Windows[wi]
+			if w.Index != window {
+				continue
+			}
+			for pi := range w.Panes {
+				if w.Panes[pi].Index == pane {
+					return &w.Panes[pi]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
+	t.Run("preserves prior pane data when its key is in the skip set", func(t *testing.T) {
+		// prev has a pane with CWD /old; fresh has a pane at the same key with /new.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 0, Name: "main", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index:          0,
+						CWD:            "/old",
+						Active:         true,
+						CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/work__0.0.bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("work", 0, 0): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		p := findPane(idx, "work", 0, 0)
+		if p == nil {
+			t.Fatalf("missing pane work:0.0 in result")
+		}
+		if p.CWD != "/old" || p.CurrentCommand != "vim" {
+			t.Errorf("pane = %+v, want prev's /old + vim (skip-set wins)", p)
+		}
+	})
+
+	t.Run("merges a skipped pane's session and window from prev when missing from fresh", func(t *testing.T) {
+		// prev has session "old"; fresh capture lists only "new". Skip set marks
+		// the prev pane — the merge must reintroduce its session/window/pane
+		// into the result.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "old",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 1, Name: "win", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index:          2,
+						CWD:            "/prev",
+						Active:         true,
+						CurrentCommand: "tmux",
+						ScrollbackFile: "scrollback/old__1.2.bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("new"),
+			listPanes:    paneLine("new", 0, "n", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("old", 1, 2): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// "new" still present.
+		if findPane(idx, "new", 0, 0) == nil {
+			t.Errorf("fresh pane new:0.0 missing")
+		}
+		// "old" reintroduced via merge.
+		p := findPane(idx, "old", 1, 2)
+		if p == nil {
+			t.Fatalf("merged pane old:1.2 missing")
+		}
+		if p.CWD != "/prev" || p.CurrentCommand != "tmux" {
+			t.Errorf("merged pane = %+v, want prev's /prev + tmux", p)
+		}
+	})
+
+	t.Run("leaves the fresh capture unchanged when skip set is empty", func(t *testing.T) {
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "old",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 0, Name: "m", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index: 0, CWD: "/prev", Active: true, CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/old__0.0.bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "m", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, map[string]struct{}{}, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "work" {
+			t.Errorf("Sessions = %+v, want only fresh 'work'", idx.Sessions)
+		}
+	})
+
+	t.Run("leaves the fresh capture unchanged when prev is nil", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "m", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		// Skip set non-empty but prev is nil — merge has no source data.
+		skip := map[string]struct{}{"work__0.0": {}}
+
+		idx, err := state.CaptureStructure(client, skip, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "work" {
+			t.Errorf("Sessions = %+v, want only fresh 'work'", idx.Sessions)
+		}
+		p := findPane(idx, "work", 0, 0)
+		if p == nil || p.CWD != "/new" {
+			t.Errorf("pane CWD = %v, want /new (no merge applied)", p)
+		}
+	})
+
+	t.Run("re-sorts sessions, windows, and panes after merge", func(t *testing.T) {
+		// prev has a session "alpha" alphabetically before fresh's "zeta",
+		// plus a pane at index 5 with a window at index 3. Verify the
+		// post-merge ordering is canonical.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "alpha",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 3, Name: "w3", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index: 5, CWD: "/prev", Active: true, CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/alpha__3.5.bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("zeta"),
+			listPanes:    paneLine("zeta", 0, "z", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("alpha", 3, 5): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 2 {
+			t.Fatalf("got %d sessions, want 2", len(idx.Sessions))
+		}
+		if idx.Sessions[0].Name != "alpha" || idx.Sessions[1].Name != "zeta" {
+			t.Errorf("session order = [%s, %s], want [alpha, zeta]",
+				idx.Sessions[0].Name, idx.Sessions[1].Name)
 		}
 	})
 }

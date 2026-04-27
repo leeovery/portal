@@ -44,11 +44,22 @@ const internalSessionPrefix = "_"
 // alphabetically and windows/panes sorted by index ascending — the result is
 // stable for downstream encoding.
 //
+// skipSet contains paneKeys (as produced by SanitizePaneKey) of skeleton-
+// restored panes whose pre-boot state must not be overwritten by a fresh
+// capture. When non-empty and prev is non-nil, the corresponding pane entries
+// from prev are merged into the result — sessions and windows are
+// reintroduced if absent, and existing panes at matching paths are
+// overwritten with the prev data. See specification → Marker Coordination →
+// `@portal-skeleton-<paneKey>`.
+//
+// When skipSet is empty or prev is nil, the merge is a no-op and the result
+// is exactly the fresh capture.
+//
 // On any tmux error, CaptureStructure returns an Index with an empty Sessions
 // slice and a wrapped error — never a partial index. This matches the spec's
 // "all reads run to completion before any writes" discipline: a downstream
 // writer keying off the returned error will not commit a half-built state.
-func CaptureStructure(c CaptureClient) (Index, error) {
+func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index) (Index, error) {
 	savedAt := time.Now().UTC()
 	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
 
@@ -58,19 +69,17 @@ func CaptureStructure(c CaptureClient) (Index, error) {
 	}
 
 	keep := keepSessionNames(names)
-	if len(keep) == 0 {
-		empty.Canonicalize()
-		return empty, nil
-	}
 
-	raw, err := c.ListAllPanesWithFormat(captureFormat)
-	if err != nil {
-		return empty, err
-	}
-
-	grouped, err := parsePaneRows(raw, keep)
-	if err != nil {
-		return empty, err
+	var grouped map[string][]paneRow
+	if len(keep) > 0 {
+		raw, err := c.ListAllPanesWithFormat(captureFormat)
+		if err != nil {
+			return empty, err
+		}
+		grouped, err = parsePaneRows(raw, keep)
+		if err != nil {
+			return empty, err
+		}
 	}
 
 	sessions := make([]Session, 0, len(keep))
@@ -87,8 +96,111 @@ func CaptureStructure(c CaptureClient) (Index, error) {
 	}
 
 	idx := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: sessions}
+
+	if len(skipSet) > 0 && prev != nil {
+		mergeSkippedPanes(&idx, *prev, skipSet)
+	}
+
 	idx.Canonicalize()
 	return idx, nil
+}
+
+// mergeSkippedPanes reintroduces or overrides panes in fresh whose paneKey is
+// in skipSet, taking authoritative state from prev. Sessions or windows that
+// the fresh capture does not contain are appended; existing panes at matching
+// (window, pane) coordinates are replaced. The result is re-sorted so the
+// canonical ordering survives the merge.
+//
+// Matching is by structural identity — session name, window index, pane
+// index — derived via SanitizePaneKey. That is the same paneKey used to set
+// the skeleton marker, so prev and skipSet always agree on which panes count.
+func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
+	for _, ps := range prev.Sessions {
+		for _, pw := range ps.Windows {
+			for _, pp := range pw.Panes {
+				key := SanitizePaneKey(ps.Name, pw.Index, pp.Index)
+				if _, skipped := skipSet[key]; !skipped {
+					continue
+				}
+				mergePane(fresh, ps, pw, pp)
+			}
+		}
+	}
+	resortIndex(fresh)
+}
+
+// mergePane integrates a single (session, window, pane) triple from prev into
+// fresh. The session and window are created if they do not already exist;
+// the pane replaces any existing entry at the same index, otherwise it is
+// appended. Environment is taken from prev only when creating a new session
+// — pre-existing fresh sessions keep their environment.
+func mergePane(fresh *Index, ps Session, pw Window, pp Pane) {
+	si := findOrAppendSession(fresh, ps)
+	wi := findOrAppendWindow(&fresh.Sessions[si], pw)
+	w := &fresh.Sessions[si].Windows[wi]
+	for i := range w.Panes {
+		if w.Panes[i].Index == pp.Index {
+			w.Panes[i] = pp
+			return
+		}
+	}
+	w.Panes = append(w.Panes, pp)
+}
+
+// findOrAppendSession returns the index in fresh.Sessions of the session with
+// ps's name. If absent, a shallow copy of ps (with no windows) is appended
+// and the new index is returned. The caller is responsible for populating
+// the session's windows via subsequent merges.
+func findOrAppendSession(fresh *Index, ps Session) int {
+	for i := range fresh.Sessions {
+		if fresh.Sessions[i].Name == ps.Name {
+			return i
+		}
+	}
+	fresh.Sessions = append(fresh.Sessions, Session{
+		Name:        ps.Name,
+		Environment: ps.Environment,
+		Windows:     []Window{},
+	})
+	return len(fresh.Sessions) - 1
+}
+
+// findOrAppendWindow returns the index in s.Windows of the window with pw's
+// index. If absent, a shallow copy of pw (with no panes) is appended and the
+// new index is returned. Panes are populated by the caller.
+func findOrAppendWindow(s *Session, pw Window) int {
+	for i := range s.Windows {
+		if s.Windows[i].Index == pw.Index {
+			return i
+		}
+	}
+	s.Windows = append(s.Windows, Window{
+		Index:  pw.Index,
+		Name:   pw.Name,
+		Layout: pw.Layout,
+		Zoomed: pw.Zoomed,
+		Active: pw.Active,
+		Panes:  []Pane{},
+	})
+	return len(s.Windows) - 1
+}
+
+// resortIndex restores the canonical ordering of an Index after merge:
+// sessions ascending by name, windows ascending by index, panes ascending by
+// index. Canonicalize is responsible for nil-slice/map normalisation; this
+// helper only sorts.
+func resortIndex(idx *Index) {
+	sort.Slice(idx.Sessions, func(i, j int) bool {
+		return idx.Sessions[i].Name < idx.Sessions[j].Name
+	})
+	for si := range idx.Sessions {
+		ws := idx.Sessions[si].Windows
+		sort.Slice(ws, func(i, j int) bool { return ws[i].Index < ws[j].Index })
+		for wi := range ws {
+			ps := ws[wi].Panes
+			sort.Slice(ps, func(i, j int) bool { return ps[i].Index < ps[j].Index })
+		}
+	}
 }
 
 // sortedKeys returns the keys of set in ascending lexicographic order. Used

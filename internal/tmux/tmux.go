@@ -281,6 +281,35 @@ func (c *Client) GetServerOption(name string) (string, error) {
 	return strings.TrimSpace(output), nil
 }
 
+// TryGetServerOption returns the value of a tmux server-level option along
+// with a found flag. When the option does not exist, it returns ("", false, nil)
+// — distinguishing absence from a real tmux failure (which surfaces as a
+// non-nil error). Callers that need to treat "not found" as a normal control-
+// flow case should prefer this over GetServerOption.
+func (c *Client) TryGetServerOption(name string) (string, bool, error) {
+	val, err := c.GetServerOption(name)
+	if errors.Is(err, ErrOptionNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return val, true, nil
+}
+
+// ShowAllServerOptions returns the raw output of "tmux show-options -sv". The
+// output is one option per line in the form `@name "value"` (or `@name value`
+// for unquoted scalars). Callers parse it themselves; this method exists so
+// the daemon can dump every server option in a single tmux invocation rather
+// than calling GetServerOption per pane during marker enumeration.
+func (c *Client) ShowAllServerOptions() (string, error) {
+	out, err := c.cmd.Run("show-options", "-sv")
+	if err != nil {
+		return "", fmt.Errorf("failed to show server options: %w", err)
+	}
+	return out, nil
+}
+
 // parsePaneOutput splits newline-delimited tmux output into trimmed, non-empty strings.
 func parsePaneOutput(output string) []string {
 	if output == "" {

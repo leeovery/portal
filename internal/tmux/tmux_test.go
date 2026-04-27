@@ -1473,3 +1473,74 @@ func TestCapturePane(t *testing.T) {
 		}
 	})
 }
+
+func TestShowAllServerOptions(t *testing.T) {
+	t.Run("invokes show-options -sv and returns output", func(t *testing.T) {
+		mock := &MockCommander{Output: "@portal-skeleton-foo__0.0 \"1\"\n@portal-restoring \"1\""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowAllServerOptions()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "@portal-skeleton-foo__0.0 \"1\"\n@portal-restoring \"1\"" {
+			t.Errorf("ShowAllServerOptions() = %q, want raw output", got)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "show-options -sv"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux exploded")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ShowAllServerOptions()
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to show server options") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+	})
+}
+
+func TestTryGetServerOption(t *testing.T) {
+	t.Run("returns value and found=true when option exists", func(t *testing.T) {
+		mock := &MockCommander{Output: "1"}
+		client := tmux.NewClient(mock)
+
+		val, found, err := client.TryGetServerOption("@portal-restoring")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !found {
+			t.Errorf("found = false, want true")
+		}
+		if val != "1" {
+			t.Errorf("value = %q, want %q", val, "1")
+		}
+	})
+
+	t.Run("returns found=false and no error when option not found", func(t *testing.T) {
+		mock := &MockCommander{Err: errors.New("unknown option")}
+		client := tmux.NewClient(mock)
+
+		val, found, err := client.TryGetServerOption("@portal-restoring")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if found {
+			t.Errorf("found = true, want false")
+		}
+		if val != "" {
+			t.Errorf("value = %q, want empty", val)
+		}
+	})
+}
