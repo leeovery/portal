@@ -59,6 +59,9 @@ var rootCmd = &cobra.Command{
 		if err := tmux.CheckTmuxAvailable(); err != nil {
 			return err
 		}
+		if err := runVersionCheck(); err != nil {
+			return err
+		}
 		bootstrapper, client := buildBootstrapDeps()
 		serverStarted, err := bootstrapper.EnsureServer()
 		if err != nil {
