@@ -120,6 +120,23 @@ func (c *Client) ListSessions() ([]Session, error) {
 	return sessions, nil
 }
 
+// ListSessionNames returns just the names of running tmux sessions, in the
+// order tmux reports them. It is a primitive-typed convenience over
+// ListSessions for callers that need only names — notably internal/state
+// CaptureStructure, which avoids importing internal/tmux to prevent an
+// import cycle.
+func (c *Client) ListSessionNames() ([]string, error) {
+	sessions, err := c.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		names = append(names, s.Name)
+	}
+	return names, nil
+}
+
 // StartServer starts the tmux server by creating a detached bootstrap session.
 // Uses "new-session -d" instead of "start-server" so the server has at least one
 // session, preventing tmux's default "exit-empty on" from terminating the server
@@ -271,6 +288,29 @@ func (c *Client) ListPanes(sessionName string) ([]string, error) {
 		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
 	}
 	return parsePaneOutput(output), nil
+}
+
+// ListAllPanesWithFormat runs "list-panes -a -F <format>" and returns the raw,
+// untrimmed tmux output. Callers are responsible for parsing the format string
+// they supplied. Unlike ListAllPanes, this method propagates the underlying
+// error so callers can distinguish "no panes" from "tmux failed".
+func (c *Client) ListAllPanesWithFormat(format string) (string, error) {
+	out, err := c.cmd.Run("list-panes", "-a", "-F", format)
+	if err != nil {
+		return "", fmt.Errorf("failed to list panes: %w", err)
+	}
+	return out, nil
+}
+
+// ShowEnvironment returns the raw output of "tmux show-environment -t <session>".
+// Each line is of the form "NAME=value" or "-NAME" (for entries removed from
+// the session environment). Callers are responsible for parsing.
+func (c *Client) ShowEnvironment(session string) (string, error) {
+	out, err := c.cmd.Run("show-environment", "-t", session)
+	if err != nil {
+		return "", fmt.Errorf("failed to show environment for session %q: %w", session, err)
+	}
+	return out, nil
 }
 
 // ListAllPanes returns the structural keys for all panes across all tmux sessions.

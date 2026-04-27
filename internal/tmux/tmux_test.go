@@ -1259,3 +1259,137 @@ func TestSendKeys(t *testing.T) {
 		}
 	})
 }
+
+func TestListSessionNames(t *testing.T) {
+	t.Run("returns just the names from list-sessions output", func(t *testing.T) {
+		mock := &MockCommander{Output: "dev|3|1\nwork|5|0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListSessionNames()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"dev", "work"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d names %v, want %d %v", len(got), got, len(want), want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Errorf("name[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns empty slice when no sessions exist", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListSessionNames()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %v, want empty", got)
+		}
+	})
+}
+
+func TestShowEnvironment(t *testing.T) {
+	t.Run("returns raw output from show-environment for the named session", func(t *testing.T) {
+		mock := &MockCommander{Output: "LANG=en_US.UTF-8\nTERM=xterm-256color"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowEnvironment("work")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "LANG=en_US.UTF-8\nTERM=xterm-256color" {
+			t.Errorf("ShowEnvironment() = %q, want %q", got, "LANG=en_US.UTF-8\nTERM=xterm-256color")
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "show-environment -t work"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns wrapped error containing session name when tmux fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("can't find session")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ShowEnvironment("nonexistent")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to show environment") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "nonexistent") {
+			t.Errorf("error %q does not contain session name", err.Error())
+		}
+	})
+
+	t.Run("returns empty string when output is empty", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowEnvironment("empty")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("ShowEnvironment() = %q, want empty string", got)
+		}
+	})
+}
+
+func TestListAllPanesWithFormat(t *testing.T) {
+	t.Run("returns raw output from list-panes -a with the given format", func(t *testing.T) {
+		mock := &MockCommander{Output: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh"}
+		client := tmux.NewClient(mock)
+
+		format := "#{session_name}|||#{window_index}|||#{window_name}|||#{window_layout}|||#{window_zoomed_flag}|||#{window_active}|||#{pane_index}|||#{pane_current_path}|||#{pane_active}|||#{pane_current_command}"
+		got, err := client.ListAllPanesWithFormat(format)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh" {
+			t.Errorf("ListAllPanesWithFormat() = %q, want raw output", got)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"list-panes", "-a", "-F", format}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("no server running")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListAllPanesWithFormat("#{session_name}")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to list panes") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+	})
+}
