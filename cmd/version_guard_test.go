@@ -3,6 +3,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -149,6 +150,15 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 
 			t.Setenv("PORTAL_ALIASES_FILE", t.TempDir()+"/aliases")
 			t.Setenv("PORTAL_PROJECTS_FILE", t.TempDir()+"/projects.json")
+
+			// state daemon's RunE blocks on signal; stub the run-func so the
+			// command returns immediately for argv-only assertions.
+			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "daemon" {
+				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+				prev := daemonRunFunc
+				daemonRunFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
+				t.Cleanup(func() { daemonRunFunc = prev })
+			}
 
 			resetRootCmd()
 			resetStateCmdFlags()

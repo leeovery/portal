@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -168,6 +169,18 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// The daemon's RunE blocks on signal until the context is
+			// cancelled in production. For an argv-validation test we stub
+			// the run-func so the command returns immediately, and we point
+			// the daemon's state directory at a per-test TempDir so the PID
+			// and version writes are scoped to the test.
+			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "daemon" {
+				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+				prev := daemonRunFunc
+				daemonRunFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
+				t.Cleanup(func() { daemonRunFunc = prev })
+			}
+
 			outBuf := new(bytes.Buffer)
 			errBuf := new(bytes.Buffer)
 			resetRootCmd()
