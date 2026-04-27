@@ -69,6 +69,54 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 	return nil
 }
 
+// EnsurePortalSaverVersion bootstraps _portal-saver while honoring the
+// version-marker upgrade protocol. Before delegating to BootstrapPortalSaver,
+// it compares the daemon's recorded version (daemon.version inside stateDir)
+// to currentVersion (the invoking binary's cmd.version). On any mismatch — and
+// always for dev builds (currentVersion == "" or "dev") — it kills the live
+// _portal-saver session so the new binary can take over on the subsequent
+// recreation. Mismatch sources, all treated equally:
+//
+//   - Read error from state.ReadVersionFile (including ErrVersionFileAbsent —
+//     first-ever bootstrap or user-initiated state-dir cleanup).
+//   - currentVersion is "" or "dev" (dev-build workflow).
+//   - stored version is "" or "dev" (previous run was a dev build, or the
+//     daemon crashed before writing).
+//   - stored != currentVersion (release-build upgrade).
+//
+// kill-session is invoked tolerantly: errors are intentionally swallowed
+// because the session may have auto-destroyed between has-session and
+// kill-session. This function never writes daemon.version itself — the new
+// daemon owns that on its own startup. After the optional kill,
+// BootstrapPortalSaver always runs to (re)create the session and apply the
+// defensive destroy-unattached=off option.
+func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error {
+	stored, readErr := state.ReadVersionFile(stateDir)
+	if portalSaverVersionMismatch(stored, currentVersion, readErr) && c.HasSession(PortalSaverName) {
+		// Tolerant: kill may fail if the session vanished mid-flight; that is
+		// equivalent to "already absent" for our purposes.
+		_ = c.KillSession(PortalSaverName)
+	}
+	return BootstrapPortalSaver(c, stateDir)
+}
+
+// portalSaverVersionMismatch encodes the version-comparison rules for
+// EnsurePortalSaverVersion. Any failure to read the version file, a dev /
+// empty currentVersion, a dev / empty stored version, or a non-equal stored
+// vs. current pair all count as a mismatch.
+func portalSaverVersionMismatch(stored, currentVersion string, readErr error) bool {
+	if readErr != nil {
+		return true
+	}
+	if currentVersion == "" || currentVersion == "dev" {
+		return true
+	}
+	if stored == "" || stored == "dev" {
+		return true
+	}
+	return stored != currentVersion
+}
+
 // createPortalSaverWithRetry attempts to create the saver session up to
 // portalSaverMaxAttempts times, sleeping PortalSaverRetryDelay between
 // attempts. After a failure it re-probes has-session to detect concurrent

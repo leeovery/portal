@@ -2,10 +2,12 @@ package tmux_test
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -451,4 +453,369 @@ func TestBootstrapPortalSaver_NoRedundantCreateOnConcurrentBootstrapRace(t *test
 	if got := countCalls(mock.Calls, "set-option"); got != 1 {
 		t.Errorf("expected set-option to still run after race detected, got %d calls", got)
 	}
+}
+
+// versionScenario configures a MockCommander dispatcher for
+// EnsurePortalSaverVersion tests. By default, has-session reports the session
+// present (so tests opt out by overriding when needed); kill-session,
+// new-session and set-option succeed. Counters track how many times each
+// command was invoked.
+type versionScenario struct {
+	sessionPresent bool
+	killSessionErr error
+	newSessionErr  error
+	setOptionErr   error
+
+	hasSessionCalls  int
+	killSessionCalls int
+	newSessionCalls  int
+	setOptionCalls   int
+}
+
+func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error) {
+	t.Helper()
+	return func(args ...string) (string, error) {
+		if len(args) == 0 {
+			t.Fatalf("empty argv")
+			return "", nil
+		}
+		switch args[0] {
+		case "has-session":
+			s.hasSessionCalls++
+			if s.sessionPresent {
+				return "", nil
+			}
+			return "", errors.New("can't find session: _portal-saver")
+		case "kill-session":
+			s.killSessionCalls++
+			// After a successful kill the session is no longer present.
+			if s.killSessionErr == nil {
+				s.sessionPresent = false
+			}
+			return "", s.killSessionErr
+		case "new-session":
+			s.newSessionCalls++
+			if s.newSessionErr == nil {
+				s.sessionPresent = true
+			}
+			return "", s.newSessionErr
+		case "set-option":
+			s.setOptionCalls++
+			return "", s.setOptionErr
+		default:
+			t.Fatalf("unexpected command: %v", args)
+			return "", nil
+		}
+	}
+}
+
+// writeVersion seeds dir with daemon.version containing the supplied content.
+func writeVersion(t *testing.T, dir, version string) {
+	t.Helper()
+	if err := state.WriteVersionFile(dir, version); err != nil {
+		t.Fatalf("WriteVersionFile(%q) returned error: %v", version, err)
+	}
+}
+
+// assertNoDaemonVersionFile fails the test if daemon.version exists in dir.
+func assertNoDaemonVersionFile(t *testing.T, dir string) {
+	t.Helper()
+	_, err := os.Stat(state.DaemonVersion(dir))
+	if err == nil {
+		t.Errorf("daemon.version exists at %q after EnsurePortalSaverVersion; the function must not write it", state.DaemonVersion(dir))
+		return
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error for daemon.version: %v", err)
+	}
+}
+
+func TestEnsurePortalSaverVersion_DoesNotKillWhenStoredMatchesCurrent(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 0 {
+		t.Errorf("expected 0 kill-session calls on version match, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 0 {
+		t.Errorf("expected 0 new-session calls on version match (session already alive), got %d", scenario.newSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call (BootstrapPortalSaver still applies destroy-unattached off), got %d", scenario.setOptionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_KillsAndRecreatesWhenStoredDiffersFromCurrent(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call on mismatch, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call, got %d", scenario.setOptionCalls)
+	}
+
+	// Order check: kill-session must precede new-session.
+	killIdx, newIdx := -1, -1
+	for i, c := range mock.Calls {
+		switch c[0] {
+		case "kill-session":
+			if killIdx == -1 {
+				killIdx = i
+			}
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		}
+	}
+	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
+		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_AlwaysRestartsWhenCurrentIsEmpty(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, ""); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call when current version is empty, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_AlwaysRestartsWhenCurrentIsLiteralDev(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call when current version is \"dev\", got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_TreatsStoredDevAsMismatch(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "dev")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call when stored version is \"dev\", got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_TreatsEmptyStoredVersionAsMismatch(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	// File exists but contains an empty string (post-trim).
+	writeVersion(t, dir, "")
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call when stored version is empty, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_TreatsAbsentVersionFileAsMismatch(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version pre-populated
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call when version file is absent, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_SkipsKillWhenNoSessionExists(t *testing.T) {
+	stubAliveCheck(t, false) // irrelevant when session absent
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version → mismatch=true
+
+	scenario := &versionScenario{sessionPresent: false}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 0 {
+		t.Errorf("expected 0 kill-session calls when no _portal-saver session exists, got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected BootstrapPortalSaver to create the session once, got %d new-session calls", scenario.newSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call, got %d", scenario.setOptionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_ToleratesKillSessionErrorForAbsentSession(t *testing.T) {
+	stubAliveCheck(t, true) // session reported alive when probed by BootstrapPortalSaver
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1")
+
+	scenario := &versionScenario{
+		sessionPresent: true,
+		killSessionErr: errors.New("can't find session: _portal-saver"),
+	}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion must tolerate kill-session error, got: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", scenario.killSessionCalls)
+	}
+	// killSessionErr left sessionPresent=true in our stub; BootstrapPortalSaver
+	// will then probe alive (true) and skip recreation, but must still apply the
+	// defensive set-option.
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call after tolerated kill error, got %d", scenario.setOptionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_AlwaysInvokesBootstrapPortalSaver(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2") // match → no kill path
+
+	var setOptionArgs []string
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "set-option" {
+				setOptionArgs = append([]string{}, args...)
+			}
+			return scenario.run(t)(args...)
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	wantArgs := []string{"set-option", "-t", "_portal-saver", "destroy-unattached", "off"}
+	if len(setOptionArgs) != len(wantArgs) {
+		t.Fatalf("set-option argv = %v, want %v", setOptionArgs, wantArgs)
+	}
+	for i, arg := range wantArgs {
+		if setOptionArgs[i] != arg {
+			t.Errorf("set-option arg[%d] = %q, want %q", i, setOptionArgs[i], arg)
+		}
+	}
+}
+
+func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionItself(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // start with no daemon.version
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	assertNoDaemonVersionFile(t, dir)
 }
