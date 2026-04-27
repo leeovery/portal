@@ -206,6 +206,34 @@ func (c *Client) SetServerOption(name, value string) error {
 	return nil
 }
 
+// SetSessionOption sets a tmux session-level option scoped to the given session.
+// The -t flag is load-bearing: it scopes the option to one session, never the
+// global namespace. Callers must not pass -g style global options through this
+// method.
+func (c *Client) SetSessionOption(session, name, value string) error {
+	_, err := c.cmd.Run("set-option", "-t", session, name, value)
+	if err != nil {
+		return fmt.Errorf("failed to set session option %s on %s: %w", name, session, err)
+	}
+	return nil
+}
+
+// NewDetachedSessionNoCwd creates a new detached tmux session with the given
+// name without specifying a working directory. When shellCommand is non-empty,
+// it is appended as the tmux shell-command argument. Used for internal
+// sessions like _portal-saver where inheriting tmux's default cwd is intended.
+func (c *Client) NewDetachedSessionNoCwd(name, shellCommand string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if shellCommand != "" {
+		args = append(args, shellCommand)
+	}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to create tmux session %q: %w", name, err)
+	}
+	return nil
+}
+
 // GetServerOption returns the value of a tmux server-level option.
 // Returns ErrOptionNotFound when the option does not exist.
 func (c *Client) GetServerOption(name string) (string, error) {

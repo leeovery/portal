@@ -610,6 +610,138 @@ func TestSetServerOption(t *testing.T) {
 	})
 }
 
+func TestSetSessionOption(t *testing.T) {
+	t.Run("runs set-option -t with session, name, and value", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SetSessionOption("_portal-saver", "destroy-unattached", "off")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "set-option -t _portal-saver destroy-unattached off"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("does not pass -g flag (session-scoped, not global)", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		_ = client.SetSessionOption("_portal-saver", "destroy-unattached", "off")
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		for _, arg := range mock.Calls[0] {
+			if arg == "-g" {
+				t.Errorf("SetSessionOption must not include -g flag, got args %v", mock.Calls[0])
+			}
+		}
+	})
+
+	t.Run("returns error wrapped with session and option name", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux error")}
+		client := tmux.NewClient(mock)
+
+		err := client.SetSessionOption("_portal-saver", "destroy-unattached", "off")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to set session option") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "destroy-unattached") {
+			t.Errorf("error %q does not contain option name", err.Error())
+		}
+		if !strings.Contains(err.Error(), "_portal-saver") {
+			t.Errorf("error %q does not contain session name", err.Error())
+		}
+	})
+}
+
+func TestNewDetachedSessionNoCwd(t *testing.T) {
+	t.Run("creates detached session with name and shell command, no -c", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewDetachedSessionNoCwd("_portal-saver", "portal state daemon")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"new-session", "-d", "-s", "_portal-saver", "portal state daemon"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+		// Belt-and-braces: ensure no -c anywhere
+		for _, arg := range mock.Calls[0] {
+			if arg == "-c" {
+				t.Errorf("NewDetachedSessionNoCwd must not include -c flag, got args %v", mock.Calls[0])
+			}
+		}
+	})
+
+	t.Run("omits shell-command argument when empty string", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewDetachedSessionNoCwd("_portal-saver", "")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		// Should be exactly 4 args: new-session -d -s <name>
+		wantArgs := []string{"new-session", "-d", "-s", "_portal-saver"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux error")}
+		client := tmux.NewClient(mock)
+
+		err := client.NewDetachedSessionNoCwd("_portal-saver", "portal state daemon")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to create tmux session") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "_portal-saver") {
+			t.Errorf("error %q does not contain session name", err.Error())
+		}
+	})
+}
+
 func TestGetServerOption(t *testing.T) {
 	t.Run("returns value when option exists", func(t *testing.T) {
 		mock := &MockCommander{Output: "1"}
