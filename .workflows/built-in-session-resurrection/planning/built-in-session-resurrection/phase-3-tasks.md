@@ -16,16 +16,18 @@ total: 13
 
 **Do**:
 - Create `internal/state/index_reader.go`:
+  - Define `var ErrCorruptIndex = errors.New("sessions.json corrupt or unreadable")` — exported sentinel that Phase 5's orchestrator (task 5-2) and Phase 6's warning accumulator (task 6-9) match against via `errors.Is`. Wraps every "we tried to use the file but couldn't" condition; specifically does NOT cover the missing-file case (returned with `err=nil`).
   - `func ReadIndex(dir string) (Index, bool, error)`:
     1. `path := SessionsJSON(dir)`.
     2. `data, err := os.ReadFile(path)`.
     3. If `errors.Is(err, os.ErrNotExist)` → return `Index{}, true, nil`.
-    4. If any other `err != nil` → return `Index{}, true, fmt.Errorf("read sessions.json: %w", err)`.
-    5. `idx, derr := DecodeIndex(data)`. If `derr != nil` → return `Index{}, true, fmt.Errorf("parse sessions.json: %w", derr)`.
-    6. If `idx.Version > SchemaVersion` → return `Index{}, true, fmt.Errorf("sessions.json schema version %d unsupported (current: %d) — skipping restore", idx.Version, SchemaVersion)`.
-    7. If `idx.Version < 1` → return `Index{}, true, fmt.Errorf("sessions.json missing or zero version — skipping restore")` (defensive; a v0 file should never exist but reject it explicitly rather than silently treating it as v1).
+    4. If any other `err != nil` → return `Index{}, true, fmt.Errorf("read sessions.json: %w: %w", ErrCorruptIndex, err)`.
+    5. `idx, derr := DecodeIndex(data)`. If `derr != nil` → return `Index{}, true, fmt.Errorf("parse sessions.json: %w: %w", ErrCorruptIndex, derr)`.
+    6. If `idx.Version > SchemaVersion` → return `Index{}, true, fmt.Errorf("sessions.json schema version %d unsupported (current: %d) — skipping restore: %w", idx.Version, SchemaVersion, ErrCorruptIndex)`.
+    7. If `idx.Version < 1` → return `Index{}, true, fmt.Errorf("sessions.json missing or zero version — skipping restore: %w", ErrCorruptIndex)`.
     8. Return `idx, false, nil`.
-- Do NOT log inside `ReadIndex` — the orchestrator in task 3-6 owns the single log line + stderr warning. Keeping `ReadIndex` side-effect-free makes it trivially testable.
+- Every error path other than "file absent" wraps `ErrCorruptIndex` via `fmt.Errorf("...: %w", ErrCorruptIndex, ...)` (Go 1.20+ multiple-`%w` wrapping). Callers use `errors.Is(err, state.ErrCorruptIndex)` to classify the condition without string matching.
+- Do NOT log inside `ReadIndex` — the orchestrator (task 3-6) and the bootstrap orchestrator (task 5-2 / 6-9) own logging and stderr emission respectively. Keeping `ReadIndex` side-effect-free makes it trivially testable.
 - Tests in `internal/state/index_reader_test.go` using `t.TempDir`:
   - Missing file → `skip=true, err=nil, idx=zero`.
   - File exists with valid v1 JSON → `skip=false, err=nil, idx=populated`.
@@ -45,6 +47,9 @@ total: 13
 - [ ] Permission / I/O errors on a present file return `(Index{}, true, wrapped err)` — never panic.
 - [ ] `ReadIndex` performs no logging, no stderr writes — purely returns values for the caller to act on.
 - [ ] Empty `sessions[]` round-trips cleanly (`idx.Sessions` is a zero-length slice, not `nil`, not treated as error).
+- [ ] `state.ErrCorruptIndex` is exported as a sentinel error.
+- [ ] Every non-"file absent" error path wraps `ErrCorruptIndex` so `errors.Is(err, ErrCorruptIndex)` returns true.
+- [ ] Missing-file path returns `(Index{}, true, nil)` — `ErrCorruptIndex` is NOT wrapped (absence is not corruption).
 
 **Tests**:
 - `"it returns skip=true with nil err when sessions.json is absent"`
@@ -57,6 +62,10 @@ total: 13
 - `"it handles an empty sessions array"`
 - `"it returns skip=true with a wrapped permission error when the file is unreadable"`
 - `"it performs no stdout/stderr writes (purity check via captured output)"`
+- `"errors.Is(err, ErrCorruptIndex) is true for unparseable JSON"`
+- `"errors.Is(err, ErrCorruptIndex) is true for unsupported version"`
+- `"errors.Is(err, ErrCorruptIndex) is true for permission errors on a present file"`
+- `"errors.Is(err, ErrCorruptIndex) is false for the missing-file case (err is nil)"`
 
 **Edge Cases**:
 - Missing file is the dominant first-ever-bootstrap case: must not be an error and must not log.
@@ -481,11 +490,11 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 
 ### Task 3-6: Implement top-level `Restore()` orchestrator with per-session error isolation
 
-**Problem**: Tasks 3-1 through 3-5 land single-session primitives (read index, create FIFO, create session, apply geometry, set markers). Step 5 of `PersistentPreRunE` calls one `Restore()` entry point — not six. That entry point must iterate every saved session, skip live-named sessions, skeleton-create each missing one, and handle per-session failures in isolation so one broken session never blocks the remaining ones. The spec enumerates failure modes at the top level: missing `sessions.json` is a silent no-op; unparseable `sessions.json` is a one-line stderr warning + log + skip-all; a session whose `panes` array is empty is a per-session log + skip (Portal refuses to create a session whose pane topology cannot be specified); any per-session creation error logs and continues to the next session; `_`-prefixed session names in the index are skipped defensively (they are Portal internals and should never appear, but be robust). This orchestrator task is where those cross-cutting policies live, decoupled from the single-session primitives they compose.
+**Problem**: Tasks 3-1 through 3-5 land single-session primitives (read index, create FIFO, create session, apply geometry, set markers). Step 5 of `PersistentPreRunE` calls one `Restore()` entry point — not six. That entry point must iterate every saved session, skip live-named sessions, skeleton-create each missing one, and handle per-session failures in isolation so one broken session never blocks the remaining ones. The spec enumerates failure modes at the top level: missing `sessions.json` is a silent no-op; unparseable `sessions.json` is a one-line stderr warning + log + skip-all; a session whose `panes` array is empty is a per-session log + skip (Portal refuses to create a session whose pane topology cannot be specified); any per-session creation error logs and continues to the next session; `_`-prefixed session names in the index are skipped defensively (they are Portal internals and should never appear, but be robust). This orchestrator task is where those cross-cutting policies live, decoupled from the single-session primitives they compose. Stderr emission of the corrupt-index warning is **not** this orchestrator's responsibility — it propagates the wrapped `state.ErrCorruptIndex` (task 3-1) and the bootstrap orchestrator (task 5-2) routes the warning through Phase 6's `BootstrapWarningsSink` (task 6-9) so CLI and TUI paths emit consistently.
 
-**Solution**: Create `internal/restore/restore.go` with `type Orchestrator struct { Client *tmux.Client; StateDir string; Logger *log.Logger; Stderr io.Writer }` and `func (o *Orchestrator) Restore() error`. Flow: (1) resolve state dir via `state.EnsureDir()`; (2) call `state.ReadIndex(dir)` from task 3-1 — on `skip=true, err=nil` return nil; on `skip=true, err!=nil` log the error, emit the spec's one-line stderr warning `"Portal state file is corrupt — restoration skipped.\nCheck `portal state status` or ~/.config/portal/state/portal.log."`, return nil; (3) read live sessions via `tmux list-sessions -F '#{session_name}'` into a set; (4) for each `sess` in `idx.Sessions`: (a) if `strings.HasPrefix(sess.Name, "_")` skip with log; (b) if session name is in live set, skip (no log — quiet no-op, this is the common steady-state case); (c) if `len(sess.Windows) == 0` or any window has `len(Panes) == 0`, log warning and skip; (d) else `SessionRestorer{Client, StateDir}.Restore(sess)` + `ApplyWindowGeometry(sess, base, paneBase)` + `ApplySkeletonMarkers(sess, base, paneBase)` — errors from any phase log per-session and continue. No fatal error propagates out of the orchestrator; `Restore()` returns `nil` even when every session failed (bootstrap proceeds). Task 3-7 wraps this with the `@portal-restoring` set/unset discipline.
+**Solution**: Create `internal/restore/restore.go` with `type Orchestrator struct { Client *tmux.Client; StateDir string; Logger *log.Logger }` (no `Stderr` field — emission belongs to Phase 6's sink) and `func (o *Orchestrator) Restore() error`. Flow: (1) resolve state dir via `state.EnsureDir()`; (2) call `state.ReadIndex(dir)` from task 3-1 — on `skip=true, err=nil` return nil; on `skip=true, err!=nil` log the wrapped error to `portal.log` and **return the error verbatim** so `errors.Is(err, state.ErrCorruptIndex)` is observable by the bootstrap orchestrator; (3) read live sessions via `tmux list-sessions -F '#{session_name}'` into a set; (4) for each `sess` in `idx.Sessions`: (a) if `strings.HasPrefix(sess.Name, "_")` skip with log; (b) if session name is in live set, skip (no log — quiet no-op, this is the common steady-state case); (c) if `len(sess.Windows) == 0` or any window has `len(Panes) == 0`, log warning and skip; (d) else `SessionRestorer{Client, StateDir}.Restore(sess)` + `ApplyWindowGeometry(sess, base, paneBase)` + `ApplySkeletonMarkers(sess, base, paneBase)` — errors from any phase log per-session and continue. No fatal error propagates out of the per-session loop; `Restore()` returns `nil` after the loop completes (bootstrap proceeds). Task 3-7 wraps this with the `@portal-restoring` set/unset discipline.
 
-**Outcome**: One callable entry point used by Phase 5's bootstrap integration: `err := restore.New(client, stateDir, logger, stderr).Restore()`. Every saved session is either skipped (already live, name-prefixed `_`, empty panes) or skeleton-restored (create → geometry → markers). Per-session failures are logged with session-name context; bootstrap continues. Unit tests cover the full matrix: missing index, corrupt index, empty index, single session happy path, live-skip, empty-panes skip, `_`-prefix skip, one-session-errors-others-continue.
+**Outcome**: One callable entry point used by Phase 5's bootstrap integration: `err := restore.New(client, stateDir, logger).Restore()`. Every saved session is either skipped (already live, name-prefixed `_`, empty panes) or skeleton-restored (create → geometry → markers). Per-session failures are logged with session-name context; the loop continues. The corrupt-index condition surfaces as a wrapped `state.ErrCorruptIndex` return; the bootstrap orchestrator (task 5-2) detects it via `errors.Is` and appends `CorruptSessionsJSONWarning()` to its accumulator (task 6-9). Unit tests cover: missing index, corrupt index (returns wrapped sentinel), empty index, single session happy path, live-skip, empty-panes skip, `_`-prefix skip, one-session-errors-others-continue.
 
 **Do**:
 - Create `internal/restore/restore.go`:
@@ -493,8 +502,7 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
   package restore
 
   import (
-      "fmt"
-      "io"
+      "errors"
       "log"
       "strings"
 
@@ -503,14 +511,13 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
   )
 
   type Orchestrator struct {
-      Client  *tmux.Client
+      Client   *tmux.Client
       StateDir string
-      Logger  *log.Logger
-      Stderr  io.Writer // task 3-7 / observability may buffer instead of writing directly
+      Logger   *log.Logger
   }
 
-  func New(c *tmux.Client, stateDir string, logger *log.Logger, stderr io.Writer) *Orchestrator {
-      return &Orchestrator{Client: c, StateDir: stateDir, Logger: logger, Stderr: stderr}
+  func New(c *tmux.Client, stateDir string, logger *log.Logger) *Orchestrator {
+      return &Orchestrator{Client: c, StateDir: stateDir, Logger: logger}
   }
 
   func (o *Orchestrator) Restore() error {
@@ -518,8 +525,10 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
       if skip {
           if readErr != nil {
               o.Logger.Printf("restore: %v", readErr)
-              fmt.Fprintln(o.Stderr, "Portal state file is corrupt — restoration skipped.")
-              fmt.Fprintln(o.Stderr, "Check `portal state status` or ~/.config/portal/state/portal.log.")
+              // Return the wrapped error so bootstrap orchestrator (task 5-2)
+              // can detect via errors.Is(err, state.ErrCorruptIndex) and emit
+              // CorruptSessionsJSONWarning through the sink (task 6-9).
+              return readErr
           }
           return nil
       }
@@ -573,7 +582,7 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 - Add `tmux.Client.ListSessionNames() (map[string]struct{}, error)` if absent — wraps `tmux list-sessions -F '#{session_name}'` and returns a set.
 - Tests in `internal/restore/restore_test.go`:
   - Missing `sessions.json` → zero tmux calls, zero log lines, zero stderr writes, returns nil.
-  - Corrupt `sessions.json` → one log line + exactly the two-line stderr warning, returns nil, no session-creation tmux calls.
+  - Corrupt `sessions.json` → one log line, returns a non-nil error wrapping `state.ErrCorruptIndex` (verified via `errors.Is`); zero session-creation tmux calls; zero stderr writes (the warning is emitted by Phase 6's sink, not here).
   - Valid empty index (`sessions: []`) → `list-sessions` called, zero session-creation calls, returns nil.
   - Valid index with one session, not live: full create → geometry → markers pipeline runs.
   - Valid index with one session, already live: `list-sessions` is called, no create/geometry/markers calls, zero log lines (steady-state silent).
@@ -587,7 +596,9 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 
 **Acceptance Criteria**:
 - [ ] Missing `sessions.json` is a silent no-op — no logs, no stderr, no tmux calls beyond the initial `list-sessions` (which itself is skipped when no file exists per the `skip=true, err=nil` branch).
-- [ ] Unparseable `sessions.json` logs the parse error to `portal.log` and emits exactly the two-line stderr warning specified by the spec.
+- [ ] Unparseable `sessions.json` logs the parse error to `portal.log` and **returns** the wrapped error verbatim so the bootstrap orchestrator (task 5-2) can detect via `errors.Is(err, state.ErrCorruptIndex)`.
+- [ ] `Restore()` does NOT write to stderr directly — stderr emission of the corrupt-index warning is task 6-9's sink path.
+- [ ] `Orchestrator` struct has no `Stderr io.Writer` field (removed; emission is Phase 6's responsibility).
 - [ ] `_`-prefixed session names in the index are defensively skipped with a log.
 - [ ] Live session (name exists in `list-sessions`) is silently skipped (no log — steady-state case).
 - [ ] Session with zero windows is skipped with a log.
@@ -596,12 +607,12 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 - [ ] Error in `Restore` (create-session step) logs with session name and continues to the next session.
 - [ ] Error in `ApplyWindowGeometry` logs and still runs `ApplySkeletonMarkers` (markers are independently useful for signal-hydrate coverage).
 - [ ] Error in `ApplySkeletonMarkers` logs and continues to the next session.
-- [ ] Orchestrator always returns `nil` (bootstrap never aborts on restore failure).
-- [ ] Stderr writes use the injected `Stderr` writer (task 3-7 / Phase 6 may buffer in TUI path).
+- [ ] Per-session loop never aborts; the only non-nil return from `Restore()` is the wrapped `ErrCorruptIndex` from `ReadIndex`.
 
 **Tests**:
 - `"it is a silent no-op when sessions.json is absent"`
-- `"it emits the corrupt-sessions stderr warning and logs the error when JSON is unparseable"`
+- `"it returns a wrapped ErrCorruptIndex when sessions.json is unparseable (no stderr write)"`
+- `"it logs the parse error to portal.log on the corrupt-index path"`
 - `"it does nothing beyond list-sessions when the index is empty"`
 - `"it skeleton-restores a single missing session end-to-end"`
 - `"it silently skips sessions whose name is already live (no log)"`
@@ -611,17 +622,17 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 - `"it isolates per-session errors (one fails, next continues)"`
 - `"it continues to ApplySkeletonMarkers after ApplyWindowGeometry fails for a session"`
 - `"it logs and returns nil when list-sessions itself fails"`
-- `"it always returns nil even when every session errors"`
+- `"it returns nil when every session errors (per-session isolation; only ErrCorruptIndex propagates)"`
 
 **Edge Cases**:
 - Missing index → common first-ever-bootstrap case; must be silent.
-- Unparseable index → rare but observable; one log, one two-line stderr warning, no partial restore.
+- Unparseable index → rare but observable; one log line, wrapped `ErrCorruptIndex` returned. Bootstrap orchestrator (task 5-2) detects via `errors.Is` and appends `CorruptSessionsJSONWarning` (task 6-9). The sink emits to stderr (CLI) or buffers for TUI flush (task 6-10).
 - `_`-prefixed session in the index → spec says daemon filters these from capture, so they should never appear; but be defensive and skip.
 - Live-session name collision → already-live sessions are authoritative per spec; silent skip (no log) avoids noise on every `portal open`.
 - `panes` empty array per spec: "Portal never creates a session whose pane topology cannot be specified." Log, skip, continue.
 - Per-session error isolation: ensures one corrupt saved session does not block a user's remaining 9 from restoring.
 - `list-sessions` failure: unusual but possible. Log, return nil — bootstrap continues with whatever live tmux has.
-- `sessions.json` present but schema `version` is future: handled by task 3-1's `ReadIndex`, which returns `skip=true, err!=nil`. This orchestrator logs and emits the same stderr warning (reuses the "corrupt" branch — the user-facing distinction is not material for v1).
+- `sessions.json` present but schema `version` is future: handled by task 3-1's `ReadIndex` wrapping the error with `ErrCorruptIndex`. Same propagation path; same Phase 6 warning surfaces to the user.
 
 **Context**:
 > Spec "Restore-Side Architecture → Restoration Trigger": "For each entry in `sessions.json`: If a live tmux session already exists with that name → skip. ... If no live session with that name → skeleton-restore it (structure only; scrollback lazy). If a saved session's `panes` array is empty (corrupt or invalid `sessions.json`) → log a warning, skip that window/session entirely, and continue restoring the remaining sessions. Portal never creates a session whose pane topology cannot be specified."
@@ -633,7 +644,9 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 > - On `select-layout` failure for a window: fall back to `select-layout tiled`, log, continue.
 > - On any per-session error: log, skip that session, continue with the next.
 >
-> Spec "Observability & Diagnostics → Proactive Health Signals → Exception: genuinely broken states detected during `PersistentPreRunE`": the corrupt-sessions warning text is `"Portal state file is corrupt — restoration skipped.\nCheck `portal state status` or ~/.config/portal/state/portal.log."` — use it verbatim.
+> The "print one-line stderr warning" step is owned by Phase 6 task 6-9's `BootstrapWarningsSink` (CLI) / task 6-10's TUI buffering, not by this orchestrator. The orchestrator's job is to make the corrupt-index condition observable to the bootstrap layer via `errors.Is(err, state.ErrCorruptIndex)`.
+>
+> Spec "Observability & Diagnostics → Proactive Health Signals → Exception: genuinely broken states detected during `PersistentPreRunE`": the corrupt-sessions warning text is `"Portal state file is corrupt — restoration skipped.\nCheck `portal state status` or ~/.config/portal/state/portal.log."` — emitted by task 6-9's `CorruptSessionsJSONWarning()` constructor.
 >
 > Spec "Failure Modes & Recovery → Consolidated Failure-Handling Table → `sessions.json` corrupt / unparseable": "Log warning, emit one-line stderr warning (see Observability), skip restoration entirely, continue bootstrap. User sees an empty picker. Diagnosable via log file or file inspection. Next successful save overwrites with valid content."
 >

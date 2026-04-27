@@ -103,7 +103,10 @@ total: 10
     2. `if err := o.Hooks.RegisterPortalHooks(); err != nil` → return `serverStarted, fmt.Errorf("bootstrap step 2 (RegisterPortalHooks): %w", err)`.
     3. `if err := o.Restoring.Set(); err != nil` → return `serverStarted, fmt.Errorf("bootstrap step 3 (Set @portal-restoring): %w", err)`. **This MUST precede step 4** — creating `_portal-saver` fires `session-created`, which the hooks registered in step 2 would otherwise route to `portal state notify`, dirtying the flag during restore.
     4. `if err := o.Saver.EnsureSaver(); err != nil` → log best-effort, continue. Per spec "Failure Modes → `_portal-saver` creation fails at bootstrap": "retries a small number of times. On persistent failure: log, emit stderr warning, continue bootstrap without the save daemon." Capture the underlying error in a Phase-6-bound buffer (via the `Warnings []bootstrap.Warning` accumulator that task 6-9 introduces); for Phase 5's slice, `EnsureSaver` failure is logged via the orchestrator's logger and execution continues. The `Warning` type lands in Phase 6 task 6-9; this task's only obligation is "continue, log, do not short-circuit". No `SaverDownError` sentinel type — soft warnings flow through the `[]Warning` accumulator pattern.
-    5. `restoreErr := o.Restore.Restore()`; capture — do not return yet. Per spec "Restore-Side Architecture → Restoration Trigger": "a missing or unparseable `sessions.json` is a non-fatal no-op warning" — so `Restore()` should already swallow its own per-session errors; an error surfacing here is exceptional.
+    5. `restoreErr := o.Restore.Restore()`; capture — do not return yet.
+       - If `errors.Is(restoreErr, state.ErrCorruptIndex)` → append `CorruptSessionsJSONWarning()` to the accumulator (task 6-9 introduces this), log WARN to `portal.log` via `ComponentBootstrap`, set `restoreErr = nil` (the condition is soft, not exceptional). Spec "Restore-Side Architecture → Restoration Trigger": "a missing or unparseable `sessions.json` is a non-fatal no-op warning."
+       - Any other non-nil `restoreErr` is genuinely exceptional — the per-session loop already swallowed per-session failures, so a remaining error indicates an internal `Restore()` bug. Log ERROR via `ComponentBootstrap` and return as a `FatalError` per task 6-8 ("Portal restore failed: <underlying>"). This branch should never fire under correct task 3-6 implementation; the fatal wrapping is defensive.
+       - Step 6 (`Restoring.Clear`) and subsequent steps still execute regardless of whether step 5 produced a soft warning.
     6. `if err := o.Restoring.Clear(); err != nil` → log WARN and continue. The marker stays set; the daemon will skip ticks until the next server restart (volatile server-option, self-heals). This is degraded but bounded — better than failing the whole bootstrap at the tail of otherwise-successful work. Matches task 3-7's clear-failure-is-soft contract. The clear is also wrapped in a `defer` off of step 3 for safety (so a panic between 3 and 6 still attempts the clear); the deferred and explicit calls are both no-ops on success.
     7. `if err := o.Sweeper.SweepOrphanFIFOs(); err != nil` → log WARN and continue. Per task 3-12, sweep failures are best-effort: the next bootstrap retries. Sweep runs AFTER `Restoring.Clear` and BEFORE `CleanStale` so live skeleton-marker FIFOs from the just-completed restore are preserved (they are referenced via the post-Restore marker set).
     8. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
@@ -133,6 +136,8 @@ total: 10
 - [ ] `RegisterPortalHooks` failure short-circuits.
 - [ ] `Restoring.Set` failure short-circuits BEFORE `EnsureSaver` — verified by asserting `EnsureSaver` was NOT called when `Set` errored.
 - [ ] `EnsureSaver` failure does NOT short-circuit `Run` — subsequent steps still execute. The failure is logged via the orchestrator's logger; Phase 6 task 6-9 wires the user-visible warning through the `Warnings []bootstrap.Warning` accumulator.
+- [ ] Step 5 (`Restore`) classifies returned errors: `errors.Is(err, state.ErrCorruptIndex)` produces a `CorruptSessionsJSONWarning` accumulator entry and is treated as soft; any other non-nil error is wrapped as `FatalError` and surfaced as fatal exit.
+- [ ] `EnsureSaver` failure (step 4) and corrupt-index (step 5) are the two soft-warning paths in v1; both flow through the same `Warnings []bootstrap.Warning` accumulator pattern (task 6-9).
 - [ ] `Restoring.Clear` failure logs WARN (via `ComponentBootstrap`) and does NOT fail `Run` — soft path. Matches task 3-7's clear-failure-is-soft contract.
 - [ ] `CleanStale` failure logs best-effort and does NOT fail `Run` (task 5-3's wiring still completes successfully).
 - [ ] `Run` returns the `serverStarted` bool from `EnsureServer` verbatim.
@@ -152,6 +157,10 @@ total: 10
 - `"it does not call EnsureSaver when Restoring.Set fails (ordering invariant)"`
 - `"it runs SweepOrphanFIFOs between Restoring.Clear and CleanStale"`
 - `"it logs and continues when SweepOrphanFIFOs fails"`
+- `"it appends CorruptSessionsJSONWarning to Warnings when Restore returns ErrCorruptIndex"`
+- `"it does not return a FatalError when Restore returns ErrCorruptIndex (soft path)"`
+- `"it still runs Restoring.Clear / SweepOrphanFIFOs / CleanStale after a soft corrupt-index"`
+- `"it returns a FatalError when Restore returns a non-ErrCorruptIndex error (defensive)"`
 
 **Edge Cases**:
 - Step 3 MUST precede step 4. A subtle implementation bug (e.g., `defer o.Restoring.Set()` instead of calling inline) would create the exact race the spec warns about — `_portal-saver` creation fires `session-created` BEFORE the marker is set, the first daemon tick runs mid-build. The `"it does not call EnsureSaver when Restoring.Set fails"` test is the regression guard.

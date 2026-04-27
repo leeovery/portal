@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-27
 cycle: 4
 phase: Plan Integrity Review
@@ -81,7 +81,7 @@ Add to task 3-1 tests:
 - `"errors.Is(err, ErrCorruptIndex) is false for the missing-file case (err is nil)"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Pairs with finding 2 — both parts must land together for the corrupt-index warning to flow through the sink as task 6-9 intends.
 
 ---
@@ -287,7 +287,7 @@ The `Stderr io.Writer` field on `Orchestrator` becomes vestigial (only the corru
 **Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — sections "Restore-Side Architecture → Restoration Trigger", "Bootstrap Flow (Integrated) → `PersistentPreRunE` Sequence → 5.", "Observability & Diagnostics → Proactive Health Signals", "Failure Modes & Recovery".
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Pairs with finding 1. Together they unify the corrupt-index warning path — orchestrator surfaces the sentinel; bootstrap layer routes it through the sink; sink handles CLI vs TUI emission. Without both fixes, the warning either double-emits (CLI) or corrupts the loading page (TUI).
 
 ---
@@ -335,7 +335,7 @@ Add to task 5-2 tests:
 - `"it returns a FatalError when Restore returns a non-ErrCorruptIndex error (defensive)"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical follow-on once findings 1 and 2 land. The change pattern mirrors task 5-2's existing `EnsureSaver` soft-warning treatment.
 
 ---
@@ -373,7 +373,7 @@ Cleanup: drop step 3 entirely and renumber, OR fold the rationale into step 2 as
     4. Log Info: `"purged state directory %s"`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Pure cleanup — no behavioural change. Improves readability for the implementer.
 
 ---

@@ -886,10 +886,9 @@ and exits 1.
     where `dir` was resolved at the top of `RunE` via `state.Dir()` (the no-create resolver from task 2-1).
   - Implement `purgeStateDir(dir string, logger *state.Logger) error`:
     1. `info, err := os.Lstat(dir)` — if `ENOENT`, return nil (idempotent).
-    2. If `info.Mode()&os.ModeSymlink != 0`, return an error: `"refusing to purge symlinked state dir: %s"` with a `logger.Warn` line. The caller can `readlink` the path and `rm -rf` the target manually if intentional.
-    3. (Removed: the prior `EvalSymlinks` strict-equality check is dropped — intermediate symlinks in the path resolution are tolerated; only the leaf being a symlink triggers refusal. This avoids a false-positive on macOS legacy installs whose intermediate paths route through other symlinked directories.)
-    4. `if err := os.RemoveAll(dir); err != nil { logger.Error(state.ComponentDaemon, "purge failed: %v", err); return err }`.
-    5. Log Info: `"purged state directory %s"`.
+    2. If `info.Mode()&os.ModeSymlink != 0`, return an error: `"refusing to purge symlinked state dir: %s"` with a `logger.Warn` line. The caller can `readlink` the path and `rm -rf` the target manually if intentional. Only the **leaf** is checked — intermediate symlinks in the path resolution are tolerated (avoids false-positives on macOS legacy installs whose intermediate paths route through other symlinked directories like `~/Library/Application Support`).
+    3. `if err := os.RemoveAll(dir); err != nil { logger.Error(state.ComponentDaemon, "purge failed: %v", err); return err }`.
+    4. Log Info: `"purged state directory %s"`.
 - Task 6-6 sets up the ordering infrastructure (joined errors, logger); this task adds step 3 in the existing error-accumulation harness.
 - Tests in `cmd/state_cleanup_test.go`:
   - `"it does not touch the state dir when --purge is absent"` — pre-populate state dir with files; run cleanup; assert dir still exists with files.
