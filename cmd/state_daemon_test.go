@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -321,7 +322,7 @@ func TestStateDaemon_DefaultRunReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	deps := &daemonDeps{Dir: dir}
+	deps := &daemonDeps{Dir: dir, TickerPeriod: time.Hour}
 	if err := defaultDaemonRun(ctx, deps); err != nil {
 		t.Errorf("defaultDaemonRun returned error after pre-cancelled context: %v", err)
 	}

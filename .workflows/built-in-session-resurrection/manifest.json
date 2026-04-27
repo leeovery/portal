@@ -148,7 +148,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "tick-3e6849",
+          "current_task": "tick-93c2e8",
           "completed_tasks": [
             "built-in-session-resurrection-1-1",
             "built-in-session-resurrection-1-2",
@@ -169,7 +169,8 @@
             "built-in-session-resurrection-2-8",
             "built-in-session-resurrection-2-9",
             "built-in-session-resurrection-2-10",
-            "built-in-session-resurrection-2-11"
+            "built-in-session-resurrection-2-11",
+            "built-in-session-resurrection-2-12"
           ]
         }
       }

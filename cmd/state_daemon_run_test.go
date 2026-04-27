@@ -1,0 +1,709 @@
+// Tests in this file mutate package-level state via Cobra and MUST NOT use t.Parallel.
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
+)
+
+// daemonFakeCommander is a tmux.Commander that dispatches per-command and
+// records every invocation. Tests configure the per-command outputs they care
+// about via the dispatch maps; unset commands return ("", nil) so unrelated
+// tmux calls do not fail the test.
+//
+// The mutex is necessary because RunRaw is invoked from CaptureAndHashPane in
+// captureAndCommit, while Run is invoked from various other tmux helpers — the
+// daemon itself is single-threaded but the in-test goroutines (defaultDaemonRun
+// path) may interleave.
+type daemonFakeCommander struct {
+	mu sync.Mutex
+
+	// markersOut is the stdout for "show-options -sv".
+	markersOut string
+	markersErr error
+
+	// optionByName maps option name → value for "show-option -sv <name>".
+	// optionErr seeds an error returned for any show-option call.
+	optionByName map[string]string
+	optionErr    error
+
+	// sessionsOut is the stdout for "list-sessions ...".
+	sessionsOut string
+	sessionsErr error
+
+	// panesOut is the stdout for "list-panes -a -F ...".
+	panesOut string
+	panesErr error
+
+	// envBySession maps session name → "show-environment -t <name>" output.
+	envBySession map[string]string
+
+	// captureByTarget maps capture target → "capture-pane ..." output.
+	// captureErrByTarget seeds errors per target.
+	captureByTarget    map[string]string
+	captureErrByTarget map[string]error
+
+	// commitErr, if non-nil, is returned for the "set-option -s" / similar
+	// writes — currently unused since Commit writes via os.WriteFile, not tmux.
+
+	// Recorded calls.
+	calls    [][]string
+	rawCalls [][]string
+}
+
+func (c *daemonFakeCommander) Run(args ...string) (string, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, append([]string(nil), args...))
+	c.mu.Unlock()
+	return c.dispatch(args)
+}
+
+func (c *daemonFakeCommander) RunRaw(args ...string) (string, error) {
+	c.mu.Lock()
+	c.rawCalls = append(c.rawCalls, append([]string(nil), args...))
+	c.mu.Unlock()
+	return c.dispatch(args)
+}
+
+func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", nil
+	}
+	switch args[0] {
+	case "show-options":
+		return c.markersOut, c.markersErr
+	case "show-option":
+		if c.optionErr != nil {
+			return "", c.optionErr
+		}
+		// args == [show-option, -sv, <name>]
+		if len(args) >= 3 {
+			if v, ok := c.optionByName[args[2]]; ok {
+				return v, nil
+			}
+		}
+		return "", tmux.ErrOptionNotFound
+	case "list-sessions":
+		return c.sessionsOut, c.sessionsErr
+	case "list-panes":
+		return c.panesOut, c.panesErr
+	case "show-environment":
+		// args == [show-environment, -t, <session>]
+		if len(args) >= 3 {
+			if v, ok := c.envBySession[args[2]]; ok {
+				return v, nil
+			}
+		}
+		return "", nil
+	case "capture-pane":
+		// args == [capture-pane, -e, -p, -S, -, -t, <target>]
+		var target string
+		if len(args) >= 7 {
+			target = args[6]
+		}
+		if err, ok := c.captureErrByTarget[target]; ok {
+			return "", err
+		}
+		if v, ok := c.captureByTarget[target]; ok {
+			return v, nil
+		}
+		return "", nil
+	}
+	return "", nil
+}
+
+// callsContaining returns recorded calls whose first argument equals cmd.
+func (c *daemonFakeCommander) callsContaining(cmd string) [][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := [][]string{}
+	for _, call := range c.calls {
+		if len(call) > 0 && call[0] == cmd {
+			out = append(out, call)
+		}
+	}
+	for _, call := range c.rawCalls {
+		if len(call) > 0 && call[0] == cmd {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+// makeDeps assembles a daemonDeps for tick-level tests. The supplied dir is
+// expected to be a t.TempDir already EnsureDir-prepared by the caller (so the
+// scrollback subdirectory exists). PrevIndex defaults to nil; HashMap to a
+// fresh empty map; LastSaveAt to zero (which makes gap=true on the first tick
+// — most tests override it).
+func makeDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonDeps {
+	t.Helper()
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	logger, err := state.OpenLogger(state.PortalLog(dir), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+	return &daemonDeps{
+		Dir:          dir,
+		Logger:       logger,
+		Client:       tmux.NewClient(fc),
+		HashMap:      state.HashMap{},
+		TickerPeriod: 1 * time.Millisecond,
+		MaxGap:       30 * time.Second,
+	}
+}
+
+// touchSaveRequested creates an empty save.requested in dir.
+func touchSaveRequested(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(state.SaveRequested(dir), nil, 0o600); err != nil {
+		t.Fatalf("touch save.requested: %v", err)
+	}
+}
+
+// oneSession returns canned commander outputs for a single session "work" with
+// one window and one pane. Useful as a fixture for the captureAndCommit happy
+// path.
+func oneSession() (sessionsOut, panesOut string) {
+	sessionsOut = "work|1|0"
+	// Format matches captureFormat in internal/state/capture.go.
+	panesOut = "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh"
+	return
+}
+
+func TestDaemonTick_NoOpWhenNeitherDirtyNorGap(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	deps.MaxGap = 30 * time.Second
+
+	tick(deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked when not dirty and not gap: %v", got)
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json should not be written; stat err=%v", err)
+	}
+}
+
+func TestDaemonTick_FiresWhenDirty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now() // gap=false
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("list-sessions not invoked when dirty")
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
+		t.Errorf("sessions.json not written when dirty: %v", err)
+	}
+}
+
+func TestDaemonTick_FiresAfterMaxGap(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.MaxGap = 10 * time.Millisecond
+	deps.LastSaveAt = time.Now().Add(-1 * time.Hour) // very old
+
+	tick(deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("list-sessions not invoked after max-gap")
+	}
+}
+
+func TestDaemonTick_FiresOnFirstTickWhenLastSaveAtZero(t *testing.T) {
+	// Initial LastSaveAt is the zero value; gap should be true so the first
+	// eligible tick fires even without an explicit save.requested.
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	// Don't set LastSaveAt — leave it as zero.
+
+	tick(deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("first tick should fire even without dirty flag (LastSaveAt zero)")
+	}
+}
+
+func TestDaemonTick_SkipsEntireTickWhenRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		optionByName: map[string]string{state.RestoringMarkerName: "1"},
+		// Seed sessions output so any leak through would trip the check.
+		sessionsOut: "work|1|0",
+	}
+	deps := makeDeps(t, dir, fc)
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked during restore: %v", got)
+	}
+}
+
+func TestDaemonTick_PreservesSaveRequestedWhenRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		optionByName: map[string]string{state.RestoringMarkerName: "1"},
+	}
+	deps := makeDeps(t, dir, fc)
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested should survive a restore-suppressed tick; stat=%v", err)
+	}
+}
+
+func TestDaemonTick_RemovesSaveRequestedAfterSuccess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
+		t.Errorf("save.requested should be removed after successful capture; stat=%v", err)
+	}
+}
+
+func TestDaemonTick_PreservesSaveRequestedOnError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	// list-sessions fails so CaptureStructure errors and tick logs+returns
+	// without removing the dirty flag.
+	fc := &daemonFakeCommander{sessionsErr: errors.New("tmux down")}
+	// list-sessions is wrapped — ListSessions returns ([], nil) on err. To
+	// force the failure path through CaptureStructure we instead force
+	// list-panes to fail; ListSessionNames swallows list-sessions errors.
+	fc.sessionsErr = nil
+	fc.sessionsOut = "work|1|0"
+	fc.panesErr = errors.New("list-panes failed")
+
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested should survive a failed cycle; stat=%v", err)
+	}
+}
+
+func TestDaemonTick_PicksUpNotifyArrivingBetweenTicks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now() // gap=false; only dirty drives subsequent tick
+
+	// Tick 1: dirty flag set, fires capture, clears flag.
+	touchSaveRequested(t, dir)
+	tick(deps)
+	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
+		t.Fatalf("save.requested should be cleared after first tick; stat=%v", err)
+	}
+	firstCalls := len(fc.callsContaining("list-sessions"))
+
+	// Notify arrives between ticks.
+	touchSaveRequested(t, dir)
+
+	// Tick 2: dirty flag set again, fires another capture.
+	tick(deps)
+
+	secondCalls := len(fc.callsContaining("list-sessions"))
+	if secondCalls <= firstCalls {
+		t.Errorf("second tick did not fire after re-touched save.requested: first=%d second=%d", firstCalls, secondCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
+		t.Errorf("save.requested should be cleared after second tick; stat=%v", err)
+	}
+}
+
+func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Session "work" with two panes 0 and 1; mark pane 1 as skeleton.
+	skipKey := state.SanitizePaneKey("work", 0, 1)
+	markersOut := fmt.Sprintf(`%s%s "1"`, state.SkeletonMarkerPrefix, skipKey)
+
+	fc := &daemonFakeCommander{
+		markersOut:  markersOut,
+		sessionsOut: "work|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
+		captureByTarget: map[string]string{
+			"work:0.0": "captured-pane-0",
+			"work:0.1": "should-not-be-captured",
+		},
+	}
+	// Seed PrevIndex with the skeleton-marked pane so the merge keeps it
+	// in the index.
+	prevPane := state.Pane{Index: 1, CWD: "/prev", ScrollbackFile: "scrollback/" + skipKey + ".bin"}
+	prev := state.Index{Version: state.SchemaVersion, Sessions: []state.Session{{
+		Name:    "work",
+		Windows: []state.Window{{Index: 0, Name: "main", Layout: "layout", Panes: []state.Pane{prevPane}}},
+	}}}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = &prev
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	for _, call := range fc.callsContaining("capture-pane") {
+		// args[6] is the -t target.
+		if len(call) >= 7 && call[6] == "work:0.1" {
+			t.Errorf("capture-pane invoked for skeleton-marked target work:0.1: %v", call)
+		}
+	}
+}
+
+func TestDaemonTick_ContinuesOnPerPaneCaptureError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
+		captureErrByTarget: map[string]error{
+			"work:0.0": errors.New("flaky pane"),
+		},
+		captureByTarget: map[string]string{
+			"work:0.1": "ok-bytes",
+		},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	// commit must still happen.
+	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
+		t.Errorf("sessions.json must commit despite per-pane error: %v", err)
+	}
+	// scrollback for the surviving pane was written.
+	survivingKey := state.SanitizePaneKey("work", 0, 1)
+	if _, err := os.Stat(state.ScrollbackFile(dir, survivingKey)); err != nil {
+		t.Errorf("surviving pane scrollback not written: %v", err)
+	}
+}
+
+func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{markersErr: errors.New("show-options blew up")}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	logBytes, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "tick:") {
+		t.Errorf("expected tick failure log entry; got:\n%s", logBytes)
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json should not be written on list-markers error; stat=%v", err)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested should survive list-markers failure: %v", err)
+	}
+}
+
+func TestDaemonTick_LogsAndSkipsOnCaptureStructureError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesErr:    errors.New("list-panes blew up"),
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json should not be written on capture-structure error; stat=%v", err)
+	}
+}
+
+func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	originalLastSave := time.Now().Add(-1 * time.Hour)
+	deps.LastSaveAt = originalLastSave
+
+	// Force commit failure: make sessions.json a directory so AtomicWrite
+	// cannot rename onto it.
+	if err := os.MkdirAll(state.SessionsJSON(dir), 0o700); err != nil {
+		t.Fatalf("create blocking dir: %v", err)
+	}
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	if !deps.LastSaveAt.Equal(originalLastSave) {
+		t.Errorf("LastSaveAt advanced despite commit failure: %v != %v", deps.LastSaveAt, originalLastSave)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested should survive commit failure: %v", err)
+	}
+}
+
+func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	sess, panes := oneSession()
+	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = time.Hour // ensure no ticker firing during test
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := defaultDaemonRun(ctx, deps); err != nil {
+		t.Fatalf("defaultDaemonRun: %v", err)
+	}
+
+	// Final flush should have committed sessions.json and called list-sessions.
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("final flush did not invoke list-sessions")
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
+		t.Errorf("final flush did not write sessions.json: %v", err)
+	}
+	logBytes, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "final flush") {
+		t.Errorf("expected 'final flush' log entry; got:\n%s", logBytes)
+	}
+}
+
+func TestDaemonShutdownFlush_SkipsWhenRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		optionByName: map[string]string{state.RestoringMarkerName: "1"},
+		sessionsOut:  "work|1|0",
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := defaultDaemonRun(ctx, deps); err != nil {
+		t.Fatalf("defaultDaemonRun: %v", err)
+	}
+
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("final flush ran list-sessions despite restoring marker: %v", got)
+	}
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json should not be written when restoring; stat=%v", err)
+	}
+}
+
+// NOTE: A test for "conservatively skips the final flush when @portal-restoring
+// read errors" cannot be exercised via the standard daemonFakeCommander because
+// internal/tmux.Client.GetServerOption coerces every underlying tmux error to
+// tmux.ErrOptionNotFound (see internal/tmux/tmux.go GetServerOption). That
+// makes TryGetServerOption return (false, nil) — never an error — so the
+// defaultShutdownFlush err branch is unreachable through the public Client
+// surface today. The defensive code is preserved for future refactors that
+// distinguish "real failure" from "not found"; until then the case is
+// verified by inspection of defaultShutdownFlush.
+
+func TestDaemonStartup_SeedsHashMapFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Pre-seed scrollback files before invoking the daemon RunE.
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	preseed := map[string][]byte{
+		"work__0.0":  []byte("alpha"),
+		"side__1.2":  []byte("beta"),
+		"third__0.0": []byte("gamma"),
+	}
+	for k, v := range preseed {
+		if err := os.WriteFile(state.ScrollbackFile(dir, k), v, 0o600); err != nil {
+			t.Fatalf("seed scrollback %s: %v", k, err)
+		}
+	}
+
+	// Capture deps via the run-func seam so we can inspect HashMap.
+	holder := new(*daemonDeps)
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
+		*holder = deps
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("runStateDaemon: %v", err)
+	}
+
+	if *holder == nil {
+		t.Fatal("daemonRunFunc not invoked")
+	}
+	hm := (*holder).HashMap
+	for k := range preseed {
+		if _, ok := hm[k]; !ok {
+			t.Errorf("HashMap missing pre-seeded entry for %q", k)
+		}
+	}
+}
+
+func TestDaemonStartup_LoadsPrevIndexFromSessionsJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	// Pre-seed sessions.json with a known structure.
+	want := state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:        "work",
+			Environment: map[string]string{"FOO": "bar"},
+			Windows:     []state.Window{{Index: 0, Name: "main", Panes: []state.Pane{{Index: 0, CWD: "/tmp"}}}},
+		}},
+	}
+	data, err := state.EncodeIndex(want)
+	if err != nil {
+		t.Fatalf("EncodeIndex: %v", err)
+	}
+	if err := os.WriteFile(state.SessionsJSON(dir), data, 0o600); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	holder := new(*daemonDeps)
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
+		*holder = deps
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("runStateDaemon: %v", err)
+	}
+	if *holder == nil {
+		t.Fatal("daemonRunFunc not invoked")
+	}
+	pi := (*holder).PrevIndex
+	if pi == nil {
+		t.Fatal("PrevIndex is nil; expected loaded index")
+	}
+	if len(pi.Sessions) != 1 || pi.Sessions[0].Name != "work" {
+		t.Errorf("PrevIndex sessions = %+v; want one session named 'work'", pi.Sessions)
+	}
+}
+
+func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	holder := new(*daemonDeps)
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
+		*holder = deps
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("runStateDaemon: %v", err)
+	}
+	if *holder == nil {
+		t.Fatal("daemonRunFunc not invoked")
+	}
+	if (*holder).PrevIndex != nil {
+		t.Errorf("PrevIndex = %+v; want nil for missing sessions.json", (*holder).PrevIndex)
+	}
+}
+
+func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	if err := os.WriteFile(state.SessionsJSON(dir), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("seed bad sessions.json: %v", err)
+	}
+
+	holder := new(*daemonDeps)
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
+		*holder = deps
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("runStateDaemon: %v", err)
+	}
+	if (*holder).PrevIndex != nil {
+		t.Errorf("PrevIndex should be nil on decode error; got %+v", *(*holder).PrevIndex)
+	}
+	logBytes, err := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(logBytes), "decode prior sessions.json") {
+		t.Errorf("expected decode warning in log; got:\n%s", logBytes)
+	}
+}

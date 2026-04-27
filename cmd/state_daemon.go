@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -15,56 +18,186 @@ import (
 // daemonDeps bundles the inputs the daemon's run loop needs to operate.
 // Held in one struct so the test seam (daemonRunFunc) can capture and assert
 // against everything the RunE prepared on its behalf.
+//
+// HashMap and PrevIndex are mutable across ticks and updated by the loop —
+// HashMap by WriteScrollbackIfChanged, PrevIndex by captureAndCommit.
+// LastSaveAt is updated by tick when a capture-and-commit succeeds.
 type daemonDeps struct {
-	Dir    string
-	Logger *state.Logger
-	Client *tmux.Client
+	Dir          string
+	Logger       *state.Logger
+	Client       *tmux.Client
+	HashMap      state.HashMap
+	PrevIndex    *state.Index
+	LastSaveAt   time.Time
+	TickerPeriod time.Duration
+	MaxGap       time.Duration
 }
 
 // daemonRunFunc and daemonShutdownFunc are package-level seams. Tests replace
 // them via t.Cleanup so the unit-level tests never block on signals or run
 // the production tick loop.
 //
-// Production callers leave them at the defaults below; later phases own the
-// real tick loop and capture logic and may extend defaultDaemonRun.
+// Production callers leave them at the defaults below.
 var (
 	daemonRunFunc      = defaultDaemonRun
 	daemonShutdownFunc = defaultShutdownFlush
 )
 
-// defaultDaemonRun is the production daemon body for Phase 2 task 2-7.
-// It blocks until ctx is cancelled (SIGHUP/SIGTERM) and then delegates to the
-// shutdown-flush seam. The real per-second tick loop lands in task 2-12.
+// defaultDaemonRun is the production daemon body: a 1-second ticker that fires
+// captures when the dirty flag is set or the 30-second max-gap has elapsed,
+// returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
+//
+// Per-tick errors are logged and swallowed — the loop never aborts on a
+// transient failure (disk full, tmux glitch). See spec § Failure Modes
+// → Disk full during save and § In-Flight Capture Atomicity.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
-	<-ctx.Done()
-	return daemonShutdownFunc(deps)
+	ticker := time.NewTicker(deps.TickerPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			tick(deps)
+		case <-ctx.Done():
+			return daemonShutdownFunc(deps)
+		}
+	}
+}
+
+// tick runs one iteration of the save loop. It never returns an error: errors
+// are logged at WARN and the next tick retries. See spec § Save-Side
+// Architecture → Daemon Tick Loop.
+//
+// The order of checks matters:
+//  1. @portal-restoring suppresses the entire tick (incl. clearing the dirty
+//     flag) so a save.requested touch during restore survives until restore
+//     completes.
+//  2. !dirty && !gap is the no-op fast path (per-tick idle cost is one stat).
+//  3. captureAndCommit failures leave LastSaveAt and save.requested untouched
+//     so the next tick retries.
+func tick(deps *daemonDeps) {
+	restoring, err := state.IsRestoringSet(deps.Client)
+	if err != nil {
+		deps.Logger.Warn("daemon", "read @portal-restoring: %v", err)
+		return
+	}
+	if restoring {
+		return
+	}
+
+	dirty := fileExists(state.SaveRequested(deps.Dir))
+	gap := time.Since(deps.LastSaveAt) >= deps.MaxGap
+	if !dirty && !gap {
+		return
+	}
+
+	if err := captureAndCommit(deps); err != nil {
+		deps.Logger.Warn("daemon", "tick: %v", err)
+		return
+	}
+
+	deps.LastSaveAt = time.Now()
+
+	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		deps.Logger.Warn("daemon", "remove save.requested: %v", err)
+	}
+}
+
+// captureAndCommit runs a full save cycle: list skeleton markers, capture the
+// structural index (merging skeleton-marked panes from the prior index),
+// capture and dedup-write per-pane scrollback, then atomically commit
+// sessions.json. On success, deps.PrevIndex is replaced with the fresh index
+// so subsequent merges have an up-to-date baseline.
+//
+// Per-pane errors (capture-pane fail, write fail) are logged and the cycle
+// continues — one bad pane must not abort the rest of the save. Errors at the
+// "phase boundary" steps (list markers, capture structure, commit) propagate
+// to the caller so tick can log and back off.
+func captureAndCommit(deps *daemonDeps) error {
+	skipSet, err := state.ListSkeletonMarkers(deps.Client)
+	if err != nil {
+		return fmt.Errorf("list markers: %w", err)
+	}
+
+	idx, err := state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex)
+	if err != nil {
+		return fmt.Errorf("capture structure: %w", err)
+	}
+
+	anyScrollbackChanged := false
+	for _, sess := range idx.Sessions {
+		for _, win := range sess.Windows {
+			for _, pane := range win.Panes {
+				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
+				if _, skipped := skipSet[paneKey]; skipped {
+					continue
+				}
+				target := fmt.Sprintf("%s:%d.%d", sess.Name, win.Index, pane.Index)
+				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
+				if err != nil {
+					deps.Logger.Warn("daemon", "capture pane %s: %v", target, err)
+					continue
+				}
+				written, err := state.WriteScrollbackIfChanged(deps.Dir, paneKey, data, hash, deps.HashMap)
+				if err != nil {
+					deps.Logger.Warn("daemon", "write scrollback %s: %v", paneKey, err)
+					continue
+				}
+				if written {
+					anyScrollbackChanged = true
+				}
+			}
+		}
+	}
+
+	if err := state.Commit(deps.Dir, idx, anyScrollbackChanged, deps.Logger); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	deps.PrevIndex = &idx
+	return nil
 }
 
 // defaultShutdownFlush implements the SIGHUP/SIGTERM final-flush handler from
 // the spec's Save-Side Architecture → Signal Handling section.
 //
-// If @portal-restoring is set, capturing now would commit a mid-restore
-// snapshot, so we skip the flush and exit. Otherwise we log the flush — the
-// actual capture-and-write call lands in a later phase that owns the capture
-// pipeline.
+// If @portal-restoring is set we skip the flush — a half-restored topology
+// must not become the committed snapshot. If we cannot determine the marker
+// state (tmux call errored), we conservatively skip too: a stale snapshot is
+// preferable to a guaranteed-bad one.
+//
+// Final-flush capture errors are logged but swallowed: the daemon is exiting
+// anyway and the prior on-disk save remains valid (per AtomicWrite atomicity).
 func defaultShutdownFlush(deps *daemonDeps) error {
-	val, err := deps.Client.GetServerOption("@portal-restoring")
-	if err == nil && val != "" {
-		deps.Logger.Info("daemon", "skipping final flush: @portal-restoring=%s", val)
+	restoring, err := state.IsRestoringSet(deps.Client)
+	if err != nil {
+		deps.Logger.Warn("daemon", "read @portal-restoring at shutdown: %v; skipping final flush", err)
+		return nil
+	}
+	if restoring {
+		deps.Logger.Info("daemon", "skipping final flush: @portal-restoring set")
 		return nil
 	}
 	deps.Logger.Info("daemon", "final flush")
+	if err := captureAndCommit(deps); err != nil {
+		deps.Logger.Warn("daemon", "final flush: %v", err)
+	}
 	return nil
+}
+
+// fileExists reports whether path resolves to an existing filesystem entry.
+// Used as a hot-path stat for the daemon's per-tick dirty-flag check.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // stateDaemonCmd is the long-running save daemon hosted in the
 // _portal-saver tmux session. Hidden from --help; invoked internally by tmux
 // via "new-session -d -s _portal-saver 'portal state daemon'".
 //
-// RunE wires up the state directory, log file, PID/version markers, and a
+// RunE wires up the state directory, log file, PID/version markers, the
+// per-pane hash map seed, the prior on-disk index (for skeleton merge), and a
 // signal-cancelled context, then delegates the run loop to daemonRunFunc.
-// The tick loop and capture logic land in later Phase 2 tasks; this body owns
-// the scaffold (paths + lifecycle hooks).
 var stateDaemonCmd = &cobra.Command{
 	Use:    "daemon",
 	Short:  "Run the Portal save daemon (internal)",
@@ -97,8 +230,33 @@ var stateDaemonCmd = &cobra.Command{
 			return fmt.Errorf("write version file: %w", err)
 		}
 
+		// Seed the per-pane content-hash map from any existing scrollback
+		// files so the first cycle dedupes against what is already on disk.
+		hm := state.SeedHashMap(dir, logger)
+
+		// Load the prior structural index so skeleton-marked panes can be
+		// merged from authoritative pre-boot state during the first capture.
+		// A missing or undecodable file maps to prevIdx=nil — capture treats
+		// that as "no prior state" and skips the merge.
+		var prevIdx *state.Index
+		if data, err := os.ReadFile(state.SessionsJSON(dir)); err == nil {
+			if idx, decErr := state.DecodeIndex(data); decErr == nil {
+				prevIdx = &idx
+			} else {
+				logger.Warn("daemon", "decode prior sessions.json: %v", decErr)
+			}
+		}
+
 		client := tmux.NewClient(&tmux.RealCommander{})
-		deps := &daemonDeps{Dir: dir, Logger: logger, Client: client}
+		deps := &daemonDeps{
+			Dir:          dir,
+			Logger:       logger,
+			Client:       client,
+			HashMap:      hm,
+			PrevIndex:    prevIdx,
+			TickerPeriod: 1 * time.Second,
+			MaxGap:       30 * time.Second,
+		}
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
