@@ -1783,3 +1783,120 @@ func TestSetSessionEnvironment(t *testing.T) {
 		}
 	})
 }
+
+func TestSelectLayout(t *testing.T) {
+	t.Run("invokes select-layout with composed window target and saved layout string", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectLayout("work", 1, "abcd,80x24,0,0")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"select-layout", "-t", "work:1", "abcd,80x24,0,0"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectLayout("work", 0, "tiled")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to select-layout") {
+			t.Errorf("error %q lacks expected prefix", err.Error())
+		}
+		if !strings.Contains(err.Error(), "work:0") {
+			t.Errorf("error %q lacks target context", err.Error())
+		}
+	})
+}
+
+func TestSelectPane(t *testing.T) {
+	t.Run("invokes select-pane with composed window.pane target", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectPane("work", 2, 3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"select-pane", "-t", "work:2.3"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectPane("work", 0, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to select-pane") {
+			t.Errorf("error %q lacks expected prefix", err.Error())
+		}
+		if !strings.Contains(err.Error(), "work:0.0") {
+			t.Errorf("error %q lacks target context", err.Error())
+		}
+	})
+}
+
+func TestResizePaneZoom(t *testing.T) {
+	t.Run("invokes resize-pane -Z with composed window.pane target", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.ResizePaneZoom("work", 1, 2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"resize-pane", "-Z", "-t", "work:1.2"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.ResizePaneZoom("work", 0, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to resize-pane -Z") {
+			t.Errorf("error %q lacks expected prefix", err.Error())
+		}
+		if !strings.Contains(err.Error(), "work:0.0") {
+			t.Errorf("error %q lacks target context", err.Error())
+		}
+	})
+}

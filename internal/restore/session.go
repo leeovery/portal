@@ -130,6 +130,78 @@ func (r *SessionRestorer) buildPaneInfo(sess state.Session, baseIdx, paneBaseIdx
 	return allPanes, nil
 }
 
+// ApplyWindowGeometry replays the saved layout, active-pane selection, and
+// zoom state for every window in sess against the live tmux session of the
+// same name. baseIdx and paneBaseIdx are the predicted live indices (from
+// predictLiveIndices) used to translate saved structural positions to live
+// (window, pane) targets.
+//
+// Per the spec's "Per-Window Restoration Order", the call sequence per window
+// is select-layout → select-pane → resize-pane -Z; zoom is applied only when
+// the saved zoomed flag was true and only after layout, since resize-pane -Z
+// is a toggle whose effect depends on the freshly-applied geometry.
+//
+// Errors are best-effort: a select-layout failure falls back to "tiled" and
+// continues; any other per-step failure is logged and the next step (or next
+// window) proceeds. The function returns nothing because the broader restore
+// flow degrades locally and continues per spec.
+func (r *SessionRestorer) ApplyWindowGeometry(sess state.Session, baseIdx, paneBaseIdx int) {
+	for wi, win := range sess.Windows {
+		liveWin := baseIdx + wi
+		liveActivePane := paneBaseIdx + activePanePosition(win.Panes)
+
+		r.applyLayoutWithFallback(sess.Name, liveWin, win.Layout)
+		r.applyActivePane(sess.Name, liveWin, liveActivePane)
+		if win.Zoomed {
+			r.applyZoom(sess.Name, liveWin, liveActivePane)
+		}
+	}
+}
+
+// activePanePosition returns the structural index of the first pane marked
+// Active. If no pane is marked active, it returns 0 — matching the spec's
+// "default to first pane" fallback.
+func activePanePosition(panes []state.Pane) int {
+	for i, p := range panes {
+		if p.Active {
+			return i
+		}
+	}
+	return 0
+}
+
+// applyLayoutWithFallback attempts the saved layout first; on failure, logs
+// a warning and tries "tiled". If tiled also fails, logs and proceeds — the
+// caller continues with the remaining geometry steps regardless.
+func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, layout string) {
+	err := r.Client.SelectLayout(session, window, layout)
+	if err == nil {
+		return
+	}
+	if r.Logger != nil {
+		r.Logger.Warn("restore", "select-layout %s:%d %q failed: %v; falling back to tiled", session, window, layout, err)
+	}
+	if err := r.Client.SelectLayout(session, window, "tiled"); err != nil && r.Logger != nil {
+		r.Logger.Warn("restore", "select-layout %s:%d tiled also failed: %v", session, window, err)
+	}
+}
+
+// applyActivePane sets the active pane within a live window. Failure is
+// logged and ignored.
+func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
+	if err := r.Client.SelectPane(session, window, pane); err != nil && r.Logger != nil {
+		r.Logger.Warn("restore", "select-pane %s:%d.%d failed: %v", session, window, pane, err)
+	}
+}
+
+// applyZoom toggles zoom on the active pane after layout has been applied.
+// Failure is logged and ignored.
+func (r *SessionRestorer) applyZoom(session string, window, pane int) {
+	if err := r.Client.ResizePaneZoom(session, window, pane); err != nil && r.Logger != nil {
+		r.Logger.Warn("restore", "resize-pane -Z %s:%d.%d failed: %v", session, window, pane, err)
+	}
+}
+
 // applyEnvironment sets every saved environment variable on the named session,
 // in sorted-key order for deterministic call ordering. Per the spec, a single
 // failure is logged and skipped — restoration must continue.

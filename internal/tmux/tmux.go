@@ -497,6 +497,49 @@ func (c *Client) SetSessionEnvironment(session, key, value string) error {
 	return nil
 }
 
+// SelectLayout applies the given layout string to the named window via
+// "tmux select-layout -t <session>:<window> <layout>". Used during restoration
+// to recreate the saved geometry once panes exist; tmux fits panes to the
+// layout in place, so the call is order-sensitive (must come after all
+// split-windows for that window).
+func (c *Client) SelectLayout(session string, window int, layout string) error {
+	target := fmt.Sprintf("%s:%d", session, window)
+	args := []string{"select-layout", "-t", target, layout}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to select-layout %s: %w", target, err)
+	}
+	return nil
+}
+
+// SelectPane sets the active pane within the named window via
+// "tmux select-pane -t <session>:<window>.<pane>". The pane index is the live
+// index after restoration (caller is responsible for translating saved →
+// live).
+func (c *Client) SelectPane(session string, window, pane int) error {
+	target := fmt.Sprintf("%s:%d.%d", session, window, pane)
+	args := []string{"select-pane", "-t", target}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to select-pane %s: %w", target, err)
+	}
+	return nil
+}
+
+// ResizePaneZoom toggles zoom on the named pane via "tmux resize-pane -Z -t
+// <session>:<window>.<pane>". Zoom is a toggle; callers must apply it only
+// when the saved state indicated a zoomed window and the layout has just been
+// freshly applied (which leaves zoom off), to land on the correct final state.
+func (c *Client) ResizePaneZoom(session string, window, pane int) error {
+	target := fmt.Sprintf("%s:%d.%d", session, window, pane)
+	args := []string{"resize-pane", "-Z", "-t", target}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to resize-pane -Z %s: %w", target, err)
+	}
+	return nil
+}
+
 // UnsetGlobalHookAt removes the hook at the given index for the given event
 // via "tmux set-hook -gu <event>[<index>]". Surrounding entries are not affected.
 func (c *Client) UnsetGlobalHookAt(event string, index int) error {
