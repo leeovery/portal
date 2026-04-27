@@ -19,8 +19,16 @@ type Session struct {
 }
 
 // Commander defines the interface for executing tmux commands.
+//
+// Run trims surrounding whitespace from the output — convenient for the vast
+// majority of tmux commands whose output is a single value or list of newline-
+// separated lines that callers want stripped. RunRaw returns the bytes
+// verbatim and is reserved for callers that must preserve trailing whitespace
+// and ANSI escape sequences (notably capture-pane scrollback dumps used for
+// content-hash dedup).
 type Commander interface {
 	Run(args ...string) (string, error)
+	RunRaw(args ...string) (string, error)
 }
 
 // RealCommander executes tmux commands via os/exec.
@@ -34,6 +42,18 @@ func (r *RealCommander) Run(args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// RunRaw executes a tmux command and returns its output verbatim — no
+// whitespace trim, no transformation. Used by capture-pane where trailing
+// blank lines and ANSI escapes are content, not noise.
+func (r *RealCommander) RunRaw(args ...string) (string, error) {
+	cmd := exec.Command("tmux", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // Client provides tmux operations using a Commander.
@@ -365,6 +385,19 @@ func (c *Client) AppendGlobalHook(event, command string) error {
 		return fmt.Errorf("failed to append hook on %q: %w", event, err)
 	}
 	return nil
+}
+
+// CapturePane returns the raw scrollback for the given pane target via
+// "tmux capture-pane -e -p -S - -t <target>". The output is returned verbatim
+// (no trimming) so the caller can hash and persist it byte-for-byte. The -e
+// flag preserves ANSI escape sequences and -S - replays from the start of the
+// history buffer.
+func (c *Client) CapturePane(target string) (string, error) {
+	out, err := c.cmd.RunRaw("capture-pane", "-e", "-p", "-S", "-", "-t", target)
+	if err != nil {
+		return "", fmt.Errorf("failed to capture pane %q: %w", target, err)
+	}
+	return out, nil
 }
 
 // UnsetGlobalHookAt removes the hook at the given index for the given event

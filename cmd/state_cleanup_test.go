@@ -34,6 +34,19 @@ func (r *recordingCommander) Run(args ...string) (string, error) {
 	return r.Output, r.Err
 }
 
+// RunRaw mirrors Run but represents the no-trim variant. Recording behaviour
+// stays identical so test assertions on Calls work regardless of which method
+// the production code reaches.
+func (r *recordingCommander) RunRaw(args ...string) (string, error) {
+	r.mu.Lock()
+	r.Calls = append(r.Calls, args)
+	r.mu.Unlock()
+	if r.RunFunc != nil {
+		return r.RunFunc(args...)
+	}
+	return r.Output, r.Err
+}
+
 // setHookCalls returns the "set-hook -gu <target>" calls in invocation order.
 func setHookCalls(calls [][]string) []string {
 	var out []string

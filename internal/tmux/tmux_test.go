@@ -17,6 +17,9 @@ type MockCommander struct {
 	Calls [][]string
 	// RunFunc, when set, is called instead of returning Output/Err.
 	RunFunc func(args ...string) (string, error)
+	// RunRawFunc, when set, is called by RunRaw instead of returning Output/Err.
+	// When unset, RunRaw falls back to the same Output/Err that Run would return.
+	RunRawFunc func(args ...string) (string, error)
 }
 
 // Run returns the configured output and error, or delegates to RunFunc.
@@ -24,6 +27,16 @@ func (m *MockCommander) Run(args ...string) (string, error) {
 	m.Calls = append(m.Calls, args)
 	if m.RunFunc != nil {
 		return m.RunFunc(args...)
+	}
+	return m.Output, m.Err
+}
+
+// RunRaw mirrors Run but is the no-trim variant. Tests that don't care about
+// raw vs trimmed semantics fall through to Output/Err.
+func (m *MockCommander) RunRaw(args ...string) (string, error) {
+	m.Calls = append(m.Calls, args)
+	if m.RunRawFunc != nil {
+		return m.RunRawFunc(args...)
 	}
 	return m.Output, m.Err
 }
@@ -1390,6 +1403,73 @@ func TestListAllPanesWithFormat(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "failed to list panes") {
 			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+	})
+}
+
+func TestCapturePane(t *testing.T) {
+	t.Run("uses capture-pane -e -p -S - -t <target> verbatim", func(t *testing.T) {
+		mock := &MockCommander{
+			RunRawFunc: func(args ...string) (string, error) {
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		_, err := client.CapturePane("my-session:0.1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"capture-pane", "-e", "-p", "-S", "-", "-t", "my-session:0.1"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("preserves trailing whitespace and ANSI escapes via RunRaw", func(t *testing.T) {
+		raw := "abc\n  \x1b[31m"
+		mock := &MockCommander{
+			RunRawFunc: func(args ...string) (string, error) {
+				return raw, nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		got, err := client.CapturePane("work:0.0")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != raw {
+			t.Errorf("CapturePane() = %q, want %q (raw output must not be trimmed)", got, raw)
+		}
+	})
+
+	t.Run("propagates errors with target in message", func(t *testing.T) {
+		mock := &MockCommander{
+			RunRawFunc: func(args ...string) (string, error) {
+				return "", fmt.Errorf("can't find pane")
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		_, err := client.CapturePane("missing:0.0")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to capture pane") {
+			t.Errorf("error %q does not contain expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "missing:0.0") {
+			t.Errorf("error %q does not contain target", err.Error())
 		}
 	})
 }

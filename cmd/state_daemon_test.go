@@ -239,6 +239,12 @@ func (f *fakeCommander) Run(args ...string) (string, error) {
 	return "", nil
 }
 
+// RunRaw mirrors Run for this fake — daemon shutdown tests don't need a
+// distinction between trimmed and raw output.
+func (f *fakeCommander) RunRaw(args ...string) (string, error) {
+	return f.Run(args...)
+}
+
 func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)

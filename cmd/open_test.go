@@ -948,6 +948,12 @@ func (s *stubCommander) Run(args ...string) (string, error) {
 	return "", nil
 }
 
+// RunRaw satisfies tmux.Commander; the cmd-level stub never expects raw
+// callers, so it returns the same empty defaults Run does.
+func (s *stubCommander) RunRaw(args ...string) (string, error) {
+	return "", nil
+}
+
 // defaultTestTUIConfig returns a tuiConfig with all stub dependencies wired.
 // Tests override individual fields as needed for their specific scenario.
 func defaultTestTUIConfig() tuiConfig {

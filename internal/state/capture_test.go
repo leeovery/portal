@@ -53,6 +53,13 @@ func (m *captureMock) Run(args ...string) (string, error) {
 	}
 }
 
+// RunRaw satisfies tmux.Commander; CaptureStructure never invokes it, so any
+// call here indicates a test-setup mismatch.
+func (m *captureMock) RunRaw(args ...string) (string, error) {
+	m.t.Fatalf("captureMock.RunRaw unexpectedly called with %v", args)
+	return "", nil
+}
+
 // listSessionsFor returns a list-sessions output line for the given names. The
 // numeric fields are placeholders; CaptureStructure only consumes the names.
 func listSessionsFor(names ...string) string {
