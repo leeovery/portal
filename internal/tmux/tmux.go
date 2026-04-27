@@ -276,3 +276,35 @@ func (c *Client) DeleteServerOption(name string) error {
 	}
 	return nil
 }
+
+// ShowGlobalHooks returns the raw output of "tmux show-hooks -g".
+// The output is returned verbatim (no trimming) so callers can parse the
+// array-indexed hook entries with line and whitespace fidelity intact.
+func (c *Client) ShowGlobalHooks() (string, error) {
+	output, err := c.cmd.Run("show-hooks", "-g")
+	if err != nil {
+		return "", fmt.Errorf("failed to show global hooks: %w", err)
+	}
+	return output, nil
+}
+
+// AppendGlobalHook appends a command to the global hook array for the given event
+// via "tmux set-hook -ga". The command is passed as a single argv element so that
+// single quotes and shell metacharacters within it are preserved verbatim.
+func (c *Client) AppendGlobalHook(event, command string) error {
+	_, err := c.cmd.Run("set-hook", "-ga", event, command)
+	if err != nil {
+		return fmt.Errorf("failed to append hook on %q: %w", event, err)
+	}
+	return nil
+}
+
+// UnsetGlobalHookAt removes the hook at the given index for the given event
+// via "tmux set-hook -gu <event>[<index>]". Surrounding entries are not affected.
+func (c *Client) UnsetGlobalHookAt(event string, index int) error {
+	_, err := c.cmd.Run("set-hook", "-gu", fmt.Sprintf("%s[%d]", event, index))
+	if err != nil {
+		return fmt.Errorf("failed to unset hook %s[%d]: %w", event, index, err)
+	}
+	return nil
+}
