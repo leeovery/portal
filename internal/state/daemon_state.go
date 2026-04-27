@@ -1,0 +1,110 @@
+package state
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/leeovery/portal/internal/fileutil"
+)
+
+// ErrPIDFileAbsent is returned by ReadPIDFile when daemon.pid does not exist.
+// Callers use errors.Is to distinguish a missing daemon (no PID file written
+// yet) from genuine I/O or parse errors.
+var ErrPIDFileAbsent = errors.New("daemon.pid absent")
+
+// ErrVersionFileAbsent is returned by ReadVersionFile when daemon.version does
+// not exist. Callers use errors.Is to distinguish a never-recorded version
+// from genuine I/O errors.
+var ErrVersionFileAbsent = errors.New("daemon.version absent")
+
+// WritePIDFile atomically writes pid to daemon.pid inside dir. The file is
+// created with mode 0600 (via fileutil.AtomicWrite's os.CreateTemp).
+func WritePIDFile(dir string, pid int) error {
+	content := strconv.Itoa(pid) + "\n"
+	return fileutil.AtomicWrite(DaemonPID(dir), []byte(content))
+}
+
+// ReadPIDFile reads daemon.pid from dir and returns the parsed PID.
+//
+// If the file does not exist, ErrPIDFileAbsent is returned. Other I/O or
+// parse errors are wrapped and returned with a zero PID.
+func ReadPIDFile(dir string) (int, error) {
+	data, err := os.ReadFile(DaemonPID(dir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, ErrPIDFileAbsent
+		}
+		return 0, fmt.Errorf("read daemon.pid: %w", err)
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("parse daemon.pid: %w", err)
+	}
+	return pid, nil
+}
+
+// IsProcessAlive reports whether a process with the given PID exists and is
+// signalable from the current process. It uses a kill(pid, 0) probe:
+//
+//   - nil error             → process exists and we can signal it
+//   - syscall.EPERM         → process exists but we lack permission (still alive)
+//   - syscall.ESRCH         → no such process
+//   - any other error / pid ≤ 0 → treated as dead
+func IsProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	if errors.Is(err, syscall.ESRCH) {
+		return false
+	}
+	return false
+}
+
+// DaemonAlive reports whether dir contains a daemon.pid pointing at a live
+// process. Both conditions must hold: missing PID file, unparseable PID file,
+// or a dead process all yield false.
+func DaemonAlive(dir string) bool {
+	pid, err := ReadPIDFile(dir)
+	if err != nil {
+		return false
+	}
+	return IsProcessAlive(pid)
+}
+
+// WriteVersionFile atomically writes the daemon's version marker to
+// daemon.version inside dir. The file is created with mode 0600.
+func WriteVersionFile(dir, version string) error {
+	content := version + "\n"
+	return fileutil.AtomicWrite(DaemonVersion(dir), []byte(content))
+}
+
+// ReadVersionFile reads daemon.version from dir, trims trailing whitespace,
+// and returns the recorded version string.
+//
+// If the file does not exist, ErrVersionFileAbsent is returned. An empty file
+// returns ("", nil) — distinct from absent — so callers can tell that the
+// daemon recorded a version (even if blank) versus never having written one.
+func ReadVersionFile(dir string) (string, error) {
+	data, err := os.ReadFile(DaemonVersion(dir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", ErrVersionFileAbsent
+		}
+		return "", fmt.Errorf("read daemon.version: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
