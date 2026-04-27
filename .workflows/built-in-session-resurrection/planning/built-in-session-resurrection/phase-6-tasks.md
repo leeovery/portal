@@ -1,7 +1,7 @@
 ---
 phase: 6
 phase_name: Observability, user commands, and documentation
-total: 11
+total: 12
 ---
 
 ## built-in-session-resurrection-6-1 | approved
@@ -1614,3 +1614,53 @@ A user with a running Portal from a pre-feature version upgrading to this releas
 > - **Changelog entries** — handled by standard release process, not specified here."
 
 **Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — section "Documentation Deliverables".
+
+## built-in-session-resurrection-6-12 | approved
+
+### Task 6-12: Delete legacy `bootstrap.NewShim` and the `BootstrapDeps.Bootstrapper` field
+
+**Problem**: Phase 5 task 5-3 introduced `cmd/bootstrap/shim.go`'s `NewShim(ServerBootstrapper) Runner` and the legacy `BootstrapDeps.Bootstrapper` field as a transitional adapter so existing cmd-package tests that pre-dated the orchestrator continued to compile during the Phase 5 cutover. Both carry `// Deprecated:` markers and `TODO(phase-6): delete after legacy bootstrappers removed` comments. With every Phase 5 / Phase 6 task landed, every cmd-package test now has a path to inject the real `*bootstrap.Orchestrator` (via `BootstrapDeps.Orchestrator` from task 5-3). Leaving the shim shipping in v1 means the deprecated surface lingers indefinitely.
+
+**Solution**: Audit every test that still constructs `BootstrapDeps{Bootstrapper: ...}` (legacy shape), migrate it to `BootstrapDeps{Orchestrator: ...}` with a recording / fake `bootstrap.Runner`, then delete `cmd/bootstrap/shim.go`, `cmd/bootstrap/shim_test.go`, and the `BootstrapDeps.Bootstrapper` field. Run `grep -R 'NewShim\|Bootstrapper' cmd/ internal/` to verify zero residual references after the migration. Expected impact is small — task 5-3 introduced the shim specifically to bound this migration to a Phase 6 follow-up.
+
+**Outcome**: `cmd/bootstrap/shim.go` and its test no longer exist; `BootstrapDeps` carries only `Orchestrator` and `Client`. Every cmd-package test that exercises bootstrap injects a `bootstrap.Runner` (the canonical seam). `go build ./...` and `go test ./...` pass. Repo-wide `grep` for `NewShim` returns zero matches.
+
+**Do**:
+- Run `rg -n 'BootstrapDeps\{[^}]*Bootstrapper' cmd/` to enumerate the legacy-shape test fixtures introduced before Phase 5.
+- For each legacy fixture: replace `Bootstrapper: <fakeServer>` with `Orchestrator: <fakeRunner>`, where `<fakeRunner>` implements `bootstrap.Runner` with the same effective semantics (typically a recording stub that returns the same `(serverStarted, warnings, err)` triple the test previously asserted).
+- Delete `cmd/bootstrap/shim.go` and `cmd/bootstrap/shim_test.go`.
+- Delete the `Bootstrapper ServerBootstrapper` field from `cmd/root.go`'s `BootstrapDeps` struct.
+- Delete the legacy-shim branch in `buildBootstrapDeps()` (the `if bootstrapDeps.Orchestrator != nil { ... } else { /* shim path */ }` shape collapses to just the orchestrator path).
+- Decide whether to also delete `ServerBootstrapper` itself: if no caller outside the deleted shim references it, delete; otherwise keep with its current callers.
+- Run `go build ./...` and `go test ./...`; fix any residual failures by migrating the call site to the orchestrator seam.
+- Final `grep -R 'NewShim\|legacy' cmd/ internal/` should return zero matches in resurrection code.
+
+**Acceptance Criteria**:
+- [ ] `cmd/bootstrap/shim.go` is deleted.
+- [ ] `cmd/bootstrap/shim_test.go` is deleted.
+- [ ] `BootstrapDeps.Bootstrapper` field is removed from `cmd/root.go`.
+- [ ] `buildBootstrapDeps()` no longer has a shim-fallback branch — returns the orchestrator from `BootstrapDeps.Orchestrator` (or a freshly-constructed one) unconditionally.
+- [ ] Every cmd-package test that previously injected `BootstrapDeps{Bootstrapper: ...}` now injects `BootstrapDeps{Orchestrator: ...}`.
+- [ ] `ServerBootstrapper` interface is either deleted (if no callers remain) or retained with a comment explaining the surviving caller.
+- [ ] `go build ./...` and `go test ./...` pass with zero failures.
+- [ ] Repo-wide `grep` for `NewShim` returns zero matches.
+
+**Tests**:
+- `"go build ./... succeeds with zero references to NewShim"`
+- `"go test ./... passes after every legacy fixture is migrated to the Orchestrator seam"`
+- `"buildBootstrapDeps returns an Orchestrator (never a shim) for every BootstrapDeps shape"`
+
+**Edge Cases**:
+- A test using the shim only because its assertion was scoped to `EnsureServer` (no hook registration / restore expected): the migrated fake `bootstrap.Runner` returns `(serverStarted, nil, nil)` — equivalent semantics, still satisfies the test's pre-shim assertion.
+- A test that asserted the old shim's "no hook registration" property: migrate the assertion to "the injected fake `Runner.Run` returns `(true, nil, nil)`" — same effective contract, asserted at the orchestrator boundary instead of at the shim.
+- If `ServerBootstrapper` has callers outside the shim path (e.g., another command or test fixture references it independently), retain it with a comment naming those callers; otherwise delete.
+- This task is purely mechanical — no new behaviour, no new tests beyond the migration. Treat the build + test pass as the sole signal of completion.
+
+**Context**:
+> Task 5-3's shim guidance (Edge Cases section): "`BootstrapDeps.Bootstrapper` + `bootstrap.NewShim` is a bridge, not a permanent API. Phase 6 deletes the shim once every cmd test is migrated to the full `Orchestrator` seam. Marked in the field's godoc comment."
+>
+> Task 5-3's Acceptance: "`bootstrap.NewShim(ServerBootstrapper) Runner` exists in `cmd/bootstrap/shim.go` and is documented as deprecated."
+>
+> This task is the deletion-half of the Phase-5 transitional bridge. Expected to be ~30 minutes of mechanical edits; carried as a distinct task so it is not lost as a TODO comment that survives v1.
+
+**Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — no direct reference (this is plan-internal cleanup of a transitional adapter introduced in task 5-3).

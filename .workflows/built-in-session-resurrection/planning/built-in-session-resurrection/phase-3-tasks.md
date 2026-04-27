@@ -179,11 +179,12 @@ total: 13
 
 Task 3-5 is the defensive re-alignment point: it re-queries `list-panes -t <session>` after creation and verifies the prediction matched, logging a warning if not. Under Option A, the prediction is correct in every realistic scenario; the re-query is belt-and-braces only.
 
-**[needs-info]**: Task 3-3's "predict live indices via `base-index` / `pane-base-index` server options" is a planning invention — the spec describes a re-query approach (line 324) but does not mandate prediction-before-creation. Prediction works in the common case but adds complexity (option reads, prediction-vs-live divergence handling in task 3-5). Alternative approaches the spec is compatible with:
-- **Option B**: pass the saved-paneKey FIFO path to the helper at construction; after pane creation, re-query live paneKey and either (b1) symlink live → saved or (b2) have `signal-hydrate` use the saved paneKey from the index (NOT the live paneKey).
+**[needs-info]**: Task 3-3's "predict live indices via `base-index` / `pane-base-index` server options" is a planning invention — the spec describes a re-query approach but does not mandate prediction-before-creation. The spec is compatible with three approaches:
+- **Option A** (planning's working assumption): predict via `base-index` / `pane-base-index` server options before pane creation; FIFO + hydrate command use the predicted live paneKey; task 3-5 is the defensive re-alignment point.
+- **Option B**: pass the saved-paneKey FIFO path to the helper; after pane creation, re-query live paneKey and either (b1) symlink live → saved or (b2) have `signal-hydrate` consult the saved paneKey from the index.
 - **Option C**: decouple FIFO naming from paneKey — use a UUID stored in the index.
 
-Planning has chosen Option A (prediction). User should confirm or override before implementation. If Option A stands, task 3-5's drift-detection becomes a defensive log-only branch; if any other Option is chosen, task 3-5 simplifies further.
+This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task) and task 3-5 (drift detection vs. authoritative re-query) cannot be implemented. The Do / Acceptance / Tests sections below describe Option A; if the user picks B or C, those sections are rewritten.
 
 **Outcome**: After `RestoreSession` returns, one live tmux session exists with the saved name, saved environment applied (inheritable by subsequent pane creation), every window in saved order, every pane in each window with its hydrate command running as the initial process blocking on a created FIFO. Task 3-4 (layout/active/zoom) and task 3-5 (live paneKey re-query + marker) run *after* this task's work completes for the session.
 
@@ -260,7 +261,7 @@ Planning has chosen Option A (prediction). User should confirm or override befor
 - [ ] `set-environment` failure for one key logs and continues to the next key; does not abort session build.
 - [ ] `new-window` / `split-window` failure returns wrapped error; orchestrator (task 3-6) handles session-level degradation.
 - [ ] Returns `nil` on full successful creation; return error points out the failing step.
-- [ ] User has confirmed the "predict live indices via server-option read" approach (Option A) over the alternative spec-compatible approaches (Options B, C). See `[needs-info]` in the Solution section.
+- [ ] [BLOCKED — needs planning decision on live-index source] User pins Option A, B, or C; subsequent implementation steps are rewritten to match the chosen route.
 
 **Tests**:
 - `"it creates a single-pane session with no environment"`

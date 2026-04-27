@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-27
 cycle: 3
 phase: Plan Integrity Review
@@ -59,7 +59,7 @@ This decision is BLOCKED on user confirmation. Until pinned, task 3-3 (this task
 - [ ] [BLOCKED — needs planning decision on live-index source] User pins Option A, B, or C; subsequent implementation steps are rewritten to match the chosen route.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -140,7 +140,7 @@ This is a small, mechanical follow-up but it is the kind of TODO that quietly ac
 | built-in-session-resurrection-6-12 | Delete legacy `bootstrap.NewShim` and `BootstrapDeps.Bootstrapper` field | every legacy-shape test migrated, `ServerBootstrapper` deleted iff no remaining callers, `go build` clean after `grep` returns zero `NewShim` matches |
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Tick task created as tick-9c172c (parent tick-27d572, blocked-by tick-b75737). Manifest task_map updated. phase-6-tasks.md frontmatter total bumped 11 → 12.
 
 ---
