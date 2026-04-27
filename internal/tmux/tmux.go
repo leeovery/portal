@@ -429,6 +429,74 @@ func (c *Client) CapturePane(target string) (string, error) {
 	return out, nil
 }
 
+// NewSessionWithCommand creates a new detached tmux session with the given
+// name. When cwd is non-empty it is passed as -c; when shellCommand is
+// non-empty it is appended as the trailing argument and becomes the pane's
+// initial process. Distinct from NewSession in that cwd is optional — used by
+// the restore path where saved panes may have no recorded cwd.
+func (c *Client) NewSessionWithCommand(name, cwd, shellCommand string) error {
+	args := []string{"new-session", "-d", "-s", name}
+	if cwd != "" {
+		args = append(args, "-c", cwd)
+	}
+	if shellCommand != "" {
+		args = append(args, shellCommand)
+	}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to create session %q: %w", name, err)
+	}
+	return nil
+}
+
+// NewWindow creates a new tmux window in the session identified by target.
+// Optional name (-n), cwd (-c), and shellCommand are appended only when
+// non-empty.
+func (c *Client) NewWindow(target, name, cwd, shellCommand string) error {
+	args := []string{"new-window", "-t", target}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if cwd != "" {
+		args = append(args, "-c", cwd)
+	}
+	if shellCommand != "" {
+		args = append(args, shellCommand)
+	}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to create window in %q: %w", target, err)
+	}
+	return nil
+}
+
+// SplitWindow splits the tmux window identified by target into a new pane.
+// Optional cwd (-c) and shellCommand are appended only when non-empty.
+func (c *Client) SplitWindow(target, cwd, shellCommand string) error {
+	args := []string{"split-window", "-t", target}
+	if cwd != "" {
+		args = append(args, "-c", cwd)
+	}
+	if shellCommand != "" {
+		args = append(args, shellCommand)
+	}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to split window %q: %w", target, err)
+	}
+	return nil
+}
+
+// SetSessionEnvironment sets a single environment variable on the named
+// session via "tmux set-environment -t <session> <key> <value>".
+func (c *Client) SetSessionEnvironment(session, key, value string) error {
+	_, err := c.cmd.Run("set-environment", "-t", session, key, value)
+	if err != nil {
+		return fmt.Errorf("failed to set env %s on %q: %w", key, session, err)
+	}
+	return nil
+}
+
 // UnsetGlobalHookAt removes the hook at the given index for the given event
 // via "tmux set-hook -gu <event>[<index>]". Surrounding entries are not affected.
 func (c *Client) UnsetGlobalHookAt(event string, index int) error {

@@ -1544,3 +1544,242 @@ func TestTryGetServerOption(t *testing.T) {
 		}
 	})
 }
+
+func TestNewSessionWithCommand(t *testing.T) {
+	t.Run("creates session with name, cwd, and shell-command", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		shellCmd := "sh -c 'portal state hydrate --fifo X --file Y --hook-key Z; exec $SHELL'"
+		err := client.NewSessionWithCommand("work", "/Users/me/project", shellCmd)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		want := []string{"new-session", "-d", "-s", "work", "-c", "/Users/me/project", shellCmd}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("omits -c when cwd is empty", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewSessionWithCommand("work", "", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"new-session", "-d", "-s", "work", "echo hi"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("omits trailing shell-command arg when empty", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewSessionWithCommand("work", "/tmp", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"new-session", "-d", "-s", "work", "-c", "/tmp"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.NewSessionWithCommand("work", "/tmp", "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to create session") {
+			t.Errorf("error %q lacks expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), `"work"`) {
+			t.Errorf("error %q lacks session name", err.Error())
+		}
+	})
+}
+
+func TestNewWindow(t *testing.T) {
+	t.Run("creates window with target, name, cwd, and shell-command", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewWindow("work:", "code", "/work", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"new-window", "-t", "work:", "-n", "code", "-c", "/work", "echo hi"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("omits -n when name is empty", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewWindow("work:", "", "/work", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"new-window", "-t", "work:", "-c", "/work"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+	})
+
+	t.Run("omits -c when cwd is empty", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.NewWindow("work:", "code", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"new-window", "-t", "work:", "-n", "code"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.NewWindow("work:", "code", "", "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to create window") {
+			t.Errorf("error %q lacks expected message", err.Error())
+		}
+	})
+}
+
+func TestSplitWindow(t *testing.T) {
+	t.Run("splits window with cwd and shell-command", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SplitWindow("work:0", "/work", "echo hi")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"split-window", "-t", "work:0", "-c", "/work", "echo hi"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("omits -c when cwd is empty", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SplitWindow("work:0", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"split-window", "-t", "work:0"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.SplitWindow("work:0", "", "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to split window") {
+			t.Errorf("error %q lacks expected message", err.Error())
+		}
+	})
+}
+
+func TestSetSessionEnvironment(t *testing.T) {
+	t.Run("sets environment variable on session", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SetSessionEnvironment("work", "LANG", "en_US.UTF-8")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"set-environment", "-t", "work", "LANG", "en_US.UTF-8"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.SetSessionEnvironment("work", "LANG", "en_US.UTF-8")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to set env") {
+			t.Errorf("error %q lacks expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "LANG") {
+			t.Errorf("error %q lacks env var name", err.Error())
+		}
+	})
+}
