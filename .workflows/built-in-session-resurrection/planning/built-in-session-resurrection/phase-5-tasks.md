@@ -101,7 +101,7 @@ total: 10
     1. `serverStarted, err := o.Server.EnsureServer()`; on error → return `false, fmt.Errorf("bootstrap step 1 (EnsureServer): %w", err)`.
     2. `if err := o.Hooks.RegisterPortalHooks(); err != nil` → return `serverStarted, fmt.Errorf("bootstrap step 2 (RegisterPortalHooks): %w", err)`.
     3. `if err := o.Restoring.Set(); err != nil` → return `serverStarted, fmt.Errorf("bootstrap step 3 (Set @portal-restoring): %w", err)`. **This MUST precede step 4** — creating `_portal-saver` fires `session-created`, which the hooks registered in step 2 would otherwise route to `portal state notify`, dirtying the flag during restore.
-    4. `if err := o.Saver.EnsureSaver(); err != nil` → log best-effort, continue. Per spec "Failure Modes → `_portal-saver` creation fails at bootstrap": "retries a small number of times. On persistent failure: log, emit stderr warning, continue bootstrap without the save daemon." Emit a `*bootstrap.SaverDownError` sentinel (for Phase 6 to surface as a one-line stderr warning) but do NOT short-circuit.
+    4. `if err := o.Saver.EnsureSaver(); err != nil` → log best-effort, continue. Per spec "Failure Modes → `_portal-saver` creation fails at bootstrap": "retries a small number of times. On persistent failure: log, emit stderr warning, continue bootstrap without the save daemon." Capture the underlying error in a Phase-6-bound buffer (via the `Warnings []bootstrap.Warning` accumulator that task 6-9 introduces); for Phase 5's slice, `EnsureSaver` failure is logged via the orchestrator's logger and execution continues. The `Warning` type lands in Phase 6 task 6-9; this task's only obligation is "continue, log, do not short-circuit". No `SaverDownError` sentinel type — soft warnings flow through the `[]Warning` accumulator pattern.
     5. `restoreErr := o.Restore.Restore()`; capture — do not return yet. Per spec "Restore-Side Architecture → Restoration Trigger": "a missing or unparseable `sessions.json` is a non-fatal no-op warning" — so `Restore()` should already swallow its own per-session errors; an error surfacing here is exceptional.
     6. `if err := o.Restoring.Clear(); err != nil` → log WARN and continue. The marker stays set; the daemon will skip ticks until the next server restart (volatile server-option, self-heals). This is degraded but bounded — better than failing the whole bootstrap at the tail of otherwise-successful work. Matches task 3-7's clear-failure-is-soft contract. The clear is also wrapped in a `defer` off of step 3 for safety (so a panic between 3 and 6 still attempts the clear); the deferred and explicit calls are both no-ops on success.
     7. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
@@ -113,7 +113,7 @@ total: 10
   - `"it propagates EnsureServer errors and skips subsequent steps"`: recorder returns error from `EnsureServer`; assert only `"EnsureServer"` is in the log.
   - `"it propagates RegisterPortalHooks errors and skips subsequent steps"`: similarly.
   - `"it propagates Restoring.Set errors and skips EnsureSaver / Restore"`: recorder errors on `Restoring.Set`; log is `["EnsureServer", "RegisterPortalHooks", "Restoring.Set"]` — critically, `EnsureSaver` is NOT called, preventing the race.
-  - `"it continues past EnsureSaver failures with a SaverDownError sentinel"`: recorder errors on `EnsureSaver`; log is the full 7-entry sequence; returned error is non-nil wrapping a `bootstrap.SaverDownError`.
+  - `"it continues past EnsureSaver failures and logs a warning without short-circuiting"`: recorder errors on `EnsureSaver`; log is the full 7-entry sequence; `Run` does not short-circuit. (Phase 6 task 6-9 wires the `Warning` accumulator and asserts the user-visible warning surfacing.)
   - `"it clears @portal-restoring even when Restore fails"`: recorder errors on `Restore`; log still contains `"Restoring.Clear"` after `"Restore"`.
   - `"it logs and continues when Restoring.Clear fails"`: recorder errors on `Restoring.Clear`; `Run` returns nil (or whatever `Restore()` returned), with a WARN log entry on `ComponentBootstrap`.
   - `"it is idempotent across repeated invocations"`: call `Run` twice on the same orchestrator; second invocation's log is a full 7-entry sequence (every step runs again — bootstrap.Run itself does NOT memoise; memoisation happens at the `PersistentPreRunE` layer in task 5-3).
@@ -128,7 +128,7 @@ total: 10
 - [ ] `EnsureServer` failure short-circuits — no subsequent steps run.
 - [ ] `RegisterPortalHooks` failure short-circuits.
 - [ ] `Restoring.Set` failure short-circuits BEFORE `EnsureSaver` — verified by asserting `EnsureSaver` was NOT called when `Set` errored.
-- [ ] `EnsureSaver` failure surfaces as a `*SaverDownError` sentinel AND allows `Run` to continue with the remaining steps.
+- [ ] `EnsureSaver` failure does NOT short-circuit `Run` — subsequent steps still execute. The failure is logged via the orchestrator's logger; Phase 6 task 6-9 wires the user-visible warning through the `Warnings []bootstrap.Warning` accumulator.
 - [ ] `Restoring.Clear` failure logs WARN (via `ComponentBootstrap`) and does NOT fail `Run` — soft path. Matches task 3-7's clear-failure-is-soft contract.
 - [ ] `CleanStale` failure logs best-effort and does NOT fail `Run` (task 5-3's wiring still completes successfully).
 - [ ] `Run` returns the `serverStarted` bool from `EnsureServer` verbatim.
@@ -140,7 +140,7 @@ total: 10
 - `"it propagates EnsureServer errors and skips subsequent steps"`
 - `"it propagates RegisterPortalHooks errors and skips subsequent steps"`
 - `"it propagates Restoring.Set errors and skips EnsureSaver and Restore"`
-- `"it continues past EnsureSaver failures with a SaverDownError sentinel"`
+- `"it continues past EnsureSaver failures and logs a warning without short-circuiting"`
 - `"it clears the restoring marker even when Restore returns an error"`
 - `"it logs and continues when Restoring.Clear fails"`
 - `"it is idempotent across repeated invocations (no internal memoisation)"`
@@ -150,7 +150,7 @@ total: 10
 **Edge Cases**:
 - Step 3 MUST precede step 4. A subtle implementation bug (e.g., `defer o.Restoring.Set()` instead of calling inline) would create the exact race the spec warns about — `_portal-saver` creation fires `session-created` BEFORE the marker is set, the first daemon tick runs mid-build. The `"it does not call EnsureSaver when Restoring.Set fails"` test is the regression guard.
 - `Restoring.Clear` must run even on `Restore()` error. Implemented via a deferred call off step 3 as belt-and-braces in addition to the explicit call. If both succeed (the normal path), the deferred clear on an already-absent marker is a no-op per `set-option -su` semantics.
-- `EnsureSaver` failure is soft per spec "Failure Modes" (saves are paused until next bootstrap, but user is not blocked). Implementation must distinguish `SaverDownError` from fatal errors.
+- `EnsureSaver` failure is soft per spec "Failure Modes" (saves are paused until next bootstrap, but user is not blocked). Implementation logs and continues; Phase 6 task 6-9 wires the user-visible warning surfacing through the `Warnings []bootstrap.Warning` accumulator pattern.
 - `Restoring.Clear` failure is soft (log + continue). The marker stays set; the daemon will skip ticks until the next tmux server restart (volatile server-option self-heals). Spec's "Fatal Bootstrap Errors" list names "set-option fails" for the SET only; clear failure is degraded but bounded.
 - `CleanStale` failure is soft — pruning hooks is bookkeeping, not critical-path. Log and continue.
 - Orchestrator does NOT memoise itself. Memoisation is the `PersistentPreRunE`-level concern (task 5-3) so that each Portal process runs bootstrap at most once. Separating the layers keeps unit tests deterministic.
@@ -253,7 +253,17 @@ total: 10
       return bootstrap.NewOrchestrator(client), client
   }
   ```
-  Add `bootstrap.NewShim(ServerBootstrapper) Runner` that satisfies `Runner` by calling only `EnsureServer` and returning `(started, err)` — used by legacy tests in the cmd package that still set `BootstrapDeps.Bootstrapper` without providing a full orchestrator. This shim keeps the existing `root_test.go` / `bootstrap_context_test.go` fixtures working through the Phase 5 cutover; Phase 6 can delete the shim once every cmd-package test has been migrated.
+- Add `bootstrap.NewShim(s ServerBootstrapper) Runner` in `cmd/bootstrap/shim.go`. Behaviour:
+  1. Returns a `Runner` whose `Run(ctx)` calls `s.EnsureServer()` and returns `(started, err)` from that call.
+  2. Performs no hook registration, no `_portal-saver` setup, no restore, no CleanStale — legacy tests that injected a bare `ServerBootstrapper` predate those steps.
+  3. If `s == nil`, `NewShim` returns a no-op Runner whose `Run(ctx)` returns `(false, nil)`. This guards against tests that set `BootstrapDeps{Client: ...}` without a `Bootstrapper`.
+  4. Mark the shim as `// Deprecated: scheduled for removal in Phase 6 after every cmd-package test migrates to the full Orchestrator seam.`
+- Tests in `cmd/bootstrap/shim_test.go`:
+  - `"NewShim returns a Runner that delegates Run to ServerBootstrapper.EnsureServer"`.
+  - `"NewShim wraps the EnsureServer error and propagates the started flag"`.
+  - `"NewShim with a nil ServerBootstrapper returns a no-op Runner"`.
+  - `"NewShim Runner does not register hooks, set markers, or call Restore"` — verified via a fake `ServerBootstrapper` whose other methods (none in the interface, but the fake should panic if any other method is invoked) don't fire.
+- The shim is a transitional artefact with a finite lifetime. Phase 6 must delete it; add `TODO(phase-6): delete after legacy bootstrappers removed` markers in both `shim.go` and `BootstrapDeps.Bootstrapper`'s field comment.
 - Add a test helper `resetBootstrapOnce(t *testing.T)` in `cmd/root_test.go`:
   ```go
   func resetBootstrapOnce(t *testing.T) {
@@ -289,6 +299,9 @@ total: 10
 - [ ] `BootstrapDeps.Waiter` field is removed (task 5-4 deletes the underlying type; this task removes the field so the struct compiles).
 - [ ] `BootstrapDeps.Orchestrator` field is added as the primary test injection seam.
 - [ ] `BootstrapDeps.Bootstrapper` field is retained with a legacy shim (`bootstrap.NewShim`) to keep existing cmd-package tests passing; marked for removal in Phase 6.
+- [ ] `bootstrap.NewShim(ServerBootstrapper) Runner` exists in `cmd/bootstrap/shim.go` and is documented as deprecated.
+- [ ] Shim returns a no-op Runner when given a nil ServerBootstrapper.
+- [ ] Shim's Run only calls `EnsureServer`; does not invoke hook registration, `_portal-saver` setup, restore, or CleanStale.
 - [ ] `resetBootstrapOnce(t)` helper is provided and called by every test that exercises `PersistentPreRunE` (guards against cross-test memoisation leakage).
 - [ ] `tmux.CheckTmuxAvailable` memoisation (Phase 1 task 1-3) continues to work — repeated `PersistentPreRunE` invocations run the tmux-version check at most once.
 
@@ -302,6 +315,9 @@ total: 10
 - `"it preserves the existing serverWasStarted / tmuxClient context lookup contract"`
 - `"it uses the Orchestrator injection when both Orchestrator and Bootstrapper are set on BootstrapDeps"`
 - `"it falls back to the Bootstrapper shim when only Bootstrapper is set (legacy test compat)"`
+- `"NewShim returns a Runner that delegates Run to ServerBootstrapper.EnsureServer"`
+- `"NewShim with a nil ServerBootstrapper returns a no-op Runner"`
+- `"NewShim Runner does not perform hook registration or restore"`
 
 **Edge Cases**:
 - `sync.Once` memoisation means a test that injects orchestrator A, runs `PersistentPreRunE`, then changes `bootstrapDeps.Orchestrator = B` and runs again would see A's cached outcome. Test helper `resetBootstrapOnce(t)` MUST be called between swaps. Document in helper godoc.

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-27
 cycle: 1
 phase: Plan Integrity Review
@@ -163,7 +163,7 @@ Planning has chosen Option A (prediction). User should confirm or override befor
 
 (The `[needs-info]` block from the existing task body is preserved verbatim — the rewrite consolidates the Solution narrative without changing the planning decision.)
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -250,7 +250,7 @@ Add to **Tests**:
 - `"NewShim Runner does not perform hook registration or restore"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -310,7 +310,7 @@ Update **Tests** — add:
 - `"--purge refuses when state/ itself is a symlink"` (existing test; tighten the assertion message).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -356,7 +356,7 @@ The traceability cycle 1 already marked task 4-4 BLOCKED with `[needs-info]`, bu
 - [ ] `portal hooks set`, `portal hooks list`, `portal hooks rm --on-resume` retain their existing user-facing surface; behavioural change is documented: hooks fire on skeleton-restored panes only, not on live detach/reattach within a server lifetime
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This finding mirrors the task 4-4 BLOCKED marker into the phase-level acceptance so the phase's completion state is honest. If the user pins Route A or Route B in the next planning cycle, both this acceptance bullet and task 4-4 unblock together.
 
 ---
@@ -427,5 +427,5 @@ And the corresponding test:
 - `"EnsureSaver failure does NOT return a FatalError (soft path — produces a Warning instead)"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This is purely a naming consistency fix; the design intent (soft warning, no fatal) is unchanged.

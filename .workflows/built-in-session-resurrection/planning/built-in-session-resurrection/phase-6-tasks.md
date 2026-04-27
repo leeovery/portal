@@ -882,8 +882,8 @@ and exits 1.
     where `dir` was resolved at the top of `RunE` via `state.ResolveDir()`.
   - Implement `purgeStateDir(dir string, logger *state.Logger) error`:
     1. `info, err := os.Lstat(dir)` — if `ENOENT`, return nil (idempotent).
-    2. If `info.Mode()&os.ModeSymlink != 0`, return an error: `"refusing to purge symlinked state dir: %s"` (defensive — a symlink-as-state-dir is suspicious).
-    3. Run symlink defensive check: `resolved, err := filepath.EvalSymlinks(dir)`; if `resolved != dir`, return error: `"state dir %s resolves to %s — refusing to purge"`. (Prevents `state/` being a symlink to `/`.)
+    2. If `info.Mode()&os.ModeSymlink != 0`, return an error: `"refusing to purge symlinked state dir: %s"` with a `logger.Warn` line. The caller can `readlink` the path and `rm -rf` the target manually if intentional.
+    3. (Removed: the prior `EvalSymlinks` strict-equality check is dropped — intermediate symlinks in the path resolution are tolerated; only the leaf being a symlink triggers refusal. This avoids a false-positive on macOS legacy installs whose intermediate paths route through other symlinked directories.)
     4. `if err := os.RemoveAll(dir); err != nil { logger.Error(state.ComponentDaemon, "purge failed: %v", err); return err }`.
     5. Log Info: `"purged state directory %s"`.
 - Task 6-6 sets up the ordering infrastructure (joined errors, logger); this task adds step 3 in the existing error-accumulation harness.
@@ -904,8 +904,8 @@ and exits 1.
 - [ ] When `--purge` is absent, the state directory is untouched after cleanup completes.
 - [ ] When `--purge` is present, `purgeStateDir(dir, logger)` runs AFTER `killSaver` and AFTER `UnregisterPortalHooks`.
 - [ ] `purgeStateDir` on a missing directory returns nil (idempotent no-op).
-- [ ] `purgeStateDir` refuses to remove paths that are themselves symlinks (defensive).
-- [ ] `purgeStateDir` refuses to remove paths whose `EvalSymlinks` resolution differs from the given path (prevents symlinked-in-chain attacks).
+- [ ] `purgeStateDir` refuses to remove paths where `state/` itself is a symlink (defensive — only the leaf check, not the resolution chain).
+- [ ] Intermediate symlinks in the resolved path (e.g., `~/.config` is a symlink) are tolerated; `--purge` succeeds.
 - [ ] On `os.RemoveAll` failure, the error is logged to `portal.log` at ERROR level and contributes to the joined exit error; subsequent actions (none in v1; this is the last step) are not affected.
 - [ ] FIFO files, `.bin` scrollback files, and all other contents are swept (verified by fixture test).
 - [ ] Command prints a single info-level log line on successful purge.
@@ -917,7 +917,7 @@ and exits 1.
 - `"it is idempotent when --purge is passed on a missing state dir"`
 - `"it logs the purge to portal.log at INFO level"`
 - `"it refuses to purge a symlinked state dir"`
-- `"it refuses to purge when the state dir resolves through a symlink chain outside itself"`
+- `"--purge succeeds when an intermediate path component is a symlink"`
 - `"--purge runs after daemon kill and hook removal"`
 - `"--purge contributes to non-zero exit when os.RemoveAll fails"`
 - `"purge removes FIFOs and .bin files alongside regular files"`
@@ -927,8 +927,8 @@ and exits 1.
 - State dir missing → `os.Lstat` returns `ENOENT` → `purgeStateDir` returns nil. No error. Idempotent.
 - State dir is itself a symlink (user redirected `state/` to elsewhere): refuse to purge — log the refusal at WARN level and contribute a non-zero exit. User must manually clean up.
 - State dir contains a symlink (e.g., `portal.log` → `/var/log/something`): `os.RemoveAll` unlinks the symlink, not the target. Safe. `filepath.EvalSymlinks` only resolves the outer path; nested symlinks within `state/` are handled by `os.RemoveAll`'s own semantics.
-- State dir's canonical resolution differs from the given path (e.g., `~/.config/portal` is a symlink to `~/Library/Application Support/portal`): `EvalSymlinks("~/.config/portal/state")` returns the canonical path; if `resolved != dir`, refuse. This catches the macOS migration artifact (`cmd/config.go` performs a one-time migration; after migration the resolved path matches the given path if the user has the new layout, or differs if they don't). For users still on the old path: `ResolveDir()` already returns the new `~/.config/portal/state/` so the defensive check's false-positive is rare.
-  - Relax: the symlink check can be skipped if the given path is the system-canonical `~/.config/portal/state` (i.e., the check is only active when the resolved path is substantially different from the input). Implementation choice: err on the safe side — any mismatch triggers refusal. Users with custom setups can override via env var.
+- State dir's canonical resolution differs from the given path (e.g., `~/.config/portal` is a symlink to `~/Library/Application Support/portal`): the check uses `os.Lstat` on the leaf path only — only the final component being a symlink triggers refusal. Intermediate symlinks (the user's `~/.config` is a symlink, or `~/Library` resolves through one) are tolerated because the final `state/` directory is what `os.RemoveAll` operates on. Concrete implementation: `if info.Mode()&os.ModeSymlink != 0 { refuse }` — only the leaf symlink is rejected, not the resolution chain. This avoids the false-positive on macOS legacy installs whose intermediate paths route through other symlinked directories.
+- Users with `state/` itself as a symlink (deliberately redirected to e.g. an external drive): receive the refusal with a clear log line: `refusing to purge symlinked state dir <path>: remove it manually if intentional`. This is a deliberate friction, not a bug — purging through an opaque symlink could nuke unrelated data.
 - FIFO files within state dir: `os.RemoveAll` handles FIFOs on both Linux and macOS. No special case needed.
 - `portal.log` held open by the daemon: task 6-6 killed the daemon, so the FD is closed by the time purge runs. Sub-millisecond race window between SIGHUP and fd close is tolerated — if the fd is still open, `os.RemoveAll` unlinks the directory entry but the file's blocks stay allocated until the daemon closes; the user sees the dir gone and doesn't care.
 - Per-file removal failures during `RemoveAll`: `os.RemoveAll` returns the first error encountered; by the time it returns, as much as could be removed IS removed. Partial cleanup + error reported. User can retry.
@@ -1019,7 +1019,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - `"Restoring.Set failure returns a FatalError"`.
   - `"Restoring.Clear failure does NOT return a FatalError (soft path)"`.
   - `"FatalError wraps the underlying cause for unwrap"`.
-  - `"EnsureSaver failure does NOT return a FatalError (soft)"` — regression guard; `EnsureSaver` is a soft failure per spec, produces `SaverDownError` (task 6-9), not `FatalError`.
+  - `"EnsureSaver failure does NOT return a FatalError (soft path — produces a Warning instead)"` — regression guard; `EnsureSaver` is a soft failure per spec, produces a `bootstrap.Warning` via the accumulator pattern (task 6-9), not `FatalError`.
 - Tests in `cmd/root_test.go` / `main_test.go`:
   - `"FatalError from PersistentPreRunE produces stderr single-line and non-zero exit"` — mock orchestrator returns `NewFatal("test msg", causeErr)`; run `Execute()`; assert stderr == `"test msg\n"` and exit code is non-zero. (Integration-style: build the binary, run via `exec.Command`.)
   - `"Cobra usage error still prints Cobra's default usage block"` — run `portal nonexistent-command`; assert stderr contains "unknown command" (Cobra's standard output).
@@ -1035,7 +1035,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
 **Acceptance Criteria**:
 - [ ] `cmd/bootstrap/errors.go` defines `FatalError` with `UserMessage` + `Cause` + `Error()` + `Unwrap()`.
 - [ ] Orchestrator returns `*FatalError` for: step 1 (EnsureServer), step 2 mass-register, step 3 (Set @portal-restoring). Step 6 (Clear @portal-restoring) failure is soft — logs WARN and continues.
-- [ ] `EnsureSaver` failure does NOT return `FatalError` — uses the soft `SaverDownError` (task 6-9).
+- [ ] `EnsureSaver` failure does NOT return `FatalError` — produces a soft `bootstrap.Warning` via the accumulator pattern (task 6-9).
 - [ ] Every fatal wrap site also logs ERROR to `portal.log` with `ComponentBootstrap` BEFORE returning.
 - [ ] `main.go` / `Execute()` intercepts `*FatalError` via `errors.As` and emits `UserMessage` on a single stderr line, followed by `os.Exit(1)`.
 - [ ] Stderr output is exactly one line (no banners, no colors, no usage block).
@@ -1049,7 +1049,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
 - `"RegisterPortalHooks mass failure returns a FatalError"`
 - `"Restoring.Set failure returns a FatalError"`
 - `"Restoring.Clear failure does NOT return a FatalError (soft path)"`
-- `"EnsureSaver failure does NOT return a FatalError (soft path)"`
+- `"EnsureSaver failure does NOT return a FatalError (soft path — produces a Warning instead)"`
 - `"FatalError wraps the underlying cause via Unwrap"`
 - `"Execute() emits FatalError.UserMessage on a single stderr line and exits non-zero"`
 - `"Cobra usage error still prints usage block (unknown command)"`
@@ -1143,7 +1143,19 @@ same continue-to-RunE behaviour. Both warnings also appear in `portal.log` at WA
   - Add a `Warnings []Warning` field accumulated during `Run`.
   - In step 4 (EnsureSaver), on persistent failure: `o.Warnings = append(o.Warnings, SaverDownWarning())`. Also log WARN to `portal.log` with `ComponentBootstrap`.
   - In step 5 (Restore), the restore path returns a typed error for corrupt `sessions.json`; detect that case via `errors.Is(err, restore.ErrCorruptIndex)` (Phase 3 task 3-1 defines this error; if it doesn't, this task adds it as part of the Restore reader). Append `CorruptSessionsJSONWarning()` to the orchestrator's slice.
-  - Change `Run`'s signature to `(bool, []Warning, error)` so callers get warnings separately from fatal errors.
+  - Change `Run`'s signature to `(serverStarted bool, warnings []Warning, err error)` so callers get warnings separately from fatal errors.
+- Update the `Runner` interface introduced in task 5-3 to match: `type Runner interface { Run(ctx context.Context) (bool, []Warning, error) }`. Update `bootstrap.NewShim` (also from 5-3) so the shim returns `(started, nil, err)` — legacy bootstrappers produce no warnings.
+- Update `cmd/root.go` `PersistentPreRunE` (task 5-3) to receive the third return value and feed it into the warnings sink:
+  ```go
+  bootstrapOnce.Do(func() {
+      bootstrapStarted, bootstrapWarningsSlice, bootstrapErr = orchestrator.Run(cmd.Context())
+      for _, w := range bootstrapWarningsSlice {
+          bootstrapWarnings.Add(w)
+      }
+  })
+  ```
+  Add a package-level `var bootstrapWarningsSlice []bootstrap.Warning` alongside the existing `bootstrapStarted` / `bootstrapErr` memoisation state. Reset it in the `resetBootstrapOnce(t)` test helper.
+- Verify every other test fixture in `cmd/root_test.go` / `cmd/bootstrap/bootstrap_test.go` that constructs an orchestrator literal or stub now satisfies the three-return shape.
 - Create `cmd/bootstrap_warnings.go`:
   ```go
   package cmd
