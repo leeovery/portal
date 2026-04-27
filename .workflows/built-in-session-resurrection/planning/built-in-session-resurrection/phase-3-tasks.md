@@ -172,6 +172,12 @@ total: 13
 
 Correction: re-read the spec — live paneKey is used for markers and FIFO paths (see "Canonical paneKey → Indices used in paneKey are always *live* indices"); the saved scrollback file path is passed via `--file` so the helper reads saved-indexed content. So FIFO creation must happen *after* each pane is created using the live paneKey, not before using the saved paneKey. Revise the flow: create session/window/pane → re-query live index → compute live paneKey → create FIFO at live paneKey path → re-send the hydrate command via `tmux send-keys` is NOT an option (the helper is already running as the pane's initial process and is mid-`open(O_RDONLY)` on a non-existent FIFO). The resolution the spec mandates is that FIFOs are created *just before pane creation* — which implies the orchestrator must compute the live paneKey *in advance*. Achievable because base-index / pane-base-index are server options readable via `tmux show-options -gv base-index` and `show-options -gv pane-base-index` before pane creation; the first-window will have window index `= base-index + 0`, first-pane `= pane-base-index + 0`, and subsequent windows/panes increment by 1. Resolve this by reading `base-index` / `pane-base-index` once at the start of `RestoreSession`, predicting live indices from saved structural order, computing live paneKeys, creating FIFOs at those live paths, and building hydrate commands with the live FIFO path and saved `--file` / `--hook-key` values.
 
+**[needs-info]**: Task 3-3's "predict live indices via `base-index` / `pane-base-index` server options" is a planning invention — the spec describes a re-query approach (line 324) but does not mandate prediction-before-creation. Prediction works in the common case but adds complexity (option reads, prediction-vs-live divergence handling in task 3-5). Alternative approaches the spec is compatible with:
+- **Option B**: pass the saved-paneKey FIFO path to the helper at construction; after pane creation, re-query live paneKey and either (b1) symlink live → saved or (b2) have `signal-hydrate` use the saved paneKey from the index (NOT the live paneKey).
+- **Option C**: decouple FIFO naming from paneKey — use a UUID stored in the index.
+
+Planning has chosen Option A (prediction). User should confirm or override before implementation. If Option A stands, task 3-5's drift-detection becomes a defensive log-only branch; if any other Option is chosen, task 3-5 simplifies further.
+
 **Outcome**: After `RestoreSession` returns, one live tmux session exists with the saved name, saved environment applied (inheritable by subsequent pane creation), every window in saved order, every pane in each window with its hydrate command running as the initial process blocking on a created FIFO. Task 3-4 (layout/active/zoom) and task 3-5 (live paneKey re-query + marker) run *after* this task's work completes for the session.
 
 **Do**:
@@ -234,6 +240,7 @@ Correction: re-read the spec — live paneKey is used for markers and FIFO paths
 - [ ] `set-environment` failure for one key logs and continues to the next key; does not abort session build.
 - [ ] `new-window` / `split-window` failure returns wrapped error; orchestrator (task 3-6) handles session-level degradation.
 - [ ] Returns `nil` on full successful creation; return error points out the failing step.
+- [ ] User has confirmed the "predict live indices via server-option read" approach (Option A) over the alternative spec-compatible approaches (Options B, C). See `[needs-info]` in the Solution section.
 
 **Tests**:
 - `"it creates a single-pane session with no environment"`
@@ -619,7 +626,7 @@ Correction: re-read the spec — live paneKey is used for markers and FIFO paths
 
 **Problem**: `Restore()` fires `session-created`, `window-linked`, `window-layout-changed`, `pane-focus-out` in bursts as it creates skeleton sessions. Phase 1 registered those events to invoke `portal state notify`, which bumps the dirty flag. Phase 2's daemon checks `@portal-restoring` at the top of every tick and skips capture entirely while set. Without the wrapper enforced in this task, the daemon would race the restore: the first post-bootstrap tick could fire mid-skeleton-build, catching half-constructed state. Per spec, `@portal-restoring` is set *before* `_portal-saver` is even created in step 4 of bootstrap, so the daemon's very first tick is already suppressed. Clearing is equally critical: if `Restore()` panics mid-flight and the marker is never cleared, the daemon stays silent forever (until server restart clears the volatile server-option). This task owns the set-before / defer-clear discipline around the orchestrator, plus the fatal-error handling when `set-option -s` fails (per spec: `@portal-restoring set-option failure` is a fatal bootstrap error, not a soft one).
 
-**Solution**: Add `func (o *Orchestrator) RestoreWithMarker() error` in `internal/restore/restore.go` (or a thin wrapper file `restore_marker.go`). Flow: (1) call `client.SetServerOption("@portal-restoring", "1")` — on failure, return the error directly so `PersistentPreRunE` treats it as fatal (task 1-3's fatal-error path prints the stderr one-liner and exits non-zero); (2) `defer` a function that calls `client.UnsetServerOption("@portal-restoring")` — the `-u` flag (not empty-string assignment, which leaves the option set with an empty value and would keep the daemon silent); (3) call `Restore()` (task 3-6) — it returns nil even on per-session errors, so the defer always runs; (4) return whatever `Restore()` returned (always nil per task 3-6, but plumbing is correct for any future fatal cases). Bootstrap integration in Phase 5 calls `RestoreWithMarker()` in step 5, immediately after step 4 (`_portal-saver` setup) — but *note* the spec's step-3 / step-5 ordering: the set happens in step 3 (before `_portal-saver` creation in step 4), the clear happens after step 5 (before step 6). This task's wrapper is the pair together for unit-test scope; Phase 5 will split the set and clear across steps 3–6 with `_portal-saver` creation nested between them. So this task's wrapper is a convenience for the self-contained restore path (Phase 3 integration tests) while Phase 5 uses the individual set-and-clear primitives directly. Add both: `SetRestoring()`, `ClearRestoring()`, and `RestoreWithMarker()` (wrapper that calls all three in order). Phase 5 uses the primitives; task 3-13 integration tests use the wrapper.
+**Solution**: Add `SetRestoring()` and `ClearRestoring()` as standalone primitives on `Orchestrator` in `internal/restore/restore.go` (or a thin wrapper file `restore_marker.go`). Each is a single-purpose method: `SetRestoring` calls `client.SetServerOption("@portal-restoring", "1")` and returns the wrapped error; `ClearRestoring` calls `client.UnsetServerOption("@portal-restoring")` and returns the wrapped error. Do NOT introduce a composite `RestoreWithMarker()` wrapper — the spec's bootstrap flow interleaves `_portal-saver` creation between the set and clear (step 3 → step 4 → step 5 → step 6), and a composite wrapper would mask that ordering invariant for any future caller. Phase 5's bootstrap orchestrator (task 5-2) calls the primitives directly in spec order. Task 3-13's integration test calls the same primitives directly with explicit set / restore / clear lines — the extra line is worth the documentation value.
 
 **Outcome**: `RestoreWithMarker()` guarantees the marker is set before any session-building tmux call and cleared when restore returns (even on panic via defer). `SetRestoring` / `ClearRestoring` are independently callable for Phase 5's bootstrap. Set failure is fatal — caller propagates the error so the user sees the spec-mandated fatal stderr line. Clear uses `-su` (remove option), not empty-string assignment. The marker is idempotent-set (already-set from a prior crashed bootstrap produces no error; tmux's `set-option` overwrites).
 
@@ -639,25 +646,12 @@ Correction: re-read the spec — live paneKey is used for markers and FIFO paths
       }
       return nil
   }
-
-  func (o *Orchestrator) RestoreWithMarker() error {
-      if err := o.SetRestoring(); err != nil {
-          return err // fatal — caller handles
-      }
-      defer func() {
-          if err := o.ClearRestoring(); err != nil {
-              o.Logger.Printf("restore: clear @portal-restoring failed: %v", err)
-          }
-      }()
-      return o.Restore()
-  }
   ```
+- Do NOT introduce a composite `RestoreWithMarker()` wrapper. The spec's bootstrap flow interleaves `_portal-saver` creation between set and clear (step 3 → step 4 → step 5 → step 6); a composite would mask that ordering invariant for any future caller. Phase 5's bootstrap orchestrator (task 5-2) calls the primitives directly. Task 3-13's integration test calls the primitives directly with explicit set / restore / clear lines.
 - Add `tmux.Client.UnsetServerOption(name string) error` wrapping `tmux set-option -su <name>` (the `-u` flag is load-bearing — empty-string assignment leaves the option set). `SetServerOption(name, value string) error` wraps `tmux set-option -s <name> <value>`. Match Phase 1 / Phase 2's existing patterns; if those methods already exist on `tmux.Client`, reuse them verbatim.
 - Tests in `internal/restore/restore_test.go`:
-  - Happy path: `SetServerOption("@portal-restoring", "1")` called, `Restore` runs, `UnsetServerOption("@portal-restoring")` called in defer. Assert call order.
-  - Set failure: error returned; `Restore` is NOT called; `UnsetServerOption` is NOT called (the defer only registers after `SetRestoring` succeeds — confirm by mocking `SetServerOption` to fail and asserting `Restore` was never invoked).
-  - Clear failure (set succeeded, unset fails): error is logged (not returned — the restore work is already done); `Restore`'s return value is preserved.
-  - `Restore` panics (simulate via a pane-mock that panics on `new-session`): the defer still fires; assert `UnsetServerOption` is called even in the panic path. Use `defer recover()` in the test to catch the panic and then assert the mock's call list.
+  - `SetRestoring` calls `SetServerOption("@portal-restoring", "1")` and propagates the error.
+  - `ClearRestoring` calls `UnsetServerOption("@portal-restoring")` and propagates the error.
   - Idempotent set: already-set marker from a prior bootstrap — `SetServerOption("@portal-restoring", "1")` succeeds regardless (tmux overwrites); test by pre-populating the marker state in the mock and verifying no-error path.
   - `-s` / `-u` flag discipline: the underlying `SetServerOption` uses `-s` (not `-g`); `UnsetServerOption` uses `-u` (not empty-string `set-option -s @portal-restoring ""`). Assert via mock call records.
 
@@ -665,19 +659,17 @@ Correction: re-read the spec — live paneKey is used for markers and FIFO paths
 - [ ] `SetRestoring` calls `tmux set-option -s @portal-restoring 1`.
 - [ ] `ClearRestoring` calls `tmux set-option -su @portal-restoring` (uses `-u` flag — empty-string assignment is forbidden).
 - [ ] Set failure returns wrapped error to caller — fatal-bootstrap-error path per spec.
-- [ ] Clear failure logs and does NOT propagate (restore work is already done; log preserves observability).
-- [ ] `RestoreWithMarker` defers `ClearRestoring` *after* `SetRestoring` succeeds, so set-failure does not trigger a spurious clear.
-- [ ] Defer executes even on panic in `Restore` (critical — a stuck marker blocks the daemon permanently until server restart).
+- [ ] Clear failure returns wrapped error to caller — caller (Phase 5 task 5-2) decides handling per its soft/fatal contract.
+- [ ] No composite `RestoreWithMarker()` wrapper exists — only the two primitives.
 - [ ] Set is idempotent — already-set marker from prior crashed bootstrap does not error.
 - [ ] Marker uses `-s` flag (server scope), matching daemon's `show-options -sv` enumeration in task 2-11.
 - [ ] Clear uses `set-option -su`, never `set-option -s @portal-restoring ""` (empty string would leave the option present).
 
 **Tests**:
-- `"it sets @portal-restoring before invoking Restore"`
-- `"it clears @portal-restoring after Restore returns"`
-- `"it clears @portal-restoring even when Restore panics"`
-- `"it returns the set error and does not invoke Restore when SetServerOption fails"`
-- `"it logs but does not return the clear error"`
+- `"SetRestoring calls set-option -s @portal-restoring 1"`
+- `"ClearRestoring calls set-option -su @portal-restoring"`
+- `"SetRestoring wraps the underlying tmux error"`
+- `"ClearRestoring wraps the underlying tmux error"`
 - `"it uses -s for set (server scope) and -u for unset (option removal)"`
 - `"it tolerates a pre-existing @portal-restoring marker (idempotent set)"`
 - `"it never issues set-option with an empty-string value"`
@@ -703,7 +695,7 @@ Correction: re-read the spec — live paneKey is used for markers and FIFO paths
 >
 > Spec "Restore-Side Architecture → Marker Coordination → `@portal-skeleton-<paneKey>`": "Unset by: the hydrate helper, via `tmux set-option -su @portal-skeleton-<paneKey>` — the `-u` flag **removes** the user option, so the daemon's enumeration sees it gone. Assigning an empty string (`set-option -s <key> \"\"`) does *not* remove the option and would be a bug ... Everywhere this spec mentions clearing the marker ... the intended semantics is `set-option -su`." The same rule applies to `@portal-restoring`.
 >
-> Phase 5 will split set/clear across steps 3 and 6 of `PersistentPreRunE` with `_portal-saver` creation in between; this task exposes both primitives plus a composite wrapper for the integration test in task 3-13.
+> Phase 5 will split set/clear across steps 3 and 6 of `PersistentPreRunE` with `_portal-saver` creation in between; this task exposes only the two primitives so the bootstrap orchestrator (and task 3-13's integration test) call them directly in spec order.
 
 **Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — sections "Restore-Side Architecture → Marker Coordination → `@portal-restoring`", "Bootstrap Flow (Integrated) → Ordering Rationale", "Observability & Diagnostics → Fatal Bootstrap Errors".
 
@@ -1302,11 +1294,11 @@ Re-read spec for FIFO unlink semantics on file-missing path: the spec says "2. O
   18. Per-pane scrollback: `sock.CapturePane(t, session, window, pane)` returns bytes containing the saved ANSI content. Assert bytes include the raw `\x1b[31m` / `\x1b[0m` sequences from step 5.
   19. Re-run restore: `orchestrator.RestoreWithMarker()` again. Assert: zero new tmux calls beyond `list-sessions` (live-skip path). Structural state unchanged.
   20. `t.Cleanup` runs `sock.KillServer(t)` — belt-and-braces on top of `StartServer`'s registered cleanup.
-- Additional focused tests:
-  - `TestPhase3_SweepRemovesOrphanFIFOs`: start server, create state dir with 2 FIFOs (one live-marked, one orphan), run sweep, assert only orphan removed.
-  - `TestPhase3_CorruptSessionsJSON`: write a garbage `sessions.json`, run restore, assert stderr contains `"Portal state file is corrupt"`, no sessions created.
-  - `TestPhase3_HydrateTimeout`: skeleton-restore a session, do NOT invoke signal-hydrate, wait 4s, assert pane's helper timed out, marker still set, shell is running (send-keys + capture shows a live shell prompt).
-  - `TestPhase3_ScrollbackFileMissing`: skeleton-restore a session, delete the scrollback `.bin` before attach, invoke signal-hydrate, assert pane is empty but shell is running, marker was cleared (file-missing path).
+- Additional focused tests (OPTIONAL — Phase 3 spec acceptance is satisfied by the primary round-trip test alone; the following expand coverage at the cost of additional integration-test surface area, CI runtime, and timing flakiness exposure):
+  - `TestPhase3_HydrateTimeout` is the highest-value supplementary because the timeout path involves real tmux + real FIFO-block timing that unit tests cannot fully simulate. **Recommended: keep this one.**
+  - `TestPhase3_SweepRemovesOrphanFIFOs`, `TestPhase3_CorruptSessionsJSON`, `TestPhase3_ScrollbackFileMissing` are unit-testable in isolation (tasks 3-12, 3-1, 3-10 already cover them at the unit level). **Recommended: drop these supplementary integration variants** in favor of the unit-test coverage already in those tasks.
+
+  If the user prefers full integration coverage, all four supplementary tests can stay; if they prefer leaner integration suite, drop the three duplicates and keep only the round-trip + hydrate-timeout pair.
 - CI consideration: integration tests SHOULD run on CI but MAY be skipped on local developer machines via env gate to avoid flakiness from tmux versions / OS differences. Follow `cmd/root_integration_test.go`'s convention.
 
 **Acceptance Criteria**:

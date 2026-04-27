@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-27
 cycle: 1
 phase: Traceability Review
@@ -84,7 +84,7 @@ And update the planning.md task-table row to flag the blocker:
 | built-in-session-resurrection-4-4 | [BLOCKED — needs planning decision on prior-name argv source] Register `portal state migrate-rename` on `session-renamed` alongside `notify` via content-based idempotency | coexists with existing `portal state notify` entry on same event (both substrings matched per-command, no cross-contamination), re-running bootstrap appends no duplicate `migrate-rename` entry, old/new session names sourced from a route that satisfies the spec's atomic-migration contract (planning to pin Route A: tmux format variable, or Route B: daemon-side rename-delta side-band), `command -v portal` guard wraps the invocation, `show-hooks` parsing distinguishes the two Portal substrings, first-ever bootstrap on server without either entry appends both |
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -115,7 +115,7 @@ The composite is justified in the task as "a convenience for the integration tes
 
 (The `Do` section's `RestoreWithMarker` snippet should be removed; `Acceptance Criteria` should drop the `RestoreWithMarker` and `defer` claims; `Tests` should drop the wrapper-specific cases; remaining tests cover `SetRestoring` and `ClearRestoring` independently.)
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -148,7 +148,7 @@ The plan should either (a) implement the spec's semantics verbatim, or (b) flag 
 
 (Update the `maybeRotate` snippet so it runs AFTER the write; update the `"the triggering write lands in the fresh portal.log"` test to assert the inverse — the triggering write lands in `.old`. Update edge-case note from "rotate-before-write" to "rotate-after-write".)
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -190,7 +190,7 @@ Update task 5-2's `Tests`:
 
 Also update task 6-8's Fatal list (`Do` section) to remove the "step 6 (Clear @portal-restoring)" wrap. Keep only step 1 EnsureServer, step 2 mass-register, and step 3 Restoring.Set as FatalError producers.
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -217,7 +217,7 @@ Minor wording finding only — flagged for completeness but lower priority than 
 | built-in-session-resurrection-1-9 | Implement the Phase 1 slice of `portal state cleanup` | no tmux server running is not an error, partial failure still attempts subsequent removals, running twice in a row is a clean no-op the second time, `--purge` parses as a boolean flag without error (body deferred to Phase 6) |
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -269,7 +269,7 @@ Add an Acceptance Criterion to task 3-3:
 - [ ] User has confirmed the "predict live indices via server-option read" approach (Option A) over the alternative spec-compatible approaches (Options B, C).
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -310,7 +310,7 @@ Trimming is not strictly required by spec compliance — supplementary tests are
 If the user prefers full integration coverage, all four supplementary tests can stay; if they prefer leaner integration suite, drop the three duplicates and keep only the round-trip + hydrate-timeout pair.
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

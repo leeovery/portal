@@ -267,7 +267,44 @@ total: 7
 
 ### Task 4-4: Register `portal state migrate-rename` on `session-renamed` alongside `notify` via content-based idempotency
 
-**Problem**: Task 4-3 implements the migration body, but the body is dead code unless tmux actually invokes it when a session is renamed. Phase 1 task 1-7 registered one Portal entry on `session-renamed`: `portal state notify`. Phase 4 needs a second Portal entry on the same event: `portal state migrate-rename`. They must coexist: `notify` touches the dirty flag (capture the rename structurally on the next tick), `migrate-rename` rewrites hook keys. Both fire when `session-renamed` fires. The content-based idempotency pattern (Phase 1 task 1-6 `RegisterHookIfAbsent`) already supports per-event-per-substring scoping, so adding a second distinct substring (`portal state migrate-rename`) on the same event is the spec's chosen mechanism. Phase 1 task 1-8 already handles removing both Portal entries on that event in reverse index order; this task adds the second registration path.
+**Problem**: Task 4-3 implements the migration body, but the body is dead code unless tmux actually invokes it when a session is renamed. Phase 1 task 1-7 registered one Portal entry on `session-renamed`: `portal state notify`. Phase 4 needs a second Portal entry on the same event: `portal state migrate-rename`. The two must coexist; both fire when `session-renamed` fires. The content-based idempotency pattern (Phase 1 task 1-6 `RegisterHookIfAbsent`) already supports per-event-per-substring scoping.
+
+**Solution**: Extend `internal/tmux/hooks_register.go` (task 1-7's module) with a third event table — `migrateRenameEvents = []string{"session-renamed"}` — and register `portal state migrate-rename '<OLD>' '<NEW>'` against it. The argv wiring for `<OLD>` and `<NEW>` MUST satisfy the spec's contract: "hook keys are migrated atomically on rename events" (spec "Resume Hook Firing → Session Rename → Argument source"). The spec offers two routes:
+
+- **Route A** — Use `session-renamed` hook's exposed variables. The spec confirms `#{hook_session_name}` exposes the new name; the prior name is NOT reliably available via `#{client_last_session}`. Planning must identify a reliable tmux 3.0+ variable for the prior name (research item — likely requires reading tmux's `format.c` for the `session-renamed` hook payload) OR confirm none exists.
+- **Route B** — Build a daemon-side rename delta. The daemon's tick (Phase 2 task 2-12) already enumerates `list-sessions`. Adding a "previous-tick session-name set" comparison yields a `(old, new)` pair on rename. Persist the delta to a side-band file (e.g., `~/.config/portal/state/pending-renames.log`); the `migrate-rename` subcommand pops the oldest matching `<new>` to obtain `<old>`. This is the "in-memory 'last-seen names' map maintained by the daemon" the spec mentions.
+
+**[needs-info]**: Planning has not pinned which route to take. Both have implementation cost; both achieve the spec's contract. The original Phase 4 task body pinned a third option — registering with `#{hook_session_name}` for BOTH old and new args, making `migrate-rename` a structural no-op — that violates the spec's atomic-migration contract and is rejected.
+
+Until planning pins Route A or Route B, this task is BLOCKED. Phase 4 task 4-3 (`migrate-rename` body) has already shipped and is correct in isolation; only the registration's argv source is undecided.
+
+**Do**:
+- (Once route is chosen) Define `migrateRenameEvents`, `migrateRenameCommand`, `migrateRenameSubstring`.
+- (Once route is chosen) Extend `RegisterPortalHooks(c *Client)` to iterate the new event table and call `RegisterHookIfAbsent(c, "session-renamed", migrateRenameSubstring, migrateRenameCommand)`.
+- The `command -v portal` defensive guard wraps the invocation.
+
+**Acceptance Criteria**:
+- [ ] Planning has pinned Route A or Route B for the prior-name argument source.
+- [ ] If Route A: the chosen tmux format variable is verified empirically against tmux 3.0–3.5 to expose the prior name reliably on `session-renamed` fire.
+- [ ] If Route B: a Phase 2 follow-up task is filed to add the daemon-side rename-delta tracking and side-band file; this task lands only after that follow-up.
+- [ ] After landing, `tmux rename-session old new` causes `portal state migrate-rename old new` to fire with the actual old and new names — verified by integration test that registers a hook on `old:0.0`, renames `old → new`, and asserts the hook is now keyed `new:0.0` in `hooks.json`.
+- [ ] Idempotent re-registration produces zero additional `set-hook -ga` calls for the `migrate-rename` entry.
+- [ ] `notify` and `migrate-rename` Portal entries coexist on `session-renamed` with no cross-contamination.
+
+**Tests**: (deferred until route pinned)
+
+**Edge Cases**: (deferred until route pinned)
+
+**Context**:
+> Spec "Resume Hook Firing → Session Rename → Argument source": "Planning-phase decides the exact wiring; the contract from the spec: hook keys are migrated atomically on rename events, the migration path is a distinct subcommand (not `notify`), and best-effort logging on failure."
+>
+> Spec "Resume Hook Firing → Session Rename → Failure mode": failure mode is for I/O errors / malformed names — not a degraded happy-path. A registration whose argv cannot supply the prior name does not satisfy the contract.
+
+**Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — section "Resume Hook Firing → Session Rename: Hook Key Migration".
+
+<!-- ORIGINAL TASK BODY (rejected — argv pinned to #{hook_session_name} for both args, making migration a no-op):
+
+OLD_PROBLEM: Task 4-3 implements the migration body, but the body is dead code unless tmux actually invokes it when a session is renamed. Phase 1 task 1-7 registered one Portal entry on `session-renamed`: `portal state notify`. Phase 4 needs a second Portal entry on the same event: `portal state migrate-rename`. They must coexist: `notify` touches the dirty flag (capture the rename structurally on the next tick), `migrate-rename` rewrites hook keys. Both fire when `session-renamed` fires. The content-based idempotency pattern (Phase 1 task 1-6 `RegisterHookIfAbsent`) already supports per-event-per-substring scoping, so adding a second distinct substring (`portal state migrate-rename`) on the same event is the spec's chosen mechanism. Phase 1 task 1-8 already handles removing both Portal entries on that event in reverse index order; this task adds the second registration path.
 
 **Solution**: Extend `internal/tmux/hooks_register.go` (task 1-7's module) with a third event table — `migrateRenameEvents = []string{"session-renamed"}` — and corresponding command / substring constants. `RegisterPortalHooks` iterates this new table alongside the save-trigger and hydration-trigger tables. The command expands `#{hook_session_name}` (current name, i.e., the new name post-rename) and references `#{hook_session_changed_name}` for the prior name — or uses whatever `session-renamed` exposes in tmux ≥ 3.0 (planning decision: the spec says "Planning-phase decides the exact wiring"; this task pins it). Registration is content-based idempotent against the substring `portal state migrate-rename`, distinct from `portal state notify`, so the two Portal entries on `session-renamed` coexist without cross-contamination.
 
@@ -350,7 +387,8 @@ total: 7
 >
 > **Ambiguity note for Context section**: The spec explicitly delegates the argument-wiring decision to planning. This task pins `#{hook_session_name}` for both args as the Phase 4 scope-limited choice, with the understanding that a daemon-side rename-delta mechanism is required to make the migration functional. That daemon work is out of Phase 4 scope; its absence degrades `migrate-rename` to a registered-but-no-op hook, and the spec's "best-effort / CleanStale cleanup" failure mode covers the gap.
 
-**Spec Reference**: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — sections "Resume Hook Firing → Session Rename: Hook Key Migration", "tmux Hook Registration Lifecycle → Registration Shape", "tmux Hook Registration Lifecycle → Content-Based Idempotency".
+OLD_SPEC_REFERENCE: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` — sections "Resume Hook Firing → Session Rename: Hook Key Migration", "tmux Hook Registration Lifecycle → Registration Shape", "tmux Hook Registration Lifecycle → Content-Based Idempotency".
+-->
 
 ## built-in-session-resurrection-4-5 | approved
 

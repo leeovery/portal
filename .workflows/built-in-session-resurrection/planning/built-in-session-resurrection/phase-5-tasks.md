@@ -103,7 +103,7 @@ total: 10
     3. `if err := o.Restoring.Set(); err != nil` → return `serverStarted, fmt.Errorf("bootstrap step 3 (Set @portal-restoring): %w", err)`. **This MUST precede step 4** — creating `_portal-saver` fires `session-created`, which the hooks registered in step 2 would otherwise route to `portal state notify`, dirtying the flag during restore.
     4. `if err := o.Saver.EnsureSaver(); err != nil` → log best-effort, continue. Per spec "Failure Modes → `_portal-saver` creation fails at bootstrap": "retries a small number of times. On persistent failure: log, emit stderr warning, continue bootstrap without the save daemon." Emit a `*bootstrap.SaverDownError` sentinel (for Phase 6 to surface as a one-line stderr warning) but do NOT short-circuit.
     5. `restoreErr := o.Restore.Restore()`; capture — do not return yet. Per spec "Restore-Side Architecture → Restoration Trigger": "a missing or unparseable `sessions.json` is a non-fatal no-op warning" — so `Restore()` should already swallow its own per-session errors; an error surfacing here is exceptional.
-    6. `if err := o.Restoring.Clear(); err != nil` → **fatal**. Per spec "Fatal Bootstrap Errors": "`@portal-restoring` set-option fails: same as `set-hook` failure" — return `serverStarted, fmt.Errorf("bootstrap step 6 (Clear @portal-restoring): %w", err)`. The clear is wrapped in a `defer` off of step 3 for safety too (so a panic between 3 and 6 still clears the marker), but the explicit-call path is the primary semantics.
+    6. `if err := o.Restoring.Clear(); err != nil` → log WARN and continue. The marker stays set; the daemon will skip ticks until the next server restart (volatile server-option, self-heals). This is degraded but bounded — better than failing the whole bootstrap at the tail of otherwise-successful work. Matches task 3-7's clear-failure-is-soft contract. The clear is also wrapped in a `defer` off of step 3 for safety (so a panic between 3 and 6 still attempts the clear); the deferred and explicit calls are both no-ops on success.
     7. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
     8. Return `(serverStarted, restoreErr)` — if `Restore()` errored, surface it; otherwise `nil`.
   - Document the step ordering in a leading comment block that mirrors the spec's "Bootstrap Flow → PersistentPreRunE Sequence" section. Copy the exact 1–8 numbering so a future reader can diff implementation against spec.
@@ -115,7 +115,7 @@ total: 10
   - `"it propagates Restoring.Set errors and skips EnsureSaver / Restore"`: recorder errors on `Restoring.Set`; log is `["EnsureServer", "RegisterPortalHooks", "Restoring.Set"]` — critically, `EnsureSaver` is NOT called, preventing the race.
   - `"it continues past EnsureSaver failures with a SaverDownError sentinel"`: recorder errors on `EnsureSaver`; log is the full 7-entry sequence; returned error is non-nil wrapping a `bootstrap.SaverDownError`.
   - `"it clears @portal-restoring even when Restore fails"`: recorder errors on `Restore`; log still contains `"Restoring.Clear"` after `"Restore"`.
-  - `"it reports Restoring.Clear failure as a fatal error"`: recorder errors on `Restoring.Clear`; `Run` returns the wrapped clear error.
+  - `"it logs and continues when Restoring.Clear fails"`: recorder errors on `Restoring.Clear`; `Run` returns nil (or whatever `Restore()` returned), with a WARN log entry on `ComponentBootstrap`.
   - `"it is idempotent across repeated invocations"`: call `Run` twice on the same orchestrator; second invocation's log is a full 7-entry sequence (every step runs again — bootstrap.Run itself does NOT memoise; memoisation happens at the `PersistentPreRunE` layer in task 5-3).
   - `"it returns the serverStarted flag from EnsureServer"`: recorder returns `true`; `Run` returns `(true, nil)`.
 - Do NOT put cobra imports in `cmd/bootstrap/`. The package is pure Go orchestration; cobra/context wiring lives in `cmd/root.go` (task 5-3). This keeps the orchestrator reusable from tests without spinning up cobra commands.
@@ -129,7 +129,7 @@ total: 10
 - [ ] `RegisterPortalHooks` failure short-circuits.
 - [ ] `Restoring.Set` failure short-circuits BEFORE `EnsureSaver` — verified by asserting `EnsureSaver` was NOT called when `Set` errored.
 - [ ] `EnsureSaver` failure surfaces as a `*SaverDownError` sentinel AND allows `Run` to continue with the remaining steps.
-- [ ] `Restoring.Clear` failure returns a fatal error wrapping the underlying tmux error.
+- [ ] `Restoring.Clear` failure logs WARN (via `ComponentBootstrap`) and does NOT fail `Run` — soft path. Matches task 3-7's clear-failure-is-soft contract.
 - [ ] `CleanStale` failure logs best-effort and does NOT fail `Run` (task 5-3's wiring still completes successfully).
 - [ ] `Run` returns the `serverStarted` bool from `EnsureServer` verbatim.
 - [ ] `Orchestrator` contains no cobra/context.Context dependencies beyond the `ctx context.Context` parameter (no import of `github.com/spf13/cobra`).
@@ -142,7 +142,7 @@ total: 10
 - `"it propagates Restoring.Set errors and skips EnsureSaver and Restore"`
 - `"it continues past EnsureSaver failures with a SaverDownError sentinel"`
 - `"it clears the restoring marker even when Restore returns an error"`
-- `"it reports Restoring.Clear failure as a fatal error"`
+- `"it logs and continues when Restoring.Clear fails"`
 - `"it is idempotent across repeated invocations (no internal memoisation)"`
 - `"it returns the serverStarted flag from EnsureServer verbatim"`
 - `"it does not call EnsureSaver when Restoring.Set fails (ordering invariant)"`
@@ -151,7 +151,7 @@ total: 10
 - Step 3 MUST precede step 4. A subtle implementation bug (e.g., `defer o.Restoring.Set()` instead of calling inline) would create the exact race the spec warns about — `_portal-saver` creation fires `session-created` BEFORE the marker is set, the first daemon tick runs mid-build. The `"it does not call EnsureSaver when Restoring.Set fails"` test is the regression guard.
 - `Restoring.Clear` must run even on `Restore()` error. Implemented via a deferred call off step 3 as belt-and-braces in addition to the explicit call. If both succeed (the normal path), the deferred clear on an already-absent marker is a no-op per `set-option -su` semantics.
 - `EnsureSaver` failure is soft per spec "Failure Modes" (saves are paused until next bootstrap, but user is not blocked). Implementation must distinguish `SaverDownError` from fatal errors.
-- `Restoring.Clear` failure is fatal per spec "Fatal Bootstrap Errors" — cannot leave the marker set because every subsequent daemon tick would skip.
+- `Restoring.Clear` failure is soft (log + continue). The marker stays set; the daemon will skip ticks until the next tmux server restart (volatile server-option self-heals). Spec's "Fatal Bootstrap Errors" list names "set-option fails" for the SET only; clear failure is degraded but bounded.
 - `CleanStale` failure is soft — pruning hooks is bookkeeping, not critical-path. Log and continue.
 - Orchestrator does NOT memoise itself. Memoisation is the `PersistentPreRunE`-level concern (task 5-3) so that each Portal process runs bootstrap at most once. Separating the layers keeps unit tests deterministic.
 - `ctx context.Context` is accepted but currently unused inside `Run` (cancellation not plumbed). It is present to let Phase 6 plumb a timeout/cancel path without signature churn.

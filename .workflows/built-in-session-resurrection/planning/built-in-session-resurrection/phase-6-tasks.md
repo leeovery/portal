@@ -219,7 +219,7 @@ total: 11
 
 **Problem**: Phase 2 task 2-7 rotates at `OpenLogger(rotate=true)` call time — daemon startup checks size, rotates if ≥ 1MB, opens fresh file. That handles rotation across daemon restarts but not during a long-running daemon lifetime. A daemon that starts with `portal.log` at 500KB and logs for weeks will never rotate — the file grows unbounded until the next daemon restart (version bump, crash, `portal state cleanup`). The spec's 2 MB total budget (1 MB `portal.log` + 1 MB `portal.log.old`) is violated. This task adds mid-write rotation: before each write, if the pending write would push the file to ≥ 1MB, rename `portal.log` → `portal.log.old` first, open a fresh `portal.log`, then write the pending line there. Only the daemon does this — other writers (task 6-2) skip size checks per concurrent-writer discipline.
 
-**Solution**: Introduce a `Logger.rotating bool` flag set by `OpenLogger(path, true)`. On each `emit`, *if* `rotating` is true, stat the current file before writing; if `Stat.Size() + len(pending) >= 1MB`, close the current fd, rename → `.old` (replacing any existing `.old`), open a fresh fd with `O_APPEND|O_CREATE|O_WRONLY` mode `0600`, then write. The check-then-rotate-then-write sequence is protected by the logger's existing `sync.Mutex` — the daemon is the only rotating writer so there is no cross-process race (other writers skip the check entirely per task 6-2). On rename failure, log a single diagnostic to stderr (last-resort) and continue writing to the current file — rotation failure never blocks logging. A write that exactly equals 1MB triggers rotation: `size + pending >= 1MB` is an inclusive threshold so the write lands in the fresh file rather than the old one (keeps `portal.log` strictly under 1MB once rotation is implemented).
+**Solution**: Introduce a `Logger.rotating bool` flag set by `OpenLogger(path, true)`. On each `emit`, *if* `rotating` is true: write the pending line first; then `Stat` the file; if `Stat.Size() >= 1MB`, close the current fd, rename → `.old` (replacing any existing `.old`), open a fresh fd with `O_APPEND|O_CREATE|O_WRONLY` mode `0600` for the NEXT write. The triggering write lands in the file that becomes `.old`, matching the spec's "On reaching 1 MB during a write, Portal renames `portal.log` → `portal.log.old` ... then starts a fresh `portal.log`" — `portal.log.old` may briefly contain content slightly over 1 MB by one log-line's worth; `portal.log` (the active file) starts fresh for subsequent writes. The write-then-stat-then-rotate sequence is protected by the logger's existing `sync.Mutex` — the daemon is the only rotating writer so there is no cross-process race (other writers skip the check entirely per task 6-2). On rename failure, log a single diagnostic to stderr (last-resort) and continue writing to the current file — rotation failure never blocks logging.
 
 **Outcome**: Daemon running for weeks never lets `portal.log` exceed 1MB. When a write would cross the boundary, `portal.log` is renamed to `portal.log.old` (any existing `.old` is replaced, not appended), a fresh `portal.log` is opened, and the write lands there. Non-daemon writers (task 6-2) continue appending without size checks — if the daemon is down and non-daemon writers push the file past 1MB, the next daemon start rotates on `OpenLogger(true)` per the startup check from Phase 2 task 2-7.
 
@@ -240,56 +240,56 @@ total: 11
             fmt.Sprintf(format, args...))
         l.mu.Lock()
         defer l.mu.Unlock()
-        if l.rotating {
-            l.maybeRotate(int64(len(line)))
-        }
         _, _ = l.file.Write([]byte(line))
+        if l.rotating {
+            l.maybeRotate()
+        }
     }
     ```
-  - Add `func (l *Logger) maybeRotate(pending int64)`:
+  - Add `func (l *Logger) maybeRotate()` — runs AFTER the write, so the triggering write lands in the file being renamed to `.old`:
     1. `st, err := l.file.Stat()`; on error, log to stderr and return (keep writing to current file).
-    2. If `st.Size() + pending < LogRotateThreshold`, return.
+    2. If `st.Size() < LogRotateThreshold`, return.
     3. `if err := l.file.Close(); err != nil { ... best-effort log ... }`.
     4. `oldPath := l.path + ".old"` (equivalent to `state.PortalLogOld(dir)`; logger uses its `path` field).
     5. `_ = os.Remove(oldPath)` — replace any existing `.old`, ignore `ENOENT`.
     6. `if err := os.Rename(l.path, oldPath); err != nil { fmt.Fprintf(os.Stderr, "portal: log rotation failed: %v\n", err); /* reopen same file, continue */ }`.
     7. `f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)`; on error, fall back to stderr and leave `l.file = nil` (emit will no-op on nil file).
-    8. `l.file = f`.
+    8. `l.file = f` — fresh file for the NEXT write.
 - Unit tests in `internal/state/logger_test.go` (subprocess-free; use `t.TempDir()` and tight `os.Stat` assertions):
-  - `"daemon rotates mid-write when the next write would cross 1 MB"`: pre-populate `portal.log` with `LogRotateThreshold - 200` bytes of content; open logger with `rotate=true`; emit a ~100-byte line (pending push to just under 1MB — no rotate); then emit another ~150-byte line that pushes past 1MB. Assert `portal.log.old` exists with the pre-rotation content and `portal.log` contains only the second line.
-  - `"daemon rotation triggers at exactly 1 MB (inclusive threshold)"`: pre-populate `portal.log` with `LogRotateThreshold - len(pending)` bytes exactly; emit a line; assert rotation fired (`portal.log.old` exists).
+  - `"daemon rotates after a write that crosses the 1 MB boundary"`: pre-populate `portal.log` with `LogRotateThreshold - 200` bytes of content; open logger with `rotate=true`; emit a ~100-byte line (post-write size still < 1MB — no rotate); then emit another ~150-byte line that pushes the file ≥ 1MB. Assert `portal.log.old` exists containing the pre-existing content + both lines, and `portal.log` is fresh (empty or contains only subsequent writes).
+  - `"daemon rotation triggers at exactly 1 MB (inclusive threshold on post-write size)"`: pre-populate `portal.log` so the next write lands the file at exactly `LogRotateThreshold` bytes; emit; assert rotation fired (`portal.log.old` exists, `portal.log` is fresh).
   - `"existing portal.log.old is replaced on rotation"`: create `portal.log.old` with sentinel content; trigger rotation; assert `portal.log.old` content matches the new pre-rotation `portal.log`, not the sentinel.
   - `"rotation-rename failure logs to stderr and continues with current file"`: mock `os.Rename` to fail (inject via a package-level var or by making `portal.log.old` undeletable with a directory-permission trick on Linux); emit; assert stderr contains a rotation-failed line; assert `portal.log` still receives the write.
-  - `"write spanning the 1 MB boundary completes in the original file then rotates for next write"`: actually, spec says "write that exactly equals 1 MB rotates" — rotation happens BEFORE the write. The write that would push to exactly 1MB is the trigger. Correct edge-case assertion: the triggering write lands in the fresh file. Confirm: pre-populate with `LogRotateThreshold - 50` bytes; emit a 60-byte line (new total would be `LogRotateThreshold + 10` ≥ 1MB); assert the 60-byte line is in `portal.log` (fresh) and the 50-byte historical content is in `portal.log.old`.
+  - `"the triggering write lands in portal.log.old (the file being rotated)"`: pre-populate with `LogRotateThreshold - 50` bytes; emit a 60-byte line (post-write size = `LogRotateThreshold + 10` ≥ 1MB); assert the 60-byte line is in `portal.log.old` (alongside the 50-byte historical content) and `portal.log` is fresh for the next write.
   - `"daemon restart between size check and rename tolerated"`: open logger with rotate=true, emit enough to trigger rotation, kill & relaunch logger, verify new logger sees a well-formed file state and continues writing. (Subprocess test.)
   - `"non-daemon caller never reaches mid-write rotation code path"`: open logger with `rotate=false`; pre-populate with 2MB; emit a line; assert `portal.log.old` does NOT exist, `portal.log` grew by the line's length (this is the regression guard for the concurrent-writer discipline).
 - Update `cmd/state_daemon.go` to trust the Phase 2 setup — it already calls `OpenLogger(path, true)`. No code change in the daemon; all behaviour lands in the logger itself.
 
 **Acceptance Criteria**:
 - [ ] `Logger.emit` in `internal/state/logger.go` calls `maybeRotate` only when `rotating == true`.
-- [ ] `maybeRotate` uses `LogRotateThreshold` (exported `= 1 * 1024 * 1024`) as the inclusive boundary (size + pending ≥ threshold triggers rotation).
+- [ ] `maybeRotate` uses `LogRotateThreshold` (exported `= 1 * 1024 * 1024`) as the post-write inclusive boundary (post-write `size >= threshold` triggers rotation).
 - [ ] Rotation replaces any existing `portal.log.old` via `os.Remove(oldPath)` before `os.Rename`.
 - [ ] On rotation-rename failure, a single diagnostic is written to stderr and the logger continues writing to the current file (degraded, not crashed).
-- [ ] The triggering write lands in the fresh `portal.log` (not the old one) — spec: "write that spanning the 1 MB boundary completes in original file then rotates for next write" is ambiguous; the implementation chosen (rotate-before-write) ensures `portal.log` stays strictly < 1MB at rest between writes. Documented in the edge cases and test.
+- [ ] The triggering write lands in `portal.log.old` (the file being rotated) — matches spec "On reaching 1 MB during a write, Portal renames `portal.log` → `portal.log.old` ... then starts a fresh `portal.log`". `portal.log.old` may briefly contain content slightly over 1 MB by one log-line's worth.
 - [ ] Non-daemon callers (task 6-2) never reach `maybeRotate` — the `rotating` flag gates the whole code path.
 - [ ] Existing Phase 2 startup-rotation (Phase 2 task 2-7) continues to work unchanged (rotation on `OpenLogger(true)` when size ≥ threshold).
 - [ ] `Logger.path` field is populated at construction so `maybeRotate` knows the rename target.
 
 **Tests**:
-- `"daemon rotates mid-write when the next write would cross 1 MB"`
-- `"daemon rotation triggers at exactly 1 MB (inclusive threshold)"`
+- `"daemon rotates after a write that crosses the 1 MB boundary"`
+- `"daemon rotation triggers at exactly 1 MB (inclusive threshold on post-write size)"`
 - `"existing portal.log.old is replaced on rotation"`
 - `"rotation-rename failure logs to stderr and continues with current file"`
-- `"the triggering write lands in the fresh portal.log"`
+- `"the triggering write lands in portal.log.old (the file being rotated)"`
 - `"daemon restart between size check and rename is tolerated"`
 - `"non-daemon caller never reaches mid-write rotation code path"`
 - `"startup rotation from Phase 2 task 2-7 still works"`
 
 **Edge Cases**:
-- Write that exactly equals 1MB rotates: inclusive threshold (`>= LogRotateThreshold`). Spec phrasing ("write that exactly equals 1 MB rotates") is captured.
+- Inclusive post-write threshold (`>= LogRotateThreshold`). Matches spec phrasing "On reaching 1 MB during a write".
 - Existing `portal.log.old` replaced, not appended. `os.Remove` before `os.Rename`. If the remove fails for `ENOENT`, ignore. If it fails for other reasons (permission), the subsequent rename will error and the stderr diagnostic fires.
 - Rotation-rename failure (e.g., dir is read-only, `.old` is locked on some platform): logger logs to stderr once, keeps writing to the current file. Rotation is attempted again on the NEXT write that crosses the threshold — every future write hits the same check, so transient conditions self-heal.
-- Write spanning the boundary: per spec the trigger is "next write would cross ≥ 1 MB", so the write lands in the fresh file. The previous content (just under 1MB) is preserved in `.old`. This keeps `portal.log` strictly below 1MB between writes at rest.
+- Write that crosses the boundary: per spec the trigger is "during a write", so the triggering write lands in the file that becomes `.old`. `portal.log.old` may briefly exceed 1MB by one log-line's worth; `portal.log` (the active file) starts fresh for subsequent writes.
 - Daemon restart between size check and rename: the next daemon's `OpenLogger(path, true)` re-checks at startup and rotates again if `portal.log` is still ≥ 1MB. Harmless; the check is idempotent.
 - Non-daemon callers never reach this code path — the `rotating` bool short-circuits at the top of `maybeRotate`. This is the load-bearing invariant preventing the rotation-race the spec warns about.
 - Logger reopened after rotation failure: if `os.OpenFile` fails in step 7 of `maybeRotate`, `l.file` becomes nil; subsequent `emit` calls check for nil and no-op. Caller never crashes. Diagnosable via the stderr one-liner.
@@ -993,7 +993,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - Step 1 `EnsureServer` failure: wrap as `NewFatal("Portal failed to start tmux server: " + err.Error(), err)`.
   - Step 2 `RegisterPortalHooks` failure: detect "mass" failure condition — `HookRegistrar.RegisterPortalHooks` returns a `joined-errors-for-all-events` error when every event's registration failed; only this case is fatal. (If a subset errored, log WARN and continue — implementation concern inside `RegisterPortalHooks`, not here.) On mass failure: wrap as `NewFatal("Portal failed to register tmux hooks: " + err.Error(), err)`.
   - Step 3 `Restoring.Set` failure: wrap as `NewFatal("Portal failed to set @portal-restoring marker: " + err.Error(), err)`.
-  - Step 6 `Restoring.Clear` failure: wrap as `NewFatal("Portal failed to clear @portal-restoring marker: " + err.Error(), err)` (per spec fatal list).
+  - Step 6 `Restoring.Clear` failure: NOT fatal — log WARN via ComponentBootstrap and continue. Spec's "Fatal Bootstrap Errors" list names `@portal-restoring set-option fails` for the SET only; clear failure is soft (matches task 3-7's clear-failure-is-soft contract and task 5-2's step-6 handling). The marker stays set; the daemon will skip ticks until next server restart (volatile server-option self-heals).
   - At each wrap site, also log ERROR to `portal.log` via `logger.Error(state.ComponentBootstrap, "<single-line>: %v", err)` BEFORE returning — ensures log entry exists even if stderr write later fails.
 - Edit `cmd/root.go` (or `main.go` — wherever `cmd.Execute()` lives):
   - Set `rootCmd.SilenceErrors = true` and `rootCmd.SilenceUsage = true` at declaration.
@@ -1017,7 +1017,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - `"EnsureServer failure returns a FatalError with the specified user message"`.
   - `"RegisterPortalHooks mass failure returns a FatalError"`.
   - `"Restoring.Set failure returns a FatalError"`.
-  - `"Restoring.Clear failure returns a FatalError"`.
+  - `"Restoring.Clear failure does NOT return a FatalError (soft path)"`.
   - `"FatalError wraps the underlying cause for unwrap"`.
   - `"EnsureSaver failure does NOT return a FatalError (soft)"` — regression guard; `EnsureSaver` is a soft failure per spec, produces `SaverDownError` (task 6-9), not `FatalError`.
 - Tests in `cmd/root_test.go` / `main_test.go`:
@@ -1030,11 +1030,11 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - EnsureServer: `"Portal failed to start tmux server: <underlying>"`.
   - Mass hook-register: `"Portal failed to register tmux hooks: <underlying>"`.
   - `@portal-restoring` set: `"Portal failed to set @portal-restoring marker: <underlying>"`.
-  - `@portal-restoring` clear: `"Portal failed to clear @portal-restoring marker: <underlying>"`.
+  - (Note: `@portal-restoring` CLEAR failure is NOT fatal — soft path per task 5-2 step 6 / task 3-7. Logs WARN and continues.)
 
 **Acceptance Criteria**:
 - [ ] `cmd/bootstrap/errors.go` defines `FatalError` with `UserMessage` + `Cause` + `Error()` + `Unwrap()`.
-- [ ] Orchestrator returns `*FatalError` for: step 1 (EnsureServer), step 2 mass-register, step 3 (Set @portal-restoring), step 6 (Clear @portal-restoring).
+- [ ] Orchestrator returns `*FatalError` for: step 1 (EnsureServer), step 2 mass-register, step 3 (Set @portal-restoring). Step 6 (Clear @portal-restoring) failure is soft — logs WARN and continues.
 - [ ] `EnsureSaver` failure does NOT return `FatalError` — uses the soft `SaverDownError` (task 6-9).
 - [ ] Every fatal wrap site also logs ERROR to `portal.log` with `ComponentBootstrap` BEFORE returning.
 - [ ] `main.go` / `Execute()` intercepts `*FatalError` via `errors.As` and emits `UserMessage` on a single stderr line, followed by `os.Exit(1)`.
@@ -1048,7 +1048,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
 - `"EnsureServer failure returns a FatalError with the specified user message"`
 - `"RegisterPortalHooks mass failure returns a FatalError"`
 - `"Restoring.Set failure returns a FatalError"`
-- `"Restoring.Clear failure returns a FatalError"`
+- `"Restoring.Clear failure does NOT return a FatalError (soft path)"`
 - `"EnsureSaver failure does NOT return a FatalError (soft path)"`
 - `"FatalError wraps the underlying cause via Unwrap"`
 - `"Execute() emits FatalError.UserMessage on a single stderr line and exits non-zero"`
