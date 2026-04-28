@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +24,18 @@ const (
 	LevelError
 )
 
+// Component constants identify the subsystem emitting a log entry. Call sites
+// should pass these constants to Logger.{Debug,Info,Warn,Error} so the
+// component column in portal.log stays consistent across the codebase.
+const (
+	ComponentDaemon    = "daemon"
+	ComponentRestore   = "restore"
+	ComponentHydrate   = "hydrate"
+	ComponentNotify    = "notify"
+	ComponentHooks     = "hooks"
+	ComponentBootstrap = "bootstrap"
+)
+
 // logRotateThreshold is the file-size cap at which OpenLogger rotates the
 // current portal.log to portal.log.old. Matches the spec's "1 MB per file"
 // (interpreted as 1 MiB to match the binary growth pattern of log files).
@@ -29,20 +43,22 @@ const logRotateThreshold = 1 << 20 // 1 MiB
 
 // Logger appends single-line, pipe-delimited entries to a log file.
 // Format: "timestamp | level | component | message\n" where timestamp is
-// RFC3339 UTC. Logger is safe for concurrent calls only insofar as POSIX
-// guarantees atomic writes for entries below PIPE_BUF — adequate for one-line
-// entries written by a single process.
+// RFC3339 UTC. Logger is safe for concurrent use from multiple goroutines:
+// writes are serialised by an internal mutex so each entry lands on the file
+// atomically with respect to other Logger callers in the same process.
 //
 // A nil *Logger is a valid no-op: all methods bail early. This lets callers
 // proceed when log opening fails without sprinkling nil checks at call sites.
 type Logger struct {
+	mu       sync.Mutex
 	f        *os.File
 	minLevel Level
 }
 
 // OpenLogger opens path for appending and returns a Logger configured with
-// the level read from PORTAL_LOG_LEVEL ("debug" → LevelDebug, anything else
-// → LevelInfo).
+// the level read from PORTAL_LOG_LEVEL via parseLevel — case-insensitive
+// "debug"/"info"/"warn"/"error"; any other value (including unset) defaults
+// to LevelWarn so production runs emit warnings and errors only.
 //
 // When rotate is true and path exists with size ≥ 1 MiB, OpenLogger renames
 // path to path+".old" before opening. Any existing path+".old" is overwritten.
@@ -66,18 +82,26 @@ func OpenLogger(path string, rotate bool) (*Logger, error) {
 		return nil, fmt.Errorf("open log file %s: %w", path, err)
 	}
 
-	return &Logger{f: f, minLevel: levelFromEnv()}, nil
+	return &Logger{f: f, minLevel: parseLevel(os.Getenv("PORTAL_LOG_LEVEL"))}, nil
 }
 
-// levelFromEnv reads PORTAL_LOG_LEVEL and returns the corresponding Level.
-// Default is LevelInfo. Only "debug" lowers the threshold; other values
-// (including unset and unrecognised) fall back to LevelInfo so that
-// production runs default to warnings + above per the spec.
-func levelFromEnv() Level {
-	if os.Getenv("PORTAL_LOG_LEVEL") == "debug" {
+// parseLevel maps a PORTAL_LOG_LEVEL string to a Level. Input is trimmed and
+// lowercased; "debug"/"info"/"warn"/"warning"/"error" map to their respective
+// levels. Any other value (including empty) returns LevelWarn so production
+// runs default to warnings + above per the spec.
+func parseLevel(s string) Level {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
 		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "warn", "warning":
+		return LevelWarn
+	case "error":
+		return LevelError
+	default:
+		return LevelWarn
 	}
-	return LevelInfo
 }
 
 // rotateIfOversized renames path → path+".old" when path exists and is at
@@ -133,8 +157,10 @@ func (l *Logger) Error(component, format string, args ...any) {
 }
 
 // write formats a single line and appends it to the underlying file.
-// On nil receiver, level filtering, or write errors, the call is silently
-// dropped — logging must never fail the caller.
+// Concurrent callers are serialised by l.mu so each entry lands atomically
+// relative to other Logger calls in the same process. On nil receiver, level
+// filtering, or write errors, the call is silently dropped — logging must
+// never fail the caller.
 func (l *Logger) write(level Level, levelLabel, component, format string, args ...any) {
 	if l == nil || l.f == nil {
 		return
@@ -145,5 +171,8 @@ func (l *Logger) write(level Level, levelLabel, component, format string, args .
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	msg := fmt.Sprintf(format, args...)
 	line := fmt.Sprintf("%s | %s | %s | %s\n", timestamp, levelLabel, component, msg)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	_, _ = l.f.WriteString(line)
 }

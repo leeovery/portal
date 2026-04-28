@@ -172,6 +172,8 @@ func TestStateDaemon_CreatesStateDirectoryIfMissing(t *testing.T) {
 }
 
 func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
+	// "starting, version=..." is INFO; default WARN threshold filters it.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -247,6 +249,8 @@ func (f *fakeCommander) RunRaw(args ...string) (string, error) {
 }
 
 func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
+	// "skipping final flush" is INFO; default WARN threshold filters it.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -279,6 +283,8 @@ func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
 }
 
 func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
+	// "final flush" is INFO; default WARN threshold filters it.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -347,6 +353,8 @@ func TestStateDaemon_ReturnsErrorWhenStateDirNotWritable(t *testing.T) {
 }
 
 func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
+	// "starting, version=..., pid=..." is INFO; default WARN threshold filters it.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 

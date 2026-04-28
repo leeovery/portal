@@ -191,6 +191,10 @@ func TestSweepOrphanFIFOs_LogsAndContinuesOnPerFileFailure(t *testing.T) {
 }
 
 func TestSweepOrphanFIFOs_LogsLinePerRemovedOrphan(t *testing.T) {
+	// Sweep emits INFO-level entries for removed orphans; default WARN
+	// threshold filters them out, so opt the test into INFO emission.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+
 	dir := t.TempDir()
 
 	orphan := filepath.Join(dir, "hydrate-gone__0.0.fifo")

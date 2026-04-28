@@ -499,6 +499,8 @@ func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testi
 }
 
 func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T) {
+	// "final flush" is INFO; default WARN threshold filters it.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	sess, panes := oneSession()
