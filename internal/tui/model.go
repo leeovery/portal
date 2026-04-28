@@ -87,11 +87,20 @@ type SessionsMsg struct {
 	Err      error
 }
 
-// MinWaitElapsedMsg signals that the minimum loading wait has elapsed.
-type MinWaitElapsedMsg struct{}
+// LoadingMinDuration is the minimum amount of time the loading page is
+// displayed before being dismissed. Bootstrap may take longer (the page
+// stays until bootstrap completes); if bootstrap is faster, the page
+// is padded to this duration so it does not flash as a UI glitch.
+const LoadingMinDuration = 1200 * time.Millisecond
 
-// MaxWaitElapsedMsg signals that the maximum loading wait has elapsed.
-type MaxWaitElapsedMsg struct{}
+// LoadingMinElapsedMsg signals that LoadingMinDuration has elapsed since
+// the loading page was first shown.
+type LoadingMinElapsedMsg struct{}
+
+// BootstrapCompleteMsg signals that the bootstrap orchestrator has finished
+// running. The TUI dismisses the loading page once both LoadingMinElapsedMsg
+// and BootstrapCompleteMsg have been received.
+type BootstrapCompleteMsg struct{}
 
 // SessionCreatedMsg is emitted when a session has been successfully created.
 type SessionCreatedMsg struct {
@@ -140,9 +149,9 @@ type Model struct {
 	commandPending    bool
 
 	// Bootstrap loading state
-	serverStarted    bool
-	minWaitDone      bool
-	sessionsReceived bool
+	serverStarted     bool
+	minElapsed        bool
+	bootstrapComplete bool
 
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
@@ -249,6 +258,16 @@ func (m Model) ActivePage() page {
 // ServerStarted returns whether the model was configured with server bootstrap, for testing.
 func (m Model) ServerStarted() bool {
 	return m.serverStarted
+}
+
+// MinElapsed reports whether LoadingMinElapsedMsg has been received, for testing.
+func (m Model) MinElapsed() bool {
+	return m.minElapsed
+}
+
+// BootstrapComplete reports whether BootstrapCompleteMsg has been received, for testing.
+func (m Model) BootstrapComplete() bool {
+	return m.bootstrapComplete
 }
 
 // CommandPending returns whether the model is in command-pending mode, for testing.
@@ -571,14 +590,6 @@ func (m Model) loadProjects() tea.Cmd {
 	}
 }
 
-// pollSessionsCmd returns a tick command that re-fetches sessions after DefaultPollInterval.
-func (m Model) pollSessionsCmd() tea.Cmd {
-	return tea.Tick(tmux.DefaultPollInterval, func(time.Time) tea.Msg {
-		sessions, err := m.sessionLister.ListSessions()
-		return SessionsMsg{Sessions: sessions, Err: err}
-	})
-}
-
 // transitionFromLoading moves from the loading page to the normal sessions page.
 // It marks sessions as loaded so evaluateDefaultPage can determine the correct
 // landing page when projects also finish loading.
@@ -603,7 +614,10 @@ func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 
 // Init returns a command that fetches tmux sessions, or loads projects
 // when in command-pending mode. When on PageLoading, it also schedules
-// min/max wait tick commands for the loading interstitial.
+// a single LoadingMinElapsedMsg tick to enforce the loading page's
+// minimum-display window. The matching BootstrapCompleteMsg is sent by
+// the bootstrap orchestrator (see task 5-7); both are required to
+// dismiss the loading page.
 func (m Model) Init() tea.Cmd {
 	if m.commandPending {
 		return m.loadProjects()
@@ -615,13 +629,10 @@ func (m Model) Init() tea.Cmd {
 	loadProjects := m.loadProjects()
 
 	if m.activePage == PageLoading {
-		minWaitTick := tea.Tick(tmux.DefaultMinWait, func(time.Time) tea.Msg {
-			return MinWaitElapsedMsg{}
+		loadingPadTick := tea.Tick(LoadingMinDuration, func(time.Time) tea.Msg {
+			return LoadingMinElapsedMsg{}
 		})
-		maxWaitTick := tea.Tick(tmux.DefaultMaxWait, func(time.Time) tea.Msg {
-			return MaxWaitElapsedMsg{}
-		})
-		cmds := []tea.Cmd{fetchSessions, minWaitTick, maxWaitTick}
+		cmds := []tea.Cmd{fetchSessions, loadingPadTick}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
 		}
@@ -668,36 +679,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
 		}
 
-		// Loading-specific: track session detection and handle transitions
+		// SessionsMsg no longer drives loading-page dismissal. The orchestrator
+		// signals completion via BootstrapCompleteMsg, paired with the
+		// LoadingMinElapsedMsg tick — both gate the transition. While on
+		// PageLoading, we still ingest the session list so it is ready when
+		// transitionFromLoading runs, but we do not flip sessionsLoaded here:
+		// transitionFromLoading does that as part of evaluateDefaultPage.
 		if m.activePage == PageLoading {
-			if len(msg.Sessions) > 0 {
-				m.sessionsReceived = true
-				if m.minWaitDone {
-					m.transitionFromLoading()
-				}
-				return m, nil
-			}
-			// No sessions yet — schedule a re-poll
-			return m, m.pollSessionsCmd()
+			return m, nil
 		}
 
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
 		return m, nil
-	case MinWaitElapsedMsg:
-		if m.activePage != PageLoading {
-			return m, nil
-		}
-		m.minWaitDone = true
-		if m.sessionsReceived {
+	case LoadingMinElapsedMsg:
+		m.minElapsed = true
+		if m.bootstrapComplete && m.activePage == PageLoading {
 			m.transitionFromLoading()
 		}
 		return m, nil
-	case MaxWaitElapsedMsg:
-		if m.activePage != PageLoading {
-			return m, nil
+	case BootstrapCompleteMsg:
+		m.bootstrapComplete = true
+		if m.minElapsed && m.activePage == PageLoading {
+			m.transitionFromLoading()
 		}
-		m.transitionFromLoading()
 		return m, nil
 	case ProjectsLoadedMsg:
 		if msg.Err == nil {
@@ -1274,7 +1279,7 @@ func (m Model) viewLoading() string {
 	if h == 0 {
 		h = 24
 	}
-	text := "Starting tmux server..."
+	text := "Restoring sessions…"
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, text)
 }
 

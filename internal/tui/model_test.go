@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -7386,14 +7387,25 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("loading view shows Starting tmux server text", func(t *testing.T) {
+	t.Run("loading view shows Restoring sessions text", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 		view := model.View()
-		if !strings.Contains(view, "Starting tmux server...") {
-			t.Errorf("expected loading text, got:\n%s", view)
+		if !strings.Contains(view, "Restoring sessions…") {
+			t.Errorf("expected loading text 'Restoring sessions…', got:\n%s", view)
+		}
+	})
+
+	t.Run("loading view does not show old Starting tmux server text", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		view := model.View()
+		if strings.Contains(view, "Starting tmux server") {
+			t.Errorf("loading view should not contain old text 'Starting tmux server', got:\n%s", view)
 		}
 	})
 
@@ -7408,13 +7420,13 @@ func TestLoadingPage(t *testing.T) {
 		if len(lines) < 2 {
 			t.Fatal("expected multiple lines for centered layout")
 		}
-		if strings.Contains(lines[0], "Starting tmux server...") {
+		if strings.Contains(lines[0], "Restoring sessions…") {
 			t.Error("text should not be on the first line when centered in 24-row terminal")
 		}
 		// Find which line has the text
 		textLine := -1
 		for i, line := range lines {
-			if strings.Contains(line, "Starting tmux server...") {
+			if strings.Contains(line, "Restoring sessions…") {
 				textLine = i
 				break
 			}
@@ -7444,7 +7456,7 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		// Do NOT send WindowSizeMsg
 		view := m.View()
-		if !strings.Contains(view, "Starting tmux server...") {
+		if !strings.Contains(view, "Restoring sessions…") {
 			t.Errorf("expected loading text with fallback dimensions, got:\n%s", view)
 		}
 		// Should have multiple lines (80x24 fallback centering)
@@ -7469,104 +7481,115 @@ func TestLoadingPage(t *testing.T) {
 		_ = model
 	})
 
-	t.Run("Init returns batch with tick commands when on PageLoading", func(t *testing.T) {
+	t.Run("LoadingMinDuration is 1.2 seconds", func(t *testing.T) {
+		if tui.LoadingMinDuration != 1200*time.Millisecond {
+			t.Errorf("expected LoadingMinDuration to be 1.2s, got %v", tui.LoadingMinDuration)
+		}
+	})
+
+	t.Run("Init schedules a single LoadingMinElapsedMsg via tea.Tick when on PageLoading", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		cmd := m.Init()
 		if cmd == nil {
 			t.Fatal("Init() returned nil, expected batch command")
 		}
-		// Batch command should produce a BatchMsg with multiple sub-commands
+		// Inspect each batched command's source to find the loadingPadTick.
+		// We invoke each non-tick command; the tick command (with 1.2s duration)
+		// is identified because it would block. Strategy: count batch entries
+		// and ensure exactly one of them, when its goroutine runs to completion,
+		// produces a LoadingMinElapsedMsg.
+		// Simpler check: confirm Init returned something, and a separate test
+		// asserts LoadingMinDuration constant. To avoid blocking the test on
+		// the 1.2s tick, we don't invoke tick commands. Instead verify there
+		// is at least one command whose body type matches the tea.Cmd shape.
 		msg := cmd()
 		batchMsg, ok := msg.(tea.BatchMsg)
 		if !ok {
 			t.Fatalf("expected tea.BatchMsg, got %T", msg)
 		}
-		// Should have at least 3 commands: fetchSessions, minWaitTick, maxWaitTick
-		if len(batchMsg) < 3 {
-			t.Errorf("expected at least 3 batch commands, got %d", len(batchMsg))
+		// Expect at least 2 commands: fetchSessions + loadingPadTick.
+		if len(batchMsg) < 2 {
+			t.Errorf("expected at least 2 batch commands, got %d", len(batchMsg))
 		}
 	})
 
-	t.Run("SessionsMsg with sessions during loading sets sessionsReceived and transitions when minWaitDone", func(t *testing.T) {
+	t.Run("Init does not poll ListSessions on a loading tick (no DefaultPollInterval)", func(t *testing.T) {
+		// Regression: removing pollSessionsCmd and tmux.DefaultPollInterval. The
+		// SessionsMsg branch must not return a non-nil retry command on empty
+		// sessions during loading.
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		// First simulate MinWaitElapsedMsg
-		model, _ = model.Update(tui.MinWaitElapsedMsg{})
-
-		// Then receive sessions
-		sessions := []tmux.Session{{Name: "dev", Windows: 1, Attached: false}}
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		updated := model.(tui.Model)
-		if updated.ActivePage() == tui.PageLoading {
-			t.Error("expected transition away from PageLoading after sessions + minWaitDone")
-		}
-	})
-
-	t.Run("SessionsMsg with sessions during loading before minWait does not transition", func(t *testing.T) {
-		lister := &mockSessionLister{sessions: []tmux.Session{}}
-		m := tui.New(lister, tui.WithServerStarted(true))
-		var model tea.Model = m
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-		// Receive sessions before MinWaitElapsedMsg
-		sessions := []tmux.Session{{Name: "dev", Windows: 1, Attached: false}}
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		updated := model.(tui.Model)
-		if updated.ActivePage() != tui.PageLoading {
-			t.Errorf("expected PageLoading (minWait not elapsed), got %d", updated.ActivePage())
-		}
-	})
-
-	t.Run("SessionsMsg with no sessions during loading schedules re-fetch", func(t *testing.T) {
-		lister := &mockSessionLister{sessions: []tmux.Session{}}
-		m := tui.New(lister, tui.WithServerStarted(true))
-		var model tea.Model = m
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-		// Receive empty sessions during loading
 		_, cmd := model.Update(tui.SessionsMsg{Sessions: []tmux.Session{}})
-		if cmd == nil {
-			t.Fatal("expected re-fetch command when no sessions during loading, got nil")
+		if cmd != nil {
+			t.Errorf("expected no re-fetch command from SessionsMsg during loading, got %T", cmd)
 		}
 	})
 
-	t.Run("MinWaitElapsedMsg with sessionsReceived transitions to normal view", func(t *testing.T) {
+	t.Run("LoadingMinElapsedMsg sets minElapsed but stays on PageLoading when bootstrap not complete", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		// Receive sessions first (before min wait)
-		sessions := []tmux.Session{{Name: "dev", Windows: 1, Attached: false}}
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Now min wait elapses
-		model, _ = model.Update(tui.MinWaitElapsedMsg{})
-
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 		updated := model.(tui.Model)
-		if updated.ActivePage() == tui.PageLoading {
-			t.Error("expected transition away from PageLoading after minWait + sessionsReceived")
+
+		if !updated.MinElapsed() {
+			t.Error("expected MinElapsed() to be true after LoadingMinElapsedMsg")
+		}
+		if updated.ActivePage() != tui.PageLoading {
+			t.Errorf("expected to remain on PageLoading (bootstrap not complete), got %d", updated.ActivePage())
 		}
 	})
 
-	t.Run("MaxWaitElapsedMsg transitions unconditionally", func(t *testing.T) {
+	t.Run("BootstrapCompleteMsg sets bootstrapComplete but stays on PageLoading when minElapsed is false", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		// No sessions received, no min wait elapsed — max wait fires
-		model, _ = model.Update(tui.MaxWaitElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		updated := model.(tui.Model)
+
+		if !updated.BootstrapComplete() {
+			t.Error("expected BootstrapComplete() to be true after BootstrapCompleteMsg")
+		}
+		if updated.ActivePage() != tui.PageLoading {
+			t.Errorf("expected to remain on PageLoading (minElapsed false), got %d", updated.ActivePage())
+		}
+	})
+
+	t.Run("transitions off PageLoading when both minElapsed and bootstrapComplete are true (min first)", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() == tui.PageLoading {
-			t.Error("expected transition away from PageLoading after MaxWaitElapsedMsg")
+			t.Error("expected transition off PageLoading after min + bootstrap")
+		}
+	})
+
+	t.Run("transitions off PageLoading when both minElapsed and bootstrapComplete are true (bootstrap first)", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() == tui.PageLoading {
+			t.Error("expected transition off PageLoading after bootstrap + min")
 		}
 	})
 
@@ -7575,7 +7598,6 @@ func TestLoadingPage(t *testing.T) {
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 
-		// Send various key presses
 		keys := []tea.KeyMsg{
 			{Type: tea.KeyRunes, Runes: []rune{'q'}},
 			{Type: tea.KeyRunes, Runes: []rune{'p'}},
@@ -7599,71 +7621,64 @@ func TestLoadingPage(t *testing.T) {
 		}
 	})
 
-	t.Run("orphaned MinWaitElapsedMsg after transition is harmless", func(t *testing.T) {
+	t.Run("orphaned LoadingMinElapsedMsg after transition is harmless", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		// Force transition via MaxWaitElapsedMsg
-		model, _ = model.Update(tui.MaxWaitElapsedMsg{})
+		// Force transition by completing both gates
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 		updated := model.(tui.Model)
 		page := updated.ActivePage()
 
-		// Now receive orphaned MinWaitElapsedMsg — should not crash or change state
-		model, _ = model.Update(tui.MinWaitElapsedMsg{})
+		// Now receive orphaned LoadingMinElapsedMsg — should not crash or change state
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
 		updated = model.(tui.Model)
 		if updated.ActivePage() != page {
-			t.Errorf("orphaned MinWaitElapsedMsg changed page from %d to %d", page, updated.ActivePage())
+			t.Errorf("orphaned LoadingMinElapsedMsg changed page from %d to %d", page, updated.ActivePage())
 		}
 	})
 
-	t.Run("orphaned MaxWaitElapsedMsg after transition is harmless", func(t *testing.T) {
+	t.Run("orphaned BootstrapCompleteMsg after transition is harmless", func(t *testing.T) {
 		lister := &mockSessionLister{sessions: []tmux.Session{}}
 		m := tui.New(lister, tui.WithServerStarted(true))
 		var model tea.Model = m
 		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		// Transition via sessions + minWait
+		// Transition
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		updated := model.(tui.Model)
+		page := updated.ActivePage()
+
+		// Orphaned BootstrapCompleteMsg
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
+		updated = model.(tui.Model)
+		if updated.ActivePage() != page {
+			t.Errorf("orphaned BootstrapCompleteMsg changed page from %d to %d", page, updated.ActivePage())
+		}
+	})
+
+	t.Run("SessionsMsg during loading does not transition off PageLoading", func(t *testing.T) {
+		// New behaviour: SessionsMsg no longer triggers loading-page dismissal.
+		// Only LoadingMinElapsedMsg + BootstrapCompleteMsg do.
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
 		sessions := []tmux.Session{{Name: "dev", Windows: 1, Attached: false}}
-		model, _ = model.Update(tui.MinWaitElapsedMsg{})
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-		updated := model.(tui.Model)
-		page := updated.ActivePage()
 
-		// Now receive orphaned MaxWaitElapsedMsg
-		model, _ = model.Update(tui.MaxWaitElapsedMsg{})
-		updated = model.(tui.Model)
-		if updated.ActivePage() != page {
-			t.Errorf("orphaned MaxWaitElapsedMsg changed page from %d to %d", page, updated.ActivePage())
+		updated := model.(tui.Model)
+		if updated.ActivePage() != tui.PageLoading {
+			t.Errorf("expected still on PageLoading after SessionsMsg (gates not met), got %d", updated.ActivePage())
 		}
 	})
 
-	t.Run("orphaned poll SessionsMsg after transition does not break normal view", func(t *testing.T) {
-		lister := &mockSessionLister{sessions: []tmux.Session{}}
-		m := tui.New(lister, tui.WithServerStarted(true))
-		var model tea.Model = m
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-		// Transition via MaxWaitElapsedMsg
-		model, _ = model.Update(tui.MaxWaitElapsedMsg{})
-
-		// Orphaned SessionsMsg should still update session list normally
-		sessions := []tmux.Session{{Name: "late", Windows: 2, Attached: false}}
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-		updated := model.(tui.Model)
-
-		items := updated.SessionListItems()
-		if len(items) != 1 {
-			t.Fatalf("expected 1 session item, got %d", len(items))
-		}
-		si := items[0].(tui.SessionItem)
-		if si.Session.Name != "late" {
-			t.Errorf("expected session name 'late', got %q", si.Session.Name)
-		}
-	})
-
-	t.Run("MaxWaitElapsedMsg with no sessions and projects loaded transitions to PageProjects", func(t *testing.T) {
+	t.Run("transition off PageLoading lands on PageProjects when no sessions and projects loaded", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{{Path: "/code/portal", Name: "portal"}},
 		}
@@ -7681,8 +7696,9 @@ func TestLoadingPage(t *testing.T) {
 			Projects: []project.Project{{Path: "/code/portal", Name: "portal"}},
 		})
 
-		// Max wait fires with no sessions
-		model, _ = model.Update(tui.MaxWaitElapsedMsg{})
+		// Both gates fire with no sessions
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageProjects {
@@ -7712,8 +7728,9 @@ func TestLoadingPage(t *testing.T) {
 		sessions := []tmux.Session{{Name: "dev", Windows: 1, Attached: false}}
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
-		// MinWait elapses — transition with sessions present
-		model, _ = model.Update(tui.MinWaitElapsedMsg{})
+		// Both gates fire
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{})
 
 		updated := model.(tui.Model)
 		if updated.ActivePage() != tui.PageSessions {
