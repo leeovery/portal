@@ -276,3 +276,47 @@ func TestUnsetSkeletonMarker(t *testing.T) {
 		}
 	})
 }
+
+func TestUnsetSkeletonMarkerForFIFO(t *testing.T) {
+	t.Run("derives paneKey from absolute FIFO path and unsets the matching option", func(t *testing.T) {
+		w := &writerMock{}
+		fifo := "/tmp/portal/hydrate-foo__0.0.fifo"
+		if err := state.UnsetSkeletonMarkerForFIFO(w, fifo); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(w.unsetCalls) != 1 {
+			t.Fatalf("got %d UnsetServerOption calls, want 1", len(w.unsetCalls))
+		}
+		wantName := state.SkeletonMarkerPrefix + "foo__0.0"
+		if w.unsetCalls[0] != wantName {
+			t.Errorf("got option name %q, want %q", w.unsetCalls[0], wantName)
+		}
+	})
+
+	t.Run("derives paneKey from bare FIFO basename", func(t *testing.T) {
+		w := &writerMock{}
+		if err := state.UnsetSkeletonMarkerForFIFO(w, "hydrate-bar__1.2.fifo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantName := state.SkeletonMarkerPrefix + "bar__1.2"
+		if len(w.unsetCalls) != 1 || w.unsetCalls[0] != wantName {
+			t.Errorf("got unsetCalls %v, want [%q]", w.unsetCalls, wantName)
+		}
+	})
+
+	t.Run("propagates UnsetServerOption error", func(t *testing.T) {
+		w := &writerMock{unsetErr: errors.New("tmux exploded")}
+		err := state.UnsetSkeletonMarkerForFIFO(w, "/tmp/portal/hydrate-foo__0.0.fifo")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("does not call SetServerOption", func(t *testing.T) {
+		w := &writerMock{}
+		_ = state.UnsetSkeletonMarkerForFIFO(w, "/tmp/portal/hydrate-foo__0.0.fifo")
+		if len(w.setCalls) != 0 {
+			t.Errorf("got %d SetServerOption calls, want 0", len(w.setCalls))
+		}
+	})
+}

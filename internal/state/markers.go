@@ -116,6 +116,18 @@ func UnsetSkeletonMarker(w ServerOptionWriter, paneKey string) error {
 	return w.UnsetServerOption(SkeletonMarkerPrefix + paneKey)
 }
 
+// UnsetSkeletonMarkerForFIFO clears the skeleton marker for the pane whose
+// hydration FIFO is fifoPath. It composes PaneKeyFromFIFOPath (recovering the
+// canonical paneKey embedded in the FIFO basename) with UnsetSkeletonMarker,
+// encoding the FIFOPath ⇄ paneKey invariant in a single helper so callers
+// holding only the FIFO path do not have to derive the paneKey themselves.
+//
+// See PaneKeyFromFIFOPath for the inverse mapping (basename → paneKey) and
+// FIFOPath for the forward mapping (paneKey → basename).
+func UnsetSkeletonMarkerForFIFO(w ServerOptionWriter, fifoPath string) error {
+	return UnsetSkeletonMarker(w, PaneKeyFromFIFOPath(fifoPath))
+}
+
 // IsRestoringSet reports whether the @portal-restoring marker is currently
 // set to a non-empty value. The daemon's tick checks this at entry and skips
 // the capture cycle while bootstrap is mid-skeleton-build (see specification

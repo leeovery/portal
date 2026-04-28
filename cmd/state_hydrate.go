@@ -96,8 +96,6 @@ func openFIFOWithTimeout(path string, timeout time.Duration) (*os.File, error) {
 // In production ExecShell calls syscall.Exec and never returns; the trailing
 // `return nil` is reached only in tests.
 func runHydrate(cfg hydrateConfig) error {
-	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
-
 	// 1. Block on FIFO until signal arrives or timeout fires.
 	f, err := cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)
 	if err != nil {
@@ -175,9 +173,7 @@ func runHydrate(cfg hydrateConfig) error {
 	// 8. Unset the skeleton marker. Failure is non-fatal: a stale marker
 	// only blocks the save loop from re-capturing this pane until next
 	// bootstrap, which will re-skeleton the pane and clear it.
-	if err := state.UnsetSkeletonMarker(cfg.Client, livePaneKey); err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+livePaneKey, err)
-	}
+	unsetSkeletonMarkerOrLog(cfg)
 
 	// 9. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
 	// not live paneKey — preserves hooks across base-index drift) and exec
@@ -299,11 +295,23 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	// 3. Unset the skeleton marker — KEY DIFFERENCE FROM TIMEOUT PATH. With
 	// no scrollback to dump, the pane is empty and the save loop should
 	// resume capturing it on the next tick rather than skipping it forever.
-	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
-	if err := state.UnsetSkeletonMarker(cfg.Client, livePaneKey); err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+livePaneKey, err)
-	}
+	unsetSkeletonMarkerOrLog(cfg)
 	return nil
+}
+
+// unsetSkeletonMarkerOrLog clears the @portal-skeleton-<paneKey> server option
+// for the pane whose hydration FIFO is cfg.FIFO and logs a single canonical
+// WARN line on failure. The FIFO→marker invariant lives entirely inside
+// state.UnsetSkeletonMarkerForFIFO; callers in this file hold only the FIFO
+// path and never derive the paneKey themselves.
+//
+// Failure is intentionally non-fatal — both call sites (signal-arrived,
+// file-missing recovery) treat a stale marker as recoverable on the next
+// bootstrap, which will re-skeleton the pane and clear it.
+func unsetSkeletonMarkerOrLog(cfg hydrateConfig) {
+	if err := state.UnsetSkeletonMarkerForFIFO(cfg.Client, cfg.FIFO); err != nil {
+		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+state.PaneKeyFromFIFOPath(cfg.FIFO), err)
+	}
 }
 
 // defaultExecShell is the production ExecShell seam: hand the process off via
