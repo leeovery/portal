@@ -17,9 +17,8 @@ type SessionValidator interface {
 
 // AttachDeps allows injecting dependencies for testing.
 type AttachDeps struct {
-	Connector    SessionConnector
-	Validator    SessionValidator
-	HookExecutor HookExecutorFunc
+	Connector SessionConnector
+	Validator SessionValidator
 }
 
 var attachCmd = &cobra.Command{
@@ -31,31 +30,27 @@ var attachCmd = &cobra.Command{
 
 		name := args[0]
 
-		connector, validator, hookExecutor := buildAttachDeps(cmd)
+		connector, validator := buildAttachDeps(cmd)
 
 		if !validator.HasSession(name) {
 			return fmt.Errorf("No session found: %s", name) //nolint:staticcheck // user-facing message per spec
-		}
-
-		if hookExecutor != nil {
-			hookExecutor(name)
 		}
 
 		return connector.Connect(name)
 	},
 }
 
-// buildAttachDeps returns the appropriate connector, validator, and hook executor
-// for the attach command. When attachDeps is set (testing), uses injected dependencies.
+// buildAttachDeps returns the appropriate connector and validator for the
+// attach command. When attachDeps is set (testing), uses injected dependencies.
 // Otherwise, builds real implementations based on inside/outside tmux detection.
-func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator, HookExecutorFunc) {
+func buildAttachDeps(cmd *cobra.Command) (SessionConnector, SessionValidator) {
 	if attachDeps != nil {
-		return attachDeps.Connector, attachDeps.Validator, attachDeps.HookExecutor
+		return attachDeps.Connector, attachDeps.Validator
 	}
 
 	client := tmuxClient(cmd)
 	connector := buildSessionConnector(client)
-	return connector, client, buildHookExecutor(client)
+	return connector, client
 }
 
 func init() {
