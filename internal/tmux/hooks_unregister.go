@@ -3,6 +3,7 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -12,9 +13,14 @@ import (
 // command body contains one of these substrings; user and other-plugin
 // entries on the same events are left untouched.
 //
-// The list mirrors every Portal-registered command (notify, signal-hydrate,
-// migrate-rename) so that all Portal hooks — including the rename-key
-// migration hook on session-renamed — are removable in one pass.
+// `portal state migrate-rename` is intentionally retained even though the
+// register side no longer installs it: older Portal binaries (pre-Task 7-2)
+// shipped the inert migrate-rename hook on `session-renamed`, and any
+// installation upgrading from one of those builds will still have a stale
+// entry sitting in the global hook table. Keeping the substring here means
+// a single `portal hooks reset` (or any other path that calls
+// UnregisterPortalHooks) cleans those legacy entries up. Drop only once the
+// migration window for those binaries is considered closed.
 var portalCommandSubstrings = []string{
 	"portal state notify",
 	"portal state signal-hydrate",
@@ -26,32 +32,15 @@ var portalCommandSubstrings = []string{
 // command substrings on any other event (e.g. window-renamed) are ignored.
 //
 // Order: save-trigger events first, then hydration-trigger events — mirrors
-// the registration order in RegisterPortalHooks. Computed as the deduped
-// union of both category slices so future category additions in
-// RegisterPortalHooks automatically flow through to the unregister side.
+// the registration order in RegisterPortalHooks. The two source slices are
+// disjoint by construction (save events fire on the server/window side;
+// hydration events fire on the client side), so a plain concatenation is
+// sufficient — no deduping needed.
 //
-// The migrate-rename category was registered in an earlier iteration; it
-// has been deferred to v2 (see hooks_register.go). `session-renamed` remains
-// covered by saveTriggerEvents, so legacy migrate-rename entries left over
-// from older binaries are still removable through portalCommandSubstrings.
-var portalEvents = dedupedEventList(saveTriggerEvents, hydrationTriggerEvents)
-
-// dedupedEventList returns the concatenation of the input slices with
-// duplicates filtered out, preserving first-seen order.
-func dedupedEventList(slices ...[]string) []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0)
-	for _, s := range slices {
-		for _, e := range s {
-			if _, ok := seen[e]; ok {
-				continue
-			}
-			seen[e] = struct{}{}
-			out = append(out, e)
-		}
-	}
-	return out
-}
+// Legacy `migrate-rename` entries from older binaries land on
+// `session-renamed`, which is part of saveTriggerEvents, so they remain
+// reachable through portalCommandSubstrings without a dedicated event entry.
+var portalEvents = slices.Concat(saveTriggerEvents, hydrationTriggerEvents)
 
 // UnregisterPortalHooks removes every Portal-owned hook entry from the global
 // tmux hook table.
