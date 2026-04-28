@@ -6,7 +6,7 @@ total_proposed: 10
 # Analysis Tasks: built-in-session-resurrection (Cycle 2)
 
 ## Task 1: Update CLAUDE.md to remove pre-resurrection mechanisms
-status: pending
+status: approved
 severity: high
 sources: standards
 
@@ -34,7 +34,7 @@ sources: standards
 ---
 
 ## Task 2: Promote skipIfNoTmux to internal/tmuxtest
-status: pending
+status: approved
 severity: high
 sources: duplication
 
@@ -63,7 +63,7 @@ sources: duplication
 ---
 
 ## Task 3: Update specification to describe respawn-pane -k arming
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -90,7 +90,7 @@ sources: standards
 ---
 
 ## Task 4: Centralise AtomicWrite + chmod 0600 doublet
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -119,7 +119,7 @@ sources: duplication
 ---
 
 ## Task 5: Extract unsetSkeletonMarkerOrLog helper for hydrate paths (incl. FIFO→marker convenience)
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -150,7 +150,7 @@ sources: duplication, architecture
 ---
 
 ## Task 6: Simplify ApplySkeletonMarkers signature (drop error + predicted-base params)
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -180,7 +180,7 @@ sources: architecture
 ---
 
 ## Task 7: Collapse isolated-socket tmux argument prefix into a helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -208,7 +208,7 @@ sources: duplication
 ---
 
 ## Task 8: Extract bootstrap.Orchestrator fatal-message helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -234,7 +234,7 @@ sources: duplication
 ---
 
 ## Task 9: Move bootstrap noop step types into cmd/bootstrap as canonical sources
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -262,7 +262,7 @@ sources: architecture
 ---
 
 ## Task 10: Extract daemon-state read template
-status: pending
+status: approved
 severity: low
 sources: duplication
 
