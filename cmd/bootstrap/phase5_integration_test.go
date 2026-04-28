@@ -13,6 +13,9 @@ package bootstrap_test
 // dedicated unit tests at the handler level. The goal is meaningful coverage
 // of the orchestration wiring (step ordering, marker visibility across steps,
 // and skeleton creation from sessions.json) without pretending to do more.
+//
+// The `tmuxSocket` harness lives in internal/tmuxtest (shared with the
+// internal/restore Phase 3 integration suite); see internal/tmuxtest/socket.go.
 
 import (
 	"context"
@@ -27,6 +30,7 @@ import (
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
 // skipIfNoTmux skips the test when tmux is not on PATH. Mirrors
@@ -36,120 +40,6 @@ func skipIfNoTmux(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available; skipping integration test")
 	}
-}
-
-// tmuxSocket scopes an isolated tmux server to a single test. The server
-// uses `tmux -S <abs-socket-path>` rooted in /tmp so the path stays inside
-// the platform's UNIX-socket length cap (104 bytes on darwin, 108 on linux).
-//
-// Why not -L + TMUX_TMPDIR=t.TempDir()? On darwin t.TempDir lives under
-// /private/var/folders/... and tmux composes a socket of
-// $TMUX_TMPDIR/tmux-$UID/<L>; for any non-trivial test name that path
-// exceeds 104 bytes. A short absolute -S path is the simplest robust fix.
-type tmuxSocket struct {
-	socketPath string
-}
-
-// newTmuxSocket constructs a tmuxSocket and registers a t.Cleanup that
-// kill-servers the isolated socket and removes the temp dir. Cleanup runs on
-// both pass and fail (and on panic) so a stray tmux server is never left
-// behind.
-func newTmuxSocket(t *testing.T) *tmuxSocket {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "ptl-p5-")
-	if err != nil {
-		t.Fatalf("mkdir temp socket dir: %v", err)
-	}
-	socketPath := filepath.Join(dir, "s")
-	ts := &tmuxSocket{socketPath: socketPath}
-	t.Cleanup(func() {
-		ts.killServer()
-		_ = os.RemoveAll(dir)
-	})
-	return ts
-}
-
-// tmuxCmd builds an *exec.Cmd targeting the isolated socket via -S. The
-// `-f /dev/null` flag suppresses the user's ~/.tmux.conf so tests run
-// against vanilla tmux defaults. tmux only acts on -f when starting a new
-// server but specifying it on every invocation is harmless and keeps the
-// helper symmetric.
-func (ts *tmuxSocket) tmuxCmd(args ...string) *exec.Cmd {
-	base := []string{"-S", ts.socketPath, "-f", "/dev/null"}
-	base = append(base, args...)
-	return exec.Command("tmux", base...)
-}
-
-// run executes a tmux command on the isolated socket, fatalling on failure.
-func (ts *tmuxSocket) run(t *testing.T, args ...string) string {
-	t.Helper()
-	out, err := ts.tmuxCmd(args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("tmux %v: %v\n%s", args, err, out)
-	}
-	return string(out)
-}
-
-// tryRun executes a tmux command on the isolated socket and returns the
-// combined output along with any exec error, leaving error handling to the
-// caller. Used to drive negative paths.
-func (ts *tmuxSocket) tryRun(args ...string) (string, error) {
-	out, err := ts.tmuxCmd(args...).CombinedOutput()
-	return string(out), err
-}
-
-// killServer tears down the isolated tmux server. Errors are intentionally
-// ignored: the typical case is "server already dead from a prior kill-server
-// in the test body," which is healthy.
-func (ts *tmuxSocket) killServer() {
-	_, _ = ts.tmuxCmd("kill-server").CombinedOutput()
-}
-
-// socketCommander wraps each tmux invocation with `-S <socketPath>` so a
-// *tmux.Client built from it talks only to the test's isolated server. It
-// satisfies tmux.Commander.
-type socketCommander struct {
-	socketPath string
-}
-
-// Run executes tmux on the isolated socket and trims surrounding whitespace,
-// matching tmux.RealCommander.Run. -f /dev/null mirrors tmuxSocket.tmuxCmd.
-func (sc *socketCommander) Run(args ...string) (string, error) {
-	full := append([]string{"-S", sc.socketPath, "-f", "/dev/null"}, args...)
-	out, err := exec.Command("tmux", full...).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// RunRaw executes tmux on the isolated socket and returns its output verbatim.
-func (sc *socketCommander) RunRaw(args ...string) (string, error) {
-	full := append([]string{"-S", sc.socketPath, "-f", "/dev/null"}, args...)
-	out, err := exec.Command("tmux", full...).Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-// client returns a *tmux.Client wired to the socketCommander for ts.
-func (ts *tmuxSocket) client() *tmux.Client {
-	return tmux.NewClient(&socketCommander{socketPath: ts.socketPath})
-}
-
-// waitForSession polls list-sessions until the target name appears or the
-// deadline elapses.
-func (ts *tmuxSocket) waitForSession(t *testing.T, name string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := ts.tryRun("has-session", "-t", name); err == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("session %q did not appear within %s", name, timeout)
 }
 
 // realRestoringMarker is the production wiring of bootstrap.RestoringMarker —
@@ -271,8 +161,8 @@ func (a *restoreOrchestratorAdapter) Restore() error { return a.inner.Restore() 
 func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 	skipIfNoTmux(t)
 
-	ts := newTmuxSocket(t)
-	client := ts.client()
+	ts := tmuxtest.New(t, "ptl-p5-")
+	client := ts.Client()
 	if _, err := client.EnsureServer(); err != nil {
 		t.Fatalf("EnsureServer: %v", err)
 	}
@@ -347,13 +237,13 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 	skipIfNoTmux(t)
 
-	ts := newTmuxSocket(t)
-	client := ts.client()
+	ts := tmuxtest.New(t, "ptl-p5-")
+	client := ts.Client()
 	if _, err := client.EnsureServer(); err != nil {
 		t.Fatalf("EnsureServer: %v", err)
 	}
-	ts.run(t, "new-session", "-d", "-s", "alpha")
-	ts.waitForSession(t, "alpha", 2*time.Second)
+	ts.Run(t, "new-session", "-d", "-s", "alpha")
+	ts.WaitForSession(t, "alpha", 2*time.Second)
 
 	o := &bootstrap.Orchestrator{
 		Server:    client,
@@ -369,7 +259,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 	}
 
 	// alpha must still be alive.
-	out := ts.run(t, "list-sessions", "-F", "#{session_name}")
+	out := ts.Run(t, "list-sessions", "-F", "#{session_name}")
 	if !strings.Contains(out, "alpha") {
 		t.Errorf("expected alpha in list-sessions; got %q", out)
 	}
@@ -408,7 +298,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		// session-renamed only carries the notify entry above.
 	}
 	for _, want := range wantHooks {
-		out, err := ts.tryRun("show-hooks", "-g", want.event)
+		out, err := ts.TryRun("show-hooks", "-g", want.event)
 		if err != nil {
 			t.Errorf("show-hooks -g %s: %v\n%s", want.event, err, out)
 			continue
@@ -437,7 +327,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	skipIfNoTmux(t)
 
-	ts := newTmuxSocket(t)
+	ts := tmuxtest.New(t, "ptl-p5-")
 	stateDir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	if _, err := state.EnsureDir(); err != nil {
@@ -472,13 +362,13 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Fatalf("write sessions.json: %v", err)
 	}
 
-	client := ts.client()
+	client := ts.Client()
 	if _, err := client.EnsureServer(); err != nil {
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
 	// Pre-condition: missing-foo must NOT be live yet.
-	if _, err := ts.tryRun("has-session", "-t", "missing-foo"); err == nil {
+	if _, err := ts.TryRun("has-session", "-t", "missing-foo"); err == nil {
 		t.Fatal("missing-foo unexpectedly live before Run")
 	}
 
@@ -508,7 +398,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 
 	// Post-condition: missing-foo must be live, created by step 5.
-	out := ts.run(t, "list-sessions", "-F", "#{session_name}")
+	out := ts.Run(t, "list-sessions", "-F", "#{session_name}")
 	if !strings.Contains(out, "missing-foo") {
 		t.Errorf("expected missing-foo in list-sessions; got %q", out)
 	}
