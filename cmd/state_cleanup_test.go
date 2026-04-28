@@ -9,11 +9,29 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
+
+// canonicalTempDir returns t.TempDir resolved through filepath.EvalSymlinks.
+// macOS's /var → /private/var redirection causes t.TempDir to return a path
+// whose parent component is itself a symlink; passing that raw to
+// PORTAL_STATE_DIR would trip purgeStateDir's defensive
+// "resolved path must equal cleaned input" check, which is intended to refuse
+// purging through a symlink — not to refuse purging tempdirs. Tests that need
+// a state dir purge must use this helper so the input matches the canonical
+// resolution.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("eval symlinks tempdir: %v", err)
+	}
+	return dir
+}
 
 // recordingCommander is a tmux.Commander that records every Run call and
 // dispatches via an optional RunFunc. Mirrors internal/tmux/MockCommander
@@ -258,6 +276,12 @@ func TestStateCleanup_IsNoOpOnSecondInvocation(t *testing.T) {
 }
 
 func TestStateCleanup_AcceptsPurgeFlagWithoutError(t *testing.T) {
+	dir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
 	cmder := &recordingCommander{
 		RunFunc: func(args ...string) (string, error) {
 			switch args[0] {
@@ -276,6 +300,333 @@ func TestStateCleanup_AcceptsPurgeFlagWithoutError(t *testing.T) {
 
 	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
 		t.Fatalf("unexpected error with --purge: %v", err)
+	}
+}
+
+// TestStateCleanup_LeavesStateDirIntactWithoutPurgeFlag asserts that omitting
+// --purge never touches the state directory, even when the directory exists
+// and contains data.
+func TestStateCleanup_LeavesStateDirIntactWithoutPurgeFlag(t *testing.T) {
+	dir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	canary := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(canary, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write canary: %v", err)
+	}
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	if _, _, err := runStateCleanup(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("state dir must remain when --purge omitted, got stat err: %v", err)
+	}
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("state dir contents must remain when --purge omitted, got stat err: %v", err)
+	}
+}
+
+// TestStateCleanup_PurgeRemovesStateDir asserts --purge wipes the state
+// directory and its contents.
+func TestStateCleanup_PurgeRemovesStateDir(t *testing.T) {
+	dir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sessions.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scrollback", "pane-0.bin"), []byte("scroll"), 0o600); err != nil {
+		t.Fatalf("write scrollback: %v", err)
+	}
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
+		t.Fatalf("unexpected error with --purge: %v", err)
+	}
+
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state dir must be gone after --purge, stat err = %v", err)
+	}
+}
+
+// TestStateCleanup_PurgeIsIdempotentOnMissingStateDir asserts --purge succeeds
+// when PORTAL_STATE_DIR points at a path that does not exist.
+func TestStateCleanup_PurgeIsIdempotentOnMissingStateDir(t *testing.T) {
+	parent := canonicalTempDir(t)
+	dir := filepath.Join(parent, "does-not-exist")
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
+		t.Fatalf("unexpected error with --purge on missing dir: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing dir must remain absent after --purge, stat err = %v", err)
+	}
+}
+
+// TestStateCleanup_PurgeLogsInfoOnSuccess asserts a successful purge writes an
+// INFO/ComponentDaemon entry to portal.log.
+func TestStateCleanup_PurgeLogsInfoOnSuccess(t *testing.T) {
+	// Use a separate log directory so the log survives the purge of the state
+	// dir we are testing. We point the logger at a fixed path inside logDir
+	// and inject it directly via StateCleanupDeps.Logger.
+	logDir := t.TempDir()
+	stateDir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	logPath := filepath.Join(logDir, "portal.log")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{
+		Client: tmux.NewClient(cmder),
+		Logger: logger,
+	})
+
+	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_ = logger.Close()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logged := string(data)
+	if !strings.Contains(logged, "INFO") {
+		t.Errorf("log missing INFO level entry: %q", logged)
+	}
+	if !strings.Contains(logged, state.ComponentDaemon) {
+		t.Errorf("log missing %q component: %q", state.ComponentDaemon, logged)
+	}
+	if !strings.Contains(logged, "purged state directory") {
+		t.Errorf("log missing purge confirmation: %q", logged)
+	}
+	if !strings.Contains(logged, stateDir) {
+		t.Errorf("log missing state dir path %q: %q", stateDir, logged)
+	}
+}
+
+// TestStateCleanup_PurgeRefusesSymlinkedStateDir asserts --purge declines to
+// remove a state directory whose path is itself a symlink.
+func TestStateCleanup_PurgeRefusesSymlinkedStateDir(t *testing.T) {
+	parent := canonicalTempDir(t)
+	target := filepath.Join(parent, "real-state")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(parent, "link-state")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	t.Setenv("PORTAL_STATE_DIR", link)
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	_, _, err := runStateCleanup(t, "--purge")
+	if err == nil {
+		t.Fatal("expected error refusing to purge symlinked state dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "refusing to purge symlinked") {
+		t.Errorf("error %q does not contain 'refusing to purge symlinked'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "purge state dir") {
+		t.Errorf("error %q does not wrap with 'purge state dir' prefix", err.Error())
+	}
+
+	// Symlink and target must remain intact.
+	if _, err := os.Lstat(link); err != nil {
+		t.Errorf("symlink must survive refusal: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("symlink target must survive refusal: %v", err)
+	}
+}
+
+// TestStateCleanup_PurgeContributesJoinedErrorOnRemoveAllFailure asserts a
+// RemoveAll failure surfaces via errors.Join with a "purge state dir" prefix
+// and does not abort the join.
+func TestStateCleanup_PurgeContributesJoinedErrorOnRemoveAllFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0o500 directory permissions")
+	}
+
+	dir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	// Create a child directory that RemoveAll must traverse, then strip its
+	// write+execute perms so RemoveAll on dir cannot recurse into it.
+	stuck := filepath.Join(dir, "stuck")
+	if err := os.MkdirAll(filepath.Join(stuck, "deep"), 0o700); err != nil {
+		t.Fatalf("mkdir stuck: %v", err)
+	}
+	if err := os.Chmod(stuck, 0o500); err != nil {
+		t.Fatalf("chmod stuck: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(stuck, 0o700)
+	})
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	_, _, err := runStateCleanup(t, "--purge")
+	if err == nil {
+		t.Fatal("expected non-nil error from RemoveAll failure")
+	}
+	if !strings.Contains(err.Error(), "purge state dir") {
+		t.Errorf("error %q missing 'purge state dir' wrapper", err.Error())
+	}
+}
+
+// TestStateCleanup_PurgeRemovesFIFOAndBinFiles asserts that --purge sweeps
+// FIFOs and .bin scrollback files alongside ordinary regular files.
+func TestStateCleanup_PurgeRemovesFIFOAndBinFiles(t *testing.T) {
+	dir := canonicalTempDir(t)
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	binPath := filepath.Join(dir, "scrollback", "pane-0.bin")
+	if err := os.WriteFile(binPath, []byte("scroll"), 0o600); err != nil {
+		t.Fatalf("write bin: %v", err)
+	}
+	fifoPath := filepath.Join(dir, "hydrate-pane-0.fifo")
+	if err := syscall.Mkfifo(fifoPath, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+	regular := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(regular, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, p := range []string{binPath, fifoPath, regular, dir} {
+		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("expected %s gone after --purge, stat err = %v", p, err)
+		}
 	}
 }
 

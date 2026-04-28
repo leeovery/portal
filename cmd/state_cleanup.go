@@ -3,6 +3,9 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
@@ -55,39 +58,101 @@ func buildStateCleanupDeps() (*tmux.Client, func(*tmux.Client) error, *state.Log
 //     session's PTY, the kernel delivers SIGHUP, and the daemon's signal
 //     handler performs a final atomic flush before exiting (Phase 2).
 //  2. Remove Portal's global hook entries via index-based set-hook -gu.
-//  3. (Phase 6 task 6-7) Optionally remove ~/.config/portal/state/ when --purge
-//     is passed.
+//  3. Optionally remove ~/.config/portal/state/ when --purge is passed.
 //
 // Ordering matters: the daemon's final flush must observe the pre-cleanup
 // world (hooks still registered, _portal-saver still alive at flush start).
-// killSaver therefore runs BEFORE UnregisterPortalHooks. Partial failures
-// never short-circuit — every action runs and errors accumulate via
-// errors.Join so cleanup never leaves mixed state.
+// killSaver therefore runs BEFORE UnregisterPortalHooks; purge runs LAST so
+// the daemon's final flush has somewhere to write. Partial failures never
+// short-circuit — every action runs and errors accumulate via errors.Join
+// so cleanup never leaves mixed state. When the tmux server is not running,
+// killSaver and UnregisterPortalHooks are skipped (no-op preconditions); the
+// purge step still runs because the state directory is independent of tmux.
 var stateCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
 	Short: "Tear down Portal's save daemon, hooks, and (optionally) state directory",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		purge, _ := cmd.Flags().GetBool("purge")
+
 		client, unregister, logger := buildStateCleanupDeps()
 
-		// No tmux server = no _portal-saver and no global hooks. Exit 0.
-		if !client.ServerRunning() {
-			return nil
-		}
-
 		var errs []error
-		if err := killSaver(client, logger); err != nil {
-			errs = append(errs, fmt.Errorf("daemon kill: %w", err))
+
+		// No tmux server = no _portal-saver and no global hooks. Skip those
+		// actions but still honour --purge: the state directory lives on disk
+		// independent of tmux server state.
+		if client.ServerRunning() {
+			if err := killSaver(client, logger); err != nil {
+				errs = append(errs, fmt.Errorf("daemon kill: %w", err))
+			}
+			if err := unregister(client); err != nil {
+				errs = append(errs, fmt.Errorf("hook removal: %w", err))
+			}
 		}
-		if err := unregister(client); err != nil {
-			errs = append(errs, fmt.Errorf("hook removal: %w", err))
+		if purge {
+			if err := runPurge(logger); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		// TODO(phase-6 task 6-7): if --purge, remove ~/.config/portal/state/
 		if len(errs) > 0 {
 			return errors.Join(errs...)
 		}
 		return nil
 	},
+}
+
+// runPurge resolves the state directory and removes it via purgeStateDir,
+// wrapping any error with a "purge state dir" prefix so the joined error
+// message in RunE identifies the failing action.
+func runPurge(logger *state.Logger) error {
+	dir, err := state.Dir()
+	if err != nil {
+		return fmt.Errorf("purge state dir: %w", err)
+	}
+	if err := purgeStateDir(dir, logger); err != nil {
+		return fmt.Errorf("purge state dir: %w", err)
+	}
+	return nil
+}
+
+// purgeStateDir removes dir and all contents when --purge is supplied. It is
+// idempotent on a missing directory and refuses to follow symlinks: if dir is
+// itself a symlink, or its filepath.EvalSymlinks-resolved path differs from
+// the cleaned input path, the function returns an error rather than removing
+// content the operator did not intend to expose to RemoveAll.
+//
+// Successful purges and RemoveAll failures are logged at INFO and ERROR
+// respectively under ComponentDaemon. The logger may be nil; *state.Logger's
+// nil-receiver semantics make those calls safe.
+func purgeStateDir(dir string, logger *state.Logger) error {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("lstat %s: %w", dir, err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to purge symlinked state dir: %s", dir)
+	}
+
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return fmt.Errorf("eval symlinks %s: %w", dir, err)
+	}
+	cleanDir := filepath.Clean(dir)
+	if filepath.Clean(resolved) != cleanDir {
+		return fmt.Errorf("state dir %s resolves to %s — refusing to purge", dir, resolved)
+	}
+
+	if err := os.RemoveAll(dir); err != nil {
+		logger.Error(state.ComponentDaemon, "purge failed: %v", err)
+		return fmt.Errorf("remove all: %w", err)
+	}
+	logger.Info(state.ComponentDaemon, "purged state directory %s", dir)
+	return nil
 }
 
 // killSaverInfoMessage is the INFO/ComponentDaemon log line emitted for a
