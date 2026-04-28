@@ -86,14 +86,15 @@ type BootstrapDeps struct {
 	ForceMemoise bool
 }
 
-// bootstrapOnce, bootstrapStarted, and bootstrapErr memoise the
-// orchestrator call so PersistentPreRunE invokes Run exactly once per
-// process. Tests reset the gate via resetBootstrapOnce(t). The pattern
-// mirrors versionCheckOnce in cmd/version_guard.go.
+// bootstrapOnce, bootstrapStarted, bootstrapWarningsSlice and bootstrapErr
+// memoise the orchestrator call so PersistentPreRunE invokes Run exactly
+// once per process. Tests reset the gate via resetBootstrapOnce(t). The
+// pattern mirrors versionCheckOnce in cmd/version_guard.go.
 var (
-	bootstrapOnce    sync.Once
-	bootstrapStarted bool
-	bootstrapErr     error
+	bootstrapOnce          sync.Once
+	bootstrapStarted       bool
+	bootstrapWarningsSlice []bootstrap.Warning
+	bootstrapErr           error
 )
 
 // buildBootstrapDeps returns the runner, shared client, and hook
@@ -123,10 +124,14 @@ func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) er
 // tests that rebuild bootstrapDeps between subtests do not need to reset
 // shared state — set BootstrapDeps.ForceMemoise to opt back into the
 // gate when verifying memoisation behaviour itself.
-func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, error) {
+//
+// The middle return is the slice of soft Warnings the orchestrator
+// accumulated during Run. Callers feed it into bootstrapWarnings (the
+// package-level sink) so PersistentPreRunE / openTUI can drain it later.
+func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, []bootstrap.Warning, error) {
 	if bootstrapDeps != nil && !bootstrapDeps.ForceMemoise {
 		if runner == nil {
-			return false, nil
+			return false, nil, nil
 		}
 		return runner.Run(ctx)
 	}
@@ -134,9 +139,9 @@ func runBootstrap(ctx context.Context, runner bootstrap.Runner) (bool, error) {
 		if runner == nil {
 			return
 		}
-		bootstrapStarted, bootstrapErr = runner.Run(ctx)
+		bootstrapStarted, bootstrapWarningsSlice, bootstrapErr = runner.Run(ctx)
 	})
-	return bootstrapStarted, bootstrapErr
+	return bootstrapStarted, bootstrapWarningsSlice, bootstrapErr
 }
 
 var rootCmd = &cobra.Command{
@@ -156,9 +161,22 @@ var rootCmd = &cobra.Command{
 		}
 
 		runner, client, registerHooks := buildBootstrapDeps()
-		started, err := runBootstrap(cmd.Context(), runner)
+		started, warnings, err := runBootstrap(cmd.Context(), runner)
 		if err != nil {
 			return err
+		}
+
+		// Feed every soft warning into the package-level sink so the TUI
+		// path can drain post-loading-page dismissal (task 6-10). The CLI
+		// path (every command except `portal open` with zero positional
+		// args) drains here so warnings precede the command's own
+		// stdout/stderr — see spec, Observability → Proactive Health
+		// Signals → TUI interaction.
+		for _, w := range warnings {
+			bootstrapWarnings.Add(w)
+		}
+		if !isTUIPath(cmd, args) {
+			bootstrapWarnings.EmitTo(cmd.ErrOrStderr())
 		}
 
 		ctx := context.WithValue(cmd.Context(), serverStartedKey, started)
@@ -180,6 +198,17 @@ var rootCmd = &cobra.Command{
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+// isTUIPath reports whether the invoked command will launch the Bubble
+// Tea TUI (and therefore must NOT have warnings emitted to stderr from
+// PersistentPreRunE — they would corrupt the alt-screen rendering). The
+// only TUI-launching path is `portal open` with zero positional args; an
+// `open <path>` invocation resolves directly via openPath without
+// entering the TUI. See cmd/open.go's RunE for the gating logic that
+// mirrors this check.
+func isTUIPath(cmd *cobra.Command, args []string) bool {
+	return cmd.Name() == "open" && len(args) == 0
 }
 
 // fatalErrorStderr is the sink for *bootstrap.FatalError user messages.

@@ -1,7 +1,8 @@
 package restore
 
 import (
-	"io"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
@@ -14,31 +15,30 @@ import (
 // session whose name is not already live. Per-session failures are logged
 // and isolated; one bad session never aborts the rest.
 //
-// Restore always returns nil. Hard fatals (corrupt sessions.json) emit a
-// single user-facing line to Stderr and continue bootstrap; per-session
-// errors only land in the structured log. The PersistentPreRunE caller wraps
-// this with the @portal-restoring marker (see spec, Bootstrap Flow step 5).
+// Restore returns nil on the happy path and on any per-session failure
+// (logged + isolated). The one error path is corrupt sessions.json: the
+// returned error is wrapped with state.ErrCorruptIndex so the bootstrap
+// orchestrator can detect it via errors.Is and surface a soft user-facing
+// warning (CorruptSessionsJSONWarning). All stderr emission was moved to
+// cmd/bootstrap_warnings.go in Phase 6 task 6-9; this package now only
+// returns and logs. The PersistentPreRunE caller wraps this with the
+// @portal-restoring marker (see spec, Bootstrap Flow step 5).
 type Orchestrator struct {
 	Client   *tmux.Client
 	StateDir string
 	Logger   *state.Logger
-	Stderr   io.Writer
 }
 
-// corruptStateMessage is the user-facing one-liner emitted to Stderr when
-// sessions.json is unparseable. Its exact wording matches the Observability
-// section of the specification.
-const corruptStateMessage = "Portal state file is corrupt — restoration skipped.\n" +
-	"Check `portal state status` or ~/.config/portal/state/portal.log.\n"
-
-// Restore is the bootstrap entry point. Always returns nil; per-session
-// failures are logged and the next session is attempted. See the spec's
-// Bootstrap Flow §5 for the full contract.
+// Restore is the bootstrap entry point. Returns nil on the happy path and
+// on any per-session failure (logged + isolated). Returns a wrapped
+// state.ErrCorruptIndex when sessions.json exists but is unparseable so
+// the bootstrap orchestrator can classify the failure as soft and emit a
+// CorruptSessionsJSONWarning. See the spec's Bootstrap Flow §5 for the
+// full contract.
 func (o *Orchestrator) Restore() error {
 	idx, skip, err := state.ReadIndex(o.StateDir)
 	if skip {
-		o.handleReadIndexSkip(err)
-		return nil
+		return o.handleReadIndexSkip(err)
 	}
 
 	if len(idx.Sessions) == 0 {
@@ -61,19 +61,24 @@ func (o *Orchestrator) Restore() error {
 	return nil
 }
 
-// handleReadIndexSkip surfaces ReadIndex's skip-with-error path (corrupt or
-// unreadable sessions.json) to both the structured log and Stderr. A clean
-// "no sessions.json file" skip carries err == nil and produces no output.
-func (o *Orchestrator) handleReadIndexSkip(err error) {
+// handleReadIndexSkip classifies ReadIndex's skip-with-error path. A clean
+// "no sessions.json file" skip carries err == nil and produces no output
+// or error. A corrupt-content skip (state.ErrCorruptIndex) is logged WARN
+// and returned to the caller so the bootstrap orchestrator can append a
+// CorruptSessionsJSONWarning. A read-error skip (e.g. permission denied)
+// is logged WARN and swallowed — it is not the corrupt-index path and the
+// orchestrator continues without surfacing a user-facing warning.
+func (o *Orchestrator) handleReadIndexSkip(err error) error {
 	if err == nil {
-		return
+		return nil
 	}
 	if o.Logger != nil {
 		o.Logger.Warn(state.ComponentRestore, "ReadIndex: %v", err)
 	}
-	if o.Stderr != nil {
-		_, _ = io.WriteString(o.Stderr, corruptStateMessage)
+	if errors.Is(err, state.ErrCorruptIndex) {
+		return fmt.Errorf("restore: %w", err)
 	}
+	return nil
 }
 
 // snapshotLiveSessions queries tmux for the set of currently-live session

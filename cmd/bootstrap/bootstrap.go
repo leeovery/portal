@@ -13,6 +13,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/leeovery/portal/internal/state"
@@ -95,35 +96,49 @@ type Orchestrator struct {
 	// LastSaverErr is populated when step 4 (EnsureSaver) fails. Run
 	// continues past the failure (per spec: saves paused, user not
 	// blocked); the caller can read this field afterwards to decide
-	// whether to surface a SaverDownError to observability.
+	// whether to surface a SaverDownError to observability. Retained
+	// alongside the Phase 6 Warnings []Warning surface for backwards
+	// compatibility with Phase 5 callers; both can coexist.
 	LastSaverErr error
 }
 
 // Run executes the eight bootstrap steps in spec order. It returns the
-// serverStarted flag from step 1 (EnsureServer) verbatim. The ctx
-// parameter is reserved for Phase 6 timeout/cancel wiring.
-func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
+// serverStarted flag from step 1 (EnsureServer) verbatim, the slice of
+// soft Warnings accumulated across steps 4-5 (in step order), and any
+// fatal error. The ctx parameter is reserved for Phase 6 timeout/cancel
+// wiring.
+//
+// Soft warning paths (do NOT short-circuit Run, do NOT produce fatal err):
+//   - Step 4 (EnsureSaver) returns non-nil → SaverDownWarning.
+//   - Step 5 (Restore) returns errors.Is(err, state.ErrCorruptIndex) →
+//     CorruptSessionsJSONWarning; restoreErr is treated as soft and the
+//     final return swallows it (per spec, corrupt sessions.json is a
+//     non-fatal no-op warning).
+func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	_ = ctx // reserved for Phase 6 timeout/cancel
+
+	var warnings []Warning
 
 	// Step 1 — EnsureServer.
 	serverStarted, err := o.Server.EnsureServer()
 	if err != nil {
-		return false, o.fatal("Portal failed to start tmux server: "+err.Error(), err)
+		return false, nil, o.fatal("Portal failed to start tmux server: "+err.Error(), err)
 	}
 
 	// Step 2 — RegisterPortalHooks.
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
-		return serverStarted, o.fatal("Portal failed to register tmux hooks: "+err.Error(), err)
+		return serverStarted, nil, o.fatal("Portal failed to register tmux hooks: "+err.Error(), err)
 	}
 
 	// Step 3 — Set @portal-restoring (MUST precede step 4).
 	if err := o.Restoring.Set(); err != nil {
-		return serverStarted, o.fatal("Portal failed to set @portal-restoring marker: "+err.Error(), err)
+		return serverStarted, nil, o.fatal("Portal failed to set @portal-restoring marker: "+err.Error(), err)
 	}
 
 	// Step 4 — EnsureSaver (best-effort).
 	if err := o.Saver.EnsureSaver(); err != nil {
 		o.LastSaverErr = &SaverDownError{Cause: err}
+		warnings = append(warnings, SaverDownWarning())
 		if o.Logger != nil {
 			o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
 		}
@@ -132,10 +147,18 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 
 	// Step 5 — Restore. Capture err but defer return until after step 6.
 	restoreErr := o.Restore.Restore()
+	if restoreErr != nil && errors.Is(restoreErr, state.ErrCorruptIndex) {
+		warnings = append(warnings, CorruptSessionsJSONWarning())
+		if o.Logger != nil {
+			o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) corrupt sessions.json: %v", restoreErr)
+		}
+		// Soft path: swallow the error so step 8 returns nil.
+		restoreErr = nil
+	}
 
 	// Step 6 — Clear @portal-restoring (fatal on failure).
 	if err := o.Restoring.Clear(); err != nil {
-		return serverStarted, o.fatal("Portal failed to clear @portal-restoring marker: "+err.Error(), err)
+		return serverStarted, warnings, o.fatal("Portal failed to clear @portal-restoring marker: "+err.Error(), err)
 	}
 
 	// Step 7 — CleanStale (best-effort).
@@ -148,9 +171,9 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 
 	// Step 8 — Return. Surface step-5 error if any; otherwise nil.
 	if restoreErr != nil {
-		return serverStarted, fmt.Errorf("step 5 (Restore): %w", restoreErr)
+		return serverStarted, warnings, fmt.Errorf("step 5 (Restore): %w", restoreErr)
 	}
-	return serverStarted, nil
+	return serverStarted, warnings, nil
 }
 
 // fatal logs the user-facing message at ERROR level (when a Logger is

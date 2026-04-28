@@ -21,10 +21,14 @@ func resetBootstrapOnce(t *testing.T) {
 	t.Helper()
 	bootstrapOnce = sync.Once{}
 	bootstrapStarted = false
+	bootstrapWarningsSlice = nil
 	bootstrapErr = nil
+	bootstrapWarnings = &BootstrapWarningsSink{}
 	t.Cleanup(func() {
 		bootstrapOnce = sync.Once{}
 		bootstrapStarted = false
+		bootstrapWarningsSlice = nil
 		bootstrapErr = nil
+		bootstrapWarnings = &BootstrapWarningsSink{}
 	})
 }

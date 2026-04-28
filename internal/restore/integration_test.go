@@ -12,7 +12,7 @@ package restore_test
 // at this scope. See the task brief for the rationale.
 
 import (
-	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -218,19 +218,14 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("OpenLogger: %v", err)
 	}
 	t.Cleanup(func() { _ = logger.Close() })
-	stderr := &bytes.Buffer{}
 
 	o := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,
 		Logger:   logger,
-		Stderr:   stderr,
 	}
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker: %v", err)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr on success; got %q", stderr.String())
 	}
 
 	// VERIFY: alpha is alive again.
@@ -252,7 +247,6 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 	}
 
 	// VERIFY: re-running Restore is a silent no-op (live-session skip).
-	stderr.Reset()
 	if err := o.Restore(); err != nil {
 		t.Fatalf("second Restore: %v", err)
 	}
@@ -260,9 +254,6 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 	// Count occurrences of "alpha" — must remain exactly one.
 	if got := strings.Count(out2, "alpha"); got != 1 {
 		t.Errorf("expected exactly one alpha session after second Restore; got %d in %q", got, out2)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr on second Restore; got %q", stderr.String())
 	}
 }
 
@@ -305,9 +296,10 @@ func TestPhase3Integration_SweepOrphanFIFOs(t *testing.T) {
 }
 
 // TestPhase3Integration_CorruptSessionsJSON wires real tmux up to an
-// orchestrator pointed at a corrupt sessions.json. Restore() must emit the
-// user-facing one-liner to stderr, log a WARN, and not create any sessions
-// on the live server.
+// orchestrator pointed at a corrupt sessions.json. Restore() must return
+// a wrapped state.ErrCorruptIndex, log a WARN, and not create any
+// sessions on the live server. (The user-facing stderr warning emission
+// moved to cmd/bootstrap_warnings.go in Phase 6 task 6-9.)
 func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 	skipIfNoTmux(t)
 
@@ -332,20 +324,18 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 		t.Fatalf("OpenLogger: %v", err)
 	}
 	t.Cleanup(func() { _ = logger.Close() })
-	stderr := &bytes.Buffer{}
 
 	o := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,
 		Logger:   logger,
-		Stderr:   stderr,
 	}
-	if err := o.RestoreWithMarker(); err != nil {
-		t.Fatalf("RestoreWithMarker: %v", err)
+	rwmErr := o.RestoreWithMarker()
+	if rwmErr == nil {
+		t.Fatal("RestoreWithMarker returned nil; expected wrapped state.ErrCorruptIndex")
 	}
-
-	if !strings.Contains(stderr.String(), "Portal state file is corrupt") {
-		t.Errorf("expected stderr to mention corrupt sessions.json; got %q", stderr.String())
+	if !errors.Is(rwmErr, state.ErrCorruptIndex) {
+		t.Errorf("RestoreWithMarker err = %v; want errors.Is(err, state.ErrCorruptIndex) = true", rwmErr)
 	}
 
 	// No user-visible sessions should have been created. The orchestrator

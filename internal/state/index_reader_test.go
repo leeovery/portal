@@ -246,6 +246,48 @@ func TestReadIndex_ReturnsSkipWithWrappedPermissionErrorWhenUnreadable(t *testin
 	}
 }
 
+func TestReadIndex_WrapsParseErrorWithErrCorruptIndex(t *testing.T) {
+	dir := t.TempDir()
+	writeSessionsJSON(t, dir, []byte("{not json"))
+
+	_, _, err := state.ReadIndex(dir)
+	if err == nil {
+		t.Fatal("expected parse error; got nil")
+	}
+	if !errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("errors.Is(err, ErrCorruptIndex) = false; want true. err=%v", err)
+	}
+}
+
+func TestReadIndex_WrapsVersionErrorWithErrCorruptIndex(t *testing.T) {
+	dir := t.TempDir()
+	writeSessionsJSON(t, dir, []byte(`{
+  "version": 99,
+  "saved_at": "2026-04-17T10:30:00Z",
+  "sessions": []
+}`))
+
+	_, _, err := state.ReadIndex(dir)
+	if err == nil {
+		t.Fatal("expected version error; got nil")
+	}
+	if !errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("errors.Is(err, ErrCorruptIndex) = false; want true. err=%v", err)
+	}
+}
+
+func TestReadIndex_DoesNotWrapAbsentFileWithErrCorruptIndex(t *testing.T) {
+	dir := t.TempDir()
+
+	_, _, err := state.ReadIndex(dir)
+	if err != nil {
+		t.Fatalf("expected nil err for absent file; got %v", err)
+	}
+	if errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("absent file must NOT be classified as corrupt")
+	}
+}
+
 func TestReadIndex_PerformsNoStdoutOrStderrWrites(t *testing.T) {
 	dir := t.TempDir()
 

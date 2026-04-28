@@ -14,18 +14,19 @@ import (
 )
 
 // recordingRunner counts Run invocations and returns a configurable
-// (started, err) tuple. Substituted into BootstrapDeps.Orchestrator to
-// verify PersistentPreRunE memoises the orchestrator call across repeated
-// invocations.
+// (started, warnings, err) tuple. Substituted into BootstrapDeps.Orchestrator
+// to verify PersistentPreRunE memoises the orchestrator call across
+// repeated invocations.
 type recordingRunner struct {
-	calls   int
-	started bool
-	err     error
+	calls    int
+	started  bool
+	warnings []bootstrap.Warning
+	err      error
 }
 
-func (r *recordingRunner) Run(_ context.Context) (bool, error) {
+func (r *recordingRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
 	r.calls++
-	return r.started, r.err
+	return r.started, r.warnings, r.err
 }
 
 func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {

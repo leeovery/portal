@@ -6,8 +6,12 @@ import "context"
 // does not import the concrete *Orchestrator type. Orchestrator implicitly
 // satisfies Runner; tests inject lightweight fakes (e.g. NewShim) without
 // pulling in the full step interfaces.
+//
+// The middle return value carries any soft Warnings accumulated during
+// the run (Phase 6 task 6-9). Legacy shims return a nil slice — only the
+// full Orchestrator produces warnings.
 type Runner interface {
-	Run(ctx context.Context) (bool, error)
+	Run(ctx context.Context) (bool, []Warning, error)
 }
 
 // shimRunner is a Runner that only performs step 1 (EnsureServer) of the
@@ -24,12 +28,14 @@ type shimRunner struct {
 
 // Run delegates to ServerBootstrapper.EnsureServer. The returned values are
 // passed through verbatim — no wrapping, no additional steps. A nil
-// ServerBootstrapper yields a no-op Run that returns (false, nil).
-func (s *shimRunner) Run(_ context.Context) (bool, error) {
+// ServerBootstrapper yields a no-op Run that returns (false, nil, nil).
+// The shim never produces warnings; the middle slice is always nil.
+func (s *shimRunner) Run(_ context.Context) (bool, []Warning, error) {
 	if s.server == nil {
-		return false, nil
+		return false, nil, nil
 	}
-	return s.server.EnsureServer()
+	started, err := s.server.EnsureServer()
+	return started, nil, err
 }
 
 // NewShim returns a Runner that wraps the given ServerBootstrapper. The

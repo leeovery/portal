@@ -1,7 +1,6 @@
 package restore_test
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -79,15 +78,17 @@ func writeRawIndex(t *testing.T, dir string, raw []byte) {
 }
 
 // orchestrator builds an Orchestrator wired against the supplied mock
-// commander, state directory, optional logger, and stderr buffer.
-func newOrchestrator(t *testing.T, mock *mockCommander, dir string, logger *state.Logger, stderr *bytes.Buffer) *restore.Orchestrator {
+// commander, state directory, and optional logger. Stderr emission was
+// removed in Phase 6 task 6-9 — the corrupt-index case now returns a
+// wrapped state.ErrCorruptIndex and the bootstrap orchestrator surfaces
+// the user-facing warning via cmd.BootstrapWarningsSink.
+func newOrchestrator(t *testing.T, mock *mockCommander, dir string, logger *state.Logger) *restore.Orchestrator {
 	t.Helper()
 	client := tmux.NewClient(mock)
 	return &restore.Orchestrator{
 		Client:   client,
 		StateDir: dir,
 		Logger:   logger,
-		Stderr:   stderr,
 	}
 }
 
@@ -106,18 +107,14 @@ func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {
 	mock := &mockCommander{RunFunc: defaultRunFunc}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
 
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
 	if len(mock.Calls) != 0 {
 		t.Errorf("expected no tmux calls when sessions.json absent; got %v", mock.Calls)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr; got %q", stderr.String())
 	}
 
 	_ = logger.Close()
@@ -127,30 +124,27 @@ func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_EmitsStderrAndLogsWhenSessionsJSONCorrupt(t *testing.T) {
+func TestOrchestrator_ReturnsWrappedErrCorruptIndexAndLogsWhenSessionsJSONCorrupt(t *testing.T) {
 	dir := t.TempDir()
 	writeRawIndex(t, dir, []byte("{not json"))
 
 	mock := &mockCommander{RunFunc: defaultRunFunc}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
 
-	o := newOrchestrator(t, mock, dir, logger, stderr)
-	if err := o.Restore(); err != nil {
-		t.Fatalf("Restore returned error: %v", err)
+	o := newOrchestrator(t, mock, dir, logger)
+	err := o.Restore()
+	if err == nil {
+		t.Fatal("expected Restore to return wrapped ErrCorruptIndex; got nil")
 	}
-
-	wantStderr := "Portal state file is corrupt — restoration skipped.\n" +
-		"Check `portal state status` or ~/.config/portal/state/portal.log.\n"
-	if stderr.String() != wantStderr {
-		t.Errorf("stderr:\n got %q\nwant %q", stderr.String(), wantStderr)
+	if !errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("errors.Is(err, state.ErrCorruptIndex) = false; want true. err=%v", err)
 	}
 
 	_ = logger.Close()
-	body, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	body, err2 := os.ReadFile(logPath)
+	if err2 != nil {
+		t.Fatalf("read log: %v", err2)
 	}
 	bodyStr := string(body)
 	if !strings.Contains(bodyStr, "WARN") || !strings.Contains(bodyStr, "ReadIndex") {
@@ -175,9 +169,7 @@ func TestOrchestrator_OnlyListsSessionsWhenIndexEmpty(t *testing.T) {
 	mock := &mockCommander{RunFunc: defaultRunFunc}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -216,9 +208,7 @@ func TestOrchestrator_SkeletonRestoresSingleMissingSession(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -241,9 +231,6 @@ func TestOrchestrator_SkeletonRestoresSingleMissingSession(t *testing.T) {
 	if !found {
 		t.Errorf("expected set-option for marker %q; calls: %v", wantMarker, mock.Calls)
 	}
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr on success; got %q", stderr.String())
-	}
 }
 
 func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
@@ -263,18 +250,13 @@ func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
 	if got := len(findAllCalls(mock.Calls, "new-session")); got != 0 {
 		t.Errorf("new-session calls = %d, want 0 (live session must be skipped)", got)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr on silent skip; got %q", stderr.String())
 	}
 
 	_ = logger.Close()
@@ -298,9 +280,7 @@ func TestOrchestrator_SkipsUnderscorePrefixedSessions(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -325,9 +305,7 @@ func TestOrchestrator_LogsAndSkipsZeroWindowSession(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -358,9 +336,7 @@ func TestOrchestrator_LogsAndSkipsZeroPaneWindow(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -417,9 +393,8 @@ func TestOrchestrator_IsolatesPerSessionErrors(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, stateOK)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
 
-	o := newOrchestrator(t, mock, stateOK, logger, stderr)
+	o := newOrchestrator(t, mock, stateOK, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -465,9 +440,7 @@ func TestOrchestrator_LogsAndReturnsNilWhenListSessionsFails(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
@@ -504,9 +477,7 @@ func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore returned error %v, expected nil even when every session errors", err)
 	}
@@ -546,9 +517,7 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}

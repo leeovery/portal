@@ -1,7 +1,6 @@
 package restore_test
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"strings"
@@ -102,9 +101,7 @@ func TestRestoreWithMarker_SetsBeforeRestoreCalls(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker returned error: %v", err)
 	}
@@ -127,9 +124,7 @@ func TestRestoreWithMarker_SetPrecedesListSessions(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker returned error: %v", err)
 	}
@@ -152,9 +147,7 @@ func TestRestoreWithMarker_ClearsAfterRestoreReturns(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker returned error: %v", err)
 	}
@@ -177,9 +170,7 @@ func TestRestoreWithMarker_ClearsEvenWhenRestorePanics(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 
 	var recovered any
 	func() {
@@ -206,9 +197,7 @@ func TestRestoreWithMarker_ReturnsSetErrorAndSkipsRestore(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	err := o.RestoreWithMarker()
 	if err == nil {
 		t.Fatalf("expected error from RestoreWithMarker, got nil")
@@ -245,9 +234,7 @@ func TestRestoreWithMarker_LogsButDoesNotReturnClearError(t *testing.T) {
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker should not propagate clear error; got %v", err)
 	}
@@ -274,9 +261,7 @@ func TestRestoreWithMarker_UsesCorrectArgvShapes(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker: %v", err)
 	}
@@ -313,9 +298,7 @@ func TestRestoreWithMarker_TolerantOfPreExistingMarker(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker: %v", err)
 	}
@@ -334,9 +317,7 @@ func TestRestoreWithMarker_NeverIssuesEmptyValueSetOption(t *testing.T) {
 	mock := &mockCommander{RunFunc: (&markerRunFunc{}).run}
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
-	stderr := &bytes.Buffer{}
-
-	o := newOrchestrator(t, mock, dir, logger, stderr)
+	o := newOrchestrator(t, mock, dir, logger)
 	if err := o.RestoreWithMarker(); err != nil {
 		t.Fatalf("RestoreWithMarker: %v", err)
 	}

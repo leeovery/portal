@@ -3,8 +3,11 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // stepRecorder is a single fake that satisfies every step interface and
@@ -108,7 +111,7 @@ func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
 	r := &stepRecorder{}
 	o := newOrchestrator(r, nil)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -133,7 +136,7 @@ func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -166,7 +169,7 @@ func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -199,7 +202,7 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -247,7 +250,7 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndRecordsLastSaverErr(t
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run must not return saver failures; got %v", err)
 	}
@@ -279,7 +282,7 @@ func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
 	r := &stepRecorder{RestoreErr: sentinel}
 	o := newOrchestrator(r, nil)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected restore error, got nil")
 	}
@@ -314,7 +317,7 @@ func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -343,7 +346,7 @@ func TestOrchestratorRun_continuesPastCleanStaleFailure(t *testing.T) {
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("CleanStale failure must not propagate; got %v", err)
 	}
@@ -356,7 +359,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 	r1 := &stepRecorder{}
 	o := newOrchestrator(r1, nil)
 
-	if _, err := o.Run(context.Background()); err != nil {
+	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("first Run errored: %v", err)
 	}
 	want := []string{
@@ -380,7 +383,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 	o.Restore = r2
 	o.Clean = r2
 
-	if _, err := o.Run(context.Background()); err != nil {
+	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("second Run errored: %v", err)
 	}
 	if !equalCalls(r2.calls, want) {
@@ -393,7 +396,7 @@ func TestOrchestratorRun_returnsServerStartedFlagFromEnsureServer(t *testing.T) 
 		r := &stepRecorder{ServerStarted: true}
 		o := newOrchestrator(r, nil)
 
-		started, err := o.Run(context.Background())
+		started, _, err := o.Run(context.Background())
 		if err != nil {
 			t.Fatalf("Run errored: %v", err)
 		}
@@ -406,7 +409,7 @@ func TestOrchestratorRun_returnsServerStartedFlagFromEnsureServer(t *testing.T) 
 		r := &stepRecorder{ServerStarted: false}
 		o := newOrchestrator(r, nil)
 
-		started, err := o.Run(context.Background())
+		started, _, err := o.Run(context.Background())
 		if err != nil {
 			t.Fatalf("Run errored: %v", err)
 		}
@@ -420,7 +423,7 @@ func TestOrchestratorRun_doesNotCallEnsureSaverWhenSetFails(t *testing.T) {
 	r := &stepRecorder{SetErr: errors.New("set boom")}
 	o := newOrchestrator(r, nil)
 
-	_, _ = o.Run(context.Background())
+	_, _, _ = o.Run(context.Background())
 
 	for _, c := range r.calls {
 		if c == "EnsureSaver" {
@@ -435,7 +438,7 @@ func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, err := o.Run(context.Background())
+	_, _, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run must not surface saver failures; got %v", err)
 	}
@@ -463,5 +466,108 @@ func TestSaverDownError_unwrapsCause(t *testing.T) {
 	}
 	if !strings.Contains(wrapped.Error(), "underlying") {
 		t.Errorf("Error() = %q; expected to mention cause", wrapped.Error())
+	}
+}
+
+func TestOrchestratorRun_appendsSaverDownWarningOnEnsureSaverFailure(t *testing.T) {
+	r := &stepRecorder{EnsureSaverErr: errors.New("saver boom")}
+	o := newOrchestrator(r, nil)
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run must not return saver failures; got %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
+	}
+	want := SaverDownWarning()
+	if len(warnings[0].Lines) != len(want.Lines) {
+		t.Fatalf("warning Lines len = %d, want %d", len(warnings[0].Lines), len(want.Lines))
+	}
+	for i := range want.Lines {
+		if warnings[0].Lines[i] != want.Lines[i] {
+			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], want.Lines[i])
+		}
+	}
+}
+
+func TestOrchestratorRun_appendsCorruptSessionsJSONWarningOnRestoreErrCorruptIndex(t *testing.T) {
+	corruptErr := fmt.Errorf("restore: %w", state.ErrCorruptIndex)
+	r := &stepRecorder{RestoreErr: corruptErr}
+	o := newOrchestrator(r, nil)
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run must treat ErrCorruptIndex as soft; got err=%v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
+	}
+	want := CorruptSessionsJSONWarning()
+	for i := range want.Lines {
+		if warnings[0].Lines[i] != want.Lines[i] {
+			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], want.Lines[i])
+		}
+	}
+}
+
+func TestOrchestratorRun_accumulatesMultipleSoftWarnings(t *testing.T) {
+	r := &stepRecorder{
+		EnsureSaverErr: errors.New("saver boom"),
+		RestoreErr:     fmt.Errorf("restore: %w", state.ErrCorruptIndex),
+	}
+	o := newOrchestrator(r, nil)
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run must treat both as soft; got err=%v", err)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("warnings len = %d, want 2; got %#v", len(warnings), warnings)
+	}
+	// Order matches step order: SaverDownWarning (step 4) first,
+	// CorruptSessionsJSONWarning (step 5) second.
+	if warnings[0].Lines[0] != SaverDownWarning().Lines[0] {
+		t.Errorf("warnings[0] = %q, want SaverDownWarning first", warnings[0].Lines[0])
+	}
+	if warnings[1].Lines[0] != CorruptSessionsJSONWarning().Lines[0] {
+		t.Errorf("warnings[1] = %q, want CorruptSessionsJSONWarning second", warnings[1].Lines[0])
+	}
+}
+
+func TestOrchestratorRun_doesNotReturnFatalErrorForCorruptIndex(t *testing.T) {
+	r := &stepRecorder{RestoreErr: fmt.Errorf("restore: %w", state.ErrCorruptIndex)}
+	o := newOrchestrator(r, nil)
+
+	_, _, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected nil err for soft corrupt-index path; got %v", err)
+	}
+}
+
+func TestOrchestratorRun_returnsFatalErrorForNonCorruptRestoreError(t *testing.T) {
+	sentinel := errors.New("restore boom")
+	r := &stepRecorder{RestoreErr: sentinel}
+	o := newOrchestrator(r, nil)
+
+	_, _, err := o.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error from non-corrupt restore failure; got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected wrapped sentinel; got %v", err)
+	}
+}
+
+func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
+	r := &stepRecorder{}
+	o := newOrchestrator(r, nil)
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("expected zero warnings on happy path; got %#v", warnings)
 	}
 }

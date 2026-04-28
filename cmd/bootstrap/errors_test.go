@@ -63,3 +63,35 @@ func TestFatalError_AsExtractsType(t *testing.T) {
 		t.Errorf("got = %v, want %v", got, original)
 	}
 }
+
+func TestCorruptSessionsJSONWarning_returnsExactSpecCopy(t *testing.T) {
+	got := CorruptSessionsJSONWarning()
+	want := []string{
+		"Portal state file is corrupt — restoration skipped.",
+		"Check `portal state status` or ~/.config/portal/state/portal.log.",
+	}
+	if len(got.Lines) != len(want) {
+		t.Fatalf("Lines len = %d, want %d; got %#v", len(got.Lines), len(want), got.Lines)
+	}
+	for i := range want {
+		if got.Lines[i] != want[i] {
+			t.Errorf("Lines[%d] = %q, want %q", i, got.Lines[i], want[i])
+		}
+	}
+}
+
+func TestSaverDownWarning_returnsExactSpecCopy(t *testing.T) {
+	got := SaverDownWarning()
+	want := []string{
+		"Portal save daemon failed to start — sessions won't be captured.",
+		"Run `portal state status` for details.",
+	}
+	if len(got.Lines) != len(want) {
+		t.Fatalf("Lines len = %d, want %d; got %#v", len(got.Lines), len(want), got.Lines)
+	}
+	for i := range want {
+		if got.Lines[i] != want[i] {
+			t.Errorf("Lines[%d] = %q, want %q", i, got.Lines[i], want[i])
+		}
+	}
+}

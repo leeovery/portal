@@ -35,3 +35,37 @@ func (e *FatalError) Unwrap() error { return e.Cause }
 func NewFatal(userMsg string, cause error) *FatalError {
 	return &FatalError{UserMessage: userMsg, Cause: cause}
 }
+
+// Warning is a soft bootstrap failure that must NOT terminate Portal. The
+// orchestrator accumulates warnings during Run; the CLI path emits each
+// warning's lines to stderr before returning from PersistentPreRunE while
+// the TUI path buffers them via cmd.BootstrapWarningsSink and flushes
+// after the loading page dismisses (see spec, Observability → Proactive
+// Health Signals → TUI interaction).
+//
+// Lines are emitted in slice order, one line per Fprintln. No banners, no
+// colors, no prefixes — the spec mandates a single primary line plus an
+// optional follow-up pointer per warning.
+type Warning struct {
+	Lines []string
+}
+
+// CorruptSessionsJSONWarning returns the canonical warning for the
+// "sessions.json exists but is unparseable" path. Wording matches the
+// Observability section of the specification verbatim.
+func CorruptSessionsJSONWarning() Warning {
+	return Warning{Lines: []string{
+		"Portal state file is corrupt — restoration skipped.",
+		"Check `portal state status` or ~/.config/portal/state/portal.log.",
+	}}
+}
+
+// SaverDownWarning returns the canonical warning for the "_portal-saver
+// failed to start after retries" path. Wording matches the Observability
+// section of the specification verbatim.
+func SaverDownWarning() Warning {
+	return Warning{Lines: []string{
+		"Portal save daemon failed to start — sessions won't be captured.",
+		"Run `portal state status` for details.",
+	}}
+}

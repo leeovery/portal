@@ -25,7 +25,7 @@ func TestNewShim_RunDelegatesToEnsureServer(t *testing.T) {
 		b := &fakeServerBootstrapper{started: true}
 		runner := NewShim(b)
 
-		started, err := runner.Run(context.Background())
+		started, _, err := runner.Run(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -41,7 +41,7 @@ func TestNewShim_RunDelegatesToEnsureServer(t *testing.T) {
 		b := &fakeServerBootstrapper{started: false}
 		runner := NewShim(b)
 
-		started, err := runner.Run(context.Background())
+		started, _, err := runner.Run(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -55,7 +55,7 @@ func TestNewShim_RunDelegatesToEnsureServer(t *testing.T) {
 		b := &fakeServerBootstrapper{err: sentinel}
 		runner := NewShim(b)
 
-		started, err := runner.Run(context.Background())
+		started, _, err := runner.Run(context.Background())
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -81,7 +81,7 @@ func TestNewShim_NilBootstrapperReturnsNoOpRunner(t *testing.T) {
 		t.Fatal("NewShim(nil) returned a nil Runner")
 	}
 
-	started, err := runner.Run(context.Background())
+	started, _, err := runner.Run(context.Background())
 	if err != nil {
 		t.Errorf("expected nil error from no-op shim, got %v", err)
 	}

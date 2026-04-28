@@ -443,8 +443,8 @@ type fatalRunner struct {
 	fatal *bootstrap.FatalError
 }
 
-func (r *fatalRunner) Run(_ context.Context) (bool, error) {
-	return false, r.fatal
+func (r *fatalRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	return false, nil, r.fatal
 }
 
 func TestPersistentPreRunE_WrapsCheckTmuxAvailableErrorAsFatal(t *testing.T) {

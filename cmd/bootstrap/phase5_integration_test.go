@@ -291,7 +291,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 		Clean:     cleanProbe,
 	}
 
-	if _, err := o.Run(context.Background()); err != nil {
+	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		Clean:     noopCleaner{},
 	}
 
-	if _, err := o.Run(context.Background()); err != nil {
+	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -504,7 +504,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		Clean:     noopCleaner{},
 	}
 
-	if _, err := o.Run(context.Background()); err != nil {
+	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
