@@ -52,9 +52,9 @@ var bootstrapDeps *BootstrapDeps
 // registration; when nil (production default), tmux.RegisterPortalHooks
 // is used.
 type BootstrapDeps struct {
-	// Orchestrator is the test seam for bootstrap. When nil, a no-op
-	// runner is substituted so tests that don't care about bootstrap
-	// can leave it unset.
+	// Orchestrator is the test seam for bootstrap. When nil, runBootstrap
+	// short-circuits to a (false, nil, nil) result so tests indifferent
+	// to bootstrap can leave it unset.
 	Orchestrator bootstrap.Runner
 
 	// Client is exposed in cmd.Context() under tmuxClientKey so downstream
@@ -86,9 +86,9 @@ var (
 
 // buildBootstrapDeps returns the runner, shared client, and hook
 // registration function used by PersistentPreRunE. When bootstrapDeps is
-// set (test mode), uses the injected Orchestrator — falling back to a
-// no-op runner when Orchestrator is nil so tests indifferent to
-// bootstrap need not wire anything. In production, builds a fully-wired
+// set (test mode), uses the injected Orchestrator verbatim — runBootstrap
+// short-circuits a nil runner to (false, nil, nil) for tests indifferent
+// to bootstrap. In production, builds a fully-wired
 // *bootstrap.Orchestrator that runs the canonical eight-step sequence
 // (see cmd/bootstrap_production.go).
 //
@@ -99,24 +99,10 @@ var (
 // orchestrator.
 func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) error) {
 	if bootstrapDeps != nil {
-		runner := bootstrapDeps.Orchestrator
-		if runner == nil {
-			runner = noopRunner{}
-		}
-		return runner, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
+		return bootstrapDeps.Orchestrator, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
 	}
 	orch, client := buildProductionOrchestrator()
 	return orch, client, nil
-}
-
-// noopRunner satisfies bootstrap.Runner with a Run that does nothing and
-// returns (false, nil, nil). Used when test-mode BootstrapDeps leaves
-// Orchestrator nil — the test does not care about bootstrap behaviour.
-type noopRunner struct{}
-
-// Run is a no-op for tests that don't care about bootstrap behaviour.
-func (noopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	return false, nil, nil
 }
 
 // runBootstrap invokes the runner with per-process memoisation. In
