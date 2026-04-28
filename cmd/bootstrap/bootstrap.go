@@ -52,10 +52,16 @@ type StaleCleaner interface {
 	CleanStale() error
 }
 
-// Logger is an optional sink for best-effort failure diagnostics. It is
-// nil-safe: Orchestrator.Run checks for nil before invoking it.
+// Logger is an optional sink for failure diagnostics. It is nil-safe:
+// Orchestrator.Run checks for nil before invoking it.
+//
+// Soft failures (best-effort steps that degrade-and-continue) emit via
+// Warn. Fatal failures emit via Error before the orchestrator returns
+// the wrapped *FatalError so the same line lands in portal.log via
+// ComponentBootstrap as well as on stderr at the top-level Execute path.
 type Logger interface {
 	Warn(component, format string, args ...any)
+	Error(component, format string, args ...any)
 }
 
 // SaverDownError indicates that step 4 (EnsureSaver) failed. Bootstrap
@@ -102,17 +108,17 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 	// Step 1 — EnsureServer.
 	serverStarted, err := o.Server.EnsureServer()
 	if err != nil {
-		return false, fmt.Errorf("step 1 (EnsureServer): %w", err)
+		return false, o.fatal("Portal failed to start tmux server: "+err.Error(), err)
 	}
 
 	// Step 2 — RegisterPortalHooks.
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
-		return serverStarted, fmt.Errorf("step 2 (RegisterPortalHooks): %w", err)
+		return serverStarted, o.fatal("Portal failed to register tmux hooks: "+err.Error(), err)
 	}
 
 	// Step 3 — Set @portal-restoring (MUST precede step 4).
 	if err := o.Restoring.Set(); err != nil {
-		return serverStarted, fmt.Errorf("step 3 (Set @portal-restoring): %w", err)
+		return serverStarted, o.fatal("Portal failed to set @portal-restoring marker: "+err.Error(), err)
 	}
 
 	// Step 4 — EnsureSaver (best-effort).
@@ -129,7 +135,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 
 	// Step 6 — Clear @portal-restoring (fatal on failure).
 	if err := o.Restoring.Clear(); err != nil {
-		return serverStarted, fmt.Errorf("step 6 (Clear @portal-restoring): %w", err)
+		return serverStarted, o.fatal("Portal failed to clear @portal-restoring marker: "+err.Error(), err)
 	}
 
 	// Step 7 — CleanStale (best-effort).
@@ -145,4 +151,15 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 		return serverStarted, fmt.Errorf("step 5 (Restore): %w", restoreErr)
 	}
 	return serverStarted, nil
+}
+
+// fatal logs the user-facing message at ERROR level (when a Logger is
+// configured) and returns a *FatalError pairing that message with the
+// underlying cause. Centralising the construction keeps the
+// log-then-return discipline impossible to drift across step sites.
+func (o *Orchestrator) fatal(userMsg string, cause error) error {
+	if o.Logger != nil {
+		o.Logger.Error(state.ComponentBootstrap, "%s", userMsg)
+	}
+	return NewFatal(userMsg, cause)
 }

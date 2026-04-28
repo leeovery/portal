@@ -3,6 +3,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -145,10 +149,10 @@ var rootCmd = &cobra.Command{
 			}
 		}
 		if err := tmux.CheckTmuxAvailable(); err != nil {
-			return err
+			return bootstrap.NewFatal(err.Error(), err)
 		}
 		if err := runVersionCheck(); err != nil {
-			return err
+			return bootstrap.NewFatal(err.Error(), err)
 		}
 
 		runner, client, registerHooks := buildBootstrapDeps()
@@ -178,7 +182,25 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 }
 
-// Execute runs the root command.
+// fatalErrorStderr is the sink for *bootstrap.FatalError user messages.
+// Test seam: tests redirect to a buffer to assert the single-line output
+// without invoking os.Stderr or building the binary.
+var fatalErrorStderr io.Writer = os.Stderr
+
+// Execute runs the root command. When PersistentPreRunE (or any subcommand
+// in the chain) returns a *bootstrap.FatalError, Execute writes the
+// fatal's UserMessage as a single line to fatalErrorStderr before
+// returning the error. Callers (main.go) translate the returned error
+// into the process exit code; Execute itself does not call os.Exit so
+// tests can drive the FatalError path without subprocess fanout.
 func Execute() error {
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err == nil {
+		return nil
+	}
+	var fatal *bootstrap.FatalError
+	if errors.As(err, &fatal) {
+		_, _ = fmt.Fprintln(fatalErrorStderr, fatal.UserMessage)
+	}
+	return err
 }

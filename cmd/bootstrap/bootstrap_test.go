@@ -58,17 +58,24 @@ func (r *stepRecorder) CleanStale() error {
 	return r.CleanStaleErr
 }
 
-// recordingLogger captures Warn invocations so tests can assert that
-// best-effort failures are surfaced through the Logger seam.
+// recordingLogger captures Warn / Error invocations so tests can assert
+// that best-effort failures land via Warn and fatal failures land via
+// Error before the orchestrator returns.
 type recordingLogger struct {
 	warnings []string
+	errors   []string
 }
 
 func (l *recordingLogger) Warn(component, format string, args ...any) {
-	_ = component
 	_ = format
 	_ = args
 	l.warnings = append(l.warnings, component)
+}
+
+func (l *recordingLogger) Error(component, format string, args ...any) {
+	_ = format
+	_ = args
+	l.errors = append(l.errors, component)
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
@@ -123,7 +130,8 @@ func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
 func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 	sentinel := errors.New("server boom")
 	r := &stepRecorder{EnsureServerErr: sentinel}
-	o := newOrchestrator(r, nil)
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
 
 	_, err := o.Run(context.Background())
 	if err == nil {
@@ -132,8 +140,19 @@ func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "step 1") {
-		t.Errorf("expected error to mention step 1, got %q", err.Error())
+	var fatal *FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
+	}
+	wantPrefix := "Portal failed to start tmux server: "
+	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
+		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
+	}
+	if !strings.Contains(fatal.UserMessage, "server boom") {
+		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "server boom")
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected logger.Error to be called before fatal return")
 	}
 	want := []string{"EnsureServer"}
 	if !equalCalls(r.calls, want) {
@@ -144,7 +163,8 @@ func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 	sentinel := errors.New("register boom")
 	r := &stepRecorder{RegisterErr: sentinel}
-	o := newOrchestrator(r, nil)
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
 
 	_, err := o.Run(context.Background())
 	if err == nil {
@@ -153,8 +173,19 @@ func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "step 2") {
-		t.Errorf("expected error to mention step 2, got %q", err.Error())
+	var fatal *FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
+	}
+	wantPrefix := "Portal failed to register tmux hooks: "
+	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
+		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
+	}
+	if !strings.Contains(fatal.UserMessage, "register boom") {
+		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "register boom")
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected logger.Error to be called before fatal return")
 	}
 	want := []string{"EnsureServer", "RegisterPortalHooks"}
 	if !equalCalls(r.calls, want) {
@@ -165,7 +196,8 @@ func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testing.T) {
 	sentinel := errors.New("set marker boom")
 	r := &stepRecorder{SetErr: sentinel}
-	o := newOrchestrator(r, nil)
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
 
 	_, err := o.Run(context.Background())
 	if err == nil {
@@ -174,8 +206,19 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "step 3") {
-		t.Errorf("expected error to mention step 3, got %q", err.Error())
+	var fatal *FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
+	}
+	wantPrefix := "Portal failed to set @portal-restoring marker: "
+	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
+		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
+	}
+	if !strings.Contains(fatal.UserMessage, "set marker boom") {
+		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "set marker boom")
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected logger.Error to be called before fatal return")
 	}
 	for _, c := range r.calls {
 		if c == "EnsureSaver" {
@@ -268,7 +311,8 @@ func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
 func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 	sentinel := errors.New("clear boom")
 	r := &stepRecorder{ClearErr: sentinel}
-	o := newOrchestrator(r, nil)
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
 
 	_, err := o.Run(context.Background())
 	if err == nil {
@@ -277,8 +321,19 @@ func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected wrapped sentinel, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "step 6") {
-		t.Errorf("expected error to mention step 6, got %q", err.Error())
+	var fatal *FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *FatalError, got %T (%v)", err, err)
+	}
+	wantPrefix := "Portal failed to clear @portal-restoring marker: "
+	if !strings.HasPrefix(fatal.UserMessage, wantPrefix) {
+		t.Errorf("UserMessage = %q, want prefix %q", fatal.UserMessage, wantPrefix)
+	}
+	if !strings.Contains(fatal.UserMessage, "clear boom") {
+		t.Errorf("UserMessage = %q, want to contain underlying %q", fatal.UserMessage, "clear boom")
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected logger.Error to be called before fatal return")
 	}
 }
 
@@ -371,6 +426,31 @@ func TestOrchestratorRun_doesNotCallEnsureSaverWhenSetFails(t *testing.T) {
 		if c == "EnsureSaver" {
 			t.Fatalf("EnsureSaver must not run when Set fails; calls = %v", r.calls)
 		}
+	}
+}
+
+func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T) {
+	sentinel := errors.New("saver boom")
+	r := &stepRecorder{EnsureSaverErr: sentinel}
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
+
+	_, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run must not surface saver failures; got %v", err)
+	}
+
+	// Regression: saver failure must travel through LastSaverErr and the
+	// Warn logger — not the FatalError type that triggers stderr+exit.
+	var fatal *FatalError
+	if errors.As(o.LastSaverErr, &fatal) {
+		t.Errorf("LastSaverErr unexpectedly wraps *FatalError: %v", o.LastSaverErr)
+	}
+	if len(logger.errors) != 0 {
+		t.Errorf("logger.Error must NOT be called for soft saver failure; got %v", logger.errors)
+	}
+	if len(logger.warnings) == 0 {
+		t.Error("expected logger.Warn to be called for soft saver failure")
 	}
 }
 

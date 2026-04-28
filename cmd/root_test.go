@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -432,4 +434,159 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
 		}
 	})
+}
+
+// fatalRunner returns a pre-built *bootstrap.FatalError so tests can
+// drive the FatalError-propagation paths without spinning up the full
+// Orchestrator step graph.
+type fatalRunner struct {
+	fatal *bootstrap.FatalError
+}
+
+func (r *fatalRunner) Run(_ context.Context) (bool, error) {
+	return false, r.fatal
+}
+
+func TestPersistentPreRunE_WrapsCheckTmuxAvailableErrorAsFatal(t *testing.T) {
+	t.Setenv("PATH", "/nonexistent/path")
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"list"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var fatal *bootstrap.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
+	}
+	want := "Portal requires tmux. Install with: brew install tmux"
+	if fatal.UserMessage != want {
+		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, want)
+	}
+}
+
+func TestPersistentPreRunE_WrapsVersionCheckErrorAsFatal(t *testing.T) {
+	resetVersionCheckForTest()
+	t.Cleanup(resetVersionCheckForTest)
+
+	original := versionChecker
+	versionChecker = func(tmux.Commander) error {
+		return errors.New("Portal requires tmux \u2265 3.0 (found 2.9). Please upgrade.")
+	}
+	t.Cleanup(func() { versionChecker = original })
+
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"list"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var fatal *bootstrap.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
+	}
+	want := "Portal requires tmux \u2265 3.0 (found 2.9). Please upgrade."
+	if fatal.UserMessage != want {
+		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, want)
+	}
+}
+
+func TestPersistentPreRunE_OrchestratorFatalErrorPropagatesUnwrapped(t *testing.T) {
+	resetBootstrapOnce(t)
+
+	cause := errors.New("hooks boom")
+	want := "Portal failed to register tmux hooks: hooks boom"
+	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, cause)}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"list"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var fatal *bootstrap.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
+	}
+	if fatal.UserMessage != want {
+		t.Errorf("UserMessage = %q, want %q", fatal.UserMessage, want)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("expected errors.Is(err, cause) to be true; err = %v", err)
+	}
+}
+
+func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
+	resetBootstrapOnce(t)
+
+	want := "Portal failed to register tmux hooks: synthetic"
+	runner := &fatalRunner{fatal: bootstrap.NewFatal(want, errors.New("synthetic"))}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var stderr bytes.Buffer
+	originalWriter := fatalErrorStderr
+	fatalErrorStderr = &stderr
+	t.Cleanup(func() { fatalErrorStderr = originalWriter })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"list"})
+	err := Execute()
+
+	if err == nil {
+		t.Fatal("expected Execute to return error, got nil")
+	}
+	var fatal *bootstrap.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("expected *bootstrap.FatalError, got %T (%v)", err, err)
+	}
+
+	got := stderr.String()
+	wantOutput := want + "\n"
+	if got != wantOutput {
+		t.Errorf("stderr = %q, want %q (single line + newline)", got, wantOutput)
+	}
+	// Spec: single line. Reject any extra content.
+	if strings.Count(got, "\n") != 1 {
+		t.Errorf("stderr contained %d newlines; want exactly 1", strings.Count(got, "\n"))
+	}
+}
+
+func TestExecute_NonFatalErrorWritesNothingToFatalStream(t *testing.T) {
+	resetBootstrapOnce(t)
+
+	// Use the legacy Bootstrapper seam — its shim returns errors verbatim
+	// without wrapping in FatalError.
+	mock := &mockServerBootstrapper{err: errors.New("transient")}
+	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	var stderr bytes.Buffer
+	originalWriter := fatalErrorStderr
+	fatalErrorStderr = &stderr
+	t.Cleanup(func() { fatalErrorStderr = originalWriter })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"list"})
+	err := Execute()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var fatal *bootstrap.FatalError
+	if errors.As(err, &fatal) {
+		t.Fatalf("non-fatal error must not be *FatalError; got %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("fatalErrorStderr unexpectedly written: %q", stderr.String())
+	}
 }
