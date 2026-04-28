@@ -516,6 +516,22 @@ func TestLogger_IsSafeForConcurrentUse(t *testing.T) {
 	}
 }
 
+func TestNopLogger_IsNonNilAndSwallowsWrites(t *testing.T) {
+	lg := state.NopLogger()
+	if lg == nil {
+		t.Fatal("NopLogger returned nil; expected non-nil sentinel")
+	}
+	// Every level must be a no-op (no panic, no error). The underlying file
+	// is nil so write returns at the f==nil guard.
+	lg.Debug(state.ComponentDaemon, "swallowed")
+	lg.Info(state.ComponentDaemon, "swallowed")
+	lg.Warn(state.ComponentDaemon, "swallowed")
+	lg.Error(state.ComponentDaemon, "swallowed")
+	if err := lg.Close(); err != nil {
+		t.Errorf("Close on NopLogger returned %v; want nil", err)
+	}
+}
+
 func TestLogger_ExposesComponentConstants(t *testing.T) {
 	cases := []struct {
 		name string

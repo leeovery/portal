@@ -50,7 +50,7 @@ func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *Logger) er
 	_ = os.Chmod(SessionsJSON(dir), 0o600)
 
 	if err := gcOrphanScrollback(dir, idx, logger); err != nil {
-		logger.Warn("daemon", "gc orphan scrollback: %v", err)
+		logger.Warn(ComponentDaemon, "gc orphan scrollback: %v", err)
 		// GC failure is non-fatal — sessions.json was committed successfully.
 	}
 
@@ -130,7 +130,7 @@ func gcOrphanScrollback(dir string, idx Index, logger *Logger) error {
 				continue
 			}
 			paneKey := strings.TrimSuffix(name, ".bin")
-			logger.Warn("daemon", "gc remove %s: %v", paneKey, err)
+			logger.Warn(ComponentDaemon, "gc remove %s: %v", paneKey, err)
 			// Continue: subsequent files may still be removable.
 		}
 	}

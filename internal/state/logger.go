@@ -127,6 +127,15 @@ func rotateIfOversized(path string) error {
 	return nil
 }
 
+// NopLogger returns a non-nil *Logger whose internal file is nil so every
+// write call short-circuits via the existing nil-file guard in write. It is a
+// convenient sentinel for callers that want a non-nil pointer (e.g. struct
+// fields whose nil-handling is awkward in tests) without having to open a real
+// log file. The returned Logger holds no resources; Close is a no-op.
+func NopLogger() *Logger {
+	return &Logger{}
+}
+
 // Close releases the underlying file. Safe to call on a nil Logger.
 func (l *Logger) Close() error {
 	if l == nil || l.f == nil {

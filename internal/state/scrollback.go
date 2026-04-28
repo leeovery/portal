@@ -49,7 +49,7 @@ func SeedHashMap(dir string, logger *Logger) HashMap {
 		if errors.Is(err, fs.ErrNotExist) {
 			return hm
 		}
-		logger.Warn("daemon", "seed: read scrollback dir %s: %v", sbDir, err)
+		logger.Warn(ComponentDaemon, "seed: read scrollback dir %s: %v", sbDir, err)
 		return hm
 	}
 	for _, entry := range entries {
@@ -64,7 +64,7 @@ func SeedHashMap(dir string, logger *Logger) HashMap {
 		path := filepath.Join(sbDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			logger.Warn("daemon", "seed: read %s: %v", name, err)
+			logger.Warn(ComponentDaemon, "seed: read %s: %v", name, err)
 			continue
 		}
 		hm[paneKey] = xxhash.Sum64(data)

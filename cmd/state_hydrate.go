@@ -189,7 +189,7 @@ func runHydrate(cfg hydrateConfig) error {
 	// bootstrap, which will re-skeleton the pane and clear it.
 	markerName := "@portal-skeleton-" + livePaneKey
 	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
-		cfg.Logger.Warn("hydrate", "unset marker %s: %v", markerName, err)
+		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
 	}
 
 	// 9. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
@@ -243,7 +243,7 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 	command, found, err := hooks.LookupOnResume(cfg.HookStore, cfg.HookKey)
 	if err != nil {
 		if cfg.Logger != nil {
-			cfg.Logger.Warn("hydrate", "lookup on-resume hook for %s: %v", cfg.HookKey, err)
+			cfg.Logger.Warn(state.ComponentHydrate, "lookup on-resume hook for %s: %v", cfg.HookKey, err)
 		}
 		execShellAndExit(cfg)
 		return
@@ -277,7 +277,7 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	// 3. Log a warning naming the hook-key + FIFO so operators can correlate
 	// the entry with the affected pane in the saved sessions.json.
 	if cfg.Logger != nil {
-		cfg.Logger.Warn("hydrate", "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
+		cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
 	}
 
 	// 4. Deliberately NO UnsetServerOption — marker stays set so the next
@@ -304,11 +304,11 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	if cfg.Logger != nil {
 		switch {
 		case errors.Is(ctx.Cause, fs.ErrNotExist):
-			cfg.Logger.Warn("hydrate", "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
 		case errors.Is(ctx.Cause, fs.ErrPermission):
-			cfg.Logger.Warn("hydrate", "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
 		default:
-			cfg.Logger.Warn("hydrate", "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
+			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
 		}
 	}
 
@@ -321,7 +321,7 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	livePaneKey := paneKeyFromFIFOPath(cfg.FIFO)
 	markerName := "@portal-skeleton-" + livePaneKey
 	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
-		cfg.Logger.Warn("hydrate", "unset marker %s: %v", markerName, err)
+		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
 	}
 	return nil
 }
@@ -361,13 +361,23 @@ var stateHydrateCmd = &cobra.Command{
 		// so swallowing the error here trades a missing hook for an exec'd
 		// shell — better than failing closed in the per-pane helper.
 		store, _ := loadHookStore()
+
+		// Open portal.log via the non-daemon append-only path so hydrate
+		// diagnostics (timeouts, file-missing, marker-unset failures) land in
+		// the central log file. Per spec § Log Rotation → Concurrent-writer
+		// discipline, only the daemon rotates; the helper's writer must not.
+		// On open failure, logger is nil and the *state.Logger nil-receiver
+		// no-ops every call so the helper degrades to "no logging" rather
+		// than aborting the per-pane recovery.
+		logger, _ := openNoRotateLogger()
+
 		cfg := hydrateConfig{
 			FIFO:              fifo,
 			File:              file,
 			HookKey:           hookKey,
 			Stdout:            cmd.OutOrStdout(),
 			Client:            tmux.NewClient(&tmux.RealCommander{}),
-			Logger:            nil,
+			Logger:            logger,
 			HookStore:         store,
 			ExecShell:         defaultExecShell,
 			OpenFIFO:          openFIFOWithTimeout,

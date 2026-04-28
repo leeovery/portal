@@ -69,7 +69,7 @@ func (o *Orchestrator) handleReadIndexSkip(err error) {
 		return
 	}
 	if o.Logger != nil {
-		o.Logger.Warn("restore", "ReadIndex: %v", err)
+		o.Logger.Warn(state.ComponentRestore, "ReadIndex: %v", err)
 	}
 	if o.Stderr != nil {
 		_, _ = io.WriteString(o.Stderr, corruptStateMessage)
@@ -84,7 +84,7 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 	names, err := o.Client.ListSessionNames()
 	if err != nil {
 		if o.Logger != nil {
-			o.Logger.Warn("restore", "list-sessions: %v", err)
+			o.Logger.Warn(state.ComponentRestore, "list-sessions: %v", err)
 		}
 		return nil, false
 	}
@@ -103,7 +103,7 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
 	if strings.HasPrefix(sess.Name, "_") {
 		if o.Logger != nil {
-			o.Logger.Warn("restore", "skipping underscore-prefixed session %q", sess.Name)
+			o.Logger.Warn(state.ComponentRestore, "skipping underscore-prefixed session %q", sess.Name)
 		}
 		return
 	}
@@ -121,7 +121,7 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 
 	if err := sr.Restore(sess, baseIdx, paneBaseIdx); err != nil {
 		if o.Logger != nil {
-			o.Logger.Warn("restore", "Restore %q: %v", sess.Name, err)
+			o.Logger.Warn(state.ComponentRestore, "Restore %q: %v", sess.Name, err)
 		}
 		return
 	}
@@ -130,7 +130,7 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 
 	if err := sr.ApplySkeletonMarkers(sess, baseIdx, paneBaseIdx); err != nil {
 		if o.Logger != nil {
-			o.Logger.Warn("restore", "ApplySkeletonMarkers %q: %v", sess.Name, err)
+			o.Logger.Warn(state.ComponentRestore, "ApplySkeletonMarkers %q: %v", sess.Name, err)
 		}
 	}
 }
@@ -142,14 +142,14 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 func (o *Orchestrator) validateTopology(sess state.Session) bool {
 	if len(sess.Windows) == 0 {
 		if o.Logger != nil {
-			o.Logger.Warn("restore", "session %q has zero windows; skipping", sess.Name)
+			o.Logger.Warn(state.ComponentRestore, "session %q has zero windows; skipping", sess.Name)
 		}
 		return false
 	}
 	for _, w := range sess.Windows {
 		if len(w.Panes) == 0 {
 			if o.Logger != nil {
-				o.Logger.Warn("restore", "session %q window %d has zero panes; skipping session", sess.Name, w.Index)
+				o.Logger.Warn(state.ComponentRestore, "session %q window %d has zero panes; skipping session", sess.Name, w.Index)
 			}
 			return false
 		}

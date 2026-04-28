@@ -77,7 +77,7 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 func tick(deps *daemonDeps) {
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
-		deps.Logger.Warn("daemon", "read @portal-restoring: %v", err)
+		deps.Logger.Warn(state.ComponentDaemon, "read @portal-restoring: %v", err)
 		return
 	}
 	if restoring {
@@ -91,14 +91,14 @@ func tick(deps *daemonDeps) {
 	}
 
 	if err := captureAndCommit(deps); err != nil {
-		deps.Logger.Warn("daemon", "tick: %v", err)
+		deps.Logger.Warn(state.ComponentDaemon, "tick: %v", err)
 		return
 	}
 
 	deps.LastSaveAt = time.Now()
 
 	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		deps.Logger.Warn("daemon", "remove save.requested: %v", err)
+		deps.Logger.Warn(state.ComponentDaemon, "remove save.requested: %v", err)
 	}
 }
 
@@ -134,12 +134,12 @@ func captureAndCommit(deps *daemonDeps) error {
 				target := fmt.Sprintf("%s:%d.%d", sess.Name, win.Index, pane.Index)
 				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
 				if err != nil {
-					deps.Logger.Warn("daemon", "capture pane %s: %v", target, err)
+					deps.Logger.Warn(state.ComponentDaemon, "capture pane %s: %v", target, err)
 					continue
 				}
 				written, err := state.WriteScrollbackIfChanged(deps.Dir, paneKey, data, hash, deps.HashMap)
 				if err != nil {
-					deps.Logger.Warn("daemon", "write scrollback %s: %v", paneKey, err)
+					deps.Logger.Warn(state.ComponentDaemon, "write scrollback %s: %v", paneKey, err)
 					continue
 				}
 				if written {
@@ -170,16 +170,16 @@ func captureAndCommit(deps *daemonDeps) error {
 func defaultShutdownFlush(deps *daemonDeps) error {
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
-		deps.Logger.Warn("daemon", "read @portal-restoring at shutdown: %v; skipping final flush", err)
+		deps.Logger.Warn(state.ComponentDaemon, "read @portal-restoring at shutdown: %v; skipping final flush", err)
 		return nil
 	}
 	if restoring {
-		deps.Logger.Info("daemon", "skipping final flush: @portal-restoring set")
+		deps.Logger.Info(state.ComponentDaemon, "skipping final flush: @portal-restoring set")
 		return nil
 	}
-	deps.Logger.Info("daemon", "final flush")
+	deps.Logger.Info(state.ComponentDaemon, "final flush")
 	if err := captureAndCommit(deps); err != nil {
-		deps.Logger.Warn("daemon", "final flush: %v", err)
+		deps.Logger.Warn(state.ComponentDaemon, "final flush: %v", err)
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ var stateDaemonCmd = &cobra.Command{
 		}
 		defer func() { _ = logger.Close() }()
 
-		logger.Info("daemon", "starting, version=%s, pid=%d", version, os.Getpid())
+		logger.Info(state.ComponentDaemon, "starting, version=%s, pid=%d", version, os.Getpid())
 
 		// Defensive dirty-flag clear: a stale save.requested from a crashed or
 		// version-mismatch-restarted daemon must not trigger an immediate save
@@ -243,7 +243,7 @@ var stateDaemonCmd = &cobra.Command{
 			if idx, decErr := state.DecodeIndex(data); decErr == nil {
 				prevIdx = &idx
 			} else {
-				logger.Warn("daemon", "decode prior sessions.json: %v", decErr)
+				logger.Warn(state.ComponentDaemon, "decode prior sessions.json: %v", decErr)
 			}
 		}
 

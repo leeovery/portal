@@ -58,7 +58,7 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 	markers, err := state.ListSkeletonMarkers(cfg.Client)
 	if err != nil {
 		if cfg.Logger != nil {
-			cfg.Logger.Warn("signal-hydrate", "list skeleton markers: %v", err)
+			cfg.Logger.Warn(state.ComponentHydrate, "list skeleton markers: %v", err)
 		}
 		return nil
 	}
@@ -66,7 +66,7 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 	panes, err := cfg.Client.ListPanesInSession(cfg.Session)
 	if err != nil {
 		if cfg.Logger != nil {
-			cfg.Logger.Warn("signal-hydrate", "list panes for %q: %v", cfg.Session, err)
+			cfg.Logger.Warn(state.ComponentHydrate, "list panes for %q: %v", cfg.Session, err)
 		}
 		return nil
 	}
@@ -78,7 +78,7 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 		}
 		fifoPath := state.FIFOPath(cfg.StateDir, livePaneKey)
 		if err := writeFIFOSignal(fifoPath, cfg); err != nil && cfg.Logger != nil {
-			cfg.Logger.Warn("signal-hydrate", "write fifo %s: %v", fifoPath, err)
+			cfg.Logger.Warn(state.ComponentHydrate, "write fifo %s: %v", fifoPath, err)
 			// Continue — don't touch marker, don't abort other panes.
 		}
 	}
@@ -144,11 +144,19 @@ var stateSignalHydrateCmd = &cobra.Command{
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
 
+		// Open portal.log via the non-daemon append-only path so signal-
+		// hydrate failures (list-markers errors, FIFO write failures) land
+		// in the central log. Per spec § Log Rotation → Concurrent-writer
+		// discipline, only the daemon rotates; this hook-invoked writer
+		// must not. On open failure logger is nil and the *state.Logger
+		// nil-receiver no-ops every call.
+		logger, _ := openNoRotateLogger()
+
 		cfg := signalHydrateConfig{
 			Session:  sessionName,
 			StateDir: dir,
 			Client:   tmux.NewClient(&tmux.RealCommander{}),
-			Logger:   nil, // hooks log silently — spec → Failure Modes
+			Logger:   logger,
 			OpenFIFO: openFIFOForSignal,
 			Sleep:    time.Sleep,
 		}

@@ -34,7 +34,7 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 	for _, path := range matches {
 		fi, err := os.Lstat(path)
 		if err != nil {
-			logger.Warn("fifo-sweep", "lstat %s: %v", path, err)
+			logger.Warn(ComponentBootstrap, "lstat %s: %v", path, err)
 			continue
 		}
 		if fi.Mode()&os.ModeNamedPipe == 0 {
@@ -46,10 +46,10 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 			continue
 		}
 		if err := os.Remove(path); err != nil {
-			logger.Warn("fifo-sweep", "remove orphan FIFO %s: %v", path, err)
+			logger.Warn(ComponentBootstrap, "remove orphan FIFO %s: %v", path, err)
 			continue
 		}
-		logger.Info("fifo-sweep", "removed orphan FIFO %s", path)
+		logger.Info(ComponentBootstrap, "removed orphan FIFO %s", path)
 	}
 	return nil
 }

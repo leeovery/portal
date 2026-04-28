@@ -1,6 +1,10 @@
 package restore
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/leeovery/portal/internal/state"
+)
 
 // restoringMarker is the tmux server-option name used by bootstrap to signal
 // that skeleton restoration is in progress. The save daemon honours this
@@ -50,7 +54,7 @@ func (o *Orchestrator) RestoreWithMarker() (retErr error) {
 	}
 	defer func() {
 		if err := o.ClearRestoring(); err != nil && o.Logger != nil {
-			o.Logger.Warn("restore", "ClearRestoring: %v", err)
+			o.Logger.Warn(state.ComponentRestore, "ClearRestoring: %v", err)
 		}
 	}()
 	return o.Restore()

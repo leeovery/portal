@@ -14,6 +14,8 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // ServerBootstrapper starts the tmux server when not already running.
@@ -117,7 +119,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 	if err := o.Saver.EnsureSaver(); err != nil {
 		o.LastSaverErr = &SaverDownError{Cause: err}
 		if o.Logger != nil {
-			o.Logger.Warn("bootstrap", "step 4 (EnsureSaver) failed: %v", err)
+			o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
 		}
 		// Continue per spec — saves paused, user not blocked.
 	}
@@ -133,7 +135,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, error) {
 	// Step 7 — CleanStale (best-effort).
 	if err := o.Clean.CleanStale(); err != nil {
 		if o.Logger != nil {
-			o.Logger.Warn("bootstrap", "step 7 (CleanStale) failed: %v", err)
+			o.Logger.Warn(state.ComponentBootstrap, "step 7 (CleanStale) failed: %v", err)
 		}
 		// Continue per spec.
 	}
