@@ -202,6 +202,118 @@ func (r *SessionRestorer) applyZoom(session string, window, pane int) {
 	}
 }
 
+// ApplySkeletonMarkers re-queries live panes for sess and sets the
+// `@portal-skeleton-<paneKey>` server option on each one. Markers use the
+// **live** paneKey returned by tmux, not the predicted indices, so any drift
+// between the predicted base / pane-base values and the actual tmux indices
+// surfaces in the markers themselves rather than silently corrupting the
+// daemon's enumeration.
+//
+// predictedBase and predictedPaneBase are the values used by the create phase
+// to produce predicted indices; they are passed in here purely so a drift
+// warning can be logged when the predicted live paneKey for a given saved
+// position differs from the actual live paneKey.
+//
+// Behavior:
+//   - On list-panes failure: returns a wrapped error; no markers are set.
+//   - On set-option failure for a single pane: logs a warning and continues
+//     setting markers for the remaining panes.
+//   - When live pane count differs from saved count: logs a sanity warning and
+//     pairs by structural order up to the shorter list. Extra live panes are
+//     still marked using their live paneKey.
+//
+// The function only writes markers; it does not clear them. Markers are
+// volatile (server-option scope) and are unset by the hydrate helper after
+// successful scrollback dump.
+func (r *SessionRestorer) ApplySkeletonMarkers(sess state.Session, predictedBase, predictedPaneBase int) error {
+	livePanes, err := r.Client.ListPanesInSession(sess.Name)
+	if err != nil {
+		return fmt.Errorf("apply skeleton markers for %q: %w", sess.Name, err)
+	}
+
+	savedSeq := flattenSavedPanePositions(sess)
+	r.warnOnPaneCountMismatch(sess.Name, len(livePanes), len(savedSeq))
+
+	pairCount := len(livePanes)
+	if len(savedSeq) < pairCount {
+		pairCount = len(savedSeq)
+	}
+
+	for i := 0; i < pairCount; i++ {
+		live := livePanes[i]
+		sv := savedSeq[i]
+
+		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
+		predictedKey := state.SanitizePaneKey(sess.Name, predictedBase+sv.windowOrdinal, predictedPaneBase+sv.paneOrdinal)
+		r.warnOnPaneKeyDrift(sess.Name, i, predictedKey, liveKey)
+
+		r.setSkeletonMarker(sess.Name, liveKey)
+	}
+
+	// Extras: live panes beyond the saved sequence still get marked under
+	// their live paneKey. Defensive — keeps the daemon from capturing them as
+	// "user state" during the restore window.
+	for i := pairCount; i < len(livePanes); i++ {
+		live := livePanes[i]
+		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
+		r.setSkeletonMarker(sess.Name, liveKey)
+	}
+
+	return nil
+}
+
+// savedPanePos is the structural ordinal pair (window position, pane position
+// within that window) — used to compute the predicted live paneKey for a
+// saved entry by adding base / pane-base offsets.
+type savedPanePos struct {
+	windowOrdinal int
+	paneOrdinal   int
+}
+
+// flattenSavedPanePositions walks the session's windows in saved order,
+// emitting one savedPanePos per pane. Output order matches restoration order
+// so callers can pair structural index with live list-panes output one-to-one.
+func flattenSavedPanePositions(sess state.Session) []savedPanePos {
+	var out []savedPanePos
+	for wi, w := range sess.Windows {
+		for pj := range w.Panes {
+			out = append(out, savedPanePos{windowOrdinal: wi, paneOrdinal: pj})
+		}
+	}
+	return out
+}
+
+// warnOnPaneCountMismatch logs a sanity warning when the count of live panes
+// differs from the saved pane count. Both signed: too few live panes hints at
+// restoration incompletely; too many hints at user-created panes leaking in.
+func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedCount int) {
+	if r.Logger == nil || liveCount == savedCount {
+		return
+	}
+	r.Logger.Warn("restore", "session %q live pane count %d != saved count %d", name, liveCount, savedCount)
+}
+
+// warnOnPaneKeyDrift logs a warning when the predicted live paneKey for a
+// saved position does not match the actual live paneKey. Drift is non-fatal —
+// the marker still gets set under the live key — but worth surfacing so users
+// notice that base-index / pane-base-index changed between save and restore.
+func (r *SessionRestorer) warnOnPaneKeyDrift(name string, position int, predictedKey, liveKey string) {
+	if r.Logger == nil || predictedKey == liveKey {
+		return
+	}
+	r.Logger.Warn("restore", "session %q: pane %d predicted=%s live=%s", name, position, predictedKey, liveKey)
+}
+
+// setSkeletonMarker writes the `@portal-skeleton-<liveKey>` server option for
+// the given live pane. Failures are logged and ignored so that one bad pane
+// does not block markers for the rest.
+func (r *SessionRestorer) setSkeletonMarker(sessionName, liveKey string) {
+	markerName := "@portal-skeleton-" + liveKey
+	if err := r.Client.SetServerOption(markerName, "1"); err != nil && r.Logger != nil {
+		r.Logger.Warn("restore", "set-option %s on %q: %v", markerName, sessionName, err)
+	}
+}
+
 // applyEnvironment sets every saved environment variable on the named session,
 // in sorted-key order for deterministic call ordering. Per the spec, a single
 // failure is logged and skipped — restoration must continue.

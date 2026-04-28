@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -326,6 +327,58 @@ func parsePaneOutput(output string) []string {
 		panes = append(panes, line)
 	}
 	return panes
+}
+
+// PaneCoord is a live tmux pane address: a (window_index, pane_index) pair
+// reported by tmux for a single pane within a session. Used by the restore
+// pipeline to map structural saved positions to actual live indices when
+// base-index / pane-base-index drift between save and restore.
+type PaneCoord struct {
+	Window int
+	Pane   int
+}
+
+// ListPanesInSession enumerates live panes in the named session and returns
+// their (window, pane) coords sorted by window then pane. Uses
+// "list-panes -s -t <session>" so all panes across all windows of the session
+// are returned, regardless of which window is currently selected.
+func (c *Client) ListPanesInSession(session string) ([]PaneCoord, error) {
+	out, err := c.cmd.Run("list-panes", "-s", "-t", session, "-F", "#{window_index}:#{pane_index}")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes in session %q: %w", session, err)
+	}
+	if out == "" {
+		return []PaneCoord{}, nil
+	}
+
+	var coords []PaneCoord
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("unexpected pane format %q", line)
+		}
+		win, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid window index %q in pane line %q: %w", parts[0], line, err)
+		}
+		pane, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil, fmt.Errorf("invalid pane index %q in pane line %q: %w", parts[1], line, err)
+		}
+		coords = append(coords, PaneCoord{Window: win, Pane: pane})
+	}
+
+	sort.Slice(coords, func(i, j int) bool {
+		if coords[i].Window != coords[j].Window {
+			return coords[i].Window < coords[j].Window
+		}
+		return coords[i].Pane < coords[j].Pane
+	})
+	return coords, nil
 }
 
 // ListPanes returns the structural keys for panes belonging to the named tmux session.

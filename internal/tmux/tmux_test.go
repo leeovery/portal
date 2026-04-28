@@ -1900,3 +1900,174 @@ func TestResizePaneZoom(t *testing.T) {
 		}
 	})
 }
+
+func TestListPanesInSession(t *testing.T) {
+	t.Run("invokes list-panes -s -t <session> with window:pane format", func(t *testing.T) {
+		mock := &MockCommander{Output: "0:0"}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"list-panes", "-s", "-t", "work", "-F", "#{window_index}:#{pane_index}"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("parses single pane line", func(t *testing.T) {
+		mock := &MockCommander{Output: "0:0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []tmux.PaneCoord{{Window: 0, Pane: 0}}
+		if len(got) != len(want) {
+			t.Fatalf("got %d coords %v, want %d", len(got), got, len(want))
+		}
+		if got[0] != want[0] {
+			t.Errorf("got[0] = %+v, want %+v", got[0], want[0])
+		}
+	})
+
+	t.Run("parses multiple panes across windows", func(t *testing.T) {
+		mock := &MockCommander{Output: "0:0\n0:1\n1:0\n1:1\n1:2"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []tmux.PaneCoord{
+			{Window: 0, Pane: 0},
+			{Window: 0, Pane: 1},
+			{Window: 1, Pane: 0},
+			{Window: 1, Pane: 1},
+			{Window: 1, Pane: 2},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("got %d coords %v, want %d", len(got), got, len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %+v, want %+v", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("sorts coords by window then pane", func(t *testing.T) {
+		// tmux output deliberately out of order.
+		mock := &MockCommander{Output: "1:2\n0:1\n1:0\n0:0"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []tmux.PaneCoord{
+			{Window: 0, Pane: 0},
+			{Window: 0, Pane: 1},
+			{Window: 1, Pane: 0},
+			{Window: 1, Pane: 2},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("got %d coords %v, want %d", len(got), got, len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %+v, want %+v", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns empty slice when output is empty", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("got %d coords %v, want 0", len(got), got)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("session not found")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanesInSession("work")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "work") {
+			t.Errorf("error %q lacks session context", err.Error())
+		}
+		if !strings.Contains(err.Error(), "session not found") {
+			t.Errorf("error %q does not wrap underlying error", err.Error())
+		}
+	})
+
+	t.Run("returns error on unexpected line format", func(t *testing.T) {
+		mock := &MockCommander{Output: "garbage-line"}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanesInSession("work")
+		if err == nil {
+			t.Fatal("expected error for malformed line, got nil")
+		}
+	})
+
+	t.Run("returns error on non-integer window", func(t *testing.T) {
+		mock := &MockCommander{Output: "abc:0"}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanesInSession("work")
+		if err == nil {
+			t.Fatal("expected error for non-integer window, got nil")
+		}
+	})
+
+	t.Run("returns error on non-integer pane", func(t *testing.T) {
+		mock := &MockCommander{Output: "0:abc"}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListPanesInSession("work")
+		if err == nil {
+			t.Fatal("expected error for non-integer pane, got nil")
+		}
+	})
+
+	t.Run("skips blank lines and trims whitespace", func(t *testing.T) {
+		mock := &MockCommander{Output: "0:0\n\n  0:1  \n"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []tmux.PaneCoord{
+			{Window: 0, Pane: 0},
+			{Window: 0, Pane: 1},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("got %d coords %v, want %d", len(got), got, len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("got[%d] = %+v, want %+v", i, got[i], want[i])
+			}
+		}
+	})
+}
