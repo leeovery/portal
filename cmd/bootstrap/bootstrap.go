@@ -65,8 +65,9 @@ type StaleCleaner interface {
 	CleanStale() error
 }
 
-// Logger is an optional sink for failure diagnostics. It is nil-safe:
-// Orchestrator.Run checks for nil before invoking it.
+// Logger is the sink for failure diagnostics. It is internally nil-safe:
+// Orchestrator.Run substitutes a no-op default when Logger is unset, so
+// callers never need to nil-check before invoking it.
 //
 // Soft failures (best-effort steps that degrade-and-continue) emit via
 // Warn. Fatal failures emit via Error before the orchestrator returns
@@ -76,6 +77,18 @@ type Logger interface {
 	Warn(component, format string, args ...any)
 	Error(component, format string, args ...any)
 }
+
+// noopLogger is the default Logger Run substitutes when Orchestrator.Logger
+// is nil. It exists so step sites can call o.Logger.Warn / o.Logger.Error
+// unconditionally — trusting the contract uniformly with the rest of the
+// codebase, where *state.Logger's nil-receiver no-op is relied on directly.
+type noopLogger struct{}
+
+// Warn is a no-op.
+func (noopLogger) Warn(component, format string, args ...any) {}
+
+// Error is a no-op.
+func (noopLogger) Error(component, format string, args ...any) {}
 
 // SaverDownError indicates that step 4 (EnsureSaver) failed. Bootstrap
 // continues past it — saves are paused, but the user is not blocked. The
@@ -103,7 +116,7 @@ type Orchestrator struct {
 	Saver     SaverBootstrapper
 	Restore   Restorer
 	Clean     StaleCleaner
-	Logger    Logger // optional; nil-safe
+	Logger    Logger // nil tolerated; Run substitutes a no-op default
 
 	// LastSaverErr is populated when step 4 (EnsureSaver) fails. Run
 	// continues past the failure (per spec: saves paused, user not
@@ -129,6 +142,13 @@ type Orchestrator struct {
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	_ = ctx // reserved for Phase 6 timeout/cancel
 
+	// Substitute a no-op Logger when none was injected so step sites can
+	// call o.Logger.Warn / o.Logger.Error unconditionally. Tests that pass
+	// nil for the Logger field rely on this default.
+	if o.Logger == nil {
+		o.Logger = noopLogger{}
+	}
+
 	var warnings []Warning
 
 	// Step 1 — EnsureServer.
@@ -151,9 +171,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	if err := o.Saver.EnsureSaver(); err != nil {
 		o.LastSaverErr = &SaverDownError{Cause: err}
 		warnings = append(warnings, SaverDownWarning())
-		if o.Logger != nil {
-			o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
-		}
+		o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
 		// Continue per spec — saves paused, user not blocked.
 	}
 
@@ -161,9 +179,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	restoreErr := o.Restore.Restore()
 	if restoreErr != nil && errors.Is(restoreErr, state.ErrCorruptIndex) {
 		warnings = append(warnings, CorruptSessionsJSONWarning())
-		if o.Logger != nil {
-			o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) corrupt sessions.json: %v", restoreErr)
-		}
+		o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) corrupt sessions.json: %v", restoreErr)
 		// Soft path: swallow the error so step 8 returns nil.
 		restoreErr = nil
 	}
@@ -175,9 +191,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	// Step 7 — CleanStale (best-effort).
 	if err := o.Clean.CleanStale(); err != nil {
-		if o.Logger != nil {
-			o.Logger.Warn(state.ComponentBootstrap, "step 7 (CleanStale) failed: %v", err)
-		}
+		o.Logger.Warn(state.ComponentBootstrap, "step 7 (CleanStale) failed: %v", err)
 		// Continue per spec.
 	}
 
@@ -188,13 +202,12 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	return serverStarted, warnings, nil
 }
 
-// fatal logs the user-facing message at ERROR level (when a Logger is
-// configured) and returns a *FatalError pairing that message with the
-// underlying cause. Centralising the construction keeps the
-// log-then-return discipline impossible to drift across step sites.
+// fatal logs the user-facing message at ERROR level and returns a
+// *FatalError pairing that message with the underlying cause. Centralising
+// the construction keeps the log-then-return discipline impossible to drift
+// across step sites. Run substitutes a no-op Logger when none was injected,
+// so this method need not nil-check.
 func (o *Orchestrator) fatal(userMsg string, cause error) error {
-	if o.Logger != nil {
-		o.Logger.Error(state.ComponentBootstrap, "%s", userMsg)
-	}
+	o.Logger.Error(state.ComponentBootstrap, "%s", userMsg)
 	return NewFatal(userMsg, cause)
 }

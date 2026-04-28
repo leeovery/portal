@@ -53,7 +53,7 @@ func (o *Orchestrator) RestoreWithMarker() (retErr error) {
 		return err
 	}
 	defer func() {
-		if err := o.ClearRestoring(); err != nil && o.Logger != nil {
+		if err := o.ClearRestoring(); err != nil {
 			o.Logger.Warn(state.ComponentRestore, "ClearRestoring: %v", err)
 		}
 	}()

@@ -176,7 +176,7 @@ func runHydrate(cfg hydrateConfig) error {
 	// only blocks the save loop from re-capturing this pane until next
 	// bootstrap, which will re-skeleton the pane and clear it.
 	markerName := state.SkeletonMarkerPrefix + livePaneKey
-	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
+	if err := cfg.Client.UnsetServerOption(markerName); err != nil {
 		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
 	}
 
@@ -230,9 +230,7 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 	}
 	command, found, err := hooks.LookupOnResume(cfg.HookStore, cfg.HookKey)
 	if err != nil {
-		if cfg.Logger != nil {
-			cfg.Logger.Warn(state.ComponentHydrate, "lookup on-resume hook for %s: %v", cfg.HookKey, err)
-		}
+		cfg.Logger.Warn(state.ComponentHydrate, "lookup on-resume hook for %s: %v", cfg.HookKey, err)
 		execShellAndExit(cfg)
 		return
 	}
@@ -264,9 +262,7 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 
 	// 3. Log a warning naming the hook-key + FIFO so operators can correlate
 	// the entry with the affected pane in the saved sessions.json.
-	if cfg.Logger != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
-	}
+	cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
 
 	// 4. Deliberately NO UnsetServerOption — marker stays set so the next
 	// attach re-signals.
@@ -289,15 +285,13 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	// 1. Log a distinct WARN entry per failure cause so operators can tell
 	// missing files (likely GC race) apart from permission misconfiguration
 	// or transient disk I/O errors.
-	if cfg.Logger != nil {
-		switch {
-		case errors.Is(ctx.Cause, fs.ErrNotExist):
-			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
-		case errors.Is(ctx.Cause, fs.ErrPermission):
-			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
-		default:
-			cfg.Logger.Warn(state.ComponentHydrate, "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
-		}
+	switch {
+	case errors.Is(ctx.Cause, fs.ErrNotExist):
+		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+	case errors.Is(ctx.Cause, fs.ErrPermission):
+		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+	default:
+		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
 	}
 
 	// 2. Deliberately NO 100ms sleep — nothing was fully dumped, so there is
@@ -308,7 +302,7 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	// resume capturing it on the next tick rather than skipping it forever.
 	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
 	markerName := state.SkeletonMarkerPrefix + livePaneKey
-	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
+	if err := cfg.Client.UnsetServerOption(markerName); err != nil {
 		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
 	}
 	return nil

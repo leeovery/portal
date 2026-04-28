@@ -181,10 +181,8 @@ func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, la
 	if err == nil {
 		return
 	}
-	if r.Logger != nil {
-		r.Logger.Warn(state.ComponentRestore, "select-layout %s:%d %q failed: %v; falling back to tiled", session, window, layout, err)
-	}
-	if err := r.Client.SelectLayout(session, window, "tiled"); err != nil && r.Logger != nil {
+	r.Logger.Warn(state.ComponentRestore, "select-layout %s:%d %q failed: %v; falling back to tiled", session, window, layout, err)
+	if err := r.Client.SelectLayout(session, window, "tiled"); err != nil {
 		r.Logger.Warn(state.ComponentRestore, "select-layout %s:%d tiled also failed: %v", session, window, err)
 	}
 }
@@ -192,7 +190,7 @@ func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, la
 // applyActivePane sets the active pane within a live window. Failure is
 // logged and ignored.
 func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
-	if err := r.Client.SelectPane(session, window, pane); err != nil && r.Logger != nil {
+	if err := r.Client.SelectPane(session, window, pane); err != nil {
 		r.Logger.Warn(state.ComponentRestore, "select-pane %s:%d.%d failed: %v", session, window, pane, err)
 	}
 }
@@ -200,7 +198,7 @@ func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
 // applyZoom toggles zoom on the active pane after layout has been applied.
 // Failure is logged and ignored.
 func (r *SessionRestorer) applyZoom(session string, window, pane int) {
-	if err := r.Client.ResizePaneZoom(session, window, pane); err != nil && r.Logger != nil {
+	if err := r.Client.ResizePaneZoom(session, window, pane); err != nil {
 		r.Logger.Warn(state.ComponentRestore, "resize-pane -Z %s:%d.%d failed: %v", session, window, pane, err)
 	}
 }
@@ -290,7 +288,7 @@ func flattenSavedPanePositions(sess state.Session) []savedPanePos {
 // differs from the saved pane count. Both signed: too few live panes hints at
 // restoration incompletely; too many hints at user-created panes leaking in.
 func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedCount int) {
-	if r.Logger == nil || liveCount == savedCount {
+	if liveCount == savedCount {
 		return
 	}
 	r.Logger.Warn(state.ComponentRestore, "session %q live pane count %d != saved count %d", name, liveCount, savedCount)
@@ -301,7 +299,7 @@ func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedC
 // the marker still gets set under the live key — but worth surfacing so users
 // notice that base-index / pane-base-index changed between save and restore.
 func (r *SessionRestorer) warnOnPaneKeyDrift(name string, position int, predictedKey, liveKey string) {
-	if r.Logger == nil || predictedKey == liveKey {
+	if predictedKey == liveKey {
 		return
 	}
 	r.Logger.Warn(state.ComponentRestore, "session %q: pane %d predicted=%s live=%s", name, position, predictedKey, liveKey)
@@ -312,7 +310,7 @@ func (r *SessionRestorer) warnOnPaneKeyDrift(name string, position int, predicte
 // does not block markers for the rest.
 func (r *SessionRestorer) setSkeletonMarker(sessionName, liveKey string) {
 	markerName := state.SkeletonMarkerPrefix + liveKey
-	if err := r.Client.SetServerOption(markerName, "1"); err != nil && r.Logger != nil {
+	if err := r.Client.SetServerOption(markerName, "1"); err != nil {
 		r.Logger.Warn(state.ComponentRestore, "set-option %s on %q: %v", markerName, sessionName, err)
 	}
 }
@@ -331,9 +329,7 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := r.Client.SetSessionEnvironment(sess.Name, k, sess.Environment[k]); err != nil {
-			if r.Logger != nil {
-				r.Logger.Warn(state.ComponentRestore, "set-environment %s on %q: %v", k, sess.Name, err)
-			}
+			r.Logger.Warn(state.ComponentRestore, "set-environment %s on %q: %v", k, sess.Name, err)
 			// Continue per spec — environment is best-effort.
 		}
 	}

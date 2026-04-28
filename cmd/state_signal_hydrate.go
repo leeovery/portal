@@ -57,17 +57,13 @@ func openFIFOForSignal(path string) (*os.File, error) {
 func runSignalHydrate(cfg signalHydrateConfig) error {
 	markers, err := state.ListSkeletonMarkers(cfg.Client)
 	if err != nil {
-		if cfg.Logger != nil {
-			cfg.Logger.Warn(state.ComponentHydrate, "list skeleton markers: %v", err)
-		}
+		cfg.Logger.Warn(state.ComponentHydrate, "list skeleton markers: %v", err)
 		return nil
 	}
 
 	panes, err := cfg.Client.ListPanesInSession(cfg.Session)
 	if err != nil {
-		if cfg.Logger != nil {
-			cfg.Logger.Warn(state.ComponentHydrate, "list panes for %q: %v", cfg.Session, err)
-		}
+		cfg.Logger.Warn(state.ComponentHydrate, "list panes for %q: %v", cfg.Session, err)
 		return nil
 	}
 
@@ -77,7 +73,7 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 			continue
 		}
 		fifoPath := state.FIFOPath(cfg.StateDir, livePaneKey)
-		if err := writeFIFOSignal(fifoPath, cfg); err != nil && cfg.Logger != nil {
+		if err := writeFIFOSignal(fifoPath, cfg); err != nil {
 			cfg.Logger.Warn(state.ComponentHydrate, "write fifo %s: %v", fifoPath, err)
 			// Continue — don't touch marker, don't abort other panes.
 		}

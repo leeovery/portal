@@ -147,9 +147,9 @@
         "built-in-session-resurrection": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle": 1,
           "linters": [
             {
@@ -169,7 +169,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 7,
-          "current_task": "tick-aed651",
+          "current_task": "tick-1da49f",
           "completed_tasks": [
             "built-in-session-resurrection-1-1",
             "built-in-session-resurrection-1-2",
@@ -236,7 +236,8 @@
             "built-in-session-resurrection-6-13",
             "built-in-session-resurrection-7-1",
             "built-in-session-resurrection-7-2",
-            "built-in-session-resurrection-7-3"
+            "built-in-session-resurrection-7-3",
+            "built-in-session-resurrection-7-4"
           ]
         }
       }
