@@ -18,7 +18,6 @@ package restore_test
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,15 +28,6 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
-
-// skipIfNoTmux skips the test if tmux is not available. Integration tests
-// require a real tmux binary on PATH.
-func skipIfNoTmux(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available; skipping integration test")
-	}
-}
 
 // restoreWithMarker drives the bootstrap-owned @portal-restoring lifecycle
 // inline for these integration tests: set the marker, run Restore(), unset
@@ -70,7 +60,7 @@ func restoreWithMarker(t *testing.T, client *tmux.Client, o *restore.Orchestrato
 // recreated with its skeleton marker set. A second Restore() call must be a
 // silent no-op (live-session skip) so the test guards against double-creates.
 func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-")
 	stateDir := t.TempDir()
@@ -166,7 +156,7 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 // Sweep does not strictly require tmux but the test gate is kept for
 // consistency with the rest of the integration suite.
 func TestPhase3Integration_SweepOrphanFIFOs(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	stateDir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -205,7 +195,7 @@ func TestPhase3Integration_SweepOrphanFIFOs(t *testing.T) {
 // sessions on the live server. (The user-facing stderr warning emission
 // moved to cmd/bootstrap_warnings.go in Phase 6 task 6-9.)
 func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-")
 	stateDir := t.TempDir()
@@ -271,7 +261,7 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 // directly — ApplyWindowGeometry / ApplySkeletonMarkers consume its output,
 // so a correct prediction is the load-bearing precondition.
 func TestPhase3Integration_BaseIndexDrift(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-")
 	// A bootstrap session is required to keep the server alive long enough to
@@ -313,7 +303,7 @@ func TestPhase3Integration_BaseIndexDrift(t *testing.T) {
 //  6. Assert: FIFO exists at the LIVE key (alpha:1.1), not at the saved key
 //     (alpha:0.0); the skeleton marker is set against the LIVE key.
 func TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-")
 	stateDir := t.TempDir()

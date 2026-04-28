@@ -10,7 +10,6 @@ package bootstrapadapter_test
 // the adapters' shaping.
 
 import (
-	"os/exec"
 	"testing"
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
@@ -18,21 +17,12 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// skipIfNoTmux skips the test when tmux is not on PATH. Mirrors the helper
-// of the same name in cmd/bootstrap/phase5_integration_test.go.
-func skipIfNoTmux(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available; skipping integration test")
-	}
-}
-
 // TestRestoringMarker_SetClearsTogglesServerOption proves that Set writes
 // @portal-restoring="1" and Clear removes it, both observable on the live
 // tmux server. The literal name comes from state.RestoringMarkerName so the
 // adapter cannot drift from the canonical constant.
 func TestRestoringMarker_SetClearsTogglesServerOption(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-bsa-")
 	client := ts.Client()
@@ -83,7 +73,7 @@ func TestRestoringMarker_SetClearsTogglesServerOption(t *testing.T) {
 // the orchestrator level by phase5_integration_test.go; this test only
 // confirms the adapter shape.
 func TestHookRegistrar_RegistersPortalHooks(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-bsa-")
 	client := ts.Client()

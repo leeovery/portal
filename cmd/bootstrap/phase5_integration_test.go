@@ -20,7 +20,6 @@ package bootstrap_test
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,15 +32,6 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
-
-// skipIfNoTmux skips the test when tmux is not on PATH. Mirrors
-// internal/restore/integration_test.go's helper of the same name.
-func skipIfNoTmux(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux not available; skipping integration test")
-	}
-}
 
 // markerProbeStub records whether @portal-restoring was set at the moment
 // the wrapped step was invoked. Used by Test 1 to prove that @portal-restoring
@@ -131,7 +121,7 @@ func (a *restoreOrchestratorAdapter) Restore() (bool, error) { return a.inner.Re
 // instead this test verifies the contract from the producer side — the
 // orchestrator does set/clear the marker around the suppression window.
 func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
 	client := ts.Client()
@@ -207,7 +197,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 // coverage here is the orchestrator's wiring of all three real steps in
 // spec order without exploding on a real tmux server.
 func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
 	client := ts.Client()
@@ -297,7 +287,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // Restore step correctly — i.e. step 5 actually creates the missing session
 // when invoked through the eight-step sequence.
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
-	skipIfNoTmux(t)
+	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
 	stateDir := t.TempDir()
