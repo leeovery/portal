@@ -615,7 +615,7 @@ func TestHydrate_FileMissingPathInvokesHandleFileMissing(t *testing.T) {
 		Client:    tmux.NewClient(&recordingCommander{}),
 		ExecShell: (&stubExecShell{}).fn(),
 		OpenFIFO:  openFIFOWithTimeout,
-		HandleFileMissing: func(_ hydrateConfig) error {
+		HandleFileMissing: func(_ hydrateConfig, _ hydrateFileMissingContext) error {
 			called = true
 			return nil
 		},
@@ -625,6 +625,437 @@ func TestHydrate_FileMissingPathInvokesHandleFileMissing(t *testing.T) {
 	}
 	if !called {
 		t.Errorf("HandleFileMissing not invoked when scrollback file is absent")
+	}
+}
+
+func TestHydrate_FileMissing_ENOENT_EmitsPreambleAndExecsShell(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fm__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	stdout := new(bytes.Buffer)
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fm:0.0",
+		Stdout:            stdout,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		ExecShell:         exec.fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	if stdout.String() != hydrateResetPreamble {
+		t.Errorf("stdout = %q, want exactly preamble %q", stdout.String(), hydrateResetPreamble)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called on file-missing path")
+	}
+}
+
+func TestHydrate_FileMissing_PermissionDenied_EmitsPreambleAndExecsShell(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fp__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	if err := os.WriteFile(scrollback, []byte("HIDDEN"), 0o600); err != nil {
+		t.Fatalf("seed scrollback: %v", err)
+	}
+	if err := os.Chmod(scrollback, 0o000); err != nil {
+		t.Fatalf("chmod 0: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(scrollback, 0o600) })
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	stdout := new(bytes.Buffer)
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fp:0.0",
+		Stdout:            stdout,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		ExecShell:         exec.fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	if stdout.String() != hydrateResetPreamble {
+		t.Errorf("stdout = %q, want exactly preamble %q", stdout.String(), hydrateResetPreamble)
+	}
+	if strings.Contains(stdout.String(), "HIDDEN") {
+		t.Errorf("stdout contains scrollback content despite permission denied: %q", stdout.String())
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called on permission-denied path")
+	}
+}
+
+func TestHydrate_FileMissing_MidStreamCopyError_LeavesPartialBytes(t *testing.T) {
+	// Drive the io.Copy mid-stream branch directly via the production handler.
+	// runHydrate uses os.Open + io.Copy on a real file, so to simulate a
+	// mid-stream Read failure we exercise the handler via a test that calls
+	// runHydrate with a real file but a reader-error injection is impossible
+	// without adding a seam. Instead, validate via direct handler invocation:
+	// the handler must NOT re-emit the preamble, must skip the sleep, must
+	// unset the marker, and must succeed (return nil) for any cause.
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hydrate-mid__0.0.fifo")
+	stdout := new(bytes.Buffer)
+	// Pre-populate stdout with preamble + some "partial" bytes already written
+	// by runHydrate before the mid-stream io.Copy failure.
+	stdout.WriteString(hydrateResetPreamble)
+	stdout.WriteString("partial-bytes-already-on-stdout")
+
+	cmder := &recordingCommander{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "mid:0.0",
+		Stdout: stdout,
+		Client: tmux.NewClient(cmder),
+	}
+
+	start := time.Now()
+	if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: errors.New("read: I/O error")}); err != nil {
+		t.Fatalf("handleHydrateFileMissing: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// Preamble appears exactly once (handler does not re-emit).
+	if n := strings.Count(stdout.String(), hydrateResetPreamble); n != 1 {
+		t.Errorf("preamble count = %d, want 1 (handler must not re-emit)", n)
+	}
+	// Partial bytes from before the failure are still present (no rollback).
+	if !strings.Contains(stdout.String(), "partial-bytes-already-on-stdout") {
+		t.Errorf("partial bytes were rolled back; stdout = %q", stdout.String())
+	}
+	// Skips the 100ms settle sleep.
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("handleHydrateFileMissing elapsed %v; expected << 100ms (no settle sleep)", elapsed)
+	}
+}
+
+func TestHydrate_FileMissing_LogsENOENTDistinctly(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-le__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "le:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		Logger:            logger,
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "not found") {
+		t.Errorf("log missing distinct ENOENT phrase \"not found\": %q", contents)
+	}
+}
+
+func TestHydrate_FileMissing_LogsPermissionDistinctly(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-lp__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	if err := os.WriteFile(scrollback, []byte("X"), 0o600); err != nil {
+		t.Fatalf("seed scrollback: %v", err)
+	}
+	if err := os.Chmod(scrollback, 0o000); err != nil {
+		t.Fatalf("chmod 0: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(scrollback, 0o600) })
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "lp:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		Logger:            logger,
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "permission denied") {
+		t.Errorf("log missing distinct permission phrase \"permission denied\": %q", contents)
+	}
+}
+
+func TestHydrate_FileMissing_LogsGenericIOError(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hydrate-lg__0.0.fifo")
+	stdout := new(bytes.Buffer)
+	stdout.WriteString(hydrateResetPreamble)
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "lg:0.0",
+		Stdout: stdout,
+		Client: tmux.NewClient(&recordingCommander{}),
+		Logger: logger,
+	}
+	genericErr := errors.New("synthetic mid-stream failure")
+	if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: genericErr}); err != nil {
+		t.Fatalf("handleHydrateFileMissing: %v", err)
+	}
+	_ = logger.Close()
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "I/O error") {
+		t.Errorf("log missing distinct generic phrase \"I/O error\": %q", contents)
+	}
+	if !strings.Contains(contents, "synthetic mid-stream failure") {
+		t.Errorf("log missing wrapped cause: %q", contents)
+	}
+}
+
+func TestHydrate_FileMissing_LogIncludesHookKeyAndFile(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-li__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "li:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		Logger:            logger,
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	data, _ := os.ReadFile(logPath)
+	contents := string(data)
+	if !strings.Contains(contents, "li:0.0") {
+		t.Errorf("log missing --hook-key value: %q", contents)
+	}
+	if !strings.Contains(contents, scrollback) {
+		t.Errorf("log missing --file path %q: %q", scrollback, contents)
+	}
+}
+
+func TestHydrate_FileMissing_UnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fu__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	cmder := &recordingCommander{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fu:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(cmder),
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	want := []string{"set-option", "-su", "@portal-skeleton-fu__0.0"}
+	var found bool
+	for _, c := range cmder.Calls {
+		if len(c) == len(want) {
+			match := true
+			for i := range c {
+				if c[i] != want[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected tmux call %v, got calls: %v", want, cmder.Calls)
+	}
+}
+
+func TestHydrate_FileMissing_SkipsSettleSleep(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fs__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fs:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+
+	start := time.Now()
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("runHydrate elapsed %v on file-missing path; expected << 100ms (no settle sleep)", elapsed)
+	}
+}
+
+func TestHydrate_FileMissing_DoesNotReadHooksFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_CONFIG_HOME", dir)
+
+	fifo := makeFIFO(t, dir, "hydrate-fh__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fh:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		ExecShell:         (&stubExecShell{}).fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hooks.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("hooks.json must not exist; stat err = %v", err)
+	}
+}
+
+func TestHydrate_FileMissing_LeavesPartialBytesOnMidStreamFailure(t *testing.T) {
+	// Direct handler invocation: simulate that runHydrate has already written
+	// the preamble + some bytes from a partial io.Copy before the mid-stream
+	// failure. The handler must not roll back stdout and must not double-emit
+	// the preamble.
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hydrate-mp__0.0.fifo")
+
+	stdout := new(bytes.Buffer)
+	stdout.WriteString(hydrateResetPreamble)
+	const partial = "ABC partial data DEF"
+	stdout.WriteString(partial)
+
+	cfg := hydrateConfig{
+		FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "mp:0.0",
+		Stdout: stdout,
+		Client: tmux.NewClient(&recordingCommander{}),
+	}
+	if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: errors.New("eio")}); err != nil {
+		t.Fatalf("handleHydrateFileMissing: %v", err)
+	}
+
+	out := stdout.String()
+	if strings.Count(out, hydrateResetPreamble) != 1 {
+		t.Errorf("preamble emitted more than once after handler: %q", out)
+	}
+	if !strings.Contains(out, partial) {
+		t.Errorf("partial bytes lost: %q", out)
 	}
 }
 

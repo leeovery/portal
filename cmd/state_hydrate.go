@@ -45,8 +45,17 @@ type hydrateConfig struct {
 	Logger            *state.Logger
 	ExecShell         func(shell string)
 	OpenFIFO          func(path string, timeout time.Duration) (*os.File, error)
-	HandleFileMissing func(cfg hydrateConfig) error
+	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
+}
+
+// hydrateFileMissingContext carries the underlying cause of a file-missing
+// transition into handleHydrateFileMissing so the handler can log distinct
+// prefixes for ENOENT, permission, and generic I/O failures. The preamble has
+// already been written by runHydrate by the time the handler runs (see
+// runHydrate step ordering); the handler must not re-emit it.
+type hydrateFileMissingContext struct {
+	Cause error
 }
 
 // paneKeyFromFIFOPath strips the "hydrate-" prefix and ".fifo" suffix from the
@@ -118,27 +127,38 @@ func runHydrate(cfg hydrateConfig) error {
 	_ = f.Close()
 	_ = os.Remove(cfg.FIFO)
 
-	// 3. Open the saved scrollback file.
+	// 3. Reset preamble — cursor visible, exit alt-screen, SGR reset. Emitted
+	// before os.Open so that the file-missing path inherits a written preamble
+	// without the handler having to re-emit it.
+	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
+
+	// 4. Open the saved scrollback file. Failure (ENOENT, permission denied,
+	// or any other I/O error) routes through HandleFileMissing — preamble is
+	// already on stdout, so the pane lands on a clean shell after exec.
 	sb, err := os.Open(cfg.File)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			if cfg.HandleFileMissing != nil {
-				return cfg.HandleFileMissing(cfg)
+		if cfg.HandleFileMissing != nil {
+			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
+				return hErr
 			}
-			return err
+			execShellAndExit(cfg)
+			return nil
 		}
 		return fmt.Errorf("open scrollback %s: %w", cfg.File, err)
 	}
 	defer func() { _ = sb.Close() }()
 
-	// 4. Reset preamble — cursor visible, exit alt-screen, SGR reset.
-	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
-
 	// 5. Stream scrollback to stdout. io.Copy preserves bytes verbatim and
-	// streams in 32K blocks; the 5MB-file test verifies this end-to-end.
+	// streams in 32K blocks; the 5MB-file test verifies this end-to-end. A
+	// mid-stream Read failure leaves the partial bytes on stdout — handler is
+	// invoked to log the cause, unset the marker, and exec the shell.
 	if _, err := io.Copy(cfg.Stdout, sb); err != nil {
 		if cfg.HandleFileMissing != nil {
-			return cfg.HandleFileMissing(cfg)
+			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
+				return hErr
+			}
+			execShellAndExit(cfg)
+			return nil
 		}
 		return err
 	}
@@ -206,6 +226,46 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	return nil
 }
 
+// handleHydrateFileMissing is invoked when the saved scrollback cannot be
+// served — either os.Open fails (ENOENT, permission denied, generic I/O) or
+// io.Copy fails mid-stream. Spec ("Helper Behavior on Startup", step 4):
+// log a warning, skip the 100ms settle sleep (nothing was fully dumped), unset
+// the @portal-skeleton marker inline so the save loop resumes capturing this
+// pane, and let runHydrate fall through to exec the user's $SHELL.
+//
+// The preamble has already been written by runHydrate (step 3) before os.Open
+// is attempted, so this handler does NOT emit it again. On a mid-stream
+// io.Copy failure, the partial bytes already streamed to stdout are left in
+// place — no rollback. The pane lands in a degraded-but-usable shell.
+func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) error {
+	// 1. Log a distinct WARN entry per failure cause so operators can tell
+	// missing files (likely GC race) apart from permission misconfiguration
+	// or transient disk I/O errors.
+	if cfg.Logger != nil {
+		switch {
+		case errors.Is(ctx.Cause, fs.ErrNotExist):
+			cfg.Logger.Warn("hydrate", "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+		case errors.Is(ctx.Cause, fs.ErrPermission):
+			cfg.Logger.Warn("hydrate", "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+		default:
+			cfg.Logger.Warn("hydrate", "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
+		}
+	}
+
+	// 2. Deliberately NO 100ms sleep — nothing was fully dumped, so there is
+	// no PTY parser settle to wait on.
+
+	// 3. Unset the skeleton marker — KEY DIFFERENCE FROM TIMEOUT PATH. With
+	// no scrollback to dump, the pane is empty and the save loop should
+	// resume capturing it on the next tick rather than skipping it forever.
+	livePaneKey := paneKeyFromFIFOPath(cfg.FIFO)
+	markerName := "@portal-skeleton-" + livePaneKey
+	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
+		cfg.Logger.Warn("hydrate", "unset marker %s: %v", markerName, err)
+	}
+	return nil
+}
+
 // defaultExecShell is the production ExecShell seam: hand the process off to
 // $SHELL via syscall.Exec. syscall.Exec only returns on error; if it does,
 // the helper exits 1 so the pane closes rather than dangling without a shell.
@@ -234,15 +294,16 @@ var stateHydrateCmd = &cobra.Command{
 		hookKey, _ := cmd.Flags().GetString("hook-key")
 
 		cfg := hydrateConfig{
-			FIFO:          fifo,
-			File:          file,
-			HookKey:       hookKey,
-			Stdout:        cmd.OutOrStdout(),
-			Client:        tmux.NewClient(&tmux.RealCommander{}),
-			Logger:        nil,
-			ExecShell:     defaultExecShell,
-			OpenFIFO:      openFIFOWithTimeout,
-			HandleTimeout: handleHydrateTimeout,
+			FIFO:              fifo,
+			File:              file,
+			HookKey:           hookKey,
+			Stdout:            cmd.OutOrStdout(),
+			Client:            tmux.NewClient(&tmux.RealCommander{}),
+			Logger:            nil,
+			ExecShell:         defaultExecShell,
+			OpenFIFO:          openFIFOWithTimeout,
+			HandleFileMissing: handleHydrateFileMissing,
+			HandleTimeout:     handleHydrateTimeout,
 		}
 		return hydrateRunFunc(cfg)
 	},
