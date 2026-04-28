@@ -437,6 +437,22 @@ func (c *Client) SendKeys(target string, command string) error {
 	return nil
 }
 
+// RespawnPane replaces the running process in the specified pane with a fresh
+// shell-command via "tmux respawn-pane -k -t <target> <command>". The -k flag
+// is load-bearing: it kills any existing process in the pane atomically rather
+// than failing because the pane is already occupied. Used by the restore arm
+// phase to swap the default shell (created by new-session / split-window) for
+// the hydrate helper as a single atomic tmux call — closer to the spec's
+// "helper as initial process" invariant than send-keys (which would let the
+// default shell briefly run before the helper takes over).
+func (c *Client) RespawnPane(target, command string) error {
+	_, err := c.cmd.Run("respawn-pane", "-k", "-t", target, command)
+	if err != nil {
+		return fmt.Errorf("failed to respawn-pane %q: %w", target, err)
+	}
+	return nil
+}
+
 // UnsetServerOption removes a tmux server-level option via "set-option -su".
 // The -s flag targets the server-option scope; -u removes (unsets) the option.
 // This is a no-op when the option is already absent — tmux does not error in

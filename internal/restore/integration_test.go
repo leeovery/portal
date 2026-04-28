@@ -263,8 +263,8 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 // base-index=1 is structurally complex (it would require either authoring a
 // hand-built sessions.json or capturing under a base-index=1 server); the
 // pragmatic shape adopted here is to validate the prediction primitive
-// directly — Restore/ApplyWindowGeometry/ApplySkeletonMarkers all consume its
-// output, so a correct prediction is the load-bearing precondition.
+// directly — ApplyWindowGeometry / ApplySkeletonMarkers consume its output,
+// so a correct prediction is the load-bearing precondition.
 func TestPhase3Integration_BaseIndexDrift(t *testing.T) {
 	skipIfNoTmux(t)
 
@@ -289,6 +289,125 @@ func TestPhase3Integration_BaseIndexDrift(t *testing.T) {
 	}
 	if paneBase != 1 {
 		t.Errorf("pane-base-index = %d, want 1", paneBase)
+	}
+}
+
+// TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift is the
+// regression test for Phase 7 task 7-9: when a session is saved with default
+// (0,0) indices but restored against a tmux server configured with non-zero
+// base-index/pane-base-index, FIFO paths and skeleton-marker keys must be
+// derived from the LIVE list-panes output, not from the saved indices or any
+// prediction-only target.
+//
+// Test flow:
+//  1. Capture a session "alpha" against a server with default 0/0 indices.
+//  2. Persist sessions.json.
+//  3. Kill the server.
+//  4. Start a fresh server with base-index=1 + pane-base-index=1.
+//  5. Run Restore via the orchestrator.
+//  6. Assert: FIFO exists at the LIVE key (alpha:1.1), not at the saved key
+//     (alpha:0.0); the skeleton marker is set against the LIVE key.
+func TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift(t *testing.T) {
+	skipIfNoTmux(t)
+
+	ts := tmuxtest.New(t, "ptl-")
+	stateDir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	// CAPTURE under default 0/0 base / pane-base indices — sessions.json
+	// records pane at 0:0.
+	ts.Run(t, "new-session", "-d", "-s", "alpha")
+	ts.WaitForSession(t, "alpha", 2*time.Second)
+
+	client := ts.Client()
+	idx, err := state.CaptureStructure(client, nil, nil)
+	if err != nil {
+		t.Fatalf("CaptureStructure: %v", err)
+	}
+	if len(idx.Sessions) != 1 {
+		t.Fatalf("expected 1 captured session, got %d", len(idx.Sessions))
+	}
+	// Sanity: the saved entry's pane index is 0 (the default).
+	savedPane := idx.Sessions[0].Windows[0].Panes[0]
+	if savedPane.Index != 0 {
+		t.Fatalf("saved pane Index = %d, want 0 (capture should reflect server default)", savedPane.Index)
+	}
+
+	data, err := state.EncodeIndex(idx)
+	if err != nil {
+		t.Fatalf("EncodeIndex: %v", err)
+	}
+	if err := writeFile(state.SessionsJSON(stateDir), data); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+
+	// KILL the server so we can bring up a fresh one with drifted indices.
+	ts.KillServer()
+
+	// Bring up a fresh server with base-index=1 / pane-base-index=1. A
+	// bootstrap session keeps the server alive while we set the options;
+	// tmux exits when there are no sessions.
+	ts.Run(t, "new-session", "-d", "-s", "_bootstrap")
+	ts.WaitForSession(t, "_bootstrap", 2*time.Second)
+	ts.Run(t, "set-option", "-g", "base-index", "1")
+	ts.Run(t, "set-option", "-g", "pane-base-index", "1")
+	ts.Run(t, "set-option", "-s", "base-index", "1")
+	ts.Run(t, "set-option", "-s", "pane-base-index", "1")
+
+	// RESTORE.
+	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	o := &restore.Orchestrator{
+		Client:   client,
+		StateDir: stateDir,
+		Logger:   logger,
+	}
+	if err := restoreWithMarker(t, client, o); err != nil {
+		t.Fatalf("restoreWithMarker: %v", err)
+	}
+
+	// VERIFY: alpha is alive again under base-index=1.
+	out := ts.Run(t, "list-sessions", "-F", "#{session_name}")
+	if !strings.Contains(out, "alpha") {
+		t.Fatalf("expected alpha in list-sessions; got %q", out)
+	}
+
+	// VERIFY: list-panes against alpha returns the LIVE coords (1,1) under
+	// the drifted base indices.
+	livePanesOut := ts.Run(t, "list-panes", "-s", "-t", "alpha", "-F", "#{window_index}:#{pane_index}")
+	livePanesOut = strings.TrimSpace(livePanesOut)
+	if livePanesOut != "1:1" {
+		t.Fatalf("alpha live panes = %q, want %q (base-index drift)", livePanesOut, "1:1")
+	}
+
+	// VERIFY: FIFO exists at the LIVE key (1,1), not the saved (0,0).
+	liveKey := state.SanitizePaneKey("alpha", 1, 1)
+	liveFIFO := state.FIFOPath(stateDir, liveKey)
+	if _, err := os.Lstat(liveFIFO); err != nil {
+		t.Errorf("expected FIFO at live key %s, missing: %v", liveFIFO, err)
+	}
+	savedKey := state.SanitizePaneKey("alpha", 0, 0)
+	savedFIFO := state.FIFOPath(stateDir, savedKey)
+	if _, err := os.Lstat(savedFIFO); err == nil {
+		t.Errorf("did not expect FIFO at saved-key path %s under index drift", savedFIFO)
+	}
+
+	// VERIFY: skeleton marker is set against the LIVE key.
+	wantMarker := "@portal-skeleton-" + liveKey
+	markerOut := ts.Run(t, "show-options", "-sv", wantMarker)
+	if strings.TrimSpace(markerOut) == "" {
+		t.Errorf("expected marker %q to be set; got empty value", wantMarker)
+	}
+	dontWantMarker := "@portal-skeleton-" + savedKey
+	if out, err := ts.TryRun("show-options", "-sv", dontWantMarker); err == nil && strings.TrimSpace(out) != "" {
+		t.Errorf("did not expect marker %q (saved-key); got %q", dontWantMarker, out)
 	}
 }
 

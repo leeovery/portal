@@ -491,8 +491,14 @@ func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
 func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *testing.T) {
 	// ApplyWindowGeometry never fails the orchestrator (it returns void).
 	// Markers must always run after geometry — drive a session with a layout
-	// that fails (forcing fallback) and assert the call ordering:
-	// new-session → select-layout → list-panes → set-option.
+	// that fails (forcing fallback) and assert the call ordering. After the
+	// 7-9 re-query rework only ONE list-panes call exists per session — the
+	// arm phase queries it, then threads the resulting []tmux.PaneCoord
+	// through to ApplyWindowGeometry and ApplySkeletonMarkers (neither of
+	// which calls list-panes themselves). Expected ordering:
+	//   new-session → list-panes (arm) → respawn-pane → select-layout → set-option
+	// The invariant under test is that geometry's first call (select-layout)
+	// runs before markers' first call (set-option).
 	dir := t.TempDir()
 	sess := state.Session{
 		Name: "work",
@@ -523,16 +529,17 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 	}
 
 	newSessionAt := callsAt(mock.Calls, "new-session")
+	listPanesIdxs := findAllCalls(mock.Calls, "list-panes")
 	layoutAt := callsAt(mock.Calls, "select-layout")
-	listPanesAt := callsAt(mock.Calls, "list-panes")
 	setOptAt := callsAt(mock.Calls, "set-option")
 
-	if newSessionAt < 0 || layoutAt < 0 || listPanesAt < 0 || setOptAt < 0 {
-		t.Fatalf("expected all calls present: new-session=%d select-layout=%d list-panes=%d set-option=%d; calls: %v",
-			newSessionAt, layoutAt, listPanesAt, setOptAt, mock.Calls)
+	if newSessionAt < 0 || len(listPanesIdxs) != 1 || layoutAt < 0 || setOptAt < 0 {
+		t.Fatalf("expected calls present (with exactly 1 list-panes): new-session=%d list-panes=%v select-layout=%d set-option=%d; calls: %v",
+			newSessionAt, listPanesIdxs, layoutAt, setOptAt, mock.Calls)
 	}
-	if newSessionAt >= layoutAt || layoutAt >= listPanesAt || listPanesAt >= setOptAt {
-		t.Errorf("ordering violated: new-session(%d) < select-layout(%d) < list-panes(%d) < set-option(%d) failed",
-			newSessionAt, layoutAt, listPanesAt, setOptAt)
+	armListPanesAt := listPanesIdxs[0]
+	if newSessionAt >= armListPanesAt || armListPanesAt >= layoutAt || layoutAt >= setOptAt {
+		t.Errorf("ordering violated: new-session(%d) < list-panes-arm(%d) < select-layout(%d) < set-option(%d) failed",
+			newSessionAt, armListPanesAt, layoutAt, setOptAt)
 	}
 }

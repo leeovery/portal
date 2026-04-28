@@ -100,7 +100,14 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 // silently, skip Portal-internal underscore-prefixed names with a log entry,
 // reject malformed topologies (zero windows / zero panes), then dispatch to
 // the SessionRestorer's create / geometry / markers sequence with all three
-// operations sharing the same predicted live indices.
+// operations sharing the same live []tmux.PaneCoord that the arm phase
+// gathered from list-panes.
+//
+// PredictLiveIndices is still consulted, but its output now feeds only the
+// drift-warning diagnostic surface in ApplySkeletonMarkers — every actual
+// tmux call target (FIFO, respawn-pane, select-layout, select-pane,
+// resize-pane, set-option) is sourced from the live re-query via the
+// livePanes slice threaded through from Restore.
 func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
 	if strings.HasPrefix(sess.Name, "_") {
 		o.Logger.Warn(state.ComponentRestore, "skipping underscore-prefixed session %q", sess.Name)
@@ -116,16 +123,20 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 		return
 	}
 
-	baseIdx, paneBaseIdx := sr.PredictLiveIndices()
-
-	if err := sr.Restore(sess, baseIdx, paneBaseIdx); err != nil {
+	livePanes, err := sr.Restore(sess)
+	if err != nil {
 		o.Logger.Warn(state.ComponentRestore, "Restore %q: %v", sess.Name, err)
 		return
 	}
 
-	sr.ApplyWindowGeometry(sess, baseIdx, paneBaseIdx)
+	// PredictLiveIndices feeds only the drift warning in ApplySkeletonMarkers.
+	// Geometry no longer consumes it — ApplyWindowGeometry now sources every
+	// (window, pane) target from the live PaneCoord slice gathered by armPanes.
+	baseIdx, paneBaseIdx := sr.PredictLiveIndices()
 
-	if err := sr.ApplySkeletonMarkers(sess, baseIdx, paneBaseIdx); err != nil {
+	sr.ApplyWindowGeometry(sess, livePanes)
+
+	if err := sr.ApplySkeletonMarkers(sess, livePanes, baseIdx, paneBaseIdx); err != nil {
 		o.Logger.Warn(state.ComponentRestore, "ApplySkeletonMarkers %q: %v", sess.Name, err)
 	}
 }

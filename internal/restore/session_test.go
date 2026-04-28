@@ -38,11 +38,27 @@ func (m *mockCommander) RunRaw(args ...string) (string, error) {
 
 // defaultRunFunc returns ErrOptionNotFound for show-option queries (so
 // predictLiveIndices defaults to 0/0) and empty-success for everything else.
+// Tests that exercise the create-then-arm Restore path should use
+// restoreRunFunc to provide a list-panes oracle reflecting their topology.
 func defaultRunFunc(args ...string) (string, error) {
 	if len(args) >= 2 && args[0] == "show-option" && args[1] == "-sv" {
 		return "", errors.New("unknown option")
 	}
 	return "", nil
+}
+
+// restoreRunFunc returns a RunFunc that responds to list-panes queries with
+// `livePanesOutput` (newline-separated `<window>:<pane>` lines) and defers
+// every other call to defaultRunFunc. Used by Restore tests where the arm
+// phase re-queries list-panes to discover live indices for FIFO creation and
+// send-keys targeting.
+func restoreRunFunc(livePanesOutput string) func(args ...string) (string, error) {
+	return func(args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "list-panes" {
+			return livePanesOutput, nil
+		}
+		return defaultRunFunc(args...)
+	}
 }
 
 // callsAt returns the index of the first call matching cmd (subcommand at
@@ -80,7 +96,7 @@ func newPane(idx int, cwd, scrollback string) state.Pane {
 }
 
 func TestSessionRestorer_SinglePaneNoEnvironment(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
@@ -91,7 +107,7 @@ func TestSessionRestorer_SinglePaneNoEnvironment(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -122,7 +138,7 @@ func TestSessionRestorer_SinglePaneNoEnvironment(t *testing.T) {
 }
 
 func TestSessionRestorer_MultiPaneSingleWindow(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0\n0:1\n0:2")}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
 
@@ -134,7 +150,7 @@ func TestSessionRestorer_MultiPaneSingleWindow(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -166,7 +182,7 @@ func TestSessionRestorer_MultiWindowMultiPane(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -195,7 +211,7 @@ func TestSessionRestorer_EnvironmentAppliedAfterNewSessionBeforeNewWindow(t *tes
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -221,7 +237,7 @@ func TestSessionRestorer_EnvironmentAppliedInSortedOrder(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -251,7 +267,7 @@ func TestSessionRestorer_EmptyEnvironmentSkipsSetEnvironment(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -261,7 +277,7 @@ func TestSessionRestorer_EmptyEnvironmentSkipsSetEnvironment(t *testing.T) {
 }
 
 func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
@@ -272,16 +288,11 @@ func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	idx := callsAt(mock.Calls, "new-session")
-	if idx < 0 {
-		t.Fatalf("no new-session call")
-	}
-	c := mock.Calls[idx]
-	hydrate := c[len(c)-1]
+	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
 	wantAbs := filepath.Join(dir, "scrollback/work__0.0.bin")
 	if !strings.Contains(hydrate, "--file "+wantAbs) {
 		t.Errorf("hydrate cmd %q does not contain --file %s", hydrate, wantAbs)
@@ -289,41 +300,55 @@ func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing
 }
 
 func TestSessionRestorer_HydrateCommandContainsRawHookKey(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
 
-	// Saved indices are 1, 2 — exercise the raw form rather than 0.0.
+	// Saved indices are 3, 7 — exercise the raw form rather than 0.0.
 	sess := newSession("work", nil,
 		newWindow(3, "main",
 			newPane(7, "/work", "scrollback/work__3.7.bin"),
 		),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	idx := callsAt(mock.Calls, "new-session")
-	c := mock.Calls[idx]
-	hydrate := c[len(c)-1]
+	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
 	wantHookKey := "work:3.7"
 	if !strings.Contains(hydrate, "--hook-key "+wantHookKey) {
 		t.Errorf("hydrate cmd %q does not contain --hook-key %s", hydrate, wantHookKey)
 	}
 }
 
-func TestSessionRestorer_FIFOUsesLivePaneKeyWhenBaseIndexDiffers(t *testing.T) {
+// respawnPaneHydrateCommand returns the hydrate command argument from the
+// first respawn-pane call in calls. Fails the test if no respawn-pane call is
+// present or if its argv shape does not match
+// [respawn-pane, -k, -t, <target>, <cmd>].
+func respawnPaneHydrateCommand(t *testing.T, calls [][]string) string {
+	t.Helper()
+	idx := callsAt(calls, "respawn-pane")
+	if idx < 0 {
+		t.Fatalf("no respawn-pane call to deliver hydrate command; calls: %v", calls)
+	}
+	args := calls[idx]
+	if len(args) != 5 {
+		t.Fatalf("respawn-pane args = %v, want length 5", args)
+	}
+	return args[4]
+}
+
+func TestSessionRestorer_FIFOUsesLivePaneKeyFromListPanesReQuery(t *testing.T) {
+	// Saved structure has indices 0/0, but live tmux reports 5:5 — full drift
+	// scenario where neither the saved indices nor any prediction match what
+	// list-panes returns. Restore must source FIFO paths and send-keys targets
+	// from the re-queried live (window, pane).
 	mock := &mockCommander{
 		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 3 && args[0] == "show-option" && args[1] == "-sv" {
-				switch args[2] {
-				case "base-index":
-					return "1", nil
-				case "pane-base-index":
-					return "1", nil
-				}
+			if len(args) > 0 && args[0] == "list-panes" {
+				return "5:5", nil
 			}
 			return "", nil
 		},
@@ -332,33 +357,74 @@ func TestSessionRestorer_FIFOUsesLivePaneKeyWhenBaseIndexDiffers(t *testing.T) {
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
 
-	// Saved at indices 0/0 but live indices will be 1/1.
 	sess := newSession("work", nil,
 		newWindow(0, "main",
 			newPane(0, "/work", "scrollback/work__0.0.bin"),
 		),
 	)
 
-	baseIdx, paneBaseIdx := r.PredictLiveIndices()
-	if err := r.Restore(sess, baseIdx, paneBaseIdx); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	wantLiveKey := state.SanitizePaneKey("work", 1, 1)
+	// FIFO must be at the LIVE paneKey (5,5), not the saved (0,0).
+	wantLiveKey := state.SanitizePaneKey("work", 5, 5)
 	liveFIFO := state.FIFOPath(dir, wantLiveKey)
 	if _, err := os.Stat(liveFIFO); err != nil {
 		t.Errorf("expected live-key FIFO %s, missing: %v", liveFIFO, err)
 	}
+	// And NO FIFO at the saved (0,0) key.
+	savedKey := state.SanitizePaneKey("work", 0, 0)
+	savedFIFO := state.FIFOPath(dir, savedKey)
+	if _, err := os.Stat(savedFIFO); err == nil {
+		t.Errorf("did not expect FIFO at saved-key path %s; should only exist at live key", savedFIFO)
+	}
 
-	// Hydrate command should reference the LIVE FIFO path.
-	idx := callsAt(mock.Calls, "new-session")
-	hydrate := mock.Calls[idx][len(mock.Calls[idx])-1]
+	// The hydrate command is dispatched via respawn-pane to the LIVE pane
+	// target, not embedded in the new-session call. respawn-pane atomically
+	// kills the default shell created by new-session and replaces it with the
+	// helper, which is closer to the spec's "helper as initial process"
+	// invariant than send-keys (which would let the default shell briefly run
+	// before the helper takes over and could leave rc-file output / prompts in
+	// scrollback above the dumped saved scrollback).
+	respIdx := callsAt(mock.Calls, "respawn-pane")
+	if respIdx < 0 {
+		t.Fatalf("expected respawn-pane call to deliver hydrate command; calls: %v", mock.Calls)
+	}
+	args := mock.Calls[respIdx]
+	// args = [respawn-pane, -k, -t, <target>, <command>]
+	if len(args) != 5 {
+		t.Fatalf("respawn-pane args = %v, want length 5", args)
+	}
+	wantTarget := "work:5.5"
+	if args[3] != wantTarget {
+		t.Errorf("respawn-pane target = %q, want %q (live coords)", args[3], wantTarget)
+	}
+	hydrate := args[4]
 	if !strings.Contains(hydrate, "--fifo "+liveFIFO) {
 		t.Errorf("hydrate cmd %q does not reference live FIFO %s", hydrate, liveFIFO)
 	}
-	// And hook-key should remain saved (raw) form.
+	// hook-key must remain saved (raw) form regardless of live drift.
 	if !strings.Contains(hydrate, "--hook-key work:0.0") {
 		t.Errorf("hydrate cmd %q does not contain raw saved hook-key work:0.0", hydrate)
+	}
+	// Scrollback --file uses the SAVED path (sessions.json was written under
+	// saved indices) — verify it's the saved path, not the live one.
+	wantFile := filepath.Join(dir, "scrollback/work__0.0.bin")
+	if !strings.Contains(hydrate, "--file "+wantFile) {
+		t.Errorf("hydrate cmd %q does not reference saved scrollback %s", hydrate, wantFile)
+	}
+
+	// new-session must NOT carry the hydrate command (separation of create
+	// from arm).
+	nsIdx := callsAt(mock.Calls, "new-session")
+	if nsIdx < 0 {
+		t.Fatalf("expected new-session; calls: %v", mock.Calls)
+	}
+	for _, a := range mock.Calls[nsIdx] {
+		if strings.Contains(a, "portal state hydrate") {
+			t.Errorf("new-session must not carry hydrate command; got args %v", mock.Calls[nsIdx])
+		}
 	}
 }
 
@@ -451,7 +517,7 @@ func TestSessionRestorer_MultibyteSessionNamePassesUnchangedToNewSession(t *test
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -467,7 +533,7 @@ func TestSessionRestorer_MultibyteSessionNamePassesUnchangedToNewSession(t *test
 }
 
 func TestSessionRestorer_HashSuffixedPaneKeyOnSanitizationCollision(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
@@ -478,7 +544,7 @@ func TestSessionRestorer_HashSuffixedPaneKeyOnSanitizationCollision(t *testing.T
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -519,7 +585,7 @@ func TestSessionRestorer_LogsAndContinuesOnSetEnvironmentFailure(t *testing.T) {
 		newWindow(1, "logs", newPane(0, "/work", "scrollback/y.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore returned error %v, expected nil (failure should be logged + continue)", err)
 	}
 	// All three set-environment calls should still be attempted.
@@ -554,7 +620,7 @@ func TestSessionRestorer_WrappedErrorOnSplitWindowFailure(t *testing.T) {
 		),
 	)
 
-	err := r.Restore(sess, 0, 0)
+	_, err := r.Restore(sess)
 	if err == nil {
 		t.Fatal("expected error from split-window failure, got nil")
 	}
@@ -564,7 +630,7 @@ func TestSessionRestorer_WrappedErrorOnSplitWindowFailure(t *testing.T) {
 }
 
 func TestSessionRestorer_WrappedErrorOnCreateFIFOFailure(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 
 	// Use a non-existent state dir → mkfifo fails with ENOENT (no parent).
@@ -575,7 +641,7 @@ func TestSessionRestorer_WrappedErrorOnCreateFIFOFailure(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	err := r.Restore(sess, 0, 0)
+	_, err := r.Restore(sess)
 	if err == nil {
 		t.Fatal("expected error from CreateFIFO failure, got nil")
 	}
@@ -585,7 +651,7 @@ func TestSessionRestorer_WrappedErrorOnCreateFIFOFailure(t *testing.T) {
 }
 
 func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
-	mock := &mockCommander{RunFunc: defaultRunFunc}
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	r := &restore.SessionRestorer{Client: client, StateDir: dir}
@@ -594,13 +660,11 @@ func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess, 0, 0); err != nil {
+	if _, err := r.Restore(sess); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	idx := callsAt(mock.Calls, "new-session")
-	c := mock.Calls[idx]
-	hydrate := c[len(c)-1]
+	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
 
 	liveKey := state.SanitizePaneKey("work", 0, 0)
 	wantFIFO := state.FIFOPath(dir, liveKey)
@@ -614,18 +678,180 @@ func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
 	}
 }
 
+func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyPairedPanesWhenLiveCountExceedsSaved(t *testing.T) {
+	// Saved 1 pane, live tmux reports 2 (extra pane appeared between create
+	// and arm — pathological but defensively handled). armPanes should log a
+	// warning, arm the single saved pane against the first live pane, and
+	// leave the second live pane untouched (still running its default shell,
+	// no respawn-pane / FIFO for it).
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0\n0:1")}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	defer func() { _ = logger.Close() }()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main",
+			newPane(0, "/work", "scrollback/work__0.0.bin"),
+		),
+	)
+
+	if _, err := r.Restore(sess); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Exactly one respawn-pane call — the saved pane gets armed, the extra
+	// live pane is left running its default shell.
+	respawnIdxs := findAllCalls(mock.Calls, "respawn-pane")
+	if len(respawnIdxs) != 1 {
+		t.Errorf("respawn-pane calls = %d, want 1 (only paired pane armed); calls: %v", len(respawnIdxs), mock.Calls)
+	}
+	if len(respawnIdxs) >= 1 {
+		args := mock.Calls[respawnIdxs[0]]
+		if len(args) >= 4 && args[3] != "work:0.0" {
+			t.Errorf("respawn-pane target = %q, want %q (first live pane)", args[3], "work:0.0")
+		}
+	}
+
+	// FIFO created for the paired pane only — none for the extra.
+	pairedFIFO := state.FIFOPath(dir, state.SanitizePaneKey("work", 0, 0))
+	if _, statErr := os.Stat(pairedFIFO); statErr != nil {
+		t.Errorf("expected FIFO at paired key %s, missing: %v", pairedFIFO, statErr)
+	}
+	extraFIFO := state.FIFOPath(dir, state.SanitizePaneKey("work", 0, 1))
+	if _, statErr := os.Stat(extraFIFO); statErr == nil {
+		t.Errorf("did not expect FIFO at extra-pane key %s; only paired panes should get FIFOs", extraFIFO)
+	}
+
+	// Warning logged.
+	_ = logger.Close()
+	body, _ := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if !strings.Contains(string(body), "live pane count") {
+		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", string(body))
+	}
+}
+
+func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyFirstWhenLiveCountIsLessThanSaved(t *testing.T) {
+	// Saved 2 panes, live tmux reports 1 (split-window failed to land or a
+	// pane was killed between create and arm — also defensive). armPanes
+	// should log a warning, arm the first paired pane, and return nil (no
+	// error — partial restoration is preferable to abort per spec).
+	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	defer func() { _ = logger.Close() }()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main",
+			newPane(0, "/work", "scrollback/work__0.0.bin"),
+			newPane(1, "/work", "scrollback/work__0.1.bin"),
+		),
+	)
+
+	livePanes, err := r.Restore(sess)
+	if err != nil {
+		t.Fatalf("Restore returned error %v, want nil (partial-restore tolerance)", err)
+	}
+	if len(livePanes) != 1 {
+		t.Errorf("livePanes length = %d, want 1 (the actual live count)", len(livePanes))
+	}
+
+	// Exactly one respawn-pane call — only the first saved pane is paired.
+	respawnIdxs := findAllCalls(mock.Calls, "respawn-pane")
+	if len(respawnIdxs) != 1 {
+		t.Errorf("respawn-pane calls = %d, want 1 (only first paired pane armed); calls: %v", len(respawnIdxs), mock.Calls)
+	}
+
+	// FIFO created for the first saved pane only — none for the second.
+	firstFIFO := state.FIFOPath(dir, state.SanitizePaneKey("work", 0, 0))
+	if _, statErr := os.Stat(firstFIFO); statErr != nil {
+		t.Errorf("expected FIFO at first-pane key %s, missing: %v", firstFIFO, statErr)
+	}
+
+	// Warning logged.
+	_ = logger.Close()
+	body, _ := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if !strings.Contains(string(body), "live pane count") {
+		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", string(body))
+	}
+}
+
+func TestSessionRestorer_ArmPanesReturnsWrappedErrorOnRespawnPaneFailure(t *testing.T) {
+	// Three saved panes, three live panes. Fail respawn-pane on the second
+	// pane (target work:0.1) — armPanes should return a wrapped error
+	// referencing the failing target so operators can locate the offending
+	// pane. Subsequent panes are NOT armed (fail-fast — a missing helper
+	// means scrollback never replays for that pane).
+	mock := &mockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "list-panes" {
+				return "0:0\n0:1\n0:2", nil
+			}
+			if len(args) >= 4 && args[0] == "respawn-pane" && args[3] == "work:0.1" {
+				return "", errors.New("respawn boom")
+			}
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+	dir := t.TempDir()
+	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	defer func() { _ = logger.Close() }()
+	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
+
+	sess := newSession("work", nil,
+		newWindow(0, "main",
+			newPane(0, "/work", "scrollback/work__0.0.bin"),
+			newPane(1, "/work", "scrollback/work__0.1.bin"),
+			newPane(2, "/work", "scrollback/work__0.2.bin"),
+		),
+	)
+
+	_, restoreErr := r.Restore(sess)
+	if restoreErr == nil {
+		t.Fatal("expected error from respawn-pane failure on pane 1 of 3, got nil")
+	}
+	if !strings.Contains(restoreErr.Error(), "respawn boom") {
+		t.Errorf("error %q does not wrap underlying respawn-pane error", restoreErr)
+	}
+	if !strings.Contains(restoreErr.Error(), "work:0.1") {
+		t.Errorf("error %q does not include failing pane target work:0.1", restoreErr)
+	}
+	if !strings.Contains(restoreErr.Error(), "work") {
+		t.Errorf("error %q lacks session name context", restoreErr)
+	}
+
+	// First pane armed, second failed, third not attempted (fail-fast).
+	respawnIdxs := findAllCalls(mock.Calls, "respawn-pane")
+	if len(respawnIdxs) != 2 {
+		t.Errorf("respawn-pane calls = %d, want 2 (pane 0 armed, pane 1 failed, pane 2 skipped); calls: %v", len(respawnIdxs), mock.Calls)
+	}
+}
+
 func TestSessionRestorer_RejectsEmptyTopology(t *testing.T) {
 	mock := &mockCommander{RunFunc: defaultRunFunc}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
 
 	sess := newSession("work", nil)
-	if err := r.Restore(sess, 0, 0); err == nil {
+	if _, err := r.Restore(sess); err == nil {
 		t.Fatal("expected error for empty windows, got nil")
 	}
 
 	sessEmptyPanes := newSession("work", nil, newWindow(0, "main"))
-	if err := r.Restore(sessEmptyPanes, 0, 0); err == nil {
+	if _, err := r.Restore(sessEmptyPanes); err == nil {
 		t.Fatal("expected error for empty panes, got nil")
 	}
 }

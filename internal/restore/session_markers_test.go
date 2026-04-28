@@ -2,6 +2,7 @@ package restore_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,15 +28,35 @@ func markersPane(idx int) state.Pane {
 	return state.Pane{Index: idx}
 }
 
-// listPanesRunFunc returns a RunFunc that responds to list-panes -s -t with
-// the supplied multi-line output and otherwise returns ("", nil).
-func listPanesRunFunc(output string) func(args ...string) (string, error) {
-	return func(args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "list-panes" {
-			return output, nil
-		}
-		return "", nil
+// parseLivePanes parses a "<window>:<pane>\n…" string (the same format
+// list-panes -F '#{window_index}:#{pane_index}' emits) into a sorted
+// []tmux.PaneCoord. Used by markers/geometry tests to build the slice that
+// armPanes would have produced from the live re-query.
+func parseLivePanes(t *testing.T, output string) []tmux.PaneCoord {
+	t.Helper()
+	if output == "" {
+		return nil
 	}
+	var out []tmux.PaneCoord
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			t.Fatalf("parseLivePanes: bad line %q", line)
+		}
+		var w, p int
+		if _, err := fmt.Sscanf(parts[0], "%d", &w); err != nil {
+			t.Fatalf("parseLivePanes: bad window %q: %v", parts[0], err)
+		}
+		if _, err := fmt.Sscanf(parts[1], "%d", &p); err != nil {
+			t.Fatalf("parseLivePanes: bad pane %q: %v", parts[1], err)
+		}
+		out = append(out, tmux.PaneCoord{Window: w, Pane: p})
+	}
+	return out
 }
 
 // findSetOptionMarker returns the index of the first set-option call whose
@@ -60,8 +81,10 @@ func allSetOptionCalls(calls [][]string) []int {
 	return out
 }
 
-func TestApplySkeletonMarkers_CallsListPanesAndSetsOneMarkerPerLivePane(t *testing.T) {
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0\n0:1\n1:0")}
+func TestApplySkeletonMarkers_SetsOneMarkerPerSuppliedLivePane(t *testing.T) {
+	// New contract: ApplySkeletonMarkers consumes the live PaneCoord slice
+	// threaded through from Restore — it does NOT call list-panes itself.
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -69,25 +92,15 @@ func TestApplySkeletonMarkers_CallsListPanesAndSetsOneMarkerPerLivePane(t *testi
 		markersWindow(0, markersPane(0), markersPane(1)),
 		markersWindow(1, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "0:0\n0:1\n1:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
-	// One list-panes invocation against -t work.
-	listIdxs := findAllCalls(mock.Calls, "list-panes")
-	if len(listIdxs) != 1 {
-		t.Fatalf("list-panes calls = %d, want 1; calls: %v", len(listIdxs), mock.Calls)
-	}
-	listArgs := mock.Calls[listIdxs[0]]
-	wantArgs := []string{"list-panes", "-s", "-t", "work", "-F", "#{window_index}:#{pane_index}"}
-	if len(listArgs) != len(wantArgs) {
-		t.Fatalf("list-panes args = %v, want %v", listArgs, wantArgs)
-	}
-	for i := range wantArgs {
-		if listArgs[i] != wantArgs[i] {
-			t.Errorf("list-panes args[%d] = %q, want %q", i, listArgs[i], wantArgs[i])
-		}
+	// No list-panes invocation — the slice is supplied by the caller.
+	if got := len(findAllCalls(mock.Calls, "list-panes")); got != 0 {
+		t.Errorf("list-panes calls = %d, want 0 (caller supplies livePanes); calls: %v", got, mock.Calls)
 	}
 
 	// Three set-option calls — one per live pane.
@@ -110,8 +123,10 @@ func TestApplySkeletonMarkers_CallsListPanesAndSetsOneMarkerPerLivePane(t *testi
 }
 
 func TestApplySkeletonMarkers_UsesLivePaneKeyWhenPredictionDiffers(t *testing.T) {
-	// Predict base 0/0 but tmux reports the pane at 1:0 (drift).
-	mock := &mockCommander{RunFunc: listPanesRunFunc("1:0")}
+	// Predict base 0/0 but the live PaneCoord slice reports the pane at 1:0
+	// (drift). Markers must use the supplied live paneKey, not the predicted
+	// one.
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
@@ -125,8 +140,9 @@ func TestApplySkeletonMarkers_UsesLivePaneKeyWhenPredictionDiffers(t *testing.T)
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "1:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -142,7 +158,7 @@ func TestApplySkeletonMarkers_UsesLivePaneKeyWhenPredictionDiffers(t *testing.T)
 }
 
 func TestApplySkeletonMarkers_LogsDriftWarningWhenPredictedAndLiveDiffer(t *testing.T) {
-	mock := &mockCommander{RunFunc: listPanesRunFunc("1:0")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "portal.log")
@@ -157,8 +173,9 @@ func TestApplySkeletonMarkers_LogsDriftWarningWhenPredictedAndLiveDiffer(t *test
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "1:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -181,7 +198,7 @@ func TestApplySkeletonMarkers_LogsDriftWarningWhenPredictedAndLiveDiffer(t *test
 
 func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T) {
 	// Saved 2 panes, live reports 1 → sanity warning expected.
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "portal.log")
@@ -196,8 +213,9 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0), markersPane(1)),
 	)
+	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -213,15 +231,16 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 }
 
 func TestApplySkeletonMarkers_UsesServerScopeFlagAndNeverGlobal(t *testing.T) {
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0\n0:1")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0), markersPane(1)),
 	)
+	livePanes := parseLivePanes(t, "0:0\n0:1")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -246,9 +265,6 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	failMarker := "@portal-skeleton-" + state.SanitizePaneKey("work", 0, 0)
 	mock := &mockCommander{
 		RunFunc: func(args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "list-panes" {
-				return "0:0\n0:1\n0:2", nil
-			}
 			if len(args) > 0 && args[0] == "set-option" {
 				for _, a := range args {
 					if a == failMarker {
@@ -271,8 +287,9 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0), markersPane(1), markersPane(2)),
 	)
+	livePanes := parseLivePanes(t, "0:0\n0:1\n0:2")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers returned error %v, expected nil (failure should be logged + continue)", err)
 	}
 
@@ -283,48 +300,23 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	}
 }
 
-func TestApplySkeletonMarkers_ReturnsErrorWhenListPanesFails(t *testing.T) {
-	mock := &mockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) > 0 && args[0] == "list-panes" {
-				return "", errors.New("list-panes failed")
-			}
-			return "", nil
-		},
-	}
-	client := tmux.NewClient(mock)
-	r := &restore.SessionRestorer{Client: client}
-
-	sess := markersSession("work",
-		markersWindow(0, markersPane(0)),
-	)
-
-	err := r.ApplySkeletonMarkers(sess, 0, 0)
-	if err == nil {
-		t.Fatal("expected error from list-panes failure, got nil")
-	}
-	if !strings.Contains(err.Error(), "work") {
-		t.Errorf("error %q lacks session context", err)
-	}
-	if !strings.Contains(err.Error(), "list-panes failed") {
-		t.Errorf("error %q does not wrap underlying error", err)
-	}
-	// No set-option calls expected when list-panes fails.
-	if got := len(allSetOptionCalls(mock.Calls)); got != 0 {
-		t.Errorf("set-option calls = %d, want 0 when list-panes fails", got)
-	}
-}
+// TestApplySkeletonMarkers_ReturnsErrorWhenListPanesFails was removed — the
+// markers function no longer queries list-panes itself; the caller threads
+// the live PaneCoord slice through from Restore. The error path that test
+// covered is now exercised in Restore tests (armPanes' list-panes call is the
+// failure point in the new wiring).
 
 func TestApplySkeletonMarkers_SetsMarkerValueToLiteralOne(t *testing.T) {
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -343,7 +335,7 @@ func TestApplySkeletonMarkers_SetsMarkerValueToLiteralOne(t *testing.T) {
 }
 
 func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T) {
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -351,8 +343,9 @@ func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T)
 	sess := markersSession(name,
 		markersWindow(0, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -366,9 +359,12 @@ func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T)
 	}
 }
 
-func TestApplySkeletonMarkers_EnumeratesLivePanesSortedByWindowThenPane(t *testing.T) {
-	// tmux reports out-of-order — function must consume sorted order.
-	mock := &mockCommander{RunFunc: listPanesRunFunc("1:1\n0:1\n1:0\n0:0")}
+func TestApplySkeletonMarkers_EnumeratesLivePanesInSuppliedOrder(t *testing.T) {
+	// The caller (armPanes) hands in a slice already sorted by (window, pane);
+	// markers walks it in the order received. The test passes pre-sorted input
+	// (since that's the caller's contract) and asserts the output ordering
+	// matches.
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client}
 
@@ -376,8 +372,9 @@ func TestApplySkeletonMarkers_EnumeratesLivePanesSortedByWindowThenPane(t *testi
 		markersWindow(0, markersPane(0), markersPane(1)),
 		markersWindow(1, markersPane(0), markersPane(1)),
 	)
+	livePanes := parseLivePanes(t, "0:0\n0:1\n1:0\n1:1")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 
@@ -407,7 +404,7 @@ func TestApplySkeletonMarkers_EnumeratesLivePanesSortedByWindowThenPane(t *testi
 func TestApplySkeletonMarkers_MarksExtraLivePanesWhenLiveCountExceedsSaved(t *testing.T) {
 	// Saved 1 pane, live reports 2 — both extras must still be marked using
 	// their live paneKey.
-	mock := &mockCommander{RunFunc: listPanesRunFunc("0:0\n0:1")}
+	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
@@ -420,8 +417,9 @@ func TestApplySkeletonMarkers_MarksExtraLivePanesWhenLiveCountExceedsSaved(t *te
 	sess := markersSession("work",
 		markersWindow(0, markersPane(0)),
 	)
+	livePanes := parseLivePanes(t, "0:0\n0:1")
 
-	if err := r.ApplySkeletonMarkers(sess, 0, 0); err != nil {
+	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
 		t.Fatalf("ApplySkeletonMarkers: %v", err)
 	}
 

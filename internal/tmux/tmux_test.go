@@ -2071,3 +2071,45 @@ func TestListPanesInSession(t *testing.T) {
 		}
 	})
 }
+
+func TestRespawnPane(t *testing.T) {
+	t.Run("kills existing process and respawns with shell command", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.RespawnPane("work:0.0", "sh -c 'echo hi; exec $SHELL'")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		want := []string{"respawn-pane", "-k", "-t", "work:0.0", "sh -c 'echo hi; exec $SHELL'"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: errors.New("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.RespawnPane("work:0.0", "sh -c 'x'")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to respawn-pane") {
+			t.Errorf("error %q lacks expected message", err.Error())
+		}
+		if !strings.Contains(err.Error(), "work:0.0") {
+			t.Errorf("error %q lacks pane target", err.Error())
+		}
+	})
+}

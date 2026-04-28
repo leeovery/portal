@@ -23,6 +23,22 @@ func inactivePane(idx int) state.Pane {
 	return state.Pane{Index: idx}
 }
 
+// liveCoordsFromSaved synthesises a []tmux.PaneCoord matching the structural
+// shape of sess, with each window mapped to live window `baseIdx + wi` and
+// each pane to live pane `paneBaseIdx + pj`. Used by ApplyWindowGeometry tests
+// that previously took (baseIdx, paneBaseIdx) directly — the new signature
+// consumes the live PaneCoord slice that armPanes gathers from list-panes,
+// so tests construct the equivalent slice up-front.
+func liveCoordsFromSaved(sess state.Session, baseIdx, paneBaseIdx int) []tmux.PaneCoord {
+	var out []tmux.PaneCoord
+	for wi, w := range sess.Windows {
+		for pj := range w.Panes {
+			out = append(out, tmux.PaneCoord{Window: baseIdx + wi, Pane: paneBaseIdx + pj})
+		}
+	}
+	return out
+}
+
 // geometrySession builds a minimal Session shell whose windows have the given
 // layout/zoomed state and pane lists. Pane CWD/scrollback are unused by
 // ApplyWindowGeometry — only Active flags and structural ordering matter.
@@ -81,7 +97,7 @@ func TestApplyWindowGeometry_AppliesSavedLayoutForEveryWindow(t *testing.T) {
 		geomWindow(2, "layoutC", false, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	for i, wantLayout := range []string{"layoutA", "layoutB", "layoutC"} {
 		target := targetWin("work", i)
@@ -105,7 +121,7 @@ func TestApplyWindowGeometry_SelectsLivePaneIndexForActivePane(t *testing.T) {
 		),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	wantTarget := "work:0.1"
 	if findCallTarget(mock.Calls, "select-pane", wantTarget) < 0 {
@@ -122,7 +138,7 @@ func TestApplyWindowGeometry_AppliesZoomAfterLayoutWhenZoomedTrue(t *testing.T) 
 		geomWindow(0, "L", true, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	layoutIdx := findCallTarget(mock.Calls, "select-layout", "work:0")
 	zoomIdx := findResizePaneZoom(mock.Calls, "work:0.0")
@@ -146,7 +162,7 @@ func TestApplyWindowGeometry_SkipsZoomWhenZoomedFalse(t *testing.T) {
 		geomWindow(0, "L", false, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	for _, c := range mock.Calls {
 		if len(c) >= 2 && c[0] == "resize-pane" && c[1] == "-Z" {
@@ -171,7 +187,7 @@ func TestApplyWindowGeometry_FallsBackToTiledWhenSavedLayoutFails(t *testing.T) 
 		geomWindow(0, "broken", false, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	if findSelectLayoutTarget(mock.Calls, "work:0", "broken") < 0 {
 		t.Errorf("expected attempted select-layout work:0 broken; calls: %v", mock.Calls)
@@ -204,7 +220,7 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 		geomWindow(0, "broken", true, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	// Both attempts must have happened.
 	if findSelectLayoutTarget(mock.Calls, "work:0", "broken") < 0 {
@@ -253,7 +269,7 @@ func TestApplyWindowGeometry_DefaultsToStructuralPositionZeroWhenNoPaneActive(t 
 		),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	if findCallTarget(mock.Calls, "select-pane", "work:0.0") < 0 {
 		t.Errorf("expected select-pane -t work:0.0 (structural position 0 default); calls: %v", mock.Calls)
@@ -272,7 +288,7 @@ func TestApplyWindowGeometry_OrdersLayoutThenPaneThenZoom(t *testing.T) {
 		geomWindow(0, "L", true, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	layoutIdx := findCallTarget(mock.Calls, "select-layout", "work:0")
 	paneIdx := findCallTarget(mock.Calls, "select-pane", "work:0.0")
@@ -294,7 +310,7 @@ func TestApplyWindowGeometry_SinglePaneWindowSelectsThatPane(t *testing.T) {
 		geomWindow(0, "L", false, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	// Exactly one select-pane call, on work:0.0.
 	count := 0
@@ -322,7 +338,7 @@ func TestApplyWindowGeometry_UsesLiveIndicesFromBaseAndPaneBase(t *testing.T) {
 		geomWindow(0, "L", true, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 1, 1)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 1, 1))
 
 	if findSelectLayoutTarget(mock.Calls, "work:1", "L") < 0 {
 		t.Errorf("expected select-layout work:1 L; calls: %v", mock.Calls)
@@ -353,7 +369,7 @@ func TestApplyWindowGeometry_ContinuesRemainingWindowsWhenOneFails(t *testing.T)
 		geomWindow(1, "L1", true, activePane(0)),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	// Window 1 should receive all three calls despite window 0 failing.
 	if findSelectLayoutTarget(mock.Calls, "work:1", "L1") < 0 {
@@ -381,7 +397,7 @@ func TestApplyWindowGeometry_FirstActivePaneWins(t *testing.T) {
 		),
 	)
 
-	r.ApplyWindowGeometry(sess, 0, 0)
+	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	if findCallTarget(mock.Calls, "select-pane", "work:0.1") < 0 {
 		t.Errorf("expected select-pane work:0.1 (first active wins); calls: %v", mock.Calls)
