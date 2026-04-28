@@ -627,3 +627,203 @@ func TestHydrate_FileMissingPathInvokesHandleFileMissing(t *testing.T) {
 		t.Errorf("HandleFileMissing not invoked when scrollback file is absent")
 	}
 }
+
+// instantTimeoutOpenFIFO returns ErrHydrateTimeout immediately so timeout-path
+// tests do not have to wait the real 3-second hydrateTimeout.
+func instantTimeoutOpenFIFO(_ string, _ time.Duration) (*os.File, error) {
+	return nil, ErrHydrateTimeout
+}
+
+// timeoutCfg builds a hydrateConfig wired for the production timeout path:
+// OpenFIFO returns ErrHydrateTimeout immediately and HandleTimeout points at
+// handleHydrateTimeout. Callers override fields as needed.
+func timeoutCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Writer, cmder *recordingCommander, exec func(string), logger *state.Logger) hydrateConfig {
+	t.Helper()
+	return hydrateConfig{
+		FIFO:          fifo,
+		File:          scrollback,
+		HookKey:       hookKey,
+		Stdout:        stdout,
+		Client:        tmux.NewClient(cmder),
+		Logger:        logger,
+		ExecShell:     exec,
+		OpenFIFO:      instantTimeoutOpenFIFO,
+		HandleTimeout: handleHydrateTimeout,
+	}
+}
+
+func TestHydrate_TimeoutWritesResetPreambleToStdout(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tp__0.0.fifo")
+
+	stdout := new(bytes.Buffer)
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tp:0.0", stdout, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if stdout.String() != hydrateResetPreamble {
+		t.Errorf("stdout = %q, want exactly the preamble %q", stdout.String(), hydrateResetPreamble)
+	}
+}
+
+func TestHydrate_TimeoutWritesNoScrollbackOrPostamble(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tn__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	// Seed scrollback so we can verify the timeout path does NOT read it.
+	_ = os.WriteFile(scrollback, []byte("SHOULD-NOT-APPEAR"), 0o600)
+
+	stdout := new(bytes.Buffer)
+	cfg := timeoutCfg(t, fifo, scrollback, "tn:0.0", stdout, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	out := stdout.String()
+	if strings.Contains(out, "SHOULD-NOT-APPEAR") {
+		t.Errorf("stdout contains scrollback bytes on timeout: %q", out)
+	}
+	if strings.Contains(out, hydrateResetPostamble) {
+		t.Errorf("stdout contains postamble on timeout: %q", out)
+	}
+	if out != hydrateResetPreamble {
+		t.Errorf("stdout has bytes beyond preamble: %q (len=%d, preamble len=%d)", out, len(out), len(hydrateResetPreamble))
+	}
+}
+
+func TestHydrate_TimeoutDoesNotSleep100ms(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-ts__0.0.fifo")
+
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "ts:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	start := time.Now()
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// Generous upper bound to avoid flakes; the real spec says no 100ms sleep
+	// on timeout, so elapsed should be well under 100ms when ExecShell is a
+	// synchronous no-op stub.
+	if elapsed >= 100*time.Millisecond {
+		t.Errorf("runHydrate elapsed %v on timeout path; expected << 100ms (no settle sleep)", elapsed)
+	}
+}
+
+func TestHydrate_TimeoutRemovesFIFO(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tr__0.0.fifo")
+
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tr:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if _, err := os.Stat(fifo); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("FIFO not removed on timeout; stat err = %v", err)
+	}
+}
+
+func TestHydrate_TimeoutDoesNotUnsetSkeletonMarker(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tu__0.0.fifo")
+
+	cmder := &recordingCommander{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tu:0.0", io.Discard, cmder, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	// Marker stays set -> no `set-option -su @portal-skeleton-...` argv.
+	for _, c := range cmder.Calls {
+		if len(c) >= 2 && c[0] == "set-option" && c[1] == "-su" {
+			t.Errorf("timeout path issued set-option -su (marker should stay set): %v", c)
+		}
+	}
+}
+
+func TestHydrate_TimeoutLogsWarningNamingHookKey(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tl__0.0.fifo")
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tl:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), logger)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "WARN") {
+		t.Errorf("log missing WARN level entry: %q", contents)
+	}
+	if !strings.Contains(contents, "tl:0.0") {
+		t.Errorf("log missing hook-key %q in entry: %q", "tl:0.0", contents)
+	}
+	if !strings.Contains(contents, "hydrate") {
+		t.Errorf("log missing component %q in entry: %q", "hydrate", contents)
+	}
+}
+
+func TestHydrate_TimeoutExecsShell(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-te__0.0.fifo")
+
+	t.Setenv("SHELL", "/usr/local/bin/myshell")
+	exec := &stubExecShell{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "te:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called on timeout path")
+	}
+	if exec.target != "/usr/local/bin/myshell" {
+		t.Errorf("ExecShell target = %q, want /usr/local/bin/myshell", exec.target)
+	}
+}
+
+func TestHydrate_TimeoutDoesNotReadHooksFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_CONFIG_HOME", dir)
+
+	fifo := makeFIFO(t, dir, "hydrate-th__0.0.fifo")
+
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "th:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hooks.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("hooks.json must not exist; stat err = %v", err)
+	}
+}
+
+func TestHydrate_TimeoutToleratesMissingFIFOSilently(t *testing.T) {
+	dir := t.TempDir()
+	// FIFO path that does not exist — handleHydrateTimeout's os.Remove must
+	// not surface an error.
+	fifo := filepath.Join(dir, "hydrate-tm__0.0.fifo")
+
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tm:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), nil)
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v (FIFO os.Remove error must be tolerated)", err)
+	}
+}

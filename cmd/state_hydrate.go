@@ -98,7 +98,13 @@ func runHydrate(cfg hydrateConfig) error {
 	if err != nil {
 		if errors.Is(err, ErrHydrateTimeout) {
 			if cfg.HandleTimeout != nil {
-				return cfg.HandleTimeout(cfg)
+				if err := cfg.HandleTimeout(cfg); err != nil {
+					return err
+				}
+				// Timeout path falls through to a bare-shell exec — pane
+				// gets an empty $SHELL prompt; no hook firing on this path.
+				execShellAndExit(cfg)
+				return nil
 			}
 			return err
 		}
@@ -154,12 +160,50 @@ func runHydrate(cfg hydrateConfig) error {
 	}
 
 	// 9. Exec the user shell. Phase 4 will add hook chaining here.
+	execShellAndExit(cfg)
+	return nil // unreachable in production (syscall.Exec replaces process)
+}
+
+// execShellAndExit resolves $SHELL (defaulting to /bin/sh) and hands the
+// process off via cfg.ExecShell. Used by both the signal-arrived path and the
+// 3-second-timeout fall-through. In production cfg.ExecShell never returns
+// (syscall.Exec replaces the process); in tests it captures the target and
+// returns.
+func execShellAndExit(cfg hydrateConfig) {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 	cfg.ExecShell(shell)
-	return nil // unreachable in production (syscall.Exec replaces process)
+}
+
+// handleHydrateTimeout is invoked when openFIFOWithTimeout returns
+// ErrHydrateTimeout. Spec ("Helper Behavior on Startup", step 3): emit the
+// reset preamble only, unlink the FIFO, log a warning naming the hook-key,
+// do NOT unset the @portal-skeleton marker (the marker stays set so the next
+// attach re-signals and retries hydration), and do NOT sleep 100ms — nothing
+// was dumped, so there is no PTY parser settle to wait on. After this returns
+// nil, runHydrate falls through to exec the user's $SHELL.
+func handleHydrateTimeout(cfg hydrateConfig) error {
+	// 1. Reset preamble only — no scrollback dump, no postamble.
+	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
+
+	// 2. Unlink the FIFO. Defense in depth — the next bootstrap also sweeps
+	// stale hydrate-*.fifo files. Errors are tolerated silently because the
+	// FIFO may not exist (e.g., already removed) and a permission error here
+	// must not block the shell exec the helper falls through to.
+	_ = os.Remove(cfg.FIFO)
+
+	// 3. Log a warning naming the hook-key + FIFO so operators can correlate
+	// the entry with the affected pane in the saved sessions.json.
+	if cfg.Logger != nil {
+		cfg.Logger.Warn("hydrate", "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
+	}
+
+	// 4. Deliberately NO UnsetServerOption — marker stays set so the next
+	// attach re-signals.
+	// 5. Deliberately NO 100ms sleep — nothing was dumped to settle.
+	return nil
 }
 
 // defaultExecShell is the production ExecShell seam: hand the process off to
@@ -190,14 +234,15 @@ var stateHydrateCmd = &cobra.Command{
 		hookKey, _ := cmd.Flags().GetString("hook-key")
 
 		cfg := hydrateConfig{
-			FIFO:      fifo,
-			File:      file,
-			HookKey:   hookKey,
-			Stdout:    cmd.OutOrStdout(),
-			Client:    tmux.NewClient(&tmux.RealCommander{}),
-			Logger:    nil,
-			ExecShell: defaultExecShell,
-			OpenFIFO:  openFIFOWithTimeout,
+			FIFO:          fifo,
+			File:          file,
+			HookKey:       hookKey,
+			Stdout:        cmd.OutOrStdout(),
+			Client:        tmux.NewClient(&tmux.RealCommander{}),
+			Logger:        nil,
+			ExecShell:     defaultExecShell,
+			OpenFIFO:      openFIFOWithTimeout,
+			HandleTimeout: handleHydrateTimeout,
 		}
 		return hydrateRunFunc(cfg)
 	},
