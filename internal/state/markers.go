@@ -37,6 +37,16 @@ type RestoringChecker interface {
 	TryGetServerOption(name string) (string, bool, error)
 }
 
+// ServerOptionWriter is the seam used by SetSkeletonMarker / UnsetSkeletonMarker.
+// It is satisfied implicitly by *tmux.Client via its SetServerOption /
+// UnsetServerOption methods. Defining the interface here keeps internal/state
+// free of an internal/tmux import — see ServerOptionLister for the full
+// rationale.
+type ServerOptionWriter interface {
+	SetServerOption(name, value string) error
+	UnsetServerOption(name string) error
+}
+
 // ListSkeletonMarkers enumerates the set of paneKeys whose skeleton markers
 // are currently set as tmux server options. A single ShowAllServerOptions
 // call replaces N per-pane GetServerOption calls during each capture cycle —
@@ -80,6 +90,30 @@ func ListSkeletonMarkers(c ServerOptionLister) (map[string]struct{}, error) {
 		set[paneKey] = struct{}{}
 	}
 	return set, nil
+}
+
+// SetSkeletonMarker writes the `@portal-skeleton-<paneKey>` server option to
+// "1", marking the pane as skeleton-restored and awaiting hydration. The save
+// loop consumes these markers (via ListSkeletonMarkers) to skip capturing
+// scrollback for marked panes — the on-disk pre-boot scrollback file is the
+// authoritative state until hydration completes.
+//
+// The companion to UnsetSkeletonMarker; both are the canonical write-side
+// helpers, colocated with ListSkeletonMarkers (the read side) and the prefix
+// constant.
+func SetSkeletonMarker(w ServerOptionWriter, paneKey string) error {
+	return w.SetServerOption(SkeletonMarkerPrefix+paneKey, "1")
+}
+
+// UnsetSkeletonMarker clears the `@portal-skeleton-<paneKey>` server option,
+// signalling that the pane has been hydrated and the save loop may resume
+// capturing its scrollback.
+//
+// The companion to SetSkeletonMarker; both are the canonical write-side
+// helpers, colocated with ListSkeletonMarkers (the read side) and the prefix
+// constant.
+func UnsetSkeletonMarker(w ServerOptionWriter, paneKey string) error {
+	return w.UnsetServerOption(SkeletonMarkerPrefix + paneKey)
 }
 
 // IsRestoringSet reports whether the @portal-restoring marker is currently

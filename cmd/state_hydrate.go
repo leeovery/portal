@@ -175,9 +175,8 @@ func runHydrate(cfg hydrateConfig) error {
 	// 8. Unset the skeleton marker. Failure is non-fatal: a stale marker
 	// only blocks the save loop from re-capturing this pane until next
 	// bootstrap, which will re-skeleton the pane and clear it.
-	markerName := state.SkeletonMarkerPrefix + livePaneKey
-	if err := cfg.Client.UnsetServerOption(markerName); err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
+	if err := state.UnsetSkeletonMarker(cfg.Client, livePaneKey); err != nil {
+		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+livePaneKey, err)
 	}
 
 	// 9. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
@@ -301,9 +300,8 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	// no scrollback to dump, the pane is empty and the save loop should
 	// resume capturing it on the next tick rather than skipping it forever.
 	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
-	markerName := state.SkeletonMarkerPrefix + livePaneKey
-	if err := cfg.Client.UnsetServerOption(markerName); err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
+	if err := state.UnsetSkeletonMarker(cfg.Client, livePaneKey); err != nil {
+		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+livePaneKey, err)
 	}
 	return nil
 }

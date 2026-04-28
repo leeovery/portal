@@ -30,6 +30,30 @@ func (m *checkerMock) TryGetServerOption(name string) (string, bool, error) {
 	return m.val, m.found, m.err
 }
 
+// writerMock satisfies state.ServerOptionWriter. It records every Set/Unset
+// call so tests can assert exact option names and values.
+type writerMock struct {
+	setCalls   []writerSetCall
+	unsetCalls []string
+	setErr     error
+	unsetErr   error
+}
+
+type writerSetCall struct {
+	name  string
+	value string
+}
+
+func (m *writerMock) SetServerOption(name, value string) error {
+	m.setCalls = append(m.setCalls, writerSetCall{name: name, value: value})
+	return m.setErr
+}
+
+func (m *writerMock) UnsetServerOption(name string) error {
+	m.unsetCalls = append(m.unsetCalls, name)
+	return m.unsetErr
+}
+
 func TestListSkeletonMarkers(t *testing.T) {
 	t.Run("returns an empty set for empty show-options output", func(t *testing.T) {
 		got, err := state.ListSkeletonMarkers(&listerMock{out: ""})
@@ -182,6 +206,73 @@ func TestIsRestoringSet(t *testing.T) {
 		_, err := state.IsRestoringSet(&checkerMock{err: errors.New("tmux exploded")})
 		if err == nil {
 			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestSetSkeletonMarker(t *testing.T) {
+	t.Run("sets server option named SkeletonMarkerPrefix+paneKey to \"1\"", func(t *testing.T) {
+		w := &writerMock{}
+		if err := state.SetSkeletonMarker(w, "foo__0.0"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(w.setCalls) != 1 {
+			t.Fatalf("got %d SetServerOption calls, want 1", len(w.setCalls))
+		}
+		wantName := state.SkeletonMarkerPrefix + "foo__0.0"
+		if w.setCalls[0].name != wantName {
+			t.Errorf("got option name %q, want %q", w.setCalls[0].name, wantName)
+		}
+		if w.setCalls[0].value != "1" {
+			t.Errorf("got option value %q, want \"1\"", w.setCalls[0].value)
+		}
+	})
+
+	t.Run("propagates SetServerOption error", func(t *testing.T) {
+		w := &writerMock{setErr: errors.New("tmux exploded")}
+		err := state.SetSkeletonMarker(w, "foo__0.0")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("does not call UnsetServerOption", func(t *testing.T) {
+		w := &writerMock{}
+		_ = state.SetSkeletonMarker(w, "foo__0.0")
+		if len(w.unsetCalls) != 0 {
+			t.Errorf("got %d UnsetServerOption calls, want 0", len(w.unsetCalls))
+		}
+	})
+}
+
+func TestUnsetSkeletonMarker(t *testing.T) {
+	t.Run("unsets server option named SkeletonMarkerPrefix+paneKey", func(t *testing.T) {
+		w := &writerMock{}
+		if err := state.UnsetSkeletonMarker(w, "foo__0.0"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(w.unsetCalls) != 1 {
+			t.Fatalf("got %d UnsetServerOption calls, want 1", len(w.unsetCalls))
+		}
+		wantName := state.SkeletonMarkerPrefix + "foo__0.0"
+		if w.unsetCalls[0] != wantName {
+			t.Errorf("got option name %q, want %q", w.unsetCalls[0], wantName)
+		}
+	})
+
+	t.Run("propagates UnsetServerOption error", func(t *testing.T) {
+		w := &writerMock{unsetErr: errors.New("tmux exploded")}
+		err := state.UnsetSkeletonMarker(w, "foo__0.0")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("does not call SetServerOption", func(t *testing.T) {
+		w := &writerMock{}
+		_ = state.UnsetSkeletonMarker(w, "foo__0.0")
+		if len(w.setCalls) != 0 {
+			t.Errorf("got %d SetServerOption calls, want 0", len(w.setCalls))
 		}
 	})
 }
