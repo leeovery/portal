@@ -1,6 +1,10 @@
 package state
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/leeovery/portal/internal/tmuxout"
+)
 
 // SkeletonMarkerPrefix is the tmux server-option name prefix used to mark
 // panes that have been skeleton-restored and are awaiting hydration. The
@@ -67,11 +71,7 @@ func ListSkeletonMarkers(c ServerOptionLister) (map[string]struct{}, error) {
 		if !strings.HasPrefix(name, SkeletonMarkerPrefix) {
 			continue
 		}
-		value := strings.TrimSpace(line[idx+1:])
-		// Strip surrounding double quotes from value if present.
-		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-			value = value[1 : len(value)-1]
-		}
+		value := tmuxout.StripMatchedOuterQuotes(strings.TrimSpace(line[idx+1:]))
 		if value == "" {
 			// Empty value — treat as absent.
 			continue

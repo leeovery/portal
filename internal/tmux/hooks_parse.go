@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/leeovery/portal/internal/tmuxout"
 )
 
 // HookEntry is a single entry parsed from `tmux show-hooks -g` output.
@@ -56,7 +58,7 @@ func ParseShowHooks(raw string) map[string][]HookEntry {
 		if err != nil {
 			continue
 		}
-		command := stripMatchedOuterQuotes(match[3])
+		command := tmuxout.StripMatchedOuterQuotes(match[3])
 
 		out[event] = append(out[event], HookEntry{Index: index, Command: command})
 	}
@@ -68,20 +70,4 @@ func ParseShowHooks(raw string) map[string][]HookEntry {
 	}
 
 	return out
-}
-
-// stripMatchedOuterQuotes returns s with its first and last characters
-// removed if and only if they are an identical matched pair of single or
-// double quotes. Inner content is preserved verbatim. Inputs shorter than
-// two characters or with mismatched outer characters are returned unchanged.
-func stripMatchedOuterQuotes(s string) string {
-	if len(s) < 2 {
-		return s
-	}
-	first := s[0]
-	last := s[len(s)-1]
-	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-		return s[1 : len(s)-1]
-	}
-	return s
 }
