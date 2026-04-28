@@ -39,7 +39,7 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 
 | Package | Role |
 |---------|------|
-| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec`). Client methods: ListSessions, NewSession, HasSession, SwitchClient, EnsureServer, WaitForSessions, ListPanes, ListAllPanes, SendKeys, GetServerOption, SetServerOption, DeleteServerOption |
+| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec`). Client methods: ListSessions, NewSession, HasSession, SwitchClient, EnsureServer, WaitForSessions, ListPanes, ListAllPanes, SendKeys, GetServerOption, SetServerOption, UnsetServerOption |
 | `session` | Session creation pipeline: git root resolution → project persistence → name generation (`{project}-{nanoid}`) → tmux session creation. `QuickStart` for atomic create-or-attach |
 | `resolver` | Path resolution chain with interface-based DI (AliasLookup, ZoxideQuerier, DirValidator) |
 | `tui` | Bubble Tea model with page state machine: Loading → Sessions → Projects → FileBrowser |

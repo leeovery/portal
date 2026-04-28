@@ -437,22 +437,10 @@ func (c *Client) SendKeys(target string, command string) error {
 	return nil
 }
 
-// DeleteServerOption removes a tmux server-level option.
-// This is a no-op if the option does not exist.
-func (c *Client) DeleteServerOption(name string) error {
-	_, err := c.cmd.Run("set-option", "-su", name)
-	if err != nil {
-		return fmt.Errorf("failed to delete server option %q: %w", name, err)
-	}
-	return nil
-}
-
 // UnsetServerOption removes a tmux server-level option via "set-option -su".
 // The -s flag targets the server-option scope; -u removes (unsets) the option.
-// Like DeleteServerOption, this is a no-op when the option is already absent —
-// tmux does not error in that case. This method exists alongside
-// DeleteServerOption to provide a Set/Unset-named pair for the
-// @portal-restoring marker coordination in the bootstrap flow.
+// This is a no-op when the option is already absent — tmux does not error in
+// that case. Pairs symmetrically with SetServerOption.
 func (c *Client) UnsetServerOption(name string) error {
 	_, err := c.cmd.Run("set-option", "-su", name)
 	if err != nil {

@@ -794,56 +794,6 @@ func TestGetServerOption(t *testing.T) {
 	})
 }
 
-func TestDeleteServerOption(t *testing.T) {
-	t.Run("runs set-option -su with name", func(t *testing.T) {
-		mock := &MockCommander{}
-		client := tmux.NewClient(mock)
-
-		err := client.DeleteServerOption("@portal-active-%3")
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if len(mock.Calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
-		}
-		wantArgs := "set-option -su @portal-active-%3"
-		gotArgs := strings.Join(mock.Calls[0], " ")
-		if gotArgs != wantArgs {
-			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
-		}
-	})
-
-	t.Run("succeeds when option does not exist", func(t *testing.T) {
-		mock := &MockCommander{} // tmux set-option -su does not error for missing options
-		client := tmux.NewClient(mock)
-
-		err := client.DeleteServerOption("@nonexistent-option")
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("returns error when tmux command fails", func(t *testing.T) {
-		mock := &MockCommander{Err: fmt.Errorf("tmux error")}
-		client := tmux.NewClient(mock)
-
-		err := client.DeleteServerOption("@portal-active-%3")
-
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "failed to delete server option") {
-			t.Errorf("error %q does not contain expected message", err.Error())
-		}
-		if !strings.Contains(err.Error(), "@portal-active-%3") {
-			t.Errorf("error %q does not contain option name", err.Error())
-		}
-	})
-}
-
 func TestUnsetServerOption(t *testing.T) {
 	t.Run("runs set-option -su with name", func(t *testing.T) {
 		mock := &MockCommander{}
