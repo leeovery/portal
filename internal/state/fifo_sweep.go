@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // SweepOrphanFIFOs removes hydrate-*.fifo files in dir whose paneKey is not
@@ -41,7 +40,7 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 			// Not a FIFO — could be a regular file or symlink. Preserve.
 			continue
 		}
-		paneKey := paneKeyFromFIFOFilename(filepath.Base(path))
+		paneKey := PaneKeyFromFIFOPath(path)
 		if _, alive := liveMarkerKeys[paneKey]; alive {
 			continue
 		}
@@ -52,13 +51,4 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 		logger.Info(ComponentBootstrap, "removed orphan FIFO %s", path)
 	}
 	return nil
-}
-
-// paneKeyFromFIFOFilename strips the "hydrate-" prefix and ".fifo" suffix
-// from the base name to recover the canonical paneKey embedded in the FIFO
-// filename. Inverse of FIFOPath's filename component.
-func paneKeyFromFIFOFilename(name string) string {
-	name = strings.TrimSuffix(name, ".fifo")
-	name = strings.TrimPrefix(name, "hydrate-")
-	return name
 }

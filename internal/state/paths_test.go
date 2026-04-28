@@ -156,6 +156,43 @@ func TestAccessors(t *testing.T) {
 	})
 }
 
+func TestPaneKeyFromFIFOPath(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "absolute path with hydrate prefix and .fifo suffix",
+			in:   "/var/lib/portal/state/hydrate-work__0.1.fifo",
+			want: "work__0.1",
+		},
+		{
+			name: "basename only with hydrate prefix and .fifo suffix",
+			in:   "hydrate-foo__0.0.fifo",
+			want: "foo__0.0",
+		},
+		{
+			name: "round-trips state.FIFOPath",
+			in:   state.FIFOPath("/tmp/portal-state", "myproj__1.2"),
+			want: "myproj__1.2",
+		},
+		{
+			name: "idempotent on input lacking prefix and suffix",
+			in:   "already-bare",
+			want: "already-bare",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := state.PaneKeyFromFIFOPath(c.in)
+			if got != c.want {
+				t.Errorf("PaneKeyFromFIFOPath(%q) = %q; want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 // assertDirMode fails the test unless path is a directory whose permission
 // bits exactly equal want.
 func assertDirMode(t *testing.T, path string, want os.FileMode) {

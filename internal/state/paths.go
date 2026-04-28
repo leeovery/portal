@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Filenames inside the state directory. Kept private — callers should compose
@@ -93,6 +94,19 @@ func ScrollbackFile(dir, paneKey string) string {
 // FIFOPath returns the hydration FIFO path for the given canonical paneKey.
 func FIFOPath(dir, paneKey string) string {
 	return filepath.Join(dir, "hydrate-"+paneKey+".fifo")
+}
+
+// PaneKeyFromFIFOPath is the inverse of FIFOPath's filename component: it
+// recovers the canonical paneKey embedded in a hydration FIFO path. It accepts
+// either an absolute path or a bare basename — filepath.Base is idempotent on
+// a basename. Inputs that lack the "hydrate-" prefix and/or ".fifo" suffix are
+// returned with whichever fixtures are present trimmed; an input that has
+// neither is returned unchanged.
+func PaneKeyFromFIFOPath(path string) string {
+	name := filepath.Base(path)
+	name = strings.TrimSuffix(name, ".fifo")
+	name = strings.TrimPrefix(name, "hydrate-")
+	return name
 }
 
 // xdgConfigBase mirrors cmd.xdgConfigBase: it returns $XDG_CONFIG_HOME if set

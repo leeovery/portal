@@ -365,25 +365,6 @@ func TestHydrate_UnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
 	}
 }
 
-func TestHydrate_DerivesPaneKeyFromFIFOBasename(t *testing.T) {
-	tests := []struct {
-		fifoBase string
-		want     string
-	}{
-		{"hydrate-foo__0.0.fifo", "foo__0.0"},
-		{"hydrate-myproj__1.2.fifo", "myproj__1.2"},
-		{"hydrate-a__0.0.fifo", "a__0.0"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.fifoBase, func(t *testing.T) {
-			got := paneKeyFromFIFOPath("/some/path/" + tt.fifoBase)
-			if got != tt.want {
-				t.Errorf("paneKeyFromFIFOPath(%q) = %q, want %q", tt.fifoBase, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestHydrate_PreservesANSISequencesInDump(t *testing.T) {
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-a__0.0.fifo")
@@ -1541,7 +1522,7 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 }
 
 func TestHydrate_LooksUpHooksByHookKeyVerbatimNotByLivePaneKey(t *testing.T) {
-	// FIFO basename derives livePaneKey "live__1.1" via paneKeyFromFIFOPath, but
+	// FIFO basename derives livePaneKey "live__1.1" via state.PaneKeyFromFIFOPath, but
 	// HookKey is the saved structural identifier "saved:0.0" — what the spec
 	// pins for hooks lookup under base-index drift. The lookup must use HookKey
 	// (so the saved-key hook fires), not the live paneKey (no entry under which).

@@ -6,8 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -66,16 +64,6 @@ type hydrateFileMissingContext struct {
 	Cause error
 }
 
-// paneKeyFromFIFOPath strips the "hydrate-" prefix and ".fifo" suffix from the
-// FIFO basename to recover the live paneKey used by the @portal-skeleton-<key>
-// marker. Example: "/run/portal/hydrate-foo__0.0.fifo" → "foo__0.0".
-func paneKeyFromFIFOPath(fifoPath string) string {
-	base := filepath.Base(fifoPath)
-	base = strings.TrimSuffix(base, ".fifo")
-	base = strings.TrimPrefix(base, "hydrate-")
-	return base
-}
-
 // openFIFOWithTimeout opens path O_RDONLY and abandons the open after timeout.
 // The blocking open runs in a goroutine; on timeout, the goroutine remains
 // blocked until a writer eventually arrives (and the resulting *os.File is
@@ -108,7 +96,7 @@ func openFIFOWithTimeout(path string, timeout time.Duration) (*os.File, error) {
 // In production ExecShell calls syscall.Exec and never returns; the trailing
 // `return nil` is reached only in tests.
 func runHydrate(cfg hydrateConfig) error {
-	livePaneKey := paneKeyFromFIFOPath(cfg.FIFO)
+	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
 
 	// 1. Block on FIFO until signal arrives or timeout fires.
 	f, err := cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)
@@ -318,7 +306,7 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	// 3. Unset the skeleton marker — KEY DIFFERENCE FROM TIMEOUT PATH. With
 	// no scrollback to dump, the pane is empty and the save loop should
 	// resume capturing it on the next tick rather than skipping it forever.
-	livePaneKey := paneKeyFromFIFOPath(cfg.FIFO)
+	livePaneKey := state.PaneKeyFromFIFOPath(cfg.FIFO)
 	markerName := state.SkeletonMarkerPrefix + livePaneKey
 	if err := cfg.Client.UnsetServerOption(markerName); err != nil && cfg.Logger != nil {
 		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", markerName, err)
