@@ -10,13 +10,27 @@ import (
 
 // skipTmuxCheck contains command names that do not require tmux.
 // If any command in the parent chain matches, the tmux check is skipped.
+//
+// Per the resurrection spec, the exempt set is:
+//   - alias / clean / help / init / version: user-facing config or help
+//   - state: every `portal state ...` subcommand. User-facing children
+//     (status, cleanup) inspect or tear down machinery the bootstrap sets
+//     up — running bootstrap first would be circular. Internal children
+//     (daemon, notify, signal-hydrate, hydrate, migrate-rename) are invoked
+//     by tmux hooks or as the pane's initial process; re-running bootstrap
+//     would recursively register hooks and could spawn nested daemons.
+//
+// Note: 'hooks' is intentionally NOT in this map. Phase 4 moved hook
+// firing into the hydrate helper, so `portal hooks set/list/rm` now go
+// through full bootstrap to keep CleanStale and skeleton restoration in
+// the path where the user expects it.
 var skipTmuxCheck = map[string]bool{
-	"version": true,
-	"init":    true,
-	"help":    true,
 	"alias":   true,
 	"clean":   true,
-	"hooks":   true,
+	"help":    true,
+	"init":    true,
+	"state":   true,
+	"version": true,
 }
 
 // ServerBootstrapper ensures a tmux server is running.

@@ -109,14 +109,18 @@ func TestHooksListCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("hooks bypasses tmux bootstrap", func(t *testing.T) {
+	t.Run("hooks invokes tmux bootstrap (Phase 4 spec)", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// No bootstrapDeps set — if tmux check runs, it will fail
-		// because tmux may not be available in CI.
-		// The fact that this succeeds proves skipTmuxCheck works.
+		// Phase 4 moved hook firing into the hydrate helper, so
+		// `portal hooks ...` now goes through the full bootstrap path
+		// to keep CleanStale and skeleton restoration in scope. Stub
+		// bootstrapDeps so the test does not depend on a real tmux.
+		mock := &mockServerBootstrapper{}
+		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
 		buf := new(bytes.Buffer)
 		resetRootCmd()
@@ -124,7 +128,10 @@ func TestHooksListCommand(t *testing.T) {
 		rootCmd.SetArgs([]string{"hooks", "list"})
 		err := rootCmd.Execute()
 		if err != nil {
-			t.Fatalf("unexpected error (tmux check should be skipped): %v", err)
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !mock.called {
+			t.Error("EnsureServer should be called for portal hooks list (Phase 4)")
 		}
 	})
 
