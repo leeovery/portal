@@ -13,7 +13,6 @@ package bootstrap
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/leeovery/portal/internal/state"
@@ -56,8 +55,24 @@ type SaverBootstrapper interface {
 }
 
 // Restorer performs skeleton-only session restoration.
+//
+// Contract (self-enforcing via the typed return signature):
+//   - Returns (false, nil) on the happy path and after isolating any
+//     per-session failures. Per the spec's degrade-locally-and-continue
+//     principle, every soft per-session error MUST be logged and swallowed
+//     inside the implementation — they MUST NOT travel up through err.
+//   - Returns (true, err) when sessions.json itself is unparseable; err
+//     MUST wrap state.ErrCorruptIndex so callers downstream can match via
+//     errors.Is. corrupt=true is the ONLY case in which err is non-nil.
+//
+// The bool exists so Orchestrator step 5 can branch on a typed signal
+// rather than a string-equality check on the error chain. A future
+// implementation that violates the contract by returning (false, err)
+// is treated defensively by Run: the err is logged and the orchestrator
+// continues without escalating to a PersistentPreRunE abort. This guards
+// the "degrade locally, log, continue" principle against silent drift.
 type Restorer interface {
-	Restore() error
+	Restore() (corrupt bool, err error)
 }
 
 // StaleCleaner prunes stale entries from the on-disk hooks store.
@@ -135,10 +150,13 @@ type Orchestrator struct {
 //
 // Soft warning paths (do NOT short-circuit Run, do NOT produce fatal err):
 //   - Step 4 (EnsureSaver) returns non-nil → SaverDownWarning.
-//   - Step 5 (Restore) returns errors.Is(err, state.ErrCorruptIndex) →
-//     CorruptSessionsJSONWarning; restoreErr is treated as soft and the
-//     final return swallows it (per spec, corrupt sessions.json is a
-//     non-fatal no-op warning).
+//   - Step 5 (Restore) returns corrupt=true → CorruptSessionsJSONWarning;
+//     restoreErr is treated as soft and the final return swallows it (per
+//     spec, corrupt sessions.json is a non-fatal no-op warning).
+//   - Step 5 (Restore) returns (false, err) — a contract violation under
+//     the Restorer contract — is treated defensively as soft: logged and
+//     swallowed. Step 5 NEVER escalates to a fatal abort, so a future
+//     Restorer implementation cannot silently break PersistentPreRunE.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	_ = ctx // reserved for Phase 6 timeout/cancel
 
@@ -175,13 +193,24 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec — saves paused, user not blocked.
 	}
 
-	// Step 5 — Restore. Capture err but defer return until after step 6.
-	restoreErr := o.Restore.Restore()
-	if restoreErr != nil && errors.Is(restoreErr, state.ErrCorruptIndex) {
+	// Step 5 — Restore. The Restorer contract returns (corrupt, err) so
+	// the orchestrator can branch on a typed signal rather than walking
+	// the error chain. Per the contract, corrupt=true is the only case
+	// that produces a non-nil err (wrapped state.ErrCorruptIndex); a
+	// (false, err) result is a contract violation and is handled
+	// defensively as a soft per-session failure to keep step 5 from
+	// escalating to a PersistentPreRunE abort.
+	corrupt, restoreErr := o.Restore.Restore()
+	switch {
+	case corrupt:
 		warnings = append(warnings, CorruptSessionsJSONWarning())
-		o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) corrupt sessions.json: %v", restoreErr)
-		// Soft path: swallow the error so step 8 returns nil.
-		restoreErr = nil
+		if restoreErr != nil {
+			o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) corrupt sessions.json: %v", restoreErr)
+		}
+	case restoreErr != nil:
+		// Defensive: contract says corrupt=false implies err==nil. Log
+		// and continue — soft per-session failures must not abort.
+		o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) returned non-corrupt error (treated as soft per Restorer contract): %v", restoreErr)
 	}
 
 	// Step 6 — Clear @portal-restoring (fatal on failure).
@@ -195,10 +224,8 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 
-	// Step 8 — Return. Surface step-5 error if any; otherwise nil.
-	if restoreErr != nil {
-		return serverStarted, warnings, fmt.Errorf("step 5 (Restore): %w", restoreErr)
-	}
+	// Step 8 — Return. Step 5 never produces a fatal error; warnings
+	// already carry the user-facing surface.
 	return serverStarted, warnings, nil
 }
 

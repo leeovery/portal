@@ -15,39 +15,43 @@ import (
 // session whose name is not already live. Per-session failures are logged
 // and isolated; one bad session never aborts the rest.
 //
-// Restore returns nil on the happy path and on any per-session failure
-// (logged + isolated). The one error path is corrupt sessions.json: the
-// returned error is wrapped with state.ErrCorruptIndex so the bootstrap
-// orchestrator can detect it via errors.Is and surface a soft user-facing
-// warning (CorruptSessionsJSONWarning). All stderr emission was moved to
-// cmd/bootstrap_warnings.go in Phase 6 task 6-9; this package now only
-// returns and logs. The PersistentPreRunE caller wraps this with the
-// @portal-restoring marker (see spec, Bootstrap Flow step 5).
+// Restore returns (false, nil) on the happy path and after isolating any
+// per-session failure (logged + swallowed). The one error path is corrupt
+// sessions.json: Restore returns (true, err) where err wraps
+// state.ErrCorruptIndex so the bootstrap orchestrator's typed branch on
+// the corrupt bool surfaces a CorruptSessionsJSONWarning. The contract is
+// pinned in cmd/bootstrap.Restorer; this implementation honours it.
+//
+// All stderr emission was moved to cmd/bootstrap_warnings.go in Phase 6
+// task 6-9; this package now only returns and logs. The PersistentPreRunE
+// caller wraps this with the @portal-restoring marker (see spec, Bootstrap
+// Flow step 5).
 type Orchestrator struct {
 	Client   *tmux.Client
 	StateDir string
 	Logger   *state.Logger
 }
 
-// Restore is the bootstrap entry point. Returns nil on the happy path and
-// on any per-session failure (logged + isolated). Returns a wrapped
-// state.ErrCorruptIndex when sessions.json exists but is unparseable so
-// the bootstrap orchestrator can classify the failure as soft and emit a
-// CorruptSessionsJSONWarning. See the spec's Bootstrap Flow §5 for the
-// full contract.
-func (o *Orchestrator) Restore() error {
+// Restore is the bootstrap entry point. Returns (false, nil) on the happy
+// path and after isolating any per-session failure (logged + swallowed).
+// Returns (true, err) wrapping state.ErrCorruptIndex when sessions.json
+// exists but is unparseable so the bootstrap orchestrator can classify
+// the failure as soft and emit a CorruptSessionsJSONWarning. See the
+// cmd/bootstrap.Restorer interface for the typed contract and the spec's
+// Bootstrap Flow §5 for the full behaviour.
+func (o *Orchestrator) Restore() (bool, error) {
 	idx, skip, err := state.ReadIndex(o.StateDir)
 	if skip {
 		return o.handleReadIndexSkip(err)
 	}
 
 	if len(idx.Sessions) == 0 {
-		return nil // nothing to restore
+		return false, nil // nothing to restore
 	}
 
 	liveSet, ok := o.snapshotLiveSessions()
 	if !ok {
-		return nil
+		return false, nil
 	}
 
 	sr := &SessionRestorer{
@@ -58,25 +62,26 @@ func (o *Orchestrator) Restore() error {
 	for _, sess := range idx.Sessions {
 		o.restoreOne(sr, sess, liveSet)
 	}
-	return nil
+	return false, nil
 }
 
 // handleReadIndexSkip classifies ReadIndex's skip-with-error path. A clean
 // "no sessions.json file" skip carries err == nil and produces no output
 // or error. A corrupt-content skip (state.ErrCorruptIndex) is logged WARN
-// and returned to the caller so the bootstrap orchestrator can append a
-// CorruptSessionsJSONWarning. A read-error skip (e.g. permission denied)
-// is logged WARN and swallowed — it is not the corrupt-index path and the
-// orchestrator continues without surfacing a user-facing warning.
-func (o *Orchestrator) handleReadIndexSkip(err error) error {
+// and returned to the caller as (true, wrapped) so the bootstrap
+// orchestrator can append a CorruptSessionsJSONWarning. A read-error skip
+// (e.g. permission denied) is logged WARN and swallowed — it is not the
+// corrupt-index path and the orchestrator continues without surfacing a
+// user-facing warning.
+func (o *Orchestrator) handleReadIndexSkip(err error) (bool, error) {
 	if err == nil {
-		return nil
+		return false, nil
 	}
 	o.Logger.Warn(state.ComponentRestore, "ReadIndex: %v", err)
 	if errors.Is(err, state.ErrCorruptIndex) {
-		return fmt.Errorf("restore: %w", err)
+		return true, fmt.Errorf("restore: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 // snapshotLiveSessions queries tmux for the set of currently-live session

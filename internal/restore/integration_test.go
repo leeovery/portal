@@ -46,6 +46,10 @@ func skipIfNoTmux(t *testing.T) {
 // exercise the same set/clear contract without re-implementing the marker
 // API inside internal/restore. The clear is registered via defer so it runs
 // on every exit path — including when Restore returns an error.
+//
+// Returns the err leg of Restore's (corrupt, err) tuple. The corrupt bool
+// is irrelevant to the marker lifecycle and is dropped here; callers that
+// need to assert on it call o.Restore() directly.
 func restoreWithMarker(t *testing.T, client *tmux.Client, o *restore.Orchestrator) error {
 	t.Helper()
 	if err := client.SetServerOption(state.RestoringMarkerName, "1"); err != nil {
@@ -56,7 +60,8 @@ func restoreWithMarker(t *testing.T, client *tmux.Client, o *restore.Orchestrato
 			t.Logf("UnsetServerOption(%s): %v", state.RestoringMarkerName, err)
 		}
 	}()
-	return o.Restore()
+	_, err := o.Restore()
+	return err
 }
 
 // TestPhase3Integration_SaveRestoreRoundTrip is the headline smoke test: it
@@ -146,7 +151,7 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 	}
 
 	// VERIFY: re-running Restore is a silent no-op (live-session skip).
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("second Restore: %v", err)
 	}
 	out2 := ts.Run(t, "list-sessions", "-F", "#{session_name}")

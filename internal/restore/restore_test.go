@@ -109,8 +109,12 @@ func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {
 	defer func() { _ = logger.Close() }()
 
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	corrupt, err := o.Restore()
+	if err != nil {
 		t.Fatalf("Restore returned error: %v", err)
+	}
+	if corrupt {
+		t.Error("expected corrupt=false on happy path (absent sessions.json); got true")
 	}
 
 	if len(mock.Calls) != 0 {
@@ -133,9 +137,12 @@ func TestOrchestrator_ReturnsWrappedErrCorruptIndexAndLogsWhenSessionsJSONCorrup
 	defer func() { _ = logger.Close() }()
 
 	o := newOrchestrator(t, mock, dir, logger)
-	err := o.Restore()
+	corrupt, err := o.Restore()
 	if err == nil {
 		t.Fatal("expected Restore to return wrapped ErrCorruptIndex; got nil")
+	}
+	if !corrupt {
+		t.Error("expected corrupt=true on corrupt-index path; got false")
 	}
 	if !errors.Is(err, state.ErrCorruptIndex) {
 		t.Errorf("errors.Is(err, state.ErrCorruptIndex) = false; want true. err=%v", err)
@@ -170,7 +177,7 @@ func TestOrchestrator_OnlyListsSessionsWhenIndexEmpty(t *testing.T) {
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -209,7 +216,7 @@ func TestOrchestrator_SkeletonRestoresSingleMissingSession(t *testing.T) {
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -251,7 +258,7 @@ func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -281,7 +288,7 @@ func TestOrchestrator_SkipsUnderscorePrefixedSessions(t *testing.T) {
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -306,7 +313,7 @@ func TestOrchestrator_LogsAndSkipsZeroWindowSession(t *testing.T) {
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -337,7 +344,7 @@ func TestOrchestrator_LogsAndSkipsZeroPaneWindow(t *testing.T) {
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -395,7 +402,7 @@ func TestOrchestrator_IsolatesPerSessionErrors(t *testing.T) {
 	defer func() { _ = logger.Close() }()
 
 	o := newOrchestrator(t, mock, stateOK, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -441,7 +448,7 @@ func TestOrchestrator_LogsAndReturnsNilWhenListSessionsFails(t *testing.T) {
 	logger, logPath := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -478,7 +485,7 @@ func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore returned error %v, expected nil even when every session errors", err)
 	}
 
@@ -524,7 +531,7 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 	logger, _ := openTestLogger(t, dir)
 	defer func() { _ = logger.Close() }()
 	o := newOrchestrator(t, mock, dir, logger)
-	if err := o.Restore(); err != nil {
+	if _, err := o.Restore(); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 

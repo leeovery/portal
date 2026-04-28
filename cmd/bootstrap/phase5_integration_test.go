@@ -70,8 +70,10 @@ func (m *markerProbeStub) probe() error {
 // EnsureSaver records the marker state and returns nil. Stubs the saver step.
 func (m *markerProbeStub) EnsureSaver() error { return m.probe() }
 
-// Restore records the marker state and returns nil. Stubs the restore step.
-func (m *markerProbeStub) Restore() error { return m.probe() }
+// Restore records the marker state and reports (false, err). Stubs the
+// restore step under the (corrupt, err) Restorer contract; this stub
+// never simulates the corrupt-index path so corrupt is always false.
+func (m *markerProbeStub) Restore() (bool, error) { return false, m.probe() }
 
 // CleanStale records the marker state and returns nil. Stubs the clean step.
 func (m *markerProbeStub) CleanStale() error { return m.probe() }
@@ -88,8 +90,9 @@ func (noopSaver) EnsureSaver() error { return nil }
 // skeleton-restore behaviour.
 type noopRestorer struct{}
 
-// Restore always returns nil.
-func (noopRestorer) Restore() error { return nil }
+// Restore always returns (false, nil) — happy path under the
+// (corrupt, err) Restorer contract.
+func (noopRestorer) Restore() (bool, error) { return false, nil }
 
 // noopCleaner is a clean step that performs no work and reports success.
 type noopCleaner struct{}
@@ -113,8 +116,10 @@ type restoreOrchestratorAdapter struct {
 	inner *restore.Orchestrator
 }
 
-// Restore delegates to the wrapped restore.Orchestrator's Restore method.
-func (a *restoreOrchestratorAdapter) Restore() error { return a.inner.Restore() }
+// Restore delegates to the wrapped restore.Orchestrator's Restore method,
+// returning the (corrupt, err) tuple verbatim under the bootstrap.Restorer
+// contract.
+func (a *restoreOrchestratorAdapter) Restore() (bool, error) { return a.inner.Restore() }
 
 // TestPhase5_RestoringMarkerSuppressesCaptures proves that the
 // @portal-restoring server option is set on the live tmux server before step

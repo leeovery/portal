@@ -20,6 +20,7 @@ type stepRecorder struct {
 	RegisterErr     error
 	SetErr          error
 	EnsureSaverErr  error
+	RestoreCorrupt  bool
 	RestoreErr      error
 	ClearErr        error
 	CleanStaleErr   error
@@ -51,9 +52,9 @@ func (r *stepRecorder) EnsureSaver() error {
 	return r.EnsureSaverErr
 }
 
-func (r *stepRecorder) Restore() error {
+func (r *stepRecorder) Restore() (bool, error) {
 	r.calls = append(r.calls, "Restore")
-	return r.RestoreErr
+	return r.RestoreCorrupt, r.RestoreErr
 }
 
 func (r *stepRecorder) CleanStale() error {
@@ -278,16 +279,16 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndRecordsLastSaverErr(t
 }
 
 func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
-	sentinel := errors.New("restore boom")
-	r := &stepRecorder{RestoreErr: sentinel}
+	// Restore reports a corrupt-index failure; per spec the orchestrator
+	// treats it as soft and continues, but step 6 (Clear) MUST still run
+	// before Run returns so the @portal-restoring window does not leak.
+	corruptErr := fmt.Errorf("restore: %w", state.ErrCorruptIndex)
+	r := &stepRecorder{RestoreCorrupt: true, RestoreErr: corruptErr}
 	o := newOrchestrator(r, nil)
 
 	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected restore error, got nil")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel, got %v", err)
+	if err != nil {
+		t.Fatalf("Run must treat corrupt-index restore as soft; got %v", err)
 	}
 
 	// Clear must appear after Restore.
@@ -493,7 +494,7 @@ func TestOrchestratorRun_appendsSaverDownWarningOnEnsureSaverFailure(t *testing.
 
 func TestOrchestratorRun_appendsCorruptSessionsJSONWarningOnRestoreErrCorruptIndex(t *testing.T) {
 	corruptErr := fmt.Errorf("restore: %w", state.ErrCorruptIndex)
-	r := &stepRecorder{RestoreErr: corruptErr}
+	r := &stepRecorder{RestoreCorrupt: true, RestoreErr: corruptErr}
 	o := newOrchestrator(r, nil)
 
 	_, warnings, err := o.Run(context.Background())
@@ -514,6 +515,7 @@ func TestOrchestratorRun_appendsCorruptSessionsJSONWarningOnRestoreErrCorruptInd
 func TestOrchestratorRun_accumulatesMultipleSoftWarnings(t *testing.T) {
 	r := &stepRecorder{
 		EnsureSaverErr: errors.New("saver boom"),
+		RestoreCorrupt: true,
 		RestoreErr:     fmt.Errorf("restore: %w", state.ErrCorruptIndex),
 	}
 	o := newOrchestrator(r, nil)
@@ -536,7 +538,10 @@ func TestOrchestratorRun_accumulatesMultipleSoftWarnings(t *testing.T) {
 }
 
 func TestOrchestratorRun_doesNotReturnFatalErrorForCorruptIndex(t *testing.T) {
-	r := &stepRecorder{RestoreErr: fmt.Errorf("restore: %w", state.ErrCorruptIndex)}
+	r := &stepRecorder{
+		RestoreCorrupt: true,
+		RestoreErr:     fmt.Errorf("restore: %w", state.ErrCorruptIndex),
+	}
 	o := newOrchestrator(r, nil)
 
 	_, _, err := o.Run(context.Background())
@@ -545,17 +550,46 @@ func TestOrchestratorRun_doesNotReturnFatalErrorForCorruptIndex(t *testing.T) {
 	}
 }
 
-func TestOrchestratorRun_returnsFatalErrorForNonCorruptRestoreError(t *testing.T) {
+// TestOrchestratorRun_doesNotEscalateNonCorruptRestoreError is the contract
+// guard for task 7-10: a future Restorer implementation that violates the
+// (corrupt bool, err error) contract by returning (false, err) for a soft
+// per-session failure MUST NOT escalate that error to a PersistentPreRunE
+// abort. The orchestrator logs and continues — the spec's degrade-locally
+// principle wins over a chatty implementation.
+func TestOrchestratorRun_doesNotEscalateNonCorruptRestoreError(t *testing.T) {
 	sentinel := errors.New("restore boom")
-	r := &stepRecorder{RestoreErr: sentinel}
-	o := newOrchestrator(r, nil)
+	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: sentinel}
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
-	if err == nil {
-		t.Fatal("expected error from non-corrupt restore failure; got nil")
+	if err != nil {
+		t.Fatalf("Run must NOT escalate a non-corrupt soft restore error; got %v", err)
 	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected wrapped sentinel; got %v", err)
+	if len(logger.warnings) == 0 {
+		t.Error("expected logger.Warn to record the contract-violating soft failure")
+	}
+	if len(logger.errors) != 0 {
+		t.Errorf("logger.Error must NOT be called for a soft restore failure; got %v", logger.errors)
+	}
+}
+
+// TestOrchestratorRun_doesNotEmitCorruptWarningWhenCorruptFalse confirms
+// that the orchestrator only emits CorruptSessionsJSONWarning when the
+// implementation reports corrupt=true. A non-corrupt soft failure is
+// logged but does not produce a user-facing warning surface.
+func TestOrchestratorRun_doesNotEmitCorruptWarningWhenCorruptFalse(t *testing.T) {
+	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: errors.New("soft boom")}
+	o := newOrchestrator(r, nil)
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+	for _, w := range warnings {
+		if len(w.Lines) > 0 && w.Lines[0] == CorruptSessionsJSONWarning().Lines[0] {
+			t.Errorf("must not emit CorruptSessionsJSONWarning when corrupt=false; got %#v", warnings)
+		}
 	}
 }
 

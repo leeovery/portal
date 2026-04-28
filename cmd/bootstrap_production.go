@@ -55,12 +55,15 @@ type restoreOrchestratorAdapter struct {
 // Restore runs the wrapped restore orchestrator and then sweeps orphan
 // FIFOs. Sweep is best-effort: any failure to enumerate skeleton
 // markers degrades to "skip the sweep" rather than aborting bootstrap.
-// Inner restore errors propagate verbatim — the bootstrap orchestrator
-// classifies state.ErrCorruptIndex via errors.Is and emits a soft
-// warning.
-func (a *restoreOrchestratorAdapter) Restore() error {
-	if err := a.inner.Restore(); err != nil {
-		return err
+// Inner restore errors are classified via the (corrupt, err) tuple
+// returned by *internal/restore.Orchestrator.Restore — the bootstrap
+// orchestrator branches on the corrupt bool to decide whether to emit
+// CorruptSessionsJSONWarning. Per the bootstrap.Restorer contract, only
+// corrupt=true carries a non-nil err.
+func (a *restoreOrchestratorAdapter) Restore() (bool, error) {
+	corrupt, err := a.inner.Restore()
+	if err != nil {
+		return corrupt, err
 	}
 	// Sweep orphan FIFOs. Skeleton markers are still set at this point
 	// (step 6 clears @portal-restoring; per-pane skeleton markers stay
@@ -68,10 +71,10 @@ func (a *restoreOrchestratorAdapter) Restore() error {
 	// the source of truth for "which paneKeys deserve their FIFO".
 	markers, err := state.ListSkeletonMarkers(a.client)
 	if err != nil {
-		return nil // soft-fail: sweep is best-effort.
+		return false, nil // soft-fail: sweep is best-effort.
 	}
 	_ = state.SweepOrphanFIFOs(a.stateDir, markers, a.logger)
-	return nil
+	return false, nil
 }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
