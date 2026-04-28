@@ -69,11 +69,12 @@ func (a *saverAdapter) EnsureSaver() error {
 }
 
 // restoreOrchestratorAdapter wraps an *internal/restore.Orchestrator's
-// bare Restore() (NOT RestoreWithMarker — bootstrap owns the marker
-// lifecycle separately) to satisfy bootstrap.Restorer. After the inner
-// restore completes it sweeps orphan hydrate-*.fifo files whose paneKey
-// is no longer represented by a live skeleton marker. Step 5 of the
-// bootstrap sequence.
+// Restore() method to satisfy bootstrap.Restorer. The bootstrap
+// orchestrator owns the @portal-restoring marker lifecycle (steps 3 and
+// 6); this adapter only runs the bare restore. After the inner restore
+// completes it sweeps orphan hydrate-*.fifo files whose paneKey is no
+// longer represented by a live skeleton marker. Step 5 of the bootstrap
+// sequence.
 type restoreOrchestratorAdapter struct {
 	inner    *restore.Orchestrator
 	client   *tmux.Client

@@ -141,6 +141,26 @@ func (ts *tmuxSocket) client() *tmux.Client {
 	return tmux.NewClient(&socketCommander{socketPath: ts.socketPath})
 }
 
+// restoreWithMarker drives the bootstrap-owned @portal-restoring lifecycle
+// inline for these integration tests: set the marker, run Restore(), unset
+// the marker. Bootstrap.Orchestrator (cmd/bootstrap) owns this discipline in
+// production; the helper exists only so the Phase-3 integration tests can
+// exercise the same set/clear contract without re-implementing the marker
+// API inside internal/restore. The clear is registered via defer so it runs
+// on every exit path — including when Restore returns an error.
+func restoreWithMarker(t *testing.T, client *tmux.Client, o *restore.Orchestrator) error {
+	t.Helper()
+	if err := client.SetServerOption(state.RestoringMarkerName, "1"); err != nil {
+		return err
+	}
+	defer func() {
+		if err := client.UnsetServerOption(state.RestoringMarkerName); err != nil {
+			t.Logf("UnsetServerOption(%s): %v", state.RestoringMarkerName, err)
+		}
+	}()
+	return o.Restore()
+}
+
 // waitForSession polls list-sessions until the target name appears or the
 // deadline elapses. tmux's new-session is synchronous from the caller's POV
 // but on slow CI systems a brief settle window has been observed before the
@@ -224,8 +244,8 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 		StateDir: stateDir,
 		Logger:   logger,
 	}
-	if err := o.RestoreWithMarker(); err != nil {
-		t.Fatalf("RestoreWithMarker: %v", err)
+	if err := restoreWithMarker(t, client, o); err != nil {
+		t.Fatalf("restoreWithMarker: %v", err)
 	}
 
 	// VERIFY: alpha is alive again.
@@ -241,9 +261,9 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 		t.Errorf("expected marker %q to be set; got empty value", wantMarker)
 	}
 
-	// VERIFY: @portal-restoring was cleared after RestoreWithMarker returned.
-	if out, err := ts.tryRun("show-options", "-sv", "@portal-restoring"); err == nil && strings.TrimSpace(out) != "" {
-		t.Errorf("@portal-restoring should be unset after RestoreWithMarker; got %q", out)
+	// VERIFY: @portal-restoring was cleared after the marker block exited.
+	if out, err := ts.tryRun("show-options", "-sv", state.RestoringMarkerName); err == nil && strings.TrimSpace(out) != "" {
+		t.Errorf("%s should be unset after marker block; got %q", state.RestoringMarkerName, out)
 	}
 
 	// VERIFY: re-running Restore is a silent no-op (live-session skip).
@@ -330,12 +350,12 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 		StateDir: stateDir,
 		Logger:   logger,
 	}
-	rwmErr := o.RestoreWithMarker()
+	rwmErr := restoreWithMarker(t, client, o)
 	if rwmErr == nil {
-		t.Fatal("RestoreWithMarker returned nil; expected wrapped state.ErrCorruptIndex")
+		t.Fatal("restoreWithMarker returned nil; expected wrapped state.ErrCorruptIndex")
 	}
 	if !errors.Is(rwmErr, state.ErrCorruptIndex) {
-		t.Errorf("RestoreWithMarker err = %v; want errors.Is(err, state.ErrCorruptIndex) = true", rwmErr)
+		t.Errorf("restoreWithMarker err = %v; want errors.Is(err, state.ErrCorruptIndex) = true", rwmErr)
 	}
 
 	// No user-visible sessions should have been created. The orchestrator

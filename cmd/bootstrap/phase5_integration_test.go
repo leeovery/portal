@@ -248,11 +248,10 @@ type noopHooks struct{}
 // RegisterPortalHooks always returns nil.
 func (noopHooks) RegisterPortalHooks() error { return nil }
 
-// restoreOrchestratorAdapter wraps a *restore.Orchestrator so its bare
-// Restore() method (no marker bundling) satisfies bootstrap.Restorer. The
-// bootstrap orchestrator owns the @portal-restoring lifecycle separately —
-// using restore.Orchestrator.Restore (not RestoreWithMarker) avoids
-// double-setting/clearing the marker.
+// restoreOrchestratorAdapter wraps a *restore.Orchestrator so its
+// Restore() method satisfies bootstrap.Restorer. The bootstrap
+// orchestrator owns the @portal-restoring lifecycle separately (steps 3
+// and 6) so the inner Restore() must not bundle marker management.
 type restoreOrchestratorAdapter struct {
 	inner *restore.Orchestrator
 }
@@ -427,8 +426,8 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // sessions.json-only name.
 //
 // Wiring: real RestoringMarker (Set/Clear), real restore.Orchestrator wrapped
-// to call the bare Restore() (NOT RestoreWithMarker — the bootstrap
-// orchestrator owns marker lifecycle separately), no-op Saver/Hooks/Clean.
+// to call the bare Restore() — the bootstrap orchestrator owns the
+// @portal-restoring marker lifecycle separately — no-op Saver/Hooks/Clean.
 //
 // Overlap note: TestPhase3Integration_SaveRestoreRoundTrip already exercises
 // the capture→persist→kill→restore round-trip. The unique coverage here is
