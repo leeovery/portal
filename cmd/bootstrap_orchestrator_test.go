@@ -30,7 +30,6 @@ func (r *recordingRunner) Run(_ context.Context) (bool, error) {
 
 func TestPersistentPreRunE_OrchestratorMemoisedAcrossInvocations(t *testing.T) {
 	resetBootstrapOnce(t)
-	installStubWaiter(t, func(*cobra.Command) {})
 
 	runner := &recordingRunner{started: true}
 	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, ForceMemoise: true}
@@ -195,7 +194,6 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 
 func TestPersistentPreRunE_PrefersOrchestratorOverBootstrapper(t *testing.T) {
 	resetBootstrapOnce(t)
-	installStubWaiter(t, func(*cobra.Command) {})
 
 	runner := &recordingRunner{started: true}
 	mock := &mockServerBootstrapper{}
@@ -227,7 +225,6 @@ func TestPersistentPreRunE_PrefersOrchestratorOverBootstrapper(t *testing.T) {
 
 func TestPersistentPreRunE_FallsBackToBootstrapperShimWhenOrchestratorNil(t *testing.T) {
 	resetBootstrapOnce(t)
-	installStubWaiter(t, func(*cobra.Command) {})
 
 	mock := &mockServerBootstrapper{started: true}
 	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}

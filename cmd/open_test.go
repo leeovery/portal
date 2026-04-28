@@ -734,7 +734,7 @@ func (s *stubAliasEditor) Delete(name string) bool {
 func (s *stubAliasEditor) Save() error { return nil }
 
 // stubCommander implements tmux.Commander for cmd-level testing.
-// Returns a single session so WaitForSessions detects sessions immediately.
+// Returns a single session so list-sessions queries succeed during tests.
 type stubCommander struct{}
 
 func (s *stubCommander) Run(args ...string) (string, error) {
@@ -996,9 +996,8 @@ func TestProcessTUIResult(t *testing.T) {
 
 func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	// When a destination is provided but resolves to FallbackResult,
-	// bootstrapWait has already run. The fallback openTUI call must
-	// pass serverStarted=false to avoid a second wait.
-	installStubWaiter(t, func(*cobra.Command) {})
+	// the bootstrap orchestrator has already run; the fallback openTUI call
+	// is reached with serverStarted reflecting the orchestrator's outcome.
 	mock := &mockServerBootstrapper{started: true}
 	client := tmux.NewClient(&stubCommander{})
 	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock, Client: client}
