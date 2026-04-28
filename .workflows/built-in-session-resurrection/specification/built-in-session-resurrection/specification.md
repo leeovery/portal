@@ -628,8 +628,9 @@ Portal's `{project}-{nanoid}` naming makes collisions between Portal-created ses
 ### Skeleton-Eager + Scrollback-Lazy
 
 **Skeleton (structure) is restored eagerly during bootstrap.** For each missing saved session:
-- `new-session -d -s <name> -c <root_cwd> "<hydrate command for first pane>"`
-- `new-window`, `split-window` for remaining windows/panes to match saved structure. Each pane's command is `portal state hydrate --fifo <F> --file <S> --hook-key <K>` (see Scrollback Restore Mechanics).
+- `new-session -d -s <name> -c <root_cwd>` (default shell; no command argument)
+- `new-window`, `split-window` for remaining windows/panes to match saved structure (no command argument; default shell)
+- Immediately after each pane is created, the hydrate helper is dispatched into it via `tmux respawn-pane -k -t <pane> "<hydrate command>"` (see Scrollback Restore Mechanics). `respawn-pane -k` atomically kills the pane's default shell and replaces its process with the helper in a single tmux call, so no shell output reaches scrollback before the helper runs.
 - `select-layout "<saved>"` per window
 - `select-pane -t <active>` per window
 - `resize-pane -Z` on the active pane if `zoomed` was true
@@ -727,15 +728,17 @@ Functionally identical to `portal open` picker attach.
 
 ### Injection Path: Blocking Helper Pre-Shell via FIFO
 
-Each skeleton-restored pane is created with a shell-pipeline command as its initial process:
+Each skeleton-restored pane is **respawned** immediately after creation with a shell-pipeline command via `tmux respawn-pane -k`:
 
 ```
-sh -c 'portal state hydrate --fifo <FIFO> --file <SCROLLBACK> --hook-key <HOOK_KEY>; exec $SHELL'
+tmux respawn-pane -k -t <pane> "sh -c 'portal state hydrate --fifo <FIFO> --file <SCROLLBACK> --hook-key <HOOK_KEY>; exec $SHELL'"
 ```
 
 where `<HOOK_KEY>` is the saved structural identifier `<raw-session>:<saved-window>.<saved-pane>` — see Save Format & Schema → Helper hook lookup under index drift.
 
-`portal state hydrate` is a Go subcommand that runs *inside the pane, before the shell*. Its stdout is connected directly to the pane's PTY slave. Bytes written to its stdout flow out through the PTY → tmux's VT parser → rendered into scrollback natively with full ANSI fidelity.
+`respawn-pane -k` atomically kills the default shell that `new-session` / `split-window` created and replaces the pane's process with the helper in a single tmux call. The `-k` flag also wipes any output the default shell may have already emitted, so no rc-file output, prompt, or other shell artefacts reach scrollback before the helper runs. The semantic guarantee — *the shell does not exist yet when the bytes are written* — is preserved: by the time the helper begins writing, the shell that briefly existed has been torn down and the pane's running process is the helper alone.
+
+`portal state hydrate` is a Go subcommand that runs *inside the pane, before the user's shell*. Its stdout is connected directly to the pane's PTY slave. Bytes written to its stdout flow out through the PTY → tmux's VT parser → rendered into scrollback natively with full ANSI fidelity.
 
 When the helper exits (normally or via timeout), the trailing `exec $SHELL` takes over the same process. The shell replaces the helper without spawning a new process. The shell never sees the helper's command line; no history pollution.
 
@@ -747,7 +750,15 @@ Only two mechanisms deliver bytes to the pane's **output (display) path**:
 1. A process inside the pane writing to its own stdout. Bytes flow through the PTY slave → tmux's VT parser → rendered correctly.
 2. External process writing directly to the pane's slave PTY device (`/dev/pts/<N>` via `#{pane_tty}`). Faster but has positioning race issues (the shell has already prompted by the time the external writer arrives).
 
-Option 1 (helper pre-shell) avoids the positioning race entirely: the shell does not exist yet when the bytes are written.
+Option 1 (helper pre-shell) avoids the positioning race entirely: by the time the helper writes, the default shell that briefly existed before `respawn-pane -k` has been replaced and only the helper holds the pane's process slot.
+
+### Implementation Note: respawn-pane Arming
+
+Skeleton restore is a two-phase per-session operation: a **create** phase that establishes pane topology with the default shell, and an **arm** phase that dispatches the hydrate helper into each live pane via `tmux respawn-pane -k`. Splitting create from arm lets restoration re-query `list-panes` after creation to discover the *live* (window, pane) indices tmux assigned, then build each pane's FIFO and helper command against those indices — necessary because tmux's `base-index` / `pane-base-index` user settings can shift the indices it hands out, and saved indices may not match.
+
+`respawn-pane -k` is preferred over `send-keys` because it atomically kills the default shell and replaces the pane's process; `send-keys` would let the shell's rc-file output and prompt render into scrollback above the helper's content dump. The `-k` flag additionally wipes any output the default shell wrote between creation and arming.
+
+Implementation: `internal/restore/session.go` (see `armPanes` and `buildHydrateCommand`).
 
 ### Signal Mechanism: FIFO Per Pane
 
@@ -1019,11 +1030,12 @@ Every Portal command that needs tmux runs this sequence, in this order. The **ex
   - `has-session -t <name>` → if live, skip this session.
   - Else, skeleton-create it:
     1. For each pane: compute FIFO path (`~/.config/portal/state/hydrate-<paneKey>.fifo`); `os.Remove(path)` (ignore `ENOENT`); `syscall.Mkfifo(path, 0600)`.
-    2. `new-session -d -s <name> -c <root_cwd> "sh -c 'portal state hydrate --fifo <F> --file <scrollback> --hook-key <K>; exec $SHELL'"` for the first pane, where `<K>` is the saved structural identifier `<raw-session>:<saved-window>.<saved-pane>`.
+    2. `new-session -d -s <name> -c <root_cwd>` for the first pane (no command argument; the pane is created with the default shell and armed via `respawn-pane -k` in the arm phase below).
     3. **Apply captured session environment** before creating any additional windows/panes: for each key/value in the saved `environment` map, run `tmux set-environment -t <name> <KEY> <VAL>`. This happens **after** `new-session` but **before** any subsequent `new-window` or `split-window`, so every subsequent pane inherits the saved per-session env at creation time. Removed-form variables (`-r` in tmux's on-wire syntax) were not captured; only plain set values round-trip.
-    4. `new-window` / `split-window` for remaining windows and panes, each created with its own `hydrate` command as the pane's initial process.
-    5. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
-    6. For each created pane: `tmux set-option -s @portal-skeleton-<paneKey> 1` — the `-s` flag targets the server-option scope (load-bearing; matches the daemon's `show-options -sv` enumeration). Server-option scope is volatile — markers clear automatically on tmux server restart.
+    4. `new-window` / `split-window` for remaining windows and panes (no command argument; default shell, armed in step 5 below).
+    5. **Arm each created pane with the hydrate helper** via `tmux respawn-pane -k -t <pane> "sh -c 'portal state hydrate --fifo <F> --file <scrollback> --hook-key <K>; exec $SHELL'"`, where `<K>` is the saved structural identifier `<raw-session>:<saved-window>.<saved-pane>`. `respawn-pane -k` atomically kills the default shell tmux created in steps 2/4 and replaces the pane's process with the helper in a single call — no shell output reaches scrollback before the helper runs.
+    6. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
+    7. For each created pane: `tmux set-option -s @portal-skeleton-<paneKey> 1` — the `-s` flag targets the server-option scope (load-bearing; matches the daemon's `show-options -sv` enumeration). Server-option scope is volatile — markers clear automatically on tmux server restart.
 - On `select-layout` failure for a window: fall back to `select-layout tiled`, log, continue.
 - On any per-session error: log, skip that session, continue with the next.
 
