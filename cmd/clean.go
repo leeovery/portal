@@ -3,16 +3,21 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
 
+// AllPaneLister returns the structural keys for all panes across all tmux sessions.
+// Each key uses the format session_name:window_index.pane_index.
+type AllPaneLister interface {
+	ListAllPanes() ([]string, error)
+}
+
 // CleanDeps holds injectable dependencies for the clean command.
 // When nil, real implementations are used.
 type CleanDeps struct {
-	AllPaneLister hooks.AllPaneLister
+	AllPaneLister AllPaneLister
 }
 
 // cleanDeps allows injecting dependencies for testing.
@@ -21,7 +26,7 @@ var cleanDeps *CleanDeps
 // buildCleanPaneLister returns the appropriate AllPaneLister.
 // When cleanDeps is set (testing), uses the injected lister.
 // Otherwise, creates a real tmux client.
-func buildCleanPaneLister() hooks.AllPaneLister {
+func buildCleanPaneLister() AllPaneLister {
 	if cleanDeps != nil {
 		return cleanDeps.AllPaneLister
 	}
