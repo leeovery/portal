@@ -148,17 +148,17 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// Step 1 — EnsureServer.
 	serverStarted, err := o.Server.EnsureServer()
 	if err != nil {
-		return false, nil, o.fatal("Portal failed to start tmux server: "+err.Error(), err)
+		return false, nil, o.fatalf("start tmux server", err)
 	}
 
 	// Step 2 — RegisterPortalHooks.
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
-		return serverStarted, nil, o.fatal("Portal failed to register tmux hooks: "+err.Error(), err)
+		return serverStarted, nil, o.fatalf("register tmux hooks", err)
 	}
 
 	// Step 3 — Set @portal-restoring (MUST precede step 4).
 	if err := o.Restoring.Set(); err != nil {
-		return serverStarted, nil, o.fatal("Portal failed to set @portal-restoring marker: "+err.Error(), err)
+		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
 	}
 
 	// Step 4 — EnsureSaver (best-effort).
@@ -190,7 +190,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	// Step 6 — Clear @portal-restoring (fatal on failure).
 	if err := o.Restoring.Clear(); err != nil {
-		return serverStarted, warnings, o.fatal("Portal failed to clear @portal-restoring marker: "+err.Error(), err)
+		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
 
 	// Step 7 — CleanStale (best-effort).
@@ -212,4 +212,11 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 func (o *Orchestrator) fatal(userMsg string, cause error) error {
 	o.Logger.Error(state.ComponentBootstrap, "%s", userMsg)
 	return NewFatal(userMsg, cause)
+}
+
+// fatalf composes the spec-mandated Portal-failed-to-<verb>:-<cause>
+// user-facing message in one place, then delegates to fatal. Defining
+// the format here makes drift across step sites structurally impossible.
+func (o *Orchestrator) fatalf(verb string, err error) error {
+	return o.fatal("Portal failed to "+verb+": "+err.Error(), err)
 }
