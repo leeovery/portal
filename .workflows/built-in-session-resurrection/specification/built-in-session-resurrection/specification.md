@@ -923,6 +923,8 @@ Hook structural keys are of the form `session:window.pane`. When a user runs `tm
 
 **Failure mode.** If migration fails (malformed names, I/O error), hooks for the renamed session get orphaned and pruned by the next `CleanStale` run. User-visible recovery: re-register the hook against the new session name. Migration is best-effort — no retry storm on failure.
 
+**v1 deferral (post-implementation note).** The rename-key migration hook is **not registered in v1**. tmux's `session-renamed` event reliably exposes only the new session name (`#{hook_session_name}`); the prior name is not retrievable from the hook itself, and the "last-seen names" map sketched above requires daemon-side tick-time enumeration plus persistence of the prior-tick name set keyed by `#{session_id}` so the hook can read the (oldName, newName) delta. That work is out of v1 scope. Shipping the hook with both arguments expanding to the new name produces a silent identity rewrite on every rename, so v1 ships without the registration entirely — `cmd/state_migrate_rename.go` remains in the tree as the future endpoint. Until v2 lands the daemon-side tracking, hooks for renamed sessions are orphaned and pruned by `CleanStale`; users recover by re-registering against the new name. See the implementation note in `internal/tmux/hooks_register.go` for the v2 entry point.
+
 ## Layout Restoration
 
 ### Per-Window Restoration Order

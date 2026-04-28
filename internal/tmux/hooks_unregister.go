@@ -25,15 +25,16 @@ var portalCommandSubstrings = []string{
 // hooks. UnregisterPortalHooks scopes its removals to these events; matching
 // command substrings on any other event (e.g. window-renamed) are ignored.
 //
-// Order: save-trigger events first, then hydration-trigger events, then
-// migrate-rename — mirrors the registration order in RegisterPortalHooks.
-// Computed as the deduped union of all three category slices so future
-// category additions in RegisterPortalHooks automatically flow through to
-// the unregister side. Without this, the unregister side relied on the
-// incidental overlap between saveTriggerEvents and migrateRenameEvents
-// (both contain session-renamed) — a future event added only to the
-// migrate-rename list would silently leak Portal-owned hooks on cleanup.
-var portalEvents = dedupedEventList(saveTriggerEvents, hydrationTriggerEvents, migrateRenameEvents)
+// Order: save-trigger events first, then hydration-trigger events — mirrors
+// the registration order in RegisterPortalHooks. Computed as the deduped
+// union of both category slices so future category additions in
+// RegisterPortalHooks automatically flow through to the unregister side.
+//
+// The migrate-rename category was registered in an earlier iteration; it
+// has been deferred to v2 (see hooks_register.go). `session-renamed` remains
+// covered by saveTriggerEvents, so legacy migrate-rename entries left over
+// from older binaries are still removable through portalCommandSubstrings.
+var portalEvents = dedupedEventList(saveTriggerEvents, hydrationTriggerEvents)
 
 // dedupedEventList returns the concatenation of the input slices with
 // duplicates filtered out, preserving first-seen order.

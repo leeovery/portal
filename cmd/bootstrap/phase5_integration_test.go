@@ -338,8 +338,8 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 //
 //   - Pre-existing user session ("alpha") survives Run.
 //   - @portal-restoring is unset post-Run.
-//   - Portal's full hook table is registered (10 entries: 7 save-trigger,
-//     2 hydration-trigger, 1 migrate-rename).
+//   - Portal's full hook table is registered (9 entries: 7 save-trigger,
+//     2 hydration-trigger). The migrate-rename hook is deferred to v2.
 //
 // This is not an end-to-end save/restore round-trip — that is covered by
 // TestPhase3Integration_SaveRestoreRoundTrip in internal/restore. The unique
@@ -405,8 +405,8 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		// 2 hydration-trigger events.
 		{"client-attached", "portal state signal-hydrate"},
 		{"client-session-changed", "portal state signal-hydrate"},
-		// 1 migrate-rename event (shares session-renamed with notify).
-		{"session-renamed", "portal state migrate-rename"},
+		// The migrate-rename hook is deferred to v2 (see hooks_register.go);
+		// session-renamed only carries the notify entry above.
 	}
 	for _, want := range wantHooks {
 		out, err := ts.tryRun("show-hooks", "-g", want.event)
