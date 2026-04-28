@@ -125,9 +125,9 @@
       "items": {
         "built-in-session-resurrection": {
           "status": "in-progress",
-          "task_gate_mode": "auto",
-          "fix_gate_mode": "auto",
-          "analysis_gate_mode": "auto",
+          "task_gate_mode": "gated",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
