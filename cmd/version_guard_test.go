@@ -160,10 +160,18 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 				t.Cleanup(func() { daemonRunFunc = prev })
 			}
 
+			// state status now renders a real diagnostic; an empty state
+			// dir produces ErrStatusUnhealthy, which is irrelevant to the
+			// version-checker assertion below.
+			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
+				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+			}
+
 			resetRootCmd()
 			resetStateCmdFlags()
 			rootCmd.SetArgs(tt.args)
-			if err := rootCmd.Execute(); err != nil {
+			err := rootCmd.Execute()
+			if err != nil && err != ErrStatusUnhealthy {
 				t.Fatalf("unexpected error: %v", err)
 			}
 

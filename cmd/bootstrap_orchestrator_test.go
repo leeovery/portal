@@ -180,8 +180,17 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 
 			resetRootCmd()
 			resetStateCmdFlags()
+			// state status now renders a real diagnostic and exits
+			// non-zero when the surface is unhealthy. Point the command
+			// at an empty TempDir and treat ErrStatusUnhealthy as
+			// expected — this test only cares whether the orchestrator
+			// was invoked.
+			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
+				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+			}
 			rootCmd.SetArgs(tt.args)
-			if err := rootCmd.Execute(); err != nil {
+			err := rootCmd.Execute()
+			if err != nil && err != ErrStatusUnhealthy {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
