@@ -7,51 +7,21 @@ package cmd
 // dependencies on internal/restore, internal/state, and internal/hooks
 // — the orchestrator owns ordering and the adapters own composition.
 //
-// Each adapter is a thin wrapper. They exist for two reasons:
-//   1. Method-name shaping: bootstrap.RestoringMarker requires
-//      Set/Clear; *tmux.Client exposes Set/UnsetServerOption with a
-//      name argument.
-//   2. Argument capture: adapters carry the long-lived context
-//      (client, stateDir, version, logger) so the orchestrator's
-//      step interfaces remain argument-free.
+// The two simplest adapters (HookRegistrar, RestoringMarker) live in
+// internal/bootstrapadapter so test suites can import production-shape
+// wirings without pulling in the rest of cmd/. Production-only adapters
+// that carry richer context (state dir, hooks store, restore
+// orchestrator, logger) remain here — they are not reusable from tests
+// in their current shape.
 
 import (
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
-
-// hookRegistrarAdapter wraps tmux.RegisterPortalHooks to satisfy
-// bootstrap.HookRegistrar. Step 2 of the bootstrap sequence.
-type hookRegistrarAdapter struct {
-	client *tmux.Client
-}
-
-// RegisterPortalHooks delegates to the package-level helper on the
-// wrapped client. Idempotent — safe to invoke on every bootstrap.
-func (a *hookRegistrarAdapter) RegisterPortalHooks() error {
-	return tmux.RegisterPortalHooks(a.client)
-}
-
-// restoringMarkerAdapter manages the @portal-restoring server-option
-// lifecycle that suppresses the save daemon during skeleton restore.
-// Steps 3 (Set) and 6 (Clear) of the bootstrap sequence.
-type restoringMarkerAdapter struct {
-	client *tmux.Client
-}
-
-// Set writes @portal-restoring="1" at server scope.
-func (a *restoringMarkerAdapter) Set() error {
-	return a.client.SetServerOption(state.RestoringMarkerName, "1")
-}
-
-// Clear removes @portal-restoring at server scope. Idempotent under
-// tmux — unsetting an already-absent option is a no-op.
-func (a *restoringMarkerAdapter) Clear() error {
-	return a.client.UnsetServerOption(state.RestoringMarkerName)
-}
 
 // saverAdapter wraps tmux.EnsurePortalSaverVersion to satisfy
 // bootstrap.SaverBootstrapper. Carries the binary's ldflags-injected
@@ -178,8 +148,8 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 
 	orch := &bootstrap.Orchestrator{
 		Server:    client,
-		Hooks:     &hookRegistrarAdapter{client: client},
-		Restoring: &restoringMarkerAdapter{client: client},
+		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore: &restoreOrchestratorAdapter{
 			inner:    restoreInner,

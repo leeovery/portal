@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -40,40 +41,6 @@ func skipIfNoTmux(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not available; skipping integration test")
 	}
-}
-
-// realRestoringMarker is the production wiring of bootstrap.RestoringMarker —
-// thin pass-through to tmux.Client's Set/UnsetServerOption. Phase 5 test seam:
-// integration tests instantiate this directly so the @portal-restoring marker
-// lifecycle is observable on the real isolated tmux server.
-type realRestoringMarker struct {
-	client *tmux.Client
-}
-
-// Set writes @portal-restoring="1" at server scope.
-func (m *realRestoringMarker) Set() error {
-	return m.client.SetServerOption("@portal-restoring", "1")
-}
-
-// Clear removes @portal-restoring at server scope. Idempotent under tmux —
-// unsetting an already-absent option is a no-op and does not error.
-func (m *realRestoringMarker) Clear() error {
-	return m.client.UnsetServerOption("@portal-restoring")
-}
-
-// realHookRegistrar is the production wiring of bootstrap.HookRegistrar — a
-// thin adapter over tmux.RegisterPortalHooks. Lives here (rather than a
-// production helper) because cmd/root.go is mid-Phase-5 cutover; once the
-// follow-up adapter task lands this can be deleted in favour of the shared
-// helper.
-type realHookRegistrar struct {
-	client *tmux.Client
-}
-
-// RegisterPortalHooks delegates to tmux.RegisterPortalHooks on the wrapped
-// client.
-func (r *realHookRegistrar) RegisterPortalHooks() error {
-	return tmux.RegisterPortalHooks(r.client)
 }
 
 // markerProbeStub records whether @portal-restoring was set at the moment
@@ -90,7 +57,7 @@ type markerProbeStub struct {
 
 // probe queries @portal-restoring on the live server and records the result.
 func (m *markerProbeStub) probe() error {
-	val, found, err := m.client.TryGetServerOption("@portal-restoring")
+	val, found, err := m.client.TryGetServerOption(state.RestoringMarkerName)
 	if err != nil {
 		return err
 	}
@@ -174,7 +141,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 	o := &bootstrap.Orchestrator{
 		Server:    client,
 		Hooks:     noopHooks{},
-		Restoring: &realRestoringMarker{client: client},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     saverProbe,
 		Restore:   restoreProbe,
 		Clean:     cleanProbe,
@@ -212,7 +179,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 	}
 
 	// Final state: marker MUST be unset after Run returns.
-	val, found, err := client.TryGetServerOption("@portal-restoring")
+	val, found, err := client.TryGetServerOption(state.RestoringMarkerName)
 	if err != nil {
 		t.Fatalf("TryGetServerOption final: %v", err)
 	}
@@ -247,8 +214,8 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 
 	o := &bootstrap.Orchestrator{
 		Server:    client,
-		Hooks:     &realHookRegistrar{client: client},
-		Restoring: &realRestoringMarker{client: client},
+		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     noopSaver{},
 		Restore:   noopRestorer{},
 		Clean:     noopCleaner{},
@@ -265,7 +232,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 	}
 
 	// @portal-restoring must be unset.
-	if val, found, err := client.TryGetServerOption("@portal-restoring"); err != nil {
+	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {
 		t.Fatalf("TryGetServerOption: %v", err)
 	} else if found {
 		t.Errorf("@portal-restoring still set; value=%q", val)
@@ -387,7 +354,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	o := &bootstrap.Orchestrator{
 		Server:    client,
 		Hooks:     noopHooks{},
-		Restoring: &realRestoringMarker{client: client},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     noopSaver{},
 		Restore:   &restoreOrchestratorAdapter{inner: restoreInner},
 		Clean:     noopCleaner{},
@@ -404,7 +371,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 
 	// @portal-restoring must be cleared by step 6.
-	if val, found, err := client.TryGetServerOption("@portal-restoring"); err != nil {
+	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {
 		t.Fatalf("TryGetServerOption: %v", err)
 	} else if found {
 		t.Errorf("@portal-restoring still set after Run; value=%q", val)
