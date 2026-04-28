@@ -39,14 +39,17 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 
 | Package | Role |
 |---------|------|
-| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec`). Client methods: ListSessions, NewSession, HasSession, SwitchClient, EnsureServer, WaitForSessions, ListPanes, ListAllPanes, SendKeys, GetServerOption, SetServerOption, UnsetServerOption |
+| `tmux` | Wraps tmux CLI via `Commander` interface (`RealCommander` → `os/exec` with separate `Run`/`RunRaw` for trim vs verbatim output). Client methods cover sessions (ListSessions, NewSession, NewSessionWithCommand, NewDetachedSessionNoCwd, HasSession, KillSession, RenameSession, SwitchClient, CurrentSessionName), windows/panes (NewWindow, SplitWindow, ListPanes, ListPanesInSession, ListAllPanes, ListAllPanesWithFormat, ResolveStructuralKey, SendKeys, RespawnPane, SelectLayout, SelectPane, ResizePaneZoom, CapturePane), environment (ShowEnvironment, SetSessionEnvironment), server lifecycle (ServerRunning, StartServer, EnsureServer), options (SetServerOption, SetSessionOption, GetServerOption, TryGetServerOption, UnsetServerOption, ShowAllServerOptions), and global hooks (ShowGlobalHooks, AppendGlobalHook, UnsetGlobalHookAt). Also exposes `BootstrapPortalSaver` / `EnsurePortalSaverVersion` for the `_portal-saver` session lifecycle |
+| `state` | Resurrection state model: schema, capture, atomic commit, scrollback dump/replay, FIFO plumbing, marker helpers (notably `@portal-restoring` via `IsRestoringSet`), pane-key resolution, paths, structured logger. Contains the `portal state daemon` runtime invariants (capture loop, FIFO sweep, version guard) |
+| `restore` | Two-phase restore engine consumed by bootstrap step 5: phase A reconstructs skeleton (sessions/windows/panes via new-session/new-window/split-window with `respawn-pane -k` swapping the default shell for the hydrate helper), phase B applies geometry (select-layout, select-pane, resize-pane -Z) and replays scrollback through per-pane FIFOs |
 | `session` | Session creation pipeline: git root resolution → project persistence → name generation (`{project}-{nanoid}`) → tmux session creation. `QuickStart` for atomic create-or-attach |
 | `resolver` | Path resolution chain with interface-based DI (AliasLookup, ZoxideQuerier, DirValidator) |
-| `tui` | Bubble Tea model with page state machine: Loading → Sessions → Projects → FileBrowser |
+| `tui` | Bubble Tea model with page state machine: Loading → Sessions → Projects → FileBrowser. `LoadingMinDuration = 1.2s` enforces a minimum loading-page display window |
 | `project` | JSON-backed store (`~/.config/portal/projects.json`) with atomic writes |
 | `alias` | Flat key=value file store (`~/.config/portal/aliases`) |
 | `browser` | Directory listing with symlink detection |
-| `hooks` | Resume-hook system: JSON-backed `Store` (`~/.config/portal/hooks.json`) for per-pane on-resume commands + `ExecuteHooks` executor that fires hooks on session attach using volatile tmux server-option markers to prevent duplicate runs |
+| `hooks` | JSON-backed `Store` (`~/.config/portal/hooks.json`) holding per-pane on-resume commands keyed by structural pane key. Pure persistence — no execution. Hook firing is now driven by the hydrate helper's exec chain (`portal state hydrate`), not by the cmd layer at attach time |
+| `bootstrapadapter` | Production adapters wiring concrete `*tmux.Client`, hooks store, and state package functions to the `cmd/bootstrap` Orchestrator's seam interfaces |
 | `fileutil` | Shared utilities — `AtomicWrite` (temp file + rename) used by hooks store |
 | `fuzzy` | Substring-based fuzzy matching/filtering |
 
@@ -60,11 +63,22 @@ All external dependencies use small interfaces (1-3 methods). Commands expose pa
 
 ### Server bootstrap
 
-`PersistentPreRunE` calls `EnsureServer()` for commands needing tmux (all except version, init, help, alias, clean). If the server was just started, TUI shows a loading page; CLI commands call `bootstrapWait()` which prints to stderr and polls for session restoration (1–6s window).
+`PersistentPreRunE` runs an eight-step `bootstrap.Orchestrator` (in `cmd/bootstrap/`) for commands needing tmux (all except version, init, help, alias, clean). Step ordering is load-bearing:
+
+1. **EnsureServer** — start the tmux server if not running.
+2. **RegisterPortalHooks** — install global tmux hooks (e.g. `client-attached` running `portal state signal-hydrate`) idempotently.
+3. **Set `@portal-restoring`** — must precede saver/restore so the daemon and hydrate helpers can detect they are inside a restoration window.
+4. **EnsureSaver** — bootstrap (or version-upgrade) the `_portal-saver` detached session that hosts `portal state daemon`. Best-effort; failure surfaces as a `SaverDownWarning`.
+5. **Restore** — invoke `internal/restore` to reconstruct skeleton + geometry + scrollback FIFOs from the saved state. Never escalates to a fatal abort; corrupt state surfaces as a warning.
+6. **Clear `@portal-restoring`** — fatal on failure (the marker must not leak past bootstrap).
+7. **CleanStale** — best-effort cleanup of orphaned markers / stale entries.
+8. **Return** — collect warnings; the TUI's loading page (subject to `LoadingMinDuration` = 1.2s minimum-display pad) drains them via `LoadingMinElapsedMsg`, while the bare-CLI path drains them post-bootstrap.
+
+If the server was just started, the TUI shows the loading page until both Restore completes and the 1.2s pad has elapsed; warnings flush to stderr (with alt-screen toggle) only after dismissal so the rendered UI is not corrupted.
 
 ### Resume hooks
 
-Per-pane hooks registered via `portal hooks set --on-resume "cmd"`. On `attach`/`open`, `ExecuteHooks` fires stored commands for panes in the target session using `tmux send-keys`. Dual-level tracking: persistent JSON store on disk + volatile `@portal-active-<pane>` tmux server options as one-shot markers (lost on reboot, so hooks re-fire after restart). Stale hooks cleaned lazily on attach and explicitly via `portal clean`.
+Per-pane hooks are registered via `portal hooks set --on-resume "cmd"` and persisted in `hooks.json`. They fire **only inside the hydrate helper's exec chain** (`portal state hydrate`), which is launched as the initial process of each restored pane via `respawn-pane -k` during bootstrap step 5. After the helper finishes scrollback replay it looks up the saved structural hook key in `hooks.json` and exec's either `sh -c '<HOOK>; exec $SHELL'` or a bare `$SHELL` — meaning hooks fire on reboot recovery, not on every detach/reattach inside the same tmux server lifetime. The structural key is preserved across base-index drift so lookups stay addressable. Stale hook entries are cleaned lazily by the daemon and explicitly via `portal clean`.
 
 ## Release
 
