@@ -74,12 +74,6 @@ var cleanCmd = &cobra.Command{
 			return nil
 		}
 
-		// Empty pane list with existing hooks means no tmux server is running.
-		// Skip cleanup to avoid destroying hooks needed after next reboot.
-		if len(livePanes) == 0 {
-			return nil
-		}
-
 		removedPanes, err := hookStore.CleanStale(livePanes)
 		if err != nil {
 			return err

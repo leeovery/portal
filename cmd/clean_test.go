@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -322,16 +324,18 @@ func TestCleanCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("no tmux server running skips hook cleanup preserving existing hooks", func(t *testing.T) {
+	t.Run("zero live panes prunes every hook entry", func(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// Real ListAllPanes returns ([]string{}, nil) when no server is running
+		// Phase 4: CleanStale runs unconditionally. With no live panes,
+		// every hooks.json entry is genuinely orphaned and must be pruned.
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
-			"my-session:0.1": {"on-resume": "some-cmd"},
+			"my-session:0.1":    {"on-resume": "cmd-1"},
+			"other-session:1.0": {"on-resume": "cmd-2"},
 		})
 
 		cleanDeps = &CleanDeps{
@@ -349,15 +353,52 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// No hook removal output — hooks are preserved
-		if buf.String() != "" {
-			t.Errorf("output = %q, want empty string", buf.String())
+		out := buf.String()
+		if !strings.Contains(out, "Removed stale hook: my-session:0.1") {
+			t.Errorf("output = %q, want containing my-session:0.1 removal", out)
+		}
+		if !strings.Contains(out, "Removed stale hook: other-session:1.0") {
+			t.Errorf("output = %q, want containing other-session:1.0 removal", out)
 		}
 
-		// Verify hooks are still in the file (NOT deleted)
+		data := readHooksJSON(t, hooksFile)
+		if len(data) != 0 {
+			t.Errorf("expected hooks file to be emptied; got %v", data)
+		}
+	})
+
+	t.Run("ListAllPanes error preserves hooks (safety net)", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"my-session:0.1": {"on-resume": "some-cmd"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{err: errors.New("tmux dead")},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty string when ListAllPanes errors", buf.String())
+		}
+
 		data := readHooksJSON(t, hooksFile)
 		if _, ok := data["my-session:0.1"]; !ok {
-			t.Error("expected hook my-session:0.1 to be preserved when no tmux server is running")
+			t.Error("expected hook my-session:0.1 to be preserved when ListAllPanes errors")
 		}
 	})
 
