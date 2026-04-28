@@ -181,6 +181,14 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 				t.Cleanup(func() { daemonRunFunc = prev })
 			}
 
+			// state hydrate's RunE blocks on a real FIFO; stub the run-func so
+			// the command returns immediately for argv-only assertions.
+			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "hydrate" {
+				prev := hydrateRunFunc
+				hydrateRunFunc = func(_ hydrateConfig) error { return nil }
+				t.Cleanup(func() { hydrateRunFunc = prev })
+			}
+
 			outBuf := new(bytes.Buffer)
 			errBuf := new(bytes.Buffer)
 			resetRootCmd()
