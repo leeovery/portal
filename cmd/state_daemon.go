@@ -236,15 +236,16 @@ var stateDaemonCmd = &cobra.Command{
 
 		// Load the prior structural index so skeleton-marked panes can be
 		// merged from authoritative pre-boot state during the first capture.
-		// A missing or undecodable file maps to prevIdx=nil — capture treats
-		// that as "no prior state" and skips the merge.
+		// state.ReadIndex shares its corrupt-vs-missing classification with
+		// the restore path (internal/restore/restore.go): a clean miss maps
+		// to prevIdx=nil with no log entry, while a read or decode failure
+		// maps to prevIdx=nil with a WARN that surfaces ErrCorruptIndex when
+		// applicable.
 		var prevIdx *state.Index
-		if data, err := os.ReadFile(state.SessionsJSON(dir)); err == nil {
-			if idx, decErr := state.DecodeIndex(data); decErr == nil {
-				prevIdx = &idx
-			} else {
-				logger.Warn(state.ComponentDaemon, "decode prior sessions.json: %v", decErr)
-			}
+		if idx, skip, err := state.ReadIndex(dir); !skip {
+			prevIdx = &idx
+		} else if err != nil {
+			logger.Warn(state.ComponentDaemon, "ReadIndex: %v", err)
 		}
 
 		client := tmux.NewClient(&tmux.RealCommander{})

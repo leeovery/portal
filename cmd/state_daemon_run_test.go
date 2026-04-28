@@ -675,6 +675,15 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	if (*holder).PrevIndex != nil {
 		t.Errorf("PrevIndex = %+v; want nil for missing sessions.json", (*holder).PrevIndex)
 	}
+	// Missing-file is a clean skip: no warning about reading sessions.json
+	// should be logged. This is the corrupt-vs-missing classification we
+	// inherit from state.ReadIndex.
+	logPath := filepath.Join(dir, "portal.log")
+	if data, err := os.ReadFile(logPath); err == nil {
+		if strings.Contains(string(data), "ReadIndex") || strings.Contains(string(data), "sessions.json") {
+			t.Errorf("missing sessions.json should not produce a ReadIndex warning; got:\n%s", data)
+		}
+	}
 }
 
 func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
@@ -705,7 +714,11 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if !strings.Contains(string(logBytes), "decode prior sessions.json") {
-		t.Errorf("expected decode warning in log; got:\n%s", logBytes)
+	// state.ReadIndex wraps decode failures with ErrCorruptIndex, whose
+	// message is "sessions.json corrupt" — surface that in the log so the
+	// daemon distinguishes corrupt-content from a missing file or other
+	// read errors.
+	if !strings.Contains(string(logBytes), "sessions.json corrupt") {
+		t.Errorf("expected corrupt-index warning in log; got:\n%s", logBytes)
 	}
 }
