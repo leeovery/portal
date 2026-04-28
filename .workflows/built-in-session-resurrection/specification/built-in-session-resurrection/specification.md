@@ -1226,7 +1226,7 @@ The long-running process invoked as the `command` of the `_portal-saver` session
 - Write `~/.config/portal/state/daemon.version` on startup with `cmd.version`.
 - Write `~/.config/portal/state/daemon.pid` on startup with the daemon's OS PID.
 - Clear `save.requested` on startup (defensive).
-- Perform log-rotation check on startup (rotate `portal.log` → `portal.log.old` if the current log is ≥1 MB).
+- Perform log-rotation check on startup (rotate `portal.log` → `portal.log.old` if the current log is ≥1 MiB).
 - Seed the in-memory `paneKey → scrollback-hash` map from existing `scrollback/*.bin` files (avoids full-rewrite on every startup).
 - Hold the in-memory `paneKey → scrollback-hash` map for content-hash dedup.
 - Run the 1-second ticker loop.
@@ -1330,13 +1330,13 @@ Human-readable and grep-friendly. No structured / JSON format in v1 (YAGNI).
 
 ### Log Rotation
 
-Simple 2-file cap at **1 MB per file**.
+Simple 2-file cap at **1 MiB per file** (1,048,576 bytes).
 
-- On reaching 1 MB during a write, Portal renames `portal.log` → `portal.log.old` (replacing any existing old file), then starts a fresh `portal.log`.
-- Total disk usage bounded at ~2 MB.
+- On reaching 1 MiB during a write, Portal renames `portal.log` → `portal.log.old` (replacing any existing old file), then starts a fresh `portal.log`.
+- Total disk usage bounded at ~2 MiB.
 - Portal performs rotation itself in-process. No external `logrotate` dependency.
 
-**Concurrent-writer discipline.** Multiple Portal processes can log concurrently (daemon + CLI commands + hydrate helpers + signal-hydrate subprocesses). To avoid rotation races (two processes both observing ≥1 MB and both renaming, clobbering `portal.log.old`), **only the daemon rotates.** Every other Portal writer appends to `portal.log` with `O_APPEND` (POSIX guarantees atomic appends for writes smaller than `PIPE_BUF` — trivially satisfied by a one-line log entry). CLI / helper / subprocess writers do not check size and do not rotate. If no daemon is running and log size grows past 1 MB, it continues to grow until the next daemon starts, at which point the daemon's startup sequence performs a rotation check and rotates if needed. This is acceptable because: (a) daemon downtime is rare and short; (b) append-only growth during that window is bounded by how much logging happens without a daemon, which is modest.
+**Concurrent-writer discipline.** Multiple Portal processes can log concurrently (daemon + CLI commands + hydrate helpers + signal-hydrate subprocesses). To avoid rotation races (two processes both observing ≥1 MiB and both renaming, clobbering `portal.log.old`), **only the daemon rotates.** Every other Portal writer appends to `portal.log` with `O_APPEND` (POSIX guarantees atomic appends for writes smaller than `PIPE_BUF` — trivially satisfied by a one-line log entry). CLI / helper / subprocess writers do not check size and do not rotate. If no daemon is running and log size grows past 1 MiB, it continues to grow until the next daemon starts, at which point the daemon's startup sequence performs a rotation check and rotates if needed. This is acceptable because: (a) daemon downtime is rare and short; (b) append-only growth during that window is bounded by how much logging happens without a daemon, which is modest.
 
 ### `portal state status` (Human-Readable Diagnostic)
 

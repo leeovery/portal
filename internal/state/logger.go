@@ -38,9 +38,8 @@ const (
 
 // LogRotateThreshold is the file-size cap at which Logger rotates the current
 // portal.log to portal.log.old. Both the open-time rotation in OpenLogger and
-// the mid-write rotation in maybeRotate use this constant. Matches the spec's
-// "1 MB per file" (interpreted as 1 MiB to match the binary growth pattern of
-// log files). Exported so tests and sibling packages can reference it.
+// the mid-write rotation in maybeRotate use this constant. 1 MiB per file
+// (1,048,576 bytes). Exported so tests and sibling packages can reference it.
 const LogRotateThreshold = 1 * 1024 * 1024 // 1 MiB
 
 // Logger appends single-line, pipe-delimited entries to a log file.
