@@ -16,11 +16,18 @@ A CLI that gives you fast, fuzzy session management from bare shell,
 
 ---
 
-Portal is a CLI that runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, auto-detects git roots for new sessions, and automatically starts the tmux server when needed (great for post-reboot tmux-continuum/resurrect workflows).
+Portal is a CLI that runs at bare shell (before entering tmux) and provides an interactive TUI for picking, creating, and managing tmux sessions. It remembers your projects, resolves paths via aliases and zoxide, auto-detects git roots for new sessions, and automatically starts the tmux server and restores your saved sessions after a reboot.
 
 After [shell integration](#shell-integration), you interact with Portal through two functions: **`x`** (session picker / opener) and **`xctl`** (subcommands like list, kill, alias). The function names are customizable — see `--cmd` below.
 
 ## Install
+
+### Requirements
+
+- **tmux ≥ 3.0** (released Feb 2020) — Portal uses array-indexed global hooks
+  (`set-hook -ga`) which require 3.0+. Earlier versions are not supported;
+  Portal exits with `Portal requires tmux ≥ 3.0 (found <version>). Please upgrade.`
+- **Go** (build from source), **macOS or Linux**.
 
 **macOS**
 
@@ -169,6 +176,13 @@ xctl hooks list                           # list all hooks
 
 Hooks fire via `tmux send-keys` when you attach/open a session. A volatile marker prevents duplicate execution within the same boot cycle — after a reboot the markers are gone and hooks re-fire.
 
+**When hooks fire:** Portal fires resume hooks ONLY when a pane is freshly recreated
+from saved state on reboot recovery — i.e., the tmux server has just been started
+fresh and Portal has restored sessions. Hooks do NOT fire on every detach / reattach
+within a single server lifetime. If a pane still exists, its hook process either
+already ran or was explicitly killed; firing again would double-launch long-running
+processes like `claude --resume`. This is deliberate.
+
 ### `xctl clean`
 
 Remove stale projects whose directories no longer exist on disk, and prune hooks for panes that no longer exist.
@@ -176,6 +190,22 @@ Remove stale projects whose directories no longer exist on disk, and prune hooks
 ```bash
 xctl clean
 ```
+
+### `xctl state`
+
+Inspect or tear down Portal's saved-session state used for reboot restoration.
+
+```bash
+xctl state status                    # daemon + state health
+xctl state cleanup                   # remove hooks + stop daemon
+xctl state cleanup --purge           # also wipe ~/.config/portal/state/
+```
+
+- `xctl state status` — print daemon status, last save time, captured counts,
+  state size, and recent warnings. Exits non-zero when the daemon is down, last
+  save is stale, or warnings are present in the last hour.
+- `xctl state cleanup [--purge]` — kills the daemon and removes Portal's tmux
+  hook entries. With `--purge`, also removes `~/.config/portal/state/`.
 
 ### `xctl version`
 
@@ -208,20 +238,22 @@ portal init bash --cmd p
 
 The TUI has three views: session list, project picker, and file browser.
 
-## Automatic Server Bootstrap
+## Automatic Server Bootstrap & Restoration
 
-Portal automatically starts the tmux server if it isn't already running. This eliminates the need for LaunchAgents or other workarounds to keep tmux alive across reboots — especially useful with tmux-continuum/resurrect.
+Portal automatically starts the tmux server if absent AND restores saved sessions
+in the same bootstrap step. After a reboot, your sessions return with structure,
+layout, zoom, working directories, and scrollback (including ANSI colour). On any
+tmux-needing command, Portal checks the server, starts it if missing, and re-creates
+saved sessions that aren't already live. Scrollback injects lazily when you attach.
+Resume hooks fire on freshly-recreated panes. The TUI shows a "Restoring sessions…"
+loading screen for at most ~1.2s; the CLI is silent.
 
-**How it works:**
+Replaces tmux-continuum/tmux-resurrect for session persistence — uninstall those
+plugins if you have them (or set `@continuum-restore off` for tmux-resurrect/continuum)
+to avoid duplicate restoration.
 
-- On any command that needs tmux (`open`, `list`, `attach`, `kill`), Portal checks for a running server and starts one if missing
-- The **TUI** shows a brief "Starting tmux server..." loading screen while waiting for sessions to restore (1–6s)
-- **CLI commands** print "Starting tmux server..." to stderr, then proceed normally once ready
-- If the server is already running, there's zero overhead — commands execute immediately
-
-Portal is plugin-agnostic: it doesn't depend on continuum or resurrect. It simply starts the server and waits briefly for any session restoration to complete.
-
-Pair this with [resume hooks](#xctl-hooks) to automatically re-run pane commands (dev servers, editors, etc.) after a reboot.
+Pair this with [resume hooks](#xctl-hooks) to automatically re-run pane commands
+(dev servers, editors, etc.) after a reboot.
 
 ## Configuration
 
@@ -232,8 +264,40 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
+| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (diagnostics). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
+
+## Privacy Considerations
+
+Portal persists pane scrollback to `~/.config/portal/state/` (override via
+`PORTAL_STATE_DIR`) so it can rehydrate sessions after a reboot. Files are written
+mode `0600`, directories `0700`.
+
+- Same local-filesystem trust model as your shell history — anything visible in
+  your terminal can end up in the saved state.
+- **No encryption at rest.** If a pane displays secrets (tokens, credentials,
+  diffs of sensitive files), they will be captured.
+- **Mitigations:** for sensitive panes, run `tmux set-option -w history-limit 0`
+  to prevent scrollback from accumulating, or `tmux clear-history` on demand
+  (run before the next save, which lands at most ~30s later).
+- v1 has no per-session opt-out; tmux-native workarounds above are the
+  supported path.
+
+## Uninstall
+
+Two paths depending on whether you want to keep your saved state:
+
+- **Just remove the binary** — `brew uninstall portal` or `rm $(which portal)`.
+  The defensive `command -v portal` guard in the registered tmux hooks
+  short-circuits when the binary is gone, so tmux keeps running normally. Your
+  saved state is preserved; reinstalling Portal picks up where it left off.
+- **Explicit teardown** — run `portal state cleanup` (kills the daemon and
+  removes Portal's tmux hook entries), or `portal state cleanup --purge` to
+  also wipe saved state under `~/.config/portal/state/`. Then uninstall the
+  binary. Use `--purge` for a completely clean slate. Non-state config
+  (`hooks.json`, `projects.json`, `aliases`) is preserved either way — remove
+  manually if desired.
 
 ## License
 
