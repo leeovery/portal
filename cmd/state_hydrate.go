@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -35,7 +36,13 @@ var ErrHydrateTimeout = errors.New("fifo open timeout")
 
 // hydrateConfig groups every dependency runHydrate needs. Tests inject stubs
 // for ExecShell and OpenFIFO; HandleTimeout / HandleFileMissing are filled in
-// by tasks 3-9 and 3-10. HookKey is reserved for Phase 4 hook lookup.
+// by tasks 3-9 and 3-10. HookStore + HookKey drive the Phase 4 hook lookup —
+// HookKey is the saved structural identifier (per spec "Helper hook lookup
+// under index drift") and is used verbatim, not the FIFO-derived live key.
+//
+// ExecShell takes (prog, args) so the hook-firing path can hand off to
+// `sh -c '<HOOK>; exec $SHELL'` with the user-registered command living in
+// its own argv slot — sh's parser handles any embedded quotes.
 type hydrateConfig struct {
 	FIFO              string
 	File              string
@@ -43,7 +50,8 @@ type hydrateConfig struct {
 	Stdout            io.Writer
 	Client            *tmux.Client
 	Logger            *state.Logger
-	ExecShell         func(shell string)
+	HookStore         *hooks.Store
+	ExecShell         func(prog string, args []string)
 	OpenFIFO          func(path string, timeout time.Duration) (*os.File, error)
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
@@ -141,7 +149,10 @@ func runHydrate(cfg hydrateConfig) error {
 			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
 				return hErr
 			}
-			execShellAndExit(cfg)
+			// File-missing path fires on-resume hooks per spec step 4e
+			// ("Continue to step h (hook/shell exec)"). The handler has
+			// already cleared the marker; lookup happens here, then exec.
+			execShellOrHookAndExit(cfg)
 			return nil
 		}
 		return fmt.Errorf("open scrollback %s: %w", cfg.File, err)
@@ -157,7 +168,9 @@ func runHydrate(cfg hydrateConfig) error {
 			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
 				return hErr
 			}
-			execShellAndExit(cfg)
+			// Mid-stream Copy failure shares the file-missing recovery
+			// (handler already cleared the marker); fire hooks then exec.
+			execShellOrHookAndExit(cfg)
 			return nil
 		}
 		return err
@@ -179,8 +192,11 @@ func runHydrate(cfg hydrateConfig) error {
 		cfg.Logger.Warn("hydrate", "unset marker %s: %v", markerName, err)
 	}
 
-	// 9. Exec the user shell. Phase 4 will add hook chaining here.
-	execShellAndExit(cfg)
+	// 9. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
+	// not live paneKey — preserves hooks across base-index drift) and exec
+	// either `sh -c '<HOOK>; exec $SHELL'` or bare $SHELL. Lookup happens
+	// AFTER the 100ms settle sleep and AFTER the marker-unset above.
+	execShellOrHookAndExit(cfg)
 	return nil // unreachable in production (syscall.Exec replaces process)
 }
 
@@ -190,11 +206,55 @@ func runHydrate(cfg hydrateConfig) error {
 // (syscall.Exec replaces the process); in tests it captures the target and
 // returns.
 func execShellAndExit(cfg hydrateConfig) {
+	shell := resolveShell()
+	cfg.ExecShell(shell, []string{shell})
+}
+
+// resolveShell reads $SHELL with /bin/sh fallback. Single resolver shared by
+// the bare-shell exec path and the hook-chain exec path so both branches see
+// the same shell selection logic.
+func resolveShell() string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	cfg.ExecShell(shell)
+	return shell
+}
+
+// execShellOrHookAndExit is the post-hydration terminal exec for the
+// signal-arrived and file-missing paths (NOT the timeout path — see spec
+// "Helper Behavior on Startup", step 3e: "exec $SHELL (bare shell; no hook
+// firing on this path)").
+//
+// On any of: nil HookStore, lookup error, or no hook registered → exec bare
+// $SHELL via execShellAndExit. On a registered non-empty on-resume command,
+// exec `/bin/sh -c '<cmd>; exec $SHELL'`. The hook command sits in its own
+// argv slot (`sh -c <cmd>`) so sh's parser handles any embedded quotes —
+// Portal does no string-interpolation of the user-registered command.
+//
+// Lookup errors degrade silently to bare $SHELL with a single WARN log line
+// so the pane lands in a usable shell rather than failing closed when
+// hooks.json is unreadable.
+func execShellOrHookAndExit(cfg hydrateConfig) {
+	if cfg.HookStore == nil {
+		execShellAndExit(cfg)
+		return
+	}
+	command, found, err := hooks.LookupOnResume(cfg.HookStore, cfg.HookKey)
+	if err != nil {
+		if cfg.Logger != nil {
+			cfg.Logger.Warn("hydrate", "lookup on-resume hook for %s: %v", cfg.HookKey, err)
+		}
+		execShellAndExit(cfg)
+		return
+	}
+	if !found {
+		execShellAndExit(cfg)
+		return
+	}
+	shell := resolveShell()
+	chained := command + "; exec " + shell
+	cfg.ExecShell("/bin/sh", []string{"sh", "-c", chained})
 }
 
 // handleHydrateTimeout is invoked when openFIFOWithTimeout returns
@@ -266,11 +326,13 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	return nil
 }
 
-// defaultExecShell is the production ExecShell seam: hand the process off to
-// $SHELL via syscall.Exec. syscall.Exec only returns on error; if it does,
-// the helper exits 1 so the pane closes rather than dangling without a shell.
-func defaultExecShell(shell string) {
-	_ = syscall.Exec(shell, []string{shell}, os.Environ())
+// defaultExecShell is the production ExecShell seam: hand the process off via
+// syscall.Exec. The (prog, args) shape lets callers pass either a bare-shell
+// invocation ([prog]) or a hook-chain invocation (`/bin/sh`, [`sh`, `-c`,
+// `<cmd>; exec $SHELL`]). syscall.Exec only returns on error; if it does, the
+// helper exits 1 so the pane closes rather than dangling without a shell.
+func defaultExecShell(prog string, args []string) {
+	_ = syscall.Exec(prog, args, os.Environ())
 	os.Exit(1)
 }
 
@@ -293,6 +355,12 @@ var stateHydrateCmd = &cobra.Command{
 		file, _ := cmd.Flags().GetString("file")
 		hookKey, _ := cmd.Flags().GetString("hook-key")
 
+		// loadHookStore() resolves the hooks.json path via configFilePath; a
+		// failure means the path itself could not be derived (e.g. no HOME).
+		// The hook lookup gracefully degrades to bare $SHELL on a nil store,
+		// so swallowing the error here trades a missing hook for an exec'd
+		// shell — better than failing closed in the per-pane helper.
+		store, _ := loadHookStore()
 		cfg := hydrateConfig{
 			FIFO:              fifo,
 			File:              file,
@@ -300,6 +368,7 @@ var stateHydrateCmd = &cobra.Command{
 			Stdout:            cmd.OutOrStdout(),
 			Client:            tmux.NewClient(&tmux.RealCommander{}),
 			Logger:            nil,
+			HookStore:         store,
 			ExecShell:         defaultExecShell,
 			OpenFIFO:          openFIFOWithTimeout,
 			HandleFileMissing: handleHydrateFileMissing,

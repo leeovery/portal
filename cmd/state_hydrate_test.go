@@ -3,16 +3,19 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -27,20 +30,24 @@ func makeFIFO(t *testing.T, dir, name string) string {
 	return path
 }
 
-// stubExecShell records the shell argument it was called with. Production
-// implementation calls syscall.Exec; the stub just captures.
+// stubExecShell records the prog and argv passed to ExecShell. Production
+// implementation calls syscall.Exec; the stub just captures. The signature
+// `func(prog string, args []string)` mirrors syscall.Exec's prog+argv shape so
+// hook-chain tests can assert "/bin/sh", []string{"sh", "-c", "<cmd>; exec <SHELL>"}.
 type stubExecShell struct {
 	mu     sync.Mutex
 	called bool
 	target string
+	args   []string
 }
 
-func (s *stubExecShell) fn() func(string) {
-	return func(shell string) {
+func (s *stubExecShell) fn() func(string, []string) {
+	return func(prog string, args []string) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.called = true
-		s.target = shell
+		s.target = prog
+		s.args = args
 	}
 }
 
@@ -1068,7 +1075,7 @@ func instantTimeoutOpenFIFO(_ string, _ time.Duration) (*os.File, error) {
 // timeoutCfg builds a hydrateConfig wired for the production timeout path:
 // OpenFIFO returns ErrHydrateTimeout immediately and HandleTimeout points at
 // handleHydrateTimeout. Callers override fields as needed.
-func timeoutCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Writer, cmder *recordingCommander, exec func(string), logger *state.Logger) hydrateConfig {
+func timeoutCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Writer, cmder *recordingCommander, exec func(string, []string), logger *state.Logger) hydrateConfig {
 	t.Helper()
 	return hydrateConfig{
 		FIFO:          fifo,
@@ -1256,5 +1263,541 @@ func TestHydrate_TimeoutToleratesMissingFIFOSilently(t *testing.T) {
 
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v (FIFO os.Remove error must be tolerated)", err)
+	}
+}
+
+// seedHookStore writes a hooks.json containing the given map and returns a
+// *hooks.Store pointing at it. Used by hook-firing tests to drive
+// LookupOnResume against a real on-disk store.
+func seedHookStore(t *testing.T, dir string, contents map[string]map[string]string) *hooks.Store {
+	t.Helper()
+	path := filepath.Join(dir, "hooks.json")
+	data, err := json.Marshal(contents)
+	if err != nil {
+		t.Fatalf("marshal hooks: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write hooks.json: %v", err)
+	}
+	return hooks.NewStore(path)
+}
+
+func TestHydrate_SignalArrived_ExecsHookChainWhenHookRegistered(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-work__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"work:0.0": {"on-resume": "echo hi"},
+	})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "work:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		HookStore: store,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/sh" {
+		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
+	}
+	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
+	}
+}
+
+func TestHydrate_SignalArrived_ExecsBareShellWhenNoHookRegistered(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-nohook__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	// Empty hooks file: no entries.
+	store := seedHookStore(t, dir, map[string]map[string]string{})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "nohook:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		HookStore: store,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
+	}
+}
+
+func TestHydrate_FileMissing_ExecsHookChainWhenHookRegistered(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fmh__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+	// Do NOT create scrollback file — drives the file-missing branch.
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"fmh:0.0": {"on-resume": "claude --resume abc"},
+	})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fmh:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		HookStore:         store,
+		ExecShell:         exec.fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/sh" {
+		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
+	}
+	want := []string{"sh", "-c", "claude --resume abc; exec /bin/zsh"}
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
+	}
+}
+
+func TestHydrate_FileMissing_ExecsBareShellWhenNoHookRegistered(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fmn__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fmn:0.0",
+		Stdout:            io.Discard,
+		Client:            tmux.NewClient(&recordingCommander{}),
+		HookStore:         store,
+		ExecShell:         exec.fn(),
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
+	}
+}
+
+func TestHydrate_Timeout_NeverFiresHookEvenIfRegistered(t *testing.T) {
+	// On the timeout path, hooks must NOT fire even when one is registered for
+	// the pane's hook-key. The de-facto verification is that ExecShell receives
+	// bare-shell argv ([shell]), NOT a hook-chained argv.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tnf__0.0.fifo")
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"tnf:0.0": {"on-resume": "should-not-fire"},
+	})
+
+	exec := &stubExecShell{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tnf:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
+	cfg.HookStore = store
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh (bare shell on timeout)", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh] (no hook chain on timeout)", exec.args)
+	}
+	// Defensive: the hook command string must not appear anywhere in the argv.
+	for _, a := range exec.args {
+		if strings.Contains(a, "should-not-fire") {
+			t.Errorf("hook command leaked into timeout-path argv: %q", a)
+		}
+	}
+}
+
+func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
+	// Drive a LookupOnResume I/O failure by pointing the store at a path that
+	// is a directory rather than a regular file → os.ReadFile returns EISDIR.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-le__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	// hooks.json is a directory, not a file.
+	hooksDir := filepath.Join(dir, "hooks.json")
+	if err := os.Mkdir(hooksDir, 0o700); err != nil {
+		t.Fatalf("mkdir hooks.json: %v", err)
+	}
+	store := hooks.NewStore(hooksDir)
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	t.Setenv("SHELL", "/bin/zsh")
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "le:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		Logger:    logger,
+		HookStore: store,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh on lookup error", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
+	}
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	if !strings.Contains(contents, "lookup on-resume hook") {
+		t.Errorf("log missing degradation warning phrase \"lookup on-resume hook\": %q", contents)
+	}
+	if !strings.Contains(contents, "le:0.0") {
+		t.Errorf("log missing hook-key in warning: %q", contents)
+	}
+}
+
+func TestHydrate_LooksUpHooksByHookKeyVerbatimNotByLivePaneKey(t *testing.T) {
+	// FIFO basename derives livePaneKey "live__1.1" via paneKeyFromFIFOPath, but
+	// HookKey is the saved structural identifier "saved:0.0" — what the spec
+	// pins for hooks lookup under base-index drift. The lookup must use HookKey
+	// (so the saved-key hook fires), not the live paneKey (no entry under which).
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-live__1.1.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"saved:0.0": {"on-resume": "echo saved"},
+		// No entry under the FIFO-derived live paneKey "live__1.1".
+	})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "saved:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		HookStore: store,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if exec.target != "/bin/sh" {
+		t.Errorf("ExecShell prog = %q, want /bin/sh (hook chain)", exec.target)
+	}
+	want := []string{"sh", "-c", "echo saved; exec /bin/zsh"}
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Errorf("ExecShell args = %#v, want %#v (lookup must use HookKey verbatim)", exec.args, want)
+	}
+}
+
+func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
+	// Single-quote safety: the hook command string sits in its own argv slot
+	// of `sh -c <cmd>` — no manual escaping, no shell-command-line interpolation.
+	// `sh`'s own parser handles embedded single quotes.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-q__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	rawCmd := "echo 'it works' && echo \"\\$x\""
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"q:0.0": {"on-resume": rawCmd},
+	})
+
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "q:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		HookStore: store,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if exec.target != "/bin/sh" {
+		t.Fatalf("ExecShell prog = %q, want /bin/sh", exec.target)
+	}
+	if len(exec.args) != 3 {
+		t.Fatalf("ExecShell args len = %d, want 3 (sh, -c, <cmd>)", len(exec.args))
+	}
+	if exec.args[0] != "sh" || exec.args[1] != "-c" {
+		t.Errorf("ExecShell args[0:2] = %v, want [sh -c]", exec.args[0:2])
+	}
+	wantArg2 := rawCmd + "; exec /bin/zsh"
+	if exec.args[2] != wantArg2 {
+		t.Errorf("ExecShell args[2] = %q, want %q (verbatim cmd in single argv slot)", exec.args[2], wantArg2)
+	}
+}
+
+func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.T) {
+	// On the signal-arrived path the spec pins the order:
+	//   dump → 100ms sleep → set-option -su <marker> → hooks lookup → exec.
+	// Verified by recording when the marker-unset occurs and asserting it
+	// happens BEFORE LookupOnResume runs. The recorder uses a hooks-store
+	// pointed at a sentinel hooks.json whose first read is timestamped via
+	// a wrapping countingCommander on tmux + a custom hookStore subdir whose
+	// access time is checked relative to the marker-unset timestamp.
+	//
+	// Concretely: capture the timestamps of (a) the set-option -su call and
+	// (b) the os.Stat-able hooks.json read. The set-option must precede the
+	// hooks read.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-ord__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"ord:0.0": {"on-resume": "echo ord"},
+	})
+
+	var (
+		mu            sync.Mutex
+		markerUnsetAt time.Time
+	)
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "set-option" && args[1] == "-su" && args[2] == "@portal-skeleton-ord__0.0" {
+				mu.Lock()
+				markerUnsetAt = time.Now()
+				mu.Unlock()
+			}
+			return "", nil
+		},
+	}
+
+	var execAt time.Time
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "ord:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(cmder),
+		HookStore: store,
+		ExecShell: func(prog string, args []string) {
+			execAt = time.Now()
+		},
+		OpenFIFO: openFIFOWithTimeout,
+	}
+	startSleep := time.Now()
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if markerUnsetAt.IsZero() {
+		t.Fatal("set-option -su was never invoked")
+	}
+	if execAt.IsZero() {
+		t.Fatal("ExecShell was never invoked")
+	}
+	if !markerUnsetAt.After(startSleep.Add(99 * time.Millisecond)) {
+		t.Errorf("marker-unset at %v, expected >= startSleep + 100ms (= %v)", markerUnsetAt, startSleep.Add(100*time.Millisecond))
+	}
+	if !execAt.After(markerUnsetAt) {
+		t.Errorf("ExecShell (%v) did not occur after marker-unset (%v) — lookup must follow marker-unset", execAt, markerUnsetAt)
+	}
+}
+
+func TestHydrate_FileMissing_LookupHappensAfterMarkerUnset(t *testing.T) {
+	// On the file-missing path the spec pins the order:
+	//   preamble → set-option -su <marker> → hooks lookup → exec.
+	// (No 100ms sleep — nothing was dumped to settle.)
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-fmo__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb")
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	store := seedHookStore(t, dir, map[string]map[string]string{
+		"fmo:0.0": {"on-resume": "echo fmo"},
+	})
+
+	var (
+		mu            sync.Mutex
+		markerUnsetAt time.Time
+	)
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "set-option" && args[1] == "-su" && args[2] == "@portal-skeleton-fmo__0.0" {
+				mu.Lock()
+				markerUnsetAt = time.Now()
+				mu.Unlock()
+			}
+			return "", nil
+		},
+	}
+
+	var execAt time.Time
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "fmo:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(cmder),
+		HookStore: store,
+		ExecShell: func(prog string, args []string) {
+			execAt = time.Now()
+		},
+		OpenFIFO:          openFIFOWithTimeout,
+		HandleFileMissing: handleHydrateFileMissing,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if markerUnsetAt.IsZero() {
+		t.Fatal("set-option -su was never invoked on file-missing path")
+	}
+	if execAt.IsZero() {
+		t.Fatal("ExecShell was never invoked")
+	}
+	if !execAt.After(markerUnsetAt) {
+		t.Errorf("ExecShell (%v) did not occur after marker-unset (%v) on file-missing path", execAt, markerUnsetAt)
+	}
+}
+
+func TestHydrate_NilHookStoreDegradesToBareShellOnSignalArrived(t *testing.T) {
+	// Defensive: nil HookStore (production path when loadHookStore failed) must
+	// not panic and must exec bare $SHELL.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-nil__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	_ = os.WriteFile(scrollback, []byte(""), 0o600)
+
+	go func() {
+		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+
+	t.Setenv("SHELL", "/bin/zsh")
+	exec := &stubExecShell{}
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "nil:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		HookStore: nil,
+		ExecShell: exec.fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh (nil store → bare shell)", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
 	}
 }
