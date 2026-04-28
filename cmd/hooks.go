@@ -9,16 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ServerOptionSetter sets a tmux server-level option.
-type ServerOptionSetter interface {
-	SetServerOption(name, value string) error
-}
-
-// ServerOptionDeleter deletes a tmux server-level option.
-type ServerOptionDeleter interface {
-	DeleteServerOption(name string) error
-}
-
 // StructuralKeyResolver resolves a tmux pane ID (e.g. "%3") to its structural
 // key (e.g. "my-session:0.0") by querying tmux for session name, window index,
 // and pane index.
@@ -32,9 +22,7 @@ var hooksDeps *HooksDeps
 
 // HooksDeps allows injecting dependencies for testing.
 type HooksDeps struct {
-	OptionSetter  ServerOptionSetter
-	OptionDeleter ServerOptionDeleter
-	KeyResolver   StructuralKeyResolver
+	KeyResolver StructuralKeyResolver
 }
 
 // requireTmuxPane reads TMUX_PANE from the environment and returns an
@@ -127,21 +115,7 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		if err := store.Set(structuralKey, "on-resume", command); err != nil {
-			return err
-		}
-
-		var setter ServerOptionSetter
-		if hooksDeps != nil {
-			setter = hooksDeps.OptionSetter
-		} else {
-			setter = buildHooksTmuxClient()
-		}
-		if err := setter.SetServerOption(hooks.MarkerName(structuralKey), "1"); err != nil {
-			return err
-		}
-
-		return nil
+		return store.Set(structuralKey, "on-resume", command)
 	},
 }
 
@@ -177,21 +151,7 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
-		if err := store.Remove(structuralKey, "on-resume"); err != nil {
-			return err
-		}
-
-		var deleter ServerOptionDeleter
-		if hooksDeps != nil {
-			deleter = hooksDeps.OptionDeleter
-		} else {
-			deleter = buildHooksTmuxClient()
-		}
-		if err := deleter.DeleteServerOption(hooks.MarkerName(structuralKey)); err != nil {
-			return err
-		}
-
-		return nil
+		return store.Remove(structuralKey, "on-resume")
 	},
 }
 
