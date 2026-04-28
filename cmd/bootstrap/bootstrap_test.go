@@ -245,21 +245,27 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 	}
 }
 
-func TestOrchestratorRun_continuesPastEnsureSaverFailureAndRecordsLastSaverErr(t *testing.T) {
+func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *testing.T) {
 	sentinel := errors.New("saver boom")
 	r := &stepRecorder{EnsureSaverErr: sentinel}
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, _, err := o.Run(context.Background())
+	_, warnings, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run must not return saver failures; got %v", err)
 	}
-	if o.LastSaverErr == nil {
-		t.Fatal("expected LastSaverErr to be set, got nil")
+	wantWarning := SaverDownWarning()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
 	}
-	if !errors.Is(o.LastSaverErr, sentinel) {
-		t.Errorf("LastSaverErr = %v, want %v", o.LastSaverErr, sentinel)
+	if len(warnings[0].Lines) != len(wantWarning.Lines) {
+		t.Fatalf("warning Lines len = %d, want %d", len(warnings[0].Lines), len(wantWarning.Lines))
+	}
+	for i := range wantWarning.Lines {
+		if warnings[0].Lines[i] != wantWarning.Lines[i] {
+			t.Errorf("warning Lines[%d] = %q, want %q", i, warnings[0].Lines[i], wantWarning.Lines[i])
+		}
 	}
 	want := []string{
 		"EnsureServer",
@@ -439,34 +445,28 @@ func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T
 	logger := &recordingLogger{}
 	o := newOrchestrator(r, logger)
 
-	_, _, err := o.Run(context.Background())
+	_, warnings, err := o.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run must not surface saver failures; got %v", err)
 	}
 
-	// Regression: saver failure must travel through LastSaverErr and the
-	// Warn logger — not the FatalError type that triggers stderr+exit.
+	// Regression: saver failure must travel through the warnings slice and
+	// the Warn logger — not the FatalError type that triggers stderr+exit.
 	var fatal *FatalError
-	if errors.As(o.LastSaverErr, &fatal) {
-		t.Errorf("LastSaverErr unexpectedly wraps *FatalError: %v", o.LastSaverErr)
+	if errors.As(err, &fatal) {
+		t.Errorf("Run unexpectedly returned *FatalError on soft saver failure: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("warnings len = %d, want 1; got %#v", len(warnings), warnings)
+	}
+	if warnings[0].Lines[0] != SaverDownWarning().Lines[0] {
+		t.Errorf("warnings[0] = %q, want SaverDownWarning", warnings[0].Lines[0])
 	}
 	if len(logger.errors) != 0 {
 		t.Errorf("logger.Error must NOT be called for soft saver failure; got %v", logger.errors)
 	}
 	if len(logger.warnings) == 0 {
 		t.Error("expected logger.Warn to be called for soft saver failure")
-	}
-}
-
-func TestSaverDownError_unwrapsCause(t *testing.T) {
-	cause := errors.New("underlying")
-	wrapped := &SaverDownError{Cause: cause}
-
-	if !errors.Is(wrapped, cause) {
-		t.Errorf("errors.Is(wrapped, cause) = false, want true")
-	}
-	if !strings.Contains(wrapped.Error(), "underlying") {
-		t.Errorf("Error() = %q; expected to mention cause", wrapped.Error())
 	}
 }
 

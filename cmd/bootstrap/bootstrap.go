@@ -4,7 +4,7 @@
 //  1. EnsureServer
 //  2. RegisterPortalHooks
 //  3. Set @portal-restoring (MUST precede step 4)
-//  4. EnsureSaver (best-effort; SaverDownError on failure)
+//  4. EnsureSaver (best-effort; SaverDownWarning on failure)
 //  5. Restore
 //  6. Clear @portal-restoring
 //  7. CleanStale (best-effort)
@@ -13,7 +13,6 @@ package bootstrap
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/leeovery/portal/internal/state"
 )
@@ -105,21 +104,6 @@ func (noopLogger) Warn(component, format string, args ...any) {}
 // Error is a no-op.
 func (noopLogger) Error(component, format string, args ...any) {}
 
-// SaverDownError indicates that step 4 (EnsureSaver) failed. Bootstrap
-// continues past it — saves are paused, but the user is not blocked. The
-// concrete value is recorded on Orchestrator.LastSaverErr after Run.
-type SaverDownError struct {
-	Cause error
-}
-
-// Error returns a human-readable message describing the saver failure.
-func (e *SaverDownError) Error() string {
-	return fmt.Sprintf("portal save daemon failed to start: %v", e.Cause)
-}
-
-// Unwrap exposes the underlying cause for errors.Is / errors.As.
-func (e *SaverDownError) Unwrap() error { return e.Cause }
-
 // Orchestrator runs the eight-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
@@ -132,14 +116,6 @@ type Orchestrator struct {
 	Restore   Restorer
 	Clean     StaleCleaner
 	Logger    Logger // nil tolerated; Run substitutes a no-op default
-
-	// LastSaverErr is populated when step 4 (EnsureSaver) fails. Run
-	// continues past the failure (per spec: saves paused, user not
-	// blocked); the caller can read this field afterwards to decide
-	// whether to surface a SaverDownError to observability. Retained
-	// alongside the Phase 6 Warnings []Warning surface for backwards
-	// compatibility with Phase 5 callers; both can coexist.
-	LastSaverErr error
 }
 
 // Run executes the eight bootstrap steps in spec order. It returns the
@@ -187,7 +163,6 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	// Step 4 — EnsureSaver (best-effort).
 	if err := o.Saver.EnsureSaver(); err != nil {
-		o.LastSaverErr = &SaverDownError{Cause: err}
 		warnings = append(warnings, SaverDownWarning())
 		o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
 		// Continue per spec — saves paused, user not blocked.
