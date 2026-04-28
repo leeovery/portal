@@ -25,9 +25,32 @@ var portalCommandSubstrings = []string{
 // hooks. UnregisterPortalHooks scopes its removals to these events; matching
 // command substrings on any other event (e.g. window-renamed) are ignored.
 //
-// Order: save-trigger events first, then hydration-trigger events — mirrors
-// the registration order in RegisterPortalHooks.
-var portalEvents = append(append([]string{}, saveTriggerEvents...), hydrationTriggerEvents...)
+// Order: save-trigger events first, then hydration-trigger events, then
+// migrate-rename — mirrors the registration order in RegisterPortalHooks.
+// Computed as the deduped union of all three category slices so future
+// category additions in RegisterPortalHooks automatically flow through to
+// the unregister side. Without this, the unregister side relied on the
+// incidental overlap between saveTriggerEvents and migrateRenameEvents
+// (both contain session-renamed) — a future event added only to the
+// migrate-rename list would silently leak Portal-owned hooks on cleanup.
+var portalEvents = dedupedEventList(saveTriggerEvents, hydrationTriggerEvents, migrateRenameEvents)
+
+// dedupedEventList returns the concatenation of the input slices with
+// duplicates filtered out, preserving first-seen order.
+func dedupedEventList(slices ...[]string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, s := range slices {
+		for _, e := range s {
+			if _, ok := seen[e]; ok {
+				continue
+			}
+			seen[e] = struct{}{}
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // UnregisterPortalHooks removes every Portal-owned hook entry from the global
 // tmux hook table.

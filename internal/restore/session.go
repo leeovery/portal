@@ -311,7 +311,7 @@ func (r *SessionRestorer) warnOnPaneKeyDrift(name string, position int, predicte
 // the given live pane. Failures are logged and ignored so that one bad pane
 // does not block markers for the rest.
 func (r *SessionRestorer) setSkeletonMarker(sessionName, liveKey string) {
-	markerName := "@portal-skeleton-" + liveKey
+	markerName := state.SkeletonMarkerPrefix + liveKey
 	if err := r.Client.SetServerOption(markerName, "1"); err != nil && r.Logger != nil {
 		r.Logger.Warn(state.ComponentRestore, "set-option %s on %q: %v", markerName, sessionName, err)
 	}
