@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 // Filenames inside the state directory. Kept private — callers should compose
@@ -34,7 +36,7 @@ func Dir() (string, error) {
 		return envPath, nil
 	}
 
-	base, err := xdgConfigBase()
+	base, err := xdg.ConfigBase()
 	if err != nil {
 		return "", err
 	}
@@ -107,18 +109,4 @@ func PaneKeyFromFIFOPath(path string) string {
 	name = strings.TrimSuffix(name, ".fifo")
 	name = strings.TrimPrefix(name, "hydrate-")
 	return name
-}
-
-// xdgConfigBase mirrors cmd.xdgConfigBase: it returns $XDG_CONFIG_HOME if set
-// and non-empty, otherwise $HOME/.config. Duplicated here because the cmd
-// package cannot be imported by internal packages.
-func xdgConfigBase() (string, error) {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return xdg, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine home directory: %w", err)
-	}
-	return filepath.Join(home, ".config"), nil
 }

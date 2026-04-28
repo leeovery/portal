@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/leeovery/portal/internal/xdg"
 )
 
 // migrateConfigFile moves a config file from oldPath to newPath if oldPath
@@ -37,8 +39,8 @@ func migrateConfigFile(oldPath, newPath string) {
 
 // configFilePath returns a config file path by checking the given environment
 // variable first. If the env var is set and non-empty, its value is returned.
-// Otherwise, it uses XDG-compliant resolution: XDG_CONFIG_HOME if set,
-// falling back to ~/.config, then appends portal/<filename>.
+// Otherwise, it uses XDG-compliant resolution via xdg.ConfigBase, then appends
+// portal/<filename>.
 // Before returning, it attempts a one-shot migration from the old macOS
 // config path (~/Library/Application Support/portal/) if the file exists there.
 func configFilePath(envVar, filename string) (string, error) {
@@ -51,22 +53,14 @@ func configFilePath(envVar, filename string) (string, error) {
 		return "", fmt.Errorf("failed to determine home directory: %w", err)
 	}
 
-	configDir := xdgConfigBase(homeDir)
+	configDir, err := xdg.ConfigBase()
+	if err != nil {
+		return "", err
+	}
 	newPath := filepath.Join(configDir, "portal", filename)
 
 	oldPath := filepath.Join(homeDir, "Library", "Application Support", "portal", filename)
 	migrateConfigFile(oldPath, newPath)
 
 	return newPath, nil
-}
-
-// xdgConfigBase returns the XDG-compliant base config directory.
-// It checks XDG_CONFIG_HOME first; if unset or empty, falls back to
-// homeDir/.config.
-func xdgConfigBase(homeDir string) string {
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return xdg
-	}
-
-	return filepath.Join(homeDir, ".config")
 }
