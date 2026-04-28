@@ -1,6 +1,6 @@
 package cmd
 
-// Tests in this file mutate package-level state (bootstrapDeps) and MUST NOT use t.Parallel.
+// Tests in this file mutate package-level state (waiterFunc, bootstrapDeps) and MUST NOT use t.Parallel.
 
 import (
 	"bytes"
@@ -10,6 +10,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// installStubWaiter replaces the package-level waiterFunc with stub for the
+// duration of the test, restoring the original on cleanup.
+func installStubWaiter(t *testing.T, stub func(*cobra.Command)) {
+	t.Helper()
+	prev := waiterFunc
+	waiterFunc = stub
+	t.Cleanup(func() { waiterFunc = prev })
+}
+
 func TestBootstrapWait(t *testing.T) {
 	t.Run("prints starting message to stderr when server was started", func(t *testing.T) {
 		cmd := &cobra.Command{}
@@ -18,12 +27,7 @@ func TestBootstrapWait(t *testing.T) {
 		stderr := new(bytes.Buffer)
 		cmd.SetErr(stderr)
 
-		waiterCalled := false
-		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper: &mockServerBootstrapper{},
-			Waiter:       func() { waiterCalled = true },
-		}
-		t.Cleanup(func() { bootstrapDeps = nil })
+		installStubWaiter(t, func(*cobra.Command) {})
 
 		bootstrapWait(cmd)
 
@@ -31,7 +35,6 @@ func TestBootstrapWait(t *testing.T) {
 		if stderr.String() != want {
 			t.Errorf("stderr = %q, want %q", stderr.String(), want)
 		}
-		_ = waiterCalled // checked in separate test
 	})
 
 	t.Run("calls waiter when server was started", func(t *testing.T) {
@@ -41,11 +44,7 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(new(bytes.Buffer))
 
 		waiterCalled := false
-		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper: &mockServerBootstrapper{},
-			Waiter:       func() { waiterCalled = true },
-		}
-		t.Cleanup(func() { bootstrapDeps = nil })
+		installStubWaiter(t, func(*cobra.Command) { waiterCalled = true })
 
 		bootstrapWait(cmd)
 
@@ -61,19 +60,13 @@ func TestBootstrapWait(t *testing.T) {
 		stderr := new(bytes.Buffer)
 		cmd.SetErr(stderr)
 
-		waiterCalled := false
-		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper: &mockServerBootstrapper{},
-			Waiter:       func() { waiterCalled = true },
-		}
-		t.Cleanup(func() { bootstrapDeps = nil })
+		installStubWaiter(t, func(*cobra.Command) {})
 
 		bootstrapWait(cmd)
 
 		if stderr.String() != "" {
 			t.Errorf("stderr = %q, want empty", stderr.String())
 		}
-		_ = waiterCalled
 	})
 
 	t.Run("does not call waiter when server was not started", func(t *testing.T) {
@@ -83,11 +76,7 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(new(bytes.Buffer))
 
 		waiterCalled := false
-		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper: &mockServerBootstrapper{},
-			Waiter:       func() { waiterCalled = true },
-		}
-		t.Cleanup(func() { bootstrapDeps = nil })
+		installStubWaiter(t, func(*cobra.Command) { waiterCalled = true })
 
 		bootstrapWait(cmd)
 
@@ -103,11 +92,7 @@ func TestBootstrapWait(t *testing.T) {
 		cmd.SetErr(stderr)
 
 		waiterCalled := false
-		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper: &mockServerBootstrapper{},
-			Waiter:       func() { waiterCalled = true },
-		}
-		t.Cleanup(func() { bootstrapDeps = nil })
+		installStubWaiter(t, func(*cobra.Command) { waiterCalled = true })
 
 		bootstrapWait(cmd)
 

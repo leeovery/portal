@@ -998,6 +998,7 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	// When a destination is provided but resolves to FallbackResult,
 	// bootstrapWait has already run. The fallback openTUI call must
 	// pass serverStarted=false to avoid a second wait.
+	installStubWaiter(t, func(*cobra.Command) {})
 	mock := &mockServerBootstrapper{started: true}
 	client := tmux.NewClient(&stubCommander{})
 	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock, Client: client}
