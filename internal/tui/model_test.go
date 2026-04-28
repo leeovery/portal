@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -7811,4 +7812,344 @@ func TestLoadingPage(t *testing.T) {
 			t.Errorf("expected PageSessions (sessions exist), got %d", updated.ActivePage())
 		}
 	})
+}
+
+// TestBootstrapWarningBuffering verifies that warnings carried on
+// BootstrapCompleteMsg are buffered on the model and flushed to stderr
+// (with alt-screen toggle) only after the loading page dismisses.
+//
+// Tests in this function manipulate the package-level test seam
+// flushWarningsToStderr and MUST NOT use t.Parallel.
+func TestBootstrapWarningBuffering(t *testing.T) {
+	t.Run("BootstrapCompleteMsg.Warnings buffers into bufferedWarnings", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		warnings := []tui.BootstrapWarning{
+			{Lines: []string{"warn 1 line 1", "warn 1 line 2"}},
+			{Lines: []string{"warn 2 line 1"}},
+		}
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+
+		updated := model.(tui.Model)
+		got := updated.BufferedWarnings()
+		if len(got) != 2 {
+			t.Fatalf("BufferedWarnings len = %d, want 2", len(got))
+		}
+		if len(got[0].Lines) != 2 || got[0].Lines[0] != "warn 1 line 1" {
+			t.Errorf("first buffered warning = %#v", got[0])
+		}
+		if len(got[1].Lines) != 1 || got[1].Lines[0] != "warn 2 line 1" {
+			t.Errorf("second buffered warning = %#v", got[1])
+		}
+	})
+
+	t.Run("transition flushes warnings via flushBufferedWarningsCmd (min first, bootstrap with warnings)", func(t *testing.T) {
+		var captured [][]string
+		restore := tui.SetFlushWarningsToStderrForTest(func(warnings []tui.BootstrapWarning) {
+			for _, w := range warnings {
+				captured = append(captured, append([]string{}, w.Lines...))
+			}
+		})
+		t.Cleanup(restore)
+
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// minElapsed first
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+
+		// bootstrap completes with warnings
+		warnings := []tui.BootstrapWarning{
+			{Lines: []string{"saver down"}},
+			{Lines: []string{"corrupt", "see log"}},
+		}
+		var cmd tea.Cmd
+		model, cmd = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() == tui.PageLoading {
+			t.Error("expected transition off PageLoading after both gates with warnings")
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil flushBufferedWarningsCmd after transition with warnings")
+		}
+
+		// Walk the returned tea.Sequence by consuming returned messages.
+		// tea.Sequence returns a tea.Cmd that emits messages one-by-one.
+		// We invoke the top-level cmd which yields a tea.SequenceMsg holding
+		// the sequenced sub-cmds; iterate them.
+		drainSequence(cmd)
+
+		if len(captured) != 2 {
+			t.Fatalf("captured %d warnings, want 2", len(captured))
+		}
+		want := [][]string{{"saver down"}, {"corrupt", "see log"}}
+		for i, w := range want {
+			if !equalStrings(captured[i], w) {
+				t.Errorf("captured[%d] = %v, want %v", i, captured[i], w)
+			}
+		}
+
+		// bufferedWarnings cleared after flush
+		if len(updated.BufferedWarnings()) != 0 {
+			t.Errorf("bufferedWarnings not cleared after flush; got %d", len(updated.BufferedWarnings()))
+		}
+	})
+
+	t.Run("transition flushes warnings (bootstrap first, then minElapsed)", func(t *testing.T) {
+		var captured [][]string
+		restore := tui.SetFlushWarningsToStderrForTest(func(warnings []tui.BootstrapWarning) {
+			for _, w := range warnings {
+				captured = append(captured, append([]string{}, w.Lines...))
+			}
+		})
+		t.Cleanup(restore)
+
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Bootstrap first
+		warnings := []tui.BootstrapWarning{{Lines: []string{"warn"}}}
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+
+		// Then min elapsed — this is where the flush command fires.
+		var cmd tea.Cmd
+		model, cmd = model.Update(tui.LoadingMinElapsedMsg{})
+
+		if cmd == nil {
+			t.Fatal("expected non-nil flush cmd from LoadingMinElapsedMsg branch")
+		}
+		drainSequence(cmd)
+
+		if len(captured) != 1 || len(captured[0]) != 1 || captured[0][0] != "warn" {
+			t.Errorf("captured = %v, want [[warn]]", captured)
+		}
+
+		updated := model.(tui.Model)
+		if len(updated.BufferedWarnings()) != 0 {
+			t.Errorf("bufferedWarnings not cleared after flush; got %d", len(updated.BufferedWarnings()))
+		}
+	})
+
+	t.Run("transition with no warnings returns no flush command", func(t *testing.T) {
+		var called bool
+		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
+			called = true
+		})
+		t.Cleanup(restore)
+
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		var cmd tea.Cmd
+		model, cmd = model.Update(tui.BootstrapCompleteMsg{Warnings: nil})
+
+		updated := model.(tui.Model)
+		if updated.ActivePage() == tui.PageLoading {
+			t.Error("expected transition off PageLoading")
+		}
+		if cmd != nil {
+			t.Errorf("expected nil flush cmd when warnings empty (avoids spurious alt-screen toggle); got %T", cmd)
+		}
+		if called {
+			t.Error("flushWarningsToStderr must not be called when warnings empty")
+		}
+	})
+
+	t.Run("repeat transitions do not re-emit buffered warnings", func(t *testing.T) {
+		var calls int
+		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
+			calls++
+		})
+		t.Cleanup(restore)
+
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		warnings := []tui.BootstrapWarning{{Lines: []string{"warn"}}}
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: warnings})
+		var cmd tea.Cmd
+		model, cmd = model.Update(tui.LoadingMinElapsedMsg{})
+		if cmd != nil {
+			drainSequence(cmd)
+		}
+
+		// Orphaned BootstrapCompleteMsg with new warnings — already off
+		// PageLoading, so no flush should fire.
+		model, cmd = model.Update(tui.BootstrapCompleteMsg{
+			Warnings: []tui.BootstrapWarning{{Lines: []string{"second"}}},
+		})
+		if cmd != nil {
+			t.Errorf("orphaned BootstrapCompleteMsg after transition produced flush cmd")
+		}
+
+		// Orphaned LoadingMinElapsedMsg
+		_, cmd = model.Update(tui.LoadingMinElapsedMsg{})
+		if cmd != nil {
+			t.Errorf("orphaned LoadingMinElapsedMsg produced flush cmd")
+		}
+
+		if calls != 1 {
+			t.Errorf("flushWarningsToStderr called %d times, want exactly 1", calls)
+		}
+	})
+
+	t.Run("orphaned BootstrapCompleteMsg after transition does not buffer warnings", func(t *testing.T) {
+		var calls int
+		restore := tui.SetFlushWarningsToStderrForTest(func(_ []tui.BootstrapWarning) {
+			calls++
+		})
+		t.Cleanup(restore)
+
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		var model tea.Model = m
+		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+		// Force transition with no warnings
+		model, _ = model.Update(tui.LoadingMinElapsedMsg{})
+		model, _ = model.Update(tui.BootstrapCompleteMsg{Warnings: nil})
+
+		// Orphaned message with warnings — must NOT populate bufferedWarnings
+		// (we are no longer on PageLoading; the warnings have nowhere to go).
+		model, _ = model.Update(tui.BootstrapCompleteMsg{
+			Warnings: []tui.BootstrapWarning{{Lines: []string{"orphan"}}},
+		})
+
+		updated := model.(tui.Model)
+		if got := updated.BufferedWarnings(); len(got) != 0 {
+			t.Errorf("orphaned warnings populated bufferedWarnings = %#v, want empty", got)
+		}
+		if calls != 0 {
+			t.Errorf("flushWarningsToStderr called %d times for orphaned warnings, want 0", calls)
+		}
+	})
+
+	t.Run("SetPendingBootstrapWarnings exposes warnings via Init", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		warnings := []tui.BootstrapWarning{{Lines: []string{"pending"}}}
+		m.SetPendingBootstrapWarnings(warnings)
+
+		got := m.PendingBootstrapWarnings()
+		if len(got) != 1 || len(got[0].Lines) != 1 || got[0].Lines[0] != "pending" {
+			t.Errorf("PendingBootstrapWarnings() = %#v, want [{Lines:[pending]}]", got)
+		}
+
+		cmd := m.Init()
+		if cmd == nil {
+			t.Fatal("Init returned nil")
+		}
+		// One of the batched cmds must produce a BootstrapCompleteMsg whose
+		// Warnings field equals the pending slice.
+		msg := cmd()
+		batchMsg, ok := msg.(tea.BatchMsg)
+		if !ok {
+			t.Fatalf("Init result not BatchMsg, got %T", msg)
+		}
+		var found *tui.BootstrapCompleteMsg
+		for _, c := range batchMsg {
+			if c == nil {
+				continue
+			}
+			done := make(chan tea.Msg, 1)
+			go func(cmd tea.Cmd) { done <- cmd() }(c)
+			select {
+			case got := <-done:
+				if bc, ok := got.(tui.BootstrapCompleteMsg); ok {
+					found = &bc
+				}
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+		if found == nil {
+			t.Fatal("no batched cmd produced BootstrapCompleteMsg")
+		}
+		if len(found.Warnings) != 1 || len(found.Warnings[0].Lines) != 1 || found.Warnings[0].Lines[0] != "pending" {
+			t.Errorf("BootstrapCompleteMsg.Warnings = %#v, want [{Lines:[pending]}]", found.Warnings)
+		}
+	})
+}
+
+// TestWriteWarningsToWriter verifies that the inner stderr-writing helper
+// (factored out for direct testing) emits every warning's lines in order,
+// one Fprintln per line.
+func TestWriteWarningsToWriter(t *testing.T) {
+	t.Run("emits all lines in order", func(t *testing.T) {
+		var buf strings.Builder
+		warnings := []tui.BootstrapWarning{
+			{Lines: []string{"a1", "a2"}},
+			{Lines: []string{"b1"}},
+		}
+		tui.WriteBootstrapWarnings(&buf, warnings)
+		want := "a1\na2\nb1\n"
+		if buf.String() != want {
+			t.Errorf("WriteBootstrapWarnings wrote %q, want %q", buf.String(), want)
+		}
+	})
+
+	t.Run("empty warnings writes nothing", func(t *testing.T) {
+		var buf strings.Builder
+		tui.WriteBootstrapWarnings(&buf, nil)
+		if buf.Len() != 0 {
+			t.Errorf("WriteBootstrapWarnings on nil wrote %q, want empty", buf.String())
+		}
+	})
+}
+
+// drainSequence consumes a tea.Cmd produced by flushBufferedWarningsCmd.
+// In Bubble Tea v1, tea.Sequence wraps sub-commands in a single tea.Cmd
+// whose invocation produces an unexported sequenceMsg ([]tea.Cmd). The
+// runtime would dispatch each sub-cmd in order; without the runtime we
+// use reflection to walk the slice and invoke each sub-cmd directly so
+// the inner stderr-writing closure executes during tests.
+func drainSequence(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	if seq, ok := msg.(tea.BatchMsg); ok {
+		for _, sub := range seq {
+			if sub == nil {
+				continue
+			}
+			_ = sub()
+		}
+		return
+	}
+	// Reflect on the sequenceMsg slice type (~[]tea.Cmd, unexported).
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice {
+		return
+	}
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i).Interface()
+		if sub, ok := elem.(tea.Cmd); ok && sub != nil {
+			_ = sub()
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

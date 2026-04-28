@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/tui"
 )
 
 // BootstrapWarningsSink accumulates soft bootstrap warnings emitted by
@@ -64,3 +65,37 @@ func (s *BootstrapWarningsSink) EmitTo(w io.Writer) {
 // loading-page dismissal (task 6-10), and PersistentPreRunE drains it
 // directly to stderr for non-TUI commands.
 var bootstrapWarnings = &BootstrapWarningsSink{}
+
+// drainBootstrapWarningsForTUI drains the package-level bootstrapWarnings
+// sink and converts each cmd/bootstrap.Warning to its tui.BootstrapWarning
+// peer so the model package can consume warnings without importing
+// cmd/bootstrap. Returns nil when the sink is empty.
+//
+// The conversion is a deliberate adapter at the cmd↔tui boundary: tui is
+// a leaf package (cmd imports tui, so tui cannot import cmd), and
+// duplicating the trivial Lines-only shape avoids the alternative of
+// hoisting Warning into a third package shared by both layers.
+func drainBootstrapWarningsForTUI() []tui.BootstrapWarning {
+	src := bootstrapWarnings.Drain()
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]tui.BootstrapWarning, len(src))
+	for i, w := range src {
+		out[i] = tui.BootstrapWarning{Lines: w.Lines}
+	}
+	return out
+}
+
+// stageBootstrapWarningsOnModel drains the package-level bootstrapWarnings
+// sink and stages any pending entries on m via SetPendingBootstrapWarnings.
+// openTUI calls this between buildTUIModel and tea.NewProgram so the
+// warnings ride Init's first BootstrapCompleteMsg and are flushed to
+// stderr (with alt-screen toggle) only after the loading page dismisses.
+func stageBootstrapWarningsOnModel(m *tui.Model) {
+	pending := drainBootstrapWarningsForTUI()
+	if len(pending) == 0 {
+		return
+	}
+	m.SetPendingBootstrapWarnings(pending)
+}

@@ -100,7 +100,16 @@ type LoadingMinElapsedMsg struct{}
 // BootstrapCompleteMsg signals that the bootstrap orchestrator has finished
 // running. The TUI dismisses the loading page once both LoadingMinElapsedMsg
 // and BootstrapCompleteMsg have been received.
-type BootstrapCompleteMsg struct{}
+//
+// Warnings carries soft bootstrap warnings drained from the
+// cmd-side BootstrapWarningsSink. The model buffers them through the
+// loading window and flushes them to stderr (with alt-screen toggle)
+// after the loading page dismisses; this preserves the rendered TUI
+// while still surfacing diagnostics the user must see. May be nil/empty
+// when bootstrap produced no warnings.
+type BootstrapCompleteMsg struct {
+	Warnings []BootstrapWarning
+}
 
 // SessionCreatedMsg is emitted when a session has been successfully created.
 type SessionCreatedMsg struct {
@@ -152,6 +161,14 @@ type Model struct {
 	serverStarted     bool
 	minElapsed        bool
 	bootstrapComplete bool
+
+	// Bootstrap warnings: pending is set by openTUI before tea.NewProgram
+	// runs Init; Init folds it into the BootstrapCompleteMsg payload so
+	// Update can buffer it through the loading window. bufferedWarnings
+	// holds the slice between BootstrapCompleteMsg and dismissal of the
+	// loading page; flushBufferedWarningsCmd clears it on emit.
+	pendingBootstrapWarnings []BootstrapWarning
+	bufferedWarnings         []BootstrapWarning
 
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
@@ -268,6 +285,28 @@ func (m Model) MinElapsed() bool {
 // BootstrapComplete reports whether BootstrapCompleteMsg has been received, for testing.
 func (m Model) BootstrapComplete() bool {
 	return m.bootstrapComplete
+}
+
+// BufferedWarnings returns the warnings buffered between
+// BootstrapCompleteMsg and loading-page dismissal, for testing.
+// The slice is cleared after flushBufferedWarningsCmd runs.
+func (m Model) BufferedWarnings() []BootstrapWarning {
+	return m.bufferedWarnings
+}
+
+// PendingBootstrapWarnings returns the warnings staged via
+// SetPendingBootstrapWarnings, for testing.
+func (m Model) PendingBootstrapWarnings() []BootstrapWarning {
+	return m.pendingBootstrapWarnings
+}
+
+// SetPendingBootstrapWarnings stores warnings to be folded into the
+// BootstrapCompleteMsg emitted from Init's first event-loop tick.
+// openTUI calls this with the result of bootstrapWarnings.Drain
+// (converted to []BootstrapWarning) before tea.NewProgram.Run, so the
+// warnings ride the same gate that dismisses the loading page.
+func (m *Model) SetPendingBootstrapWarnings(warnings []BootstrapWarning) {
+	m.pendingBootstrapWarnings = warnings
 }
 
 // CommandPending returns whether the model is in command-pending mode, for testing.
@@ -635,9 +674,13 @@ func (m Model) Init() tea.Cmd {
 		// Bubble Tea launches AFTER PersistentPreRunE has finished synchronously,
 		// so the bootstrap orchestrator has already returned by the time Init
 		// runs. Emit BootstrapCompleteMsg from the first event-loop tick to
-		// satisfy the bootstrapComplete gate. Loading dismissal still requires
-		// the LoadingMinElapsedMsg tick (1.2s minimum-display floor).
-		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{} }
+		// satisfy the bootstrapComplete gate, carrying any pending warnings
+		// drained from the package-level sink by openTUI. Loading dismissal
+		// still requires the LoadingMinElapsedMsg tick (1.2s minimum-display
+		// floor); warnings are flushed to stderr at that moment via
+		// flushBufferedWarningsCmd.
+		pending := m.pendingBootstrapWarnings
+		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{Warnings: pending} }
 		cmds := []tea.Cmd{fetchSessions, loadingPadTick, bootstrapCompleteCmd}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
@@ -702,12 +745,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.minElapsed = true
 		if m.bootstrapComplete && m.activePage == PageLoading {
 			m.transitionFromLoading()
+			return m, m.flushBufferedWarningsCmd()
 		}
 		return m, nil
 	case BootstrapCompleteMsg:
 		m.bootstrapComplete = true
+		// Only buffer warnings when still on the loading page; warnings
+		// that arrive after dismissal (orphaned BootstrapCompleteMsg) are
+		// dropped so they cannot accumulate dead state on the model.
+		if m.activePage == PageLoading {
+			m.bufferedWarnings = msg.Warnings
+		}
 		if m.minElapsed && m.activePage == PageLoading {
 			m.transitionFromLoading()
+			return m, m.flushBufferedWarningsCmd()
 		}
 		return m, nil
 	case ProjectsLoadedMsg:

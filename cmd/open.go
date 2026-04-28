@@ -374,13 +374,17 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	}
 
 	m := buildTUIModel(cfg, initialFilter, command)
+	// Drain any soft bootstrap warnings accumulated during PersistentPreRunE
+	// and stage them on the model. Init folds them into BootstrapCompleteMsg
+	// so they ride the loading-page dismissal gate; the model emits them to
+	// stderr (with alt-screen toggle) only after the loading page has been
+	// dismissed — direct writes during loading would corrupt the rendered UI.
+	stageBootstrapWarningsOnModel(&m)
 	// Bootstrap-before-TUI ordering: PersistentPreRunE has already run the
 	// orchestrator synchronously by the time openTUI is reached. The TUI's
 	// Init emits BootstrapCompleteMsg from its first event-loop tick, paired
 	// with a 1.2s LoadingMinElapsedMsg tea.Tick. Loading-page dismissal is
 	// gated on receipt of both — see internal/tui/model.go transitionFromLoading.
-	// Phase 6 will extend BootstrapCompleteMsg with buffered stderr warnings
-	// surfaced after dismissal so they never corrupt the rendered UI.
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
