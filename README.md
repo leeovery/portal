@@ -174,8 +174,6 @@ xctl hooks rm --on-resume                 # remove the hook
 xctl hooks list                           # list all hooks
 ```
 
-Hooks fire via `tmux send-keys` when you attach/open a session. A volatile marker prevents duplicate execution within the same boot cycle — after a reboot the markers are gone and hooks re-fire.
-
 **When hooks fire:** Portal fires resume hooks ONLY when a pane is freshly recreated
 from saved state on reboot recovery — i.e., the tmux server has just been started
 fresh and Portal has restored sessions. Hooks do NOT fire on every detach / reattach
