@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,14 +40,10 @@ func WritePIDFile(dir string, pid int) error {
 // If the file does not exist, ErrPIDFileAbsent is returned. Other I/O or
 // parse errors are wrapped and returned with a zero PID.
 func ReadPIDFile(dir string) (int, error) {
-	data, err := os.ReadFile(DaemonPID(dir))
+	data, err := readDaemonFile(DaemonPID(dir), ErrPIDFileAbsent)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return 0, ErrPIDFileAbsent
-		}
-		return 0, fmt.Errorf("read daemon.pid: %w", err)
+		return 0, err
 	}
-
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		return 0, fmt.Errorf("parse daemon.pid: %w", err)
@@ -108,12 +105,24 @@ func WriteVersionFile(dir, version string) error {
 // returns ("", nil) — distinct from absent — so callers can tell that the
 // daemon recorded a version (even if blank) versus never having written one.
 func ReadVersionFile(dir string) (string, error) {
-	data, err := os.ReadFile(DaemonVersion(dir))
+	data, err := readDaemonFile(DaemonVersion(dir), ErrVersionFileAbsent)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", ErrVersionFileAbsent
-		}
-		return "", fmt.Errorf("read daemon.version: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+// readDaemonFile reads path and classifies the open error: a missing file
+// surfaces as absentSentinel, any other I/O error is wrapped with a
+// "read <basename>: %w" prefix. Successful reads return the raw bytes for the
+// caller to trim/parse.
+func readDaemonFile(path string, absentSentinel error) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, absentSentinel
+		}
+		return nil, fmt.Errorf("read %s: %w", filepath.Base(path), err)
+	}
+	return data, nil
 }
