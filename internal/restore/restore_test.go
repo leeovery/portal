@@ -550,3 +550,49 @@ func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *
 			newSessionAt, armListPanesAt, layoutAt, setOptAt)
 	}
 }
+
+func TestOrchestrator_LogsDriftWarningWhenPredictedAndLiveDiffer(t *testing.T) {
+	// The orchestrator predicts paneKeys from base-index/pane-base-index and
+	// compares them to the live PaneCoord slice from list-panes. When they
+	// differ (e.g., predicted base 0/0 but live tmux reports the pane at 1:0),
+	// a WARN must be emitted with predicted=... live=... details.
+	dir := t.TempDir()
+	sess := state.Session{
+		Name: "work",
+		Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/x.bin", Active: true},
+			}},
+		},
+	}
+	writeValidIndex(t, dir, []state.Session{sess})
+
+	rf := &orchestratorRunFunc{
+		listSessionsOut: "",
+		// Live tmux reports the pane at 1:0 — diverges from predicted 0/0.
+		listPanesOut: "1:0",
+	}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, logPath := openTestLogger(t, dir)
+	defer func() { _ = logger.Close() }()
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	_ = logger.Close()
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	bodyStr := string(body)
+	if !strings.Contains(bodyStr, "WARN") {
+		t.Errorf("log body lacks WARN entry: %q", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "predicted=") {
+		t.Errorf("log body lacks predicted=... drift detail: %q", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "live=") {
+		t.Errorf("log body lacks live=... drift detail: %q", bodyStr)
+	}
+}

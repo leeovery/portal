@@ -108,11 +108,12 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 // operations sharing the same live []tmux.PaneCoord that the arm phase
 // gathered from list-panes.
 //
-// PredictLiveIndices is still consulted, but its output now feeds only the
-// drift-warning diagnostic surface in ApplySkeletonMarkers — every actual
-// tmux call target (FIFO, respawn-pane, select-layout, select-pane,
-// resize-pane, set-option) is sourced from the live re-query via the
-// livePanes slice threaded through from Restore.
+// After geometry + markers are applied, PredictLiveIndices is consulted and
+// the predicted paneKey for each saved position is compared against the live
+// paneKey. Mismatches surface a WARN per pane via warnOnPaneKeyDrift — this
+// keeps the drift diagnostic next to the prediction it depends on, rather than
+// coupling ApplySkeletonMarkers (a pure write primitive) to a diagnostic
+// concern.
 func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
 	if strings.HasPrefix(sess.Name, "_") {
 		o.Logger.Warn(state.ComponentRestore, "skipping underscore-prefixed session %q", sess.Name)
@@ -134,15 +135,34 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 		return
 	}
 
-	// PredictLiveIndices feeds only the drift warning in ApplySkeletonMarkers.
-	// Geometry no longer consumes it — ApplyWindowGeometry now sources every
-	// (window, pane) target from the live PaneCoord slice gathered by armPanes.
-	baseIdx, paneBaseIdx := sr.PredictLiveIndices()
-
 	sr.ApplyWindowGeometry(sess, livePanes)
+	sr.ApplySkeletonMarkers(sess, livePanes)
 
-	if err := sr.ApplySkeletonMarkers(sess, livePanes, baseIdx, paneBaseIdx); err != nil {
-		o.Logger.Warn(state.ComponentRestore, "ApplySkeletonMarkers %q: %v", sess.Name, err)
+	// Drift diagnostic: compare each predicted paneKey against the live
+	// paneKey and emit a WARN per mismatch. The prediction is consulted only
+	// here, so the diagnostic surface stays adjacent to its sole consumer.
+	o.warnOnPaneKeyDrift(sr, sess, livePanes)
+}
+
+// warnOnPaneKeyDrift compares the predicted paneKey (computed from the
+// server's base-index / pane-base-index plus saved structural ordinals)
+// against the actual live paneKey for each saved position, and emits a
+// per-pane WARN via SessionRestorer.warnOnPaneKeyDrift on mismatch. Drift is
+// non-fatal — markers have already been written under the live paneKey — but
+// surfaces base-index / pane-base-index changes between save and restore.
+func (o *Orchestrator) warnOnPaneKeyDrift(sr *SessionRestorer, sess state.Session, livePanes []tmux.PaneCoord) {
+	predictedBase, predictedPaneBase := sr.PredictLiveIndices()
+	savedSeq := flattenSavedPanePositions(sess)
+	pairCount := len(livePanes)
+	if len(savedSeq) < pairCount {
+		pairCount = len(savedSeq)
+	}
+	for i := 0; i < pairCount; i++ {
+		live := livePanes[i]
+		sv := savedSeq[i]
+		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
+		predictedKey := state.SanitizePaneKey(sess.Name, predictedBase+sv.windowOrdinal, predictedPaneBase+sv.paneOrdinal)
+		sr.warnOnPaneKeyDrift(sess.Name, i, predictedKey, liveKey)
 	}
 }
 

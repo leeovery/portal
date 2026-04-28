@@ -94,9 +94,7 @@ func TestApplySkeletonMarkers_SetsOneMarkerPerSuppliedLivePane(t *testing.T) {
 	)
 	livePanes := parseLivePanes(t, "0:0\n0:1\n1:0")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	// No list-panes invocation — the slice is supplied by the caller.
 	if got := len(findAllCalls(mock.Calls, "list-panes")); got != 0 {
@@ -122,10 +120,9 @@ func TestApplySkeletonMarkers_SetsOneMarkerPerSuppliedLivePane(t *testing.T) {
 	}
 }
 
-func TestApplySkeletonMarkers_UsesLivePaneKeyWhenPredictionDiffers(t *testing.T) {
-	// Predict base 0/0 but the live PaneCoord slice reports the pane at 1:0
-	// (drift). Markers must use the supplied live paneKey, not the predicted
-	// one.
+func TestApplySkeletonMarkers_UsesLivePaneKey(t *testing.T) {
+	// The live PaneCoord slice reports the pane at 1:0. Markers must use the
+	// supplied live paneKey.
 	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
@@ -142,57 +139,12 @@ func TestApplySkeletonMarkers_UsesLivePaneKeyWhenPredictionDiffers(t *testing.T)
 	)
 	livePanes := parseLivePanes(t, "1:0")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
-	// Marker should be set with the live paneKey (1:0), NOT the predicted (0:0).
+	// Marker should be set with the live paneKey (1:0).
 	wantLive := "@portal-skeleton-" + state.SanitizePaneKey("work", 1, 0)
-	dontWant := "@portal-skeleton-" + state.SanitizePaneKey("work", 0, 0)
 	if findSetOptionMarker(mock.Calls, wantLive) < 0 {
 		t.Errorf("expected set-option for live marker %q; calls: %v", wantLive, mock.Calls)
-	}
-	if findSetOptionMarker(mock.Calls, dontWant) >= 0 {
-		t.Errorf("did not expect set-option for predicted marker %q; calls: %v", dontWant, mock.Calls)
-	}
-}
-
-func TestApplySkeletonMarkers_LogsDriftWarningWhenPredictedAndLiveDiffer(t *testing.T) {
-	mock := &mockCommander{}
-	client := tmux.NewClient(mock)
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
-
-	r := &restore.SessionRestorer{Client: client, Logger: logger}
-
-	sess := markersSession("work",
-		markersWindow(0, markersPane(0)),
-	)
-	livePanes := parseLivePanes(t, "1:0")
-
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
-
-	_ = logger.Close()
-	body, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	bodyStr := string(body)
-	if !strings.Contains(bodyStr, "WARN") {
-		t.Errorf("log body lacks WARN entry: %q", bodyStr)
-	}
-	if !strings.Contains(bodyStr, "predicted=") {
-		t.Errorf("log body lacks predicted=... drift detail: %q", bodyStr)
-	}
-	if !strings.Contains(bodyStr, "live=") {
-		t.Errorf("log body lacks live=... drift detail: %q", bodyStr)
 	}
 }
 
@@ -215,9 +167,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 	)
 	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	_ = logger.Close()
 	body, err := os.ReadFile(logPath)
@@ -240,9 +190,7 @@ func TestApplySkeletonMarkers_UsesServerScopeFlagAndNeverGlobal(t *testing.T) {
 	)
 	livePanes := parseLivePanes(t, "0:0\n0:1")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	for _, idx := range allSetOptionCalls(mock.Calls) {
 		args := mock.Calls[idx]
@@ -289,9 +237,7 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	)
 	livePanes := parseLivePanes(t, "0:0\n0:1\n0:2")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers returned error %v, expected nil (failure should be logged + continue)", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	// All three set-option calls should still have been attempted.
 	setIdxs := allSetOptionCalls(mock.Calls)
@@ -316,9 +262,7 @@ func TestApplySkeletonMarkers_SetsMarkerValueToLiteralOne(t *testing.T) {
 	)
 	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	setIdxs := allSetOptionCalls(mock.Calls)
 	if len(setIdxs) != 1 {
@@ -345,9 +289,7 @@ func TestApplySkeletonMarkers_UsesHashedPaneKeyForCollisionSession(t *testing.T)
 	)
 	livePanes := parseLivePanes(t, "0:0")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	wantKey := state.SanitizePaneKey(name, 0, 0)
 	if !strings.Contains(wantKey, "foo_bar-") {
@@ -374,9 +316,7 @@ func TestApplySkeletonMarkers_EnumeratesLivePanesInSuppliedOrder(t *testing.T) {
 	)
 	livePanes := parseLivePanes(t, "0:0\n0:1\n1:0\n1:1")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	setIdxs := allSetOptionCalls(mock.Calls)
 	if len(setIdxs) != 4 {
@@ -419,9 +359,7 @@ func TestApplySkeletonMarkers_MarksExtraLivePanesWhenLiveCountExceedsSaved(t *te
 	)
 	livePanes := parseLivePanes(t, "0:0\n0:1")
 
-	if err := r.ApplySkeletonMarkers(sess, livePanes, 0, 0); err != nil {
-		t.Fatalf("ApplySkeletonMarkers: %v", err)
-	}
+	r.ApplySkeletonMarkers(sess, livePanes)
 
 	wantMarkers := []string{
 		"@portal-skeleton-" + state.SanitizePaneKey("work", 0, 0),

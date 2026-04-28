@@ -338,11 +338,6 @@ func (r *SessionRestorer) applyZoom(session string, window, pane int) {
 // paneKey returned by tmux — sharing one re-query across arm, geometry, and
 // markers keeps all three operations consistent under base-index drift.
 //
-// predictedBase and predictedPaneBase are the values returned by
-// PredictLiveIndices and are passed in here purely so a drift warning can be
-// logged when the predicted live paneKey for a given saved position differs
-// from the actual live paneKey. They no longer drive any tmux call target.
-//
 // Behavior:
 //   - On set-option failure for a single pane: logs a warning and continues
 //     setting markers for the remaining panes.
@@ -352,37 +347,26 @@ func (r *SessionRestorer) applyZoom(session string, window, pane int) {
 //
 // The function only writes markers; it does not clear them. Markers are
 // volatile (server-option scope) and are unset by the hydrate helper after
-// successful scrollback dump.
-func (r *SessionRestorer) ApplySkeletonMarkers(sess state.Session, livePanes []tmux.PaneCoord, predictedBase, predictedPaneBase int) error {
-	savedSeq := flattenSavedPanePositions(sess)
-	r.warnOnPaneCountMismatch(sess.Name, len(livePanes), len(savedSeq))
+// successful scrollback dump. It is a pure write primitive — drift diagnostics
+// live in the orchestrator, alongside the prediction (PredictLiveIndices),
+// rather than coupling a write primitive to a diagnostic concern.
+func (r *SessionRestorer) ApplySkeletonMarkers(sess state.Session, livePanes []tmux.PaneCoord) {
+	savedCount := countSavedPanes(sess)
+	r.warnOnPaneCountMismatch(sess.Name, len(livePanes), savedCount)
 
-	pairCount := len(livePanes)
-	if len(savedSeq) < pairCount {
-		pairCount = len(savedSeq)
-	}
-
-	for i := 0; i < pairCount; i++ {
-		live := livePanes[i]
-		sv := savedSeq[i]
-
-		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
-		predictedKey := state.SanitizePaneKey(sess.Name, predictedBase+sv.windowOrdinal, predictedPaneBase+sv.paneOrdinal)
-		r.warnOnPaneKeyDrift(sess.Name, i, predictedKey, liveKey)
-
-		r.setSkeletonMarker(sess.Name, liveKey)
-	}
-
-	// Extras: live panes beyond the saved sequence still get marked under
-	// their live paneKey. Defensive — keeps the daemon from capturing them as
-	// "user state" during the restore window.
-	for i := pairCount; i < len(livePanes); i++ {
-		live := livePanes[i]
+	for _, live := range livePanes {
 		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
 		r.setSkeletonMarker(sess.Name, liveKey)
 	}
+}
 
-	return nil
+// countSavedPanes returns the total number of panes across every saved window.
+func countSavedPanes(sess state.Session) int {
+	n := 0
+	for _, w := range sess.Windows {
+		n += len(w.Panes)
+	}
+	return n
 }
 
 // savedPanePos is the structural ordinal pair (window position, pane position
@@ -460,14 +444,14 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 // ErrOptionNotFound and an empty value are treated as "use default 0" — tmux's
 // documented default when the user has not customised either option.
 //
-// As of the 7-9 re-query rework this is consulted **only** to feed the
-// drift-warning diagnostic surface in ApplySkeletonMarkers. Restore arms
-// panes from the live list-panes re-query (via armPanes), and
-// ApplyWindowGeometry consumes the same live []tmux.PaneCoord threaded
-// through from Restore — neither consumes the predicted indices any longer.
-// The drift warning compares the predicted paneKey to the actual live
-// paneKey so users notice when base-index / pane-base-index changed between
-// save and restore.
+// As of the 8-6 signature simplification this is consulted **only** by the
+// orchestrator's drift-warning helper (Orchestrator.warnOnPaneKeyDrift in
+// restore.go). Restore arms panes from the live list-panes re-query (via
+// armPanes), and ApplyWindowGeometry / ApplySkeletonMarkers consume the same
+// live []tmux.PaneCoord threaded through from Restore — neither consumes the
+// predicted indices. The drift warning compares the predicted paneKey to the
+// actual live paneKey so users notice when base-index / pane-base-index
+// changed between save and restore.
 func (r *SessionRestorer) PredictLiveIndices() (int, int) {
 	return readIndexOption(r.Client, "base-index"), readIndexOption(r.Client, "pane-base-index")
 }
