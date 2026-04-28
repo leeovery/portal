@@ -160,7 +160,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
-          "fix_attempts": 1,
+          "fix_attempts": 0,
           "analysis_cycle": 2,
           "linters": [
             {
@@ -180,7 +180,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 8,
-          "current_task": "tick-78dbaa",
+          "current_task": "tick-b99f02",
           "completed_tasks": [
             "built-in-session-resurrection-1-1",
             "built-in-session-resurrection-1-2",
@@ -267,7 +267,8 @@
             "built-in-session-resurrection-7-20",
             "built-in-session-resurrection-8-1",
             "built-in-session-resurrection-8-2",
-            "built-in-session-resurrection-8-3"
+            "built-in-session-resurrection-8-3",
+            "built-in-session-resurrection-8-4"
           ],
           "completed_phases": [
             7

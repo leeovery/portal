@@ -24,6 +24,11 @@ var ErrVersionFileAbsent = errors.New("daemon.version absent")
 
 // WritePIDFile atomically writes pid to daemon.pid inside dir. The file is
 // created with mode 0600 (via fileutil.AtomicWrite's os.CreateTemp).
+//
+// Note: this deliberately uses plain AtomicWrite — not AtomicWrite0600 — and
+// tolerates the user's umask leaking through. The PID file is non-sensitive,
+// so the umask-defence chmod used by sessions.json / scrollback writers is
+// not applied here.
 func WritePIDFile(dir string, pid int) error {
 	content := strconv.Itoa(pid) + "\n"
 	return fileutil.AtomicWrite(DaemonPID(dir), []byte(content))
@@ -87,6 +92,10 @@ func DaemonAlive(dir string) bool {
 
 // WriteVersionFile atomically writes the daemon's version marker to
 // daemon.version inside dir. The file is created with mode 0600.
+//
+// Note: like WritePIDFile, this deliberately uses plain AtomicWrite — not
+// AtomicWrite0600 — and tolerates the user's umask. The version marker is
+// non-sensitive.
 func WriteVersionFile(dir, version string) error {
 	content := version + "\n"
 	return fileutil.AtomicWrite(DaemonVersion(dir), []byte(content))

@@ -86,9 +86,9 @@ func CaptureAndHashPane(c PaneCapturer, target string) ([]byte, uint64, error) {
 }
 
 // WriteScrollbackIfChanged is the dedup-aware writer for per-pane scrollback.
-// It commits data to `scrollback/<paneKey>.bin` via fileutil.AtomicWrite only
-// when the supplied newHash differs from the entry already stored in hm; on
-// hit (identical hash, paneKey present) it returns (false, nil) without
+// It commits data to `scrollback/<paneKey>.bin` via fileutil.AtomicWrite0600
+// only when the supplied newHash differs from the entry already stored in hm;
+// on hit (identical hash, paneKey present) it returns (false, nil) without
 // touching disk.
 //
 // The returned bool is "did we write?" — letting callers track whether the
@@ -96,18 +96,17 @@ func CaptureAndHashPane(c PaneCapturer, target string) ([]byte, uint64, error) {
 // successful write, hm[paneKey] is updated to newHash so subsequent calls in
 // the same cycle (and across ticks) keep the dedup map honest.
 //
-// The scrollback file is chmodded to 0o600 after the rename so its mode does
-// not depend on the user's umask. AtomicWrite errors are wrapped with the
-// paneKey for traceable failure logs.
+// AtomicWrite0600 atomically writes and chmods to 0600 so the scrollback
+// file's mode does not depend on the user's umask. Errors are wrapped with
+// the paneKey for traceable failure logs.
 func WriteScrollbackIfChanged(dir, paneKey string, data []byte, newHash uint64, hm HashMap) (bool, error) {
 	if existing, ok := hm[paneKey]; ok && existing == newHash {
 		return false, nil
 	}
 	path := ScrollbackFile(dir, paneKey)
-	if err := fileutil.AtomicWrite(path, data); err != nil {
+	if err := fileutil.AtomicWrite0600(path, data); err != nil {
 		return false, fmt.Errorf("write scrollback %s: %w", paneKey, err)
 	}
-	_ = os.Chmod(path, 0o600)
 	hm[paneKey] = newHash
 	return true, nil
 }

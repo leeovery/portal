@@ -26,10 +26,11 @@ import (
 // no-op cycle produces zero disk activity (per the spec's content-hash dedup
 // goal).
 //
-// On a real change, sessions.json is written via fileutil.AtomicWrite and
-// chmod'd to 0600. After a successful write, gcOrphanScrollback removes any
-// .bin files no longer referenced by idx. GC failure is logged but never
-// fails the commit — sessions.json is the source of truth.
+// On a real change, sessions.json is written via fileutil.AtomicWrite0600
+// (atomic write + post-rename chmod 0600 against a permissive umask). After a
+// successful write, gcOrphanScrollback removes any .bin files no longer
+// referenced by idx. GC failure is logged but never fails the commit —
+// sessions.json is the source of truth.
 //
 // A nil logger is acceptable; the underlying *Logger methods are nil-safe.
 func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *Logger) error {
@@ -44,10 +45,9 @@ func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *Logger) er
 		return nil
 	}
 
-	if err := fileutil.AtomicWrite(SessionsJSON(dir), data); err != nil {
+	if err := fileutil.AtomicWrite0600(SessionsJSON(dir), data); err != nil {
 		return fmt.Errorf("write sessions.json: %w", err)
 	}
-	_ = os.Chmod(SessionsJSON(dir), 0o600)
 
 	if err := gcOrphanScrollback(dir, idx, logger); err != nil {
 		logger.Warn(ComponentDaemon, "gc orphan scrollback: %v", err)
