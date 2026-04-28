@@ -6,7 +6,7 @@ total_proposed: 20
 # Analysis Tasks: built-in-session-resurrection (Cycle 1)
 
 ## Task 1: Remove obsolete README hooks paragraph that contradicts the new firing model
-status: pending
+status: approved
 severity: high
 sources: standards
 
@@ -28,7 +28,7 @@ sources: standards
 ---
 
 ## Task 2: Implement functional migrate-rename hook key migration (or remove the inert scaffolding)
-status: pending
+status: approved
 severity: high
 sources: standards, architecture
 
@@ -56,7 +56,7 @@ sources: standards, architecture
 ---
 
 ## Task 3: Consolidate paneKey-from-FIFO helper into internal/state
-status: pending
+status: approved
 severity: medium
 sources: duplication, standards, architecture
 
@@ -80,7 +80,7 @@ sources: duplication, standards, architecture
 ---
 
 ## Task 4: Remove redundant `if Logger != nil` guards across new files
-status: pending
+status: approved
 severity: medium
 sources: duplication, standards
 
@@ -100,7 +100,7 @@ sources: duplication, standards
 ---
 
 ## Task 5: Delete dead-code parallel restoring-marker API in internal/restore
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -123,7 +123,7 @@ sources: duplication, architecture
 ---
 
 ## Task 6: Collapse DeleteServerOption and UnsetServerOption to a single method
-status: pending
+status: approved
 severity: medium
 sources: duplication, standards
 
@@ -147,7 +147,7 @@ sources: duplication, standards
 ---
 
 ## Task 7: Promote tmuxSocket integration-test harness to shared package
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -170,7 +170,7 @@ sources: duplication
 ---
 
 ## Task 8: Eliminate real-step adapter copies in phase5 integration test
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -194,7 +194,7 @@ sources: duplication
 ---
 
 ## Task 9: Re-query live tmux indices post-creation instead of predicting
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -219,7 +219,7 @@ sources: standards
 ---
 
 ## Task 10: Self-enforce the Restorer interface contract for corrupt-vs-soft errors
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -243,7 +243,7 @@ sources: architecture
 ---
 
 ## Task 11: Delete SaverDownError and LastSaverErr triple-encoding
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -266,7 +266,7 @@ sources: duplication
 ---
 
 ## Task 12: Table-drive RegisterPortalHooks event categories
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -288,7 +288,7 @@ sources: duplication
 ---
 
 ## Task 13: Replace daemon's hand-rolled index load with state.ReadIndex
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -310,7 +310,7 @@ sources: duplication
 ---
 
 ## Task 14: Hoist surrounding-quote stripping into a shared leaf package
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -334,7 +334,7 @@ sources: duplication
 ---
 
 ## Task 15: Hoist xdgConfigBase into a shared leaf package
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -359,7 +359,7 @@ sources: duplication
 ---
 
 ## Task 16: Move noopRunner out of production cmd/root.go
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -381,7 +381,7 @@ sources: standards
 ---
 
 ## Task 17: Reconcile log rotation threshold with spec wording (1 MB vs 1 MiB)
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -402,7 +402,7 @@ sources: standards
 ---
 
 ## Task 18: Relocate AllPaneLister out of misnamed internal/hooks/tmux.go
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -424,7 +424,7 @@ sources: architecture
 ---
 
 ## Task 19: Add canonical SetSkeletonMarker / UnsetSkeletonMarker helpers in internal/state
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -449,7 +449,7 @@ sources: architecture
 ---
 
 ## Task 20: If migrate-rename hook is removed (Task 2 path b), collapse the dedupe-category list
-status: pending
+status: approved
 severity: low
 sources: architecture
 

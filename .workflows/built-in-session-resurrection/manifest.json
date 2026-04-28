@@ -115,7 +115,28 @@
             "built-in-session-resurrection-6-9": "tick-a8e8dc",
             "built-in-session-resurrection-6-10": "tick-134d50",
             "built-in-session-resurrection-6-11": "tick-4689fb",
-            "built-in-session-resurrection-6-12": "tick-9c172c"
+            "built-in-session-resurrection-6-12": "tick-9c172c",
+            "built-in-session-resurrection-7": "tick-e2f873",
+            "built-in-session-resurrection-7-1": "tick-5f3c8b",
+            "built-in-session-resurrection-7-2": "tick-ef5506",
+            "built-in-session-resurrection-7-3": "tick-aed651",
+            "built-in-session-resurrection-7-4": "tick-1da49f",
+            "built-in-session-resurrection-7-5": "tick-c8d445",
+            "built-in-session-resurrection-7-6": "tick-921afc",
+            "built-in-session-resurrection-7-7": "tick-ca9244",
+            "built-in-session-resurrection-7-8": "tick-d6a06c",
+            "built-in-session-resurrection-7-9": "tick-122a0c",
+            "built-in-session-resurrection-7-10": "tick-0faaac",
+            "built-in-session-resurrection-7-11": "tick-5c1f8b",
+            "built-in-session-resurrection-7-12": "tick-a827a3",
+            "built-in-session-resurrection-7-13": "tick-326c1d",
+            "built-in-session-resurrection-7-14": "tick-c5c2c6",
+            "built-in-session-resurrection-7-15": "tick-bafb6e",
+            "built-in-session-resurrection-7-16": "tick-769978",
+            "built-in-session-resurrection-7-17": "tick-68ddec",
+            "built-in-session-resurrection-7-18": "tick-c50f99",
+            "built-in-session-resurrection-7-19": "tick-4bf9b3",
+            "built-in-session-resurrection-7-20": "tick-6f2a4a"
           },
           "external_id": "tick-45287e"
         }
@@ -127,7 +148,7 @@
           "status": "in-progress",
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
