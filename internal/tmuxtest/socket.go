@@ -20,6 +20,14 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
+// socketArgs prepends the isolated-socket prefix (`-S <socketPath> -f /dev/null`)
+// to args, returning the full tmux argv. Centralising this prefix means all
+// invocations against the isolated server stay byte-identical and the prefix
+// only ever changes in one place.
+func socketArgs(socketPath string, args ...string) []string {
+	return append([]string{"-S", socketPath, "-f", "/dev/null"}, args...)
+}
+
 // Socket scopes an isolated tmux server to a single test. The server uses
 // `tmux -S <abs-socket-path>` rooted in /tmp so the path stays inside the
 // platform's UNIX-socket length cap (104 bytes on darwin, 108 on linux), and
@@ -68,9 +76,7 @@ func (s *Socket) SocketPath() string { return s.socketPath }
 // only acts on -f when starting a new server, but specifying it on every
 // invocation is harmless and keeps the helper symmetric.
 func (s *Socket) cmd(args ...string) *exec.Cmd {
-	base := []string{"-S", s.socketPath, "-f", "/dev/null"}
-	base = append(base, args...)
-	return exec.Command("tmux", base...)
+	return exec.Command("tmux", socketArgs(s.socketPath, args...)...)
 }
 
 // Run executes a tmux command on the isolated socket, fatalling the test on
@@ -111,8 +117,7 @@ type socketCommander struct {
 // matching tmux.RealCommander.Run. -f /dev/null mirrors Socket.cmd: tests
 // must not pick up the developer's ~/.tmux.conf (notably base-index).
 func (sc *socketCommander) Run(args ...string) (string, error) {
-	full := append([]string{"-S", sc.socketPath, "-f", "/dev/null"}, args...)
-	out, err := exec.Command("tmux", full...).Output()
+	out, err := exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
 	if err != nil {
 		return "", err
 	}
@@ -122,8 +127,7 @@ func (sc *socketCommander) Run(args ...string) (string, error) {
 // RunRaw executes tmux on the isolated socket and returns its output verbatim,
 // matching tmux.RealCommander.RunRaw.
 func (sc *socketCommander) RunRaw(args ...string) (string, error) {
-	full := append([]string{"-S", sc.socketPath, "-f", "/dev/null"}, args...)
-	out, err := exec.Command("tmux", full...).Output()
+	out, err := exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
 	if err != nil {
 		return "", err
 	}
