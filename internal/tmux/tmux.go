@@ -447,6 +447,20 @@ func (c *Client) DeleteServerOption(name string) error {
 	return nil
 }
 
+// UnsetServerOption removes a tmux server-level option via "set-option -su".
+// The -s flag targets the server-option scope; -u removes (unsets) the option.
+// Like DeleteServerOption, this is a no-op when the option is already absent —
+// tmux does not error in that case. This method exists alongside
+// DeleteServerOption to provide a Set/Unset-named pair for the
+// @portal-restoring marker coordination in the bootstrap flow.
+func (c *Client) UnsetServerOption(name string) error {
+	_, err := c.cmd.Run("set-option", "-su", name)
+	if err != nil {
+		return fmt.Errorf("failed to unset server option %s: %w", name, err)
+	}
+	return nil
+}
+
 // ShowGlobalHooks returns the raw output of "tmux show-hooks -g".
 // The output is returned verbatim (no trimming) so callers can parse the
 // array-indexed hook entries with line and whitespace fidelity intact.
