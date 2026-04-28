@@ -16,6 +16,12 @@ func TestHooksListCommand(t *testing.T) {
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
+		// Stub bootstrap so the orchestrator's CleanStale step does
+		// not prune the hand-seeded hook entry whose structural key
+		// has no matching live tmux pane.
+		bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+		t.Cleanup(func() { bootstrapDeps = nil })
+
 		data := map[string]map[string]string{
 			"my-project-abc123:0.0": {"on-resume": "claude --resume abc123"},
 		}
@@ -85,6 +91,11 @@ func TestHooksListCommand(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Stub bootstrap so CleanStale does not prune entries whose
+		// structural keys have no live tmux pane.
+		bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
+		t.Cleanup(func() { bootstrapDeps = nil })
 
 		data := map[string]map[string]string{
 			"proj-abc:1.0":   {"on-resume": "claude --resume def456"},

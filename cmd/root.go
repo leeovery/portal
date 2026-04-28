@@ -88,10 +88,15 @@ var (
 // registration function used by PersistentPreRunE. When bootstrapDeps is
 // set (test mode), uses the injected Orchestrator — falling back to a
 // no-op runner when Orchestrator is nil so tests indifferent to
-// bootstrap need not wire anything. In production, builds a real tmux
-// client with RealCommander and wraps it in an inline runner whose Run
-// only calls EnsureServer until a follow-up task wires the full
-// Orchestrator with all step implementations.
+// bootstrap need not wire anything. In production, builds a fully-wired
+// *bootstrap.Orchestrator that runs the canonical eight-step sequence
+// (see cmd/bootstrap_production.go).
+//
+// In production the returned hook-registration callback is nil: hook
+// registration is owned by step 2 of the orchestrator. Tests still
+// inject a non-nil callback when they want to assert on
+// PersistentPreRunE's post-Run hook plumbing without standing up a real
+// orchestrator.
 func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) error) {
 	if bootstrapDeps != nil {
 		runner := bootstrapDeps.Orchestrator
@@ -100,8 +105,8 @@ func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) er
 		}
 		return runner, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
 	}
-	client := tmux.NewClient(&tmux.RealCommander{})
-	return ensureServerRunner{client: client}, client, tmux.RegisterPortalHooks
+	orch, client := buildProductionOrchestrator()
+	return orch, client, nil
 }
 
 // noopRunner satisfies bootstrap.Runner with a Run that does nothing and
@@ -112,27 +117,6 @@ type noopRunner struct{}
 // Run is a no-op for tests that don't care about bootstrap behaviour.
 func (noopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
 	return false, nil, nil
-}
-
-// ensureServerRunner is the production bootstrap.Runner used until the
-// full Orchestrator is wired with all step implementations. It performs
-// only step 1 (EnsureServer) of the canonical eight-step bootstrap
-// sequence and returns the started flag verbatim. Hook registration is
-// kept separate (see PersistentPreRunE), which calls the
-// BootstrapDeps.RegisterHooks func directly.
-type ensureServerRunner struct {
-	client *tmux.Client
-}
-
-// Run delegates to client.EnsureServer and propagates the result
-// verbatim. The middle slice is always nil — this runner produces no
-// warnings.
-func (r ensureServerRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
-	if r.client == nil {
-		return false, nil, nil
-	}
-	started, err := r.client.EnsureServer()
-	return started, nil, err
 }
 
 // runBootstrap invokes the runner with per-process memoisation. In
@@ -202,10 +186,12 @@ var rootCmd = &cobra.Command{
 		}
 		cmd.SetContext(ctx)
 
-		// Hook registration sits outside the orchestrator's path because
-		// production has not yet wired the full Orchestrator (planned
-		// follow-up task). The shim Runner only does EnsureServer; we
-		// still need RegisterHooks to keep Phase 1's hook table in scope.
+		// In production the orchestrator owns hook registration (step 2)
+		// and buildBootstrapDeps returns a nil registerHooks — the guard
+		// below is a no-op. The hook stays in place purely as a test
+		// seam: BootstrapDeps.RegisterHooks lets tests inject a recorder
+		// to assert on the post-Run plumbing without standing up a real
+		// orchestrator.
 		if registerHooks != nil && client != nil {
 			if err := registerHooks(client); err != nil {
 				return err
