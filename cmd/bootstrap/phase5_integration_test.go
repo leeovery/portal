@@ -68,36 +68,6 @@ func (m *markerProbeStub) Restore() (bool, error) { return false, m.probe() }
 // CleanStale records the marker state and returns nil. Stubs the clean step.
 func (m *markerProbeStub) CleanStale() error { return m.probe() }
 
-// noopSaver is a saver step that performs no work and reports success. Used
-// where the saver step is incidental to the test scenario.
-type noopSaver struct{}
-
-// EnsureSaver always returns nil.
-func (noopSaver) EnsureSaver() error { return nil }
-
-// noopRestorer is a restore step that performs no work and reports success.
-// Used by tests that exercise marker lifecycle but do not need real
-// skeleton-restore behaviour.
-type noopRestorer struct{}
-
-// Restore always returns (false, nil) — happy path under the
-// (corrupt, err) Restorer contract.
-func (noopRestorer) Restore() (bool, error) { return false, nil }
-
-// noopCleaner is a clean step that performs no work and reports success.
-type noopCleaner struct{}
-
-// CleanStale always returns nil.
-func (noopCleaner) CleanStale() error { return nil }
-
-// noopHooks is a hook registrar that performs no work and reports success.
-// Used by Test 1 to keep that scenario focused on marker lifecycle without
-// also asserting on Portal's hook table.
-type noopHooks struct{}
-
-// RegisterPortalHooks always returns nil.
-func (noopHooks) RegisterPortalHooks() error { return nil }
-
 // restoreOrchestratorAdapter wraps a *restore.Orchestrator so its
 // Restore() method satisfies bootstrap.Restorer. The bootstrap
 // orchestrator owns the @portal-restoring lifecycle separately (steps 3
@@ -135,7 +105,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 
 	o := &bootstrap.Orchestrator{
 		Server:    client,
-		Hooks:     noopHooks{},
+		Hooks:     bootstrap.NoOpHooks{},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     saverProbe,
 		Restore:   restoreProbe,
@@ -211,9 +181,9 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		Server:    client,
 		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     noopSaver{},
-		Restore:   noopRestorer{},
-		Clean:     noopCleaner{},
+		Saver:     bootstrap.NoOpSaver{},
+		Restore:   bootstrap.NoOpRestorer{},
+		Clean:     bootstrap.NoOpStaleCleaner{},
 	}
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -348,11 +318,11 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 
 	o := &bootstrap.Orchestrator{
 		Server:    client,
-		Hooks:     noopHooks{},
+		Hooks:     bootstrap.NoOpHooks{},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     noopSaver{},
+		Saver:     bootstrap.NoOpSaver{},
 		Restore:   &restoreOrchestratorAdapter{inner: restoreInner},
-		Clean:     noopCleaner{},
+		Clean:     bootstrap.NoOpStaleCleaner{},
 	}
 
 	if _, _, err := o.Run(context.Background()); err != nil {

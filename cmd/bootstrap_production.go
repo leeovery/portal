@@ -99,15 +99,6 @@ func (a *cleanStaleAdapter) CleanStale() error {
 	return err
 }
 
-// noopStaleCleaner is the production fallback when loadHookStore
-// fails to resolve the hooks.json path (e.g. HOME unset). Returning
-// nil keeps bootstrap moving — failed hook-config resolution is not a
-// reason to block the user's command.
-type noopStaleCleaner struct{}
-
-// CleanStale is a no-op.
-func (noopStaleCleaner) CleanStale() error { return nil }
-
 // buildProductionOrchestrator constructs a fully-wired
 // *bootstrap.Orchestrator and the underlying *tmux.Client to be shared
 // with downstream commands via cmd.Context(). The construction is
@@ -120,7 +111,7 @@ func (noopStaleCleaner) CleanStale() error { return nil }
 // values, so callers downstream do not have to nil-check.
 //
 // HookStore: when loadHookStore fails (path resolution error) the
-// CleanStale step degrades to noopStaleCleaner.
+// CleanStale step degrades to bootstrap.NoOpStaleCleaner.
 func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	client := tmux.NewClient(&tmux.RealCommander{})
 
@@ -140,7 +131,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	if hookStore, err := loadHookStore(); err == nil && hookStore != nil {
 		cleaner = &cleanStaleAdapter{client: client, store: hookStore}
 	} else {
-		cleaner = noopStaleCleaner{}
+		cleaner = bootstrap.NoOpStaleCleaner{}
 	}
 
 	restoreInner := &restore.Orchestrator{
