@@ -26,8 +26,6 @@ var attachCmd = &cobra.Command{
 	Short: "Attach to a tmux session by name",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		bootstrapWait(cmd)
-
 		name := args[0]
 
 		connector, validator := buildAttachDeps(cmd)

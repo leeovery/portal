@@ -90,8 +90,6 @@ var openCmd = &cobra.Command{
 			return openTUIFunc(cmd, "", command, serverWasStarted(cmd))
 		}
 
-		bootstrapWait(cmd)
-
 		query := destination
 
 		qr, err := buildQueryResolver()
