@@ -118,8 +118,8 @@ func TestHooksListCommand(t *testing.T) {
 		// `portal hooks ...` now goes through the full bootstrap path
 		// to keep CleanStale and skeleton restoration in scope. Stub
 		// bootstrapDeps so the test does not depend on a real tmux.
-		mock := &mockServerBootstrapper{}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		runner := &recordingRunner{}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		buf := new(bytes.Buffer)
@@ -130,8 +130,8 @@ func TestHooksListCommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !mock.called {
-			t.Error("EnsureServer should be called for portal hooks list (Phase 4)")
+		if runner.calls != 1 {
+			t.Errorf("orchestrator Run call count = %d, want 1 for portal hooks list (Phase 4)", runner.calls)
 		}
 	})
 

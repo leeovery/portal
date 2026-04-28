@@ -39,36 +39,23 @@ var skipTmuxCheck = map[string]bool{
 	"version": true,
 }
 
-// ServerBootstrapper ensures a tmux server is running. Retained as the
-// legacy injection seam for cmd-package tests written before the full
-// orchestrator landed; production code goes through bootstrap.Runner.
-type ServerBootstrapper interface {
-	EnsureServer() (bool, error)
-}
-
 // bootstrapDeps holds injectable dependencies for PersistentPreRunE. When
 // nil, real implementations are used.
 var bootstrapDeps *BootstrapDeps
 
 // BootstrapDeps allows injecting bootstrap dependencies for testing.
 //
-// Orchestrator is the preferred seam — when set, PersistentPreRunE calls
-// its Run method directly. Bootstrapper is the legacy seam wrapped by
-// bootstrap.NewShim when only Bootstrapper is set; it is scheduled for
-// removal in Phase 6 once every cmd-package test migrates to the
-// Orchestrator field. Client populates the tmuxClientKey context value
-// (helpers like tmuxClient(cmd) panic without it). RegisterHooks is the
-// seam for Portal's global tmux hook registration; when nil (production
-// default), tmux.RegisterPortalHooks is used.
+// Orchestrator is the test seam — implementations of bootstrap.Runner
+// whose Run is invoked by PersistentPreRunE. Client populates the
+// tmuxClientKey context value (helpers like tmuxClient(cmd) panic
+// without it). RegisterHooks is the seam for Portal's global tmux hook
+// registration; when nil (production default), tmux.RegisterPortalHooks
+// is used.
 type BootstrapDeps struct {
-	// Orchestrator is the primary test seam — implementations of
-	// bootstrap.Runner whose Run is invoked by PersistentPreRunE.
+	// Orchestrator is the test seam for bootstrap. When nil, a no-op
+	// runner is substituted so tests that don't care about bootstrap
+	// can leave it unset.
 	Orchestrator bootstrap.Runner
-
-	// Bootstrapper is the legacy test seam, wrapped via bootstrap.NewShim
-	// when Orchestrator is nil. TODO(phase-6): delete after every
-	// cmd-package test migrates to Orchestrator.
-	Bootstrapper ServerBootstrapper
 
 	// Client is exposed in cmd.Context() under tmuxClientKey so downstream
 	// commands (list, attach, kill, …) can look it up.
@@ -99,23 +86,53 @@ var (
 
 // buildBootstrapDeps returns the runner, shared client, and hook
 // registration function used by PersistentPreRunE. When bootstrapDeps is
-// set (test mode), uses injected dependencies — preferring Orchestrator
-// over the legacy Bootstrapper shim. Otherwise builds a real tmux client
-// with RealCommander and wraps it via bootstrap.NewShim. Production
-// keeps using NewShim until a follow-up adapter task wires the full
+// set (test mode), uses the injected Orchestrator — falling back to a
+// no-op runner when Orchestrator is nil so tests indifferent to
+// bootstrap need not wire anything. In production, builds a real tmux
+// client with RealCommander and wraps it in an inline runner whose Run
+// only calls EnsureServer until a follow-up task wires the full
 // Orchestrator with all step implementations.
 func buildBootstrapDeps() (bootstrap.Runner, *tmux.Client, func(*tmux.Client) error) {
 	if bootstrapDeps != nil {
-		var runner bootstrap.Runner
-		if bootstrapDeps.Orchestrator != nil {
-			runner = bootstrapDeps.Orchestrator
-		} else if bootstrapDeps.Bootstrapper != nil {
-			runner = bootstrap.NewShim(bootstrapDeps.Bootstrapper) //nolint:staticcheck // shim is the legacy seam during Phase 5 cutover
+		runner := bootstrapDeps.Orchestrator
+		if runner == nil {
+			runner = noopRunner{}
 		}
 		return runner, bootstrapDeps.Client, bootstrapDeps.RegisterHooks
 	}
 	client := tmux.NewClient(&tmux.RealCommander{})
-	return bootstrap.NewShim(client), client, tmux.RegisterPortalHooks //nolint:staticcheck // production wraps the client in shim until follow-up adapter task lands
+	return ensureServerRunner{client: client}, client, tmux.RegisterPortalHooks
+}
+
+// noopRunner satisfies bootstrap.Runner with a Run that does nothing and
+// returns (false, nil, nil). Used when test-mode BootstrapDeps leaves
+// Orchestrator nil — the test does not care about bootstrap behaviour.
+type noopRunner struct{}
+
+// Run is a no-op for tests that don't care about bootstrap behaviour.
+func (noopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	return false, nil, nil
+}
+
+// ensureServerRunner is the production bootstrap.Runner used until the
+// full Orchestrator is wired with all step implementations. It performs
+// only step 1 (EnsureServer) of the canonical eight-step bootstrap
+// sequence and returns the started flag verbatim. Hook registration is
+// kept separate (see PersistentPreRunE), which calls the
+// BootstrapDeps.RegisterHooks func directly.
+type ensureServerRunner struct {
+	client *tmux.Client
+}
+
+// Run delegates to client.EnsureServer and propagates the result
+// verbatim. The middle slice is always nil — this runner produces no
+// warnings.
+func (r ensureServerRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	if r.client == nil {
+		return false, nil, nil
+	}
+	started, err := r.client.EnsureServer()
+	return started, nil, err
 }
 
 // runBootstrap invokes the runner with per-process memoisation. In

@@ -170,17 +170,8 @@ func TestStateNotify_DoesNotReadOrCreateOtherStateFiles(t *testing.T) {
 	}
 }
 
-// stateNotifyPanicBootstrapper implements ServerBootstrapper but panics on any
-// call. Used to prove that PersistentPreRunE never invokes bootstrap for the
-// state notify command (state is in skipTmuxCheck).
-type stateNotifyPanicBootstrapper struct{}
-
-func (stateNotifyPanicBootstrapper) EnsureServer() (bool, error) {
-	panic("state notify must not invoke bootstrap (state is in skipTmuxCheck)")
-}
-
 func TestStateNotify_DoesNotInvokeBootstrap(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: stateNotifyPanicBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: panicRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	dir := t.TempDir()

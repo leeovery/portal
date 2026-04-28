@@ -51,7 +51,7 @@ func (t *testDirValidator) Exists(path string) bool {
 }
 
 func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
@@ -72,7 +72,7 @@ func TestOpenCommand_PathArgument_NonExistentPath(t *testing.T) {
 }
 
 func TestOpenCommand_PathArgument_FileNotDirectory(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	dir := t.TempDir()
@@ -119,7 +119,7 @@ func TestOpenCommand_PathArgument_SkipsTUI(t *testing.T) {
 }
 
 func TestOpenCommand_QueryResolution_AliasNotFound(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	// When a non-path query resolves to an alias that points to a non-existent directory,
@@ -149,7 +149,7 @@ func TestOpenCommand_QueryResolution_AliasNotFound(t *testing.T) {
 }
 
 func TestOpenCommand_QueryResolution_ZoxideNotFound(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	// When a non-path query resolves via zoxide to a non-existent directory,
@@ -998,9 +998,9 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 	// When a destination is provided but resolves to FallbackResult,
 	// the bootstrap orchestrator has already run; the fallback openTUI call
 	// is reached with serverStarted reflecting the orchestrator's outcome.
-	mock := &mockServerBootstrapper{started: true}
+	runner := &recordingRunner{started: true}
 	client := tmux.NewClient(&stubCommander{})
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock, Client: client}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner, Client: client}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	// Force the resolver to return FallbackResult (no alias, no zoxide match, no dir).
@@ -1034,8 +1034,8 @@ func TestOpenCommand_FallbackToTUI_SkipsSecondWait(t *testing.T) {
 func TestOpenCommand_DirectTUI_PassesServerStarted(t *testing.T) {
 	// When no destination is provided, the direct TUI path must pass
 	// the real serverWasStarted value so the TUI shows its loading interstitial.
-	mock := &mockServerBootstrapper{started: true}
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	runner := &recordingRunner{started: true}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	var capturedServerStarted bool

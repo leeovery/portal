@@ -167,22 +167,42 @@ func TestTmuxDependentCommandsSucceedWithTmux(t *testing.T) {
 	}
 }
 
-// mockServerBootstrapper implements ServerBootstrapper for testing.
-type mockServerBootstrapper struct {
-	started bool
-	err     error
-	called  bool
+// nopRunner satisfies bootstrap.Runner with a Run that does nothing and
+// returns (false, nil, nil). Substituted into BootstrapDeps.Orchestrator
+// for tests that don't care about bootstrap behaviour.
+type nopRunner struct{}
+
+// Run is a no-op for tests that don't care about bootstrap behaviour.
+func (nopRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	return false, nil, nil
 }
 
-func (m *mockServerBootstrapper) EnsureServer() (bool, error) {
-	m.called = true
-	return m.started, m.err
+// panicRunner satisfies bootstrap.Runner but panics on any Run
+// invocation. Used to prove PersistentPreRunE never reaches bootstrap
+// for skip-tmux commands or short-circuit paths.
+type panicRunner struct{}
+
+// Run panics; never expected to be called in tests using this fake.
+func (panicRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	panic("buildBootstrapDeps / Run must not be reached")
+}
+
+// errRunner returns the configured error from Run verbatim. Used by
+// tests asserting non-fatal bootstrap errors propagate without
+// wrapping.
+type errRunner struct {
+	err error
+}
+
+// Run returns (false, nil, r.err) verbatim.
+func (r *errRunner) Run(_ context.Context) (bool, []bootstrap.Warning, error) {
+	return false, nil, r.err
 }
 
 func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
-	t.Run("EnsureServer called for tmux-requiring commands", func(t *testing.T) {
-		mock := &mockServerBootstrapper{}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Run("orchestrator Run called for tmux-requiring commands", func(t *testing.T) {
+		runner := &recordingRunner{}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		listDeps = &ListDeps{
@@ -198,14 +218,14 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !mock.called {
-			t.Error("EnsureServer was not called")
+		if runner.calls != 1 {
+			t.Errorf("orchestrator Run call count = %d, want 1", runner.calls)
 		}
 	})
 
-	t.Run("EnsureServer error propagates to caller", func(t *testing.T) {
-		mock := &mockServerBootstrapper{err: fmt.Errorf("failed to start tmux server: permission denied")}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Run("orchestrator error propagates to caller", func(t *testing.T) {
+		runner := &recordingRunner{err: fmt.Errorf("failed to start tmux server: permission denied")}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		resetRootCmd()
@@ -221,9 +241,9 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		}
 	})
 
-	t.Run("EnsureServer not called for skipTmuxCheck commands", func(t *testing.T) {
-		mock := &mockServerBootstrapper{}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	t.Run("orchestrator Run not called for skipTmuxCheck commands", func(t *testing.T) {
+		runner := &recordingRunner{}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		resetRootCmd()
@@ -233,14 +253,14 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if mock.called {
-			t.Error("EnsureServer should not be called for skip commands")
+		if runner.calls != 0 {
+			t.Errorf("orchestrator Run call count for skip command = %d, want 0", runner.calls)
 		}
 	})
 
 	t.Run("PersistentPreRunE stores serverStarted=true in context", func(t *testing.T) {
-		mock := &mockServerBootstrapper{started: true}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		runner := &recordingRunner{started: true}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		// Create a test command that captures the context value from RunE
@@ -268,8 +288,8 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 	})
 
 	t.Run("PersistentPreRunE stores serverStarted=false in context", func(t *testing.T) {
-		mock := &mockServerBootstrapper{started: false}
-		bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+		runner := &recordingRunner{started: false}
+		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 		t.Cleanup(func() { bootstrapDeps = nil })
 
 		var gotStarted bool
@@ -324,13 +344,13 @@ func (r *recordingHookRegistrar) Register(c *tmux.Client) error {
 }
 
 func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
-	t.Run("RegisterHooks is called once after EnsureServer for non-exempt commands", func(t *testing.T) {
-		mockBoot := &mockServerBootstrapper{}
+	t.Run("RegisterHooks is called once after orchestrator for non-exempt commands", func(t *testing.T) {
+		runner := &recordingRunner{}
 		client := tmux.NewClient(&tmux.RealCommander{})
 		registrar := &recordingHookRegistrar{want: client}
 
 		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper:  mockBoot,
+			Orchestrator:  runner,
 			Client:        client,
 			RegisterHooks: registrar.Register,
 		}
@@ -348,8 +368,8 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		if !mockBoot.called {
-			t.Error("EnsureServer was not called")
+		if runner.calls != 1 {
+			t.Errorf("orchestrator Run call count = %d, want 1", runner.calls)
 		}
 		if registrar.calls != 1 {
 			t.Errorf("RegisterHooks call count = %d, want 1", registrar.calls)
@@ -374,7 +394,7 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				registrar := &recordingHookRegistrar{}
 				bootstrapDeps = &BootstrapDeps{
-					Bootstrapper:  &mockServerBootstrapper{},
+					Orchestrator:  &nopRunner{},
 					RegisterHooks: registrar.Register,
 				}
 				t.Cleanup(func() { bootstrapDeps = nil })
@@ -408,7 +428,7 @@ func TestPersistentPreRunE_RegistersPortalHooks(t *testing.T) {
 		registrar := &recordingHookRegistrar{err: sentinel}
 
 		bootstrapDeps = &BootstrapDeps{
-			Bootstrapper:  &mockServerBootstrapper{},
+			Orchestrator:  &nopRunner{},
 			Client:        client,
 			RegisterHooks: registrar.Register,
 		}
@@ -477,7 +497,7 @@ func TestPersistentPreRunE_WrapsVersionCheckErrorAsFatal(t *testing.T) {
 	}
 	t.Cleanup(func() { versionChecker = original })
 
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
@@ -564,10 +584,11 @@ func TestExecute_EmitsFatalUserMessageToStderr(t *testing.T) {
 func TestExecute_NonFatalErrorWritesNothingToFatalStream(t *testing.T) {
 	resetBootstrapOnce(t)
 
-	// Use the legacy Bootstrapper seam — its shim returns errors verbatim
-	// without wrapping in FatalError.
-	mock := &mockServerBootstrapper{err: errors.New("transient")}
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
+	// Use a plain errRunner — its Run returns the configured error
+	// verbatim, without wrapping in FatalError. Verifies Execute writes
+	// nothing to fatalErrorStderr when the error is non-fatal.
+	runner := &errRunner{err: errors.New("transient")}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	var stderr bytes.Buffer

@@ -571,3 +571,8 @@ func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
 		t.Errorf("expected zero warnings on happy path; got %#v", warnings)
 	}
 }
+
+// Compile-time assertion: *Orchestrator satisfies Runner. cmd/root.go's
+// BootstrapDeps.Orchestrator field is typed as Runner; this guards
+// against future drift in either the interface or the concrete type.
+var _ Runner = (*Orchestrator)(nil)

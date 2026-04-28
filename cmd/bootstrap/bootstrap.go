@@ -19,6 +19,18 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
+// Runner is the abstraction cmd/root.go depends on so PersistentPreRunE
+// does not import the concrete *Orchestrator type. Orchestrator implicitly
+// satisfies Runner; tests inject lightweight fakes (no-op runners,
+// recording fakes, panic guards) via BootstrapDeps.Orchestrator.
+//
+// The middle return value carries any soft Warnings accumulated during
+// the run (Phase 6 task 6-9). Lightweight test fakes typically return a
+// nil slice — only the full Orchestrator produces warnings.
+type Runner interface {
+	Run(ctx context.Context) (bool, []Warning, error)
+}
+
 // ServerBootstrapper starts the tmux server when not already running.
 // EnsureServer reports whether Portal itself was the one that started it.
 type ServerBootstrapper interface {

@@ -28,7 +28,7 @@ func (m *mockSessionValidator) HasSession(name string) bool {
 }
 
 func TestAttachCommand(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	t.Run("inside tmux uses switch-client", func(t *testing.T) {

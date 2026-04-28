@@ -630,17 +630,8 @@ func TestStateCleanup_PurgeRemovesFIFOAndBinFiles(t *testing.T) {
 	}
 }
 
-// stateCleanupPanicBootstrapper implements ServerBootstrapper but panics on
-// any call. Used to prove that PersistentPreRunE never invokes bootstrap for
-// the state cleanup command (state is in skipTmuxCheck).
-type stateCleanupPanicBootstrapper struct{}
-
-func (stateCleanupPanicBootstrapper) EnsureServer() (bool, error) {
-	panic("state cleanup must not invoke bootstrap (state is in skipTmuxCheck)")
-}
-
 func TestStateCleanup_DoesNotInvokeBootstrap(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: stateCleanupPanicBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: panicRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	cmder := &recordingCommander{

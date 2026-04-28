@@ -37,20 +37,11 @@ func installStubVersionChecker(t *testing.T, stub *stubVersionChecker) {
 	t.Cleanup(resetVersionCheckForTest)
 }
 
-// panicBootstrapper implements ServerBootstrapper but panics if EnsureServer
-// is invoked. Used to prove PersistentPreRunE short-circuits before bootstrap
-// when the version checker errors.
-type panicBootstrapper struct{}
-
-func (panicBootstrapper) EnsureServer() (bool, error) {
-	panic("buildBootstrapDeps / EnsureServer must not be reached when the version checker errors")
-}
-
 func TestVersionGuard_InvokedForNonExemptOpen(t *testing.T) {
 	stub := &stubVersionChecker{}
 	installStubVersionChecker(t, stub)
 
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
@@ -111,7 +102,7 @@ func TestVersionGuard_InvokedForOtherNonExemptCommands(t *testing.T) {
 			stub := &stubVersionChecker{}
 			installStubVersionChecker(t, stub)
 
-			bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+			bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 			t.Cleanup(func() { bootstrapDeps = nil })
 
 			tt.setup(t)
@@ -186,7 +177,7 @@ func TestVersionGuard_RunsExactlyOnceAcrossRepeatedInvocations(t *testing.T) {
 	stub := &stubVersionChecker{}
 	installStubVersionChecker(t, stub)
 
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	listDeps = &ListDeps{
@@ -212,7 +203,7 @@ func TestVersionGuard_ShortCircuitsBootstrapOnFailure(t *testing.T) {
 	stub := &stubVersionChecker{err: errors.New("Portal requires tmux \u2265 3.0 (found 2.9). Please upgrade.")}
 	installStubVersionChecker(t, stub)
 
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: panicBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: panicRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()
@@ -238,7 +229,7 @@ func TestVersionGuard_PropagatesExactCheckerError(t *testing.T) {
 	stub := &stubVersionChecker{err: errors.New(wantMsg)}
 	installStubVersionChecker(t, stub)
 
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: panicBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: panicRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	resetRootCmd()

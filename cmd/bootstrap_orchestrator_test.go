@@ -202,61 +202,6 @@ func TestPersistentPreRunE_DoesNotInvokeOrchestratorForExemptCommands(t *testing
 	}
 }
 
-func TestPersistentPreRunE_PrefersOrchestratorOverBootstrapper(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	runner := &recordingRunner{started: true}
-	mock := &mockServerBootstrapper{}
-	bootstrapDeps = &BootstrapDeps{
-		Orchestrator: runner,
-		Bootstrapper: mock,
-	}
-	t.Cleanup(func() { bootstrapDeps = nil })
-
-	listDeps = &ListDeps{
-		Lister: &mockSessionLister{sessions: []tmux.Session{}},
-		IsTTY:  func() bool { return false },
-	}
-	t.Cleanup(func() { listDeps = nil })
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if runner.calls != 1 {
-		t.Errorf("orchestrator Run call count = %d, want 1", runner.calls)
-	}
-	if mock.called {
-		t.Error("Bootstrapper.EnsureServer must NOT be called when Orchestrator is set")
-	}
-}
-
-func TestPersistentPreRunE_FallsBackToBootstrapperShimWhenOrchestratorNil(t *testing.T) {
-	resetBootstrapOnce(t)
-
-	mock := &mockServerBootstrapper{started: true}
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: mock}
-	t.Cleanup(func() { bootstrapDeps = nil })
-
-	listDeps = &ListDeps{
-		Lister: &mockSessionLister{sessions: []tmux.Session{}},
-		IsTTY:  func() bool { return false },
-	}
-	t.Cleanup(func() { listDeps = nil })
-
-	resetRootCmd()
-	rootCmd.SetArgs([]string{"list"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !mock.called {
-		t.Error("Bootstrapper.EnsureServer was not called when Orchestrator is nil")
-	}
-}
-
 // Compile-time assertion: bootstrap.Runner is the type the cmd package
 // stores in BootstrapDeps.Orchestrator. Catches any future drift in the
 // interface signature.

@@ -20,7 +20,7 @@ func (m *mockSessionLister) ListSessions() ([]tmux.Session, error) {
 }
 
 func TestListCommand(t *testing.T) {
-	bootstrapDeps = &BootstrapDeps{Bootstrapper: &mockServerBootstrapper{}}
+	bootstrapDeps = &BootstrapDeps{Orchestrator: &nopRunner{}}
 	t.Cleanup(func() { bootstrapDeps = nil })
 
 	t.Run("TTY output includes name status and window count", func(t *testing.T) {
