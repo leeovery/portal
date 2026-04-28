@@ -36,10 +36,12 @@ const (
 	ComponentBootstrap = "bootstrap"
 )
 
-// logRotateThreshold is the file-size cap at which OpenLogger rotates the
-// current portal.log to portal.log.old. Matches the spec's "1 MB per file"
-// (interpreted as 1 MiB to match the binary growth pattern of log files).
-const logRotateThreshold = 1 << 20 // 1 MiB
+// LogRotateThreshold is the file-size cap at which Logger rotates the current
+// portal.log to portal.log.old. Both the open-time rotation in OpenLogger and
+// the mid-write rotation in maybeRotate use this constant. Matches the spec's
+// "1 MB per file" (interpreted as 1 MiB to match the binary growth pattern of
+// log files). Exported so tests and sibling packages can reference it.
+const LogRotateThreshold = 1 * 1024 * 1024 // 1 MiB
 
 // Logger appends single-line, pipe-delimited entries to a log file.
 // Format: "timestamp | level | component | message\n" where timestamp is
@@ -53,6 +55,15 @@ type Logger struct {
 	mu       sync.Mutex
 	f        *os.File
 	minLevel Level
+	// path is the on-disk path of the current log file. Empty for NopLogger
+	// (where rotation has nothing to act on). Captured at OpenLogger so
+	// maybeRotate can rename the file without re-deriving the path.
+	path string
+	// rotating indicates whether mid-write rotation is enabled for this
+	// Logger. Set true only when OpenLogger is called with rotate=true (the
+	// daemon process). Non-daemon callers leave it false so maybeRotate
+	// short-circuits — only one writer rotates the file at a time.
+	rotating bool
 }
 
 // OpenLogger opens path for appending and returns a Logger configured with
@@ -82,7 +93,12 @@ func OpenLogger(path string, rotate bool) (*Logger, error) {
 		return nil, fmt.Errorf("open log file %s: %w", path, err)
 	}
 
-	return &Logger{f: f, minLevel: parseLevel(os.Getenv("PORTAL_LOG_LEVEL"))}, nil
+	return &Logger{
+		f:        f,
+		minLevel: parseLevel(os.Getenv("PORTAL_LOG_LEVEL")),
+		path:     path,
+		rotating: rotate,
+	}, nil
 }
 
 // parseLevel maps a PORTAL_LOG_LEVEL string to a Level. Input is trimmed and
@@ -105,7 +121,7 @@ func parseLevel(s string) Level {
 }
 
 // rotateIfOversized renames path → path+".old" when path exists and is at
-// least logRotateThreshold bytes. A missing path is a no-op. Errors from
+// least LogRotateThreshold bytes. A missing path is a no-op. Errors from
 // stat (other than ErrNotExist) and rename are returned wrapped so callers
 // can surface a specific failure.
 func rotateIfOversized(path string) error {
@@ -117,7 +133,7 @@ func rotateIfOversized(path string) error {
 		return fmt.Errorf("stat log file %s: %w", path, err)
 	}
 
-	if info.Size() < logRotateThreshold {
+	if info.Size() < LogRotateThreshold {
 		return nil
 	}
 
@@ -125,6 +141,54 @@ func rotateIfOversized(path string) error {
 		return fmt.Errorf("rotate log file %s: %w", path, err)
 	}
 	return nil
+}
+
+// maybeRotate performs daemon-only mid-write rotation. The caller must hold
+// l.mu. pending is the byte count of the line about to be written; if the
+// current file size plus pending would reach LogRotateThreshold, the current
+// file is closed, renamed to path+".old" (replacing any existing one), and a
+// fresh file is opened so the triggering write lands in the new portal.log.
+//
+// Failure handling is best-effort: rotation errors are logged once to stderr
+// so the operator notices, but the Logger never panics or returns errors —
+// logging must not fail the caller. If the rename or reopen fails, l.f is
+// left in a state where the next write either retries the rotation (file
+// still ≥ threshold) or no-ops (l.f == nil).
+func (l *Logger) maybeRotate(pending int64) {
+	if !l.rotating {
+		return
+	}
+	if l.f == nil {
+		return
+	}
+	st, err := l.f.Stat()
+	if err != nil {
+		return
+	}
+	if st.Size()+pending < LogRotateThreshold {
+		return
+	}
+
+	_ = l.f.Close()
+
+	oldPath := l.path + ".old"
+	_ = os.Remove(oldPath) // ENOENT-tolerant; ensures Rename can replace.
+
+	if err := os.Rename(l.path, oldPath); err != nil {
+		fmt.Fprintf(os.Stderr, "portal: log rotation failed: %v\n", err)
+		// Re-open the existing file so subsequent writes still land.
+		f, _ := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		l.f = f // may be nil → next write no-ops
+		return
+	}
+
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "portal: log reopen failed: %v\n", err)
+		l.f = nil
+		return
+	}
+	l.f = f
 }
 
 // NopLogger returns a non-nil *Logger whose internal file is nil so every
@@ -171,7 +235,7 @@ func (l *Logger) Error(component, format string, args ...any) {
 // filtering, or write errors, the call is silently dropped — logging must
 // never fail the caller.
 func (l *Logger) write(level Level, levelLabel, component, format string, args ...any) {
-	if l == nil || l.f == nil {
+	if l == nil {
 		return
 	}
 	if level < l.minLevel {
@@ -183,5 +247,14 @@ func (l *Logger) write(level Level, levelLabel, component, format string, args .
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Rotate before writing so the triggering line lands in the freshly
+	// opened portal.log rather than pushing the rotated file over threshold.
+	// maybeRotate is a no-op for non-daemon callers and for nil l.f.
+	l.maybeRotate(int64(len(line)))
+
+	if l.f == nil {
+		return
+	}
 	_, _ = l.f.WriteString(line)
 }

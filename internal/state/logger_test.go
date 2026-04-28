@@ -532,6 +532,191 @@ func TestNopLogger_IsNonNilAndSwallowsWrites(t *testing.T) {
 	}
 }
 
+// loggerLineOverhead is the constant byte cost of a Logger line on disk for
+// level=WARN, component=daemon. Logger.write formats lines as
+// "<RFC3339-20> | <LEVEL-N> | <component> | <msg>\n" with three " | "
+// separators; the overhead is
+// 20 (timestamp) + 3 + 4 (WARN) + 3 + 6 (daemon) + 3 + 1 (newline) = 40.
+const loggerLineOverhead = 40
+
+// makeMessageOfLineLen returns a message string such that the resulting Logger
+// line (including timestamp prefix and trailing newline, with WARN/daemon) has
+// exactly lineLen bytes on disk. lineLen must be >= loggerLineOverhead.
+func makeMessageOfLineLen(t *testing.T, lineLen int) string {
+	t.Helper()
+	if lineLen < loggerLineOverhead {
+		t.Fatalf("line length %d is below fixed overhead %d", lineLen, loggerLineOverhead)
+	}
+	return strings.Repeat("x", lineLen-loggerLineOverhead)
+}
+
+func TestLogger_DaemonRotatesMidWriteWhenNextWriteCrossesOneMiB(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "portal.log")
+
+	// Pre-populate at threshold-200. The seed bytes are "S"... so we can later
+	// distinguish them from log lines.
+	const threshold = 1 << 20
+	seed := bytes.Repeat([]byte("S"), threshold-200)
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	lg := openLogger(t, path, true) // rotate=true → daemon mode
+
+	// First write: line of 100 bytes. Post-write file size would be
+	// threshold-200+100 = threshold-100 < threshold → no rotation.
+	firstMsg := makeMessageOfLineLen(t, 100)
+	lg.Warn("daemon", "%s", firstMsg)
+
+	// Second write: line of 150 bytes. Pre-write check: size=threshold-100,
+	// pending=150 → sum=threshold+50 ≥ threshold → rotate before write.
+	secondMsg := makeMessageOfLineLen(t, 150)
+	lg.Warn("daemon", "%s", secondMsg)
+
+	if err := lg.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	old, err := os.ReadFile(path + ".old")
+	if err != nil {
+		t.Fatalf("rotated file missing: %v", err)
+	}
+	// .old must contain pre-rotation bytes: seed + first 100-byte line.
+	if got, want := len(old), threshold-100; got != want {
+		t.Fatalf(".old size = %d, want %d (seed %d + first line 100)", got, want, threshold-200)
+	}
+	if !bytes.HasPrefix(old, seed) {
+		t.Errorf(".old does not start with seed bytes")
+	}
+	if !bytes.Contains(old, []byte(firstMsg)) {
+		t.Errorf(".old missing first line message")
+	}
+	if bytes.Contains(old, []byte(secondMsg)) {
+		t.Errorf(".old must not contain triggering (second) line")
+	}
+
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read post-rotation portal.log: %v", err)
+	}
+	// New portal.log contains only the triggering 150-byte line.
+	if got, want := len(cur), 150; got != want {
+		t.Errorf("post-rotation portal.log size = %d, want %d", got, want)
+	}
+	if !bytes.Contains(cur, []byte(secondMsg)) {
+		t.Errorf("post-rotation portal.log missing triggering line")
+	}
+	if bytes.Contains(cur, []byte("S")) {
+		t.Errorf("post-rotation portal.log contains pre-rotation seed bytes")
+	}
+}
+
+func TestLogger_DaemonRotationTriggersAtExactlyOneMiB(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "portal.log")
+
+	const threshold = 1 << 20
+	const lineLen = 100
+	seed := bytes.Repeat([]byte("S"), threshold-lineLen)
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	lg := openLogger(t, path, true)
+
+	// Pending size + current = exactly threshold → must rotate (inclusive).
+	msg := makeMessageOfLineLen(t, lineLen)
+	lg.Warn("daemon", "%s", msg)
+
+	if err := lg.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	old, err := os.ReadFile(path + ".old")
+	if err != nil {
+		t.Fatalf("expected rotation at exact threshold, .old missing: %v", err)
+	}
+	if got, want := len(old), threshold-lineLen; got != want {
+		t.Errorf(".old size = %d, want %d", got, want)
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	if got, want := len(cur), lineLen; got != want {
+		t.Errorf("post-rotation portal.log size = %d, want %d", got, want)
+	}
+}
+
+func TestLogger_DaemonReplacesExistingOldOnMidWriteRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "portal.log")
+	oldPath := path + ".old"
+
+	const threshold = 1 << 20
+	const lineLen = 100
+
+	// Pre-existing .old with sentinel content that must be overwritten.
+	sentinel := []byte("STALE-OLD-SHOULD-BE-REPLACED")
+	if err := os.WriteFile(oldPath, sentinel, 0o600); err != nil {
+		t.Fatalf("seed old: %v", err)
+	}
+	seed := bytes.Repeat([]byte("S"), threshold-lineLen)
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatalf("seed current: %v", err)
+	}
+
+	lg := openLogger(t, path, true)
+	msg := makeMessageOfLineLen(t, lineLen)
+	lg.Warn("daemon", "%s", msg)
+	if err := lg.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatalf("read .old: %v", err)
+	}
+	if bytes.Contains(got, sentinel) {
+		t.Errorf(".old still contains sentinel; rotation did not replace it")
+	}
+	if got, want := len(got), threshold-lineLen; got != want {
+		t.Errorf(".old size = %d, want %d (pre-rotation portal.log size)", got, want)
+	}
+}
+
+func TestLogger_NonDaemonDoesNotRotateMidWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "portal.log")
+
+	// 2 MiB pre-populated content — well above threshold.
+	huge := bytes.Repeat([]byte("D"), 2*(1<<20))
+	if err := os.WriteFile(path, huge, 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// rotate=false → non-daemon caller. No rotation on open and no mid-write
+	// rotation either.
+	lg := openLogger(t, path, false)
+	msg := makeMessageOfLineLen(t, 100)
+	lg.Warn("daemon", "%s", msg)
+	if err := lg.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := os.Stat(path + ".old"); !os.IsNotExist(err) {
+		t.Errorf(".old must not exist for non-daemon caller; stat err = %v", err)
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	if got, min := len(cur), 2*(1<<20); got <= min {
+		t.Errorf("portal.log size = %d, want > %d (non-daemon must not rotate)", got, min)
+	}
+}
+
 func TestLogger_ExposesComponentConstants(t *testing.T) {
 	cases := []struct {
 		name string
