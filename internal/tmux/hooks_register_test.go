@@ -40,6 +40,18 @@ const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && p
 // expands it at hook-fire time.
 const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`
 
+// expectedMigrateRenameEvents is the canonical migrate-rename event list, in
+// registration order. Mirrors migrateRenameEvents in hooks_register.go.
+var expectedMigrateRenameEvents = []string{"session-renamed"}
+
+// expectedMigrateRenameCommand is the exact full command Portal registers for
+// the rename-key migration hook on session-renamed. Mirrors
+// migrateRenameCommand in hooks_register.go. The literal #{hook_session_name}
+// tokens are preserved verbatim — tmux expands them at hook-fire time. Until
+// daemon-side rename-delta tracking lands, both old and new are passed as
+// the new name; the migrate-rename body is a no-op when old==new.
+const expectedMigrateRenameCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state migrate-rename '#{hook_session_name}' '#{hook_session_name}'"`
+
 // dispatchPortalHooks builds a RunFunc that returns showOutput for every
 // "show-hooks -g" call and records "set-hook -ga" calls. setHookErrFor, when
 // non-nil, returns the configured error for matching events; nil otherwise.
@@ -75,7 +87,9 @@ func setHookCalls(calls [][]string) [][2]string {
 }
 
 // allPortalHooksRegisteredOutput builds a show-hooks -g output that contains
-// a Portal entry for every save-trigger and hydration-trigger event.
+// a Portal entry for every save-trigger, hydration-trigger, and
+// migrate-rename event. session-renamed gets two entries (notify and
+// migrate-rename) — the latter is appended at the next available index.
 func allPortalHooksRegisteredOutput() string {
 	var b strings.Builder
 	for _, e := range expectedSaveTriggerEvents {
@@ -83,6 +97,11 @@ func allPortalHooksRegisteredOutput() string {
 	}
 	for _, e := range expectedHydrationTriggerEvents {
 		fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+	}
+	for _, e := range expectedMigrateRenameEvents {
+		// session-renamed already has a notify entry at [0] from the
+		// save-trigger loop above; migrate-rename appends at [1].
+		fmt.Fprintf(&b, "%s[1] => %q\n", e, expectedMigrateRenameCommand)
 	}
 	return b.String()
 }
@@ -314,7 +333,7 @@ func TestRegisterHookIfAbsent(t *testing.T) {
 }
 
 func TestRegisterPortalHooks(t *testing.T) {
-	t.Run("it registers all nine Portal hooks on a fresh server", func(t *testing.T) {
+	t.Run("it registers all ten Portal hooks on a fresh server", func(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
@@ -324,13 +343,14 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
-		if len(got) != 9 {
-			t.Fatalf("set-hook -ga call count = %d, want 9: %v", len(got), got)
+		if len(got) != 10 {
+			t.Fatalf("set-hook -ga call count = %d, want 10: %v", len(got), got)
 		}
 	})
 
 	t.Run("it registers hooks in the documented order", func(t *testing.T) {
-		// Save-trigger events first, then hydration-trigger events.
+		// Save-trigger events first, then hydration-trigger events, then
+		// migrate-rename events.
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
@@ -341,6 +361,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		got := setHookCalls(mock.Calls)
 		want := append([]string{}, expectedSaveTriggerEvents...)
 		want = append(want, expectedHydrationTriggerEvents...)
+		want = append(want, expectedMigrateRenameEvents...)
 
 		if len(got) != len(want) {
 			t.Fatalf("set-hook count = %d, want %d (got %v)", len(got), len(want), got)
@@ -368,7 +389,9 @@ func TestRegisterPortalHooks(t *testing.T) {
 
 	t.Run("it tops up only the missing events on a partially-registered server", func(t *testing.T) {
 		// Five save-trigger events present, two missing (window-unlinked and pane-focus-out).
-		// Both hydration events present.
+		// Both hydration events present. Migrate-rename also already present
+		// on session-renamed so the only top-ups are the two missing
+		// save-trigger events.
 		var b strings.Builder
 		present := map[string]bool{
 			"session-created":       true,
@@ -384,6 +407,11 @@ func TestRegisterPortalHooks(t *testing.T) {
 		}
 		for _, e := range expectedHydrationTriggerEvents {
 			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+		}
+		for _, e := range expectedMigrateRenameEvents {
+			// session-renamed already has the notify entry above at [0];
+			// migrate-rename appended at [1].
+			fmt.Fprintf(&b, "%s[1] => %q\n", e, expectedMigrateRenameCommand)
 		}
 
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
@@ -406,9 +434,10 @@ func TestRegisterPortalHooks(t *testing.T) {
 	})
 
 	t.Run("it attempts every event even if one set-hook -ga call fails", func(t *testing.T) {
-		// Fresh server: all 9 events would be appended. We make set-hook fail
-		// for two specific events. RegisterPortalHooks must still attempt every
-		// event (9 set-hook calls in total).
+		// Fresh server: all 10 events would be appended (session-renamed gets
+		// two — notify and migrate-rename). We make set-hook fail for two
+		// specific events. RegisterPortalHooks must still attempt every event
+		// (10 set-hook calls in total).
 		failures := map[string]error{
 			"session-renamed":        errors.New("transient tmux failure"),
 			"client-session-changed": errors.New("another transient failure"),
@@ -422,8 +451,8 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatal("expected aggregate error, got nil")
 		}
 		got := setHookCalls(mock.Calls)
-		if len(got) != 9 {
-			t.Errorf("set-hook -ga call count = %d, want 9 (every event attempted): %v", len(got), got)
+		if len(got) != 10 {
+			t.Errorf("set-hook -ga call count = %d, want 10 (every event attempted): %v", len(got), got)
 		}
 	})
 
@@ -458,27 +487,23 @@ func TestRegisterPortalHooks(t *testing.T) {
 
 	t.Run("it does not double-register on two consecutive bootstraps in the same process", func(t *testing.T) {
 		// Simulate a stateful tmux: first bootstrap on empty show-hooks
-		// registers all 9. Second bootstrap sees those 9 in show-hooks output
-		// and registers nothing.
-		var registered []string
+		// registers all 10. Second bootstrap sees those 10 in show-hooks
+		// output and registers nothing.
+		var registered [][2]string // (event, command) in registration order
 		runFunc := func(args ...string) (string, error) {
 			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
 				var b strings.Builder
-				for _, ev := range registered {
-					// Use the same command body Portal would have appended.
-					cmd := expectedNotifyCommand
-					for _, h := range expectedHydrationTriggerEvents {
-						if ev == h {
-							cmd = expectedSignalHydrateCommand
-							break
-						}
-					}
-					fmt.Fprintf(&b, "%s[0] => %q\n", ev, cmd)
+				perEventCount := map[string]int{}
+				for _, entry := range registered {
+					ev, cmd := entry[0], entry[1]
+					idx := perEventCount[ev]
+					perEventCount[ev] = idx + 1
+					fmt.Fprintf(&b, "%s[%d] => %q\n", ev, idx, cmd)
 				}
 				return b.String(), nil
 			}
 			if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
-				registered = append(registered, args[2])
+				registered = append(registered, [2]string{args[2], args[3]})
 				return "", nil
 			}
 			t.Fatalf("unexpected command: %v", args)
@@ -491,8 +516,8 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("first bootstrap: unexpected error: %v", err)
 		}
 		firstBootstrapAppends := len(setHookCalls(mock.Calls))
-		if firstBootstrapAppends != 9 {
-			t.Fatalf("first bootstrap set-hook count = %d, want 9", firstBootstrapAppends)
+		if firstBootstrapAppends != 10 {
+			t.Fatalf("first bootstrap set-hook count = %d, want 10", firstBootstrapAppends)
 		}
 
 		// Reset call log; run again.
@@ -532,7 +557,8 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
-		// Last two calls correspond to hydration-trigger events.
+		// The two hydration-trigger calls sit between the save-trigger calls
+		// and the migrate-rename call.
 		base := len(expectedSaveTriggerEvents)
 		for i, ev := range expectedHydrationTriggerEvents {
 			idx := base + i
@@ -544,6 +570,228 @@ func TestRegisterPortalHooks(t *testing.T) {
 			}
 			if !strings.Contains(got[idx][1], "#{session_name}") {
 				t.Errorf("call[%d] command = %q, missing literal #{session_name}", idx, got[idx][1])
+			}
+		}
+	})
+
+	t.Run("it appends a migrate-rename entry on session-renamed on a fresh server", func(t *testing.T) {
+		// After all 7 save-trigger and 2 hydration-trigger appends, the final
+		// set-hook -ga must be on session-renamed with the migrateRenameCommand.
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		if len(got) != 10 {
+			t.Fatalf("set-hook -ga call count = %d, want 10: %v", len(got), got)
+		}
+		final := got[9]
+		if final[0] != "session-renamed" {
+			t.Errorf("final call event = %q, want session-renamed", final[0])
+		}
+		if final[1] != expectedMigrateRenameCommand {
+			t.Errorf("final call command = %q, want %q", final[1], expectedMigrateRenameCommand)
+		}
+	})
+
+	t.Run("it leaves the existing notify entry untouched when adding migrate-rename", func(t *testing.T) {
+		// Fresh server but with a pre-existing notify entry on every save-
+		// trigger event (including session-renamed). Hydration events also
+		// already present. Only migrate-rename should be appended.
+		var b strings.Builder
+		for _, e := range expectedSaveTriggerEvents {
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
+		}
+		for _, e := range expectedHydrationTriggerEvents {
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+		}
+
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		if len(got) != 1 {
+			t.Fatalf("set-hook -ga call count = %d, want 1: %v", len(got), got)
+		}
+		if got[0][0] != "session-renamed" {
+			t.Errorf("set-hook event = %q, want session-renamed", got[0][0])
+		}
+		if got[0][1] != expectedMigrateRenameCommand {
+			t.Errorf("set-hook command = %q, want %q", got[0][1], expectedMigrateRenameCommand)
+		}
+	})
+
+	t.Run("it is idempotent across re-registration when notify and migrate-rename are both present", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, allPortalHooksRegisteredOutput(), nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		if len(got) != 0 {
+			t.Errorf("expected 0 set-hook -ga calls (all present), got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("it tops up only migrate-rename when notify is already present on session-renamed", func(t *testing.T) {
+		// Every event has its expected entry except migrate-rename on
+		// session-renamed. Only that one append should occur.
+		var b strings.Builder
+		for _, e := range expectedSaveTriggerEvents {
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
+		}
+		for _, e := range expectedHydrationTriggerEvents {
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+		}
+
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		if len(got) != 1 {
+			t.Fatalf("set-hook -ga call count = %d, want 1: %v", len(got), got)
+		}
+		if got[0][0] != "session-renamed" || got[0][1] != expectedMigrateRenameCommand {
+			t.Errorf("got %v, want [session-renamed %q]", got[0], expectedMigrateRenameCommand)
+		}
+	})
+
+	t.Run("it tops up only notify when migrate-rename is already present on session-renamed", func(t *testing.T) {
+		// All save-trigger events have notify EXCEPT session-renamed, which
+		// only has migrate-rename. All hydration events present. Only the
+		// notify append on session-renamed should occur.
+		var b strings.Builder
+		for _, e := range expectedSaveTriggerEvents {
+			if e == "session-renamed" {
+				continue
+			}
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
+		}
+		for _, e := range expectedHydrationTriggerEvents {
+			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+		}
+		// session-renamed only has migrate-rename at index [0].
+		fmt.Fprintf(&b, "session-renamed[0] => %q\n", expectedMigrateRenameCommand)
+
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		if len(got) != 1 {
+			t.Fatalf("set-hook -ga call count = %d, want 1: %v", len(got), got)
+		}
+		if got[0][0] != "session-renamed" || got[0][1] != expectedNotifyCommand {
+			t.Errorf("got %v, want [session-renamed %q]", got[0], expectedNotifyCommand)
+		}
+	})
+
+	t.Run("it registers both notify and migrate-rename on a completely fresh session-renamed event", func(t *testing.T) {
+		// Fresh server with no existing entries. Two appends should land on
+		// session-renamed: one for notify (during the save-trigger loop) and
+		// one for migrate-rename (during the migrate-rename loop).
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var sessionRenamedAppends [][2]string
+		for _, c := range setHookCalls(mock.Calls) {
+			if c[0] == "session-renamed" {
+				sessionRenamedAppends = append(sessionRenamedAppends, c)
+			}
+		}
+		if len(sessionRenamedAppends) != 2 {
+			t.Fatalf("session-renamed append count = %d, want 2: %v", len(sessionRenamedAppends), sessionRenamedAppends)
+		}
+		if sessionRenamedAppends[0][1] != expectedNotifyCommand {
+			t.Errorf("first session-renamed append command = %q, want %q", sessionRenamedAppends[0][1], expectedNotifyCommand)
+		}
+		if sessionRenamedAppends[1][1] != expectedMigrateRenameCommand {
+			t.Errorf("second session-renamed append command = %q, want %q", sessionRenamedAppends[1][1], expectedMigrateRenameCommand)
+		}
+	})
+
+	t.Run("it wraps the migrate-rename invocation in command -v portal guard", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var found bool
+		for _, c := range setHookCalls(mock.Calls) {
+			if c[0] == "session-renamed" && strings.Contains(c[1], "portal state migrate-rename") {
+				found = true
+				if !strings.Contains(c[1], `command -v portal >/dev/null 2>&1 && `) {
+					t.Errorf("migrate-rename command = %q, missing 'command -v portal >/dev/null 2>&1 && ' guard", c[1])
+				}
+			}
+		}
+		if !found {
+			t.Fatal("no migrate-rename set-hook -ga call observed")
+		}
+	})
+
+	t.Run("it uses the substring portal state migrate-rename specifically not portal state broadly", func(t *testing.T) {
+		// session-renamed has a notify entry already (matches 'portal state'
+		// loosely but does NOT contain 'portal state migrate-rename'). Portal
+		// must still register migrate-rename — proving the substring used for
+		// the dedupe check is migrateRenameSubstring, scoped precisely.
+		raw := fmt.Sprintf("session-renamed[0] => %q\n", expectedNotifyCommand)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var migrateRenameAppended bool
+		var sawMigrateRenameSubstring bool
+		for _, c := range setHookCalls(mock.Calls) {
+			if c[0] == "session-renamed" && strings.Contains(c[1], "portal state migrate-rename") {
+				migrateRenameAppended = true
+				sawMigrateRenameSubstring = true
+			}
+		}
+		if !migrateRenameAppended {
+			t.Error("expected migrate-rename to be appended on session-renamed despite a pre-existing notify entry — substring check is not scoped to 'portal state migrate-rename'")
+		}
+		if !sawMigrateRenameSubstring {
+			t.Error("expected at least one set-hook -ga call to contain substring 'portal state migrate-rename'")
+		}
+	})
+
+	t.Run("it does not register migrate-rename on any event other than session-renamed", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for _, c := range setHookCalls(mock.Calls) {
+			if strings.Contains(c[1], "portal state migrate-rename") && c[0] != "session-renamed" {
+				t.Errorf("migrate-rename registered on event %q, expected only session-renamed", c[0])
 			}
 		}
 	})
