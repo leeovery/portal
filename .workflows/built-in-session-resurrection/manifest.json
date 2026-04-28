@@ -124,12 +124,12 @@
     "implementation": {
       "items": {
         "built-in-session-resurrection": {
-          "status": "completed",
+          "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 0,
+          "analysis_cycle": 1,
           "linters": [
             {
               "name": "go vet",
