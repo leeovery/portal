@@ -91,12 +91,13 @@ func TestSessionRestorer_SinglePaneNoEnvironment(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
-	// Expect: 2 show-option calls (predict), 1 new-session, no set-environment,
-	// no new-window, no split-window.
+	// Expect: 1 new-session, no set-environment, no new-window, no split-window.
+	// (Show-option queries now happen in PredictLiveIndices, called by the
+	// orchestrator — not by Restore itself.)
 	if got := len(findAllCalls(mock.Calls, "new-session")); got != 1 {
 		t.Errorf("new-session calls = %d, want 1", got)
 	}
@@ -133,7 +134,7 @@ func TestSessionRestorer_MultiPaneSingleWindow(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -165,7 +166,7 @@ func TestSessionRestorer_MultiWindowMultiPane(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore returned error: %v", err)
 	}
 
@@ -194,7 +195,7 @@ func TestSessionRestorer_EnvironmentAppliedAfterNewSessionBeforeNewWindow(t *tes
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -220,7 +221,7 @@ func TestSessionRestorer_EnvironmentAppliedInSortedOrder(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -250,7 +251,7 @@ func TestSessionRestorer_EmptyEnvironmentSkipsSetEnvironment(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -271,7 +272,7 @@ func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -300,7 +301,7 @@ func TestSessionRestorer_HydrateCommandContainsRawHookKey(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -338,7 +339,8 @@ func TestSessionRestorer_FIFOUsesLivePaneKeyWhenBaseIndexDiffers(t *testing.T) {
 		),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	baseIdx, paneBaseIdx := r.PredictLiveIndices()
+	if err := r.Restore(sess, baseIdx, paneBaseIdx); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -360,7 +362,7 @@ func TestSessionRestorer_FIFOUsesLivePaneKeyWhenBaseIndexDiffers(t *testing.T) {
 	}
 }
 
-func TestSessionRestorer_PredictsLiveIndicesFromShowOptions(t *testing.T) {
+func TestSessionRestorer_PredictLiveIndicesQueriesShowOptions(t *testing.T) {
 	var seenBase, seenPaneBase bool
 	mock := &mockCommander{
 		RunFunc: func(args ...string) (string, error) {
@@ -380,26 +382,26 @@ func TestSessionRestorer_PredictsLiveIndicesFromShowOptions(t *testing.T) {
 	client := tmux.NewClient(mock)
 	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
 
-	sess := newSession("work", nil,
-		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
-	)
+	gotBase, gotPaneBase := r.PredictLiveIndices()
 
-	if err := r.Restore(sess); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
 	if !seenBase {
 		t.Error("expected show-option -sv base-index call")
 	}
 	if !seenPaneBase {
 		t.Error("expected show-option -sv pane-base-index call")
 	}
+	if gotBase != 1 {
+		t.Errorf("base = %d, want 1", gotBase)
+	}
+	if gotPaneBase != 1 {
+		t.Errorf("paneBase = %d, want 1", gotPaneBase)
+	}
 }
 
-func TestSessionRestorer_DefaultsToZeroWhenOptionUnset(t *testing.T) {
+func TestSessionRestorer_PredictLiveIndicesDefaultsToZeroWhenOptionUnset(t *testing.T) {
 	tests := []struct {
-		name   string
-		runFn  func(args ...string) (string, error)
-		expect string
+		name  string
+		runFn func(args ...string) (string, error)
 	}{
 		{
 			name: "ErrOptionNotFound for both",
@@ -425,21 +427,15 @@ func TestSessionRestorer_DefaultsToZeroWhenOptionUnset(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockCommander{RunFunc: tt.runFn}
 			client := tmux.NewClient(mock)
-			dir := t.TempDir()
-			r := &restore.SessionRestorer{Client: client, StateDir: dir}
+			r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
 
-			sess := newSession("work", nil,
-				newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
-			)
+			base, paneBase := r.PredictLiveIndices()
 
-			if err := r.Restore(sess); err != nil {
-				t.Fatalf("Restore: %v", err)
+			if base != 0 {
+				t.Errorf("base = %d, want 0", base)
 			}
-
-			wantKey := state.SanitizePaneKey("work", 0, 0)
-			wantFIFO := state.FIFOPath(dir, wantKey)
-			if _, err := os.Stat(wantFIFO); err != nil {
-				t.Errorf("expected FIFO at zero-default %s, missing: %v", wantFIFO, err)
+			if paneBase != 0 {
+				t.Errorf("paneBase = %d, want 0", paneBase)
 			}
 		})
 	}
@@ -455,7 +451,7 @@ func TestSessionRestorer_MultibyteSessionNamePassesUnchangedToNewSession(t *test
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -482,7 +478,7 @@ func TestSessionRestorer_HashSuffixedPaneKeyOnSanitizationCollision(t *testing.T
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -523,7 +519,7 @@ func TestSessionRestorer_LogsAndContinuesOnSetEnvironmentFailure(t *testing.T) {
 		newWindow(1, "logs", newPane(0, "/work", "scrollback/y.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore returned error %v, expected nil (failure should be logged + continue)", err)
 	}
 	// All three set-environment calls should still be attempted.
@@ -558,7 +554,7 @@ func TestSessionRestorer_WrappedErrorOnSplitWindowFailure(t *testing.T) {
 		),
 	)
 
-	err := r.Restore(sess)
+	err := r.Restore(sess, 0, 0)
 	if err == nil {
 		t.Fatal("expected error from split-window failure, got nil")
 	}
@@ -579,7 +575,7 @@ func TestSessionRestorer_WrappedErrorOnCreateFIFOFailure(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/x.bin")),
 	)
 
-	err := r.Restore(sess)
+	err := r.Restore(sess, 0, 0)
 	if err == nil {
 		t.Fatal("expected error from CreateFIFO failure, got nil")
 	}
@@ -598,7 +594,7 @@ func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
 		newWindow(0, "main", newPane(0, "/work", "scrollback/work__0.0.bin")),
 	)
 
-	if err := r.Restore(sess); err != nil {
+	if err := r.Restore(sess, 0, 0); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -624,12 +620,12 @@ func TestSessionRestorer_RejectsEmptyTopology(t *testing.T) {
 	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
 
 	sess := newSession("work", nil)
-	if err := r.Restore(sess); err == nil {
+	if err := r.Restore(sess, 0, 0); err == nil {
 		t.Fatal("expected error for empty windows, got nil")
 	}
 
 	sessEmptyPanes := newSession("work", nil, newWindow(0, "main"))
-	if err := r.Restore(sessEmptyPanes); err == nil {
+	if err := r.Restore(sessEmptyPanes, 0, 0); err == nil {
 		t.Fatal("expected error for empty panes, got nil")
 	}
 }

@@ -44,12 +44,15 @@ type paneInfo struct {
 // saved order. FIFOs are created up front so that no helper inside a pane can
 // race signal-hydrate. Environment is applied between new-session and the
 // first new-window so subsequent panes inherit it at creation time.
-func (r *SessionRestorer) Restore(sess state.Session) error {
+//
+// baseIdx and paneBaseIdx are the predicted live tmux indices (typically from
+// PredictLiveIndices); the orchestrator pre-computes them once per session and
+// passes the same values to ApplyWindowGeometry and ApplySkeletonMarkers so
+// all three operations agree on pane targets.
+func (r *SessionRestorer) Restore(sess state.Session, baseIdx, paneBaseIdx int) error {
 	if len(sess.Windows) == 0 || len(sess.Windows[0].Panes) == 0 {
 		return fmt.Errorf("session %q: no windows/panes", sess.Name)
 	}
-
-	baseIdx, paneBaseIdx := r.predictLiveIndices()
 
 	allPanes, err := r.buildPaneInfo(sess, baseIdx, paneBaseIdx)
 	if err != nil {
@@ -336,10 +339,15 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 	}
 }
 
-// predictLiveIndices reads the server's base-index and pane-base-index. Both
+// PredictLiveIndices reads the server's base-index and pane-base-index. Both
 // ErrOptionNotFound and an empty value are treated as "use default 0" — tmux's
 // documented default when the user has not customised either option.
-func (r *SessionRestorer) predictLiveIndices() (int, int) {
+//
+// The orchestrator calls this once per saved session and passes the result to
+// Restore, ApplyWindowGeometry, and ApplySkeletonMarkers so all three operations
+// share the same predicted indices and a single pair of show-option queries
+// covers the entire restoration of one session.
+func (r *SessionRestorer) PredictLiveIndices() (int, int) {
 	return readIndexOption(r.Client, "base-index"), readIndexOption(r.Client, "pane-base-index")
 }
 
