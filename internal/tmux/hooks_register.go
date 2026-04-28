@@ -88,10 +88,29 @@ func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand strin
 	return c.AppendGlobalHook(event, fullCommand)
 }
 
+// hookCategory bundles a set of tmux events with the (substring, command)
+// pair RegisterPortalHooks should append on each. Adding a new category is a
+// single table entry — no new loop, no new branch.
+type hookCategory struct {
+	events    []string
+	substring string
+	command   string
+}
+
+// portalHookCategories is the registration table consumed by
+// RegisterPortalHooks. Order is significant: categories are processed in
+// declaration order, and within each category events are processed in the
+// order declared on the category's events slice. The current ordering
+// (save-trigger first, then hydration-trigger) matches the spec.
+var portalHookCategories = []hookCategory{
+	{events: saveTriggerEvents, substring: notifySubstring, command: notifyCommand},
+	{events: hydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
+}
+
 // RegisterPortalHooks idempotently registers Portal's full hook table on
-// the supplied tmux Client. Save-trigger events are processed first, then
-// hydration-trigger events; within each category, events are processed in
-// the order declared in the spec.
+// the supplied tmux Client. Categories are processed in the order declared
+// in portalHookCategories; within each category, events are processed in the
+// order declared in the spec.
 //
 // Each registration is delegated to RegisterHookIfAbsent, which performs the
 // content-based dedupe check. A failure on one event does not short-circuit
@@ -102,15 +121,11 @@ func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand strin
 func RegisterPortalHooks(c *Client) error {
 	var errs []error
 
-	for _, event := range saveTriggerEvents {
-		if err := RegisterHookIfAbsent(c, event, notifySubstring, notifyCommand); err != nil {
-			errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
-		}
-	}
-
-	for _, event := range hydrationTriggerEvents {
-		if err := RegisterHookIfAbsent(c, event, signalHydrateSubstring, signalHydrateCommand); err != nil {
-			errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
+	for _, cat := range portalHookCategories {
+		for _, event := range cat.events {
+			if err := RegisterHookIfAbsent(c, event, cat.substring, cat.command); err != nil {
+				errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
+			}
 		}
 	}
 
