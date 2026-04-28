@@ -7508,9 +7508,83 @@ func TestLoadingPage(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected tea.BatchMsg, got %T", msg)
 		}
-		// Expect at least 2 commands: fetchSessions + loadingPadTick.
-		if len(batchMsg) < 2 {
-			t.Errorf("expected at least 2 batch commands, got %d", len(batchMsg))
+		// Expect at least 3 commands: fetchSessions + loadingPadTick +
+		// bootstrapCompleteCmd (task 5-7 wires BootstrapCompleteMsg from Init).
+		if len(batchMsg) < 3 {
+			t.Errorf("expected at least 3 batch commands, got %d", len(batchMsg))
+		}
+	})
+
+	t.Run("Init emits BootstrapCompleteMsg from PageLoading first event-loop tick", func(t *testing.T) {
+		// Task 5-7 wires BootstrapCompleteMsg from Init so the loading-page
+		// dismissal gate trips after the 1.2s tick has fired. PersistentPreRunE
+		// has already run synchronously before this Init, so 'bootstrap
+		// complete' is effectively true at Init time.
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(true))
+		cmd := m.Init()
+		if cmd == nil {
+			t.Fatal("Init() returned nil")
+		}
+		msg := cmd()
+		batchMsg, ok := msg.(tea.BatchMsg)
+		if !ok {
+			t.Fatalf("expected tea.BatchMsg, got %T", msg)
+		}
+
+		// Walk the batch looking for a non-tick command whose synchronous
+		// invocation produces a BootstrapCompleteMsg. Skip the loadingPadTick
+		// (1.2s) so the test doesn't sleep — it's the only blocking command.
+		// Run each non-tick command in a goroutine guarded by a short timeout.
+		found := false
+		for _, c := range batchMsg {
+			if c == nil {
+				continue
+			}
+			done := make(chan tea.Msg, 1)
+			go func(cmd tea.Cmd) { done <- cmd() }(c)
+			select {
+			case got := <-done:
+				if _, ok := got.(tui.BootstrapCompleteMsg); ok {
+					found = true
+				}
+			case <-time.After(50 * time.Millisecond):
+				// Likely the loadingPadTick; ignore.
+			}
+		}
+		if !found {
+			t.Error("expected one batched command to produce BootstrapCompleteMsg")
+		}
+	})
+
+	t.Run("Init does not emit BootstrapCompleteMsg when not on PageLoading", func(t *testing.T) {
+		lister := &mockSessionLister{sessions: []tmux.Session{}}
+		m := tui.New(lister, tui.WithServerStarted(false))
+		cmd := m.Init()
+		if cmd == nil {
+			t.Fatal("Init() returned nil")
+		}
+		msg := cmd()
+		// On PageSessions Init, the result may be a single fetchSessions cmd
+		// (single-cmd path) or a batch of (fetchSessions, loadProjects). Either
+		// way it must NOT contain BootstrapCompleteMsg.
+		switch typed := msg.(type) {
+		case tea.BatchMsg:
+			for _, c := range typed {
+				done := make(chan tea.Msg, 1)
+				go func(cmd tea.Cmd) { done <- cmd() }(c)
+				select {
+				case got := <-done:
+					if _, ok := got.(tui.BootstrapCompleteMsg); ok {
+						t.Error("Init on non-loading page emitted BootstrapCompleteMsg")
+					}
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+		default:
+			if _, ok := msg.(tui.BootstrapCompleteMsg); ok {
+				t.Error("Init on non-loading page emitted BootstrapCompleteMsg")
+			}
 		}
 	})
 

@@ -632,7 +632,13 @@ func (m Model) Init() tea.Cmd {
 		loadingPadTick := tea.Tick(LoadingMinDuration, func(time.Time) tea.Msg {
 			return LoadingMinElapsedMsg{}
 		})
-		cmds := []tea.Cmd{fetchSessions, loadingPadTick}
+		// Bubble Tea launches AFTER PersistentPreRunE has finished synchronously,
+		// so the bootstrap orchestrator has already returned by the time Init
+		// runs. Emit BootstrapCompleteMsg from the first event-loop tick to
+		// satisfy the bootstrapComplete gate. Loading dismissal still requires
+		// the LoadingMinElapsedMsg tick (1.2s minimum-display floor).
+		bootstrapCompleteCmd := func() tea.Msg { return BootstrapCompleteMsg{} }
+		cmds := []tea.Cmd{fetchSessions, loadingPadTick, bootstrapCompleteCmd}
 		if loadProjects != nil {
 			cmds = append(cmds, loadProjects)
 		}
