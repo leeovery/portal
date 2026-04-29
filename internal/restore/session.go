@@ -116,7 +116,8 @@ func (r *SessionRestorer) collectArmInfos(sess state.Session) []savedPaneArmInfo
 // applyEnvironment between session and first new-window, then split-window /
 // new-window / split-window for every remaining pane. Panes are created with
 // no initial command — they default to the user's shell — so that the arm
-// phase can dispatch the hydrate helper via `send-keys` against live indices.
+// phase can dispatch the hydrate helper via `respawn-pane -k` against live
+// indices.
 //
 // Splits and new-windows target `<session>:` (the session's currently-active
 // window). After new-session the first window is active; after each new-window
