@@ -1,10 +1,16 @@
 package bootstrap
 
-// Canonical no-op implementations of every Orchestrator step interface.
+// Canonical no-op implementations exist only for the four Orchestrator
+// steps the spec permits to degrade-and-continue: Hooks, Saver, Restore,
+// FIFOSweeper, and StaleCleaner. Server and RestoringMarker are
+// fatal-on-failure (steps 1, 3, and 6); they intentionally have no NoOp
+// because reaching for a "default" would silently violate the bootstrap
+// contract.
+//
 // These exist so tests across packages and production-side fallbacks
-// share one source of truth — adding a new step interface to the
-// orchestrator only requires extending this file rather than re-declaring
-// a sibling private noop in each consumer package.
+// share one source of truth — adding a new degradable step interface to
+// the orchestrator only requires extending this file rather than
+// re-declaring a sibling private noop in each consumer package.
 //
 // Each type is a zero-value struct whose methods return the zero/no-error
 // result for the interface they satisfy. They are useful in two places:
@@ -15,30 +21,12 @@ package bootstrap
 //     NoOpStaleCleaner when hook-store path resolution fails) where the
 //     spec mandates degrade-and-continue rather than aborting bootstrap.
 
-// NoOpServer satisfies ServerBootstrapper. EnsureServer reports
-// (false, nil) — i.e. server already running, no fatal error. Useful for
-// tests / production fallbacks.
-type NoOpServer struct{}
-
-// EnsureServer always returns (false, nil).
-func (NoOpServer) EnsureServer() (bool, error) { return false, nil }
-
 // NoOpHooks satisfies HookRegistrar. RegisterPortalHooks always reports
 // success. Useful for tests / production fallbacks.
 type NoOpHooks struct{}
 
 // RegisterPortalHooks always returns nil.
 func (NoOpHooks) RegisterPortalHooks() error { return nil }
-
-// NoOpRestoringMarker satisfies RestoringMarker. Both Set and Clear
-// always report success. Useful for tests / production fallbacks.
-type NoOpRestoringMarker struct{}
-
-// Set always returns nil.
-func (NoOpRestoringMarker) Set() error { return nil }
-
-// Clear always returns nil.
-func (NoOpRestoringMarker) Clear() error { return nil }
 
 // NoOpSaver satisfies SaverBootstrapper. EnsureSaver always reports
 // success. Useful for tests / production fallbacks.
