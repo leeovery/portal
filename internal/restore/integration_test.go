@@ -54,11 +54,22 @@ func restoreWithMarker(t *testing.T, client *tmux.Client, o *restore.Orchestrato
 	return err
 }
 
-// TestPhase3Integration_SaveRestoreRoundTrip is the headline smoke test: it
-// captures a single live session, kills the tmux server, restores from the
-// persisted index against a fresh server, and asserts the saved session is
-// recreated with its skeleton marker set. A second Restore() call must be a
-// silent no-op (live-session skip) so the test guards against double-creates.
+// TestPhase3Integration_SaveRestoreRoundTrip is the default-mode smoke
+// test: a single-session, single-window, single-pane round-trip without
+// the binary-build / signal-hydrate machinery so it runs under plain
+// `go test ./...`. It captures a live session, kills the server, restores
+// from the persisted index against a fresh server, and asserts the saved
+// session is recreated with its skeleton marker set. A second Restore()
+// call must be a silent no-op (live-session skip) so the test guards
+// against double-creates.
+//
+// The expanded planning-acceptance round-trip (multi-session × multi-
+// window × multi-pane, ANSI scrollback byte fidelity, per-session env,
+// zoom + active pane preservation, @portal-skeleton-* clearance after
+// helper dump) lives in integration_full_test.go behind the `integration`
+// build tag — see planning task 3-13 expanded by 12-4. Both tests are
+// kept: the smoke runs in the default lane for fast feedback, the full
+// round-trip guards the plan acceptance bullet under `-tags=integration`.
 func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
