@@ -306,3 +306,26 @@ approved_at: 2026-04-23
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | built-in-session-resurrection-11-1 | Fix stale step 7 comment in phase5_integration_test.go CleanStale assertion | line 125 only; mirror wording of lines 39 and 74 ("step 8 (CleanStale)"); comment-only change with no behavioural impact; all three CleanStale comments must agree post-edit; `go test ./cmd/bootstrap/...` continues to pass |
+
+### Phase 12: Review Remediation (Cycle 1)
+
+**Goal**: Address findings from Review Remediation (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-12-1 | Implement task 5-9 — end-to-end reboot round-trip integration test | PTY fragility may require fallback to direct `state.SignalHydrate` invocation; base-index drift sub-test uses divergent `base-index` between save and restore |
+| built-in-session-resurrection-12-2 | Implement task 5-10 — `portal attach NAME` / `portal open` reattach integration test | live session shadows saved entry; pruned saved entry no longer resolves; unknown name errors cleanly; mock connectors avoid PTY requirement |
+| built-in-session-resurrection-12-3 | Expand task 5-8 — marker-suppression integration test with non-vacuous probe | non-vacuity probe must fire at least once; cleanup of global hook in `t.Cleanup`; `sessions.json.saved_at` invariant during the marker window |
+| built-in-session-resurrection-12-4 | Expand task 3-13 — Phase 3 integration test multi-session/ANSI/marker coverage | zoomed pane preserved; ANSI SGR bytes byte-equal; per-session env round-trip; `@portal-restoring` marker cleared post-hydrate |
+| built-in-session-resurrection-12-5 | Fix task 6-2 logger migration in `state_migrate_rename` and `state_notify` | `ComponentNotify` may need adding to `internal/state/logger.go`; only fatal pre-logger errors permitted as stderr writes; defer `logger.Close()` in both files |
+| built-in-session-resurrection-12-6 | Add `Debug` method to bootstrap `Logger` interface and emit step-entry DEBUG lines | interface change must compile across all callers including `noopLogger` and any test doubles like `mockLogger`; `*state.Logger` may need `Debug` added if missing |
+| built-in-session-resurrection-12-7 | Defer `logger.Close()` in `state_signal_hydrate` and `state_hydrate` RunE | production path exec'd-away inherits duplicated fd closed on process replacement (OS handles); `Close()` must be idempotent on already-exec'd logger |
+| built-in-session-resurrection-12-8 | Wrap permission errors in `ReadIndex` with `ErrCorruptIndex` | skip test on Windows (chmod semantics differ); skip when running as root (no permission denial); preserve existing return tuple shape |
+| built-in-session-resurrection-12-9 | Reconcile plan body wording for task 5-2 `Restoring.Clear` failure classification | documentation-only change; cite spec § Fatal Bootstrap Errors and CLAUDE.md bootstrap step 6; add cycle-1 review-resolution note |
+| built-in-session-resurrection-12-10 | Quick-fix — remove stale `migrate-rename` comment in `hooks_register_test.go` | comment-only change; current contract is 9 hooks (migrate-rename deferred to v2 per task 7-2 path b) |
+| built-in-session-resurrection-12-11 | Quick-fix — restore symmetry in `internal/state/logger.go` rename-failure reopen branch | must mirror diagnostic style of parallel branch; reopen failure on silent path needs forcing in test |
+| built-in-session-resurrection-12-12 | Quick-fixes — schema/scrollback polish (version diagnostic + xxhash allocation) | tests pinning verbatim schema error string need updating; `xxhash.Sum64String` semantically equal to `Sum64([]byte(s))` but avoids allocation |
+| built-in-session-resurrection-12-13 | Idea — relax or remove `purgeStateDir` `EvalSymlinks` rejection | prefer dropping check entirely unless leaf-symlink protection is load-bearing; `canonicalTempDir` shim may be removed once no longer needed; test uses symlinked intermediate component |
+| built-in-session-resurrection-12-14 | Idea — add binary-missing and projects.json-absence regression tests in `cmd/clean.go` | use `cleanDeps` injection seam if present; otherwise mock `file-stat` directly; both binary-missing and `projects.json`-absent cases must NOT trigger staleness action |

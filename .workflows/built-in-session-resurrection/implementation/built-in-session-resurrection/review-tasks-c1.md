@@ -3,12 +3,12 @@ scope: built-in-session-resurrection
 cycle: 1
 source: review
 total_proposed: 14
-gate_mode: gated
+gate_mode: auto
 ---
 # Review Tasks: built-in-session-resurrection (Cycle 1)
 
 ## Task 1: Implement task 5-9 — end-to-end reboot round-trip integration test
-status: pending
+status: approved
 severity: high
 sources: report Required Change 1
 
@@ -32,7 +32,7 @@ sources: report Required Change 1
 - The task IS the test; no new sibling tests required.
 
 ## Task 2: Implement task 5-10 — `portal attach NAME` / `portal open` reattach integration test
-status: pending
+status: approved
 severity: high
 sources: report Required Change 2
 
@@ -52,7 +52,7 @@ sources: report Required Change 2
 - The task IS the test; no new sibling tests required.
 
 ## Task 3: Expand task 5-8 — marker-suppression integration test with non-vacuous probe
-status: pending
+status: approved
 severity: high
 sources: report Required Change 3
 
@@ -73,7 +73,7 @@ sources: report Required Change 3
 - The task IS the test expansion; no new sibling tests required.
 
 ## Task 4: Expand task 3-13 — Phase 3 integration test multi-session/ANSI/marker coverage
-status: pending
+status: approved
 severity: high
 sources: report Required Change 4
 
@@ -96,7 +96,7 @@ sources: report Required Change 4
 - The task IS the test expansion.
 
 ## Task 5: Fix task 6-2 logger migration in `state_migrate_rename` and `state_notify`
-status: pending
+status: approved
 severity: high
 sources: report Required Change 5 (parts a + b)
 
@@ -116,7 +116,7 @@ sources: report Required Change 5 (parts a + b)
 - Unit test asserting `state_notify` emits a WARN on a forced file-create failure (e.g., directory pre-created as a regular file).
 
 ## Task 6: Add `Debug` method to bootstrap `Logger` interface and emit step-entry DEBUG lines
-status: pending
+status: approved
 severity: high
 sources: report Required Change 5 (part c)
 
@@ -136,7 +136,7 @@ sources: report Required Change 5 (part c)
 - Unit test that runs the orchestrator with a recording logger and asserts ≥1 DEBUG line per executed step.
 
 ## Task 7: Defer `logger.Close()` in `state_signal_hydrate` and `state_hydrate` RunE
-status: pending
+status: approved
 severity: medium
 sources: report Required Change 5 (part d), Bug 45
 
@@ -154,7 +154,7 @@ sources: report Required Change 5 (part d), Bug 45
 - Unit test that invokes `RunE` (without exec) on each command and asserts the logger fd is closed on RunE return (via tempfile + `lsof`-style check or by re-opening for write).
 
 ## Task 8: Wrap permission errors in `ReadIndex` with `ErrCorruptIndex`
-status: pending
+status: approved
 severity: high
 sources: report Required Change 6
 
@@ -174,7 +174,7 @@ sources: report Required Change 6
 - New test: `TestReadIndex_PermissionDeniedWrapsErrCorruptIndex` asserting `errors.Is`.
 
 ## Task 9: Reconcile plan body wording for task 5-2 `Restoring.Clear` failure classification
-status: pending
+status: approved
 severity: low
 sources: report Required Change 7
 
@@ -193,7 +193,7 @@ sources: report Required Change 7
 - N/A (documentation-only change).
 
 ## Task 10: Quick-fix — remove stale `migrate-rename` comment in `hooks_register_test.go`
-status: pending
+status: approved
 severity: low
 sources: report Quick-fix 1
 
@@ -210,7 +210,7 @@ sources: report Quick-fix 1
 - N/A (comment-only change).
 
 ## Task 11: Quick-fix — restore symmetry in `internal/state/logger.go` rename-failure reopen branch
-status: pending
+status: approved
 severity: low
 sources: report Quick-fix 5
 
@@ -228,7 +228,7 @@ sources: report Quick-fix 5
 - Add a test that forces a reopen failure on the silent path and asserts the diagnostic is emitted (mirroring the parallel-branch test if present).
 
 ## Task 12: Quick-fixes — schema/scrollback polish (version diagnostic + xxhash allocation)
-status: pending
+status: approved
 severity: low
 sources: report Quick-fix 9, Quick-fix 10
 
@@ -246,7 +246,7 @@ sources: report Quick-fix 9, Quick-fix 10
 - Update any test that pins the schema error string verbatim.
 
 ## Task 13: Idea — relax or remove `purgeStateDir` `EvalSymlinks` rejection
-status: pending
+status: approved
 severity: medium
 sources: report Idea 19, Bug 46
 
@@ -266,7 +266,7 @@ sources: report Idea 19, Bug 46
 - New test exercising symlinked-intermediate purge.
 
 ## Task 14: Idea — add binary-missing and projects.json-absence regression tests in `cmd/clean.go`
-status: pending
+status: approved
 severity: low
 sources: report Idea 27
 
