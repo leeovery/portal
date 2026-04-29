@@ -4,12 +4,12 @@ package cmd
 // MUST NOT use t.Parallel.
 
 import (
-	"fmt"
 	"io"
 	"sync"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/tui"
+	"github.com/leeovery/portal/internal/warning"
 )
 
 // BootstrapWarningsSink accumulates soft bootstrap warnings emitted by
@@ -51,13 +51,10 @@ func (s *BootstrapWarningsSink) Drain() []bootstrap.Warning {
 // EmitTo drains the sink and writes every warning's lines to w in
 // orchestrator-observation order, one line per Fprintln. Safe for
 // concurrent use — Drain's atomicity guarantees no warning is emitted
-// twice across concurrent EmitTo callers.
+// twice across concurrent EmitTo callers. Delegates to warning.WriteLines
+// so the CLI and TUI paths produce byte-identical stderr output.
 func (s *BootstrapWarningsSink) EmitTo(w io.Writer) {
-	for _, warn := range s.Drain() {
-		for _, line := range warn.Lines {
-			_, _ = fmt.Fprintln(w, line)
-		}
-	}
+	warning.WriteLines(w, s.Drain())
 }
 
 // bootstrapWarnings is the canonical package-level sink. PersistentPreRunE
@@ -66,34 +63,17 @@ func (s *BootstrapWarningsSink) EmitTo(w io.Writer) {
 // directly to stderr for non-TUI commands.
 var bootstrapWarnings = &BootstrapWarningsSink{}
 
-// drainBootstrapWarningsForTUI drains the package-level bootstrapWarnings
-// sink and converts each cmd/bootstrap.Warning to its tui.BootstrapWarning
-// peer so the model package can consume warnings without importing
-// cmd/bootstrap. Returns nil when the sink is empty.
-//
-// The conversion is a deliberate adapter at the cmd↔tui boundary: tui is
-// a leaf package (cmd imports tui, so tui cannot import cmd), and
-// duplicating the trivial Lines-only shape avoids the alternative of
-// hoisting Warning into a third package shared by both layers.
-func drainBootstrapWarningsForTUI() []tui.BootstrapWarning {
-	src := bootstrapWarnings.Drain()
-	if len(src) == 0 {
-		return nil
-	}
-	out := make([]tui.BootstrapWarning, len(src))
-	for i, w := range src {
-		out[i] = tui.BootstrapWarning{Lines: w.Lines}
-	}
-	return out
-}
-
 // stageBootstrapWarningsOnModel drains the package-level bootstrapWarnings
 // sink and stages any pending entries on m via SetPendingBootstrapWarnings.
 // openTUI calls this between buildTUIModel and tea.NewProgram so the
 // warnings ride Init's first BootstrapCompleteMsg and are flushed to
 // stderr (with alt-screen toggle) only after the loading page dismisses.
+//
+// bootstrap.Warning, tui.BootstrapWarning, and warning.Warning are all
+// type aliases of the same underlying struct, so the drained slice is
+// passed straight through with no per-element copy.
 func stageBootstrapWarningsOnModel(m *tui.Model) {
-	pending := drainBootstrapWarningsForTUI()
+	pending := bootstrapWarnings.Drain()
 	if len(pending) == 0 {
 		return
 	}

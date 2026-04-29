@@ -1,24 +1,18 @@
 package tui
 
 import (
-	"fmt"
 	"io"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/leeovery/portal/internal/warning"
 )
 
-// BootstrapWarning is the TUI-side representation of a soft bootstrap
-// warning. It mirrors cmd/bootstrap.Warning but lives in the leaf tui
-// package to avoid an import cycle (cmd imports tui, so tui cannot import
-// cmd). The cmd-side openTUI converts cmd/bootstrap.Warning values to
-// BootstrapWarning before passing them into the model.
-//
-// Lines are emitted in slice order, one Fprintln per line, matching the
-// CLI-path stderr behaviour.
-type BootstrapWarning struct {
-	Lines []string
-}
+// BootstrapWarning is a type alias for internal/warning.Warning. The
+// alias keeps existing tui call sites readable while pointing at the
+// canonical shape shared with cmd/bootstrap.
+type BootstrapWarning = warning.Warning
 
 // flushWarningsToStderr is the side-effect closure used by
 // (Model).flushBufferedWarningsCmd to emit buffered warnings between
@@ -31,16 +25,12 @@ var flushWarningsToStderr = func(warnings []BootstrapWarning) {
 }
 
 // WriteBootstrapWarnings emits every warning's lines to w in order, one
-// Fprintln per line. It mirrors cmd.BootstrapWarningsSink.EmitTo so the
-// CLI path and the TUI path produce identical stderr output for the same
-// warnings. Errors from Fprintln are intentionally ignored — diagnostics
-// must not themselves fail the program.
+// Fprintln per line. Delegates to warning.WriteLines so the CLI and TUI
+// paths share a single emission implementation. Errors from Fprintln are
+// intentionally ignored — diagnostics must not themselves fail the
+// program.
 func WriteBootstrapWarnings(w io.Writer, warnings []BootstrapWarning) {
-	for _, warn := range warnings {
-		for _, line := range warn.Lines {
-			_, _ = fmt.Fprintln(w, line)
-		}
-	}
+	warning.WriteLines(w, warnings)
 }
 
 // SetFlushWarningsToStderrForTest replaces the package-level

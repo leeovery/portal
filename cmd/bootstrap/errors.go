@@ -1,5 +1,7 @@
 package bootstrap
 
+import "github.com/leeovery/portal/internal/warning"
+
 // FatalError is the typed sentinel for unrecoverable bootstrap conditions
 // (tmux missing, version too old, EnsureServer failure, hook registration
 // failure, @portal-restoring marker failure). The orchestrator's job is
@@ -36,19 +38,11 @@ func NewFatal(userMsg string, cause error) *FatalError {
 	return &FatalError{UserMessage: userMsg, Cause: cause}
 }
 
-// Warning is a soft bootstrap failure that must NOT terminate Portal. The
-// orchestrator accumulates warnings during Run; the CLI path emits each
-// warning's lines to stderr before returning from PersistentPreRunE while
-// the TUI path buffers them via cmd.BootstrapWarningsSink and flushes
-// after the loading page dismisses (see spec, Observability → Proactive
-// Health Signals → TUI interaction).
-//
-// Lines are emitted in slice order, one line per Fprintln. No banners, no
-// colors, no prefixes — the spec mandates a single primary line plus an
-// optional follow-up pointer per warning.
-type Warning struct {
-	Lines []string
-}
+// Warning is a soft bootstrap failure that must NOT terminate Portal.
+// It is a type alias for internal/warning.Warning so the cmd/bootstrap,
+// cmd, and tui packages all reference the same canonical shape — see
+// the internal/warning package for the canonical godoc.
+type Warning = warning.Warning
 
 // CorruptSessionsJSONWarning returns the canonical warning for the
 // "sessions.json exists but is unparseable" path. Wording matches the

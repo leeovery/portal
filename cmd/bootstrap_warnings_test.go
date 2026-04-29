@@ -131,54 +131,6 @@ func TestBootstrapWarningsSink_ConcurrentAddAndDrainAreSafe(t *testing.T) {
 	}
 }
 
-// TestDrainBootstrapWarningsForTUI verifies the cmd-side adapter that
-// drains the package-level bootstrapWarnings sink and converts each entry
-// to its tui.BootstrapWarning peer for handoff to the model.
-func TestDrainBootstrapWarningsForTUI(t *testing.T) {
-	t.Run("empty sink returns nil", func(t *testing.T) {
-		// Reset the package-level sink so leftover state from sibling tests
-		// does not contaminate this case.
-		bootstrapWarnings = &BootstrapWarningsSink{}
-
-		got := drainBootstrapWarningsForTUI()
-		if got != nil {
-			t.Errorf("drainBootstrapWarningsForTUI() = %#v, want nil", got)
-		}
-	})
-
-	t.Run("non-empty sink converts to tui.BootstrapWarning slice in order", func(t *testing.T) {
-		bootstrapWarnings = &BootstrapWarningsSink{}
-		bootstrapWarnings.Add(bootstrap.SaverDownWarning())
-		bootstrapWarnings.Add(bootstrap.CorruptSessionsJSONWarning())
-
-		got := drainBootstrapWarningsForTUI()
-		if len(got) != 2 {
-			t.Fatalf("len = %d, want 2", len(got))
-		}
-
-		// Order preserved (saver first, corrupt second) and lines preserved.
-		wantFirst := bootstrap.SaverDownWarning().Lines
-		wantSecond := bootstrap.CorruptSessionsJSONWarning().Lines
-		if !equalStringSlices(got[0].Lines, wantFirst) {
-			t.Errorf("got[0].Lines = %v, want %v", got[0].Lines, wantFirst)
-		}
-		if !equalStringSlices(got[1].Lines, wantSecond) {
-			t.Errorf("got[1].Lines = %v, want %v", got[1].Lines, wantSecond)
-		}
-	})
-
-	t.Run("drain clears the sink", func(t *testing.T) {
-		bootstrapWarnings = &BootstrapWarningsSink{}
-		bootstrapWarnings.Add(bootstrap.SaverDownWarning())
-
-		_ = drainBootstrapWarningsForTUI()
-
-		if remaining := bootstrapWarnings.Drain(); len(remaining) != 0 {
-			t.Errorf("sink not cleared after drainBootstrapWarningsForTUI; remaining = %d", len(remaining))
-		}
-	})
-}
-
 // TestStageBootstrapWarningsOnModel verifies the openTUI glue: drain the
 // package-level sink and stage any pending warnings on the model so Init
 // can fold them into BootstrapCompleteMsg.
