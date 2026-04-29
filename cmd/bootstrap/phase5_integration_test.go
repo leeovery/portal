@@ -1,6 +1,6 @@
 package bootstrap_test
 
-// Phase 5 integration tests exercise the eight-step bootstrap.Orchestrator
+// Phase 5 integration tests exercise the nine-step bootstrap.Orchestrator
 // against a real tmux server using the same isolated-socket pattern as
 // internal/restore/integration_test.go (Phase 3, task 3-13). Each test runs an
 // isolated tmux instance via `tmux -S <abs-socket-path>` rooted in a per-test
@@ -36,7 +36,7 @@ import (
 // markerProbeStub records whether @portal-restoring was set at the moment
 // the wrapped step was invoked. Used by Test 1 to prove that @portal-restoring
 // is observable on the live tmux server during steps 4-5 (EnsureSaver,
-// Restore) and absent during step 7 (CleanStale).
+// Restore) and absent during step 8 (CleanStale).
 type markerProbeStub struct {
 	client    *tmux.Client
 	wantValue string // "1" when marker should be present, "" when absent
@@ -71,7 +71,7 @@ func (m *markerProbeStub) CleanStale() error { return m.probe() }
 // TestPhase5_RestoringMarkerSuppressesCaptures proves that the
 // @portal-restoring server option is set on the live tmux server before step
 // 4 (EnsureSaver) runs and stays set through step 5 (Restore), then is
-// cleared before step 7 (CleanStale) runs. This is the integration-level
+// cleared before step 8 (CleanStale) runs. This is the integration-level
 // guarantee the save daemon depends on: when its tick observes
 // @portal-restoring="1" it must skip its capture cycle. Testing the daemon's
 // suppression directly would require standing up the full daemon process;

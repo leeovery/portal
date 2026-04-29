@@ -769,7 +769,7 @@ Implementation: `internal/restore/session.go` (see `armPanes` and `buildHydrateC
 2. `syscall.Mkfifo(path, 0600)` — create the FIFO with owner-only permissions.
 3. `os.Chmod(path, 0600)` — defensive post-mkfifo chmod to defend against an unusually-tight umask that would otherwise leave the FIFO below 0600.
 
-This defensive pattern eliminates the need for a separate stale-FIFO sweep step. Stale FIFOs only exist when no live helper holds them (helpers die with the tmux server, same lifetime as the FIFOs they block on).
+This defensive pattern complements the bootstrap-step-7 sweep, which performs best-effort cleanup of orphan FIFOs whose paneKey is no longer represented by a live skeleton marker. Stale FIFOs only exist when no live helper holds them (helpers die with the tmux server, same lifetime as the FIFOs they block on).
 
 **Signal (attach time):**
 The `client-attached` / `client-session-changed` hook runs `portal state signal-hydrate <session-name>`, which:
@@ -1023,7 +1023,7 @@ Every Portal command that needs tmux runs this sequence, in this order. The **ex
   - Else → leave running.
 - Always run `set-option -t _portal-saver destroy-unattached off` (defensive, idempotent).
 
-**5. `Restore()` — skeleton-only restoration.** TUI path wraps this step (and steps 6-7) with the loading page (1.2s minimum display). CLI path runs silently.
+**5. `Restore()` — skeleton-only restoration.** TUI path wraps this step (and steps 6-8) with the loading page (1.2s minimum display). CLI path runs silently.
 
 - If `~/.config/portal/state/sessions.json` does not exist → no-op; continue to step 6.
 - If `sessions.json` is unparseable (corrupt JSON) → log warning, print one-line stderr warning, skip restoration entirely; continue to step 6.
@@ -1043,9 +1043,11 @@ Every Portal command that needs tmux runs this sequence, in this order. The **ex
 
 **6. Unset `@portal-restoring`.** Save loop resumes normal operation on its next tick. Daemon will capture new user state and skip skeleton-marked panes.
 
-**7. `CleanStale()`** — prune stale entries from `hooks.json` whose structural keys do not match any currently-live pane. Runs unconditionally (no empty-panes guard — see CleanStale Behavior section). Runs here because by this point live panes include both pre-existing and skeleton-restored ones.
+**7. `SweepOrphanFIFOs`** — best-effort cleanup of orphan `hydrate-*.fifo` files whose paneKey is no longer represented by a live `@portal-skeleton-*` marker.
 
-**8. Return to the calling command.** TUI: loading page is dismissed once the 1.2s minimum has elapsed AND restoration completed. CLI: returns immediately after step 7.
+**8. `CleanStale()`** — prune stale entries from `hooks.json` whose structural keys do not match any currently-live pane. Runs unconditionally (no empty-panes guard — see CleanStale Behavior section). Runs here because by this point live panes include both pre-existing and skeleton-restored ones.
+
+**9. Return to the calling command.** TUI: loading page is dismissed once the 1.2s minimum has elapsed AND restoration completed. CLI: returns immediately after step 9.
 
 ### Ordering Rationale
 
@@ -1088,7 +1090,7 @@ Skeleton restoration typically completes in ~600ms for a heavy 10-session config
 ```
 start := time.Now()
 // show loading page
-// bootstrap steps 1-7 run
+// bootstrap steps 1-9 run
 elapsed := time.Since(start)
 if elapsed < 1200*time.Millisecond {
     time.Sleep(1200*time.Millisecond - elapsed)
@@ -1158,11 +1160,11 @@ That guard was a workaround for Portal not owning restoration.
 
 ### Why It Is Removed
 
-Under the new bootstrap flow, `CleanStale` runs in **step 7 of `PersistentPreRunE`** — *after* skeleton restore completes in steps 5-6. By that point, live panes include both pre-existing panes and skeleton-restored ones. If `list-panes -a` is genuinely empty at step 7, there really are no sessions, and any hooks.json entries are genuinely orphaned.
+Under the new bootstrap flow, `CleanStale` runs in **step 8 of `PersistentPreRunE`** — *after* skeleton restore completes in steps 5-6. By that point, live panes include both pre-existing panes and skeleton-restored ones. If `list-panes -a` is genuinely empty at step 8, there really are no sessions, and any hooks.json entries are genuinely orphaned.
 
 ### Where CleanStale Runs
 
-- **Bootstrap step 7** (every non-exempt `PersistentPreRunE` invocation, post-restore). Keeps `hooks.json` consistent with live state on every Portal command that goes through bootstrap.
+- **Bootstrap step 8** (every non-exempt `PersistentPreRunE` invocation, post-restore). Keeps `hooks.json` consistent with live state on every Portal command that goes through bootstrap.
 - **`portal clean` command** (user-initiated). Exempt from bootstrap. The command's body calls `CleanStale()` directly against live tmux state. Because it skips bootstrap, there is no skeleton-restore step preceding it — but `portal clean` is a user-initiated cleanup on whatever tmux is currently live, so that is the intended semantic. If no sessions are live when the user runs `portal clean`, and `hooks.json` has entries, they are genuinely orphaned and get pruned.
 
 ### Stale-Hook Detection Criteria (Unchanged)
