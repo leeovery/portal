@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: built-in-session-resurrection (Cycle 4)
 
 ## Task 1: Propagate nine-step bootstrap terminology across spec, CLAUDE.md, and doc-comments
-status: pending
+status: approved
 severity: high
 sources: standards, architecture
 
@@ -49,7 +49,7 @@ sources: standards, architecture
 ---
 
 ## Task 2: Surface FIFOSweeper marker-enumeration failures via orchestrator step-7 logging
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -77,7 +77,7 @@ sources: architecture
 ---
 
 ## Task 3: Consolidate BootstrapWarning struct and emission across cmd and tui packages
-status: pending
+status: approved
 severity: medium
 sources: duplication
 

@@ -284,3 +284,15 @@ approved_at: 2026-04-23
 | built-in-session-resurrection-9-7 | Delete orphaned `NoOpServer` and `NoOpRestoringMarker` | confirm no cross-package references before deletion; leading-comment policy statement explicit |
 | built-in-session-resurrection-9-8 | Resolve ambiguous `warnOnPaneKeyDrift` seam between Orchestrator and SessionRestorer | no other callers of `flattenSavedPanePositions` / `savedPanePos`; orchestrator logger nil-guard semantics preserved |
 | built-in-session-resurrection-9-9 | Align spec text with current implementation (mkfifo ordering, hydrate helper ordering, CreateFIFO semantics) | spec-text-only change; verify all four sections remain internally consistent after edits |
+
+### Phase 10: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-10-1 | Propagate nine-step bootstrap terminology across spec, CLAUDE.md, and doc-comments | spec § Bootstrap Flow renumbered with SweepOrphanFIFOs at 7, CleanStale at 8, Return at 9; spec § CleanStale Behavior step references updated; spec line 772 no longer claims FIFO sweep is unneeded; CLAUDE.md preface and numbered list updated; cmd/root.go:92 doc-comment updated; phase5_integration_test.go file-level + markerProbeStub comments updated; repo-wide grep for "eight-step" and "step 7 (CleanStale)" returns no hits |
+| built-in-session-resurrection-10-2 | Surface FIFOSweeper marker-enumeration failures via orchestrator step-7 logging | `ListSkeletonMarkers` failure now returns wrapped error rather than nil; orchestrator step-7 site logs via Warn and swallows; bootstrap continues to step 8 regardless; per-FIFO inline Warn calls inside SweepOrphanFIFOs unchanged; no fatal abort path introduced |
+| built-in-session-resurrection-10-3 | Consolidate BootstrapWarning struct and emission across cmd and tui packages | new leaf package (e.g. internal/warning) with single Warning struct + WriteLines helper; cmd/bootstrap.Warning and tui.BootstrapWarning become aliases or removed; drainBootstrapWarningsForTUI deleted; nested emission loop appears exactly once; no caller constructs old type literals; existing cmd-path and TUI-path tests still pass without modification |
