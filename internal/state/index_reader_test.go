@@ -246,6 +246,35 @@ func TestReadIndex_ReturnsSkipWithWrappedPermissionErrorWhenUnreadable(t *testin
 	}
 }
 
+func TestReadIndex_PermissionDeniedWrapsErrCorruptIndex(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file mode 0o000 does not block reads on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses file permission checks")
+	}
+
+	dir := t.TempDir()
+	path := state.SessionsJSON(dir)
+	if err := os.WriteFile(path, []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod 0o000: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(path, 0o600)
+	})
+
+	_, _, err := state.ReadIndex(dir)
+	if err == nil {
+		t.Fatal("expected read error; got nil")
+	}
+	if !errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("errors.Is(err, ErrCorruptIndex) = false; want true. err=%v", err)
+	}
+}
+
 func TestReadIndex_WrapsParseErrorWithErrCorruptIndex(t *testing.T) {
 	dir := t.TempDir()
 	writeSessionsJSON(t, dir, []byte("{not json"))

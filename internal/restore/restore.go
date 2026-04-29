@@ -67,12 +67,12 @@ func (o *Orchestrator) Restore() (bool, error) {
 
 // handleReadIndexSkip classifies ReadIndex's skip-with-error path. A clean
 // "no sessions.json file" skip carries err == nil and produces no output
-// or error. A corrupt-content skip (state.ErrCorruptIndex) is logged WARN
-// and returned to the caller as (true, wrapped) so the bootstrap
-// orchestrator can append a CorruptSessionsJSONWarning. A read-error skip
-// (e.g. permission denied) is logged WARN and swallowed — it is not the
-// corrupt-index path and the orchestrator continues without surfacing a
-// user-facing warning.
+// or error. Any "exists but unusable" skip (corrupt content, unreadable
+// file via permission denial) is wrapped with state.ErrCorruptIndex by
+// ReadIndex, logged WARN, and returned to the caller as (true, wrapped)
+// so the bootstrap orchestrator can append a CorruptSessionsJSONWarning.
+// The fallthrough branch is defensive — ReadIndex is contracted to wrap
+// every non-nil error with ErrCorruptIndex.
 func (o *Orchestrator) handleReadIndexSkip(err error) (bool, error) {
 	if err == nil {
 		return false, nil
