@@ -996,7 +996,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - Step 1 `EnsureServer` failure: wrap as `NewFatal("Portal failed to start tmux server: " + err.Error(), err)`.
   - Step 2 `RegisterPortalHooks` failure: detect "mass" failure condition — `HookRegistrar.RegisterPortalHooks` returns a `joined-errors-for-all-events` error when every event's registration failed; only this case is fatal. (If a subset errored, log WARN and continue — implementation concern inside `RegisterPortalHooks`, not here.) On mass failure: wrap as `NewFatal("Portal failed to register tmux hooks: " + err.Error(), err)`.
   - Step 3 `Restoring.Set` failure: wrap as `NewFatal("Portal failed to set @portal-restoring marker: " + err.Error(), err)`.
-  - Step 6 `Restoring.Clear` failure: NOT fatal — log WARN via ComponentBootstrap and continue. Spec's "Fatal Bootstrap Errors" list names `@portal-restoring set-option fails` for the SET only; clear failure is soft (matches task 3-7's clear-failure-is-soft contract and task 5-2's step-6 handling). The marker stays set; the daemon will skip ticks until next server restart (volatile server-option self-heals).
+  - Step 6 `Restoring.Clear` failure: fatal — wrap as `NewFatal("Portal failed to clear @portal-restoring marker: " + err.Error(), err)`. Per spec § Fatal Bootstrap Errors and `CLAUDE.md` bootstrap step 6 ("Clear `@portal-restoring` — fatal on failure (the marker must not leak past bootstrap)"). _Cycle-1 reconciliation: an earlier draft of this body classified the failure as soft + WARN; spec, CLAUDE.md, and the `cmd/bootstrap/bootstrap.go` step-6 implementation all classify it as fatal — wording corrected here._
   - At each wrap site, also log ERROR to `portal.log` via `logger.Error(state.ComponentBootstrap, "<single-line>: %v", err)` BEFORE returning — ensures log entry exists even if stderr write later fails.
 - Edit `cmd/root.go` (or `main.go` — wherever `cmd.Execute()` lives):
   - Keep `SilenceErrors = false` on `rootCmd` (Cobra default) so usage errors render through Cobra's normal path. Set `SilenceErrors = true` only on commands whose `RunE` already wrote complete output (e.g., `stateStatusCmd` per task 6-5, `stateCleanupCmd` per task 6-6) so a non-zero exit there does not double-print.
@@ -1019,7 +1019,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - `"EnsureServer failure returns a FatalError with the specified user message"`.
   - `"RegisterPortalHooks mass failure returns a FatalError"`.
   - `"Restoring.Set failure returns a FatalError"`.
-  - `"Restoring.Clear failure does NOT return a FatalError (soft path)"`.
+  - `"Restoring.Clear failure DOES return a FatalError"` — per spec § Fatal Bootstrap Errors and `CLAUDE.md` bootstrap step 6.
   - `"FatalError wraps the underlying cause for unwrap"`.
   - `"EnsureSaver failure does NOT return a FatalError (soft path — produces a Warning instead)"` — regression guard; `EnsureSaver` is a soft failure per spec, produces a `bootstrap.Warning` via the accumulator pattern (task 6-9), not `FatalError`.
 - Tests in `cmd/root_test.go` / `main_test.go`:
@@ -1032,11 +1032,11 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
   - EnsureServer: `"Portal failed to start tmux server: <underlying>"`.
   - Mass hook-register: `"Portal failed to register tmux hooks: <underlying>"`.
   - `@portal-restoring` set: `"Portal failed to set @portal-restoring marker: <underlying>"`.
-  - (Note: `@portal-restoring` CLEAR failure is NOT fatal — soft path per task 5-2 step 6 / task 3-7. Logs WARN and continues.)
+  - `@portal-restoring` clear: `"Portal failed to clear @portal-restoring marker: <underlying>"` — fatal per spec § Fatal Bootstrap Errors and `CLAUDE.md` bootstrap step 6. The marker must not leak past bootstrap.
 
 **Acceptance Criteria**:
 - [ ] `cmd/bootstrap/errors.go` defines `FatalError` with `UserMessage` + `Cause` + `Error()` + `Unwrap()`.
-- [ ] Orchestrator returns `*FatalError` for: step 1 (EnsureServer), step 2 mass-register, step 3 (Set @portal-restoring). Step 6 (Clear @portal-restoring) failure is soft — logs WARN and continues.
+- [ ] Orchestrator returns `*FatalError` for: step 1 (EnsureServer), step 2 mass-register, step 3 (Set @portal-restoring), and step 6 (Clear @portal-restoring). Step 6 is fatal because the marker must not leak past bootstrap — see spec § Fatal Bootstrap Errors and `CLAUDE.md` bootstrap step 6.
 - [ ] `EnsureSaver` failure does NOT return `FatalError` — produces a soft `bootstrap.Warning` via the accumulator pattern (task 6-9).
 - [ ] Every fatal wrap site also logs ERROR to `portal.log` with `ComponentBootstrap` BEFORE returning.
 - [ ] `main.go` / `Execute()` intercepts `*FatalError` via `errors.As` and emits `UserMessage` on a single stderr line, followed by `os.Exit(1)`.
@@ -1053,7 +1053,7 @@ Task 5-2's orchestrator already produces errors for each; task 5-3 propagates th
 - `"EnsureServer failure returns a FatalError with the specified user message"`
 - `"RegisterPortalHooks mass failure returns a FatalError"`
 - `"Restoring.Set failure returns a FatalError"`
-- `"Restoring.Clear failure does NOT return a FatalError (soft path)"`
+- `"Restoring.Clear failure DOES return a FatalError"`
 - `"EnsureSaver failure does NOT return a FatalError (soft path — produces a Warning instead)"`
 - `"FatalError wraps the underlying cause via Unwrap"`
 - `"Execute() emits FatalError.UserMessage on a single stderr line and exits non-zero"`
