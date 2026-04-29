@@ -501,6 +501,92 @@ func TestCleanCommand(t *testing.T) {
 			t.Errorf("output = %q, want %q", buf.String(), want)
 		}
 	})
+
+	// Spec-pinned regression: hook stale-detection is purely structural-key
+	// mismatch against `list-panes -a`. Whether the hook command's binary
+	// exists on disk is NOT a staleness signal. Per phase-4-tasks.md
+	// acceptance bullet "Binary-missing and projects.json-absent are NOT
+	// staleness signals". Cycle-1 review remediation gap-fill.
+	t.Run("keeps hook with missing-binary command when structural key is live", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Hook command references a binary that almost certainly does not
+		// exist on the test host. The clean path must NOT remove this hook
+		// because its structural key matches a live pane.
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"my-session:0.0": {"on-resume": "/nonexistent/no-such-binary --resume"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty (missing-binary is not a staleness signal)", buf.String())
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["my-session:0.0"]; !ok {
+			t.Error("hook with missing-binary command must NOT be pruned when its structural key is live")
+		}
+	})
+
+	// Spec-pinned regression: a hook for a live pane must be retained even
+	// when projects.json has no entry for that pane's project. Hooks are
+	// keyed by structural pane key, not by project membership. Per
+	// phase-4-tasks.md acceptance bullet "Binary-missing and projects.json-
+	// absent are NOT staleness signals". Cycle-1 review remediation gap-fill.
+	t.Run("keeps hook when projects.json absent and structural key is live", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// projects.json is intentionally NOT created. The clean path must
+		// still preserve the hook because its structural key matches a live
+		// pane — projects.json membership is not a staleness input.
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"my-session:0.0": {"on-resume": "echo hello"},
+		})
+
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty (projects.json absence is not a staleness signal)", buf.String())
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["my-session:0.0"]; !ok {
+			t.Error("hook for live pane must NOT be pruned when projects.json is absent")
+		}
+	})
 }
 
 // mockCleanPaneLister implements AllPaneLister for clean command tests.
