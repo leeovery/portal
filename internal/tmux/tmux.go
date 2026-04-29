@@ -342,6 +342,15 @@ type PaneCoord struct {
 	Pane   int
 }
 
+// PaneTarget formats a tmux pane target string in the canonical
+// "session:window.pane" form accepted by tmux's `-t` flag (e.g.
+// "my-project:0.1"). It is the single canonical formatter for this target;
+// callers must not hand-roll the equivalent fmt.Sprintf so the format stays
+// uniform across the codebase.
+func PaneTarget(session string, window, pane int) string {
+	return fmt.Sprintf("%s:%d.%d", session, window, pane)
+}
+
 // ListPanesInSession enumerates live panes in the named session and returns
 // their (window, pane) coords sorted by window then pane. Uses
 // "list-panes -s -t <session>" so all panes across all windows of the session
@@ -592,7 +601,7 @@ func (c *Client) SelectLayout(session string, window int, layout string) error {
 // index after restoration (caller is responsible for translating saved →
 // live).
 func (c *Client) SelectPane(session string, window, pane int) error {
-	target := fmt.Sprintf("%s:%d.%d", session, window, pane)
+	target := PaneTarget(session, window, pane)
 	args := []string{"select-pane", "-t", target}
 	_, err := c.cmd.Run(args...)
 	if err != nil {
@@ -606,7 +615,7 @@ func (c *Client) SelectPane(session string, window, pane int) error {
 // when the saved state indicated a zoomed window and the layout has just been
 // freshly applied (which leaves zoom off), to land on the correct final state.
 func (c *Client) ResizePaneZoom(session string, window, pane int) error {
-	target := fmt.Sprintf("%s:%d.%d", session, window, pane)
+	target := PaneTarget(session, window, pane)
 	args := []string{"resize-pane", "-Z", "-t", target}
 	_, err := c.cmd.Run(args...)
 	if err != nil {

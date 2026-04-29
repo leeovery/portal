@@ -105,7 +105,7 @@ func (r *SessionRestorer) collectArmInfos(sess state.Session) []savedPaneArmInfo
 		for _, p := range w.Panes {
 			infos = append(infos, savedPaneArmInfo{
 				scrollAbs: filepath.Join(r.StateDir, p.ScrollbackFile),
-				hookKey:   fmt.Sprintf("%s:%d.%d", sess.Name, w.Index, p.Index),
+				hookKey:   tmux.PaneTarget(sess.Name, w.Index, p.Index),
 			})
 		}
 	}
@@ -218,7 +218,7 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 		}
 
 		hydrateCmd := buildHydrateCommand(fifo, info.scrollAbs, info.hookKey)
-		liveTarget := fmt.Sprintf("%s:%d.%d", sess.Name, live.Window, live.Pane)
+		liveTarget := tmux.PaneTarget(sess.Name, live.Window, live.Pane)
 		if err := r.Client.RespawnPane(liveTarget, hydrateCmd); err != nil {
 			return nil, fmt.Errorf("session %q: arm pane %s: %w", sess.Name, liveTarget, err)
 		}

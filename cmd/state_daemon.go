@@ -131,7 +131,7 @@ func captureAndCommit(deps *daemonDeps) error {
 				if _, skipped := skipSet[paneKey]; skipped {
 					continue
 				}
-				target := fmt.Sprintf("%s:%d.%d", sess.Name, win.Index, pane.Index)
+				target := tmux.PaneTarget(sess.Name, win.Index, pane.Index)
 				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
 				if err != nil {
 					deps.Logger.Warn(state.ComponentDaemon, "capture pane %s: %v", target, err)

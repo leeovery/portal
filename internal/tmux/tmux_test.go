@@ -2113,3 +2113,45 @@ func TestRespawnPane(t *testing.T) {
 		}
 	})
 }
+
+func TestPaneTarget(t *testing.T) {
+	tests := []struct {
+		name    string
+		session string
+		window  int
+		pane    int
+		want    string
+	}{
+		{
+			name:    "zero indices",
+			session: "work",
+			window:  0,
+			pane:    0,
+			want:    "work:0.0",
+		},
+		{
+			name:    "non-zero indices",
+			session: "my-project",
+			window:  2,
+			pane:    3,
+			want:    "my-project:2.3",
+		},
+		{
+			name:    "session name with hyphens and digits",
+			session: "proj-abc123",
+			window:  10,
+			pane:    11,
+			want:    "proj-abc123:10.11",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tmux.PaneTarget(tt.session, tt.window, tt.pane)
+			if got != tt.want {
+				t.Errorf("PaneTarget(%q, %d, %d) = %q, want %q",
+					tt.session, tt.window, tt.pane, got, tt.want)
+			}
+		})
+	}
+}
