@@ -3,8 +3,6 @@
 package cmd
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +10,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/state"
 )
 
 // newMigrateStore is a small helper that returns a *hooks.Store rooted at a
@@ -24,13 +23,29 @@ func newMigrateStore(t *testing.T) (*hooks.Store, string) {
 	return hooks.NewStore(path), path
 }
 
+// newMigrateLogger returns a *state.Logger that writes to a fresh tempfile
+// under t.TempDir() so tests can read its on-disk output back. Sets
+// PORTAL_LOG_LEVEL=info so INFO/WARN entries are emitted regardless of the
+// production default. Closes via t.Cleanup.
+func newMigrateLogger(t *testing.T) (*state.Logger, string) {
+	t.Helper()
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+	logPath := filepath.Join(t.TempDir(), "portal.log")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+	return logger, logPath
+}
+
 func TestRunMigrateRename_RewritesSingleMatchingKey(t *testing.T) {
 	store, path := newMigrateStore(t)
 	writeHooksJSON(t, path, map[string]map[string]string{
 		"old:0.0": {"on-resume": "claude --resume abc"},
 	})
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -51,7 +66,7 @@ func TestRunMigrateRename_RewritesMultipleMatchingKeys(t *testing.T) {
 		"work:1.0": {"on-resume": "c"},
 	})
 
-	if err := runMigrateRename(store, "work", "play", io.Discard); err != nil {
+	if err := runMigrateRename(store, "work", "play", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -76,7 +91,7 @@ func TestRunMigrateRename_LeavesUnrelatedKeysUntouched(t *testing.T) {
 		"other:0.0": {"on-resume": "untouched"},
 	})
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -104,7 +119,7 @@ func TestRunMigrateRename_NoMatchIsNoOp_NoFileWrite(t *testing.T) {
 	// Sleep so that any rewrite would produce a different mtime.
 	time.Sleep(20 * time.Millisecond)
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -124,7 +139,7 @@ func TestRunMigrateRename_PrefixAmbiguityViaTrailingColon(t *testing.T) {
 		"work-2:0.0": {"on-resume": "do-not-match"},
 	})
 
-	if err := runMigrateRename(store, "work", "play", io.Discard); err != nil {
+	if err := runMigrateRename(store, "work", "play", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -147,10 +162,11 @@ func TestRunMigrateRename_CollisionLogsAndOverwrites(t *testing.T) {
 		"new:0.0": {"on-resume": "pre-existing"},
 	})
 
-	stderr := new(bytes.Buffer)
-	if err := runMigrateRename(store, "old", "new", stderr); err != nil {
+	logger, logPath := newMigrateLogger(t)
+	if err := runMigrateRename(store, "old", "new", logger); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
+	_ = logger.Close()
 
 	got := readHooksJSON(t, path)
 	if got["new:0.0"]["on-resume"] != "from-old" {
@@ -159,12 +175,22 @@ func TestRunMigrateRename_CollisionLogsAndOverwrites(t *testing.T) {
 	if _, ok := got["old:0.0"]; ok {
 		t.Errorf("old:0.0 should have been removed")
 	}
-	msg := stderr.String()
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	msg := string(logged)
+	if !strings.Contains(msg, "WARN") {
+		t.Errorf("expected WARN level on collision; got %q", msg)
+	}
+	if !strings.Contains(msg, state.ComponentHooks) {
+		t.Errorf("expected component %q on collision log; got %q", state.ComponentHooks, msg)
+	}
 	if !strings.Contains(msg, "collision on new:0.0") {
-		t.Errorf("expected collision warning on stderr; got %q", msg)
+		t.Errorf("expected collision warning in log; got %q", msg)
 	}
 	if !strings.Contains(msg, "overwriting") {
-		t.Errorf("expected 'overwriting' in stderr; got %q", msg)
+		t.Errorf("expected 'overwriting' in log; got %q", msg)
 	}
 }
 
@@ -181,7 +207,7 @@ func TestRunMigrateRename_MalformedJSONIsNoOp(t *testing.T) {
 	beforeMtime := info.ModTime()
 	time.Sleep(20 * time.Millisecond)
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename should treat malformed as empty: %v", err)
 	}
 
@@ -206,7 +232,7 @@ func TestRunMigrateRename_MissingFileIsNoOp(t *testing.T) {
 	store, path := newMigrateStore(t)
 	// Do not create the file.
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename should treat missing as empty: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -216,7 +242,7 @@ func TestRunMigrateRename_MissingFileIsNoOp(t *testing.T) {
 
 func TestRunMigrateRename_RejectsEmptyNewName(t *testing.T) {
 	store, _ := newMigrateStore(t)
-	err := runMigrateRename(store, "old", "", io.Discard)
+	err := runMigrateRename(store, "old", "", state.NopLogger())
 	if err == nil {
 		t.Fatal("expected error for empty new name, got nil")
 	}
@@ -243,13 +269,26 @@ func TestRunMigrateRename_SaveFailurePropagatesAndWarns(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	stderr := new(bytes.Buffer)
-	err := runMigrateRename(store, "old", "new", stderr)
+	logger, logPath := newMigrateLogger(t)
+	err := runMigrateRename(store, "old", "new", logger)
 	if err == nil {
 		t.Fatal("expected save failure error, got nil")
 	}
-	if !strings.Contains(stderr.String(), "save failed") {
-		t.Errorf("expected 'save failed' on stderr; got %q", stderr.String())
+	_ = logger.Close()
+
+	logged, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	msg := string(logged)
+	if !strings.Contains(msg, "WARN") {
+		t.Errorf("expected WARN level on save failure; got %q", msg)
+	}
+	if !strings.Contains(msg, state.ComponentHooks) {
+		t.Errorf("expected component %q on save-failure log; got %q", state.ComponentHooks, msg)
+	}
+	if !strings.Contains(msg, "save failed") {
+		t.Errorf("expected 'save failed' in log; got %q", msg)
 	}
 }
 
@@ -262,7 +301,7 @@ func TestRunMigrateRename_PreservesEventMapVerbatim(t *testing.T) {
 		},
 	})
 
-	if err := runMigrateRename(store, "old", "new", io.Discard); err != nil {
+	if err := runMigrateRename(store, "old", "new", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -290,7 +329,7 @@ func TestRunMigrateRename_KeyWithColonInRemainder(t *testing.T) {
 		"foo:bar:0.0": {"on-resume": "preserved"},
 	})
 
-	if err := runMigrateRename(store, "foo", "baz", io.Discard); err != nil {
+	if err := runMigrateRename(store, "foo", "baz", state.NopLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
@@ -300,5 +339,38 @@ func TestRunMigrateRename_KeyWithColonInRemainder(t *testing.T) {
 	}
 	if _, ok := got["foo:bar:0.0"]; ok {
 		t.Errorf("foo:bar:0.0 should have been removed")
+	}
+}
+
+// TestRunMigrateRename_EmitsHooksComponentToLogger asserts the migration
+// surface routes its diagnostic warnings through *state.Logger under the
+// canonical state.ComponentHooks tag rather than fmt.Fprintf(os.Stderr, ...).
+// This is the task 12-5 acceptance: routine reporting in state_migrate_rename
+// must be visible to portal.log so portal state status recent-warnings can
+// surface it. We exercise the collision path (which is the deterministic
+// non-fatal warning path) and verify both the level and component tag.
+func TestRunMigrateRename_EmitsHooksComponentToLogger(t *testing.T) {
+	store, path := newMigrateStore(t)
+	writeHooksJSON(t, path, map[string]map[string]string{
+		"old:0.0": {"on-resume": "from-old"},
+		"new:0.0": {"on-resume": "pre-existing"},
+	})
+
+	logger, logPath := newMigrateLogger(t)
+	if err := runMigrateRename(store, "old", "new", logger); err != nil {
+		t.Fatalf("runMigrateRename: %v", err)
+	}
+	_ = logger.Close()
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logged := string(data)
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("log missing WARN level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentHooks+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentHooks, logged)
 	}
 }

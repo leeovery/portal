@@ -19,6 +19,12 @@ import (
 // reads no other state files — it must remain trivially fast and side-effect
 // minimal because tmux invokes it from hook contexts on every structural
 // event.
+//
+// Diagnostics route through portal.log under state.ComponentNotify. The
+// logger is opened only after EnsureDir succeeds (the log file lives inside
+// the state directory); an EnsureDir failure therefore returns the wrapped
+// error without a log line — the only surviving stderr path is the cobra
+// error printer, which is the documented "fatal pre-logger" exception.
 var stateNotifyCmd = &cobra.Command{
 	Use:    "notify",
 	Short:  "Bump the save-requested marker (internal, invoked by tmux hooks)",
@@ -27,12 +33,24 @@ var stateNotifyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := state.EnsureDir()
 		if err != nil {
+			// Fatal pre-logger: without a state dir we have nowhere to open
+			// portal.log. cobra prints the wrapped error to stderr.
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
+
+		// Open portal.log via the non-daemon append-only path so notify
+		// failures (save.requested create/truncate failures) land in the
+		// central log under state.ComponentNotify. Per spec § Log Rotation
+		// → Concurrent-writer discipline, only the daemon rotates. On open
+		// failure logger is nil and the *state.Logger nil-receiver no-ops
+		// every call so notify never aborts on a diagnostics-only failure.
+		logger, _ := openNoRotateLogger()
+		defer func() { _ = logger.Close() }()
 
 		path := state.SaveRequested(dir)
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err != nil {
+			logger.Warn(state.ComponentNotify, "touch save.requested at %s: %v", path, err)
 			return fmt.Errorf("touch save.requested: %w", err)
 		}
 		_ = f.Close()

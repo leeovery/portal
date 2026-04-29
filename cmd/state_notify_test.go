@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // runStateNotify executes "portal state notify" and returns stdout/stderr
@@ -185,5 +188,52 @@ func TestStateNotify_DoesNotInvokeBootstrap(t *testing.T) {
 
 	if _, _, err := runStateNotify(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestStateNotify_LogsWarnOnSaveRequestedCreateFailure asserts that when the
+// save.requested file cannot be created (e.g. its path is already a
+// directory), the notify subsystem emits a WARN entry to portal.log under the
+// state.ComponentNotify tag. This is the task 12-5 acceptance: routine
+// notify failure reporting must be visible to portal.log so it can be
+// surfaced via portal state status recent-warnings.
+//
+// We force the OpenFile failure by pre-creating save.requested as a
+// directory beneath the state dir; OpenFile with O_WRONLY|O_CREATE|O_TRUNC
+// against a directory fails with EISDIR.
+func TestStateNotify_LogsWarnOnSaveRequestedCreateFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+
+	// EnsureDir would normally create the state dir; do it ourselves so we
+	// can plant the blocking directory at save.requested before notify runs.
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	blockingPath := filepath.Join(dir, "save.requested")
+	if err := os.Mkdir(blockingPath, 0o700); err != nil {
+		t.Fatalf("mkdir blocking save.requested: %v", err)
+	}
+
+	_, _, err := runStateNotify(t)
+	if err == nil {
+		t.Fatal("expected non-zero exit when save.requested cannot be created, got nil")
+	}
+
+	logPath := state.PortalLog(dir)
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read portal.log: %v", readErr)
+	}
+	logged := string(data)
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("log missing WARN level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentNotify+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentNotify, logged)
+	}
+	if !strings.Contains(logged, "save.requested") {
+		t.Errorf("log missing failing path 'save.requested': %q", logged)
 	}
 }
