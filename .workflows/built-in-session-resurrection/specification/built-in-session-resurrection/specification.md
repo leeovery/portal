@@ -465,7 +465,7 @@ Idempotent. Runs once per save. Self-healing by construction.
 
 ### FIFO Files
 
-Per-pane FIFOs for hydration (`hydrate-<paneKey>.fifo`) live in the state directory during the restoration window. They are created just before pane creation, unlinked by the helper on signal (or timeout), and swept defensively by `os.Remove + syscall.Mkfifo` on each bootstrap. Not part of the save schema; treated as transient coordination artifacts.
+Per-pane FIFOs for hydration (`hydrate-<paneKey>.fifo`) live in the state directory during the restoration window. They are created just before arming each pane (immediately before `respawn-pane -k`), unlinked by the helper on signal (or timeout), and swept defensively by `os.Remove + syscall.Mkfifo` on each bootstrap. Not part of the save schema; treated as transient coordination artifacts.
 
 ## tmux Hook Registration Lifecycle
 
@@ -764,9 +764,10 @@ Implementation: `internal/restore/session.go` (see `armPanes` and `buildHydrateC
 
 **FIFO path:** `~/.config/portal/state/hydrate-<paneKey>.fifo` (paneKey = `<session>__<window>.<pane>` — same sanitization as scrollback filenames).
 
-**Creation (bootstrap, before creating the pane):**
-1. `os.Remove(path)` — ignore `ENOENT`; defensive sweep of any stale FIFO from a prior crashed bootstrap or dead helper.
+**Creation (bootstrap, before arming the pane):**
+1. `os.Remove(path)` — ignore `ENOENT`; remove any pre-existing inode (regular file, symlink, or stale FIFO from a prior crashed bootstrap or dead helper).
 2. `syscall.Mkfifo(path, 0600)` — create the FIFO with owner-only permissions.
+3. `os.Chmod(path, 0600)` — defensive post-mkfifo chmod to defend against an unusually-tight umask that would otherwise leave the FIFO below 0600.
 
 This defensive pattern eliminates the need for a separate stale-FIFO sweep step. Stale FIFOs only exist when no live helper holds them (helpers die with the tmux server, same lifetime as the FIFOs they block on).
 
@@ -794,8 +795,8 @@ portal state hydrate --fifo F --file S --hook-key K:
      c. Copy the scrollback file's bytes to stdout.
      d. Emit reset postamble + CRLF:      \033[?25h\033[?1049l\033[0m\r\n
      e. time.Sleep(100 * time.Millisecond).
-     f. Read hooks.json; look up this pane's resume hook using the --hook-key argument (the saved structural identifier), not the helper's live tmux position. This preserves hooks across base-index / pane-base-index drift.
-     g. tmux set-option -su @portal-skeleton-<paneKey>  (remove marker via -u flag — load-bearing; empty-string assignment does NOT remove).
+     f. tmux set-option -su @portal-skeleton-<paneKey>  (remove marker via -u flag — load-bearing; empty-string assignment does NOT remove). The unset is sequenced before the hook lookup because the lookup is independent of marker state — the helper reads hooks.json by `--hook-key` regardless — so it is safe to clear the marker first and reduce the window where the daemon would otherwise still skip this (now-hydrated) pane.
+     g. Read hooks.json; look up this pane's resume hook using the --hook-key argument (the saved structural identifier), not the helper's live tmux position. This preserves hooks across base-index / pane-base-index drift.
      h. If hook exists: exec sh -c 'HOOK; exec $SHELL'.
         Else:           exec $SHELL.
   3. On 3-second timeout (no signal arrived):
@@ -1029,13 +1030,14 @@ Every Portal command that needs tmux runs this sequence, in this order. The **ex
 - Otherwise, parse `sessions.json`. For each saved session:
   - `has-session -t <name>` → if live, skip this session.
   - Else, skeleton-create it:
-    1. For each pane: compute FIFO path (`~/.config/portal/state/hydrate-<paneKey>.fifo`); `os.Remove(path)` (ignore `ENOENT`); `syscall.Mkfifo(path, 0600)`.
-    2. `new-session -d -s <name> -c <root_cwd>` for the first pane (no command argument; the pane is created with the default shell and armed via `respawn-pane -k` in the arm phase below).
-    3. **Apply captured session environment** before creating any additional windows/panes: for each key/value in the saved `environment` map, run `tmux set-environment -t <name> <KEY> <VAL>`. This happens **after** `new-session` but **before** any subsequent `new-window` or `split-window`, so every subsequent pane inherits the saved per-session env at creation time. Removed-form variables (`-r` in tmux's on-wire syntax) were not captured; only plain set values round-trip.
-    4. `new-window` / `split-window` for remaining windows and panes (no command argument; default shell, armed in step 5 below).
-    5. **Arm each created pane with the hydrate helper** via `tmux respawn-pane -k -t <pane> "sh -c 'portal state hydrate --fifo <F> --file <scrollback> --hook-key <K>; exec $SHELL'"`, where `<K>` is the saved structural identifier `<raw-session>:<saved-window>.<saved-pane>`. `respawn-pane -k` atomically kills the default shell tmux created in steps 2/4 and replaces the pane's process with the helper in a single call — no shell output reaches scrollback before the helper runs.
-    6. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
-    7. For each created pane: `tmux set-option -s @portal-skeleton-<paneKey> 1` — the `-s` flag targets the server-option scope (load-bearing; matches the daemon's `show-options -sv` enumeration). Server-option scope is volatile — markers clear automatically on tmux server restart.
+    1. `new-session -d -s <name> -c <root_cwd>` for the first pane (no command argument; the pane is created with the default shell and armed via `respawn-pane -k` in the arm phase below).
+    2. **Apply captured session environment** before creating any additional windows/panes: for each key/value in the saved `environment` map, run `tmux set-environment -t <name> <KEY> <VAL>`. This happens **after** `new-session` but **before** any subsequent `new-window` or `split-window`, so every subsequent pane inherits the saved per-session env at creation time. Removed-form variables (`-r` in tmux's on-wire syntax) were not captured; only plain set values round-trip.
+    3. `new-window` / `split-window` for remaining windows and panes (no command argument; default shell, armed in step 4 below).
+    4. **Arm each created pane with the hydrate helper.** Per pane, in order:
+       a. Compute FIFO path (`~/.config/portal/state/hydrate-<paneKey>.fifo`); remove any pre-existing inode (regular file, symlink, FIFO) via `os.Remove` (ignore `ENOENT`); `syscall.Mkfifo(path, 0600)`; then `os.Chmod(path, 0600)` defensively against an unusually-tight umask. The FIFO must exist before the helper opens it for read, so creation is sequenced immediately before arming.
+       b. `tmux respawn-pane -k -t <pane> "sh -c 'portal state hydrate --fifo <F> --file <scrollback> --hook-key <K>; exec $SHELL'"`, where `<K>` is the saved structural identifier `<raw-session>:<saved-window>.<saved-pane>`. `respawn-pane -k` atomically kills the default shell tmux created in steps 1/3 and replaces the pane's process with the helper in a single call — no shell output reaches scrollback before the helper runs.
+    5. Per window: `select-layout "<saved>"`, `select-pane -t <active>`, `resize-pane -Z` if `zoomed`.
+    6. For each created pane: `tmux set-option -s @portal-skeleton-<paneKey> 1` — the `-s` flag targets the server-option scope (load-bearing; matches the daemon's `show-options -sv` enumeration). Server-option scope is volatile — markers clear automatically on tmux server restart.
 - On `select-layout` failure for a window: fall back to `select-layout tiled`, log, continue.
 - On any per-session error: log, skip that session, continue with the next.
 
@@ -1268,16 +1270,16 @@ Does **not** unset skeleton markers. The helper owns that.
 #### `portal state hydrate --fifo F --file S --hook-key K`
 
 The pane's initial command at skeleton restore time, wrapped in `sh -c 'portal state hydrate ...; exec $SHELL'`. All three flags are required:
-- `--fifo F` — absolute path to the per-pane FIFO (created by bootstrap before pane creation).
+- `--fifo F` — absolute path to the per-pane FIFO (created by bootstrap immediately before arming the pane).
 - `--file S` — absolute path to the saved-indexed scrollback file to dump on signal.
 - `--hook-key K` — saved structural identifier `<raw-session>:<saved-window>.<saved-pane>`, used to look up the resume hook in `hooks.json`. This preserves hooks across `base-index` / `pane-base-index` drift between save and restore.
 
 Responsibilities per Scrollback Restore Mechanics:
 
 - Block on FIFO read (3s timeout).
-- On signal: close + unlink FIFO, emit reset preamble, dump scrollback file, emit reset postamble + CRLF, sleep 100ms, read hooks.json, unset skeleton marker, exec hook-or-shell.
+- On signal: close + unlink FIFO, emit reset preamble, dump scrollback file, emit reset postamble + CRLF, sleep 100ms, unset skeleton marker, read hooks.json, exec hook-or-shell.
 - On timeout: emit reset preamble only, leave marker set, log warning, exec bare shell.
-- On file missing: emit reset preamble only, log warning, clear marker (by the signal path reaching step g), exec hook-or-shell.
+- On file missing: emit reset preamble only, log warning, clear marker (by the signal path reaching step f), exec hook-or-shell.
 
 ### No User-Facing Manual Save Command
 
