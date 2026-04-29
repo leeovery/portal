@@ -542,8 +542,8 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
-		// The two hydration-trigger calls sit between the save-trigger calls
-		// and the migrate-rename call.
+		// The two hydration-trigger calls sit immediately after the
+		// save-trigger calls in the current 9-hook registration order.
 		base := len(expectedSaveTriggerEvents)
 		for i, ev := range expectedHydrationTriggerEvents {
 			idx := base + i
