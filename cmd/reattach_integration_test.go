@@ -1,0 +1,693 @@
+//go:build integration
+
+// Phase 5 task 5-10 — `portal attach NAME` / `portal open` reattach
+// integration test.
+//
+// This file locks in the Phase 5 acceptance bullet (planning.md L166):
+//
+//	`portal attach NAME` and `portal open` continue to resolve names
+//	that only exist in `sessions.json` at bootstrap time (skeleton is
+//	created before the command's own attach logic runs).
+//
+// The five enumerated edge cases (planning task 5-10) covered here:
+//
+//  1. Steady-state reattach (saved session already live) does zero
+//     structural rewrites.
+//  2. `has-session` post-bootstrap returns true for every name in
+//     `sessions.json` (bootstrap creates skeleton sessions before
+//     downstream commands run).
+//  3. `switch-client` (inside-tmux) attach path verified end-to-end.
+//  4. `exec attach-session -A` (bare-shell) attach path verified
+//     end-to-end (mock connector substitutes for the real syscall.Exec
+//     to avoid PTY hand-off in tests).
+//  5. Name in neither live nor saved still fails with the existing
+//     "No session found" error.
+//
+// Why this file lives in cmd/ (and not cmd/bootstrap/):
+//   - The Phase 5 acceptance criterion is at the cmd-level: a user-
+//     facing `portal attach NAME` invocation must work against a saved-
+//     only name. That means we need access to the cmd package's
+//     injection seams (`bootstrapDeps`, `attachDeps`, `openTUIFunc`)
+//     which are unexported package-level state. cmd/bootstrap/'s
+//     reboot_roundtrip_test verifies the bootstrap orchestrator's
+//     reboot pipeline; this file verifies the cmd-layer pipeline that
+//     consumes its output.
+//
+// Why we drive a real bootstrap.Orchestrator (and not a stub):
+//   - The criterion is "skeleton is created before the command's own
+//     attach logic runs" — i.e. the Restore step's contract. A stub
+//     Orchestrator would not exercise that contract. We wire a real
+//     bootstrap.Orchestrator with NoOp shims for the steps incidental
+//     to this scenario (Hooks, Saver, Sweeper, Clean) and real
+//     RestoringMarker + RestoreAdapter so step 5 actually runs.
+//
+// Why we build the portal binary on PATH:
+//   - Restore arms each created pane via `respawn-pane -k 'sh -c
+//     portal state hydrate ...'`. If `portal` is not on PATH the
+//     helper exits immediately, the pane closes (default tmux
+//     remain-on-exit=off), the window closes, and the session itself
+//     dies — has-session would then return false even though Restore
+//     ran successfully. Building the binary keeps the helper blocked
+//     on its FIFO open(O_RDONLY) so the pane (and its session) stays
+//     alive long enough for the cmd-layer assertions.
+//
+// Build & run:
+//
+//	go test -tags=integration ./cmd/...
+//
+// Tests in this file are NOT included in the default `go test ./...`
+// run because the `//go:build integration` tag gates them off. They
+// also call `testing.Short()` so `go test -short -tags=integration`
+// skips them — useful for quick-check CI lanes.
+
+package cmd
+
+// Tests in this file mutate package-level state (bootstrapDeps,
+// attachDeps, openTUIFunc) and MUST NOT use t.Parallel.
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
+	"github.com/leeovery/portal/internal/tmuxtest"
+	"github.com/spf13/cobra"
+)
+
+// reattachBuildOnce caches the portal-binary build across all five test
+// cases in this file. The build itself is ~1-2 seconds and produces a
+// process-wide PATH side effect; doing it once amortises the cost
+// without introducing TestMain (the package has no other shared setup).
+var reattachBuildOnce sync.Once
+var reattachBinDir string
+var reattachBuildErr error
+
+// ensurePortalOnPATH builds the portal binary into a temp dir (once
+// per test process) and prepends that dir to PATH for the lifetime of
+// the calling test. The temp dir lives until process exit — sharing it
+// across tests is intentional because the only consumer is the in-pane
+// hydrate helper, which never mutates the binary.
+func ensurePortalOnPATH(t *testing.T) {
+	t.Helper()
+	reattachBuildOnce.Do(func() {
+		dir, err := buildPortalBinaryForReattach()
+		reattachBinDir = dir
+		reattachBuildErr = err
+	})
+	if reattachBuildErr != nil {
+		t.Fatalf("build portal: %v", reattachBuildErr)
+	}
+	t.Setenv("PATH", reattachBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// buildPortalBinaryForReattach compiles the portal CLI into a stable
+// temp dir under os.TempDir() (NOT t.TempDir, which would be removed
+// when the first test that triggers the build exits). Returns the dir
+// containing the binary so callers can prepend it to PATH.
+func buildPortalBinaryForReattach() (string, error) {
+	dir, err := os.MkdirTemp("", "ptl-reattach-")
+	if err != nil {
+		return "", fmt.Errorf("mkdir temp: %w", err)
+	}
+	binary := filepath.Join(dir, "portal")
+	root, err := reattachProjectRoot()
+	if err != nil {
+		return "", fmt.Errorf("locate project root: %w", err)
+	}
+	cmd := exec.Command("go", "build", "-o", binary, ".")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("go build: %v\n%s", err, out)
+	}
+	return dir, nil
+}
+
+// reattachProjectRoot walks up from the test's runtime CWD to the
+// directory holding go.mod. The test binary's CWD is cmd/ at runtime;
+// the closest go.mod is one level up at the repo root, which is where
+// `go build .` must run from to compile the portal CLI.
+func reattachProjectRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found above %s", dir)
+		}
+		dir = parent
+	}
+}
+
+// buildReattachOrchestrator constructs a bootstrap.Orchestrator wired
+// for the reattach integration scenario: real RestoringMarker
+// (Set/Clear) and real RestoreAdapter (so step 5 actually creates the
+// skeleton from sessions.json), with NoOp shims for the steps
+// incidental to this scenario (Hooks, Saver, Sweeper, Clean). The same
+// adapter shape used by Phase 5's TestPhase5_RestoreCreatesMissingSession
+// in cmd/bootstrap/phase5_integration_test.go.
+//
+// stateDir holds the seeded sessions.json and the per-pane scrollback
+// files (written by the helper after hydration). client points at the
+// isolated test socket via tmuxtest.Socket.Client.
+func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir string) *bootstrap.Orchestrator {
+	t.Helper()
+	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	restoreInner := &restore.Orchestrator{
+		Client:   client,
+		StateDir: stateDir,
+		Logger:   logger,
+	}
+	return &bootstrap.Orchestrator{
+		Server:    client,
+		Hooks:     bootstrap.NoOpHooks{},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:     bootstrap.NoOpSaver{},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Sweeper:   bootstrap.NoOpFIFOSweeper{},
+		Clean:     bootstrap.NoOpStaleCleaner{},
+	}
+}
+
+// seedSessionsJSON writes a minimal sessions.json containing one
+// single-window/single-pane session per supplied name. The pane's
+// ScrollbackFile points at a placeholder path under
+// stateDir/scrollback/ — the file does not have to exist for skeleton
+// restoration to succeed (Restore only reads the index; the helper
+// reads the file).
+func seedSessionsJSON(t *testing.T, stateDir string, names ...string) {
+	t.Helper()
+	sessions := make([]state.Session, 0, len(names))
+	for _, name := range names {
+		sessions = append(sessions, state.Session{
+			Name: name,
+			Windows: []state.Window{{
+				Index:  0,
+				Layout: "tiled",
+				Active: true,
+				Panes: []state.Pane{{
+					Index:          0,
+					Active:         true,
+					ScrollbackFile: filepath.Join("scrollback", name+"-w0-p0.bin"),
+				}},
+			}},
+		})
+	}
+	idx := state.Index{Sessions: sessions}
+	data, err := state.EncodeIndex(idx)
+	if err != nil {
+		t.Fatalf("EncodeIndex: %v", err)
+	}
+	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+}
+
+// setupReattachEnv builds the per-test scaffolding shared by every
+// case: isolated tmux socket, state dir wired via PORTAL_STATE_DIR,
+// portal binary on PATH, the test's bootstrap orchestrator wired into
+// bootstrapDeps, and a t.Cleanup that resets every package-level seam
+// it mutated. Returns the socket and the *tmux.Client so the caller
+// can seed live sessions / drive assertions.
+func setupReattachEnv(t *testing.T) (*tmuxtest.Socket, *tmux.Client, string) {
+	t.Helper()
+
+	ensurePortalOnPATH(t)
+
+	ts := tmuxtest.New(t, "ptl-reattach-")
+	stateDir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	resetBootstrapOnce(t)
+
+	return ts, client, stateDir
+}
+
+// listSessionNamesViaSocket returns the names of currently-live tmux
+// sessions on the isolated socket. Used to assert pre/post bootstrap
+// states without depending on test-process-level Run-trim semantics.
+func listSessionNamesViaSocket(t *testing.T, ts *tmuxtest.Socket) []string {
+	t.Helper()
+	out, err := ts.TryRun("list-sessions", "-F", "#{session_name}")
+	if err != nil {
+		// list-sessions errors when no server / no sessions; treat as empty.
+		return nil
+	}
+	return splitNonEmptyLines(out)
+}
+
+// splitNonEmptyLines splits s on newlines and trims whitespace,
+// dropping any empty results. Pulled into a helper so callers do not
+// repeat the boilerplate around `strings.Split + trim + skip empty`.
+func splitNonEmptyLines(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '\n' {
+			line := s[start:i]
+			// Trim trailing carriage return (Windows-safe; harmless on Unix).
+			if n := len(line); n > 0 && line[n-1] == '\r' {
+				line = line[:n-1]
+			}
+			if line != "" {
+				out = append(out, line)
+			}
+			start = i + 1
+		}
+	}
+	return out
+}
+
+// containsAll reports whether every want item is present in got.
+// Order-independent — both inputs are flat string slices.
+func containsAll(got, want []string) bool {
+	set := make(map[string]struct{}, len(got))
+	for _, g := range got {
+		set[g] = struct{}{}
+	}
+	for _, w := range want {
+		if _, ok := set[w]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites
+// covers planning task 5-10 case 1: when a saved session is already
+// live, bootstrap's Restore step must NOT issue a second new-session
+// (which would error with "session already exists" or worse silently
+// recreate it). Steady-state reattach should be a single-list-sessions
+// no-op for that name.
+//
+// We assert this by: pre-creating "alpha" on the live server, seeding
+// sessions.json with "alpha", running bootstrap, then verifying that
+// alpha is still alive AND that no @portal-skeleton-<paneKey> marker
+// was set for it (skeleton markers are a Restore side effect — their
+// absence proves Restore took the live-session-skip branch).
+func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	// Pre-create alpha live so Restore takes the skip branch.
+	ts.Run(t, "new-session", "-d", "-s", "alpha")
+	ts.WaitForSession(t, "alpha", 2*time.Second)
+
+	// Seed sessions.json with the same name.
+	seedSessionsJSON(t, stateDir, "alpha")
+
+	// Wire orchestrator + cmd-layer mocks. attachDeps validator points
+	// at the real socket-backed client so HasSession queries traverse
+	// the live tmux server. Connector is a mock so Connect is captured
+	// without trying to do a real attach.
+	connector := &mockSessionConnector{}
+	attachDeps = &AttachDeps{
+		Connector: connector,
+		Validator: client,
+	}
+	t.Cleanup(func() { attachDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"attach", "alpha"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Connect must have been called — alpha was already live so
+	// HasSession passed and dispatch reached the connector.
+	if connector.connectedTo != "alpha" {
+		t.Errorf("connector.Connect = %q; want %q", connector.connectedTo, "alpha")
+	}
+
+	// Skeleton marker MUST be absent — its absence is the structural
+	// signal that Restore took the live-session-skip branch and did not
+	// rewrite the live session.
+	wantMarker := state.SkeletonMarkerPrefix + state.SanitizePaneKey("alpha", 0, 0)
+	val, found, err := client.TryGetServerOption(wantMarker)
+	if err != nil {
+		t.Fatalf("TryGetServerOption %s: %v", wantMarker, err)
+	}
+	if found {
+		t.Errorf("@portal-skeleton-* marker set for live alpha (value=%q); want absent — skeleton restore re-ran on a live session", val)
+	}
+
+	// Belt-and-braces: there must still be exactly one live session named alpha.
+	got := listSessionNamesViaSocket(t, ts)
+	if !containsAll(got, []string{"alpha"}) {
+		t.Errorf("live sessions = %v; want alpha present", got)
+	}
+}
+
+// TestReattachIntegration_HasSessionPostBootstrapForSavedNames covers
+// planning task 5-10 case 2: every name present in sessions.json must
+// be queryable via has-session after bootstrap completes. This is the
+// central acceptance criterion — `portal attach NAME` only resolves a
+// saved-only name when bootstrap's Restore step (5) has already
+// skeleton-created it BEFORE the command's RunE inspects HasSession.
+//
+// We seed two saved-only names ("ghost-foo", "ghost-bar"), confirm
+// neither is live before bootstrap, run a tmux-using command (which
+// triggers PersistentPreRunE → bootstrap), and assert both names are
+// live afterwards.
+func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	// Two saved-only names; nothing live yet.
+	seedSessionsJSON(t, stateDir, "ghost-foo", "ghost-bar")
+
+	// Pre-condition: neither name is live.
+	for _, name := range []string{"ghost-foo", "ghost-bar"} {
+		if _, err := ts.TryRun("has-session", "-t", name); err == nil {
+			t.Fatalf("%s unexpectedly live before bootstrap", name)
+		}
+	}
+
+	connector := &mockSessionConnector{}
+	attachDeps = &AttachDeps{
+		Connector: connector,
+		Validator: client,
+	}
+	t.Cleanup(func() { attachDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"attach", "ghost-foo"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// attach must have dispatched to the connector — proving HasSession
+	// returned true post-bootstrap for the saved-only name.
+	if connector.connectedTo != "ghost-foo" {
+		t.Errorf("connector.Connect = %q; want %q", connector.connectedTo, "ghost-foo")
+	}
+
+	// Both saved names must be live on the server (Restore creates them
+	// up-front, not lazily on attach). Cross-check via the raw socket
+	// in case the validator's HasSession degrades silently.
+	for _, name := range []string{"ghost-foo", "ghost-bar"} {
+		if _, err := ts.TryRun("has-session", "-t", name); err != nil {
+			t.Errorf("has-session -t %s: %v (expected live post-bootstrap)", name, err)
+		}
+	}
+}
+
+// TestReattachIntegration_AttachInsideTmuxSwitchClientPath covers
+// planning task 5-10 case 3: when Portal is invoked from inside an
+// existing tmux session, `portal attach NAME` must dispatch to a
+// SwitchConnector (which calls tmux switch-client). We verify the
+// dispatch path with full type fidelity by leaving attachDeps.Connector
+// pointing at a real *SwitchConnector wrapped around a mock
+// SwitchClienter — only the SwitchClient call itself is mocked, so
+// the cmd path through buildAttachDeps' inside-tmux branch and the
+// SwitchConnector's Connect method is end-to-end exercised.
+//
+// The TMUX env variable is intentionally NOT consulted here because
+// attachDeps is non-nil and bypasses tmux.InsideTmux() — that gating
+// is covered separately by TestBuildSessionConnector. The contribution
+// of this case is verifying the end-to-end pipeline against a
+// saved-only name when the inside-tmux Connector type is wired.
+func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	seedSessionsJSON(t, stateDir, "switched-foo")
+
+	// Pre-condition: switched-foo is not yet live.
+	if _, err := ts.TryRun("has-session", "-t", "switched-foo"); err == nil {
+		t.Fatal("switched-foo unexpectedly live before bootstrap")
+	}
+
+	// Real SwitchConnector wrapping a mock SwitchClienter — proves the
+	// cmd-layer dispatches through SwitchConnector.Connect → underlying
+	// SwitchClient. This is the inside-tmux path's structural shape.
+	switcher := &mockSwitchClient{}
+	connector := &SwitchConnector{client: switcher}
+
+	attachDeps = &AttachDeps{
+		Connector: connector,
+		Validator: client,
+	}
+	t.Cleanup(func() { attachDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"attach", "switched-foo"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// SwitchClient must have been called with the saved-only name —
+	// proves Restore skeleton-created switched-foo (HasSession=true)
+	// AND that SwitchConnector.Connect reached the underlying client.
+	if switcher.switchedTo != "switched-foo" {
+		t.Errorf("SwitchClient.SwitchedTo = %q; want %q", switcher.switchedTo, "switched-foo")
+	}
+}
+
+// TestReattachIntegration_AttachOutsideTmuxAttachSessionPath covers
+// planning task 5-10 case 4: when Portal is invoked from a bare shell
+// (TMUX unset), `portal attach NAME` must dispatch through the
+// outside-tmux pipeline that production wires to AttachConnector
+// (`syscall.Exec` + `tmux attach-session -A -t NAME`). We substitute a
+// mockSessionConnector so the test does not require a real PTY hand-
+// off — per the planning brief's "mock connectors so the test does
+// not require a real PTY" guidance.
+//
+// What this case uniquely contributes (vs case 3): it proves the cmd
+// pipeline reaches Connector.Connect with the saved-only name when
+// the bare-shell wiring is in effect. The TMUX env variable is
+// intentionally cleared at the test process level via t.Setenv so
+// `tmux.InsideTmux()` would observe the bare-shell state if the test
+// path were to consult it (attachDeps non-nil bypasses it; the env
+// clear is documentation more than mechanism).
+func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	// Document bare-shell semantics: TMUX unset.
+	t.Setenv("TMUX", "")
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	seedSessionsJSON(t, stateDir, "attached-foo")
+
+	// Pre-condition: attached-foo is not yet live.
+	if _, err := ts.TryRun("has-session", "-t", "attached-foo"); err == nil {
+		t.Fatal("attached-foo unexpectedly live before bootstrap")
+	}
+
+	// mockSessionConnector stands in for AttachConnector — real
+	// AttachConnector.Connect calls syscall.Exec which would replace
+	// the test process. The mock captures the connection by name,
+	// matching what the production tmux-attach-session-with-name path
+	// would target.
+	connector := &mockSessionConnector{}
+	attachDeps = &AttachDeps{
+		Connector: connector,
+		Validator: client,
+	}
+	t.Cleanup(func() { attachDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"attach", "attached-foo"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if connector.connectedTo != "attached-foo" {
+		t.Errorf("connector.Connect = %q; want %q", connector.connectedTo, "attached-foo")
+	}
+
+	// Cross-check: skeleton restoration actually ran. attached-foo
+	// must be live after bootstrap.
+	if _, err := ts.TryRun("has-session", "-t", "attached-foo"); err != nil {
+		t.Errorf("has-session -t attached-foo: %v (expected live post-bootstrap)", err)
+	}
+}
+
+// TestReattachIntegration_UnknownNameNotFoundError covers planning task
+// 5-10 case 5: a name that exists in NEITHER live tmux NOR sessions.json
+// must surface the existing "No session found: <name>" error from
+// cmd/attach.go, with no Connector.Connect dispatch. This guards against
+// a future regression where bootstrap silently creates skeletons for
+// names not in sessions.json (it must not).
+func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	// ts is unused in this case — we never query the live socket
+	// because the assertion is on the cmd-layer error message, not on
+	// any post-bootstrap server state. ts's t.Cleanup still tears down
+	// the isolated server via tmuxtest.New's registered cleanup.
+	_, client, stateDir := setupReattachEnv(t)
+
+	// No sessions.json at all — empty state dir is the simplest
+	// "neither live nor saved" world.
+
+	connector := &mockSessionConnector{}
+	attachDeps = &AttachDeps{
+		Connector: connector,
+		Validator: client,
+	}
+	t.Cleanup(func() { attachDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"attach", "nope-not-here"})
+	err := rootCmd.Execute()
+
+	if err == nil {
+		t.Fatal("expected 'No session found' error, got nil")
+	}
+	want := "No session found: nope-not-here"
+	if err.Error() != want {
+		t.Errorf("error = %q; want %q", err.Error(), want)
+	}
+
+	// Connector must NOT have been invoked — the not-found branch in
+	// cmd/attach.go short-circuits before Connect.
+	if connector.connectedTo != "" {
+		t.Errorf("connector.Connect = %q; want empty (not-found short-circuits before dispatch)", connector.connectedTo)
+	}
+}
+
+// TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton covers
+// the `portal open` half of planning task 5-10's acceptance bullet:
+// when invoked with no positional arg, `portal open` launches the TUI
+// — and by the time the TUI's session lister consults tmux, every
+// saved name has already been skeleton-restored by bootstrap step 5.
+//
+// We override openTUIFunc to capture its inputs without launching a
+// real Bubble Tea program (the TUI requires a TTY which test harnesses
+// do not provide). The post-Run assertion is that the live tmux server
+// observable by the TUI's lister includes the saved-only name —
+// equivalent to "the TUI would render it as a selectable session".
+func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	seedSessionsJSON(t, stateDir, "tui-ghost")
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	// Capture-only TUI launcher — does not start the program. We assert
+	// it was reached and that, by the time it would have run, the saved
+	// name is queryable as a live session on the server the TUI's
+	// lister would target.
+	var tuiCalled bool
+	origFunc := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, _ string, _ []string, _ bool) error {
+		tuiCalled = true
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origFunc })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !tuiCalled {
+		t.Fatal("openTUIFunc was not invoked for `portal open` with no args")
+	}
+
+	// The TUI's lister would query list-sessions on the same server
+	// the bootstrap orchestrator wired. tui-ghost must be live by now.
+	if _, err := ts.TryRun("has-session", "-t", "tui-ghost"); err != nil {
+		t.Errorf("has-session -t tui-ghost: %v (expected live by the time `portal open` reached the TUI)", err)
+	}
+}
+
+// Compile-time assertions: keep this file's reuse of cmd-package types
+// honest. If any of these symbols change shape, the failure surfaces
+// here rather than as a runtime mock-mismatch panic deep in a t.Run.
+var _ SessionConnector = (*mockSessionConnector)(nil)
+var _ SessionValidator = (*mockSessionValidator)(nil)
+var _ SwitchClienter = (*mockSwitchClient)(nil)
+var _ bootstrap.Runner = (*bootstrap.Orchestrator)(nil)
+
+// Compile-time assertion that openTUIFunc's signature matches what the
+// reattach test injects. Cobra calls go through cmd.RunE, so a drift
+// between the registered openTUIFunc and the test's stub would only
+// surface at runtime under the integration tag.
+var _ func(*cobra.Command, string, []string, bool) error = openTUIFunc
