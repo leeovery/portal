@@ -266,3 +266,21 @@ approved_at: 2026-04-23
 | built-in-session-resurrection-8-8 | Extract bootstrap.Orchestrator fatal-message helper | new `(o *Orchestrator) fatalf(verb, err)` builds `"Portal failed to <verb>: <err>"`; four sites at `cmd/bootstrap/bootstrap.go` lines 151, 156, 161, 193 collapse to single line each; `grep -n '"Portal failed to '` returns one hit; byte-identical messages preserved |
 | built-in-session-resurrection-8-9 | Move bootstrap noop step types into cmd/bootstrap as canonical sources | new `cmd/bootstrap/noop.go` exports `NoOpServer`, `NoOpHooks`, `NoOpRestoringMarker`, `NoOpSaver`, `NoOpRestorer`, `NoOpStaleCleaner`; production `noopStaleCleaner` in `cmd/bootstrap_production.go:102-109` deleted; phase5 test's four sibling noop types deleted; audit retires any other private noops in bootstrap tests |
 | built-in-session-resurrection-8-10 | Extract daemon-state read template | new private `readDaemonFile(path, absentSentinel)` collapses ENOENT-classification + read-error wrapping; `ReadPIDFile` (`internal/state/daemon_state.go:36-50`) and `ReadVersionFile` (`:101-110`) reduce to trim/parse-only after helper call; absent-file and parse-error behaviour unchanged |
+
+### Phase 9: Analysis (Cycle 3)
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-9-1 | Consolidate `restoreOrchestratorAdapter` and split out FIFO sweep | production vs test-side adapter parity; FIFO sweep failure swallowed; Pascal-case vs camelCase naming consistency; orchestrator doc-comment step count alignment |
+| built-in-session-resurrection-9-2 | Eliminate `socketCommander.Run`/`RunRaw` duplication of `tmux.RealCommander` | trim semantics preserved between `Run` (`TrimSpace`) and `RunRaw` (verbatim); error path returns `("", err)` unchanged |
+| built-in-session-resurrection-9-3 | Fix stale `createSkeleton` doc-comment claiming send-keys arming | comment-only change; verify no stray `send-keys` references remain in `createSkeleton`'s doc-comment |
+| built-in-session-resurrection-9-4 | Extract `openAppendLog` helper for OpenFile triplet in logger.go | maintain identical OpenFile flags and mode (`0o600`); rotation behaviour unchanged |
+| built-in-session-resurrection-9-5 | Add `PaneTarget` helper for `%s:%d.%d` Sprintf duplication | zero indices (window=0, pane=0) round-trip; preserve the `SelectLayout` `%s:%d` form unchanged |
+| built-in-session-resurrection-9-6 | Add `tmux.DefaultClient()` helper for `NewClient(&RealCommander{})` repetition | tests using mock `Commander` still construct via `NewClient` directly; production paths uniformly use `DefaultClient()` |
+| built-in-session-resurrection-9-7 | Delete orphaned `NoOpServer` and `NoOpRestoringMarker` | confirm no cross-package references before deletion; leading-comment policy statement explicit |
+| built-in-session-resurrection-9-8 | Resolve ambiguous `warnOnPaneKeyDrift` seam between Orchestrator and SessionRestorer | no other callers of `flattenSavedPanePositions` / `savedPanePos`; orchestrator logger nil-guard semantics preserved |
+| built-in-session-resurrection-9-9 | Align spec text with current implementation (mkfifo ordering, hydrate helper ordering, CreateFIFO semantics) | spec-text-only change; verify all four sections remain internally consistent after edits |

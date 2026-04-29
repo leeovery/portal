@@ -6,7 +6,7 @@ total_proposed: 9
 # Analysis Tasks: built-in-session-resurrection (Cycle 3)
 
 ## Task 1: Consolidate `restoreOrchestratorAdapter` and split out FIFO sweep
-status: pending
+status: approved
 severity: high
 sources: duplication, architecture
 
@@ -39,7 +39,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Eliminate `socketCommander.Run`/`RunRaw` duplication of `tmux.RealCommander`
-status: pending
+status: approved
 severity: high
 sources: duplication
 
@@ -67,7 +67,7 @@ sources: duplication
 ---
 
 ## Task 3: Fix stale `createSkeleton` doc-comment claiming send-keys arming
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -93,7 +93,7 @@ sources: standards
 ---
 
 ## Task 4: Extract `openAppendLog` helper for OpenFile triplet in logger.go
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -119,7 +119,7 @@ sources: duplication
 ---
 
 ## Task 5: Add `PaneTarget` helper for `%s:%d.%d` Sprintf duplication
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -149,7 +149,7 @@ sources: duplication
 ---
 
 ## Task 6: Add `tmux.DefaultClient()` helper for `NewClient(&RealCommander{})` repetition
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -175,7 +175,7 @@ sources: duplication
 ---
 
 ## Task 7: Delete orphaned `NoOpServer` and `NoOpRestoringMarker`
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -201,7 +201,7 @@ sources: architecture
 ---
 
 ## Task 8: Resolve ambiguous `warnOnPaneKeyDrift` seam between Orchestrator and SessionRestorer
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -230,7 +230,7 @@ sources: architecture
 ---
 
 ## Task 9: Align spec text with current implementation (mkfifo ordering, hydrate helper ordering, CreateFIFO semantics)
-status: pending
+status: approved
 severity: low
 sources: standards
 
