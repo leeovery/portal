@@ -113,21 +113,24 @@ type socketCommander struct {
 	socketPath string
 }
 
-// Run executes tmux on the isolated socket and trims surrounding whitespace,
-// matching tmux.RealCommander.Run. -f /dev/null mirrors Socket.cmd: tests
-// must not pick up the developer's ~/.tmux.conf (notably base-index).
+// runRaw executes tmux on the isolated socket and returns the raw stdout
+// bytes. Shared by Run and RunRaw so the exec/error path lives in one place.
+func (sc *socketCommander) runRaw(args []string) ([]byte, error) {
+	return exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
+}
+
+// Run executes tmux on the isolated socket and trims surrounding whitespace.
 func (sc *socketCommander) Run(args ...string) (string, error) {
-	out, err := exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
+	out, err := sc.runRaw(args)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// RunRaw executes tmux on the isolated socket and returns its output verbatim,
-// matching tmux.RealCommander.RunRaw.
+// RunRaw executes tmux on the isolated socket and returns its output verbatim.
 func (sc *socketCommander) RunRaw(args ...string) (string, error) {
-	out, err := exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
+	out, err := sc.runRaw(args)
 	if err != nil {
 		return "", err
 	}
