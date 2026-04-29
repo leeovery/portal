@@ -101,20 +101,29 @@ type StaleCleaner interface {
 // Orchestrator.Run substitutes a no-op default when Logger is unset, so
 // callers never need to nil-check before invoking it.
 //
-// Soft failures (best-effort steps that degrade-and-continue) emit via
-// Warn. Fatal failures emit via Error before the orchestrator returns
-// the wrapped *FatalError so the same line lands in portal.log via
-// ComponentBootstrap as well as on stderr at the top-level Execute path.
+// Step-entry diagnostics emit via Debug — per the spec's Observability
+// section, bootstrap events are logged at DEBUG so PORTAL_LOG_LEVEL=debug
+// surfaces the step boundary an operator scans when a session fails to come
+// back; production runs (default LevelWarn) drop these lines. Soft failures
+// (best-effort steps that degrade-and-continue) emit via Warn. Fatal
+// failures emit via Error before the orchestrator returns the wrapped
+// *FatalError so the same line lands in portal.log via ComponentBootstrap
+// as well as on stderr at the top-level Execute path.
 type Logger interface {
+	Debug(component, format string, args ...any)
 	Warn(component, format string, args ...any)
 	Error(component, format string, args ...any)
 }
 
 // noopLogger is the default Logger Run substitutes when Orchestrator.Logger
-// is nil. It exists so step sites can call o.Logger.Warn / o.Logger.Error
-// unconditionally — trusting the contract uniformly with the rest of the
-// codebase, where *state.Logger's nil-receiver no-op is relied on directly.
+// is nil. It exists so step sites can call o.Logger.Debug / o.Logger.Warn /
+// o.Logger.Error unconditionally — trusting the contract uniformly with the
+// rest of the codebase, where *state.Logger's nil-receiver no-op is relied
+// on directly.
 type noopLogger struct{}
+
+// Debug is a no-op.
+func (noopLogger) Debug(component, format string, args ...any) {}
 
 // Warn is a no-op.
 func (noopLogger) Warn(component, format string, args ...any) {}
@@ -166,22 +175,26 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	var warnings []Warning
 
 	// Step 1 — EnsureServer.
+	o.Logger.Debug(state.ComponentBootstrap, "step 1 (EnsureServer): entering")
 	serverStarted, err := o.Server.EnsureServer()
 	if err != nil {
 		return false, nil, o.fatalf("start tmux server", err)
 	}
 
 	// Step 2 — RegisterPortalHooks.
+	o.Logger.Debug(state.ComponentBootstrap, "step 2 (RegisterPortalHooks): entering")
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
 		return serverStarted, nil, o.fatalf("register tmux hooks", err)
 	}
 
 	// Step 3 — Set @portal-restoring (MUST precede step 4).
+	o.Logger.Debug(state.ComponentBootstrap, "step 3 (Set @portal-restoring): entering")
 	if err := o.Restoring.Set(); err != nil {
 		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
 	}
 
 	// Step 4 — EnsureSaver (best-effort).
+	o.Logger.Debug(state.ComponentBootstrap, "step 4 (EnsureSaver): entering")
 	if err := o.Saver.EnsureSaver(); err != nil {
 		warnings = append(warnings, SaverDownWarning())
 		o.Logger.Warn(state.ComponentBootstrap, "step 4 (EnsureSaver) failed: %v", err)
@@ -195,6 +208,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// (false, err) result is a contract violation and is handled
 	// defensively as a soft per-session failure to keep step 5 from
 	// escalating to a PersistentPreRunE abort.
+	o.Logger.Debug(state.ComponentBootstrap, "step 5 (Restore): entering")
 	corrupt, restoreErr := o.Restore.Restore()
 	switch {
 	case corrupt:
@@ -209,6 +223,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	}
 
 	// Step 6 — Clear @portal-restoring (fatal on failure).
+	o.Logger.Debug(state.ComponentBootstrap, "step 6 (Clear @portal-restoring): entering")
 	if err := o.Restoring.Clear(); err != nil {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
@@ -219,12 +234,14 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// (those outlive @portal-restoring and are cleared per-pane on
 	// hydration). A non-nil err is logged and swallowed — a stuck FIFO must
 	// never block PersistentPreRunE.
+	o.Logger.Debug(state.ComponentBootstrap, "step 7 (SweepOrphanFIFOs): entering")
 	if err := o.Sweeper.Sweep(); err != nil {
 		o.Logger.Warn(state.ComponentBootstrap, "step 7 (SweepOrphanFIFOs) failed: %v", err)
 		// Continue per spec.
 	}
 
 	// Step 8 — CleanStale (best-effort).
+	o.Logger.Debug(state.ComponentBootstrap, "step 8 (CleanStale): entering")
 	if err := o.Clean.CleanStale(); err != nil {
 		o.Logger.Warn(state.ComponentBootstrap, "step 8 (CleanStale) failed: %v", err)
 		// Continue per spec.

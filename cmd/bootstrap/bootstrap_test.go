@@ -68,14 +68,21 @@ func (r *stepRecorder) CleanStale() error {
 	return r.CleanStaleErr
 }
 
-// recordingLogger captures Warn / Error invocations so tests can assert
-// that best-effort failures land via Warn and fatal failures land via
-// Error before the orchestrator returns. Entries are the fully formatted
-// message so tests can verify wrapped causes (e.g. step-7 Sweep error) flow
-// through to portal.log unchanged.
+// recordingLogger captures Debug / Warn / Error invocations so tests can
+// assert that step-entry diagnostics land at DEBUG, best-effort failures land
+// via Warn, and fatal failures land via Error before the orchestrator
+// returns. Entries are the fully formatted message so tests can verify
+// wrapped causes (e.g. step-7 Sweep error) flow through to portal.log
+// unchanged.
 type recordingLogger struct {
+	debugs   []string
 	warnings []string
 	errors   []string
+}
+
+func (l *recordingLogger) Debug(component, format string, args ...any) {
+	_ = component
+	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
 }
 
 func (l *recordingLogger) Warn(component, format string, args ...any) {
@@ -707,3 +714,44 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 // BootstrapDeps.Orchestrator field is typed as Runner; this guards
 // against future drift in either the interface or the concrete type.
 var _ Runner = (*Orchestrator)(nil)
+
+// TestOrchestratorRun_emitsDebugLinePerExecutedStep is the spec-Observability
+// guard: bootstrap events emit at DEBUG. Each of the eight executed steps in
+// the happy path MUST log at least one DEBUG line on entry so portal.log
+// (when PORTAL_LOG_LEVEL=debug) records the step boundary the operator can
+// scan when a session fails to come back. Names match the canonical labels
+// emitted by Run; if a step is renamed, this test pins the rename to land
+// here as well.
+func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	// Each executed step must produce at least one DEBUG line whose
+	// message references that step's canonical label.
+	steps := []string{
+		"EnsureServer",
+		"RegisterPortalHooks",
+		"Set",
+		"EnsureSaver",
+		"Restore",
+		"Clear",
+		"Sweep",
+		"CleanStale",
+	}
+	for _, step := range steps {
+		matches := 0
+		for _, line := range logger.debugs {
+			if strings.Contains(line, step) {
+				matches++
+			}
+		}
+		if matches < 1 {
+			t.Errorf("step %q: expected ≥1 DEBUG line referencing it; got debugs=%v", step, logger.debugs)
+		}
+	}
+}
