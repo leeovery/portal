@@ -42,6 +42,13 @@ const (
 // (1,048,576 bytes). Exported so tests and sibling packages can reference it.
 const LogRotateThreshold = 1 * 1024 * 1024 // 1 MiB
 
+// openAppendLog opens path for appending with the canonical flag/mode used
+// across logger.go (initial open in OpenLogger and post-rotate reopens in
+// maybeRotate). Centralising the call ensures all sites stay in sync.
+func openAppendLog(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+}
+
 // Logger appends single-line, pipe-delimited entries to a log file.
 // Format: "timestamp | level | component | message\n" where timestamp is
 // RFC3339 UTC. Logger is safe for concurrent use from multiple goroutines:
@@ -87,7 +94,7 @@ func OpenLogger(path string, rotate bool) (*Logger, error) {
 		return nil, fmt.Errorf("create log parent dir: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := openAppendLog(path)
 	if err != nil {
 		return nil, fmt.Errorf("open log file %s: %w", path, err)
 	}
@@ -176,12 +183,12 @@ func (l *Logger) maybeRotate(pending int64) {
 	if err := os.Rename(l.path, oldPath); err != nil {
 		fmt.Fprintf(os.Stderr, "portal: log rotation failed: %v\n", err)
 		// Re-open the existing file so subsequent writes still land.
-		f, _ := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		f, _ := openAppendLog(l.path)
 		l.f = f // may be nil → next write no-ops
 		return
 	}
 
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := openAppendLog(l.path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "portal: log reopen failed: %v\n", err)
 		l.f = nil
