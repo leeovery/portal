@@ -266,10 +266,10 @@ func (r *SessionRestorer) ApplyWindowGeometry(sess state.Session, livePanes []tm
 }
 
 // groupLivePanesBySavedWindow buckets livePanes into one slice per saved
-// window ordinal, preserving structural order. flattenSavedPanePositions and
-// list-panes both walk in (window, pane) sorted order, so the i-th saved pane
-// pairs with the i-th livePane and saved window ordinals map onto live window
-// groups by structural position.
+// window ordinal, preserving structural order. The orchestrator's
+// flattenSavedPanePositions and list-panes both walk in (window, pane)
+// sorted order, so the i-th saved pane pairs with the i-th livePane and
+// saved window ordinals map onto live window groups by structural position.
 //
 // On count mismatch, extras (live panes beyond the saved sequence) are
 // silently dropped — the arm-phase warning has already surfaced the mismatch
@@ -370,27 +370,6 @@ func countSavedPanes(sess state.Session) int {
 	return n
 }
 
-// savedPanePos is the structural ordinal pair (window position, pane position
-// within that window) — used to compute the predicted live paneKey for a
-// saved entry by adding base / pane-base offsets.
-type savedPanePos struct {
-	windowOrdinal int
-	paneOrdinal   int
-}
-
-// flattenSavedPanePositions walks the session's windows in saved order,
-// emitting one savedPanePos per pane. Output order matches restoration order
-// so callers can pair structural index with live list-panes output one-to-one.
-func flattenSavedPanePositions(sess state.Session) []savedPanePos {
-	var out []savedPanePos
-	for wi, w := range sess.Windows {
-		for pj := range w.Panes {
-			out = append(out, savedPanePos{windowOrdinal: wi, paneOrdinal: pj})
-		}
-	}
-	return out
-}
-
 // warnOnPaneCountMismatch logs a sanity warning when the count of live panes
 // differs from the saved pane count. Both signed: too few live panes hints at
 // restoration incompletely; too many hints at user-created panes leaking in.
@@ -399,17 +378,6 @@ func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedC
 		return
 	}
 	r.Logger.Warn(state.ComponentRestore, "session %q live pane count %d != saved count %d", name, liveCount, savedCount)
-}
-
-// warnOnPaneKeyDrift logs a warning when the predicted live paneKey for a
-// saved position does not match the actual live paneKey. Drift is non-fatal —
-// the marker still gets set under the live key — but worth surfacing so users
-// notice that base-index / pane-base-index changed between save and restore.
-func (r *SessionRestorer) warnOnPaneKeyDrift(name string, position int, predictedKey, liveKey string) {
-	if predictedKey == liveKey {
-		return
-	}
-	r.Logger.Warn(state.ComponentRestore, "session %q: pane %d predicted=%s live=%s", name, position, predictedKey, liveKey)
 }
 
 // setSkeletonMarker writes the `@portal-skeleton-<liveKey>` server option for

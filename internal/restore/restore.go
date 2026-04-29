@@ -110,10 +110,10 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 //
 // After geometry + markers are applied, PredictLiveIndices is consulted and
 // the predicted paneKey for each saved position is compared against the live
-// paneKey. Mismatches surface a WARN per pane via warnOnPaneKeyDrift — this
-// keeps the drift diagnostic next to the prediction it depends on, rather than
-// coupling ApplySkeletonMarkers (a pure write primitive) to a diagnostic
-// concern.
+// paneKey. Mismatches surface a WARN per pane directly via o.Logger.Warn —
+// the drift concern lives entirely on the orchestrator so the diagnostic
+// stays adjacent to the prediction it depends on, rather than coupling
+// ApplySkeletonMarkers (a pure write primitive) to a diagnostic concern.
 func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
 	if strings.HasPrefix(sess.Name, "_") {
 		o.Logger.Warn(state.ComponentRestore, "skipping underscore-prefixed session %q", sess.Name)
@@ -147,9 +147,9 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 // warnOnPaneKeyDrift compares the predicted paneKey (computed from the
 // server's base-index / pane-base-index plus saved structural ordinals)
 // against the actual live paneKey for each saved position, and emits a
-// per-pane WARN via SessionRestorer.warnOnPaneKeyDrift on mismatch. Drift is
-// non-fatal — markers have already been written under the live paneKey — but
-// surfaces base-index / pane-base-index changes between save and restore.
+// per-pane WARN directly via o.Logger.Warn on mismatch. Drift is non-fatal
+// — markers have already been written under the live paneKey — but surfaces
+// base-index / pane-base-index changes between save and restore.
 func (o *Orchestrator) warnOnPaneKeyDrift(sr *SessionRestorer, sess state.Session, livePanes []tmux.PaneCoord) {
 	predictedBase, predictedPaneBase := sr.PredictLiveIndices()
 	savedSeq := flattenSavedPanePositions(sess)
@@ -162,8 +162,32 @@ func (o *Orchestrator) warnOnPaneKeyDrift(sr *SessionRestorer, sess state.Sessio
 		sv := savedSeq[i]
 		liveKey := state.SanitizePaneKey(sess.Name, live.Window, live.Pane)
 		predictedKey := state.SanitizePaneKey(sess.Name, predictedBase+sv.windowOrdinal, predictedPaneBase+sv.paneOrdinal)
-		sr.warnOnPaneKeyDrift(sess.Name, i, predictedKey, liveKey)
+		if predictedKey == liveKey {
+			continue
+		}
+		o.Logger.Warn(state.ComponentRestore, "session %q: pane %d predicted=%s live=%s", sess.Name, i, predictedKey, liveKey)
 	}
+}
+
+// savedPanePos is the structural ordinal pair (window position, pane position
+// within that window) — used to compute the predicted live paneKey for a
+// saved entry by adding base / pane-base offsets.
+type savedPanePos struct {
+	windowOrdinal int
+	paneOrdinal   int
+}
+
+// flattenSavedPanePositions walks the session's windows in saved order,
+// emitting one savedPanePos per pane. Output order matches restoration order
+// so callers can pair structural index with live list-panes output one-to-one.
+func flattenSavedPanePositions(sess state.Session) []savedPanePos {
+	var out []savedPanePos
+	for wi, w := range sess.Windows {
+		for pj := range w.Panes {
+			out = append(out, savedPanePos{windowOrdinal: wi, paneOrdinal: pj})
+		}
+	}
+	return out
 }
 
 // validateTopology rejects sessions that cannot be skeleton-restored: zero
