@@ -1782,3 +1782,55 @@ func TestHydrate_NilHookStoreDegradesToBareShellOnSignalArrived(t *testing.T) {
 		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
 	}
 }
+
+// TestHydrate_RunEDefersLoggerClose verifies that the cobra RunE for
+// `portal state hydrate` defers logger.Close() so the portal.log fd is
+// released on RunE return. Production hydrate exec's away on the success and
+// timeout/file-missing paths, so the defer never runs there — but it does run
+// on the early-error and test paths, and a leaked fd in either is a real bug.
+//
+// The seam: hydrateRunFunc is replaced with a no-op that captures the
+// *state.Logger from cfg. After rootCmd.Execute returns, the test calls
+// Close() on the captured logger and asserts the underlying *os.File reports
+// os.ErrClosed — proving the deferred Close already ran. PORTAL_STATE_DIR is
+// set so openNoRotateLogger succeeds and yields a real file-backed logger
+// (a nil-file logger cannot prove closure).
+func TestHydrate_RunEDefersLoggerClose(t *testing.T) {
+	t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+
+	var captured *state.Logger
+	prev := hydrateRunFunc
+	hydrateRunFunc = func(cfg hydrateConfig) error {
+		captured = cfg.Logger
+		return nil
+	}
+	t.Cleanup(func() { hydrateRunFunc = prev })
+
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	resetRootCmd()
+	resetStateCmdFlags()
+	rootCmd.SetOut(outBuf)
+	rootCmd.SetErr(errBuf)
+	rootCmd.SetArgs([]string{
+		"state", "hydrate",
+		"--fifo", "/tmp/unused.fifo",
+		"--file", "/tmp/unused.bin",
+		"--hook-key", "k:0.0",
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("rootCmd.Execute: %v\nstderr: %s", err, errBuf.String())
+	}
+
+	if captured == nil {
+		t.Fatal("hydrateRunFunc seam was not invoked; captured logger is nil")
+	}
+
+	// Calling Close on a logger whose deferred Close already ran returns
+	// os.ErrClosed from the underlying *os.File. If the deferred Close had
+	// not run, this Close would have been the first and returned nil.
+	err := captured.Close()
+	if !errors.Is(err, os.ErrClosed) {
+		t.Errorf("expected logger.Close() to return os.ErrClosed (deferred Close already ran), got %v", err)
+	}
+}

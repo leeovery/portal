@@ -357,7 +357,14 @@ var stateHydrateCmd = &cobra.Command{
 		// On open failure, logger is nil and the *state.Logger nil-receiver
 		// no-ops every call so the helper degrades to "no logging" rather
 		// than aborting the per-pane recovery.
+		//
+		// In production, the helper exec's away (syscall.Exec replaces the
+		// process), so this defer never runs on the success path. It exists
+		// for non-exec error paths and tests that short-circuit via
+		// hydrateRunFunc — where leaking the fd would surface as a
+		// reproducible test leak.
 		logger, _ := openNoRotateLogger()
+		defer func() { _ = logger.Close() }()
 
 		cfg := hydrateConfig{
 			FIFO:              fifo,

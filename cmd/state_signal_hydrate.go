@@ -147,6 +147,7 @@ var stateSignalHydrateCmd = &cobra.Command{
 		// must not. On open failure logger is nil and the *state.Logger
 		// nil-receiver no-ops every call.
 		logger, _ := openNoRotateLogger()
+		defer func() { _ = logger.Close() }()
 
 		cfg := signalHydrateConfig{
 			Session:  sessionName,
