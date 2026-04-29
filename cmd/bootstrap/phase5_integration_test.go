@@ -29,117 +29,18 @@ import (
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// markerProbeStub records whether @portal-restoring was set at the moment
-// the wrapped step was invoked. Used by Test 1 to prove that @portal-restoring
-// is observable on the live tmux server during steps 4-5 (EnsureSaver,
-// Restore) and absent during step 8 (CleanStale).
-type markerProbeStub struct {
-	client    *tmux.Client
-	wantValue string // "1" when marker should be present, "" when absent
-	called    bool
-	observed  string
-	found     bool
-}
-
-// probe queries @portal-restoring on the live server and records the result.
-func (m *markerProbeStub) probe() error {
-	val, found, err := m.client.TryGetServerOption(state.RestoringMarkerName)
-	if err != nil {
-		return err
-	}
-	m.called = true
-	m.observed = val
-	m.found = found
-	return nil
-}
-
-// EnsureSaver records the marker state and returns nil. Stubs the saver step.
-func (m *markerProbeStub) EnsureSaver() error { return m.probe() }
-
-// Restore records the marker state and reports (false, err). Stubs the
-// restore step under the (corrupt, err) Restorer contract; this stub
-// never simulates the corrupt-index path so corrupt is always false.
-func (m *markerProbeStub) Restore() (bool, error) { return false, m.probe() }
-
-// CleanStale records the marker state and returns nil. Stubs the clean step.
-func (m *markerProbeStub) CleanStale() error { return m.probe() }
-
-// TestPhase5_RestoringMarkerSuppressesCaptures proves that the
-// @portal-restoring server option is set on the live tmux server before step
-// 4 (EnsureSaver) runs and stays set through step 5 (Restore), then is
-// cleared before step 8 (CleanStale) runs. This is the integration-level
-// guarantee the save daemon depends on: when its tick observes
-// @portal-restoring="1" it must skip its capture cycle. Testing the daemon's
-// suppression directly would require standing up the full daemon process;
-// instead this test verifies the contract from the producer side — the
-// orchestrator does set/clear the marker around the suppression window.
-func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
-	tmuxtest.SkipIfNoTmux(t)
-
-	ts := tmuxtest.New(t, "ptl-p5-")
-	client := ts.Client()
-	if _, err := client.EnsureServer(); err != nil {
-		t.Fatalf("EnsureServer: %v", err)
-	}
-
-	saverProbe := &markerProbeStub{client: client, wantValue: "1"}
-	restoreProbe := &markerProbeStub{client: client, wantValue: "1"}
-	cleanProbe := &markerProbeStub{client: client, wantValue: ""}
-
-	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     saverProbe,
-		Restore:   restoreProbe,
-		Sweeper:   bootstrap.NoOpFIFOSweeper{},
-		Clean:     cleanProbe,
-	}
-
-	if _, _, err := o.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// Saver step: marker MUST be present and equal to "1".
-	if !saverProbe.called {
-		t.Error("EnsureSaver probe was not invoked")
-	}
-	if !saverProbe.found || saverProbe.observed != "1" {
-		t.Errorf("EnsureSaver: @portal-restoring found=%v value=%q; want found=true value=%q",
-			saverProbe.found, saverProbe.observed, "1")
-	}
-
-	// Restore step: marker MUST still be present.
-	if !restoreProbe.called {
-		t.Error("Restore probe was not invoked")
-	}
-	if !restoreProbe.found || restoreProbe.observed != "1" {
-		t.Errorf("Restore: @portal-restoring found=%v value=%q; want found=true value=%q",
-			restoreProbe.found, restoreProbe.observed, "1")
-	}
-
-	// CleanStale step: marker MUST be cleared by step 6 before step 8 (CleanStale) runs.
-	if !cleanProbe.called {
-		t.Error("CleanStale probe was not invoked")
-	}
-	if cleanProbe.found {
-		t.Errorf("CleanStale: @portal-restoring still present (value=%q); want absent",
-			cleanProbe.observed)
-	}
-
-	// Final state: marker MUST be unset after Run returns.
-	val, found, err := client.TryGetServerOption(state.RestoringMarkerName)
-	if err != nil {
-		t.Fatalf("TryGetServerOption final: %v", err)
-	}
-	if found {
-		t.Errorf("@portal-restoring still set after Run; value=%q", val)
-	}
-}
+// TestPhase5_RestoringMarkerSuppressesCaptures has been promoted into a
+// non-vacuous integration test in phase5_marker_suppression_integration_test.go
+// (gated by `//go:build integration`). The original assertion-of-absence
+// shape was vacuously true — it stubbed Saver/Restore so no structural
+// events ever fired during the @portal-restoring window. The replacement
+// installs a real probe hook AND a real RestoreAdapter so at least one
+// session-created event MUST fire during the window for the test to even
+// be meaningful, then asserts both the probe-fire (non-vacuity guard) and
+// the saved_at-unchanged invariant (suppression contract).
 
 // TestPhase5_OrchestratorEndToEndSmoke runs the bootstrap orchestrator with
 // real wirings for Server, Hooks, and Restoring against a live tmux server,
