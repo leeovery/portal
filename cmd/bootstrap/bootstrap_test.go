@@ -23,6 +23,7 @@ type stepRecorder struct {
 	RestoreCorrupt  bool
 	RestoreErr      error
 	ClearErr        error
+	SweepErr        error
 	CleanStaleErr   error
 	ServerStarted   bool
 }
@@ -57,6 +58,11 @@ func (r *stepRecorder) Restore() (bool, error) {
 	return r.RestoreCorrupt, r.RestoreErr
 }
 
+func (r *stepRecorder) Sweep() error {
+	r.calls = append(r.calls, "Sweep")
+	return r.SweepErr
+}
+
 func (r *stepRecorder) CleanStale() error {
 	r.calls = append(r.calls, "CleanStale")
 	return r.CleanStaleErr
@@ -83,7 +89,7 @@ func (l *recordingLogger) Error(component, format string, args ...any) {
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
-// recorded call slice reflects the canonical eight-step ordering.
+// recorded call slice reflects the canonical nine-step ordering.
 func newOrchestrator(r *stepRecorder, logger Logger) *Orchestrator {
 	return &Orchestrator{
 		Server:    r,
@@ -91,6 +97,7 @@ func newOrchestrator(r *stepRecorder, logger Logger) *Orchestrator {
 		Restoring: r,
 		Saver:     r,
 		Restore:   r,
+		Sweeper:   r,
 		Clean:     r,
 		Logger:    logger,
 	}
@@ -124,6 +131,7 @@ func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
 		"EnsureSaver",
 		"Restore",
 		"Clear",
+		"Sweep",
 		"CleanStale",
 	}
 	if !equalCalls(r.calls, want) {
@@ -274,6 +282,7 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *tes
 		"EnsureSaver",
 		"Restore",
 		"Clear",
+		"Sweep",
 		"CleanStale",
 	}
 	if !equalCalls(r.calls, want) {
@@ -376,6 +385,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 		"EnsureSaver",
 		"Restore",
 		"Clear",
+		"Sweep",
 		"CleanStale",
 	}
 	if !equalCalls(r1.calls, want) {
@@ -388,6 +398,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 	o.Restoring = r2
 	o.Saver = r2
 	o.Restore = r2
+	o.Sweeper = r2
 	o.Clean = r2
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -603,6 +614,76 @@ func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
 	}
 	if len(warnings) != 0 {
 		t.Errorf("expected zero warnings on happy path; got %#v", warnings)
+	}
+}
+
+// TestOrchestratorRun_runsSweepBetweenClearAndCleanStale pins the FIFO
+// sweep step at position 7 of the nine-step sequence: after Clear (step 6)
+// so the @portal-restoring suppression window has closed, but before
+// CleanStale (step 8) so the per-pane skeleton markers it observes are
+// still set on the live tmux server (skeleton markers outlive the
+// @portal-restoring marker; they are cleared per-pane on hydration).
+func TestOrchestratorRun_runsSweepBetweenClearAndCleanStale(t *testing.T) {
+	r := &stepRecorder{}
+	o := newOrchestrator(r, nil)
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	clearIdx, sweepIdx, cleanIdx := -1, -1, -1
+	for i, c := range r.calls {
+		switch c {
+		case "Clear":
+			clearIdx = i
+		case "Sweep":
+			sweepIdx = i
+		case "CleanStale":
+			cleanIdx = i
+		}
+	}
+	if clearIdx == -1 || sweepIdx == -1 || cleanIdx == -1 {
+		t.Fatalf("expected Clear, Sweep, CleanStale in calls; got %v", r.calls)
+	}
+	if clearIdx >= sweepIdx || sweepIdx >= cleanIdx {
+		t.Errorf("expected ordering Clear < Sweep < CleanStale; got Clear=%d Sweep=%d CleanStale=%d (%v)",
+			clearIdx, sweepIdx, cleanIdx, r.calls)
+	}
+}
+
+// TestOrchestratorRun_continuesPastSweepFailure proves the FIFO sweep is
+// best-effort: a Sweep error MUST NOT short-circuit Run, MUST NOT produce
+// a *FatalError, and MUST log via Warn so the failure is observable in
+// portal.log.
+func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
+	sentinel := errors.New("sweep boom")
+	r := &stepRecorder{SweepErr: sentinel}
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
+
+	_, _, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Sweep failure must not propagate; got %v", err)
+	}
+
+	var fatal *FatalError
+	if errors.As(err, &fatal) {
+		t.Errorf("Run unexpectedly returned *FatalError on soft sweep failure: %v", err)
+	}
+	if len(logger.warnings) == 0 {
+		t.Error("expected logger.Warn to record the soft sweep failure")
+	}
+
+	// CleanStale must still run after a sweep failure.
+	cleanRan := false
+	for _, c := range r.calls {
+		if c == "CleanStale" {
+			cleanRan = true
+			break
+		}
+	}
+	if !cleanRan {
+		t.Errorf("CleanStale must run even when Sweep fails; calls = %v", r.calls)
 	}
 }
 

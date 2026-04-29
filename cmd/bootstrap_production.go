@@ -7,12 +7,21 @@ package cmd
 // dependencies on internal/restore, internal/state, and internal/hooks
 // — the orchestrator owns ordering and the adapters own composition.
 //
-// The two simplest adapters (HookRegistrar, RestoringMarker) live in
-// internal/bootstrapadapter so test suites can import production-shape
-// wirings without pulling in the rest of cmd/. Production-only adapters
-// that carry richer context (state dir, hooks store, restore
-// orchestrator, logger) remain here — they are not reusable from tests
-// in their current shape.
+// Adapters split across two homes by reusability:
+//
+//   - internal/bootstrapadapter (Pascal-cased, exported): adapters whose
+//     dependencies are all available from internal/* packages — the
+//     *tmux.Client, the *restore.Orchestrator, the state directory, the
+//     *state.Logger. Test suites import these directly so production-shape
+//     wirings are reusable without pulling in the rest of cmd/. Currently:
+//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper.
+//
+//   - cmd/bootstrap_production.go (camelCase, unexported): adapters that
+//     compose dependencies test code cannot reach in this package's
+//     current shape — the package-level cmd.version variable
+//     (saverAdapter), the hook-store path-resolution chain
+//     (cleanStaleAdapter). Lowercase reflects "this struct is the wiring
+//     this binary uses; tests compose their own."
 
 import (
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -38,47 +47,8 @@ func (a *saverAdapter) EnsureSaver() error {
 	return tmux.EnsurePortalSaverVersion(a.client, a.stateDir, version)
 }
 
-// restoreOrchestratorAdapter wraps an *internal/restore.Orchestrator's
-// Restore() method to satisfy bootstrap.Restorer. The bootstrap
-// orchestrator owns the @portal-restoring marker lifecycle (steps 3 and
-// 6); this adapter only runs the bare restore. After the inner restore
-// completes it sweeps orphan hydrate-*.fifo files whose paneKey is no
-// longer represented by a live skeleton marker. Step 5 of the bootstrap
-// sequence.
-type restoreOrchestratorAdapter struct {
-	inner    *restore.Orchestrator
-	client   *tmux.Client
-	stateDir string
-	logger   *state.Logger
-}
-
-// Restore runs the wrapped restore orchestrator and then sweeps orphan
-// FIFOs. Sweep is best-effort: any failure to enumerate skeleton
-// markers degrades to "skip the sweep" rather than aborting bootstrap.
-// Inner restore errors are classified via the (corrupt, err) tuple
-// returned by *internal/restore.Orchestrator.Restore — the bootstrap
-// orchestrator branches on the corrupt bool to decide whether to emit
-// CorruptSessionsJSONWarning. Per the bootstrap.Restorer contract, only
-// corrupt=true carries a non-nil err.
-func (a *restoreOrchestratorAdapter) Restore() (bool, error) {
-	corrupt, err := a.inner.Restore()
-	if err != nil {
-		return corrupt, err
-	}
-	// Sweep orphan FIFOs. Skeleton markers are still set at this point
-	// (step 6 clears @portal-restoring; per-pane skeleton markers stay
-	// up until hydration completes per pane), so ListSkeletonMarkers is
-	// the source of truth for "which paneKeys deserve their FIFO".
-	markers, err := state.ListSkeletonMarkers(a.client)
-	if err != nil {
-		return false, nil // soft-fail: sweep is best-effort.
-	}
-	_ = state.SweepOrphanFIFOs(a.stateDir, markers, a.logger)
-	return false, nil
-}
-
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
-// structural key no longer matches a live tmux pane. Step 7 of the
+// structural key no longer matches a live tmux pane. Step 8 of the
 // bootstrap sequence; best-effort per spec.
 type cleanStaleAdapter struct {
 	client *tmux.Client
@@ -145,11 +115,11 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
-		Restore: &restoreOrchestratorAdapter{
-			inner:    restoreInner,
-			client:   client,
-			stateDir: stateDir,
-			logger:   logger,
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Sweeper: &bootstrapadapter.FIFOSweeper{
+			Client:   client,
+			StateDir: stateDir,
+			Logger:   logger,
 		},
 		Clean:  cleaner,
 		Logger: logger,

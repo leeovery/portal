@@ -1,4 +1,4 @@
-// Package bootstrap composes the eight-step PersistentPreRunE sequence
+// Package bootstrap composes the nine-step PersistentPreRunE sequence
 // pinned by the resurrection spec. Step ordering is load-bearing:
 //
 //  1. EnsureServer
@@ -7,8 +7,11 @@
 //  4. EnsureSaver (best-effort; SaverDownWarning on failure)
 //  5. Restore
 //  6. Clear @portal-restoring
-//  7. CleanStale (best-effort)
-//  8. Return
+//  7. SweepOrphanFIFOs (best-effort; observes still-set per-pane
+//     @portal-skeleton-* markers from step 5 — those outlive
+//     @portal-restoring and are cleared per-pane on hydration)
+//  8. CleanStale (best-effort)
+//  9. Return
 package bootstrap
 
 import (
@@ -74,6 +77,21 @@ type Restorer interface {
 	Restore() (corrupt bool, err error)
 }
 
+// FIFOSweeper removes stale hydrate-*.fifo files in the state directory
+// whose paneKey is no longer represented by a live `@portal-skeleton-*`
+// marker. Best-effort: the implementation MUST swallow per-file failures
+// internally and return nil unless the underlying directory enumeration
+// itself fails. The orchestrator treats a non-nil err as a soft warning
+// and continues — a stuck FIFO must never block PersistentPreRunE.
+//
+// Step 7 of the bootstrap sequence: runs after Clear (step 6) so the
+// suppression window has closed, but before CleanStale (step 8) so the
+// per-pane skeleton markers it observes via state.ListSkeletonMarkers are
+// still set on the live tmux server.
+type FIFOSweeper interface {
+	Sweep() error
+}
+
 // StaleCleaner prunes stale entries from the on-disk hooks store.
 type StaleCleaner interface {
 	CleanStale() error
@@ -104,7 +122,7 @@ func (noopLogger) Warn(component, format string, args ...any) {}
 // Error is a no-op.
 func (noopLogger) Error(component, format string, args ...any) {}
 
-// Orchestrator runs the eight-step bootstrap sequence. Wiring of
+// Orchestrator runs the nine-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
 // independently testable.
@@ -114,11 +132,12 @@ type Orchestrator struct {
 	Restoring RestoringMarker
 	Saver     SaverBootstrapper
 	Restore   Restorer
+	Sweeper   FIFOSweeper
 	Clean     StaleCleaner
 	Logger    Logger // nil tolerated; Run substitutes a no-op default
 }
 
-// Run executes the eight bootstrap steps in spec order. It returns the
+// Run executes the nine bootstrap steps in spec order. It returns the
 // serverStarted flag from step 1 (EnsureServer) verbatim, the slice of
 // soft Warnings accumulated across steps 4-5 (in step order), and any
 // fatal error. The ctx parameter is reserved for Phase 6 timeout/cancel
@@ -133,6 +152,7 @@ type Orchestrator struct {
 //     the Restorer contract — is treated defensively as soft: logged and
 //     swallowed. Step 5 NEVER escalates to a fatal abort, so a future
 //     Restorer implementation cannot silently break PersistentPreRunE.
+//   - Step 7 (Sweep) returns non-nil → logged via Warn and swallowed.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	_ = ctx // reserved for Phase 6 timeout/cancel
 
@@ -193,13 +213,24 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
 
-	// Step 7 — CleanStale (best-effort).
-	if err := o.Clean.CleanStale(); err != nil {
-		o.Logger.Warn(state.ComponentBootstrap, "step 7 (CleanStale) failed: %v", err)
+	// Step 7 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
+	// daemon's suppression window has closed, but before CleanStale so the
+	// per-pane @portal-skeleton-* markers from step 5 are still observable
+	// (those outlive @portal-restoring and are cleared per-pane on
+	// hydration). A non-nil err is logged and swallowed — a stuck FIFO must
+	// never block PersistentPreRunE.
+	if err := o.Sweeper.Sweep(); err != nil {
+		o.Logger.Warn(state.ComponentBootstrap, "step 7 (SweepOrphanFIFOs) failed: %v", err)
 		// Continue per spec.
 	}
 
-	// Step 8 — Return. Step 5 never produces a fatal error; warnings
+	// Step 8 — CleanStale (best-effort).
+	if err := o.Clean.CleanStale(); err != nil {
+		o.Logger.Warn(state.ComponentBootstrap, "step 8 (CleanStale) failed: %v", err)
+		// Continue per spec.
+	}
+
+	// Step 9 — Return. Step 5 never produces a fatal error; warnings
 	// already carry the user-facing surface.
 	return serverStarted, warnings, nil
 }

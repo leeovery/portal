@@ -68,19 +68,6 @@ func (m *markerProbeStub) Restore() (bool, error) { return false, m.probe() }
 // CleanStale records the marker state and returns nil. Stubs the clean step.
 func (m *markerProbeStub) CleanStale() error { return m.probe() }
 
-// restoreOrchestratorAdapter wraps a *restore.Orchestrator so its
-// Restore() method satisfies bootstrap.Restorer. The bootstrap
-// orchestrator owns the @portal-restoring lifecycle separately (steps 3
-// and 6) so the inner Restore() must not bundle marker management.
-type restoreOrchestratorAdapter struct {
-	inner *restore.Orchestrator
-}
-
-// Restore delegates to the wrapped restore.Orchestrator's Restore method,
-// returning the (corrupt, err) tuple verbatim under the bootstrap.Restorer
-// contract.
-func (a *restoreOrchestratorAdapter) Restore() (bool, error) { return a.inner.Restore() }
-
 // TestPhase5_RestoringMarkerSuppressesCaptures proves that the
 // @portal-restoring server option is set on the live tmux server before step
 // 4 (EnsureSaver) runs and stays set through step 5 (Restore), then is
@@ -109,6 +96,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     saverProbe,
 		Restore:   restoreProbe,
+		Sweeper:   bootstrap.NoOpFIFOSweeper{},
 		Clean:     cleanProbe,
 	}
 
@@ -183,6 +171,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     bootstrap.NoOpSaver{},
 		Restore:   bootstrap.NoOpRestorer{},
+		Sweeper:   bootstrap.NoOpFIFOSweeper{},
 		Clean:     bootstrap.NoOpStaleCleaner{},
 	}
 
@@ -247,15 +236,16 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // the spec's central acceptance criterion for `portal attach NAME` against a
 // sessions.json-only name.
 //
-// Wiring: real RestoringMarker (Set/Clear), real restore.Orchestrator wrapped
-// to call the bare Restore() — the bootstrap orchestrator owns the
-// @portal-restoring marker lifecycle separately — no-op Saver/Hooks/Clean.
+// Wiring: real RestoringMarker (Set/Clear), real restore.Orchestrator
+// wrapped via bootstrapadapter.RestoreAdapter so its Restore() satisfies
+// bootstrap.Restorer — the bootstrap orchestrator owns the
+// @portal-restoring marker lifecycle separately — no-op Saver/Hooks/Sweeper/Clean.
 //
 // Overlap note: TestPhase3Integration_SaveRestoreRoundTrip already exercises
 // the capture→persist→kill→restore round-trip. The unique coverage here is
 // that the bootstrap.Orchestrator (not just restore.Orchestrator) wires the
 // Restore step correctly — i.e. step 5 actually creates the missing session
-// when invoked through the eight-step sequence.
+// when invoked through the nine-step sequence.
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
@@ -321,7 +311,8 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		Hooks:     bootstrap.NoOpHooks{},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     bootstrap.NoOpSaver{},
-		Restore:   &restoreOrchestratorAdapter{inner: restoreInner},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Sweeper:   bootstrap.NoOpFIFOSweeper{},
 		Clean:     bootstrap.NoOpStaleCleaner{},
 	}
 
@@ -349,5 +340,116 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Fatalf("TryGetServerOption %s: %v", wantMarker, err)
 	} else if !found || val == "" {
 		t.Errorf("expected skeleton marker %q to be set; found=%v value=%q", wantMarker, found, val)
+	}
+}
+
+// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 7
+// (FIFOSweeper) removes orphan hydrate-*.fifo files whose paneKey is not
+// represented by a live `@portal-skeleton-*` marker, while preserving
+// FIFOs whose paneKey corresponds to a marker freshly set by step 5
+// (Restore). This is the integration-level guarantee that the sweep
+// observes the post-Restore marker set, not the pre-Restore one — i.e.
+// step 7 runs strictly after step 5.
+//
+// Wiring: real RestoringMarker, real restore.Orchestrator wrapped in
+// bootstrapadapter.RestoreAdapter (so Restore actually creates the
+// session and sets the skeleton marker), real bootstrapadapter.FIFOSweeper.
+// Saver/Hooks/Clean are no-ops — the test is scoped to the Restore →
+// Sweep handoff.
+func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts := tmuxtest.New(t, "ptl-p5-")
+	stateDir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	// sessions.json describing one session — Restore will skeleton-create
+	// it and set the @portal-skeleton-<paneKey> marker for its single pane.
+	idx := state.Index{
+		Sessions: []state.Session{{
+			Name: "swept-foo",
+			Windows: []state.Window{{
+				Index:  0,
+				Layout: "tiled",
+				Active: true,
+				Panes: []state.Pane{{
+					Index:          0,
+					Active:         true,
+					ScrollbackFile: "scrollback/swept-foo-w0-p0.bin",
+				}},
+			}},
+		}},
+	}
+	data, err := state.EncodeIndex(idx)
+	if err != nil {
+		t.Fatalf("EncodeIndex: %v", err)
+	}
+	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+
+	// Pre-create two FIFOs in stateDir:
+	//   - liveKey matches the paneKey Restore will mark live.
+	//   - orphanKey is not represented in sessions.json, so no skeleton
+	//     marker will be set for it; step 7 must remove it.
+	liveKey := state.SanitizePaneKey("swept-foo", 0, 0)
+	orphanKey := state.SanitizePaneKey("ghost-bar", 0, 0)
+	livePath := state.FIFOPath(stateDir, liveKey)
+	orphanPath := state.FIFOPath(stateDir, orphanKey)
+	if err := state.CreateFIFO(livePath); err != nil {
+		t.Fatalf("create live FIFO: %v", err)
+	}
+	if err := state.CreateFIFO(orphanPath); err != nil {
+		t.Fatalf("create orphan FIFO: %v", err)
+	}
+
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	restoreInner := &restore.Orchestrator{
+		Client:   client,
+		StateDir: stateDir,
+		Logger:   logger,
+	}
+
+	o := &bootstrap.Orchestrator{
+		Server:    client,
+		Hooks:     bootstrap.NoOpHooks{},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:     bootstrap.NoOpSaver{},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Sweeper: &bootstrapadapter.FIFOSweeper{
+			Client:   client,
+			StateDir: stateDir,
+			Logger:   logger,
+		},
+		Clean: bootstrap.NoOpStaleCleaner{},
+	}
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Live FIFO MUST survive — its paneKey corresponds to the skeleton
+	// marker step 5 set on the live tmux server.
+	if _, err := os.Lstat(livePath); err != nil {
+		t.Errorf("live FIFO removed (paneKey=%q): %v", liveKey, err)
+	}
+
+	// Orphan FIFO MUST be removed — no skeleton marker exists for its
+	// paneKey, so step 7 swept it.
+	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {
+		t.Errorf("orphan FIFO not removed (paneKey=%q): lstat err = %v", orphanKey, err)
 	}
 }

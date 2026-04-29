@@ -1475,7 +1475,7 @@ func TestCapturePane(t *testing.T) {
 }
 
 func TestShowAllServerOptions(t *testing.T) {
-	t.Run("invokes show-options -sv and returns output", func(t *testing.T) {
+	t.Run("invokes show-options -s and returns output", func(t *testing.T) {
 		mock := &MockCommander{Output: "@portal-skeleton-foo__0.0 \"1\"\n@portal-restoring \"1\""}
 		client := tmux.NewClient(mock)
 
@@ -1490,7 +1490,7 @@ func TestShowAllServerOptions(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "show-options -sv"
+		wantArgs := "show-options -s"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)

@@ -55,6 +55,16 @@ type NoOpRestorer struct{}
 // Restore always returns (false, nil).
 func (NoOpRestorer) Restore() (bool, error) { return false, nil }
 
+// NoOpFIFOSweeper satisfies FIFOSweeper. Sweep always reports success.
+// FIFO sweeping is best-effort and degradable per spec, so a no-op is the
+// natural fallback when the production wiring cannot resolve the state
+// directory and matches the NoOp policy: "only steps that may degrade get
+// a NoOp."
+type NoOpFIFOSweeper struct{}
+
+// Sweep always returns nil.
+func (NoOpFIFOSweeper) Sweep() error { return nil }
+
 // NoOpStaleCleaner satisfies StaleCleaner. CleanStale always reports
 // success. Useful for tests / production fallbacks.
 type NoOpStaleCleaner struct{}

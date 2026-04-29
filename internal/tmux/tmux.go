@@ -298,13 +298,17 @@ func (c *Client) TryGetServerOption(name string) (string, bool, error) {
 	return val, true, nil
 }
 
-// ShowAllServerOptions returns the raw output of "tmux show-options -sv". The
+// ShowAllServerOptions returns the raw output of "tmux show-options -s". The
 // output is one option per line in the form `@name "value"` (or `@name value`
 // for unquoted scalars). Callers parse it themselves; this method exists so
 // the daemon can dump every server option in a single tmux invocation rather
 // than calling GetServerOption per pane during marker enumeration.
+//
+// Implementation note: `-s` emits `name value` pairs; `-sv` would emit values
+// only, which would defeat the marker-name-based parsing in
+// state.ListSkeletonMarkers. The flag combination here is load-bearing.
 func (c *Client) ShowAllServerOptions() (string, error) {
-	out, err := c.cmd.Run("show-options", "-sv")
+	out, err := c.cmd.Run("show-options", "-s")
 	if err != nil {
 		return "", fmt.Errorf("failed to show server options: %w", err)
 	}
