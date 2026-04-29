@@ -30,7 +30,7 @@ func buildCleanPaneLister() AllPaneLister {
 	if cleanDeps != nil {
 		return cleanDeps.AllPaneLister
 	}
-	return tmux.NewClient(&tmux.RealCommander{})
+	return tmux.DefaultClient()
 }
 
 var cleanCmd = &cobra.Command{

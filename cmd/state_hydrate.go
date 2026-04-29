@@ -364,7 +364,7 @@ var stateHydrateCmd = &cobra.Command{
 			File:              file,
 			HookKey:           hookKey,
 			Stdout:            cmd.OutOrStdout(),
-			Client:            tmux.NewClient(&tmux.RealCommander{}),
+			Client:            tmux.DefaultClient(),
 			Logger:            logger,
 			HookStore:         store,
 			ExecShell:         defaultExecShell,

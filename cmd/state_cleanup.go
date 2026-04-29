@@ -46,7 +46,7 @@ func buildStateCleanupDeps() (*tmux.Client, func(*tmux.Client) error, *state.Log
 		}
 		return stateCleanupDeps.Client, unregister, stateCleanupDeps.Logger
 	}
-	client := tmux.NewClient(&tmux.RealCommander{})
+	client := tmux.DefaultClient()
 	logger, _ := openNoRotateLogger()
 	return client, tmux.UnregisterPortalHooks, logger
 }

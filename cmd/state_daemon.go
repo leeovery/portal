@@ -248,7 +248,7 @@ var stateDaemonCmd = &cobra.Command{
 			logger.Warn(state.ComponentDaemon, "ReadIndex: %v", err)
 		}
 
-		client := tmux.NewClient(&tmux.RealCommander{})
+		client := tmux.DefaultClient()
 		deps := &daemonDeps{
 			Dir:          dir,
 			Logger:       logger,

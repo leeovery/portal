@@ -38,7 +38,7 @@ func requireTmuxPane() (string, error) {
 // buildHooksTmuxClient creates a real tmux.Client for hooks commands.
 // Only called when hooksDeps is nil (production path).
 func buildHooksTmuxClient() *tmux.Client {
-	return tmux.NewClient(&tmux.RealCommander{})
+	return tmux.DefaultClient()
 }
 
 // resolveCurrentPaneKey reads TMUX_PANE from the environment, resolves

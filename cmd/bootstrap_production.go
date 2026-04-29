@@ -83,7 +83,7 @@ func (a *cleanStaleAdapter) CleanStale() error {
 // HookStore: when loadHookStore fails (path resolution error) the
 // CleanStale step degrades to bootstrap.NoOpStaleCleaner.
 func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
-	client := tmux.NewClient(&tmux.RealCommander{})
+	client := tmux.DefaultClient()
 
 	// Resolve state dir once. An error here does not abort bootstrap —
 	// state.EnsureDir will be retried inside individual subsystems and

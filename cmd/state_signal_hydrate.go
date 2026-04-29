@@ -151,7 +151,7 @@ var stateSignalHydrateCmd = &cobra.Command{
 		cfg := signalHydrateConfig{
 			Session:  sessionName,
 			StateDir: dir,
-			Client:   tmux.NewClient(&tmux.RealCommander{}),
+			Client:   tmux.DefaultClient(),
 			Logger:   logger,
 			OpenFIFO: openFIFOForSignal,
 			Sleep:    time.Sleep,

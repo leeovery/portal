@@ -67,6 +67,14 @@ func NewClient(cmd Commander) *Client {
 	return &Client{cmd: cmd}
 }
 
+// DefaultClient returns a Client backed by RealCommander — the production
+// constructor used by every cmd-layer entry point that does not have a
+// test-injected dependency. Centralising it gives production-client
+// construction a single entry point.
+func DefaultClient() *Client {
+	return NewClient(&RealCommander{})
+}
+
 // ServerRunning reports whether a tmux server is currently running.
 // It runs "tmux info" which succeeds even with zero sessions.
 func (c *Client) ServerRunning() bool {
