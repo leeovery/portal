@@ -122,7 +122,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures(t *testing.T) {
 			restoreProbe.found, restoreProbe.observed, "1")
 	}
 
-	// CleanStale step: marker MUST be cleared by step 6 before step 7 runs.
+	// CleanStale step: marker MUST be cleared by step 6 before step 8 (CleanStale) runs.
 	if !cleanProbe.called {
 		t.Error("CleanStale probe was not invoked")
 	}
