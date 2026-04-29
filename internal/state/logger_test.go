@@ -738,3 +738,79 @@ func TestLogger_ExposesComponentConstants(t *testing.T) {
 		})
 	}
 }
+
+// captureStderr redirects os.Stderr to a pipe for the duration of fn and
+// returns the captured bytes. The original stderr is always restored.
+func captureStderr(t *testing.T, fn func()) []byte {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = orig })
+
+	done := make(chan []byte, 1)
+	go func() {
+		buf := bytes.Buffer{}
+		_, _ = buf.ReadFrom(r)
+		done <- buf.Bytes()
+	}()
+
+	fn()
+
+	_ = w.Close()
+	got := <-done
+	_ = r.Close()
+	return got
+}
+
+// TestLogger_RotateRenameFailureReopenFailureEmitsBothDiagnostics forces both
+// the rename and the post-rename reopen to fail inside maybeRotate, then
+// asserts the silent reopen-failure branch now emits a diagnostic that
+// matches the parallel branch's format. Guards the symmetry restored by
+// review remediation cycle 1 (built-in-session-resurrection-12-11).
+func TestLogger_RotateRenameFailureReopenFailureEmitsBothDiagnostics(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses file permission checks")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "portal.log")
+
+	// Seed at threshold-50 so on-open rotation does NOT fire, but the next
+	// 100-byte write WILL cross the threshold and trigger mid-write rotation.
+	const threshold = 1 << 20
+	if err := os.WriteFile(path, bytes.Repeat([]byte("S"), threshold-50), 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	lg := openLogger(t, path, true)
+	t.Cleanup(func() { _ = lg.Close() })
+
+	// Force rename to fail (parent dir not writable) AND reopen to fail
+	// (file not writable) before triggering rotation.
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod file 0o000: %v", err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir 0o500: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o700)
+		_ = os.Chmod(path, 0o600)
+	})
+
+	stderr := captureStderr(t, func() {
+		// Triggers maybeRotate; both rename and reopen will fail.
+		lg.Warn("daemon", "%s", makeMessageOfLineLen(t, 100))
+	})
+
+	if !bytes.Contains(stderr, []byte("portal: log rotation failed")) {
+		t.Errorf("expected 'log rotation failed' diagnostic; stderr = %q", stderr)
+	}
+	if !bytes.Contains(stderr, []byte("portal: log reopen failed")) {
+		t.Errorf("expected 'log reopen failed' diagnostic on rename-failure path; stderr = %q", stderr)
+	}
+}

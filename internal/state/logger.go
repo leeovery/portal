@@ -183,7 +183,10 @@ func (l *Logger) maybeRotate(pending int64) {
 	if err := os.Rename(l.path, oldPath); err != nil {
 		fmt.Fprintf(os.Stderr, "portal: log rotation failed: %v\n", err)
 		// Re-open the existing file so subsequent writes still land.
-		f, _ := openAppendLog(l.path)
+		f, reopenErr := openAppendLog(l.path)
+		if reopenErr != nil {
+			fmt.Fprintf(os.Stderr, "portal: log reopen failed: %v\n", reopenErr)
+		}
 		l.f = f // may be nil → next write no-ops
 		return
 	}
