@@ -16,6 +16,8 @@
 package bootstrapadapter
 
 import (
+	"fmt"
+
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -88,33 +90,39 @@ func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 // cleared per-pane on hydration; ListSkeletonMarkers is the source of
 // truth for "which paneKeys deserve their FIFO".
 //
-// Sweep is best-effort:
+// Sweep is best-effort, but visibility-preserving:
 //
 //   - A ShowAllServerOptions failure (the seam ListSkeletonMarkers uses)
-//     degrades to nil so a transient tmux failure does not interrupt
-//     bootstrap — the next bootstrap retries.
+//     is wrapped and returned so the orchestrator's step-7 Warn-and-swallow
+//     path logs it uniformly with the per-FIFO Warn lines below. Bootstrap
+//     does not abort — the orchestrator continues to step 8 (CleanStale).
 //   - Per-FIFO removal errors are logged via Logger and skipped inside
 //     state.SweepOrphanFIFOs.
+//
+// Client is typed as state.ServerOptionLister rather than *tmux.Client so
+// unit tests can inject a stub that simulates a tmux failure without
+// standing up a real server. Production wiring still passes *tmux.Client,
+// which satisfies the interface via its ShowAllServerOptions method.
 //
 // The adapter lives here (rather than cmd/) so integration tests can
 // import it directly. Its dependencies are all internal package types
 // (no cmd-package globals like the ldflags-injected version), which
 // makes it reusable from tests without dragging in cmd/.
 type FIFOSweeper struct {
-	Client   *tmux.Client
+	Client   state.ServerOptionLister
 	StateDir string
 	Logger   *state.Logger // nil tolerated; *state.Logger is nil-safe.
 }
 
 // Sweep enumerates the live skeleton markers from the tmux server and
 // removes any hydrate-*.fifo file in StateDir whose paneKey is not in
-// that set. A non-nil ListSkeletonMarkers error degrades to nil so the
-// orchestrator's Step 7 path is not interrupted by transient tmux
-// failures.
+// that set. A ListSkeletonMarkers failure is wrapped and returned so the
+// orchestrator's step-7 Warn-and-swallow path logs it uniformly — the
+// orchestrator never aborts on a non-nil sweep error.
 func (s *FIFOSweeper) Sweep() error {
 	markers, err := state.ListSkeletonMarkers(s.Client)
 	if err != nil {
-		return nil // soft-fail: sweep is best-effort.
+		return fmt.Errorf("list skeleton markers: %w", err)
 	}
 	return state.SweepOrphanFIFOs(s.StateDir, markers, s.Logger)
 }

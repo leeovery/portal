@@ -10,12 +10,51 @@ package bootstrapadapter_test
 // the adapters' shaping.
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
+
+// listerStub satisfies state.ServerOptionLister with a canned (output, err).
+// Used to exercise FIFOSweeper.Sweep's marker-enumeration failure path
+// without standing up a live tmux server.
+type listerStub struct {
+	out string
+	err error
+}
+
+func (s *listerStub) ShowAllServerOptions() (string, error) {
+	return s.out, s.err
+}
+
+// TestFIFOSweeper_PropagatesListSkeletonMarkersError proves that a
+// ShowAllServerOptions failure surfaces from FIFOSweeper.Sweep wrapped with
+// the "list skeleton markers" prefix so the orchestrator's step-7
+// Warn-and-swallow path can log it uniformly. Pre-cycle-4 the adapter
+// silently returned nil on this path, hiding transient tmux failures from
+// portal.log; this test is the regression guard.
+func TestFIFOSweeper_PropagatesListSkeletonMarkersError(t *testing.T) {
+	sentinel := errors.New("show-options boom")
+	s := &bootstrapadapter.FIFOSweeper{
+		Client:   &listerStub{err: sentinel},
+		StateDir: t.TempDir(),
+		Logger:   nil, // *state.Logger is nil-safe; the sweep never reaches it.
+	}
+
+	err := s.Sweep()
+	if err == nil {
+		t.Fatal("Sweep returned nil; want wrapped error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("Sweep err = %v; want errors.Is(err, sentinel)=true", err)
+	}
+	if got := err.Error(); got == "" || got == sentinel.Error() {
+		t.Errorf("Sweep err = %q; want a wrapped message containing the cause", got)
+	}
+}
 
 // TestRestoringMarker_SetClearsTogglesServerOption proves that Set writes
 // @portal-restoring="1" and Clear removes it, both observable on the live

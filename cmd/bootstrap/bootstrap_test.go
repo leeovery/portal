@@ -70,22 +70,22 @@ func (r *stepRecorder) CleanStale() error {
 
 // recordingLogger captures Warn / Error invocations so tests can assert
 // that best-effort failures land via Warn and fatal failures land via
-// Error before the orchestrator returns.
+// Error before the orchestrator returns. Entries are the fully formatted
+// message so tests can verify wrapped causes (e.g. step-7 Sweep error) flow
+// through to portal.log unchanged.
 type recordingLogger struct {
 	warnings []string
 	errors   []string
 }
 
 func (l *recordingLogger) Warn(component, format string, args ...any) {
-	_ = format
-	_ = args
-	l.warnings = append(l.warnings, component)
+	_ = component
+	l.warnings = append(l.warnings, fmt.Sprintf(format, args...))
 }
 
 func (l *recordingLogger) Error(component, format string, args ...any) {
-	_ = format
-	_ = args
-	l.errors = append(l.errors, component)
+	_ = component
+	l.errors = append(l.errors, fmt.Sprintf(format, args...))
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
@@ -654,7 +654,9 @@ func TestOrchestratorRun_runsSweepBetweenClearAndCleanStale(t *testing.T) {
 // TestOrchestratorRun_continuesPastSweepFailure proves the FIFO sweep is
 // best-effort: a Sweep error MUST NOT short-circuit Run, MUST NOT produce
 // a *FatalError, and MUST log via Warn so the failure is observable in
-// portal.log.
+// portal.log. The Warn message MUST embed the underlying cause so the
+// FIFOSweeper adapter's wrapped marker-enumeration errors travel through
+// to portal.log unchanged.
 func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	sentinel := errors.New("sweep boom")
 	r := &stepRecorder{SweepErr: sentinel}
@@ -671,7 +673,21 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 		t.Errorf("Run unexpectedly returned *FatalError on soft sweep failure: %v", err)
 	}
 	if len(logger.warnings) == 0 {
-		t.Error("expected logger.Warn to record the soft sweep failure")
+		t.Fatal("expected logger.Warn to record the soft sweep failure")
+	}
+
+	// The Warn message MUST embed the underlying cause so the
+	// FIFOSweeper adapter's wrapped error (e.g. "list skeleton markers:
+	// <cause>") is preserved verbatim in portal.log.
+	foundCause := false
+	for _, msg := range logger.warnings {
+		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 7") {
+			foundCause = true
+			break
+		}
+	}
+	if !foundCause {
+		t.Errorf("expected a step-7 Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
 	}
 
 	// CleanStale must still run after a sweep failure.
