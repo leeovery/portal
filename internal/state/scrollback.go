@@ -81,8 +81,7 @@ func CaptureAndHashPane(c PaneCapturer, target string) ([]byte, uint64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	bytes := []byte(out)
-	return bytes, xxhash.Sum64(bytes), nil
+	return []byte(out), xxhash.Sum64String(out), nil
 }
 
 // WriteScrollbackIfChanged is the dedup-aware writer for per-pane scrollback.

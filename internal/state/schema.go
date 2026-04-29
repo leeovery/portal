@@ -106,7 +106,7 @@ func DecodeIndex(data []byte) (Index, error) {
 		return idx, errors.New("sessions.json missing version field")
 	}
 	if idx.Version != SchemaVersion {
-		return idx, fmt.Errorf("unsupported sessions.json version: %d", idx.Version)
+		return idx, fmt.Errorf("unsupported sessions.json version: %d (current: %d)", idx.Version, SchemaVersion)
 	}
 	return idx, nil
 }
