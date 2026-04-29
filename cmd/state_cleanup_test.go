@@ -16,21 +16,15 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// canonicalTempDir returns t.TempDir resolved through filepath.EvalSymlinks.
-// macOS's /var → /private/var redirection causes t.TempDir to return a path
-// whose parent component is itself a symlink; passing that raw to
-// PORTAL_STATE_DIR would trip purgeStateDir's defensive
-// "resolved path must equal cleaned input" check, which is intended to refuse
-// purging through a symlink — not to refuse purging tempdirs. Tests that need
-// a state dir purge must use this helper so the input matches the canonical
-// resolution.
+// canonicalTempDir was historically required because purgeStateDir compared
+// dir against filepath.EvalSymlinks(dir) and rejected any mismatch. macOS's
+// /var → /private/var redirect tripped that check. Review remediation cycle 1
+// dropped the strict check (relies on Lstat for leaf-symlink protection only),
+// so this helper is now a thin alias for t.TempDir kept to avoid churn at the
+// callsites.
 func canonicalTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("eval symlinks tempdir: %v", err)
-	}
-	return dir
+	return t.TempDir()
 }
 
 // recordingCommander is a tmux.Commander that records every Run call and
@@ -527,6 +521,68 @@ func TestStateCleanup_PurgeRefusesSymlinkedStateDir(t *testing.T) {
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Errorf("symlink target must survive refusal: %v", err)
+	}
+}
+
+// TestStateCleanup_PurgeAllowsSymlinkedIntermediatePathComponents is the
+// review-cycle-1 regression guard for the dropped EvalSymlinks strict-equality
+// check. Earlier revisions rejected paths whose intermediate components were
+// symlinks (e.g. ~/.config symlinked to a different volume), forcing users to
+// purge manually. Today purgeStateDir trusts Lstat at the leaf for symlink
+// protection — intermediate symlinks are fine.
+func TestStateCleanup_PurgeAllowsSymlinkedIntermediatePathComponents(t *testing.T) {
+	parent := t.TempDir()
+
+	// Real config root that the leaf "state" directory will live under.
+	realConfig := filepath.Join(parent, "real-config")
+	if err := os.MkdirAll(realConfig, 0o700); err != nil {
+		t.Fatalf("mkdir real-config: %v", err)
+	}
+
+	// Symlink that mimics ~/.config → real-config.
+	linkConfig := filepath.Join(parent, "link-config")
+	if err := os.Symlink(realConfig, linkConfig); err != nil {
+		t.Fatalf("symlink intermediate: %v", err)
+	}
+
+	// State dir is a regular directory living UNDER the symlinked intermediate.
+	stateDir := filepath.Join(linkConfig, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir state via symlink: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "sentinel"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	cmder := &recordingCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "info":
+				return "", nil
+			case "has-session":
+				return "", errors.New("can't find session: _portal-saver")
+			case "show-hooks":
+				return "", nil
+			}
+			t.Fatalf("unexpected tmux call: %v", args)
+			return "", nil
+		},
+	}
+	installStateCleanupDeps(t, &StateCleanupDeps{Client: tmux.NewClient(cmder)})
+
+	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
+		t.Fatalf("purge with symlinked intermediate path component must succeed; got %v", err)
+	}
+	if _, err := os.Stat(stateDir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("state dir under symlinked intermediate not removed: %v", err)
+	}
+	// The symlink and its real target must remain — only the leaf was purged.
+	if _, err := os.Lstat(linkConfig); err != nil {
+		t.Errorf("intermediate symlink must survive: %v", err)
+	}
+	if _, err := os.Stat(realConfig); err != nil {
+		t.Errorf("intermediate symlink target must survive: %v", err)
 	}
 }
 

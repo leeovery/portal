@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
@@ -117,10 +116,16 @@ func runPurge(logger *state.Logger) error {
 }
 
 // purgeStateDir removes dir and all contents when --purge is supplied. It is
-// idempotent on a missing directory and refuses to follow symlinks: if dir is
-// itself a symlink, or its filepath.EvalSymlinks-resolved path differs from
-// the cleaned input path, the function returns an error rather than removing
-// content the operator did not intend to expose to RemoveAll.
+// idempotent on a missing directory and refuses to follow a leaf symlink: if
+// dir itself is a symlink, the function returns an error rather than removing
+// the target.
+//
+// Intermediate path components MAY be symlinks (e.g. `~/.config` symlinked to
+// a different volume, or macOS's `~/Library` symlink farm). Earlier revisions
+// rejected any such case via filepath.EvalSymlinks strict-equality, which
+// produced false-positive "refusing to purge" errors on real users with
+// symlinked config setups. The Lstat check below is sufficient — RemoveAll
+// follows the leaf inode and never traverses through a symlink target.
 //
 // Successful purges and RemoveAll failures are logged at INFO and ERROR
 // respectively under ComponentDaemon. The logger may be nil; *state.Logger's
@@ -136,15 +141,6 @@ func purgeStateDir(dir string, logger *state.Logger) error {
 
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to purge symlinked state dir: %s", dir)
-	}
-
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return fmt.Errorf("eval symlinks %s: %w", dir, err)
-	}
-	cleanDir := filepath.Clean(dir)
-	if filepath.Clean(resolved) != cleanDir {
-		return fmt.Errorf("state dir %s resolves to %s — refusing to purge", dir, resolved)
 	}
 
 	if err := os.RemoveAll(dir); err != nil {
