@@ -173,18 +173,18 @@ inside `ListSessions` therefore also filters the capture caller, but
 on top (`internal/state/capture.go:218-228`), so the post-filter
 result is unchanged.
 
-The implementation MAY adopt either of two equivalent strategies:
+**Chosen strategy:** apply the filter only inside `ListSessions`.
+The capture path's existing `keepSessionNames` filter double-filters
+`_*` names, which is a no-op (set difference is identical), so no
+new method is introduced and `ListSessionNames` keeps its current
+shape as a thin wrapper around `ListSessions`.
 
-1. Apply the underscore filter at the post-processing layer in
-   `ListSessions`, and have `ListSessionNames` call the lower-level
-   raw enumeration directly (bypassing the filter), OR
-2. Apply the filter only in `ListSessions` and rely on the
-   capture path's existing `keepSessionNames` filter to produce the
-   same result via double-filtering.
-
-The implementation chooses one and documents which. No new test is
-required for the capture path beyond the existing regression guard
-(see Test Requirements → Capture-Path Regression Guard).
+This strategy was chosen over the alternative (introducing a
+lower-level raw enumeration that `ListSessionNames` calls directly,
+bypassing the filter) because it is the smaller change and does
+not require creating a new internal method. No new test is required
+for the capture path beyond the existing regression guard (see Test
+Requirements → Capture-Path Regression Guard).
 
 ### Diagnostic Escape Hatch (Future)
 
@@ -199,6 +199,42 @@ documented as the available extension point so the default
 A session is filtered when `strings.HasPrefix(name, "_")` is true.
 The match is on the literal session name as reported by tmux. No
 trimming, no case-folding.
+
+### Filter Application Order
+
+The filter is applied as the **final** post-processing step before
+return — after parsing tmux output and any current ordering. If
+`ListSessions` later grows additional post-processing (sort,
+attach-metadata enrichment), those steps run first and the filter
+runs last. The contract is "the returned slice never contains a
+`_*` name" — preserved regardless of how the rest of the pipeline
+evolves.
+
+### Return-Value Contract
+
+`ListSessions` returns an empty (non-nil) slice when all underlying
+sessions are filtered. Callers may rely on `len(result) == 0` and
+on JSON-serialisation producing `[]` rather than `null`. The
+implementation MUST NOT return `nil` to express "no visible
+sessions".
+
+### Empty-List Behaviour
+
+After Fix A, on a freshly bootstrapped server with no restorable
+state, `Client.ListSessions` returns an empty slice (only
+`_portal-bootstrap` and `_portal-saver` exist, both filtered).
+Downstream behaviour:
+
+- **`portal list`:** prints whatever `ListSessions` returns,
+  one name per line. On empty input, prints nothing (silent
+  exit, no "no sessions" message). This is the existing
+  behaviour — no change required.
+- **TUI session picker (`internal/tui`):** verify the existing
+  empty-list rendering (`filteredSessions` returning an empty
+  slice) is acceptable. Adding a dedicated empty-state UX is
+  **out of scope** for this bugfix. If existing rendering is
+  unacceptable to the user, raise it as a separate work unit;
+  do not bundle it here.
 
 ## Fix B — Rename Bootstrap Session To `_portal-bootstrap`
 
@@ -236,11 +272,22 @@ Three alternatives were considered for the bootstrap session:
 
 ### Lifecycle After The Rename
 
+Portal does **not** explicitly set or modify tmux's `exit-empty`
+option. The reaping behaviour described below is opportunistic and
+depends on the user's tmux configuration. When `exit-empty` is at
+its tmux default (`on`), the server exits when its last session
+closes — Portal benefits from this naturally. When the user has
+overridden `exit-empty off`, `_portal-bootstrap` may persist
+indefinitely, but Fix A's filter still hides it from view, so the
+user never sees it. Reaping is therefore a nice-to-have, not a
+correctness requirement.
+
 - **Server start with restorable state:** `_portal-bootstrap` is
   created. `Restore` (bootstrap step 5) creates real user sessions.
-  When tmux's `exit-empty on` policy applies, `_portal-bootstrap`
-  may be reaped naturally because real sessions exist. If it
-  persists, Fix A's filter hides it from view.
+  Killing user sessions later may eventually leave `_portal-bootstrap`
+  as the only session; whether the server then exits depends on
+  `exit-empty`. Fix A's filter hides `_portal-bootstrap` from view
+  regardless.
 - **Server start with no restorable state:** `_portal-bootstrap`
   is created and remains as the only session. It keeps the server
   alive (its original purpose). Fix A's filter hides it from the
@@ -265,6 +312,16 @@ session. Any future contributor adding a sibling unnamed
 in Fix A applies — the underscore-prefix invariant must be the
 default for any new bootstrap-style session.
 
+**Enforcement posture:** treated as a code-review concern, not a
+mandated automated check. A static check (e.g. a unit test that
+greps `internal/tmux` for `Run("new-session"` calls and asserts
+each one is paired with `-s`) was considered and rejected — the
+infrastructure cost outweighs the marginal protection given that
+the end-to-end test in Test Requirements catches `_*` leaks and a
+new unnamed session would also produce a non-`_*`-prefixed entry,
+which would surface in the post-fix UX. Reviewers are expected to
+challenge any new unnamed `new-session` call.
+
 ## Doc-Comment Cleanup
 
 Two existing doc-comments encode incorrect or stale claims and MUST
@@ -274,10 +331,14 @@ not a follow-up — they document the post-fix invariants.
 ### `tmux.PortalSaverName`
 
 The current comment claims `_portal-saver` is "filtered from the
-TUI picker and from `sessions.json` capture." Pre-fix, the TUI
-filter does not exist. After Fix A lands, the claim becomes
-accurate as written. The comment may be tightened but its substance
-stands.
+TUI picker and from `sessions.json` capture." After Fix A lands the
+claim becomes accurate. The comment MUST be re-read in the post-fix
+context and revised so it correctly references the chokepoint —
+`Client.ListSessions` — as the source of TUI-picker filtering rather
+than implying any per-consumer filter. If the existing wording is
+already accurate against the post-fix code, leave it; otherwise
+update it. The implementer ships a deliberate edit OR an explicit
+"reviewed, no change required" code comment in the commit message.
 
 ### `tmux.StartServer`
 
@@ -338,15 +399,19 @@ regression to an unnamed session.
 
 ### End-To-End — No `_*` Sessions Visible Post-Bootstrap
 
-Extend either a bootstrap-level test or
-`cmd/bootstrap/reboot_roundtrip_test.go` to assert that, after a
-full bootstrap, the session list visible via `Client.ListSessions`
-contains no entries whose names begin with `_`.
+Extend `cmd/bootstrap/reboot_roundtrip_test.go` (the real-tmux
+fixture path) with an assertion that, after a full bootstrap, the
+session list visible via `Client.ListSessions` contains no entries
+whose names begin with `_`.
 
-This is the assertion that would have caught both root causes during
-the `built-in-session-resurrection` review. It serves as the
-end-to-end regression guard for this entire bugfix and for any
-future `_*` session that joins the codebase.
+The real-tmux fixture is required because the assertion is a
+tmux-level invariant — the mocked-orchestrator path could pass with
+a regression that only manifests against a real tmux server (e.g.
+the rename arg silently dropped). This is the assertion that would
+have caught both root causes during the `built-in-session-
+resurrection` review. It serves as the end-to-end regression guard
+for this entire bugfix and for any future `_*` session that joins
+the codebase.
 
 ### Capture-Path Regression Guard
 
@@ -398,6 +463,28 @@ Other listing methods (`ListPanes`, `ListPanesInSession`,
 modified in this bugfix. Pane-level filtering is a separate
 concern, and there is no observed bug or spec mandate driving a
 change there.
+
+### Cleanup Of Pre-Existing `0` Sessions On Upgrade
+
+When users upgrade to a Portal version that includes Fix B, tmux
+servers that were started by an older Portal will already host a
+session named `0`. The new `StartServer` does not run because the
+server is already running, so the rename never happens for that
+server's lifetime. Fix A does not filter `0` (it filters only
+`_*`).
+
+Auto-cleanup is **not** added because Portal cannot safely
+distinguish "leftover bootstrap session named `0`" from "user-owned
+session named `0`" — a user is free to create one. Filtering the
+literal name `0` carries the same risk.
+
+The accepted resolution is: the legacy `0` session persists until
+the user restarts their tmux server (machine reboot, manual `tmux
+kill-server`, `pkill tmux`, etc.). The release notes for the
+shipping change MUST mention this — the suggested wording is "After
+upgrading, restart your tmux server (`tmux kill-server`) once to
+clear any leftover `0` session created by the previous version." No
+code change is required.
 
 ## Rollout
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Gap Analysis
@@ -17,33 +17,13 @@ topic: hidden-sessions-showing-on-startup
 **Affects**: Fix A — Interaction With The Capture Path
 
 **Details**:
-The spec offers two "equivalent" implementation strategies for the
-filter placement and tells the implementer to "choose one and document
-which". This is a design decision deferred into implementation. The
-two strategies are not actually equivalent in code shape:
-
-- Strategy 1 requires `ListSessionNames` to be re-pointed at a new
-  lower-level raw enumeration (which is not described — does it
-  already exist? must it be created? what is it called?).
-- Strategy 2 relies on `internal/state` double-filtering, which is
-  fine functionally but couples the capture path to the assumption
-  that `_*` is filtered upstream.
-
-A planning agent or implementer cannot proceed without picking, and
-picking requires inventing detail the spec does not contain (the
-name and shape of the "lower-level raw enumeration" in Strategy 1).
-
-The spec should either:
-- Pick the strategy and describe it concretely (including any new
-  internal method, its name, and its signature), or
-- Confirm Strategy 2 is the chosen approach and remove Strategy 1
-  from the spec to avoid implementer indecision.
+Spec offered two equivalent strategies but deferred the choice to the implementer. Strategy 1 required a new lower-level method that the spec did not name or describe.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Pinned to Strategy 2 (filter only in `ListSessions`; capture path's existing `keepSessionNames` double-filters as a no-op). Rejected Strategy 1 in the spec rather than deferring to implementer.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-resolved with smaller-change rationale.
 
 ---
 
@@ -54,29 +34,13 @@ The spec should either:
 **Affects**: Fix B — Lifecycle After The Rename; Root Cause 2
 
 **Details**:
-The spec repeatedly invokes tmux's `exit-empty on` policy to justify
-why Fix B (rename) is sufficient and why no explicit kill step is
-needed. But the spec never states what `exit-empty` is currently
-set to in Portal-managed tmux servers, nor whether Portal sets it.
-
-If `exit-empty` is `off` (or user-overridden off), `_portal-bootstrap`
-is never reaped — it persists indefinitely as a hidden session. That
-is not a bug per se (Fix A hides it), but the lifecycle narrative
-in "Fix B — Lifecycle After The Rename" reads as if reaping is the
-expected outcome, which is misleading for any reader trying to
-reason about long-running servers.
-
-A planning agent will not know whether to:
-- Add an explicit `set-option -g exit-empty on` somewhere, or
-- Document that `_portal-bootstrap` is expected to persist for the
-  server's full lifetime in the no-restorable-state case, or
-- Verify Portal's existing default and call it out as a precondition.
+Spec invoked tmux's `exit-empty on` to justify Fix B but never stated whether Portal sets it.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added an opening paragraph to "Lifecycle After The Rename" stating that Portal does not set or modify `exit-empty`, that reaping is opportunistic, and that Fix A's filter hides `_portal-bootstrap` regardless of the user's `exit-empty` configuration.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -87,26 +51,13 @@ A planning agent will not know whether to:
 **Affects**: Doc-Comment Cleanup — `tmux.PortalSaverName`
 
 **Details**:
-The Doc-Comment Cleanup section opens with "Two existing doc-comments
-... MUST be updated as part of this work." But the `PortalSaverName`
-sub-section then says the comment "may be tightened but its substance
-stands."
-
-This is internally inconsistent: is the edit required (per the MUST
-opener) or optional (per "may be tightened")? An implementer reading
-the spec will not know whether shipping with the existing comment
-text is acceptable.
-
-Also, the Rollout section assigns the `PortalSaverName` doc cleanup
-to commit 1, which implies a concrete edit is expected. The spec
-should resolve whether the edit is in fact required and, if so, give
-the target wording (or a clear directive on what should change).
+Internal inconsistency between "MUST be updated" opener and "may be tightened but its substance stands" sub-section.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Re-wrote the `PortalSaverName` directive to require active review against post-fix code, with a deliberate edit OR an explicit "reviewed, no change required" commit-message acknowledgement.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -114,35 +65,16 @@ the target wording (or a clear directive on what should change).
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix B — Behaviour Contract; Lifecycle After The Rename
+**Affects**: Out Of Scope; Rollout
 
 **Details**:
-Users upgrading from a current Portal build to the post-fix build
-will, on first run, find a still-running tmux server with the legacy
-`0` bootstrap session already present. The new `StartServer` will
-not run (server already running), so the rename never happens and
-the legacy `0` session continues to surface.
-
-`0` does not start with `_`, so Fix A's filter does not hide it.
-The spec's reproduction steps assume "fresh tmux" or "kill the
-tmux server", which sidesteps the upgrade scenario.
-
-A planning agent needs to know whether to:
-- Treat upgrade as out-of-scope (with a release note telling users
-  to restart their tmux server), or
-- Add a one-shot cleanup that detects and renames/kills any legacy
-  `0` session during bootstrap, or
-- Apply Fix A's filter more broadly (e.g. also filter the literal
-  name `0`) as a transitional measure.
-
-This is a real-world rollout question that the Rollout section does
-not address.
+Users upgrading on a running tmux server keep the legacy `0` session because `StartServer` does not run.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added "Cleanup Of Pre-Existing `0` Sessions On Upgrade" subsection to Out Of Scope. Documented why auto-cleanup is unsafe (cannot distinguish leftover from user-owned) and required release-note guidance instructing users to restart their tmux server once after upgrade.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved with safety reasoning.
 
 ---
 
@@ -150,31 +82,16 @@ not address.
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix A — Behaviour Contract; Test Requirements
+**Affects**: Fix A — Behaviour Contract
 
 **Details**:
-After Fix A, on a freshly bootstrapped server with no restorable
-state, `Client.ListSessions` returns an empty slice (only
-`_portal-bootstrap` and `_portal-saver` exist, both filtered).
-
-`portal list` currently prints whatever `ListSessions` returns. The
-spec does not say what `portal list` should output when the slice
-is empty:
-- An empty stdout (silent), or
-- A message ("no sessions"), or
-- Maintain whatever current behaviour is (which the spec doesn't
-  describe).
-
-This is small but real — scripts piping `portal list` through
-counters or `wc -l` will see different results, and the
-"Behavioural change beyond the visible UX" paragraph already
-acknowledges scripted consumers exist.
+Spec did not specify what `portal list` should print when the filtered slice is empty.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added "Empty-List Behaviour" subsection to Fix A. `portal list` prints nothing on empty input — preserves existing behaviour, no message added.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -185,24 +102,13 @@ acknowledges scripted consumers exist.
 **Affects**: Fix A — Behaviour Contract
 
 **Details**:
-Same scenario as finding 5, in the TUI: a fresh server with no
-restorable state means the session picker will be presented with
-zero sessions. The spec does not state what the TUI should display
-in that case, nor whether existing TUI code already handles the
-empty-list case gracefully.
-
-If the TUI today never sees an empty list because `_portal-saver`
-and `0` always populate it, this fix may surface a latent UX gap.
-A planning agent needs to know whether to:
-- Verify the existing empty-list rendering and call it acceptable, or
-- Add an "empty state" UX as part of this bugfix, or
-- Document the empty-list rendering as out of scope.
+Same scenario as #5 in the TUI — picker may face empty list for the first time.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Folded into "Empty-List Behaviour": verify existing rendering is acceptable; explicitly out-of-scope to add an empty-state UX in this bugfix.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -210,29 +116,16 @@ A planning agent needs to know whether to:
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix B — Sole Production Caller Verified; Test Requirements
+**Affects**: Fix B — Sole Production Caller Verified
 
 **Details**:
-The spec correctly identifies that `StartServer` is the only current
-production caller of `tmux new-session` without `-s`, and warns:
-"Any future contributor adding a sibling unnamed `new-session` would
-re-introduce the bug."
-
-But no test or lint rule is mandated to enforce this invariant. The
-end-to-end test "No `_*` Sessions Visible Post-Bootstrap" only
-catches `_*` leaks, not unnamed-session leaks (a future unnamed
-session would default to `0`, `1`, etc. — none start with `_`).
-
-A planning agent will not know whether to:
-- Add a unit test or static check that asserts no production caller
-  invokes `new-session` without `-s`, or
-- Treat the warning as a code-review concern only.
+Spec warned future contributors but mandated no automated check.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added "Enforcement posture: treated as a code-review concern, not a mandated automated check" with explicit reasoning (e2e test still catches non-`_*` leaks via UX).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -243,22 +136,13 @@ A planning agent will not know whether to:
 **Affects**: Test Requirements — End-To-End — No `_*` Sessions Visible Post-Bootstrap
 
 **Details**:
-The spec says "Extend either a bootstrap-level test or
-`cmd/bootstrap/reboot_roundtrip_test.go`". This leaves the test
-location open — the implementer must decide. The two locations have
-different test infrastructures (real-tmux fixture vs. mocked
-orchestrator), and the choice changes what the test actually proves.
-
-For planning readiness, either pin the location or describe the
-selection criterion (e.g. "use the real-tmux fixture path because
-the assertion is a tmux-level invariant"). Otherwise the planner
-will pick somewhat arbitrarily.
+Spec said "either a bootstrap-level test or `reboot_roundtrip_test.go`".
 
 **Proposed Addition**:
-{leave blank until discussed}
+Pinned to `cmd/bootstrap/reboot_roundtrip_test.go` (real-tmux fixture path). Real fixture required because the assertion is a tmux-level invariant.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -269,21 +153,13 @@ will pick somewhat arbitrarily.
 **Affects**: Fix A — Filter Definition
 
 **Details**:
-The Filter Definition section pins down what counts as a `_*` match
-but does not specify the return shape when the post-filter slice is
-empty: nil slice or empty slice? Today, callers may differ in
-tolerance (range over nil is fine; some explicit `len(...) == 0`
-checks may behave the same; serialization to JSON differs between
-`null` and `[]`).
-
-Minor, but for a chokepoint that every consumer relies on, the
-contract should be explicit.
+Empty post-filter slice — nil or empty? JSON marshalling differs.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added "Return-Value Contract" subsection to Fix A: empty (non-nil) slice. JSON serialises to `[]`, not `null`. Implementation MUST NOT return `nil`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -294,21 +170,12 @@ contract should be explicit.
 **Affects**: Fix A — Behaviour Contract; Interaction With The Capture Path
 
 **Details**:
-`Client.ListSessions` already does some parsing/post-processing of
-tmux output. The spec says to apply the filter at "the post-
-processing layer" but doesn't pin down where in the chain
-(immediately after parse? after sort? before/after de-dup if any?).
-
-If `ListSessions` later grows additional post-processing (sort,
-attach metadata), the filter's position may matter. For an
-invariant claimed to be Portal-wide and chokepoint-enforced, the
-spec should say "filter as the final step before return" (or
-similar) so the contract is unambiguous.
+Spec said "post-processing layer" without pinning where in the chain.
 
 **Proposed Addition**:
-{leave blank until discussed}
+Added "Filter Application Order" subsection: filter runs as the final step before return, after parsing/sorting/enrichment. Contract preserved as the pipeline evolves.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
