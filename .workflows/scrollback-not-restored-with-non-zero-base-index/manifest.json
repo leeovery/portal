@@ -16,12 +16,12 @@
       "items": {
         "scrollback-not-restored-with-non-zero-base-index": {
           "status": "in-progress",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "finding_gate_mode": "gated",
           "date": "2026-04-30",
           "sources": {
             "scrollback-not-restored-with-non-zero-base-index": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }
