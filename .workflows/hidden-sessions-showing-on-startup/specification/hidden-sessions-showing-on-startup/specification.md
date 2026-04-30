@@ -186,6 +186,14 @@ not require creating a new internal method. No new test is required
 for the capture path beyond the existing regression guard (see Test
 Requirements → Capture-Path Regression Guard).
 
+**Invariant going forward.** `ListSessionNames` MUST remain a
+delegation to `ListSessions` — it MUST NOT bypass `ListSessions`
+to query tmux directly. The chosen strategy depends on this
+delegation: if a future change decouples them, the capture path
+silently loses the underscore filter and Root Cause 1 partially
+regresses for capture. Any such future change MUST re-evaluate
+filter placement before landing.
+
 ### Diagnostic Escape Hatch (Future)
 
 If a future caller legitimately needs unfiltered output (e.g. an
@@ -220,15 +228,17 @@ sessions".
 
 ### Empty-List Behaviour
 
-After Fix A, on a freshly bootstrapped server with no restorable
-state, `Client.ListSessions` returns an empty slice (only
-`_portal-bootstrap` and `_portal-saver` exist, both filtered).
-Downstream behaviour:
+After **both Fix A and Fix B** have landed, on a freshly
+bootstrapped server with no restorable state, `Client.ListSessions`
+returns an empty slice (only `_portal-bootstrap` and `_portal-saver`
+exist, both filtered). Downstream behaviour:
 
-- **`portal list`:** prints whatever `ListSessions` returns,
-  one name per line. On empty input, prints nothing (silent
-  exit, no "no sessions" message). This is the existing
-  behaviour — no change required.
+- **`portal list`:** MUST emit no output when `ListSessions`
+  returns an empty slice (silent exit, no "no sessions" message,
+  no trailing newline beyond what the existing iteration produces).
+  The implementer MUST verify `cmd/list.go` against this contract
+  and adjust if the existing empty-input path produces output;
+  do not assume "no change required" without the verification.
 - **TUI session picker (`internal/tui`):** verify the existing
   empty-list rendering (`filteredSessions` returning an empty
   slice) is acceptable. Adding a dedicated empty-state UX is
@@ -249,9 +259,19 @@ instead of the current `tmux new-session -d`.
 
 The reserved name MUST be exposed as an exported package-level
 constant in `internal/tmux` (sibling to `PortalSaverName`), e.g.
-`PortalBootstrapName = "_portal-bootstrap"`. Tests and any future
-diagnostic tooling reference the constant rather than the literal
-string.
+`PortalBootstrapName = "_portal-bootstrap"`. **All references to
+the reserved name — production code (`StartServer`'s tmux args),
+tests, and any future diagnostic tooling — MUST go through the
+constant.** No literal `"_portal-bootstrap"` string elsewhere in
+the codebase.
+
+**Precondition.** `StartServer` is contracted to be called only
+when no tmux server is running (the existing `ServerRunning` gate
+in `cmd/root.go`). Behaviour when called against a server that
+already hosts a `_portal-bootstrap` session is undefined and out
+of scope for this bugfix — `tmux new-session -d -s _portal-bootstrap`
+would fail with "duplicate session" in that case. Callers must
+check `ServerRunning` first, as today.
 
 ### Why Rename Instead Of Kill
 
@@ -397,21 +417,36 @@ to assert the args passed to `Commander.Run` include
 constant, not the literal string). This prevents accidental
 regression to an unnamed session.
 
-### End-To-End — No `_*` Sessions Visible Post-Bootstrap
+### End-To-End — Post-Bootstrap Session State
 
 Extend `cmd/bootstrap/reboot_roundtrip_test.go` (the real-tmux
-fixture path) with an assertion that, after a full bootstrap, the
-session list visible via `Client.ListSessions` contains no entries
-whose names begin with `_`.
+fixture path) with two assertions after a full bootstrap. The
+test must read tmux's raw session list directly — either via a
+test-only helper (e.g. `ListAllSessions` if introduced) or by
+shelling to `tmux list-sessions -F '#{session_name}'` — **not**
+via `Client.ListSessions`, because asserting on `ListSessions`
+output would only re-test the chokepoint filter and would NOT
+catch a regression of Root Cause 2 (rename arg silently dropped,
+`0` returns — `0` has no `_*` prefix and would still be filtered
+into invisibility for `ListSessions` callers).
 
-The real-tmux fixture is required because the assertion is a
-tmux-level invariant — the mocked-orchestrator path could pass with
-a regression that only manifests against a real tmux server (e.g.
-the rename arg silently dropped). This is the assertion that would
-have caught both root causes during the `built-in-session-
-resurrection` review. It serves as the end-to-end regression guard
-for this entire bugfix and for any future `_*` session that joins
-the codebase.
+**Assertion 1 — raw tmux state (catches Root Cause 2):**
+The set of session names reported directly by tmux MUST be a
+subset of `{_portal-bootstrap, _portal-saver, <expected restored
+sessions>}`. Specifically: no `0`, no other unexpected names. A
+regression of Fix B (e.g. `-s` arg dropped) breaks this assertion
+because `0` would re-appear.
+
+**Assertion 2 — user-facing visibility (catches Root Cause 1):**
+`Client.ListSessions` MUST return the expected user-facing slice —
+i.e. the restored user sessions only, with both reserved names
+(`_portal-bootstrap`, `_portal-saver`) excluded. A regression of
+Fix A breaks this assertion because the reserved names would leak
+through.
+
+Together these two assertions catch both root causes. This is the
+end-to-end regression guard for the entire bugfix and for any
+future `_*` session that joins the codebase.
 
 ### Capture-Path Regression Guard
 
@@ -499,12 +534,25 @@ Commit shape: two small targeted commits, each with its own test:
    `Client.ListSessions` unit test and the doc-comment cleanup on
    `tmux.PortalSaverName`.
 2. Fix B (rename bootstrap session) plus the `TestStartServer`
-   update, the `PortalBootstrapName` constant, and the doc-comment
-   cleanup on `tmux.StartServer`.
+   update, the `PortalBootstrapName` constant, the doc-comment
+   cleanup on `tmux.StartServer`, **and the end-to-end
+   post-bootstrap test** (see Test Requirements → "End-To-End —
+   Post-Bootstrap Session State").
 
-The end-to-end post-bootstrap test (Test Requirements → "End-To-End
-— No `_*` Sessions Visible Post-Bootstrap") MAY ship in either
-commit but MUST land in the same release.
+The end-to-end test MUST ship in commit 2 (or in a third commit
+landing after both fixes), never in commit 1. Shipping it in
+commit 1 would yield a misleading-green test: commit 1 alone leaves
+the bootstrap session named `0`, and Assertion 1 of the end-to-end
+test would fail against that intermediate state. Pairing the test
+with commit 2 keeps the test green only when both root causes are
+fixed.
+
+**Review as a pair.** The two commits should be reviewed
+together — commit 1's `tmux.PortalSaverName` doc-comment references
+Fix A's filter behaviour, which is fully realised only after
+commit 2's rename. A reviewer landing only commit 1 should expect
+a transient state where `_portal-saver` is hidden but `0` remains
+visible.
 
 ---
 

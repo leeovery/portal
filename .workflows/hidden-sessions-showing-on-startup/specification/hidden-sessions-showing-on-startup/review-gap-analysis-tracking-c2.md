@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 2
 phase: Gap Analysis
@@ -32,8 +32,8 @@ Tighten the e2e test contract to assert on raw tmux state (via a new test-only h
   - `Client.ListSessions` returns the expected user-facing slice (i.e. excludes both reserved names).
 Together these catch both Root Cause 1 (filter regression) and Root Cause 2 (rename regression).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -51,8 +51,8 @@ Not strictly needed for the bugfix, but the spec elevates `_portal-bootstrap` to
 **Proposed Addition**:
 Add a one-line note to Fix B's Behaviour Contract: `StartServer` is contracted to be called only when no tmux server is running (the existing precondition via `ServerRunning`). Behaviour when called against a server already hosting a `_portal-bootstrap` session is undefined and not in scope for this bugfix — callers must check `ServerRunning` first, as today.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -70,8 +70,8 @@ This is a small point but matters for "the constant is the canonical reference" 
 **Proposed Addition**:
 Clarify in Fix B's Behaviour Contract that `StartServer`'s implementation MUST reference `PortalBootstrapName` (not the literal string) when constructing the tmux args, so the constant is genuinely the canonical reference for production and test code alike.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -89,8 +89,8 @@ If a future change makes `ListSessionNames` go to tmux directly (bypassing `List
 **Proposed Addition**:
 Add a one-line invariant to Fix A's Interaction With The Capture Path subsection: `ListSessionNames` MUST remain a delegation to `ListSessions` — any future change that decouples them must re-evaluate the capture-path filter. Optionally seed a unit test that asserts `ListSessionNames` returns a subset of `ListSessions`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -110,8 +110,8 @@ This may be acceptable — small commits with a test for each is good hygiene �
 **Proposed Addition**:
 Update Rollout to specify that the End-To-End test SHOULD ship in commit 2 (or in a third commit after both fixes land), not commit 1, so the test is never green against an incomplete fix. If shipped in commit 1, it must be paired with the Fix B work in the same commit.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -129,8 +129,8 @@ This is a minor descriptive issue rather than an implementation gap — the Empt
 **Proposed Addition**:
 Clarify in Fix A's Empty-List Behaviour: prefix the sentence with "After both Fix A and Fix B have landed, on a freshly bootstrapped server..." so the precondition is explicit and the section is correctly contextualised.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -148,8 +148,8 @@ If `cmd/list.go` happens to print something on empty input (e.g. an "iterating o
 **Proposed Addition**:
 Either (a) drop the "no change required" framing and instead state "Implementation MUST emit no output when the slice is empty — verify and adjust `cmd/list.go` if necessary," or (b) confirm via a quick read of `cmd/list.go` that the empty-input path is truly silent and tighten the spec wording. Recommend (a) — it makes the contract enforceable rather than reliant on an unverified premise.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
@@ -173,7 +173,7 @@ This is fine as long as the two commits are reviewed together. Worth a small not
 **Proposed Addition**:
 Add a brief note to Rollout: "The two commits should be reviewed as a unit — commit 1's doc-comment references Fix A's filter behaviour, which is fully realised only after commit 2's rename. Reviewers landing only commit 1 should expect a transient state where `_portal-saver` is hidden but `0` remains visible."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
