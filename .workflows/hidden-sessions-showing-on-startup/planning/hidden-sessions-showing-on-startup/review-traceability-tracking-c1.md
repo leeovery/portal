@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Traceability Review
@@ -91,7 +91,7 @@ Also update Phase 2's task-count metadata in `phase-2-tasks.md` front-matter fro
 - [ ] Release notes for the shipping version include a one-line upgrade note instructing users to run `tmux kill-server` once after upgrading to clear any leftover `0` session created by the previous version (per spec § Out Of Scope / Deferred → "Cleanup Of Pre-Existing `0` Sessions On Upgrade"); the note ships with Phase 2's commit / release artefact, not Phase 1.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim. Added Task 2-3 row to Phase 2 task table in `planning.md`, added matching acceptance bullet to Phase 2's Acceptance section, appended Task 2-3 detail block to `phase-2-tasks.md` with status `approved`, updated `phase-2-tasks.md` front-matter `total: 2` → `total: 3`, and created tick task `tick-1687f9` (refs `hidden-sessions-showing-on-startup-2-3`) under parent `tick-0a7576`.
 
 ---

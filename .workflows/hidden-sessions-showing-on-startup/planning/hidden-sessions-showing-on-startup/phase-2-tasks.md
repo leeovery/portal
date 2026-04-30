@@ -1,7 +1,7 @@
 ---
 phase: 2
 phase_name: Rename Bootstrap Session to `_portal-bootstrap`
-total: 2
+total: 3
 ---
 
 ## hidden-sessions-showing-on-startup-2-1 | approved
@@ -128,3 +128,45 @@ total: 2
 > **Fixture context** (`cmd/bootstrap/reboot_roundtrip_test.go`): The round-trip body uses `bootstrap.NoOpSaver{}` (line 344, 833) so `_portal-saver` is not created in this test run. A `_seed` session is created at lines 236 and 319 as part of the test's bootstrap discipline (mirrors the daemon's `_portal-saver` discipline) — it is underscore-prefixed and must be in the allowed-reserved set for Assertion 1.
 
 **Spec Reference**: `.workflows/hidden-sessions-showing-on-startup/specification/hidden-sessions-showing-on-startup/specification.md` § Test Requirements ("End-To-End — Post-Bootstrap Session State") and § Rollout (commit-shape and review-as-a-pair guidance) and § Why It Wasn't Caught Earlier (review-process-gap rationale).
+
+## hidden-sessions-showing-on-startup-2-3 | approved
+
+### Task 2-3: Add release-notes line covering legacy `0` session cleanup on upgrade
+
+**Problem**: When a user upgrades to a Portal version that includes Fix B, any tmux server already running was started by an older Portal and therefore already hosts a session named `0`. Fix B's `StartServer` does not run because the server is already running, so the rename never happens for that server's lifetime. Fix A's filter targets `_*` and does not hide the literal name `0`. The accepted resolution is to instruct affected users to restart their tmux server once after upgrading. The specification mandates this guidance MUST appear in the release notes.
+
+**Solution**: Add a one-line release-notes entry alongside the Phase 2 commit (or in the release artefact that ships with Phase 2) instructing users to run `tmux kill-server` once after upgrading to clear any leftover `0` session created by the previous version. No code change is required.
+
+**Outcome**: The release notes for the shipping version contain wording equivalent to the spec's suggested line: "After upgrading, restart your tmux server (`tmux kill-server`) once to clear any leftover `0` session created by the previous version." Affected users have a documented path to clean up the legacy session without Portal needing to attempt automatic cleanup (which is unsafe — a user is free to create a session named `0`).
+
+**Do**:
+- Locate the project's release-notes channel (release commit message, `CHANGELOG.md`, GitHub release body, or whichever artefact the goreleaser pipeline ships per `.goreleaser.yaml`). If no dedicated file exists, the release note belongs in the GitHub release body that goreleaser publishes for the tagged version.
+- Add a short upgrade note matching the spec's suggested wording (verbatim or equivalent): "After upgrading, restart your tmux server (`tmux kill-server`) once to clear any leftover `0` session created by the previous version."
+- The wording MUST reference the literal name `0` (not `_portal-bootstrap`) because the legacy session pre-dates the rename and Fix A's filter does not match `0`.
+- Do NOT add automatic cleanup code. The spec is explicit: "Auto-cleanup is **not** added because Portal cannot safely distinguish 'leftover bootstrap session named `0`' from 'user-owned session named `0`' — a user is free to create one. Filtering the literal name `0` carries the same risk."
+- The release-notes line ships with Phase 2 (or the release artefact accompanying Phase 2), never with Phase 1. Phase 1 alone leaves `0` still visible, so the note's framing ("leftover `0` session created by the previous version") is only coherent once Phase 2 has landed.
+
+**Acceptance Criteria**:
+- [ ] Release notes for the shipping version contain a one-line upgrade note instructing users to run `tmux kill-server` once after upgrading to clear any leftover `0` session.
+- [ ] The wording references the literal name `0` (not `_portal-bootstrap`).
+- [ ] No automatic-cleanup code is added — the legacy session's persistence is resolved entirely via user action documented in release notes.
+- [ ] The note is delivered with Phase 2's commit / release artefact, not Phase 1.
+
+**Tests**:
+- No automated tests. Verification is editorial: confirm the release-notes artefact for the shipping tag contains the required line before the release ships.
+
+**Edge Cases**:
+- Project has no dedicated release-notes file — use the GitHub release body that goreleaser publishes (per `.goreleaser.yaml`); document the resolution in the commit message rather than blocking on creating new release infrastructure.
+- A user-owned session legitimately named `0` exists at upgrade time — the release-notes wording does not commit users to running `tmux kill-server`; it offers it as the accepted cleanup path. Users who have a real `0` session can ignore the note. No automated cleanup is attempted because the ambiguity is unresolvable from Portal's side.
+- Wording must use the literal `0`, not `_portal-bootstrap`. The rename only affects new server starts; the legacy session that existed before upgrade is still named `0` for the rest of that server's lifetime.
+
+**Context**:
+> From the specification's Out Of Scope / Deferred → "Cleanup Of Pre-Existing `0` Sessions On Upgrade":
+>
+> "When users upgrade to a Portal version that includes Fix B, tmux servers that were started by an older Portal will already host a session named `0`. The new `StartServer` does not run because the server is already running, so the rename never happens for that server's lifetime. Fix A does not filter `0` (it filters only `_*`)."
+>
+> "Auto-cleanup is **not** added because Portal cannot safely distinguish 'leftover bootstrap session named `0`' from 'user-owned session named `0`' — a user is free to create one. Filtering the literal name `0` carries the same risk."
+>
+> "The accepted resolution is: the legacy `0` session persists until the user restarts their tmux server (machine reboot, manual `tmux kill-server`, `pkill tmux`, etc.). The release notes for the shipping change MUST mention this — the suggested wording is 'After upgrading, restart your tmux server (`tmux kill-server`) once to clear any leftover `0` session created by the previous version.' No code change is required."
+
+**Spec Reference**: `.workflows/hidden-sessions-showing-on-startup/specification/hidden-sessions-showing-on-startup/specification.md` § Out Of Scope / Deferred → "Cleanup Of Pre-Existing `0` Sessions On Upgrade".

@@ -36,7 +36,7 @@
           "task_list_gate_mode": "gated",
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "phase": 3,
           "task": "~",
           "task_map": {
@@ -45,7 +45,8 @@
             "hidden-sessions-showing-on-startup-1-2": "tick-6731e9",
             "hidden-sessions-showing-on-startup-2": "tick-0a7576",
             "hidden-sessions-showing-on-startup-2-1": "tick-dc5668",
-            "hidden-sessions-showing-on-startup-2-2": "tick-fdb106"
+            "hidden-sessions-showing-on-startup-2-2": "tick-fdb106",
+            "hidden-sessions-showing-on-startup-2-3": "tick-1687f9"
           },
           "external_id": "tick-79a9e1"
         }
