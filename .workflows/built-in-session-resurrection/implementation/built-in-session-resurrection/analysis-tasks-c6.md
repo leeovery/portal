@@ -10,7 +10,7 @@ total_proposed: 5
 
 ## Task 1: Extract shared reboot-round-trip + portal-binary test helpers into `internal/restoretest/`
 
-- **status:** pending
+- **status:** approved
 - **severity:** high
 - **sources:** duplication (D1, D2), architecture (A4 cross-ref)
 
@@ -50,7 +50,7 @@ total_proposed: 5
 
 ## Task 2: Exercise the production `client-attached` / `signal-hydrate` pathway end-to-end in reboot round-trip tests
 
-- **status:** pending
+- **status:** approved
 - **severity:** medium
 - **sources:** standards (S1)
 
@@ -82,7 +82,7 @@ total_proposed: 5
 
 ## Task 3: Add the two missing Phase 5 task 5-10 acceptance assertions to `cmd/reattach_integration_test.go`
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** standards (S2, S3)
 
@@ -112,7 +112,7 @@ total_proposed: 5
 
 ## Task 4: Use `state.SanitizePaneKey` for round-trip hook fixtures and tighten the marker-suppression test scope godoc
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** standards (S4, S5)
 
@@ -143,7 +143,7 @@ total_proposed: 5
 
 ## Task 5: Documentation precision cleanup across spec citations, error-warning wording, godoc scope, and historical record
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** standards (S6, S7), architecture (A2, A3, A5)
 

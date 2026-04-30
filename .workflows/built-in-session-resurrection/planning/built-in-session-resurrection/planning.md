@@ -329,3 +329,17 @@ approved_at: 2026-04-23
 | built-in-session-resurrection-12-12 | Quick-fixes — schema/scrollback polish (version diagnostic + xxhash allocation) | tests pinning verbatim schema error string need updating; `xxhash.Sum64String` semantically equal to `Sum64([]byte(s))` but avoids allocation |
 | built-in-session-resurrection-12-13 | Idea — relax or remove `purgeStateDir` `EvalSymlinks` rejection | prefer dropping check entirely unless leaf-symlink protection is load-bearing; `canonicalTempDir` shim may be removed once no longer needed; test uses symlinked intermediate component |
 | built-in-session-resurrection-12-14 | Idea — add binary-missing and projects.json-absence regression tests in `cmd/clean.go` | use `cleanDeps` injection seam if present; otherwise mock `file-stat` directly; both binary-missing and `projects.json`-absent cases must NOT trigger staleness action |
+
+### Phase 13: Analysis (Cycle 6)
+
+**Goal**: Address findings from Analysis (Cycle 6).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-13-1 | Extract shared reboot-round-trip + portal-binary test helpers into `internal/restoretest/` | ~150 lines duplication across three test files; retry-budget drift hazard; build-tag scoping; import cycle avoidance against `internal/tmux` |
+| built-in-session-resurrection-13-2 | Exercise the production `client-attached` / `signal-hydrate` pathway end-to-end in reboot round-trip tests | PTY fragility on CI; `client-session-changed` coverage gap; fallback path retained for flake tolerance; ensure production-binary path is default coverage |
+| built-in-session-resurrection-13-3 | Add the two missing Phase 5 task 5-10 acceptance assertions to `cmd/reattach_integration_test.go` | alias vs zoxide pre-seed; saved-only resolution must reach the connector; intentional duplication of `saved_at` assertion (different trigger than marker-suppression test) |
+| built-in-session-resurrection-13-4 | Use `state.SanitizePaneKey` for round-trip hook fixtures and tighten the marker-suppression test scope godoc | `saveBase != 0` would expose silent drift in current implementation; godoc-only changes for the marker-suppression test (no behaviour change) |
+| built-in-session-resurrection-13-5 | Documentation precision cleanup across spec citations, error-warning wording, godoc scope, and historical record | spec section title verification; test fixtures asserting old "corrupt" headline; symlink-traversal claim must align with existing passing test; historical review record gets a reconciliation note (not a rewrite) |
