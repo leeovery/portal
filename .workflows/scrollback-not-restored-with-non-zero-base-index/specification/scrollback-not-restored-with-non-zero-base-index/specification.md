@@ -67,6 +67,49 @@ The helper waits at `hydrate-<sess>__<live>.fifo`, the marker is set at `@portal
 
 **Potentially affected:** Any other Portal subcommand invoked from a tmux hook with `#{session_name}` as a positional arg. `signalHydrateCommand` is currently the only such site (per `internal/tmux/hooks_register.go`); `notifyCommand` is argument-free and unaffected.
 
+## Fix Scope
+
+The fix has two parts. Both are required: Part 1 stops the hydration failure; Part 2 removes the misleading diagnostic that the bug report mistook for the cause.
+
+### Part 1 — Add `--` End-Of-Flags Separator to `signal-hydrate` Hook
+
+**Change:** `internal/tmux/hooks_register.go:39` — update `signalHydrateCommand` so the resolved hook command is:
+
+```
+run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"
+```
+
+The `--` token tells cobra/pflag to stop flag parsing and treat `#{session_name}` as a positional argument unconditionally, regardless of its first character.
+
+**One-shot bootstrap migration:** Existing installs already have a hook entry written without `--`. Hook registration is idempotent (skips if an entry matching the current command substring is found), so without migration the new fixed entry would either be added alongside the old broken entry (both fire — broken one still errors) or rejected as "already present" (depending on dedupe substring). Both outcomes leave users broken.
+
+The existing `RegisterPortalHooks` step (bootstrap step 2) must evict any hook entry whose command contains `portal state signal-hydrate` but does **not** contain the `--` separator before installing the fixed entry. The dedupe substring used to detect whether a hook is already present must be tightened to `portal state signal-hydrate --` so the migration distinguishes the fixed entry from the broken one.
+
+The migration runs at every bootstrap (idempotent) — once a user's install has only the fixed entry, subsequent bootstraps perform no eviction work.
+
+### Part 2 — Delete `PredictLiveIndices` and Its Consumers
+
+Delete the dead diagnostic prediction path entirely:
+
+- `internal/restore/session.go::PredictLiveIndices` — function and its helpers `readIndexOption` (if unused after removal).
+- `internal/restore/session.go::flattenSavedPanePositions` — only consumer was `warnOnPaneKeyDrift`.
+- `internal/restore/restore.go::Orchestrator.warnOnPaneKeyDrift` — the diagnostic itself.
+- Any call site in the orchestrator's restore loop that invokes `warnOnPaneKeyDrift`.
+- Tests covering the deleted functions.
+
+**Rationale for deletion over repair:** The function exists only to power a diagnostic WARN with no functional consumer. The spec's "Index Semantics" section mandates "re-query live indices, never predict" — a repaired predictor would buy a marginal post-restore drift signal at the cost of new tmux-client surface area (session-scope and window-scope option getters) and continued conceptual tension with the spec mandate.
+
+If post-restore drift visibility ever becomes valuable, a saved-vs-live comparison is the better shape than predicted-vs-live and can be added later without resurrecting prediction. Pane-count mismatch is already logged at `armPanes:202`, providing a coarser but consistent signal.
+
+### Out of Scope
+
+The following were considered and explicitly excluded from this fix:
+
+- **Renaming `SanitiseProjectName`'s `.` → `-` substitution to `_` or another safe char.** Fixes one symptom (no more leading-dash names from dotfiles projects) but leaves the broader class — any user-issued or scripted invocation passing `-anything` to a hook-invoked Portal subcommand would still break. Also a backwards-incompatible change for existing users whose projects/sessions use the current scheme.
+- **Pass session via env var or `set-environment` instead of positional argv.** Most robust to weird names (quotes, semicolons, etc.) but requires invasive run-shell setup. Overkill for the constrained name alphabet Portal generates; `--` solves the actual observed class.
+- **`cobra.Command.DisableFlagParsing = true` on `stateSignalHydrateCmd`.** Works but loses the ability to add real flags later and is less intent-preserving than `--`.
+- **Repairing `PredictLiveIndices` to read `base-index` from session scope and `pane-base-index` from window scope.** Considered and rejected for the reasons above (no functional consumer, conflicts with spec mandate).
+
 ---
 
 ## Working Notes
