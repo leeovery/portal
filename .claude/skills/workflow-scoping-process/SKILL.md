@@ -1,7 +1,7 @@
 ---
 name: workflow-scoping-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
 ---
 
 # Scoping Process
@@ -17,6 +17,19 @@ Scope a mechanical change — gather context, write a specification, and produce
 - **Work unit description** (required) - From the manifest, summarising the mechanical change
 - **Topic name** (required) - Same as work_unit for quick-fix
 - **Output format preference** (optional) - Will ask if not specified
+
+---
+
+## Instructions
+
+Follow these steps EXACTLY as written. Do not skip steps or combine them.
+
+**CRITICAL**: This guidance is mandatory.
+
+- After each user interaction, STOP and wait for their response before proceeding
+- Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
+- Complete each step fully before moving to the next
 
 ---
 
@@ -89,11 +102,11 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs init-phase {work_unit
 node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.scoping.{topic} status completed
 ```
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 8**.
 
 **Otherwise:**
 
-→ Proceed to **Step 1** (spec exists but plan is incomplete — resume from format selection).
+→ Proceed to **Step 6** (spec exists but plan is incomplete — resume from format selection).
 
 #### If specification does not exist
 
@@ -101,7 +114,28 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.scopi
 
 ---
 
-## Step 1: Gather Context
+## Step 1: Knowledge Usage
+
+> *Output the next fenced block as a code block:*
+
+```
+── Knowledge Usage ──────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Loading the usage guide for the knowledge base so
+> proactive querying is available while scoping the change.
+```
+
+Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+
+→ Proceed to **Step 2**.
+
+---
+
+## Step 2: Gather Context
 
 > *Output the next fenced block as a code block:*
 
@@ -118,11 +152,34 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {work_unit}.scopi
 
 Load **[gather-context.md](references/gather-context.md)** and follow its instructions as written.
 
-→ Proceed to **Step 2**.
+*Knowledge-base nudge — if the change touches an area with prior discussions, investigations, or specs, query the knowledge base while gathering context. A "mechanical change" often has a history. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+
+→ Proceed to **Step 3**.
 
 ---
 
-## Step 2: Complexity Check
+## Step 3: Contextual Query
+
+> *Output the next fenced block as a code block:*
+
+```
+── Contextual Query ─────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Checking the knowledge base for prior discussions, investigations,
+> or specs that touch the area being changed.
+```
+
+Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
+
+→ Proceed to **Step 4**.
+
+---
+
+## Step 4: Complexity Check
 
 > *Output the next fenced block as a code block:*
 
@@ -139,11 +196,11 @@ Load **[gather-context.md](references/gather-context.md)** and follow its instru
 
 Load **[complexity-check.md](references/complexity-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 3**.
+→ Proceed to **Step 5**.
 
 ---
 
-## Step 3: Write Specification
+## Step 5: Write Specification
 
 > *Output the next fenced block as a code block:*
 
@@ -160,11 +217,11 @@ Load **[complexity-check.md](references/complexity-check.md)** and follow its in
 
 Load **[write-specification.md](references/write-specification.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+→ Proceed to **Step 6**.
 
 ---
 
-## Step 4: Select Output Format
+## Step 6: Select Output Format
 
 > *Output the next fenced block as a code block:*
 
@@ -180,11 +237,11 @@ Load **[write-specification.md](references/write-specification.md)** and follow 
 
 Load **[select-format.md](references/select-format.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ Proceed to **Step 7**.
 
 ---
 
-## Step 5: Write Tasks
+## Step 7: Write Tasks
 
 > *Output the next fenced block as a code block:*
 
@@ -201,11 +258,11 @@ Load **[select-format.md](references/select-format.md)** and follow its instruct
 
 Load **[write-tasks.md](references/write-tasks.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 8**.
 
 ---
 
-## Step 6: Conclude Scoping
+## Step 8: Conclude Scoping
 
 > *Output the next fenced block as a code block:*
 

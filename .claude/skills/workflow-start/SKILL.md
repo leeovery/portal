@@ -1,7 +1,7 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
 ---
 
 Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
@@ -16,6 +16,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
 - Complete each step fully before moving to the next
 
 ---
@@ -48,20 +49,31 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+### Step 0.1: Casing Conventions
+
 Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
+
+→ Proceed to **Step 0.2**.
+
+### Step 0.2: Migrations
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 > Running migrations to keep workflow files in sync.
-> This ensures everything is up to date before we proceed.
 ```
 
 **Run migrations — this is mandatory. You must complete it before proceeding.**
 
 Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
 
-**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to Step 1 below. Do not stop after migration completes.
+**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to **Step 0.3**. Do not stop after migration completes.
+
+→ Proceed to **Step 0.3**.
+
+### Step 0.3: Knowledge Check
+
+Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)** and follow its instructions as written.
 
 → Proceed to **Step 1**.
 

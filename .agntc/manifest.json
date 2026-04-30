@@ -1,8 +1,8 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.2.18",
-    "commit": "2dcc5bd035d8eb920940205e759db6a0f8a30e53",
-    "installedAt": "2026-04-30T19:17:23.111Z",
+    "ref": "v0.3.2",
+    "commit": "2e665fcedbbe2e616d4f05cb4fccf3c8d835a98a",
+    "installedAt": "2026-04-30T19:17:52.491Z",
     "agents": [
       "claude"
     ],
@@ -164,11 +164,17 @@
       ".claude/skills/workflow-investigation-process/references/synthesis-agent.md",
       ".claude/skills/workflow-investigation-process/references/template.md",
       ".claude/skills/workflow-knowledge/",
+      ".claude/skills/workflow-knowledge/SKILL.md",
       ".claude/skills/workflow-knowledge/chunking/",
       ".claude/skills/workflow-knowledge/chunking/discussion.json",
       ".claude/skills/workflow-knowledge/chunking/investigation.json",
       ".claude/skills/workflow-knowledge/chunking/research.json",
       ".claude/skills/workflow-knowledge/chunking/specification.json",
+      ".claude/skills/workflow-knowledge/references/",
+      ".claude/skills/workflow-knowledge/references/contextual-query.md",
+      ".claude/skills/workflow-knowledge/references/knowledge-check.md",
+      ".claude/skills/workflow-knowledge/references/knowledge-usage.md",
+      ".claude/skills/workflow-knowledge/references/reindex-work-unit.md",
       ".claude/skills/workflow-knowledge/scripts/",
       ".claude/skills/workflow-knowledge/scripts/knowledge.cjs",
       ".claude/skills/workflow-log-bug/",
@@ -221,6 +227,8 @@
       ".claude/skills/workflow-migrate/scripts/migrations/033-rename-inbox-to-dotinbox.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/034-show-clear-context-on-plan-accept.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/035-phase-to-project-defaults.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/036-completed-at.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/037-completed-at-gap.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -430,6 +438,6 @@
       ".claude/agents/workflow-specification-review-input.md"
     ],
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "constraint": "^0.2.1"
+    "constraint": "^0.3.2"
   }
 }

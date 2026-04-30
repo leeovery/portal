@@ -1,6 +1,6 @@
 ---
 name: start-cross-cutting
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(ls .workflows/), Bash(mkdir -p .workflows/.inbox/.archived/), Bash(mv .workflows/.inbox/)
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(ls .workflows/), Bash(mkdir -p .workflows/.inbox/.archived/), Bash(mv .workflows/.inbox/)
 ---
 
 Start a new cross-cutting concern. Gather a brief description, create the work unit, and route to the first phase.
@@ -15,6 +15,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
 - Complete each step fully before moving to the next
 
 ---
@@ -27,29 +28,17 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+### Step 0.1: Casing Conventions
+
 Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
+
+→ Proceed to **Step 0.2**.
+
+### Step 0.2: Migrations
 
 #### If the `/workflow-migrate` skill has already been invoked in this conversation
 
-> *Output the next fenced block as a code block:*
-
-```
-●───────────────────────────────────────────────●
-  New Cross-Cutting Concern
-●───────────────────────────────────────────────●
-
-```
-
-> *Output the next fenced block as markdown (not a code block):*
-
-```
-> Starting a new cross-cutting concern. I'll ask what pattern
-> or policy you're defining, suggest a name, then you'll choose
-> whether to research first or go straight to discussion. The
-> pipeline ends at specification — no planning or implementation.
-```
-
-→ Proceed to **Step 1**.
+→ Proceed to **Step 0.3**.
 
 #### Otherwise
 
@@ -63,7 +52,11 @@ Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.
 
 Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
 
-**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to the next instruction below. Do not stop after migration completes.
+**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to **Step 0.3**. Do not stop after migration completes.
+
+→ Proceed to **Step 0.3**.
+
+### Step 0.3: Intro and Knowledge Check
 
 > *Output the next fenced block as a code block:*
 
@@ -82,6 +75,8 @@ Invoke the `/workflow-migrate` skill and follow its instructions exactly — if 
 > whether to research first or go straight to discussion. The
 > pipeline ends at specification — no planning or implementation.
 ```
+
+Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)** and follow its instructions as written.
 
 → Proceed to **Step 1**.
 

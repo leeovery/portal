@@ -1,7 +1,7 @@
 ---
 name: workflow-discussion-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
 ---
 
 # Discussion Process
@@ -17,6 +17,19 @@ Follows research (or starts the pipeline for features). Debate technical decisio
 - **Topic** (required) - What technical area to discuss/document
 - **Context** (optional) - Prior research, constraints, existing decisions
 - **Seed concerns** (optional) - Initial subtopics or architectural questions to explore
+
+---
+
+## Instructions
+
+Follow these steps EXACTLY as written. Do not skip steps or combine them.
+
+**CRITICAL**: This guidance is mandatory.
+
+- After each user interaction, STOP and wait for their response before proceeding
+- Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
+- Complete each step fully before moving to the next
 
 ---
 
@@ -126,7 +139,49 @@ Load **[discussion-guidelines.md](references/discussion-guidelines.md)** and fol
 
 ---
 
-## Step 3: Discussion Session
+## Step 3: Knowledge Usage
+
+> *Output the next fenced block as a code block:*
+
+```
+── Knowledge Usage ──────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Loading the usage guide for the knowledge base so
+> proactive querying is available throughout the discussion.
+```
+
+Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+
+→ Proceed to **Step 4**.
+
+---
+
+## Step 4: Contextual Query
+
+> *Output the next fenced block as a code block:*
+
+```
+── Contextual Query ─────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Checking the knowledge base for prior work that relates
+> to this discussion topic before the session begins.
+```
+
+Load **[contextual-query.md](../workflow-knowledge/references/contextual-query.md)** and follow its instructions as written.
+
+→ Proceed to **Step 5**.
+
+---
+
+## Step 5: Discussion Session
 
 > *Output the next fenced block as a code block:*
 
@@ -144,11 +199,13 @@ Load **[discussion-guidelines.md](references/discussion-guidelines.md)** and fol
 
 Load **[discussion-session.md](references/discussion-session.md)** and follow its instructions as written.
 
-→ Proceed to **Step 4**.
+*Knowledge-base nudge — before committing to a direction on a new subtopic, or when a decision might echo one made elsewhere, run a quick query. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+
+→ Proceed to **Step 6**.
 
 ---
 
-## Step 4: Final Gap Review
+## Step 6: Final Gap Review
 
 > *Output the next fenced block as a code block:*
 
@@ -165,11 +222,11 @@ Load **[discussion-session.md](references/discussion-session.md)** and follow it
 
 Load **[final-review.md](references/final-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+→ Proceed to **Step 7**.
 
 ---
 
-## Step 5: Document Review
+## Step 7: Document Review
 
 > *Output the next fenced block as a code block:*
 
@@ -186,11 +243,11 @@ Load **[final-review.md](references/final-review.md)** and follow its instructio
 
 Load **[document-review.md](references/document-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 8**.
 
 ---
 
-## Step 6: Compliance Self-Check
+## Step 8: Compliance Self-Check
 
 > *Output the next fenced block as a code block:*
 
@@ -206,11 +263,11 @@ Load **[document-review.md](references/document-review.md)** and follow its inst
 
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ Proceed to **Step 9**.
 
 ---
 
-## Step 7: Conclude Discussion
+## Step 9: Conclude Discussion
 
 > *Output the next fenced block as a code block:*
 

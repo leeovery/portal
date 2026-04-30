@@ -1,6 +1,6 @@
 ---
 name: continue-bugfix
-allowed-tools: Bash(node .claude/skills/continue-bugfix/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs)
+allowed-tools: Bash(node .claude/skills/continue-bugfix/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
 ---
 
 Continue an in-progress bugfix. Determines current phase and routes to the appropriate phase skill.
@@ -15,6 +15,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 
 - After each user interaction, STOP and wait for their response before proceeding
 - Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
 - Complete each step fully before moving to the next
 
 ---
@@ -36,11 +37,17 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 ── Initialisation ───────────────────────────────
 ```
 
+### Step 0.1: Casing Conventions
+
 Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.md)** and follow its instructions as written.
+
+→ Proceed to **Step 0.2**.
+
+### Step 0.2: Migrations
 
 #### If the `/workflow-migrate` skill has already been invoked in this conversation
 
-→ Proceed to **Step 1**.
+→ Proceed to **Step 0.3**.
 
 #### Otherwise
 
@@ -54,7 +61,13 @@ Load **[casing-conventions.md](../workflow-shared/references/casing-conventions.
 
 Invoke the `/workflow-migrate` skill and follow its instructions exactly — if it issues a STOP gate, you must stop.
 
-**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to Step 1 below. Do not stop after migration completes.
+**CRITICAL**: When the migrate skill returns (either after committing changes or reporting no changes needed), you MUST continue to **Step 0.3**. Do not stop after migration completes.
+
+→ Proceed to **Step 0.3**.
+
+### Step 0.3: Knowledge Check
+
+Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)** and follow its instructions as written.
 
 → Proceed to **Step 1**.
 
@@ -230,4 +243,6 @@ Skills receive positional arguments: `$0` = work_type (`bugfix`), `$1` = work_un
 
 If the user chose to revisit a completed phase in Step 5, use that phase instead of `next_phase`.
 
-Invoke the skill. This is terminal — do not return to the backbone.
+Invoke the skill.
+
+**STOP.** Do not proceed — terminal condition.

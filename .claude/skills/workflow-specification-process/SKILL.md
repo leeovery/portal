@@ -1,7 +1,7 @@
 ---
 name: workflow-specification-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(mkdir -p .workflows/), Bash(mv .workflows/)
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(mkdir -p .workflows/), Bash(mv .workflows/)
 ---
 
 # Specification Process
@@ -31,6 +31,19 @@ additional material I should review?
 **STOP.** Wait for user response.
 
 **Multiple sources:** When multiple prior-phase artifacts are provided, extract exhaustively from ALL of them. Content may be scattered across sources — a decision in one discussion may have constraints or details in another. The specification consolidates everything into a single standalone document.
+
+---
+
+## Instructions
+
+Follow these steps EXACTLY as written. Do not skip steps or combine them.
+
+**CRITICAL**: This guidance is mandatory.
+
+- After each user interaction, STOP and wait for their response before proceeding
+- Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
+- Complete each step fully before moving to the next
 
 ---
 

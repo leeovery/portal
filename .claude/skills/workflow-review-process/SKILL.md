@@ -1,7 +1,7 @@
 ---
 name: workflow-review-process
 user-invocable: false
-allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(mkdir -p .workflows/.inbox)
+allowed-tools: Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(mkdir -p .workflows/.inbox)
 ---
 
 # Review Process
@@ -17,6 +17,19 @@ Follows implementation. Verify plan tasks were implemented, tested adequately, a
 - **Review scope** (required) - single, multi, or all
 - **Plan content** (required) - Tasks and acceptance criteria to verify against (one or more plans)
 - **Specification content** (required) - The specification from the prior phase, for design decision context
+
+---
+
+## Instructions
+
+Follow these steps EXACTLY as written. Do not skip steps or combine them.
+
+**CRITICAL**: This guidance is mandatory.
+
+- After each user interaction, STOP and wait for their response before proceeding
+- Never assume or anticipate user choices
+- Claude Code's harness auto mode does NOT permit skipping STOP gates or selecting menu options on the user's behalf — including the `a`/`auto` opt-in. The only skip mechanism is the manifest `auto` field, scoped to the specific gate it was set on for the current topic.
+- Complete each step fully before moving to the next
 
 ---
 
@@ -142,7 +155,7 @@ Set `unreviewed_tasks` = `[{list of unreviewed internal IDs}]`.
 
 **If all tasks reviewed:**
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 7**.
 
 **Otherwise** (no tracking data):
 
@@ -241,7 +254,30 @@ Load **[load-project-skills.md](references/load-project-skills.md)** and follow 
 
 ---
 
-## Step 4: QA Verification
+## Step 4: Knowledge Usage
+
+> *Output the next fenced block as a code block:*
+
+```
+── Knowledge Usage ──────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Loading the usage guide for the knowledge base. Review verifies
+> against the current spec — that's in scope without the KB. The guide
+> documents the narrow case where a cross-work-unit consistency check
+> is warranted.
+```
+
+Load **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)** and follow its instructions as written.
+
+→ Proceed to **Step 5**.
+
+---
+
+## Step 5: QA Verification
 
 > *Output the next fenced block as a code block:*
 
@@ -259,11 +295,13 @@ Load **[load-project-skills.md](references/load-project-skills.md)** and follow 
 
 Load **[invoke-task-verifiers.md](references/invoke-task-verifiers.md)** and follow its instructions as written.
 
-→ Proceed to **Step 5**.
+*Knowledge-base nudge — use only for cross-work-unit consistency checks ("does this mirror how similar decisions were made elsewhere?"). Consistency with the current spec is already in scope — no KB needed. See **[knowledge-usage.md](../workflow-knowledge/references/knowledge-usage.md)**.*
+
+→ Proceed to **Step 6**.
 
 ---
 
-## Step 5: Produce Review
+## Step 6: Produce Review
 
 > *Output the next fenced block as a code block:*
 
@@ -280,11 +318,11 @@ Load **[invoke-task-verifiers.md](references/invoke-task-verifiers.md)** and fol
 
 Load **[produce-review.md](references/produce-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 7**.
 
 ---
 
-## Step 6: Present Review
+## Step 7: Present Review
 
 > *Output the next fenced block as a code block:*
 
@@ -301,11 +339,11 @@ Load **[produce-review.md](references/produce-review.md)** and follow its instru
 
 Load **[present-review.md](references/present-review.md)** and follow its instructions as written.
 
-→ Proceed to **Step 7**.
+→ Proceed to **Step 8**.
 
 ---
 
-## Step 7: Compliance Self-Check
+## Step 8: Compliance Self-Check
 
 > *Output the next fenced block as a code block:*
 
@@ -321,11 +359,11 @@ Load **[present-review.md](references/present-review.md)** and follow its instru
 
 Load **[compliance-check.md](../workflow-shared/references/compliance-check.md)** and follow its instructions as written.
 
-→ Proceed to **Step 8**.
+→ Proceed to **Step 9**.
 
 ---
 
-## Step 8: Review Actions
+## Step 9: Review Actions
 
 > *Output the next fenced block as a code block:*
 

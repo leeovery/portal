@@ -184,6 +184,7 @@ Set `implementation_completed` = true.
 
 ```bash
 node .claude/skills/workflow-manifest/scripts/manifest.cjs set {selected.name} status completed
+node .claude/skills/workflow-manifest/scripts/manifest.cjs set {selected.name} completed_at $(date +%Y-%m-%d)
 ```
 
 Commit: `workflow({selected.name}): mark as completed`
@@ -202,6 +203,10 @@ Commit: `workflow({selected.name}): mark as completed`
 node .claude/skills/workflow-manifest/scripts/manifest.cjs set {selected.name} work_type epic
 ```
 
+Re-index all completed artifacts so their chunks carry the new `work_type: epic`:
+
+Load **[reindex-work-unit.md](../../workflow-knowledge/references/reindex-work-unit.md)** with work_unit = `{selected.name}`.
+
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
@@ -217,7 +222,9 @@ node .claude/skills/workflow-manifest/scripts/manifest.cjs set {selected.name} w
 
 **If user chose `c`/`continue`:**
 
-Invoke the `/continue-epic` skill. This is terminal — do not return to the caller.
+Invoke the `/continue-epic` skill.
+
+**STOP.** Do not proceed — terminal condition.
 
 **If user chose `b`/`back`:**
 
@@ -239,6 +246,22 @@ Invoke the `/continue-epic` skill. This is terminal — do not return to the cal
 
 ```bash
 node .claude/skills/workflow-manifest/scripts/manifest.cjs set {selected.name} status cancelled
+```
+
+Remove the cancelled work unit's chunks from the knowledge base:
+
+```bash
+node .claude/skills/workflow-knowledge/scripts/knowledge.cjs remove --work-unit {selected.name}
+```
+
+If the remove command fails, display the error but do not block — the cancellation itself is already recorded:
+
+> *Output the next fenced block as a code block:*
+
+```
+⚑ Knowledge removal warning
+  {error details}
+  The work unit is cancelled. The removal has been queued and will retry automatically on the next `knowledge remove` or `knowledge compact` call.
 ```
 
 Commit: `workflow({selected.name}): mark as cancelled`
