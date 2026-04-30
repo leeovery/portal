@@ -133,11 +133,21 @@ func PrependPATH(t *testing.T, dir string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// DriveSignalHydrate is the test-side replacement for
-// `portal state signal-hydrate <session>`. For each named session, it
-// enumerates skeleton-marked panes and writes 1 byte to each pane's
-// hydration FIFO, retrying ENXIO/EAGAIN at 50ms intervals up to a
-// 10-second budget.
+// DriveSignalHydrate is a fallback (CI flake-tolerant) test-side helper
+// that mimics `portal state signal-hydrate <session>` by writing the FIFO
+// byte directly. For each named session, it enumerates skeleton-marked
+// panes and writes 1 byte to each pane's hydration FIFO, retrying
+// ENXIO/EAGAIN at 50ms intervals up to a 10-second budget.
+//
+// Phase 13 task 13-2 made DriveSignalHydrateBinary the *primary* coverage
+// surface for the production hook → run-shell → portal CLI argv → FIFO
+// pipeline. This direct-FIFO helper remains as a fallback used by:
+//
+//   - The base-index drift round-trip variant where exec'ing the binary
+//     against a divergent live tmux base-index would re-walk paths the
+//     binary-driven primary path already covers.
+//   - Any future CI lane where the binary path proves flaky and a
+//     short-term fallback is preferable to skipping the test entirely.
 //
 // The 10-second budget is deliberately longer than production's 500ms:
 // production runs from a tmux client-attached hook with a warm server,
@@ -148,9 +158,8 @@ func PrependPATH(t *testing.T, dir string) {
 // regressions (a stuck helper still times out).
 //
 // Driving the FIFO directly (rather than spawning the production CLI) is
-// per-spec acceptable: the production path is covered by dedicated unit
-// tests in cmd/state_signal_hydrate_test.go and runSignalHydrate is
-// unexported anyway.
+// byte-equivalent to writeFIFOSignal in cmd/state_signal_hydrate.go;
+// retain only when the binary path cannot be exercised.
 func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sessions []string) {
 	t.Helper()
 	const (
@@ -178,6 +187,64 @@ func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sess
 			if err := OpenAndSignalFIFO(fifo, retryDelay, budget); err != nil {
 				t.Errorf("signal FIFO %s: %v", fifo, err)
 			}
+		}
+	}
+}
+
+// DriveSignalHydrateBinary is the production-binary-equivalent
+// counterpart to DriveSignalHydrate. For each named session it exec's the
+// pre-built `portal state signal-hydrate <session>` subcommand — argv-
+// identical to what the tmux `client-attached` / `client-session-changed`
+// hooks invoke via `run-shell` in production. This exercises the full
+// hook pipeline that the Phase 5 task 5-9 acceptance bullet calls out:
+// tmux hook → run-shell → portal CLI argv → runSignalHydrate body →
+// per-pane FIFO write → in-pane hydrate helper unblock.
+//
+// portalBinaryDir is the directory the binary lives in (typically the
+// return of BuildPortalBinaryDir or BuildPortalBinaryStable). socketPath
+// is the test's isolated tmux server socket — propagated to the spawned
+// binary via `TMUX=<socket>,1,0` so the binary's tmux.DefaultClient
+// targets the test's isolated server (without -S/-L, tmux respects the
+// TMUX env's socket-path component).
+//
+// stateDir / hooksFile are propagated as PORTAL_STATE_DIR /
+// PORTAL_HOOKS_FILE so the binary's state.EnsureDir and hooks store
+// resolve to the test's isolated config locations.
+//
+// On per-session failure (build missing, exit non-zero, output drift) the
+// test fails via t.Errorf — every session's invocation is reported
+// independently so a failing test pinpoints which session's hook pipeline
+// regressed.
+func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDir, hooksFile string, sessions []string) {
+	t.Helper()
+	binary := filepath.Join(portalBinaryDir, "portal")
+	for _, session := range sessions {
+		// Argv mirrors the production hook: `portal state signal-hydrate
+		// <session-name>`. The hook itself wraps this in
+		// `command -v portal >/dev/null 2>&1 && ...` for the not-on-PATH
+		// case; we already control PATH (and pass an absolute binary
+		// path here) so the wrap is unnecessary.
+		cmd := exec.Command(binary, "state", "signal-hydrate", session)
+		cmd.Env = append(os.Environ(),
+			// TMUX is the only documented mechanism by which a tmux CLI
+			// invocation without -S/-L can target a non-default socket.
+			// Format: <socket-path>,<server-pid>,<session-id>; only the
+			// first component is consulted by the client-side connect
+			// path, and the literals `,1,0` are ignored. Production
+			// signal-hydrate inherits this env from the run-shell parent
+			// (the tmux server itself), so this exec mirrors the
+			// production env shape.
+			fmt.Sprintf("TMUX=%s,1,0", socketPath),
+			"PORTAL_STATE_DIR="+stateDir,
+			"PORTAL_HOOKS_FILE="+hooksFile,
+			// PATH: keep prepended portalBinaryDir so any sub-exec the
+			// binary performs (none today, but defensive) resolves the
+			// same `portal` we just spawned.
+			"PATH="+portalBinaryDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Errorf("portal state signal-hydrate %q: %v\n%s", session, err, out)
 		}
 	}
 }
