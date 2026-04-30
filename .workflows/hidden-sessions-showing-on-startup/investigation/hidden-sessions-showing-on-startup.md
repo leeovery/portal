@@ -265,23 +265,131 @@ appear together at first startup — but each requires a separate fix.
 
 ---
 
-## Notes — Open Design Questions for Findings Review
+---
 
-- **Where to put the underscore filter?** Two reasonable places:
-  - At `tmux.Client.ListSessions` (single chokepoint, all callers
-    benefit, but the daemon / capture path that already filters separately
-    might double-filter or accidentally lose visibility into `_*` for
-    diagnostic uses).
-  - At each consumer (`internal/tui`, `cmd/list.go`) keeping
-    `ListSessions` as a raw view. The capture path already does its own
-    filter; this preserves that boundary.
-- **`portal list` opt-in to show all?** A `--all` flag would let users
-  inspect internal sessions without `tmux ls`. Worth deciding.
-- **`0` session cleanup:** options range from killing it after
-  `EnsureSaver` succeeds, to renaming the bootstrap session to a `_*`
-  name (e.g. `_portal-bootstrap`) so the new picker filter hides it,
-  while letting normal tmux server-empty-exit reap it once restore
-  creates real sessions. The rename approach is more conservative — it
-  reuses the same hiding mechanism we'd add for `_portal-saver`.
-- **Doc-comment on `StartServer`** must be updated either way; its
-  current claim is incorrect.
+## Fix Direction
+
+### Chosen Approach
+
+Two fixes shipping together, plus doc-comment cleanup.
+
+**Fix A1 — Filter underscore-prefixed sessions at the chokepoint.** Apply
+the filter inside `tmux.Client.ListSessions` so every consumer benefits
+from a single source of truth. The spec describes the filter as a
+Portal-wide invariant, not a per-consumer concern. The internal
+`internal/state` capture path uses its own
+`keepSessionNames`/`ListSessionNames` route that is unaffected, so this
+does not double-filter or starve the daemon of `_*` visibility.
+
+**Fix B1 — Rename the bootstrap session to an underscore-prefixed name.**
+Change `StartServer` to call `tmux new-session -d -s <reserved-name>`
+(e.g. `_portal-bootstrap`) instead of an unnamed `new-session -d`. Once
+Fix A1 is in place, the bootstrap session is hidden by the same
+mechanism that hides `_portal-saver`. tmux's native `exit-empty on`
+behaviour reaps the bootstrap session naturally if Restore creates real
+sessions; if Restore creates nothing, the bootstrap session remains as
+the keep-server-alive anchor — exactly its job.
+
+**Doc-comment cleanup.**
+
+- `tmux.PortalSaverName` — claim becomes accurate after A1.
+- `tmux.StartServer` — drop the stale "tmux-resurrect cleans this up"
+  rationale; replace with the actual mechanism (named session, hidden
+  by underscore filter, reaped by tmux when no longer needed).
+
+**Deciding factor:** A1 + B1 closes the spec gap with a single filter
+invariant and removes Portal's third-party plugin dependency for
+cleanup. Both fixes ride on the same mechanism — one filter site, one
+test, one mental model.
+
+### Options Explored
+
+**Filter placement — Fix A:**
+
+- **A1 (chosen).** Filter in `tmux.Client.ListSessions`. Single chokepoint;
+  every caller benefits; future callers don't have to remember.
+- **A2 (rejected).** Filter at each consumer (`internal/tui` and
+  `cmd/list.go`). Mirrors the existing capture-side pattern but loses
+  the Portal-wide invariant. Future consumer forgets, bug repeats.
+  Two edit sites, two tests.
+
+**Bootstrap session — Fix B:**
+
+- **B1 (chosen).** Rename to `_portal-bootstrap`. Smallest surface change.
+  Hides via Fix A1. Lets tmux's native lifecycle handle reaping.
+- **B2 (rejected).** Add an explicit kill step in the bootstrap
+  orchestrator after Restore. Works but introduces a new orchestrator
+  step, plus a precondition check (must not kill the only session, or
+  the server dies). More moving parts than B1.
+- **B3 (rejected).** Revert `StartServer` to `tmux start-server`.
+  Re-introduces the failure mode that bd659a3 fixed
+  (`exit-empty on` can kill the server before restoration finishes).
+
+**`portal list --all` flag.** Deferred. The user has `tmux ls` for
+inspecting internals; adding a flag now would solve a hypothetical
+need. Can be added later if a real diagnostic use case emerges.
+
+### Discussion
+
+The user pressed for 100% confirmation that the `0` session was
+Portal's doing rather than a leftover from `tmux-resurrect` /
+`tmux-continuum`. Three lines of evidence converge:
+
+1. `internal/tmux/tmux.go:175-181`: `StartServer` runs
+   `tmux new-session -d` without `-s`. Per `man tmux`, the default name
+   is the lowest unused numeric index from `base-index` — `0` on a
+   fresh server. It is the only unnamed `new-session` call in the
+   production codebase.
+2. Commit `bd659a3` made the change deliberately and captured the
+   intent in the doc-comment ("tmux-resurrect recognizes and cleans
+   up").
+3. The user removed both plugins, restarted the server, and `0` still
+   appears — so the plugins are not the source.
+
+The user also asked the agent not to interfere with their tmux server
+during investigation; analysis remained code-reading only.
+
+The two root causes are independent but ride on the same fix
+mechanism — once underscore-prefixed sessions are filtered out, both
+`_portal-saver` and the renamed bootstrap session disappear from view
+together. That alignment is what made A1 + B1 the natural pairing
+rather than two unrelated patches.
+
+### Testing Recommendations
+
+- **TUI / `portal list` filter.** Add a unit test asserting that
+  `tmux.Client.ListSessions` excludes any session whose name starts
+  with `_`. With the filter at the chokepoint, this single test
+  protects every consumer (TUI picker, `cmd/list.go`, future callers).
+- **Bootstrap session naming.** Update the existing `TestStartServer`
+  in `internal/tmux/tmux_test.go` to assert the args include
+  `-s _portal-bootstrap` (or whatever reserved name is chosen),
+  preventing accidental regression to an unnamed session.
+- **End-to-end visibility check.** A bootstrap-level test (or
+  `cmd/bootstrap/reboot_roundtrip_test.go` extension) that
+  asserts the post-bootstrap session list visible via
+  `Client.ListSessions` contains no entries beginning with `_`. This
+  is the one assertion that would have caught both root causes during
+  the resurrection feature's review.
+- **Diagnostic visibility.** If the team later wants to keep an
+  unfiltered listing for debugging, a sibling `ListAllSessions` (or
+  `ListSessionsRaw`) on the client provides an opt-in escape hatch
+  without changing the default safe behaviour.
+
+### Risk Assessment
+
+- **Fix complexity:** Low. A1 is a `strings.HasPrefix` skip inside an
+  existing loop. B1 is a one-line argument change plus the chosen
+  reserved name as a constant. Doc-comment edits are trivial.
+- **Regression risk:** Low. The capture path uses
+  `ListSessionNames` (a thin wrapper around `ListSessions`) — adding
+  an underscore filter to `ListSessions` would also filter the capture
+  caller, but `internal/state` already applies its own
+  `keepSessionNames` filter on top, so the result is unchanged. Worth
+  verifying no other production caller relies on seeing `_*` sessions
+  in raw form (search shows the only callers are `cmd/list.go` and
+  `internal/tui/model.go`, both of which want the filter). If a
+  diagnostic caller appears in future, expose `ListAllSessions` then.
+- **Recommended approach:** Regular bugfix. Two small targeted commits
+  (filter + rename), each with its own test. No feature flag
+  needed — the change is observable but strictly improves UX.
