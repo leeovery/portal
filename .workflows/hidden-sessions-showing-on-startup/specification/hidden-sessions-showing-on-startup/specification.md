@@ -259,6 +259,52 @@ After Fix B, the comment MUST:
   rather than `start-server` (this is still load-bearing — commit
   `bd659a3`).
 
+## Test Requirements
+
+The fix MUST add or update tests at three layers. Each test asserts
+a single invariant; together they cover the spec gap that allowed
+the bug to ship.
+
+### Unit — `Client.ListSessions` Excludes `_*` Sessions
+
+In `internal/tmux/tmux_test.go`, add a unit test asserting that
+`Client.ListSessions` excludes any session whose name starts with
+`_`. Drive the test with mocked `Commander` output containing a
+mix of `_*` and non-`_*` names; assert that only the non-`_*`
+names appear in the returned slice.
+
+This single test protects every consumer of `ListSessions` (TUI
+picker, `cmd/list.go`, future callers) and prevents Root Cause 1
+from regressing.
+
+### Unit — `StartServer` Uses Reserved Bootstrap Name
+
+Update the existing `TestStartServer` in `internal/tmux/tmux_test.go`
+to assert the args passed to `Commander.Run` include
+`-s _portal-bootstrap` (referenced via the `PortalBootstrapName`
+constant, not the literal string). This prevents accidental
+regression to an unnamed session.
+
+### End-To-End — No `_*` Sessions Visible Post-Bootstrap
+
+Extend either a bootstrap-level test or
+`cmd/bootstrap/reboot_roundtrip_test.go` to assert that, after a
+full bootstrap, the session list visible via `Client.ListSessions`
+contains no entries whose names begin with `_`.
+
+This is the assertion that would have caught both root causes during
+the `built-in-session-resurrection` review. It serves as the
+end-to-end regression guard for this entire bugfix and for any
+future `_*` session that joins the codebase.
+
+### Capture-Path Regression Guard
+
+The capture-path tests (`internal/state/capture_test.go:135` and
+related) MUST continue to pass unchanged. Confirm that the chosen
+implementation strategy from Fix A's "Interaction With The Capture
+Path" section preserves capture behaviour. No new capture tests are
+required, but existing ones are an explicit regression gate.
+
 ---
 
 ## Working Notes
