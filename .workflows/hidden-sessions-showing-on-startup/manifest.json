@@ -79,10 +79,11 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 2,
-          "current_task": "tick-dc5668",
+          "current_task": "tick-fdb106",
           "completed_tasks": [
             "hidden-sessions-showing-on-startup-1-1",
-            "hidden-sessions-showing-on-startup-1-2"
+            "hidden-sessions-showing-on-startup-1-2",
+            "hidden-sessions-showing-on-startup-2-1"
           ],
           "completed_phases": [
             1

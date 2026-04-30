@@ -246,15 +246,15 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 	// No user-visible sessions should have been created. The orchestrator
 	// auto-starts a tmux server when it sets @portal-restoring, but no
 	// new-session call should follow the corrupt-index abort, so any session
-	// present must be tmux's own bootstrap session ("0"), not "alpha" or
-	// similar saved names.
+	// present must be Portal's reserved bootstrap session
+	// (tmux.PortalBootstrapName), not "alpha" or similar saved names.
 	out, err := ts.TryRun("list-sessions", "-F", "#{session_name}")
 	if err == nil {
-		// If tmux did auto-start a server it will list at most a default "0"
+		// If tmux did auto-start a server it will list at most the reserved
 		// bootstrap session. Anything else means restore created a session.
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" || line == "0" {
+			if line == "" || line == tmux.PortalBootstrapName {
 				continue
 			}
 			t.Errorf("unexpected session %q after corrupt-index restore; out=%q", line, out)

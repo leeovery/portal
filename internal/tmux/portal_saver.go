@@ -15,6 +15,16 @@ import (
 // separate keepSessionNames pass in internal/state/capture.go.
 const PortalSaverName = "_portal-saver"
 
+// PortalBootstrapName is the tmux session name used by Client.StartServer when
+// it creates the initial detached session that keeps the freshly-started tmux
+// server alive long enough for Portal's bootstrap Restore step to run. The
+// leading underscore marks the session as Portal-internal: Client.ListSessions
+// applies a chokepoint underscore-prefix filter so this session is excluded
+// from every user-facing listing (the TUI picker, `portal list`, and any
+// future ListSessions consumer). The constant is the canonical reference —
+// other code MUST NOT create or re-use a session with this name.
+const PortalBootstrapName = "_portal-bootstrap"
+
 // portalSaverCommand is the shell command run as the saver session's initial
 // process. tmux owns the daemon's lifecycle: when this session is killed (or
 // the server dies), the kernel delivers SIGHUP to the daemon for graceful

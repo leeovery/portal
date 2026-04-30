@@ -180,14 +180,19 @@ func (c *Client) ListSessionNames() ([]string, error) {
 	return names, nil
 }
 
-// StartServer starts the tmux server by creating a detached bootstrap session.
-// Uses "new-session -d" instead of "start-server" so the server has at least one
-// session, preventing tmux's default "exit-empty on" from terminating the server
-// before plugins like tmux-continuum can restore saved sessions.
-// The unnamed session defaults to "0", which tmux-resurrect recognizes and cleans up.
+// StartServer starts the tmux server by creating a detached bootstrap session
+// with the reserved name PortalBootstrapName. Using
+// "new-session -d" instead of "start-server" guarantees the server has at
+// least one session at the moment it comes up, preventing tmux's default
+// "exit-empty on" from terminating the server before Portal's own bootstrap
+// Restore step (bootstrap step 5 in cmd/bootstrap) has had a chance to
+// reconstruct user sessions from saved state. The bootstrap session is hidden
+// from user-facing listings by the underscore-prefix filter in
+// Client.ListSessions, so it is never visible in the TUI picker or
+// `portal list` even if it persists past Restore.
 // Returns nil on success or a wrapped error on failure. No retry logic.
 func (c *Client) StartServer() error {
-	_, err := c.cmd.Run("new-session", "-d")
+	_, err := c.cmd.Run("new-session", "-d", "-s", PortalBootstrapName)
 	if err != nil {
 		return fmt.Errorf("failed to start tmux server (bootstrap session): %w", err)
 	}

@@ -144,7 +144,7 @@ func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 	}{
 		{
 			name:   "filters _* names from mixed output",
-			output: "dev|2|0\n_portal-saver|1|0\nwork|3|1\n_portal-bootstrap|1|0",
+			output: fmt.Sprintf("dev|2|0\n%s|1|0\nwork|3|1\n%s|1|0", tmux.PortalSaverName, tmux.PortalBootstrapName),
 			want: []tmux.Session{
 				{Name: "dev", Windows: 2, Attached: false},
 				{Name: "work", Windows: 3, Attached: true},
@@ -152,7 +152,7 @@ func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 		},
 		{
 			name:   "all underscore sessions yields non-nil empty slice",
-			output: "_portal-saver|1|0\n_portal-bootstrap|1|0",
+			output: fmt.Sprintf("%s|1|0\n%s|1|0", tmux.PortalSaverName, tmux.PortalBootstrapName),
 			want:   []tmux.Session{},
 		},
 		{
@@ -475,7 +475,7 @@ func TestStartServer(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "new-session -d"
+		wantArgs := strings.Join([]string{"new-session", "-d", "-s", tmux.PortalBootstrapName}, " ")
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -1228,7 +1228,7 @@ func TestEnsureServerThenListSessions(t *testing.T) {
 				case "new-session":
 					return "", nil
 				case "list-sessions":
-					return "0|1|0", nil
+					return fmt.Sprintf("%s|1|0", tmux.PortalBootstrapName), nil
 				default:
 					t.Fatalf("unexpected command: %v", args)
 					return "", nil
@@ -1246,22 +1246,14 @@ func TestEnsureServerThenListSessions(t *testing.T) {
 			t.Error("EnsureServer() started = false, want true")
 		}
 
-		// Step 2: ListSessions should return the bootstrap session
+		// Step 2: ListSessions filters _* sessions, so the reserved
+		// bootstrap session must NOT appear in the user-facing slice.
 		sessions, err := client.ListSessions()
 		if err != nil {
 			t.Fatalf("ListSessions() unexpected error: %v", err)
 		}
-		if len(sessions) != 1 {
-			t.Fatalf("ListSessions() returned %d sessions, want 1", len(sessions))
-		}
-		if sessions[0].Name != "0" {
-			t.Errorf("session.Name = %q, want %q", sessions[0].Name, "0")
-		}
-		if sessions[0].Windows != 1 {
-			t.Errorf("session.Windows = %d, want 1", sessions[0].Windows)
-		}
-		if sessions[0].Attached {
-			t.Error("session.Attached = true, want false")
+		if len(sessions) != 0 {
+			t.Fatalf("ListSessions() returned %d sessions, want 0 (bootstrap session must be filtered): %v", len(sessions), sessions)
 		}
 
 		// Step 3: ServerRunning should return true
@@ -1276,7 +1268,7 @@ func TestEnsureServerThenListSessions(t *testing.T) {
 
 		wantCalls := [][]string{
 			{"info"},
-			{"new-session", "-d"},
+			{"new-session", "-d", "-s", tmux.PortalBootstrapName},
 			{"list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}"},
 			{"info"},
 		}
