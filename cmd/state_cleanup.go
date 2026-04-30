@@ -75,6 +75,7 @@ var stateCleanupCmd = &cobra.Command{
 		purge, _ := cmd.Flags().GetBool("purge")
 
 		client, unregister, logger := buildStateCleanupDeps()
+		defer func() { _ = logger.Close() }()
 
 		var errs []error
 
