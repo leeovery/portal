@@ -21,7 +21,8 @@ approved_at: 2026-04-30
 - [ ] `go test ./...` is green; change ships as a single targeted commit (Fix A + unit test + doc-comment) per the Rollout section.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-04-30
 
 | ID | Task | Acceptance | Edge Cases |
 |----|------|------------|------------|

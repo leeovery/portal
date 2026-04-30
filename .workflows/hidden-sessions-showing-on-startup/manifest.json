@@ -33,12 +33,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "d5d9c2716a03d8f6f730541c5aad71cad54679fd",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "hidden-sessions-showing-on-startup-1-1",
           "task_map": {}
         }
       }
