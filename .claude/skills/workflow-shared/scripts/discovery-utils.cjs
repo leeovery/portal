@@ -102,8 +102,11 @@ function phaseStatus(manifest, phase) {
   if (p.items && typeof p.items === 'object') {
     const keys = Object.keys(p.items);
     if (keys.length === 0) return null;
-    if (keys.length === 1) return (p.items[keys[0]] || {}).status || null;
-    const statuses = keys.map(k => (p.items[k] || {}).status).filter(Boolean);
+    if (keys.length === 1) {
+      const status = (p.items[keys[0]] || {}).status || null;
+      return status === 'cancelled' ? null : status;
+    }
+    const statuses = keys.map(k => (p.items[k] || {}).status).filter(s => s && s !== 'cancelled');
     if (statuses.length === 0) return null;
     if (statuses.every(s => s === 'completed')) return 'completed';
     if (statuses.some(s => s === 'in-progress')) return 'in-progress';
@@ -215,6 +218,13 @@ function computePendingFromResearch(manifest) {
   return surfaced.filter(t => !discussed.has(t));
 }
 
+function computePendingFromGaps(manifest) {
+  const dd = (manifest.phases || {}).discussion || {};
+  const gaps = Array.isArray(dd.gap_topics) ? dd.gap_topics : [];
+  const discussed = new Set(phaseItems(manifest, 'discussion').map(i => i.name));
+  return gaps.filter(t => !discussed.has(t));
+}
+
 module.exports = {
   listFiles,
   listDirs,
@@ -227,6 +237,7 @@ module.exports = {
   filesChecksum,
   computeNextPhase,
   computePendingFromResearch,
+  computePendingFromGaps,
   loadActiveManifests,
   loadAllManifests,
   loadProjectManifest,

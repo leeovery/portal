@@ -10,7 +10,7 @@ topic: hidden-sessions-showing-on-startup
 
 ## Findings
 
-### 1. Misleading test-location guidance for `TestStartServer`
+### 1. Misleading test-location guidance for `TestStartServer` [FIXED]
 
 **Severity**: Minor
 **Plan Reference**: `phase-2-tasks.md`, Task 2-1, "Do" section, fourth bullet
@@ -30,8 +30,8 @@ Task 2-1's Do step instructs the implementer to "Locate the existing `TestStartS
 - Locate the existing `TestStartServer` in `internal/tmux/tmux_test.go` (currently at line 404 onwards; `TestListSessions` and `MockCommander` live earlier in the same file at lines 12-100+). Update it to assert that the recorded `Commander.Run` invocation contains the args `-s` and `tmux.PortalBootstrapName` in addition to the existing `new-session -d` assertion. Reference the value via the exported constant — do NOT compare against the literal `"_portal-bootstrap"` string.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim to Task 2-1 "Do" section in `phase-2-tasks.md`.
 
 ---
 
