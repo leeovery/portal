@@ -226,6 +226,39 @@ Three alternatives were considered for the bootstrap session:
 re-use a session with this name. The constant is the canonical
 reference.
 
+## Doc-Comment Cleanup
+
+Two existing doc-comments encode incorrect or stale claims and MUST
+be updated as part of this work. The edits are part of the bugfix,
+not a follow-up — they document the post-fix invariants.
+
+### `tmux.PortalSaverName`
+
+The current comment claims `_portal-saver` is "filtered from the
+TUI picker and from `sessions.json` capture." Pre-fix, the TUI
+filter does not exist. After Fix A lands, the claim becomes
+accurate as written. The comment may be tightened but its substance
+stands.
+
+### `tmux.StartServer`
+
+The current comment includes the rationale: *"The unnamed session
+defaults to '0', which tmux-resurrect recognizes and cleans up."*
+This rationale is stale — Portal no longer relies on tmux-resurrect
+for cleanup, and the user has confirmed the session persists with
+the plugin removed.
+
+After Fix B, the comment MUST:
+
+- Drop the tmux-resurrect cleanup claim entirely.
+- Document that the session is created with the reserved name
+  `PortalBootstrapName` (`_portal-bootstrap`).
+- Document that the session is hidden from user-facing listings by
+  the underscore-prefix filter in `Client.ListSessions`.
+- Retain the `exit-empty on` rationale for using `new-session -d`
+  rather than `start-server` (this is still load-bearing — commit
+  `bd659a3`).
+
 ---
 
 ## Working Notes
