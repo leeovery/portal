@@ -1,0 +1,16 @@
+{
+  "name": "hidden-sessions-showing-on-startup",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-04-30",
+  "description": "Sessions prefixed with underscore (e.g. _portal-saver) and a stray '0' session are visible in the session list on startup; underscore-prefixed sessions were intended to be hidden by default.",
+  "phases": {
+    "investigation": {
+      "items": {
+        "hidden-sessions-showing-on-startup": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}

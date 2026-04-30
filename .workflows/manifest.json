@@ -35,6 +35,9 @@
     },
     "built-in-session-resurrection": {
       "work_type": "feature"
+    },
+    "hidden-sessions-showing-on-startup": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
