@@ -183,7 +183,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	if err != nil {
 		// Probe never fired: probeFile may not exist. Treat as zero events.
 		if !os.IsNotExist(err) {
-			t.Fatalf("read probe file: %v", err)
+			t.Fatalf("read probe file %s: %v", probeFile, err)
 		}
 		probeBytes = nil
 	}

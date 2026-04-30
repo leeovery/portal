@@ -471,7 +471,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 
 	t.Run("it does not double-register on two consecutive bootstraps in the same process", func(t *testing.T) {
 		// Simulate a stateful tmux: first bootstrap on empty show-hooks
-		// registers all 10. Second bootstrap sees those 10 in show-hooks
+		// registers all 9. Second bootstrap sees those 9 in show-hooks
 		// output and registers nothing.
 		var registered [][2]string // (event, command) in registration order
 		runFunc := func(args ...string) (string, error) {

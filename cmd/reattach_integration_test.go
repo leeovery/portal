@@ -323,8 +323,9 @@ func containsAll(got, want []string) bool {
 //	(c) sessions.json.saved_at is byte-identical to the seeded value
 //	    (proves nothing in the orchestrator's pipeline rewrote
 //	    sessions.json during the @portal-restoring window — see
-//	    phase5_marker_suppression_integration_test.go:207-210 for the
-//	    sibling sub-orchestrator-level assertion).
+//	    cmd/bootstrap/phase5_marker_suppression_integration_test.go's
+//	    `saved_at` invariance assertion for the sibling
+//	    sub-orchestrator-level guard).
 func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -390,7 +391,8 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	// invariant. The orchestrator wires NoOpSaver, so any advance in
 	// saved_at would indicate either the @portal-restoring guard
 	// failed OR an unintended write path inside Restore. Mirrors the
-	// assertion at phase5_marker_suppression_integration_test.go:207.
+	// `saved_at` invariance assertion in
+	// cmd/bootstrap/phase5_marker_suppression_integration_test.go.
 	postIdx, skip, err := state.ReadIndex(stateDir)
 	if err != nil {
 		t.Fatalf("ReadIndex post-Execute: %v", err)

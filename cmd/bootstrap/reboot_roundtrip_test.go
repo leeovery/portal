@@ -447,11 +447,6 @@ func createSavedTopology(t *testing.T, ts *tmuxtest.Socket, args savedTopologyAr
 	zoomTarget := tmux.PaneTarget("alpha", args.base+0, args.paneBase+1)
 	ts.Run(t, "resize-pane", "-t", zoomTarget, "-Z")
 
-	// Make alpha:w1.p0 the active pane of its window. (Single-pane
-	// windows always have their sole pane active, so this is mostly
-	// a sanity statement; the assertion later proves the restored
-	// active-pane bit matches the captured one.)
-
 	// beta session — single window, single pane.
 	ts.Run(t, "new-session", "-d", "-s", "beta", "-c", args.cwdBeta, "sleep", "infinity")
 	ts.WaitForSession(t, "beta", 2*time.Second)
