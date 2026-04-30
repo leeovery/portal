@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "hidden-sessions-showing-on-startup": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "d796727a27eca91437f55149aa36ed22b31592db",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
