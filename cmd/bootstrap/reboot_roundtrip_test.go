@@ -203,9 +203,15 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	envValue := "round-trip-test-value"
 
 	// Saved structural identifier of the pane that owns the on-resume
-	// hook. Saved indices use the saveBase / savePaneBase pair; the
-	// helper invokes hooks lookup with this exact string regardless of
-	// any drift on restore.
+	// hook. Hook-store keys are in tmux's "session:window.pane" form
+	// (see internal/restore/session.go:108 — collectArmInfos passes
+	// tmux.PaneTarget(...) via --hook-key, and the hooks.Store keys at
+	// internal/hooks/store_test.go follow the same shape). This is
+	// distinct from state.SanitizePaneKey, which is the filesystem-
+	// safe key used for FIFO paths, scrollback files, and skeleton
+	// markers. Saved indices (saveBase / savePaneBase) are pinned at
+	// save time so this string is stable across base-index drift on
+	// restore.
 	savedHookKey := tmux.PaneTarget("alpha",
 		cfg.saveBase+0, cfg.savePaneBase+0)
 

@@ -50,25 +50,24 @@ import (
 // TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous is the
 // non-vacuous expansion of the marker-suppression integration test.
 //
-// Contract under test (from spec "Save-Side Architecture → Triggers &
-// Serialization → Properties → Restoration guard"):
+// SCOPE — this test exercises Restore-side write discipline only. It
+// proves that during the @portal-restoring window:
 //
-//	While @portal-restoring is set (between orchestrator step 3 and step 6),
-//	structural events fired by the restoration itself MUST NOT cause a
-//	save daemon capture cycle to commit a write to sessions.json.
+//	(a) at least one structural event (session-created) actually fires
+//	    inside the window — a non-vacuity guard against a future refactor
+//	    that turns the assertion into a pass-by-doing-nothing; AND
+//	(b) sessions.json.saved_at does not advance — neither Restore itself
+//	    nor any code path it touches commits a write to sessions.json
+//	    while the marker is set.
 //
-// Two assertions enforce this end-to-end:
-//
-//	(a) Non-vacuity guard: at least one structural event (session-created)
-//	    MUST fire during the marker window. If zero events fire, the test
-//	    fails — guarding against a future refactor that accidentally turns
-//	    the test into a pass-by-doing-nothing.
-//
-//	(b) Suppression invariant: sessions.json.saved_at MUST equal its
-//	    pre-run value after Run returns. The orchestrator wires no saver
-//	    (NoOpSaver), so any advance would indicate either a contract
-//	    violation in the daemon's marker check OR an unintended write
-//	    path inside Restore.
+// What this test deliberately does NOT cover: the daemon-tick suppression
+// path proper (the spec's "Save-Side Architecture → Triggers &
+// Serialization → Properties → Restoration guard" contract — daemon ticks
+// observing @portal-restoring=1 at tick entry and skipping the capture).
+// That contract is the daemon's own responsibility and is exercised by
+// the daemon's unit tests; this test wires bootstrap.NoOpSaver so the
+// daemon code path is not reachable from here. The two coverages are
+// complementary, not redundant.
 func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
