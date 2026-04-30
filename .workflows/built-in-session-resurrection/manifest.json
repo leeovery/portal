@@ -366,7 +366,7 @@
     "review": {
       "items": {
         "built-in-session-resurrection": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "built-in-session-resurrection-1-1",
             "built-in-session-resurrection-1-2",
@@ -473,7 +473,29 @@
             "built-in-session-resurrection-10-1",
             "built-in-session-resurrection-10-2",
             "built-in-session-resurrection-10-3",
-            "built-in-session-resurrection-11-1"
+            "built-in-session-resurrection-11-1",
+            "built-in-session-resurrection-12-1",
+            "built-in-session-resurrection-12-2",
+            "built-in-session-resurrection-12-3",
+            "built-in-session-resurrection-12-4",
+            "built-in-session-resurrection-12-5",
+            "built-in-session-resurrection-12-6",
+            "built-in-session-resurrection-12-7",
+            "built-in-session-resurrection-12-8",
+            "built-in-session-resurrection-12-9",
+            "built-in-session-resurrection-12-10",
+            "built-in-session-resurrection-12-11",
+            "built-in-session-resurrection-12-12",
+            "built-in-session-resurrection-12-13",
+            "built-in-session-resurrection-12-14",
+            "built-in-session-resurrection-13-1",
+            "built-in-session-resurrection-13-2",
+            "built-in-session-resurrection-13-3",
+            "built-in-session-resurrection-13-4",
+            "built-in-session-resurrection-13-5",
+            "built-in-session-resurrection-14-1",
+            "built-in-session-resurrection-14-2",
+            "built-in-session-resurrection-14-3"
           ]
         }
       }

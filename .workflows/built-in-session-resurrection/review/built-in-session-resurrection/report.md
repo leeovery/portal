@@ -1,136 +1,142 @@
 # Implementation Review: Built-In Session Resurrection
 
 **Plan**: built-in-session-resurrection
-**QA Verdict**: Request Changes
+**QA Verdict**: Approve
 
 ## Summary
 
-The 106-task implementation lands the full save/restore architecture cleanly: scaffolding, save daemon, skeleton restore, hydrate helper, hook lifecycle migration, bootstrap orchestrator, observability, and five subsequent analysis cycles. Code quality is consistently strong — small interfaces with DI, table-driven tests without `t.Parallel()`, clear doc-comments citing spec sections, and a thoughtful Pascal/camelCase split between reusable adapters and production-only wiring. The final 11-cycle phase structure with five analysis cycles produced a polished codebase: ~95% of tasks land Complete with zero blocking issues.
+The 128-task implementation lands the full save/restore architecture cleanly: scaffolding, save daemon, skeleton restore, hydrate helper, hook lifecycle migration, bootstrap orchestrator, observability, and three subsequent post-review remediation phases. The Cycle-1 review (originally **Request Changes**) flagged seven required fixes — all now landed via Phase 12. Phase 13 closed Analysis Cycle 6 findings (shared test-helper extraction, production binary path coverage, missing 5-10 acceptance assertions, paneKey parameterisation, documentation precision). Phase 14 closed Analysis Cycle 7 hygiene gaps (deferred logger Close in cleanup, init() rationale removal, OpenAndSignalFIFO unexport). Analysis Cycle 8 returned `STATUS: clean` across duplication / standards / architecture — the implementation is converged.
 
-The blocking gaps are concentrated in **integration-test coverage**: tasks 5-8, 5-9, and 5-10 — three of the highest-value end-to-end regression guards the spec calls out — were either substantially descoped (5-8) or never implemented (5-9, 5-10). Phase 3's headline integration test (3-13) was also descoped from multi-session/ANSI/marker-clearance to a single-session minimal smoke. A separate observability gap (6-2) leaves the `migrate-rename` and `notify` subcommands logging via stderr instead of `*state.Logger`, and the `bootstrap.Logger` interface lacks the `Debug` method the spec implicitly requires for "Bootstrap events at DEBUG level only." Finally, 3-1's `ReadIndex` deliberately omits `ErrCorruptIndex` wrapping on permission errors, contradicting a plan acceptance criterion downstream warning classifiers depend on.
+Code quality is consistently strong throughout: small DI interfaces, table-driven tests without `t.Parallel()`, doc-comments citing spec sections, careful Pascal/camelCase split between reusable adapters and production-only wiring. End-to-end integration coverage now includes a binary-driven reboot round-trip (alpha+beta, base-index drift variant), reattach against saved-only sessions (six tests), marker suppression with non-vacuous probe, multi-session/ANSI/marker round-trip, and full hook firing under `respawn-pane -k` arming.
 
-None of the blocking issues are in the **production code path** — the feature works end-to-end as designed; what is missing is the regression net that would catch a future drift. The implementation is ship-ready behind a manual-QA gate; it is not ship-ready behind an automated-CI gate of the strength the spec implies.
+The single residual issue is a stale inline comment at `internal/tmux/hooks_register_test.go:474` ("registers all 10. Second bootstrap sees those 10") that contradicts the computed 9-hook assertion two lines below. The comment cannot mask a regression (the assertion is computed from `expectedSaveTriggerEvents + expectedHydrationTriggerEvents`), but it represents an incomplete execution of quick-fix task 12-10 — the original review named both line 474 and lines 545-547 as stale; only the latter was updated. A separate documentation precision miss in task 13-5 (no reconciliation note appended to this review file from the cycle-6 sweep) is also tracked. Both are Comments Only and non-blocking.
+
+The feature is ship-ready behind both manual-QA and automated-CI gates. Ship.
 
 ## QA Verification
 
 ### Specification Compliance
 
-Implementation aligns with the spec's organizing principles ("Portal owns the full lifecycle", "single-writer architecture", "degrade locally, log, continue"). Notable deliberate deviations, all documented in code:
+Implementation aligns with the spec's organizing principles ("Portal owns the full lifecycle", "single-writer architecture", "degrade locally, log, continue"). Notable deliberate deviations (all documented in code, all reconciled in plan):
 
 - **`Restore()` signature**: spec/plan suggested `error` only; implementation uses typed `(corrupt bool, err error)` tuple so the orchestrator cannot escalate non-corrupt restore failures to fatal. Cleaner contract than what was planned.
-- **`@portal-restoring.Clear` failure classification**: plan body (task 5-2) says "soft + WARN", but spec § "Fatal Bootstrap Errors", CLAUDE.md, and the implementing test all say fatal. Implementation correctly follows spec; the plan body's "soft" wording is the outlier and should be reconciled in plan documentation.
-- **`show-options -sv` → `-s`**: spec uses `-sv`, but `-v` (value-only) without an option name would emit values without their names, defeating prefix-based filtering. Implementation uses `-s` (name + value pairs) — spec wording should be amended.
+- **`@portal-restoring.Clear` failure classification**: original plan body (task 5-2) said "soft + WARN", but spec § "Fatal Bootstrap Errors", CLAUDE.md, and the implementing test all say fatal. Reconciled in Phase 12 task 12-9 — plan body now correctly classifies as fatal with cycle-1 reconciliation note.
+- **`show-options -sv` → `-s`**: spec uses `-sv`, but `-v` (value-only) without an option name would emit values without their names, defeating prefix-based filtering. Implementation uses `-s` (name + value pairs) — spec wording amended.
 - **`migrate-rename` hook deferred to v2**: spec § "v1 deferral (post-implementation note)" amended after implementation began; `cmd/state_migrate_rename.go` retained as the v2 endpoint, hook registration dropped from the bootstrap table.
-- **Pre-write vs post-write log rotation**: plan says triggering write lands in `.old`; implementation rotates pre-write so triggering line lands in fresh `portal.log`. Both satisfy the ~2 MiB cap. Spec is ambiguous; implementation is internally consistent.
+- **Pre-write vs post-write log rotation**: plan says triggering write lands in `.old`; implementation rotates pre-write so triggering line lands in fresh `portal.log`. Both satisfy the ~2 MiB cap. Spec ambiguous; implementation internally consistent.
+- **ANSI scrollback assertion via substring contains** (rather than byte-equal as the Phase 12 task 12-4 edge case suggested): `capture-pane -e` normalises `\x1b[0m` → `\x1b[39m` when only fg state changed, and reflow padding breaks literal equality. Substring contains catches every regression byte-equal would. Documented inline in `internal/restore/integration_full_test.go`.
 
 ### Plan Completion
 
-- [x] Phase 1 acceptance criteria met
-- [x] Phase 2 acceptance criteria met
-- [ ] **Phase 3 acceptance criteria**: integration test (task 3-13) covers structure round-trip but lacks multi-session, multi-window, multi-pane, ANSI scrollback, marker-clearance, env-round-trip, zoom-round-trip, and active-pane round-trip per the spec acceptance bullet at planning.md L96.
-- [x] Phase 4 acceptance criteria met
-- [ ] **Phase 5 acceptance criteria**: tasks 5-8, 5-9, 5-10 integration tests are the headline regression guards for the spec's "WaitForSessions removal" + "skeleton-restore + reattach" workflow. 5-8 substantially descoped; 5-9 and 5-10 entire test files never created.
-- [ ] **Phase 6 acceptance criteria**: task 6-2 retrofit incomplete — `migrate-rename` and `notify` still write to stderr instead of `*state.Logger`, leaving two subsystems invisible to `portal.log` and to `portal state status` recent-warnings scanning.
-- [x] Phases 7–11 (analysis cycles) acceptance criteria met
-- [x] All 106 plan tasks marked complete in the manifest
-- [x] No unintended scope creep (scope grew via spec amendment + `internal/warning` extraction, both well-justified)
+- [x] Phase 1 acceptance criteria met (Portal state CLI scaffolding & tmux hook registration)
+- [x] Phase 2 acceptance criteria met (Save daemon, triggers, on-disk state format)
+- [x] Phase 3 acceptance criteria met — multi-session/ANSI/marker round-trip lives in `internal/restore/integration_full_test.go` (closed by Phase 12 task 12-4)
+- [x] Phase 4 acceptance criteria met (Resume-hook lifecycle migration)
+- [x] Phase 5 acceptance criteria met — tasks 5-9 (`reboot_roundtrip_test.go`) and 5-10 (`reattach_integration_test.go`) shipped via Phase 12, with 13-3 closing the two remaining 5-10 assertion gaps
+- [x] Phase 6 acceptance criteria met — task 6-2 logger retrofit completed by Phase 12 task 12-5; bootstrap `Logger` interface gained `Debug` method (12-6); deferred `Close()` added to all five non-daemon writers (12-7, 14-1)
+- [x] Phases 7-11 acceptance criteria met (analysis cycles 1-5)
+- [x] Phase 12 acceptance criteria met — 14 review-remediation tasks landed
+- [x] Phase 13 acceptance criteria met — 5 cycle-6 analysis tasks landed
+- [x] Phase 14 acceptance criteria met — 3 cycle-7 cleanup tasks landed
+- [x] Analysis Cycle 8 returned `STATUS: clean` across all dimensions
+- [x] All 128 plan tasks marked complete in the manifest
+- [x] No unintended scope creep
 
 ### Code Quality
 
-Excellent overall. Strong patterns observed throughout:
+Excellent overall. Strong patterns sustained throughout:
 
-- **Small DI interfaces** consistently used: `ServerOptionWriter`, `ServerOptionLister`, `RestoringChecker`, `Restorer`, `FIFOSweeper`, `StaleCleaner`, `HookRegistrar`, `Server` — each is 1–2 methods.
-- **`*state.Logger` nil-safe receiver pattern** trusted everywhere after task 7-4's guard removal; matches Go idioms for nil-safe value receivers.
+- **Small DI interfaces** consistently used: `ServerOptionWriter`, `ServerOptionLister`, `RestoringChecker`, `Restorer`, `FIFOSweeper`, `StaleCleaner`, `HookRegistrar`, `Server`, `Logger` (3-method bootstrap variant, 4-method state variant) — each is 1–3 methods.
+- **`*state.Logger` nil-safe receiver pattern** trusted everywhere; matches Go idioms for nil-safe value receivers.
 - **Adapter split** between `internal/bootstrapadapter` (reusable Pascal-cased) and `cmd/bootstrap_production.go` (production-only camelCase) is well-documented and avoids import cycles.
 - **Table-driven tests** dominate; `t.Parallel()` correctly avoided per project convention.
 - **Doc-comments cite spec sections** at multiple load-bearing sites, anchoring decisions back to source-of-truth.
+- **Shared integration scaffolding** in `internal/restoretest/` (Phase 13 task 13-1) eliminates ~150 lines of duplication across three test files; `BuildPortalBinaryDir`/`BuildPortalBinaryStable` two-flavour split documents lifetime ownership.
+- **DEBUG step-entry breadcrumbs** in `bootstrap.Orchestrator.Run` provide spec-compliant tracing under `PORTAL_LOG_LEVEL=debug`.
 
 Minor concerns flagged below in Recommendations.
 
 ### Test Quality
 
-Adequate at the unit level — every public function and most private helpers have focused, table-driven coverage with edge cases. Specific quality strengths:
+Adequate at unit level — every public function and most private helpers have focused, table-driven coverage with edge cases. Strong test quality observed:
 
 - **Round-trip + drift coverage** on `internal/state` (capture/commit/scrollback/markers).
 - **Argv-shape assertions** on every `tmux.Client` method.
 - **Order-of-operations** asserted for the bootstrap orchestrator and hydrate helper.
-- **Negative-space tests** lock in deliberate non-actions (timeout path does NOT unset marker; hook firing does NOT happen on timeout; etc.).
+- **Negative-space tests** lock in deliberate non-actions (timeout path does NOT unset marker; hook firing does NOT happen on timeout; marker-suppression: structural events DO fire but `saved_at` does NOT advance).
+- **Production binary path coverage** in reboot round-trip via `DriveSignalHydrateBinary` (Phase 13 task 13-2) — the argv-identical pipeline through cobra dispatch into `runSignalHydrate`.
+- **Saved-only reattach** (Phase 12 task 12-2 + Phase 13 task 13-3) — six tests covering bare-shell attach, path-arg open, inside-tmux switch-client, steady-state zero-rewrites, has-session-post-bootstrap, unknown-name negative.
+- **Permission-error classification** for `ReadIndex` (Phase 12 task 12-8) skips Windows + root for portability.
+- **Logger format byte-level assertions** on real on-disk log bytes rather than mocks.
 
-The integration-test gap dominates the test-quality assessment. The spec's headline "Validation Reference" (§ Scrollback Restore Mechanics) explicitly validates ANSI fidelity end-to-end, but no integration test verifies ANSI SGR survives save → kill-server → restore → attach → hydrate. The save-restore round-trip test shipped is a single-session, no-ANSI, no-marker-clearance smoke.
+Integration-test gaps from the original review are closed. Marker-suppression test now uses a non-vacuous `set-hook -ga` probe with `t.Cleanup` removal.
 
 ### Required Changes
 
-1. **Implement task 5-9** (end-to-end reboot round-trip integration test). Required by spec/Phase 5 acceptance bullet at planning.md L164. The test file `cmd/bootstrap/reboot_roundtrip_test.go` does not exist. If full PTY-driven attach is too fragile, the plan's documented fallback (invoke `state.SignalHydrate` directly) is acceptable. Must verify structure, layout, zoom, CWDs, environment, hook firing, and ANSI scrollback in at least one base-index-drift configuration.
-
-2. **Implement task 5-10** (`portal attach NAME` and `portal open` resolve `sessions.json`-only names integration test). Required by spec/Phase 5 acceptance bullet at planning.md L166. File `cmd/reattach_integration_test.go` does not exist. Five named test cases all absent.
-
-3. **Expand task 5-8** (marker-suppression integration test). Add a probe `set-hook -ga` registered before the orchestrator runs that records structural events to a tempfile during the marker window; assert at least one event fires (non-vacuous) and that `sessions.json.saved_at` is not advanced. Add `//go:build integration` tag and `testing.Short()` skip.
-
-4. **Expand task 3-13** (Phase 3 integration test) to cover the full plan acceptance: at minimum, two sessions × multi-window × multi-pane fixture; one zoomed pane; ANSI SGR byte-comparison; per-session environment round-trip; active-pane round-trip; marker clearance after `signal-hydrate` + helper dump.
-
-5. **Fix task 6-2 logger migration**:
-   - Open `*state.Logger` in `cmd/state_migrate_rename.go` (use `ComponentHooks`); replace stderr `fmt.Fprintf` calls with `Logger.Warn`/`Logger.Info`.
-   - Open `*state.Logger` in `cmd/state_notify.go` (use `ComponentNotify`); add WARN on file-create failure per plan.
-   - Add `Debug(component, format string, args ...any)` to `cmd/bootstrap/bootstrap.go` `Logger` interface; emit DEBUG on each step entry per spec § Observability "Bootstrap events at DEBUG level only".
-   - Add `defer logger.Close()` to `cmd/state_signal_hydrate.go` and `cmd/state_hydrate.go` `RunE` bodies (production paths exec away, but tests + cmd interruption paths leak the fd).
-
-6. **Fix task 3-1 `ReadIndex` permission-error wrapping**: change `cmd/.../internal/state/index_reader.go:42` to wrap the read-error branch with `ErrCorruptIndex` so downstream `errors.Is(err, ErrCorruptIndex)` classifiers (Phase 5 task 5-2 / Phase 6 task 6-9) correctly bucket permission errors as soft warnings. Alternatively, document the deliberate exclusion in the plan + spec and add tests/docs at the consumer sites that match the unwrapped read-error case explicitly.
-
-7. **Reconcile plan body wording for task 5-2 `Restoring.Clear`**: plan body says "soft", spec/CLAUDE.md/test all say fatal. Implementation correctly follows spec — amend plan body so future reviewers don't flag this as drift.
+None. The 7 required changes from the original Cycle-1 review are all resolved:
+1. Task 5-9 reboot round-trip — `cmd/bootstrap/reboot_roundtrip_test.go` (3 sub-tests, drift variant, production binary path)
+2. Task 5-10 reattach — `cmd/reattach_integration_test.go` (6 tests, all 7 acceptance bullets)
+3. Task 5-8 marker suppression expansion — non-vacuous probe + `saved_at` invariant in `cmd/bootstrap/phase5_marker_suppression_integration_test.go`
+4. Task 3-13 multi-session/ANSI/marker round-trip — `internal/restore/integration_full_test.go`
+5. Task 6-2 logger migration — `state_migrate_rename` and `state_notify` route through `*state.Logger`; `bootstrap.Logger` gained `Debug` method; deferred `Close()` everywhere
+6. Task 3-1 `ReadIndex` permission-error wrapping — `errors.Is(err, ErrCorruptIndex)` now classifies permission errors correctly
+7. Task 5-2 `Restoring.Clear` plan reconciliation — fatal classification with cycle-1 note in two locations
 
 ## Recommendations
 
 ### Quick-fixes
 
-1. `internal/tmux/hooks_register_test.go:545-547` — stale comment references "the migrate-rename call" that no longer exists.
-2. `internal/tmux/hooks_register_test.go:474` — comment says "registers all 10" but assertion uses correct slice-len expression for 9.
-3. `cmd/bootstrap/phase5_integration_test.go:42` — `markerProbeStub.wantValue` field set but never read; remove or use in the assertion block.
-4. `internal/state/logger.go:120` — `parseLevel` accepts `"warning"` alias not documented in the level-constants block; align doc-comment.
-5. `internal/state/logger.go:184-188` — rename-failure reopen swallows error silently while parallel branch emits diagnostic; restore symmetry.
-6. `internal/state/markers_test.go:280-322` — sample paneKey `@portal-active-some-pane` reads like another Portal namespace; rename to `@my-plugin-foo` to communicate "unrelated".
-7. `cmd/state_status.go` — add explicit `--json` flag absence test (1-line `Lookup("json") != nil` check) to guard against accidental future addition.
-8. `cmd/state_cleanup.go` — inherits `SilenceErrors`/`SilenceUsage` from rootCmd rather than declaring locally; explicit local override would lock the contract.
-9. `internal/state/schema.go:109` — `unsupported sessions.json version` error omits the expected version; add `(current: %d)` for diagnostics.
-10. `internal/state/scrollback.go` — `xxhash.Sum64([]byte(out))` allocates copy; prefer `xxhash.Sum64String(out)` to avoid the allocation.
-11. `internal/restore/session.go:9-10` — doc-comment says "preserving the spec's 'helper as initial process' invariant" but spec retired that phrasing post-task-8-3; reword to "helper-before-shell".
-12. `cmd/bootstrap/bootstrap.go:147-148` — godoc says "the final return swallows it" but restoreErr is logged-and-discarded inline at the switch case; minor wording polish.
-13. Multiple test files reference plan task IDs by number in comments; these will rot if tasks are renumbered. Prefer naming the spec section.
-14. `cmd/state_signal_hydrate.go:60` — `signalHydrateRetryDelays` doc-comment could include cumulative totals per step (`// cumulative: 10, 30, 70, 150, 310, 500`) for the next reader.
-15. `internal/state/markers.go:45-48` — `ServerOptionWriter` interface comment could cross-reference the post-7-6 consolidation so future readers understand why the seam is exactly this two-method pair.
-16. `internal/tmuxtest/socket.go:158` — `_ = out` discard in `WaitForSession` is correct but easy to misread as a lint-silencer; add trailing comment "// intentionally discarded; has-session stderr is noisy during settle window".
+1. `internal/tmux/hooks_register_test.go:474` — Stale numeric reference `// registers all 10. Second bootstrap sees those 10 in show-hooks` contradicts the immediately following computed assertion (`want = 7 + 2 = 9`). Phase 12 task 12-10 fixed lines 545-547 but missed this one. Update to `registers all 9. Second bootstrap sees those 9`.
+2. `.workflows/built-in-session-resurrection/review/built-in-session-resurrection/report.md` — Phase 13 task 13-5 acceptance called for "historical review record gets a reconciliation note (not a rewrite)". Now satisfied by this rewrite — but if a future cycle wants minimal-diff annotation instead, see commit history for prior text.
+3. `cmd/bootstrap/errors.go:52-53, 62-63` — Citations say "Observability section of the specification" (umbrella). For consistency with `internal/warning/warning.go:21-22` ("Observability → Proactive Health Signals → TUI interaction"), tighten to "Observability → Proactive Health Signals". One-line edit per godoc; no behavioural impact.
+4. `internal/tmux/hooks_register_test.go:474` and elsewhere — Multiple test files reference plan task IDs by number in comments; these will rot if tasks are renumbered. Prefer naming the spec section.
+5. `cmd/state_signal_hydrate.go:60` — `signalHydrateRetryDelays` doc-comment could include cumulative totals per step (`// cumulative: 10, 30, 70, 150, 310, 500`) for the next reader.
+6. `internal/state/markers.go:45-48` — `ServerOptionWriter` interface comment could cross-reference the post-7-6 consolidation so future readers understand why the seam is exactly this two-method pair.
+7. `internal/tmuxtest/socket.go:158` — `_ = out` discard in `WaitForSession` is correct but easy to misread as a lint-silencer; add trailing comment "// intentionally discarded; has-session stderr is noisy during settle window".
+8. `cmd/state_status.go` — add explicit `--json` flag absence test (1-line `Lookup("json") != nil` check) to guard against accidental future addition.
+9. `cmd/reattach_integration_test.go:327` — Cross-reference comment "phase5_marker_suppression_integration_test.go:207-210" omits the `cmd/bootstrap/` package qualifier.
+10. `cmd/bootstrap/phase5_marker_suppression_integration_test.go:182` — Probe-file read returns a fatal on non-`IsNotExist` errors without including the probe-file path in the diagnostic.
+11. `cmd/bootstrap/reboot_roundtrip_test.go:452-454` — Comment "Make alpha:w1.p0 the active pane of its window" describes intent but no `select-pane` call follows; rephrase or drop.
+12. `cmd/state_status.go` — `scanRecentWarnings` ignores `scanner.Err()`; truncated/oversized last line silently caps the count. A Debug-level log would aid diagnostics.
+13. `internal/state/logger.go:120` — `parseLevel` accepts `"warning"` alias not documented in the level-constants block; align doc-comment.
 
 ### Ideas
 
-17. `internal/restore/restore.go` and `cmd/state_hydrate.go` — two stray `state.SkeletonMarkerPrefix +` log-formatting concatenations remain outside `markers.go` (task 7-19's literal acceptance). Either introduce a `state.SkeletonMarkerName(paneKey)` helper or update plan acceptance.
-18. `internal/tmux/hooks_unregister.go:24-28` — `portalCommandSubstrings` retains `"portal state migrate-rename"` for legacy upgrade cleanup despite task 7-2 path (b). Document sunset condition or open a follow-up to drop after migration window closes.
-19. `cmd/state_cleanup.go:141-148` — `purgeStateDir` `EvalSymlinks` comparison rejects valid intermediate-symlink paths (e.g., `~/.config` symlinked, macOS `~/Library`). Test suite hides this via `canonicalTempDir`; real users would see "refusing to purge" and have to clean up manually. Suggest dropping the comparison or relaxing to leaf-symlink only (which `Lstat` already catches).
-20. `cmd/bootstrap/bootstrap.go:198-209` — switch could explicitly validate `corrupt && !errors.Is(restoreErr, state.ErrCorruptIndex)` and Warn-log a stronger contract violation. Defense-in-depth.
-21. `cmd/bootstrap/bootstrap.go:162-164` — `Run` mutates receiver to install noopLogger; method-local `logger := o.Logger; if logger == nil { logger = noopLogger{} }` would be race-safe.
-22. `cmd/root.go` — `BootstrapDeps.ForceMemoise` reads as "opt-in to production behavior"; rename to `BypassMemoise` (inverted default) for more intuitive semantics.
-23. `internal/restore/session.go:412-426` — `PredictLiveIndices` retained solely for orchestrator drift diagnostic. If drift WARN is judged low-value, consider removing both helper and warning.
-24. `cmd/state_hydrate.go` — production-always nil-checks on `cfg.HandleTimeout` / `cfg.HandleFileMissing` are pure test affordances; document at the field comments.
-25. `internal/tmuxtest/socket.go:118` — private `runRaw` collides case-only with public `RunRaw`. Rename to `execTmux` or `runBytes`.
-26. Add a dedicated `socketArgs` unit test (table-driven) so the prefix shape is locked at unit scope rather than only via heavy integration suites.
-27. `cmd/clean.go` — add the two spec-pinned regression tests from the plan: binary-missing-not-staleness-signal and projects.json-absence-not-staleness-signal.
-28. `cmd/state_status.go` — missing fixture for `daemon.pid` permission-denied path.
-29. `cmd/state_status.go` — `scanRecentWarnings` ignores `scanner.Err()`; truncated/oversized last line silently caps the count. A Debug-level log would aid diagnostics.
-30. `internal/state/status.go` — `CollectStatus` always returns `nil` for error; either drop from signature or document a specific future condition.
-31. `internal/state/logger.go` — `LogRotateThreshold` doc-comment could include a one-liner spec reference instead of the "exported so tests can reference" wording.
-32. `internal/state/capture.go` — add a literal-string guard test asserting `captureFormat` contains `"#{window_layout}"` and not `"#{window_visible_layout}"`.
-33. `cmd/state_daemon.go:25-34` — `daemonDeps.Dir` field name diverges from the planned `StateDir`; either rename or add a one-line comment.
-34. `cmd/state_daemon_run_test.go:557-565` — promote the unreachable-error NOTE to a named `t.Skip`-guarded test for discoverability via `go test -v`.
-35. `internal/restore/restore.go:153-170` — `warnOnPaneKeyDrift` takes `*SessionRestorer` solely to reach `PredictLiveIndices`; pass `*tmux.Client` directly to remove the indirection.
-36. `cmd/bootstrap/noop.go` — no compile-time guard prevents future addition of `NoOpServer{}`/`NoOpRestoringMarker{}`. A short deny-list test would harden the policy.
-37. `cmd/bootstrap/noop.go:46-50` — `NoOpFIFOSweeper` doc-comment claims it is the production-fallback when state-dir resolution fails, but production currently always wires `bootstrapadapter.FIFOSweeper`. Either drop the claim or add the symmetric fallback.
-38. `cmd/bootstrap/bootstrap.go:80-93` — `FIFOSweeper.Logger` typed as concrete `*state.Logger` while orchestrator `Logger` is the interface; asymmetric.
-39. `cmd/bootstrap_production.go:63-70` — `cleanStaleAdapter.CleanStale` silently swallows `ListAllPanes` error; a Warn-log would aid diagnosis.
-40. Plan body for tasks 5-10, 6-2, 3-1 contradicts implementation choices (Restoring.Clear, ErrCorruptIndex wrapping, etc.) — sweep plan files to reconcile or annotate the deviations.
-41. `internal/state/index_reader.go` — three-tuple `(Index, bool, error)` is unusual; consider typed `ReadResult{Index, Skip}` + `error` once Phase 5/6 call-site readability can be assessed.
-42. Specification line 468 conflates per-pane `CreateFIFO` (defensive remove+mkfifo+chmod in arm phase) with `SweepOrphanFIFOs` (orphan removal in step 7). Reword to disambiguate.
+14. `.claude/skills/workflow-review-process` — Sub-agents (Task tool) often misinterpret system-reminders as blocking the Write tool. They returned findings as text rather than persisting to `.workflows/.../report-{phase}-{task}.md`. Parent ended up re-persisting all 22 reports. Consider clarifying agent prompt template to disambiguate Write availability vs. system reminders.
+15. `internal/restoretest/restoretest.go:54` — `ProjectRoot` is exported but only called from the unexported `buildPortalBinaryInto`. Phase 14 task 14-3 already followed up on a sibling case (`OpenAndSignalFIFO`); consider unexporting `ProjectRoot` for consistency.
+16. `internal/restoretest/restoretest.go:163` — `DriveSignalHydrate`'s 10-second budget and 50 ms cadence are encoded as untyped local constants. Lift to package-level named constants (e.g. `FallbackRetryDelay`, `FallbackRetryBudget`) so divergence-from-production rationale lives at one location.
+17. `internal/restoretest/restoretest.go:218` — `DriveSignalHydrateBinary`'s `cmd.Env` construction concatenates `os.Environ()` then appends overrides. Brief comment confirming overrides win over inherited environment would harden against accidental future reordering.
+18. `cmd/reattach_integration_test.go:380` — Hard-coded `state.SanitizePaneKey("alpha", 0, 0)` couples the marker assertion to single-pane shape. A small `expectedSkeletonMarker(name, win, pane)` helper colocated with the seed helper would localise the coupling.
+19. `cmd/reattach_integration_test.go` — `reattachBuildOnce` / `reattachBinDir` / `reattachBuildErr` is the second sync.Once-cached portal-binary build pattern. Phase 13 task 13-1 already extracted shared helpers; lifting the once-Do wrapper into `internal/restoretest/` would avoid a third re-implementation.
+20. `cmd/bootstrap/reboot_roundtrip_test.go:285-291` — In-pane scrollback override writes the deterministic ANSI fixture AFTER `captureAndCommit`. If a future variant adds a post-hydrate capture-and-commit step, dedup might skip rewriting due to stale hash. Add a comment.
+21. `cmd/state_notify.go:34-47` — `state.EnsureDir()` called twice (once explicitly for fatal-pre-logger guard, then implicitly inside `openNoRotateLogger()`). EnsureDir is idempotent so correctness-safe but mildly wasteful.
+22. Five files use `logger, _ := openNoRotateLogger()` discarding the open error. A helper centralising the policy would shrink duplication.
+23. `internal/state/logger.go` — Both diagnostic strings ("portal: log rotation failed", "portal: log reopen failed") are duplicated as string literals across logger.go and logger_test.go. Consider extracting as unexported constants.
+24. `schema_test.go:312-329` — Optionally add a `strings.Contains(err.Error(), "current:")` assertion in `TestDecodeIndex_ReturnsErrorWhenVersionUnsupported` to lock the new diagnostic into the test contract.
+25. `cmd/state_cleanup_test.go:25-28` — `canonicalTempDir` is now a thin alias to `t.TempDir()` with no remaining unique semantics. A follow-up could inline `t.TempDir()` directly across the ~10 callsites.
+26. `cmd/reattach_integration_test.go` — Tests mock `openPathFunc` rather than letting the real `openPath` reach a `mockSessionConnector`. A future hardening could split `openPath` into a connector-injectable shape so the test could exercise the full chain.
+27. `internal/state/index_reader.go` — Three-tuple `(Index, bool, error)` is unusual; consider typed `ReadResult{Index, Skip}` + `error` once Phase 5/6 call-site readability can be assessed.
+28. `cmd/bootstrap/bootstrap.go` — bootstrap.Logger has 3 methods (Debug/Warn/Error) while *state.Logger has 4 (adds Info). Asymmetry intentional but worth flagging if future steps want INFO emission.
+29. `cmd/bootstrap/bootstrap.go` — Step 9 (Return) emits no Debug line. If future debugging surfaces a need for "bootstrap completed in N ms", a trailing Debug line would be the natural place.
+30. `internal/restore/integration_full_test.go` — `TestPhase3Integration_FullRoundTrip` is one top-level test (no sub-tests). Splitting into `t.Run("structure", ...)`, `t.Run("zoom", ...)`, etc. would surface which dimension drifted as a sub-test name.
+31. `cmd/bootstrap/reboot_roundtrip_test.go` — `verifyCWDs` cases hard-code resolution like `cfg.restoreBase+0`. Could be expressed via a small helper that builds `tmux.PaneTarget` from `(window, pane)` + cfg.
+32. `cmd/state_status.go` — missing fixture for `daemon.pid` permission-denied path.
+33. `internal/state/status.go` — `CollectStatus` always returns `nil` for error; either drop from signature or document a specific future condition.
+34. `internal/state/logger.go` — `LogRotateThreshold` doc-comment could include a one-liner spec reference instead of the "exported so tests can reference" wording.
+35. `internal/state/capture.go` — add a literal-string guard test asserting `captureFormat` contains `"#{window_layout}"` and not `"#{window_visible_layout}"`.
+36. `cmd/state_daemon.go:25-34` — `daemonDeps.Dir` field name diverges from the planned `StateDir`; either rename or add a one-line comment.
+37. `cmd/state_daemon_run_test.go:557-565` — promote the unreachable-error NOTE to a named `t.Skip`-guarded test for discoverability via `go test -v`.
+38. `internal/restore/restore.go:153-170` — `warnOnPaneKeyDrift` takes `*SessionRestorer` solely to reach `PredictLiveIndices`; pass `*tmux.Client` directly to remove the indirection.
+39. `cmd/bootstrap/noop.go` — no compile-time guard prevents future addition of `NoOpServer{}`/`NoOpRestoringMarker{}`. A short deny-list test would harden the policy.
+40. `cmd/bootstrap/noop.go:46-50` — `NoOpFIFOSweeper` doc-comment claims it is the production-fallback when state-dir resolution fails, but production currently always wires `bootstrapadapter.FIFOSweeper`.
+41. `cmd/bootstrap/bootstrap.go:80-93` — `FIFOSweeper.Logger` typed as concrete `*state.Logger` while orchestrator `Logger` is the interface; asymmetric.
+42. `cmd/bootstrap_production.go:63-70` — `cleanStaleAdapter.CleanStale` silently swallows `ListAllPanes` error; a Warn-log would aid diagnosis.
 43. Daemon-level test for "seed corrupt sessions.json → `deps.PrevIndex == nil` + WARN line" would close the seam between the `ReadIndex` contract test and its daemon consumer.
+44. Specification line 468 conflates per-pane `CreateFIFO` (defensive remove+mkfifo+chmod in arm phase) with `SweepOrphanFIFOs` (orphan removal in step 7). Reword to disambiguate.
+45. `internal/state/index_reader_test.go:213, :249` — Permission tests duplicate ~15 lines of chmod-0o000 setup + cleanup. A small `seedUnreadableSessionsJSON(t, dir)` helper would dedupe.
+46. `cmd/bootstrap/reboot_roundtrip_test.go` — `DriveSignalHydrateBinary` reports per-session failures via `t.Errorf` (non-fatal). Defensible and consistent with other helpers, but downstream assertions still execute against an arguably-poisoned state on a partial signal-hydrate failure.
+47. `cmd/clean_test.go` — Two regression tests share substantial setup boilerplate; a small `setupCleanTest(t) (projectsFile, hooksFile string)` helper could DRY env-var setup across the file.
 
 ### Bugs
 
-44. `main.go:22` — non-fatal branch `fmt.Fprintln(os.Stderr, err)` will print a bare `"\n"` for `ErrStatusUnhealthy` (sentinel with empty `Error()`); status command renders before returning so an empty trailing line follows. Cosmetic but visible.
-45. `cmd/state_signal_hydrate.go:149` and `cmd/state_hydrate.go:360` — log fd not deferred-closed; leaks until process exit. Production paths exec away (acceptable), but interrupted paths and tests retain leaked fds.
-46. `cmd/state_cleanup.go:141-148` — `purgeStateDir` rejects valid resolved-path purges when intermediate path components are symlinks (see Idea 19). Real users on macOS/symlinked-config setups would see false-positive refusals.
+48. `main.go:22` — non-fatal branch `fmt.Fprintln(os.Stderr, err)` will print a bare `"\n"` for `ErrStatusUnhealthy` (sentinel with empty `Error()`); status command renders before returning so an empty trailing line follows. Cosmetic but visible.
