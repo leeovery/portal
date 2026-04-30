@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "hidden-sessions-showing-on-startup": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-04-30",
+          "sources": {
+            "hidden-sessions-showing-on-startup": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
