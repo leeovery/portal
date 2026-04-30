@@ -23,7 +23,9 @@ The bug report attributed this to non-zero `base-index` / `pane-base-index`. Tha
 run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"
 ```
 
-When tmux fires `client-attached` / `client-session-changed` for a session whose name begins with `-` (e.g. `-dotfiles-HM9Zhw`), the resolved shell command becomes `portal state signal-hydrate -dotfiles-HM9Zhw`. cobra/pflag parses the leading-dash token as a short-flag cluster, fails with `unknown shorthand flag: 'd'`, and exits non-zero before `runSignalHydrate` executes. No FIFO byte is written; the hydrate helper times out at 3s and exec's a bare `$SHELL` with no scrollback replay.
+When tmux fires `client-attached` / `client-session-changed` for a session whose name begins with `-` (e.g. `-dotfiles-HM9Zhw`), the resolved shell command becomes `portal state signal-hydrate -dotfiles-HM9Zhw`. cobra/pflag parses the leading-dash token as a short-flag cluster, fails with `unknown shorthand flag: 'd'`, and exits non-zero before `runSignalHydrate` executes. No FIFO byte is written; the hydrate helper times out at 3s (`openFIFOWithTimeout` at `cmd/state_hydrate.go:100`) and exec's a bare `$SHELL` (`handleHydrateTimeout` at `cmd/state_hydrate.go:248`) with no scrollback replay.
+
+The parse-error text is written to stderr, which `tmux run-shell` captures into its own output stream rather than `portal.log`. As a result, the failure produces no Portal log line — the only observable artefact is the downstream `hydrate timeout` WARN.
 
 Leading-dash session names arise because `internal/session/naming.go::SanitiseProjectName` (line 24) replaces `.` and `:` with `-`. Project basenames like `.dotfiles` or `.config` become `-dotfiles` / `-config`, then `GenerateSessionName` appends a 6-char nanoid yielding `-dotfiles-HM9Zhw`.
 
@@ -65,7 +67,9 @@ The helper waits at `hydrate-<sess>__<live>.fifo`, the marker is set at `@portal
 
 **Directly affected:** Any session whose name starts with `-`. Includes Portal-generated names from projects whose basename begins with `.` or `:` (after `SanitiseProjectName`'s substitution — `.dotfiles`, `.config`, etc.).
 
-**Potentially affected:** Any other Portal subcommand invoked from a tmux hook with `#{session_name}` as a positional arg. `signalHydrateCommand` is currently the only such site (per `internal/tmux/hooks_register.go`); `notifyCommand` is argument-free and unaffected.
+**Potentially affected:**
+- Any other Portal subcommand invoked from a tmux hook with `#{session_name}` as a positional arg. `signalHydrateCommand` is currently the only such site (per `internal/tmux/hooks_register.go`); `notifyCommand` is argument-free and unaffected.
+- User-issued `portal <subcommand> -<dashed-name>` from a shell prompt — same parse-failure class. **Not addressed** by the chosen fix: the `--` separator is added only to the hook command, so a user invoking the CLI manually with a leading-dash positional argument would still hit the parse error. This case is intentionally out of scope (see Out of Scope below).
 
 ## Fix Scope
 
@@ -105,7 +109,7 @@ If post-restore drift visibility ever becomes valuable, a saved-vs-live comparis
 
 The following were considered and explicitly excluded from this fix:
 
-- **Renaming `SanitiseProjectName`'s `.` → `-` substitution to `_` or another safe char.** Fixes one symptom (no more leading-dash names from dotfiles projects) but leaves the broader class — any user-issued or scripted invocation passing `-anything` to a hook-invoked Portal subcommand would still break. Also a backwards-incompatible change for existing users whose projects/sessions use the current scheme.
+- **Renaming `SanitiseProjectName`'s `.` → `-` substitution to `_` or another safe char.** Fixes one symptom (no more leading-dash names from dotfiles projects) but leaves the broader class — any user-issued or scripted invocation passing `-anything` to a hook-invoked Portal subcommand would still break. Also a backwards-incompatible change for existing users whose projects/sessions use the current scheme. Worth re-evaluating in a separate, larger discussion later — not as a fix for this bug.
 - **Pass session via env var or `set-environment` instead of positional argv.** Most robust to weird names (quotes, semicolons, etc.) but requires invasive run-shell setup. Overkill for the constrained name alphabet Portal generates; `--` solves the actual observed class.
 - **`cobra.Command.DisableFlagParsing = true` on `stateSignalHydrateCmd`.** Works but loses the ability to add real flags later and is less intent-preserving than `--`.
 - **Repairing `PredictLiveIndices` to read `base-index` from session scope and `pane-base-index` from window scope.** Considered and rejected for the reasons above (no functional consumer, conflicts with spec mandate).

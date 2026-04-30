@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Input Review
@@ -14,7 +14,7 @@ topic: scrollback-not-restored-with-non-zero-base-index
 
 **Source**: investigation.md § "Contributing Factors" (line 155) and § "Why It Wasn't Caught" (line 159)
 **Category**: Enhancement to existing topic
-**Affects**: Problem & Root Cause → Primary Root Cause (or a new "Why It Wasn't Caught" sub-section)
+**Affects**: Problem & Root Cause → Primary Root Cause
 
 **Details**:
 The investigation calls out that `signal-hydrate` failures are invisible because the cobra/pflag parse error is written to stderr, which `tmux run-shell` captures into its own output stream rather than `portal.log`. This is load-bearing context for understanding why this bug went undetected — it explains why a non-zero exit produces no log line and the only observable artefact is the downstream `hydrate timeout` WARN. The spec describes the parse failure but never mentions where the parse-error text goes, leaving a reader to wonder why the failure wasn't logged.
@@ -23,10 +23,10 @@ The investigation calls out that `signal-hydrate` failures are invisible because
 > cobra/pflag parses the leading-dash token as a short-flag cluster, fails with `unknown shorthand flag: 'd'`, and exits non-zero before `runSignalHydrate` executes. No FIFO byte is written; the hydrate helper times out at 3s and exec's a bare `$SHELL` with no scrollback replay.
 
 **Proposed Addition**:
-(blank — to be discussed)
+Append a new paragraph after the existing one: "The parse-error text is written to stderr, which `tmux run-shell` captures into its own output stream rather than `portal.log`. As a result, the failure produces no Portal log line — the only observable artefact is the downstream `hydrate timeout` WARN."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added to Primary Root Cause; co-applied with Finding 3's file references in the same paragraph.
 
 ---
 
@@ -43,10 +43,10 @@ Investigation explicitly notes that `portal attach -dashed-session` invoked from
 > **Potentially affected:** Any other Portal subcommand invoked from a tmux hook with `#{session_name}` as a positional arg. `signalHydrateCommand` is currently the only such site (per `internal/tmux/hooks_register.go`); `notifyCommand` is argument-free and unaffected.
 
 **Proposed Addition**:
-(blank — to be discussed)
+Convert "Potentially affected" to a bulleted list and add: "User-issued `portal <subcommand> -<dashed-name>` from a shell prompt — same parse-failure class. **Not addressed** by the chosen fix: the `--` separator is added only to the hook command, so a user invoking the CLI manually with a leading-dash positional argument would still hit the parse error. This case is intentionally out of scope (see Out of Scope below)."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added under Blast Radius. Explicitly clarifies that the `--` fix targets the hook path only; user-issued CLI invocations remain a known limitation deferred from this fix.
 
 ---
 
@@ -63,10 +63,10 @@ The investigation's Code Trace pinpoints where the 3s timeout originates (`cmd/s
 > No FIFO byte is written; the hydrate helper times out at 3s and exec's a bare `$SHELL` with no scrollback replay.
 
 **Proposed Addition**:
-(blank — to be discussed)
+Inline the file/line refs into the existing sentence: "the hydrate helper times out at 3s (`openFIFOWithTimeout` at `cmd/state_hydrate.go:100`) and exec's a bare `$SHELL` (`handleHydrateTimeout` at `cmd/state_hydrate.go:248`) with no scrollback replay."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Co-applied with Finding 1 in the same Primary Root Cause paragraph.
 
 ---
 
@@ -80,10 +80,10 @@ The investigation's Code Trace pinpoints where the 3s timeout originates (`cmd/s
 Investigation states twice that Part 1 + Part 2 should ship in a single PR — both touch restoration-diagnostics correctness, both are low-complexity, and bundling closes the misleading-WARN loop the bug report opened with. The spec describes the two parts as both required but says nothing about delivery sequencing or whether they can/should land separately. For a bug fix this is normally implicit, but the investigation makes it an explicit recommendation worth preserving.
 
 **Proposed Addition**:
-(blank — to be discussed)
+(N/A — see resolution)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Skipped
+**Notes**: User explicitly directed during construction that PR/delivery concerns are out of scope for the spec — "you dont need to say ship together in a single pr. its out of scope to worry about PRs in this spec." Skipping this finding preserves that direction.
 
 ---
 
@@ -100,9 +100,9 @@ The investigation's closing Notes section flags that `SanitiseProjectName`'s `.`
 > - **Renaming `SanitiseProjectName`'s `.` → `-` substitution to `_` or another safe char.** Fixes one symptom (no more leading-dash names from dotfiles projects) but leaves the broader class — any user-issued or scripted invocation passing `-anything` to a hook-invoked Portal subcommand would still break. Also a backwards-incompatible change for existing users whose projects/sessions use the current scheme.
 
 **Proposed Addition**:
-(blank — to be discussed)
+Append to the existing bullet: "Worth re-evaluating in a separate, larger discussion later — not as a fix for this bug."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added to Out of Scope bullet — preserves the follow-up framing without re-litigating now.
 
 ---
