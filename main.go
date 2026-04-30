@@ -19,7 +19,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Fprintln(os.Stderr, err)
+		// Some errors are intentional empty-message sentinels (e.g.
+		// cmd.ErrStatusUnhealthy) used solely to drive a non-zero exit
+		// after the command has already rendered its output. Skip the
+		// stderr write so the user does not see a bare trailing newline.
+		if err.Error() != "" {
+			fmt.Fprintln(os.Stderr, err)
+		}
 
 		var usageErr *cmd.UsageError
 		if errors.As(err, &usageErr) {
