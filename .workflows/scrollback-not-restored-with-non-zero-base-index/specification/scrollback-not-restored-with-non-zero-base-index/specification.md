@@ -110,6 +110,40 @@ The following were considered and explicitly excluded from this fix:
 - **`cobra.Command.DisableFlagParsing = true` on `stateSignalHydrateCmd`.** Works but loses the ability to add real flags later and is less intent-preserving than `--`.
 - **Repairing `PredictLiveIndices` to read `base-index` from session scope and `pane-base-index` from window scope.** Considered and rejected for the reasons above (no functional consumer, conflicts with spec mandate).
 
+## Acceptance Criteria
+
+The fix is complete when all of the following hold:
+
+1. **Hydration succeeds for leading-dash session names.** After `tmux kill-server` and reattach, a Portal-managed session whose name begins with `-` (e.g. `-dotfiles-HM9Zhw`) has its saved scrollback replayed into each pane. No `hydrate timeout` WARN appears in `~/.config/portal/state/portal.log`. This holds regardless of `base-index` / `pane-base-index` values in the user's tmux config.
+
+2. **`signal-hydrate` accepts leading-dash session names from a tmux hook.** Manual verification: `portal state signal-hydrate -dotfiles-HM9Zhw` invoked via `run-shell` (the hook's invocation context) exits 0 and writes the FIFO byte. The previous parse error (`unknown shorthand flag: 'd'`) no longer occurs.
+
+3. **Existing installs are migrated on first bootstrap.** After upgrading, the next Portal command that runs the bootstrap orchestrator removes any pre-existing hook entry that lacks the `--` separator and installs the fixed entry. Subsequent bootstraps are no-ops.
+
+4. **No misleading `predicted=...__0.0 live=...__X.Y` WARN appears in `portal.log`** under any tmux config. The diagnostic is gone, not silenced.
+
+5. **No regression in the existing live-index path.** Sessions whose names do not start with `-` continue to restore and hydrate as before. Pane-count mismatch logging at `armPanes:202` is preserved.
+
+## Testing Requirements
+
+The following test coverage must be in place before the fix is considered complete:
+
+1. **Cobra-level argv parse test for `signal-hydrate`.** A unit test exercising `runSignalHydrate` end-to-end via the cobra `Execute()` path (not direct `signalHydrateConfig` construction) with a session name starting with `-`. Today's tests in `cmd/state_signal_hydrate_test.go` bypass argv parsing by calling the run function directly; they would not have caught this bug. The new test must drive the cobra command tree the same way production does.
+
+2. **Reboot round-trip integration coverage with leading-dash session name.** Extend `cmd/bootstrap/reboot_roundtrip_test.go` (or add a sibling integration test) using a session name that begins with `-` to exercise the full hook-firing path: client-attached fires → `signal-hydrate` runs via `run-shell` → FIFO byte written → helper unblocks → scrollback replays. The existing test's session names ("alpha", "beta") would not have surfaced this failure.
+
+3. **Hook content unit test.** A test asserting that `signalHydrateCommand` includes the `--` separator before `#{session_name}`, so future edits to the constant cannot silently regress the fix.
+
+4. **Migration test for `RegisterPortalHooks`.** A unit test verifying that bootstrap evicts a pre-existing hook entry containing `portal state signal-hydrate` without `--` and installs the fixed entry. A second invocation of the same bootstrap step must be a no-op (idempotent).
+
+### Testing Constraint — Do Not Restart The Active Tmux Server
+
+The tmux server hosting the developer's working session must **not** be killed (`tmux kill-server`) as part of executing tests or manual verification. Doing so terminates the running session and halts work in progress.
+
+Reboot round-trip tests and any manual reproduction must use a **separate, isolated tmux server** — typically by pointing tmux at a dedicated socket via `tmux -L <test-socket>` (or equivalent fixture, e.g. `internal/tmuxtest`'s real-tmux socket helper). The `kill-server` step exercised by these tests targets only the test socket; the developer's primary tmux server is unaffected.
+
+This constraint applies to all automated tests, manual repro steps documented in PRs, and any debugging session.
+
 ---
 
 ## Working Notes
