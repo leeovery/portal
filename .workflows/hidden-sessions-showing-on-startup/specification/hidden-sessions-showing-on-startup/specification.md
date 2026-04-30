@@ -305,6 +305,49 @@ implementation strategy from Fix A's "Interaction With The Capture
 Path" section preserves capture behaviour. No new capture tests are
 required, but existing ones are an explicit regression gate.
 
+## Out Of Scope / Deferred
+
+The following ideas surfaced during investigation but are **not**
+part of this bugfix. They are documented here so planning does not
+mistakenly pull them in.
+
+### `portal list --all` Flag
+
+A `--all` (or equivalent) flag to display unfiltered output is
+deferred. Users have `tmux ls` for inspecting Portal-internal
+sessions; adding a flag now would solve a hypothetical need. Can
+be added later if a real diagnostic use case emerges.
+
+### `ListAllSessions` / `ListSessionsRaw` Sibling Method
+
+Documented as the available extension point in Fix A but **not**
+implemented in this bugfix. No production caller currently needs
+unfiltered output — the only callers identified (`cmd/list.go`,
+`internal/tui/model.go`) all want the filter. Add the method when
+the first legitimate consumer appears, not speculatively.
+
+### Bootstrap Orchestrator Step For Explicit Cleanup
+
+The "kill the bootstrap session after Restore" approach (option
+B2 from the investigation) was rejected in favour of Fix B
+(rename). No new orchestrator step is added. The existing
+nine-step bootstrap sequence is unchanged in shape.
+
+### Generalised Internal-Session Naming Policy
+
+The `_` prefix convention is already documented in the
+`built-in-session-resurrection` specification. This bugfix does
+not extend, formalise, or relocate that policy beyond the targeted
+filter and rename described above.
+
+### Audit Of Other `Client.List*` Methods
+
+Other listing methods (`ListPanes`, `ListPanesInSession`,
+`ListAllPanes`, `ListAllPanesWithFormat`) are **not** audited or
+modified in this bugfix. Pane-level filtering is a separate
+concern, and there is no observed bug or spec mandate driving a
+change there.
+
 ---
 
 ## Working Notes
