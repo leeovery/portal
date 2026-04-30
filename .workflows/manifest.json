@@ -38,6 +38,9 @@
     },
     "hidden-sessions-showing-on-startup": {
       "work_type": "bugfix"
+    },
+    "scrollback-not-restored-with-non-zero-base-index": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
