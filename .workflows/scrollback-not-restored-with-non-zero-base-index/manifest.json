@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "scrollback-not-restored-with-non-zero-base-index": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
