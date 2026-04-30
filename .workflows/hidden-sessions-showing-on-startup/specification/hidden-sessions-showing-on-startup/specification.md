@@ -172,6 +172,60 @@ A session is filtered when `strings.HasPrefix(name, "_")` is true.
 The match is on the literal session name as reported by tmux. No
 trimming, no case-folding.
 
+## Fix B — Rename Bootstrap Session To `_portal-bootstrap`
+
+### Behaviour Contract
+
+`internal/tmux.Client.StartServer` MUST create the bootstrap session
+with an explicit underscore-prefixed name. The chosen name is
+`_portal-bootstrap`.
+
+The implementation invokes `tmux new-session -d -s _portal-bootstrap`
+instead of the current `tmux new-session -d`.
+
+The reserved name MUST be exposed as an exported package-level
+constant in `internal/tmux` (sibling to `PortalSaverName`), e.g.
+`PortalBootstrapName = "_portal-bootstrap"`. Tests and any future
+diagnostic tooling reference the constant rather than the literal
+string.
+
+### Why Rename Instead Of Kill
+
+Three alternatives were considered for the bootstrap session:
+
+- **Rename to `_portal-bootstrap` (chosen).** Smallest surface
+  change. Hidden by Fix A's filter. Lets tmux's native `exit-empty`
+  lifecycle handle reaping when other sessions exist. If Restore
+  creates nothing on a given startup, the bootstrap session remains
+  as the keep-server-alive anchor — exactly its intended job.
+- **Add an explicit kill step in the bootstrap orchestrator after
+  Restore (rejected).** Works but introduces a new orchestrator
+  step plus a precondition check (must not kill the only session,
+  or the server dies). More moving parts than the rename.
+- **Revert `StartServer` to `tmux start-server` (rejected).** Re-
+  introduces the failure mode that commit `bd659a3` fixed —
+  `exit-empty on` can kill the server before restoration finishes.
+
+### Lifecycle After The Rename
+
+- **Server start with restorable state:** `_portal-bootstrap` is
+  created. `Restore` (bootstrap step 5) creates real user sessions.
+  When tmux's `exit-empty on` policy applies, `_portal-bootstrap`
+  may be reaped naturally because real sessions exist. If it
+  persists, Fix A's filter hides it from view.
+- **Server start with no restorable state:** `_portal-bootstrap`
+  is created and remains as the only session. It keeps the server
+  alive (its original purpose). Fix A's filter hides it from the
+  user's session list.
+- **Server already running:** `StartServer` is not called.
+  Bootstrap proceeds without creating the session.
+
+### Naming Constraint
+
+`_portal-bootstrap` is reserved. Other code MUST NOT create or
+re-use a session with this name. The constant is the canonical
+reference.
+
 ---
 
 ## Working Notes
