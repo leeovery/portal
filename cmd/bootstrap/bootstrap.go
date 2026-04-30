@@ -249,6 +249,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 
 	// Step 9 — Return. Step 5 never produces a fatal error; warnings
 	// already carry the user-facing surface.
+	o.Logger.Debug(state.ComponentBootstrap, "step 9 (Return): exiting with %d warning(s)", len(warnings))
 	return serverStarted, warnings, nil
 }
 

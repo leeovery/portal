@@ -51,6 +51,9 @@ import (
 // Returns an error rather than fatalling so it can be reused by helpers
 // that also return error (BuildPortalBinaryStable) without dragging
 // *testing.T into pure plumbing.
+//
+// Exported because internal/restoretest/restoretest_test.go (external
+// _test package) exercises this helper's contract directly.
 func ProjectRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -225,6 +228,10 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 		// case; we already control PATH (and pass an absolute binary
 		// path here) so the wrap is unnecessary.
 		cmd := exec.Command(binary, "state", "signal-hydrate", session)
+		// Env construction: prepend os.Environ() then append overrides.
+		// exec.Cmd honours last-write-wins for duplicate keys, so any
+		// inherited TMUX/PORTAL_STATE_DIR/PORTAL_HOOKS_FILE/PATH from the
+		// outer test process is shadowed by the explicit values below.
 		cmd.Env = append(os.Environ(),
 			// TMUX is the only documented mechanism by which a tmux CLI
 			// invocation without -S/-L can target a non-default socket.

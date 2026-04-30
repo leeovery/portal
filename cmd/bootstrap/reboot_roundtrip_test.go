@@ -282,6 +282,14 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// the production code's responsibility), and we only swap the
 	// bytes for determinism — capture-pane output is timing- and
 	// terminal-dependent which would make a byte-compare flaky.
+	//
+	// NOTE: this on-disk write does NOT update state.HashMap, so the
+	// in-memory hash for hookScrollbackPath is stale relative to disk.
+	// This test never re-captures after the reboot, so the staleness
+	// is invisible. A future variant that adds a post-hydrate
+	// captureAndCommit step would need to invalidate the hash entry
+	// (or re-seed it) before that capture, otherwise dedup will skip
+	// the rewrite and the new fixture won't land on disk.
 	ansiFixture := []byte("\x1b[31mred\x1b[0m\nbefore reboot\n")
 	hookPaneKey := state.SanitizePaneKey("alpha",
 		cfg.saveBase+0, cfg.savePaneBase+0)

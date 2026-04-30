@@ -155,6 +155,9 @@ func (s *Socket) WaitForSession(t *testing.T, name string, timeout time.Duration
 		if err == nil {
 			return
 		}
+		// out is intentionally discarded: has-session writes to stderr
+		// during the settle window ("can't find session") and the noise
+		// is not useful diagnostic surface for the polling caller.
 		_ = out
 		time.Sleep(20 * time.Millisecond)
 	}

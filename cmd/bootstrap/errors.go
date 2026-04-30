@@ -47,10 +47,10 @@ type Warning = warning.Warning
 // CorruptSessionsJSONWarning returns the canonical warning for the
 // "sessions.json exists but cannot be used" path. Both unparseable
 // content (malformed JSON, unsupported version) AND unreadable files
-// (permission denied — see T12-8) flow through this warning, since
+// (permission denied) flow through this warning, since
 // internal/state/index_reader.go wraps every non-nil error with
-// state.ErrCorruptIndex. Wording matches the Observability section of
-// the specification verbatim.
+// state.ErrCorruptIndex. Wording matches the spec section
+// "Observability → Proactive Health Signals" verbatim.
 func CorruptSessionsJSONWarning() Warning {
 	return Warning{Lines: []string{
 		"Portal state file unusable — restoration skipped.",
@@ -59,8 +59,8 @@ func CorruptSessionsJSONWarning() Warning {
 }
 
 // SaverDownWarning returns the canonical warning for the "_portal-saver
-// failed to start after retries" path. Wording matches the Observability
-// section of the specification verbatim.
+// failed to start after retries" path. Wording matches the spec section
+// "Observability → Proactive Health Signals" verbatim.
 func SaverDownWarning() Warning {
 	return Warning{Lines: []string{
 		"Portal save daemon failed to start — sessions won't be captured.",
