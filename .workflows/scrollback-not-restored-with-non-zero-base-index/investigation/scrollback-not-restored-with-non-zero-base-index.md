@@ -178,7 +178,7 @@ Two-part fix.
 
 **Part 1 (primary, fixes the observed symptom):** add a `--` end-of-flags separator to `signalHydrateCommand` so the session name is unambiguously positional regardless of its first character. Add a one-shot migration on bootstrap to remove any pre-existing hook entries that lack the `--` separator (so users upgrading don't keep the broken hook alongside a fixed one).
 
-**Part 2 (diagnostic-quality fix):** either repair `PredictLiveIndices` to read the correct tmux scopes (`base-index` is a session option, `pane-base-index` is a window option), or — preferred — delete `PredictLiveIndices` and `warnOnPaneKeyDrift` outright. The function exists only to power a diagnostic WARN that has no functional consumer; the spec-mandated approach is "re-query live indices, never predict." A more useful drift-detection signal would compare *saved* indices against *live* indices (pane-count mismatch is already logged at `armPanes:202`); add that warning if drift visibility is wanted.
+**Part 2 (diagnostic-quality fix):** delete `PredictLiveIndices`, `warnOnPaneKeyDrift`, and `flattenSavedPanePositions`. The function exists only to power a diagnostic WARN that has no functional consumer, and the spec-mandated approach is "re-query live indices, never predict." (Repair was considered — read `base-index` from session scope and `pane-base-index` from window scope — but rejected; see Discussion.) Pane-count mismatch is already logged at `armPanes:202`; if post-restore drift visibility is later wanted, a saved-vs-live comparison is the better shape.
 
 ### Options Explored
 
@@ -194,7 +194,11 @@ Chosen: A for primary, plus delete-or-fix for the diagnostic. C is rejected as a
 
 ### Discussion
 
-_To be filled in during findings review._
+User accepted both findings (primary leading-dash argv parse, secondary `PredictLiveIndices` wrong-scope) on first presentation — synthesis validation gave high confidence with no gaps, and no further trace work was requested.
+
+For Part 2, the recommendation is **delete** rather than repair `PredictLiveIndices` / `warnOnPaneKeyDrift` / `flattenSavedPanePositions`. Reasoning: the function powers only a diagnostic with no functional consumer, and the spec's stated mandate is "re-query live, never predict." A repaired predictor would buy a marginal post-restore drift signal at the cost of new tmux-client surface (session-scope + window-scope option getters) and continued conceptual tension with the spec. If post-restore drift visibility ever becomes valuable, a saved-vs-live comparison is more defensible than predicted-vs-live and can be added later without resurrecting prediction.
+
+Bundle Part 1 + Part 2 in a single PR — both touch restoration-diagnostics correctness, both are low-complexity, and the diagnostic deletion in Part 2 closes the misleading-WARN loop that the user-facing bug report opened with.
 
 ### Testing Recommendations
 
