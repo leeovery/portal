@@ -6,7 +6,7 @@ total: 2
 
 ## hidden-sessions-showing-on-startup-1-1 | approved
 
-### Task: Add underscore-prefix filter to `Client.ListSessions` with unit test
+### Task 1-1: Add underscore-prefix filter to `Client.ListSessions` with unit test
 
 **Problem**: The `built-in-session-resurrection` spec mandates that sessions whose names begin with `_` are hidden Portal-wide. The capture path filters them, but `internal/tmux.Client.ListSessions` does not — so every downstream consumer (TUI session picker via `internal/tui/model.go.filteredSessions`, `cmd/list.go`, future callers) leaks `_portal-saver` (and, after Phase 2, `_portal-bootstrap`) into user-visible output. This is Root Cause 1 of the bug.
 
@@ -76,7 +76,7 @@ total: 2
 
 ## hidden-sessions-showing-on-startup-1-2 | approved
 
-### Task: Verify `cmd/list.go` empty-input contract and refresh `tmux.PortalSaverName` doc-comment
+### Task 1-2: Verify `cmd/list.go` empty-input contract and refresh `tmux.PortalSaverName` doc-comment
 
 **Problem**: Two follow-on housekeeping items must ride with Phase 1's commit per the spec's Rollout section: (a) `cmd/list.go` must be **explicitly verified** against the empty-input contract that Phase 1 unlocks (the spec forbids assuming "no change required" without verification); (b) the `tmux.PortalSaverName` doc-comment encodes a claim ("filtered from the TUI picker and from `sessions.json` capture") that becomes accurate only once the chokepoint filter from Task 1-1 lands — it must be re-read in the post-fix context and either revised to correctly reference the chokepoint or explicitly noted as "reviewed, no change required" in the commit message. Phase 1 ships as one targeted commit (Fix A + unit test + this verification + doc-comment), so neither item can be deferred.
 

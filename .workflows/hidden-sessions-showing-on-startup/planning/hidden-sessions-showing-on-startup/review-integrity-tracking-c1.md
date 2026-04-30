@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Plan Integrity Review
@@ -80,7 +80,7 @@ Task 1-1 cites `Client.ListSessions` at "lines 106-150" and `ListSessionNames` a
 
 ---
 
-### 3. Inconsistent task-header style across phase task files
+### 3. Inconsistent task-header style across phase task files [FIXED]
 
 **Severity**: Minor
 **Plan Reference**: `phase-1-tasks.md` (Tasks 1-1, 1-2 headers) vs `phase-2-tasks.md` (Tasks 2-1, 2-2, 2-3 headers)
@@ -118,7 +118,7 @@ Phase 2's task headers follow the canonical task template ("### Task N: ..." —
 ### Task 1-2: Verify `cmd/list.go` empty-input contract and refresh `tmux.PortalSaverName` doc-comment
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Task 1-1 and Task 1-2 headers in `phase-1-tasks.md` aligned to canonical `### Task N: ...` style.
 
 ---
