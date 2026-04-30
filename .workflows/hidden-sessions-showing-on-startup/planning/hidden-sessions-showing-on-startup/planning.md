@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Filter `_*` Sessions in Client.ListSessions
-status: draft
+status: approved
+approved_at: 2026-04-30
 
 **Goal**: Apply the chokepoint underscore-prefix filter inside `internal/tmux.Client.ListSessions` so every consumer (TUI picker, `portal list`, capture path, future callers) inherits the `_*`-hiding invariant without per-consumer changes, and refresh the `tmux.PortalSaverName` doc-comment to reflect the post-fix reality.
 
@@ -20,7 +21,8 @@ status: draft
 - [ ] `go test ./...` is green; change ships as a single targeted commit (Fix A + unit test + doc-comment) per the Rollout section.
 
 ### Phase 2: Rename Bootstrap Session to `_portal-bootstrap`
-status: draft
+status: approved
+approved_at: 2026-04-30
 
 **Goal**: Replace the unnamed bootstrap session created by `internal/tmux.Client.StartServer` with a named `_portal-bootstrap` session keyed off a new exported `PortalBootstrapName` constant, refresh the `tmux.StartServer` doc-comment to drop stale tmux-resurrect / tmux-continuum rationale, and ship the end-to-end regression guard that proves both root causes are fixed together.
 
