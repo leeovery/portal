@@ -57,6 +57,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -355,6 +356,15 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
 
+	// End-to-end regression guard for the hidden-sessions-showing-on-
+	// startup spec. Asserted BEFORE the structural verifiers so a
+	// regression (Root Cause 1: `_*` leak through ListSessions, Root
+	// Cause 2: bootstrap session named `0` reappears) fails fast and
+	// the failure pinpoints the bug rather than cascading downstream.
+	verifyPostBootstrapSessionSet(t, ts, client,
+		[]string{tmux.PortalBootstrapName, tmux.PortalSaverName, "_seed"},
+		[]string{"alpha", "beta"})
+
 	// Assert structure / layout / zoom / CWDs / environment NOW —
 	// before signal-hydrate fires. At this point each restored pane
 	// is running `portal state hydrate ...` blocked on its FIFO
@@ -590,6 +600,126 @@ func verifyLiveStructure(t *testing.T, ts *tmuxtest.Socket, cfg roundTripCfg) {
 	if !strings.Contains(betaPanes, wantBeta) {
 		t.Errorf("beta live pane %q missing; got %q", wantBeta, betaPanes)
 	}
+}
+
+// verifyPostBootstrapSessionSet is the end-to-end regression guard for
+// the hidden-sessions-showing-on-startup spec. It runs two complementary
+// assertions against the live tmux server post-bootstrap:
+//
+// Assertion 1 (Root Cause 2 — RAW TMUX STATE):
+//   - Reads tmux's session list directly via `ts.Run("list-sessions",
+//     -F #{session_name})`, deliberately bypassing Client.ListSessions.
+//     Bypassing the chokepoint filter is load-bearing: a regression
+//     where StartServer drops its `-s <name>` arg makes tmux fall back
+//     to its default session name `0` — which has no `_*` prefix and
+//     would therefore be invisible to a Client.ListSessions-based
+//     assertion.
+//   - Asserts the raw set is a SUBSET of allowedReserved ∪
+//     expectedRestored. The "subset" shape (rather than equality) is
+//     deliberate: PortalSaverName is included in allowedReserved for
+//     forward-compatibility even though bootstrap.NoOpSaver{} skips
+//     creating it in this test path. Equality would force every test
+//     wiring to either create _portal-saver or omit it from the
+//     superset; subset tolerates either outcome.
+//   - Failure message identifies the unexpected name so a regression
+//     (e.g. `0` re-appearing after a Fix B regression) pinpoints the
+//     leaked name rather than printing only the full set.
+//
+// Assertion 2 (Root Cause 1 — USER-FACING VISIBILITY):
+//   - Calls Client.ListSessions and asserts the returned set equals
+//     expectedRestored exactly. Reserved names (PortalBootstrapName,
+//     PortalSaverName) MUST be filtered out. A Fix A regression (the
+//     `_*` filter being removed) leaks reserved names through to user-
+//     facing callers (TUI picker, `portal list`, etc.) and would be
+//     caught here.
+//   - Failure message identifies the leaked reserved name.
+//
+// The helper takes both names via the tmux package constants
+// (PortalBootstrapName, PortalSaverName) — the test file MUST NOT
+// embed the literal strings, so a future rename of either constant is
+// caught at compile time, not by a stale string assertion.
+func verifyPostBootstrapSessionSet(t *testing.T, ts *tmuxtest.Socket, client *tmux.Client, allowedReserved []string, expectedRestored []string) {
+	t.Helper()
+
+	// Assertion 1 — raw tmux state. Bypass Client.ListSessions on
+	// purpose: see helper docstring.
+	rawOut := ts.Run(t, "list-sessions", "-F", "#{session_name}")
+	rawSet := map[string]struct{}{}
+	for _, line := range strings.Split(rawOut, "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		rawSet[name] = struct{}{}
+	}
+
+	allowed := map[string]struct{}{}
+	for _, n := range allowedReserved {
+		allowed[n] = struct{}{}
+	}
+	for _, n := range expectedRestored {
+		allowed[n] = struct{}{}
+	}
+
+	for name := range rawSet {
+		if _, ok := allowed[name]; !ok {
+			t.Errorf("raw tmux session list contains unexpected name %q; "+
+				"allowed reserved=%v, expected restored=%v, raw=%v",
+				name, allowedReserved, expectedRestored,
+				sortedStringSet(rawSet))
+		}
+	}
+
+	// Assertion 2 — user-facing visibility via Client.ListSessions.
+	sessions, err := client.ListSessions()
+	if err != nil {
+		t.Fatalf("Client.ListSessions: %v", err)
+	}
+	gotSet := map[string]struct{}{}
+	for _, s := range sessions {
+		gotSet[s.Name] = struct{}{}
+	}
+
+	// Reserved names must be filtered out — assert with named
+	// failure messages so a regression pinpoints which leaked.
+	for _, reserved := range []string{tmux.PortalBootstrapName, tmux.PortalSaverName} {
+		if _, leaked := gotSet[reserved]; leaked {
+			t.Errorf("Client.ListSessions leaked reserved name %q; "+
+				"underscore-prefix filter regression. got=%v",
+				reserved, sortedStringSet(gotSet))
+		}
+	}
+
+	// Returned set must equal expectedRestored exactly (no missing,
+	// no extras among non-reserved names).
+	expectedSet := map[string]struct{}{}
+	for _, n := range expectedRestored {
+		expectedSet[n] = struct{}{}
+	}
+	for name := range gotSet {
+		if _, ok := expectedSet[name]; !ok {
+			t.Errorf("Client.ListSessions returned unexpected name %q; "+
+				"expected restored=%v, got=%v",
+				name, expectedRestored, sortedStringSet(gotSet))
+		}
+	}
+	for _, want := range expectedRestored {
+		if _, ok := gotSet[want]; !ok {
+			t.Errorf("Client.ListSessions missing expected restored name %q; got=%v",
+				want, sortedStringSet(gotSet))
+		}
+	}
+}
+
+// sortedStringSet returns the keys of a string-set sorted, for stable
+// failure messages.
+func sortedStringSet(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // verifyLayoutAndZoom asserts that ApplyWindowGeometry produced the
@@ -842,6 +972,14 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
+
+	// End-to-end regression guard (see verifyPostBootstrapSessionSet
+	// for full rationale). Catches both Root Cause 1 (`_*` leak
+	// through ListSessions) and Root Cause 2 (bootstrap session
+	// named `0` reappears).
+	verifyPostBootstrapSessionSet(t, ts, client,
+		[]string{tmux.PortalBootstrapName, tmux.PortalSaverName, "_seed"},
+		[]string{"alpha", "beta"})
 
 	// Sanity: both sessions are live and skeleton-marked before we
 	// drive any hook. If markers were never set, the test would
