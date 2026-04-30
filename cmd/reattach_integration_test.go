@@ -9,7 +9,35 @@
 //	that only exist in `sessions.json` at bootstrap time (skeleton is
 //	created before the command's own attach logic runs).
 //
-// The five enumerated edge cases (planning task 5-10) covered here:
+// The seven planning task 5-10 acceptance bullets (phase-5-tasks.md
+// L941-L947) → their asserting test in this file:
+//
+//  1. "portal attach NAME resolves a name present only in sessions.json
+//     (bare shell)" → TestReattachIntegration_AttachOutsideTmuxAttachSessionPath.
+//  2. "portal open PATH resolves a session name present only in
+//     sessions.json" → TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton
+//     (no-arg TUI branch) AND
+//     TestReattachIntegration_OpenPathResolvesSavedOnlySession (path-arg
+//     branch through alias resolution into openPath).
+//  3. "portal attach NAME resolves a name present only in sessions.json
+//     (inside tmux switch-client)" →
+//     TestReattachIntegration_AttachInsideTmuxSwitchClientPath.
+//  4. "steady-state reattach with saved session already live performs
+//     zero structural rewrites" →
+//     TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites.
+//  5. "portal attach NAME returns the existing not-found error for names
+//     in neither live nor saved state" →
+//     TestReattachIntegration_UnknownNameNotFoundError.
+//  6. "has-session returns true for every name in sessions.json
+//     post-bootstrap" →
+//     TestReattachIntegration_HasSessionPostBootstrapForSavedNames.
+//  7. "saved_at is not advanced during a steady-state reattach window" →
+//     TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites
+//     (asserts pre/post sessions.json.saved_at equality alongside the
+//     pane-id preservation check).
+//
+// The five enumerated edge cases (planning task 5-10 Solution section)
+// covered here:
 //
 //  1. Steady-state reattach (saved session already live) does zero
 //     structural rewrites.
@@ -63,7 +91,8 @@
 package cmd
 
 // Tests in this file mutate package-level state (bootstrapDeps,
-// attachDeps, openTUIFunc) and MUST NOT use t.Parallel.
+// attachDeps, openDeps, openTUIFunc, openPathFunc) and MUST NOT use
+// t.Parallel.
 
 import (
 	"os"
@@ -74,6 +103,7 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
@@ -151,7 +181,22 @@ func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir strin
 // stateDir/scrollback/ — the file does not have to exist for skeleton
 // restoration to succeed (Restore only reads the index; the helper
 // reads the file).
+//
+// SavedAt is left zero — callers that need to assert SavedAt is
+// preserved across a Run window should use seedSessionsJSONWithSavedAt
+// to plant a known-good timestamp.
 func seedSessionsJSON(t *testing.T, stateDir string, names ...string) {
+	t.Helper()
+	seedSessionsJSONWithSavedAt(t, stateDir, time.Time{}, names...)
+}
+
+// seedSessionsJSONWithSavedAt is the savedAt-aware variant of
+// seedSessionsJSON. The supplied savedAt is encoded verbatim into the
+// Index so the caller can capture it pre-Run and assert that it is not
+// advanced by anything in the orchestrator's pipeline (the suppression
+// invariant from spec "Save-Side Architecture → Triggers & Serialization
+// → Properties → Restoration guard").
+func seedSessionsJSONWithSavedAt(t *testing.T, stateDir string, savedAt time.Time, names ...string) {
 	t.Helper()
 	sessions := make([]state.Session, 0, len(names))
 	for _, name := range names {
@@ -169,7 +214,7 @@ func seedSessionsJSON(t *testing.T, stateDir string, names ...string) {
 			}},
 		})
 	}
-	idx := state.Index{Sessions: sessions}
+	idx := state.Index{SavedAt: savedAt, Sessions: sessions}
 	data, err := state.EncodeIndex(idx)
 	if err != nil {
 		t.Fatalf("EncodeIndex: %v", err)
@@ -258,17 +303,28 @@ func containsAll(got, want []string) bool {
 }
 
 // TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites
-// covers planning task 5-10 case 1: when a saved session is already
-// live, bootstrap's Restore step must NOT issue a second new-session
-// (which would error with "session already exists" or worse silently
-// recreate it). Steady-state reattach should be a single-list-sessions
-// no-op for that name.
+// covers planning task 5-10 case 1 AND task 5-10 acceptance bullet
+// "saved_at is not advanced during a steady-state reattach window"
+// (phase-5-tasks.md L947). When a saved session is already live,
+// bootstrap's Restore step must NOT issue a second new-session (which
+// would error with "session already exists" or worse silently recreate
+// it). Steady-state reattach should be a single-list-sessions no-op for
+// that name AND must not bump sessions.json.saved_at — the suppression
+// invariant the @portal-restoring marker exists to enforce.
 //
 // We assert this by: pre-creating "alpha" on the live server, seeding
-// sessions.json with "alpha", running bootstrap, then verifying that
-// alpha is still alive AND that no @portal-skeleton-<paneKey> marker
-// was set for it (skeleton markers are a Restore side effect — their
-// absence proves Restore took the live-session-skip branch).
+// sessions.json with "alpha" at a known pre-Run saved_at, running
+// bootstrap, then verifying that
+//
+//	(a) alpha is still alive,
+//	(b) no @portal-skeleton-<paneKey> marker was set for it (skeleton
+//	    markers are a Restore side effect — their absence proves
+//	    Restore took the live-session-skip branch), and
+//	(c) sessions.json.saved_at is byte-identical to the seeded value
+//	    (proves nothing in the orchestrator's pipeline rewrote
+//	    sessions.json during the @portal-restoring window — see
+//	    phase5_marker_suppression_integration_test.go:207-210 for the
+//	    sibling sub-orchestrator-level assertion).
 func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short")
@@ -281,8 +337,13 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	ts.Run(t, "new-session", "-d", "-s", "alpha")
 	ts.WaitForSession(t, "alpha", 2*time.Second)
 
-	// Seed sessions.json with the same name.
-	seedSessionsJSON(t, stateDir, "alpha")
+	// Seed sessions.json with the same name and a fixed saved_at the
+	// post-Run assertion can compare against. The timestamp is
+	// arbitrary but MUST be in the past — capture.go would treat a
+	// future timestamp as "newer than this run" and the suppression
+	// test could pass for the wrong reason.
+	preRunSavedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+	seedSessionsJSONWithSavedAt(t, stateDir, preRunSavedAt, "alpha")
 
 	// Wire orchestrator + cmd-layer mocks. attachDeps validator points
 	// at the real socket-backed client so HasSession queries traverse
@@ -323,6 +384,23 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	}
 	if found {
 		t.Errorf("@portal-skeleton-* marker set for live alpha (value=%q); want absent — skeleton restore re-ran on a live session", val)
+	}
+
+	// saved_at MUST equal the seeded pre-Run value — suppression
+	// invariant. The orchestrator wires NoOpSaver, so any advance in
+	// saved_at would indicate either the @portal-restoring guard
+	// failed OR an unintended write path inside Restore. Mirrors the
+	// assertion at phase5_marker_suppression_integration_test.go:207.
+	postIdx, skip, err := state.ReadIndex(stateDir)
+	if err != nil {
+		t.Fatalf("ReadIndex post-Execute: %v", err)
+	}
+	if skip {
+		t.Fatal("ReadIndex post-Execute reported skip=true; sessions.json was unexpectedly removed during Run")
+	}
+	if !postIdx.SavedAt.Equal(preRunSavedAt) {
+		t.Errorf("sessions.json.saved_at advanced during the steady-state reattach window: pre=%v post=%v",
+			preRunSavedAt, postIdx.SavedAt)
 	}
 
 	// Belt-and-braces: there must still be exactly one live session named alpha.
@@ -636,6 +714,139 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 	}
 }
 
+// TestReattachIntegration_OpenPathResolvesSavedOnlySession covers the
+// path-argument half of planning task 5-10 acceptance bullet #2 (
+// "portal open PATH resolves a session name present only in
+// sessions.json", phase-5-tasks.md L942). The sibling
+// TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton covers
+// the no-arg → TUI-launch branch; this case covers the path-arg branch
+// that runs through alias resolution → resolver.PathResult → openPath
+// against a sessions.json that holds a saved-only name.
+//
+// Wiring:
+//   - openDeps overrides the resolver's AliasLookup so the test does not
+//     need to write to ~/.config/portal/aliases. The alias maps a known
+//     query string to a temp directory whose basename matches the name
+//     of the saved-only session — exercising the same shape as a user
+//     who registered an alias pointing at a project directory whose
+//     session name was previously persisted to sessions.json.
+//   - openPathFunc is overridden to capture (resolvedPath, command)
+//     rather than running the real openPath, because openPath calls
+//     either tmux switch-client (inside-tmux) or syscall.Exec (bare
+//     shell). The former requires a live attached client (impossible in
+//     a test harness); the latter would replace the test process.
+//   - openTUIFunc is overridden to fail the test if the resolver took
+//     the FallbackResult branch — ensures we are exercising the
+//     path-arg PathResult branch and not silently falling through to
+//     the TUI.
+//
+// What this case uniquely contributes (vs the no-arg sibling): it
+// proves the cmd-layer resolver chain reaches openPath when alias
+// resolution succeeds, AND that by the time openPath would dispatch,
+// bootstrap step 5 has already skeleton-restored the saved-only
+// session on the live tmux server (queryable via has-session). This
+// is the path-arg analogue of the "skeleton is created before the
+// command's own attach logic runs" guarantee.
+func TestReattachIntegration_OpenPathResolvesSavedOnlySession(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts, client, stateDir := setupReattachEnv(t)
+
+	// Project dir for the alias to point at. The basename is incidental
+	// to the assertion (openPathFunc is mocked) but documents the
+	// shape: aliases map names to project directories, and the saved
+	// session would have been created from such a directory.
+	projectDir := filepath.Join(t.TempDir(), "open-saved-proj")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+
+	// Saved-only session whose name does NOT need to match the alias
+	// query — the assertion is "skeleton was restored AND openPath was
+	// dispatched", not "the open command attached to that exact name"
+	// (which would require contriving the {project}-{nanoid} naming
+	// dance).
+	const savedSession = "open-ghost"
+	seedSessionsJSON(t, stateDir, savedSession)
+
+	// Pre-condition: the saved-only session is not yet live.
+	if _, err := ts.TryRun("has-session", "-t", savedSession); err == nil {
+		t.Fatalf("%s unexpectedly live before bootstrap", savedSession)
+	}
+
+	// Wire resolver dependencies so `portal open mysaved` resolves to
+	// projectDir via the alias chain (no zoxide, no real disk lookup
+	// for the alias itself — the OSDirValidator does the existence
+	// check on projectDir which we just mkdir'd).
+	openDeps = &OpenDeps{
+		AliasLookup:  &testAliasLookup{aliases: map[string]string{"mysaved": projectDir}},
+		Zoxide:       &testZoxideQuerier{err: resolver.ErrNoMatch},
+		DirValidator: &resolver.OSDirValidator{},
+	}
+	t.Cleanup(func() { openDeps = nil })
+
+	bootstrapDeps = &BootstrapDeps{
+		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
+		Client:       client,
+	}
+	t.Cleanup(func() { bootstrapDeps = nil })
+
+	// Capture-only path opener — substitutes for openPath so the test
+	// does not invoke real tmux switch-client or syscall.Exec. Records
+	// the resolved path so we can prove the resolver chain produced a
+	// PathResult and dispatched into the path-arg branch.
+	var (
+		pathOpenerCalled bool
+		capturedPath     string
+	)
+	origOpenPath := openPathFunc
+	openPathFunc = func(_ *cobra.Command, resolvedPath string, _ []string) error {
+		pathOpenerCalled = true
+		capturedPath = resolvedPath
+		return nil
+	}
+	t.Cleanup(func() { openPathFunc = origOpenPath })
+
+	// TUI launcher must NOT be reached — falling through to the TUI
+	// would mean the alias resolution silently produced FallbackResult,
+	// which would mask a regression in the path-arg branch we're
+	// testing.
+	origOpenTUI := openTUIFunc
+	openTUIFunc = func(_ *cobra.Command, query string, _ []string, _ bool) error {
+		t.Errorf("openTUIFunc unexpectedly called (query=%q); resolver should have produced PathResult, not FallbackResult", query)
+		return nil
+	}
+	t.Cleanup(func() { openTUIFunc = origOpenTUI })
+
+	resetRootCmd()
+	rootCmd.SetArgs([]string{"open", "mysaved"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// openPath dispatch must have been reached with the alias-resolved
+	// project directory — proves the resolver chain produced a
+	// PathResult and the command's RunE took the path-arg branch.
+	if !pathOpenerCalled {
+		t.Fatal("openPathFunc was not invoked for `portal open mysaved`; alias resolution did not reach the path-arg branch")
+	}
+	if capturedPath != projectDir {
+		t.Errorf("openPathFunc resolved path = %q; want %q", capturedPath, projectDir)
+	}
+
+	// Skeleton restoration must have run: the saved-only session is
+	// live on the same server openPath would have targeted. This is
+	// the path-arg equivalent of the "saved name resolves
+	// post-bootstrap" guarantee — by the time openPath dispatched,
+	// has-session for the saved name would have returned true.
+	if _, err := ts.TryRun("has-session", "-t", savedSession); err != nil {
+		t.Errorf("has-session -t %s: %v (expected live by the time `portal open mysaved` reached openPath)", savedSession, err)
+	}
+}
+
 // Compile-time assertions: keep this file's reuse of cmd-package types
 // honest. If any of these symbols change shape, the failure surfaces
 // here rather than as a runtime mock-mismatch panic deep in a t.Run.
@@ -644,8 +855,9 @@ var _ SessionValidator = (*mockSessionValidator)(nil)
 var _ SwitchClienter = (*mockSwitchClient)(nil)
 var _ bootstrap.Runner = (*bootstrap.Orchestrator)(nil)
 
-// Compile-time assertion that openTUIFunc's signature matches what the
-// reattach test injects. Cobra calls go through cmd.RunE, so a drift
-// between the registered openTUIFunc and the test's stub would only
+// Compile-time assertions that openTUIFunc and openPathFunc signatures
+// match what the reattach tests inject. Cobra calls go through cmd.RunE,
+// so a drift between the registered seam and the test's stub would only
 // surface at runtime under the integration tag.
 var _ func(*cobra.Command, string, []string, bool) error = openTUIFunc
+var _ func(*cobra.Command, string, []string) error = openPathFunc
