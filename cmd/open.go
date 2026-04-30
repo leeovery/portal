@@ -16,17 +16,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// openTUIFunc is the function used to launch the TUI. It defaults to openTUI
-// and can be overridden in tests to capture arguments.
-// Initialized in init() to break the openTUIFunc → openTUI → openCmd → openTUIFunc cycle.
-var openTUIFunc func(*cobra.Command, string, []string, bool) error
+// openTUIFunc is the function used to launch the TUI. Tests override it via
+// t.Cleanup-restored assignment to capture arguments without launching the
+// real Bubble Tea program.
+var openTUIFunc = openTUI
 
-// openPathFunc is the function used to open a session at a resolved path. It
-// defaults to openPath and can be overridden in tests to capture the resolved
-// path without performing real tmux create / exec hand-off (which would require
-// a live attached tmux client and replace the test process via syscall.Exec).
-// Initialized in init() to break the openPathFunc → openPath → openCmd → openPathFunc cycle.
-var openPathFunc func(*cobra.Command, string, []string) error
+// openPathFunc is the function used to open a session at a resolved path.
+// Tests override it via t.Cleanup-restored assignment to capture the resolved
+// path without performing real tmux create / exec hand-off (which would
+// require a live attached tmux client and replace the test process via
+// syscall.Exec).
+var openPathFunc = openPath
 
 // openDeps holds injectable dependencies for the open command.
 // When nil, real implementations are used.
@@ -426,8 +426,6 @@ func buildQueryResolver() (*resolver.QueryResolver, error) {
 }
 
 func init() {
-	openTUIFunc = openTUI
-	openPathFunc = openPath
 	openCmd.Flags().StringP("exec", "e", "", "command to execute in the new session")
 	rootCmd.AddCommand(openCmd)
 }
