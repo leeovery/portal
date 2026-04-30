@@ -50,8 +50,13 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 | `browser` | Directory listing with symlink detection |
 | `hooks` | JSON-backed `Store` (`~/.config/portal/hooks.json`) holding per-pane on-resume commands keyed by structural pane key. Pure persistence — no execution. Hook firing is now driven by the hydrate helper's exec chain (`portal state hydrate`), not by the cmd layer at attach time |
 | `bootstrapadapter` | Production adapters wiring concrete `*tmux.Client`, hooks store, and state package functions to the `cmd/bootstrap` Orchestrator's seam interfaces |
+| `warning` | Canonical `Warning` shape and `WriteLines` stderr helper for soft bootstrap warnings. Single source of truth straddling the `cmd → tui` import boundary; `cmd/bootstrap` aliases the type and both CLI and TUI emission paths delegate to `WriteLines` so output is byte-identical |
+| `xdg` | Leaf package resolving `$XDG_CONFIG_HOME` (with `~/.config` fallback). Single source of truth consumed by both `cmd/config.go` and `internal/state/paths.go` |
+| `tmuxout` | Leaf, dependency-free helpers for parsing `tmux show-*` output (e.g., `StripMatchedOuterQuotes`). Imported by both `internal/tmux` and `internal/state` to avoid an import cycle |
+| `ui` | Shared Bubble Tea file-browser model (`BrowserCancelMsg`, `BrowserDirSelectedMsg`, `DirLister`) consumed by both `internal/tui` and `cmd/open.go` |
 | `fileutil` | Shared utilities — `AtomicWrite` (temp file + rename) used by hooks store |
 | `fuzzy` | Substring-based fuzzy matching/filtering |
+| `restoretest` / `tmuxtest` | Test-only helpers (shared restore drivers, real-tmux socket fixtures) — production code must not import these |
 
 ### Config path resolution (cmd/config.go)
 
