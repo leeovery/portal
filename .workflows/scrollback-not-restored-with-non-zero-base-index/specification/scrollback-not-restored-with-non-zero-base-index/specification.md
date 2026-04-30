@@ -13,7 +13,20 @@ WARN | restore | session "<name>": pane 0 predicted=<name>__0.0 live=<name>__1.1
 WARN | hydrate | timeout waiting for signal on --hook-key=<name>:1.1 --fifo=...
 ```
 
-The bug report attributed this to non-zero `base-index` / `pane-base-index`. That framing is incorrect: base-index is a confound that surfaces a misleading diagnostic WARN, not the cause of hydration failure.
+**Save side is unaffected.** Per-pane scrollback files on disk contain the expected ANSI-coloured terminal history; the save daemon reports success. The fix is scoped to the restore/hydrate path only — no save-side investigation is needed.
+
+The bug report attributed this to non-zero `base-index` / `pane-base-index`. That framing is incorrect: base-index is a confound that surfaces a misleading diagnostic WARN, not the cause of hydration failure. The reporter's empirical observation that "removing base-index makes it work" is consistent with seeing the diagnostic WARN go quiet (with base-index unset, live indices match the always-zero prediction so `warnOnPaneKeyDrift` does not fire) rather than with verifying end-to-end hydration. The reporter likely either tested a session whose name did not start with `-`, or observed only the absence of the WARN line and not whether scrollback actually appeared.
+
+### Reproduction
+
+To reproduce the failure deterministically:
+
+1. Use a project directory whose basename starts with `.` (e.g. `~/.dotfiles`) so `SanitiseProjectName` produces a leading-dash session name.
+2. *(Optional, for the misleading WARN)* tmux.conf includes `set -g base-index 1` and `setw -g pane-base-index 1`.
+3. Open a Portal-managed session in that project and generate scrollback.
+4. `tmux kill-server` (against the **test** server only — see Testing Constraint), then reattach via Portal.
+
+The two factors are independent: step 1 alone causes the actual hydration failure; step 2 alone surfaces the misleading `predicted=...__0.0 live=...__X.Y` WARN. Either reproduces a distinct symptom; together they reproduce the full user-reported scenario.
 
 ### Primary Root Cause — Leading-Dash Session Name Breaks `signal-hydrate` Argv Parsing
 
