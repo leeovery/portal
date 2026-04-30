@@ -34,12 +34,16 @@
           "format": "tick",
           "spec_commit": "d5d9c2716a03d8f6f730541c5aad71cad54679fd",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "hidden-sessions-showing-on-startup-1-1",
-          "task_map": {}
+          "task": "hidden-sessions-showing-on-startup-1-2",
+          "task_map": {
+            "hidden-sessions-showing-on-startup-1-1": "tick-94b4e1",
+            "hidden-sessions-showing-on-startup-1": "tick-6a0e98"
+          },
+          "external_id": "tick-79a9e1"
         }
       }
     }
