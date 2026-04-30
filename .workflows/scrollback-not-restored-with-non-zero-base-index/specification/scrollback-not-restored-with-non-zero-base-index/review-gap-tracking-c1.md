@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Gap Analysis
@@ -17,19 +17,13 @@ topic: scrollback-not-restored-with-non-zero-base-index
 **Affects**: Fix Scope → Part 1 → "One-shot bootstrap migration"
 
 **Details**:
-The spec mandates that `RegisterPortalHooks` "evict any hook entry whose command contains `portal state signal-hydrate` but does not contain the `--` separator before installing the fixed entry," but does not specify:
-
-- Which tmux package API performs the eviction (the CLAUDE.md context mentions `UnsetGlobalHookAt` and `ShowGlobalHooks` exist — should the migration use these, or a new helper?).
-- Whether eviction is by index, by command-substring match, or by some other addressing scheme.
-- The exact ordering: scan-then-evict-then-install vs. evict-during-scan.
-
-A planner would have to either read source to discover the existing hook-store API or guess the implementation shape. State the intended API entry points and ordering explicitly.
+The spec mandates that `RegisterPortalHooks` "evict any hook entry whose command contains `portal state signal-hydrate` but does not contain the `--` separator before installing the fixed entry," but does not specify which tmux package API performs the eviction, the addressing scheme, or the ordering.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Add a "Migration mechanics (explicit)" sub-block to Part 1 covering: Eviction API (`ShowGlobalHooks`, `ParseShowHooks`, `UnsetGlobalHookAt`); ordering (scan-then-evict-then-install, highest index first); operator visibility (single INFO line per non-empty migration).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as a single bulleted "Migration mechanics" block alongside Findings 2, 3, 7.
 
 ---
 
@@ -40,13 +34,13 @@ _Leave blank until discussed._
 **Affects**: Fix Scope → Part 1 → "One-shot bootstrap migration"
 
 **Details**:
-The Problem section refers to `client-attached` / `client-session-changed` as hook events, but the migration text only says "evict any hook entry whose command contains `portal state signal-hydrate`" — it does not enumerate which hook events the scan iterates over. If the broken hook was registered against multiple events, missing one would leave a broken entry behind. A planner needs an explicit list of hook events to inspect (or a clear statement that the scan covers all events `RegisterPortalHooks` writes to).
+Migration must enumerate which hook events the scan iterates over. State explicitly that the scan covers all events in `hydrationTriggerEvents` (currently `client-attached` and `client-session-changed`).
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Bullet under "Migration mechanics": "Hook event scope: scan covers every event listed in `hydrationTriggerEvents` (currently `client-attached` and `client-session-changed` per `internal/tmux/hooks_register.go:25-28`). If the slice is later extended, the migration scan must follow it."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as part of Finding 1's combined block.
 
 ---
 
@@ -57,13 +51,13 @@ _Leave blank until discussed._
 **Affects**: Fix Scope → Part 1 → "One-shot bootstrap migration"
 
 **Details**:
-The spec says the dedupe substring "must be tightened to `portal state signal-hydrate --`" but does not identify the current dedupe substring or where it lives in the codebase. Without that anchor, an implementer cannot confirm they are editing the right constant, and a reviewer cannot confirm the migration distinguishes correctly between the broken and fixed shapes. State the current substring (or file:line reference for it) so the change is unambiguous.
+State the current dedupe substring (`signalHydrateSubstring` at `internal/tmux/hooks_register.go:48`) so the change to `"portal state signal-hydrate --"` is unambiguous.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Inline anchor: "the dedupe substring used to detect whether a hook is already present (currently `signalHydrateSubstring = "portal state signal-hydrate"` at `internal/tmux/hooks_register.go:48`) must be tightened to `"portal state signal-hydrate --"`."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied inline in the existing migration paragraph.
 
 ---
 
@@ -74,13 +68,13 @@ _Leave blank until discussed._
 **Affects**: Acceptance Criteria → item 3
 
 **Details**:
-"Subsequent bootstraps are no-ops" is a behavioural assertion but the spec does not define how this is verified. Options include: count of hook entries before/after equal, no eviction-log line emitted, no tmux mutation observed by a test fixture. Without a definition, the criterion is hard to test rigorously. Clarify whether this is meant as a runtime invariant (asserted via test fixture) or simply a design property.
+Define the no-op invariant in observable terms: count of `portal state signal-hydrate` hook entries per event is exactly 1 after bootstrap and unchanged across two consecutive bootstraps.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Rewrite AC 3 to include the runtime invariant and note that the migration test (TR 4) asserts it directly.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — AC 3 now defines the invariant in observable terms and binds it to TR 4.
 
 ---
 
@@ -91,13 +85,13 @@ _Leave blank until discussed._
 **Affects**: Acceptance Criteria → item 2
 
 **Details**:
-Item 2 is labelled "Manual verification" but the Testing Requirements section also includes a cobra-level argv parse test (item 1) that appears to cover the same behaviour. It is unclear whether AC 2 must be exercised as a manual repro step (e.g. captured in the PR description) or whether passing the unit test in TR 1 satisfies it. Clarify so the implementer knows whether a manual repro artefact is required for sign-off.
+Clarify that AC 2 is satisfied by passing the cobra-level argv parse test in TR 1; no separate manual repro artefact is required for sign-off.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Rewrite AC 2 to bind it to TR 1 and remove the "manual verification" framing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — AC 2 now references TR 1 explicitly and drops the manual-repro phrasing.
 
 ---
 
@@ -108,13 +102,13 @@ _Leave blank until discussed._
 **Affects**: Testing Requirements → item 4
 
 **Details**:
-The migration test must verify eviction of a pre-existing broken hook, but the spec does not say how the test arranges that pre-existing state — via a real tmux fixture (`internal/tmuxtest`), a mocked `Commander`, or by directly seeding the hook store. Each approach has different fidelity vs. cost trade-offs. State the intended approach (or leave it explicit that the implementer chooses, with rationale documented in the PR).
+State the intended approach for migration test setup: real-tmux fixture vs. mocked Commander.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Prefer a real-tmux socket fixture (`internal/tmuxtest`) — eviction logic depends on `show-hooks` output format and `set-hook -gu` index semantics, both of which a mock would have to re-implement.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as a "Test setup" clause on TR 4.
 
 ---
 
@@ -125,13 +119,13 @@ _Leave blank until discussed._
 **Affects**: Fix Scope → Part 1 → "One-shot bootstrap migration"
 
 **Details**:
-The migration silently rewrites a tmux hook on first bootstrap after upgrade. The spec does not say whether this should produce a log line in `portal.log` (e.g. INFO-level "evicted broken signal-hydrate hook") or be entirely silent. Logging the migration once would help operators correlate first-bootstrap behaviour after upgrade; silence avoids noise. State the intended behaviour.
+Decide whether migration emits a `portal.log` line and at what level.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Single INFO line on non-empty migration: `INFO | bootstrap | evicted N stale signal-hydrate hook(s) lacking '--' separator`. Silent on steady-state.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as part of Finding 1's combined block, plus a closing sentence on the migration paragraph.
 
 ---
 
@@ -142,13 +136,13 @@ _Leave blank until discussed._
 **Affects**: Fix Scope → Part 2
 
 **Details**:
-Part 2 lists symbols to delete and asserts e.g. "`flattenSavedPanePositions` — only consumer was `warnOnPaneKeyDrift`" and "`readIndexOption` (if unused after removal)". This is correct in spirit but a planner should be told to verify no other consumers exist before deletion (especially in tests, exported API surface, or future-staged code). A one-line instruction — "verify each symbol has zero remaining references before removal; if any are found, surface them for review" — would prevent silent breakage from a missed reference.
+Instruct the planner to verify each symbol has zero remaining references before removal; surface unexpected references for review.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+"Pre-deletion verification" paragraph appended to Part 2's deletion list.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied as a new paragraph immediately after the deletion bullet list.
 
 ---
 
@@ -159,12 +153,12 @@ _Leave blank until discussed._
 **Affects**: Testing Requirements → item 2
 
 **Details**:
-TR 2 says to "extend `cmd/bootstrap/reboot_roundtrip_test.go` (or add a sibling integration test)" but does not state whether the new test must run against a real tmux server (via `internal/tmuxtest`) or can use mocks. The Testing Constraint section addresses socket isolation when a real server is used, but does not mandate which mode the new test uses. Given the bug is specifically about `run-shell` argv resolution by tmux, a real-tmux fixture seems essential for fidelity — state this explicitly so the test cannot regress to a mock-only shape that wouldn't catch the bug.
+Mandate real-tmux fixture (`internal/tmuxtest`) for the reboot round-trip test — a mock-based shape would not exercise tmux's `run-shell` argv resolution.
 
 **Proposed Addition**:
-_Leave blank until discussed._
+Insert mandate into TR 2 explicitly.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — TR 2 now requires a real-tmux fixture and explains why.
 
 ---

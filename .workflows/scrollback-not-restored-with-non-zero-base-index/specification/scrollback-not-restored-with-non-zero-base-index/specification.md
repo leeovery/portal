@@ -87,9 +87,16 @@ The `--` token tells cobra/pflag to stop flag parsing and treat `#{session_name}
 
 **One-shot bootstrap migration:** Existing installs already have a hook entry written without `--`. Hook registration is idempotent (skips if an entry matching the current command substring is found), so without migration the new fixed entry would either be added alongside the old broken entry (both fire — broken one still errors) or rejected as "already present" (depending on dedupe substring). Both outcomes leave users broken.
 
-The existing `RegisterPortalHooks` step (bootstrap step 2) must evict any hook entry whose command contains `portal state signal-hydrate` but does **not** contain the `--` separator before installing the fixed entry. The dedupe substring used to detect whether a hook is already present must be tightened to `portal state signal-hydrate --` so the migration distinguishes the fixed entry from the broken one.
+The existing `RegisterPortalHooks` step (bootstrap step 2) must evict any hook entry whose command contains `portal state signal-hydrate` but does **not** contain the `--` separator before installing the fixed entry. The dedupe substring used to detect whether a hook is already present (currently `signalHydrateSubstring = "portal state signal-hydrate"` at `internal/tmux/hooks_register.go:48`) must be tightened to `"portal state signal-hydrate --"` so the migration distinguishes the fixed entry from the broken one.
 
-The migration runs at every bootstrap (idempotent) — once a user's install has only the fixed entry, subsequent bootstraps perform no eviction work.
+**Migration mechanics (explicit):**
+
+- **Eviction API:** Use the existing `tmux.Client` methods exposed for global hook management — `ShowGlobalHooks` to enumerate, `ParseShowHooks` to parse the result, and `UnsetGlobalHookAt` (by event + index) to remove. Do not introduce a new helper unless the existing surface is insufficient.
+- **Hook event scope:** The migration scan must cover **every event listed in `hydrationTriggerEvents`** (currently `client-attached` and `client-session-changed` per `internal/tmux/hooks_register.go:25-28`). If the slice is later extended, the migration scan must follow it. Scanning only one event would leave a broken entry on the other.
+- **Ordering:** Scan-then-evict-then-install. For each hydration-trigger event: enumerate entries → identify entries whose command contains `portal state signal-hydrate` AND does **not** contain `portal state signal-hydrate --` → call `UnsetGlobalHookAt` for each (highest index first, so earlier indices are not invalidated by removal) → then proceed with the existing `RegisterHookIfAbsent` call which installs the fixed entry.
+- **Operator visibility:** When at least one entry is evicted on a given bootstrap, emit a single INFO line to `portal.log` of the form `INFO | bootstrap | evicted N stale signal-hydrate hook(s) lacking '--' separator`. Bootstraps with no evictions are silent (no log noise on the steady-state path).
+
+The migration runs at every bootstrap (idempotent) — once a user's install has only the fixed entry, subsequent bootstraps perform no eviction work and emit no INFO line.
 
 ### Part 2 — Delete `PredictLiveIndices` and Its Consumers
 
@@ -100,6 +107,8 @@ Delete the dead diagnostic prediction path entirely:
 - `internal/restore/restore.go::Orchestrator.warnOnPaneKeyDrift` — the diagnostic itself.
 - Any call site in the orchestrator's restore loop that invokes `warnOnPaneKeyDrift`.
 - Tests covering the deleted functions.
+
+**Pre-deletion verification:** For each symbol in the list above, confirm zero remaining references across the entire repository (production, tests, exported API surface) before removal. If any references are found that are not also in the deletion list, surface them for review rather than silently deleting — they may indicate a downstream consumer that wasn't accounted for in the investigation.
 
 **Rationale for deletion over repair:** The function exists only to power a diagnostic WARN with no functional consumer. The spec's "Index Semantics" section mandates "re-query live indices, never predict" — a repaired predictor would buy a marginal post-restore drift signal at the cost of new tmux-client surface area (session-scope and window-scope option getters) and continued conceptual tension with the spec mandate.
 
@@ -120,9 +129,9 @@ The fix is complete when all of the following hold:
 
 1. **Hydration succeeds for leading-dash session names.** After `tmux kill-server` and reattach, a Portal-managed session whose name begins with `-` (e.g. `-dotfiles-HM9Zhw`) has its saved scrollback replayed into each pane. No `hydrate timeout` WARN appears in `~/.config/portal/state/portal.log`. This holds regardless of `base-index` / `pane-base-index` values in the user's tmux config.
 
-2. **`signal-hydrate` accepts leading-dash session names from a tmux hook.** Manual verification: `portal state signal-hydrate -dotfiles-HM9Zhw` invoked via `run-shell` (the hook's invocation context) exits 0 and writes the FIFO byte. The previous parse error (`unknown shorthand flag: 'd'`) no longer occurs.
+2. **`signal-hydrate` accepts leading-dash session names from a tmux hook.** This criterion is satisfied by the automated cobra-level argv parse test (Testing Requirements item 1) — no separate manual repro artefact is required for sign-off. The test must drive the cobra command tree via `Execute()` against a leading-dash positional argument and assert exit 0 + FIFO byte written; passing the test confirms the previous parse error (`unknown shorthand flag: 'd'`) no longer occurs.
 
-3. **Existing installs are migrated on first bootstrap.** After upgrading, the next Portal command that runs the bootstrap orchestrator removes any pre-existing hook entry that lacks the `--` separator and installs the fixed entry. Subsequent bootstraps are no-ops.
+3. **Existing installs are migrated on first bootstrap, and steady-state bootstraps are no-ops.** After upgrading, the next Portal command that runs the bootstrap orchestrator removes any pre-existing hook entry that lacks the `--` separator and installs the fixed entry. **Verifiable as a runtime invariant:** for each event in `hydrationTriggerEvents`, the count of hook entries containing `portal state signal-hydrate` is exactly 1 after bootstrap, and is unchanged across two consecutive bootstraps invoked back-to-back. The migration test (Testing Requirements item 4) asserts this invariant directly.
 
 4. **No misleading `predicted=...__0.0 live=...__X.Y` WARN appears in `portal.log`** under any tmux config. The diagnostic is gone, not silenced.
 
@@ -134,11 +143,11 @@ The following test coverage must be in place before the fix is considered comple
 
 1. **Cobra-level argv parse test for `signal-hydrate`.** A unit test exercising `runSignalHydrate` end-to-end via the cobra `Execute()` path (not direct `signalHydrateConfig` construction) with a session name starting with `-`. Today's tests in `cmd/state_signal_hydrate_test.go` bypass argv parsing by calling the run function directly; they would not have caught this bug. The new test must drive the cobra command tree the same way production does.
 
-2. **Reboot round-trip integration coverage with leading-dash session name.** Extend `cmd/bootstrap/reboot_roundtrip_test.go` (or add a sibling integration test) using a session name that begins with `-` to exercise the full hook-firing path: client-attached fires → `signal-hydrate` runs via `run-shell` → FIFO byte written → helper unblocks → scrollback replays. The existing test's session names ("alpha", "beta") would not have surfaced this failure.
+2. **Reboot round-trip integration coverage with leading-dash session name.** Extend `cmd/bootstrap/reboot_roundtrip_test.go` (or add a sibling integration test) using a session name that begins with `-` to exercise the full hook-firing path: client-attached fires → `signal-hydrate` runs via `run-shell` → FIFO byte written → helper unblocks → scrollback replays. **Must run against a real tmux server** via the `internal/tmuxtest` real-tmux socket fixture — a mock-based shape would not exercise tmux's actual `run-shell` argv resolution and so would not catch the bug. The existing test's session names ("alpha", "beta") would not have surfaced this failure.
 
 3. **Hook content unit test.** A test asserting that `signalHydrateCommand` includes the `--` separator before `#{session_name}`, so future edits to the constant cannot silently regress the fix.
 
-4. **Migration test for `RegisterPortalHooks`.** A unit test verifying that bootstrap evicts a pre-existing hook entry containing `portal state signal-hydrate` without `--` and installs the fixed entry. A second invocation of the same bootstrap step must be a no-op (idempotent).
+4. **Migration test for `RegisterPortalHooks`.** A unit test verifying that bootstrap evicts a pre-existing hook entry containing `portal state signal-hydrate` without `--` and installs the fixed entry. A second invocation of the same bootstrap step must be a no-op (idempotent). **Test setup:** prefer a real-tmux socket fixture (`internal/tmuxtest`) over a mocked `Commander` — the eviction logic depends on the precise format of `show-hooks` output and `set-hook -gu` index semantics, both of which a mock would have to re-implement to be faithful. Real-tmux gives end-to-end fidelity at low cost.
 
 ### Testing Constraint — Do Not Restart The Active Tmux Server
 
