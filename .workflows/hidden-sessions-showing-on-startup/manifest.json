@@ -32,7 +32,7 @@
         "hidden-sessions-showing-on-startup": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "d796727a27eca91437f55149aa36ed22b31592db",
+          "spec_commit": "d5d9c2716a03d8f6f730541c5aad71cad54679fd",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
