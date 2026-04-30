@@ -78,10 +78,14 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 1,
-          "current_task": "tick-6731e9",
+          "current_phase": 2,
+          "current_task": "tick-dc5668",
           "completed_tasks": [
-            "hidden-sessions-showing-on-startup-1-1"
+            "hidden-sessions-showing-on-startup-1-1",
+            "hidden-sessions-showing-on-startup-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }

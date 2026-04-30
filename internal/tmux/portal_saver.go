@@ -8,8 +8,11 @@ import (
 )
 
 // PortalSaverName is the tmux session name that hosts the long-running save daemon.
-// The leading underscore marks the session as Portal-internal so it is filtered
-// from the TUI picker and from sessions.json capture.
+// The leading underscore marks the session as Portal-internal: Client.ListSessions
+// applies a chokepoint underscore-prefix filter so this session is excluded from
+// every user-facing listing (the TUI picker, `portal list`, and any future
+// ListSessions consumer). It is also excluded from sessions.json capture by the
+// separate keepSessionNames pass in internal/state/capture.go.
 const PortalSaverName = "_portal-saver"
 
 // portalSaverCommand is the shell command run as the saver session's initial
