@@ -35,6 +35,14 @@ Reproducibility: always.
 - Confirmed independent of `tmux-resurrect` / `tmux-continuum` —
   Portal itself is the source of both unwanted sessions.
 
+**Behavioural change beyond the visible UX:** any external tooling
+that scripts against `portal list` will, after this fix, see output
+strictly trimmed to user-visible sessions. Scripts that today
+tolerate or filter `_portal-saver` / `0` will continue to work; any
+script that depended on those names appearing will silently observe
+their absence. The change is benign but is documented here so
+consumers are not surprised.
+
 ### Design Intent
 
 The `built-in-session-resurrection` specification mandates that Portal
@@ -92,6 +100,17 @@ Bootstrap step 5 (`Restore`) does not target the `0` session, and no
 other bootstrap step or cleanup mechanism removes it. The session
 lingers indefinitely.
 
+The bootstrap session is functionally redundant the moment
+bootstrap step 4 (`EnsureSaver`) creates `_portal-saver` or step 5
+(`Restore`) creates user sessions — its sole job is to keep the
+server alive *until* something else exists. Once another session
+is present, the `0` session has no role to play. No step removes
+it; tmux's `exit-empty` policy cannot reap it because the server
+is no longer empty. This justifies why Fix B's reliance on tmux's
+native lifecycle is acceptable: the renamed session has no purpose
+once real sessions exist, and tmux's `exit-empty` reaping (when
+applicable) targets exactly that condition.
+
 ### Why The Two Causes Surface Together
 
 Both unwanted sessions appear at first startup because both are
@@ -109,6 +128,14 @@ renamed bootstrap session disappear from view together.
 - Tests for `StartServer` check that the command runs; they do not
   assert on whether the bootstrap session is cleaned up at the end
   of bootstrap. The `0` session is invisible to current assertions.
+- The `built-in-session-resurrection` planning's "review" phase
+  scored the implementation against the explicit task list rather
+  than against an end-to-end UX walk-through. Manual QA of the
+  post-bootstrap session list as a user sees it would have caught
+  both root causes. The end-to-end test mandated in this bugfix
+  (see Test Requirements → "End-To-End — No `_*` Sessions Visible
+  Post-Bootstrap") is the regression guard for that review-process
+  gap, not just the test-surface gap.
 
 ## Fix A — Filter `_*` Sessions In `Client.ListSessions`
 
@@ -139,24 +166,25 @@ appear would forget, and the bug would repeat.
 
 ### Interaction With The Capture Path
 
-`internal/state/capture.go` does not call `ListSessions`. It uses a
-separate `ListSessionNames` route and applies its own
-`keepSessionNames` filter (lines 218-228). Adding a filter inside
-`ListSessions` does not affect capture behaviour.
+`internal/state/capture.go` reaches tmux via `ListSessionNames` —
+verified to be a thin wrapper around `ListSessions`. Adding a filter
+inside `ListSessions` therefore also filters the capture caller, but
+`internal/state` already applies its own `keepSessionNames` filter
+on top (`internal/state/capture.go:218-228`), so the post-filter
+result is unchanged.
 
-If `ListSessionNames` is implemented as a thin wrapper around
-`ListSessions` and the new filter would change its output, the
-implementation MUST preserve current behaviour for the capture path.
-Two acceptable implementations:
+The implementation MAY adopt either of two equivalent strategies:
 
 1. Apply the underscore filter at the post-processing layer in
    `ListSessions`, and have `ListSessionNames` call the lower-level
    raw enumeration directly (bypassing the filter), OR
-2. Apply the filter only in `ListSessions` because the capture path
-   already filters `_*` sessions on top via `keepSessionNames` —
-   double-filtering produces the same result.
+2. Apply the filter only in `ListSessions` and rely on the
+   capture path's existing `keepSessionNames` filter to produce the
+   same result via double-filtering.
 
-The implementation chooses one and documents which.
+The implementation chooses one and documents which. No new test is
+required for the capture path beyond the existing regression guard
+(see Test Requirements → Capture-Path Regression Guard).
 
 ### Diagnostic Escape Hatch (Future)
 
@@ -226,6 +254,17 @@ Three alternatives were considered for the bootstrap session:
 re-use a session with this name. The constant is the canonical
 reference.
 
+### Sole Production Caller Verified
+
+`StartServer` is the only call site in production code that invokes
+`tmux new-session` without `-s`. This was verified during
+investigation. Once Fix B lands there is no remaining code path
+that produces an unnamed (and therefore numerically-defaulted)
+session. Any future contributor adding a sibling unnamed
+`new-session` would re-introduce the bug; the chokepoint reasoning
+in Fix A applies — the underscore-prefix invariant must be the
+default for any new bootstrap-style session.
+
 ## Doc-Comment Cleanup
 
 Two existing doc-comments encode incorrect or stale claims and MUST
@@ -258,6 +297,18 @@ After Fix B, the comment MUST:
 - Retain the `exit-empty on` rationale for using `new-session -d`
   rather than `start-server` (this is still load-bearing — commit
   `bd659a3`).
+
+### Convention Precedent
+
+Existing tests already follow the underscore-prefix convention for
+seeding sessions:
+
+- `internal/restore/integration_test.go:280` uses `_seed`.
+- `cmd/bootstrap/reboot_roundtrip_test.go:236, 319` uses `_bootstrap`.
+
+Test-bench code already demonstrates the pattern works; production
+was the outlier. Fix B brings production in line with the convention
+the test code has been using.
 
 ## Test Requirements
 
@@ -347,6 +398,26 @@ Other listing methods (`ListPanes`, `ListPanesInSession`,
 modified in this bugfix. Pane-level filtering is a separate
 concern, and there is no observed bug or spec mandate driving a
 change there.
+
+## Rollout
+
+This is a regular bugfix. No feature flag, no env-var gate, no
+staged rollout. The change is observable but strictly improves UX,
+and there is no scenario where it is desirable to ship the broken
+behaviour.
+
+Commit shape: two small targeted commits, each with its own test:
+
+1. Fix A (filter in `Client.ListSessions`) plus the
+   `Client.ListSessions` unit test and the doc-comment cleanup on
+   `tmux.PortalSaverName`.
+2. Fix B (rename bootstrap session) plus the `TestStartServer`
+   update, the `PortalBootstrapName` constant, and the doc-comment
+   cleanup on `tmux.StartServer`.
+
+The end-to-end post-bootstrap test (Test Requirements → "End-To-End
+— No `_*` Sessions Visible Post-Bootstrap") MAY ship in either
+commit but MUST land in the same release.
 
 ---
 
