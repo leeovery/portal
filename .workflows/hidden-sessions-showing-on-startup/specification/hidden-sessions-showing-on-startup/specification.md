@@ -110,6 +110,68 @@ renamed bootstrap session disappear from view together.
   assert on whether the bootstrap session is cleaned up at the end
   of bootstrap. The `0` session is invisible to current assertions.
 
+## Fix A — Filter `_*` Sessions In `Client.ListSessions`
+
+### Behaviour Contract
+
+`internal/tmux.Client.ListSessions` MUST exclude any session whose
+name begins with `_` from its returned slice. The exclusion is
+unconditional and applies to every caller.
+
+After this change, the TUI session picker, `portal list`, and any
+future caller of `ListSessions` automatically inherit the filter
+without per-consumer code changes.
+
+### Placement Rationale
+
+The filter is applied at the chokepoint — `tmux.Client.ListSessions` —
+rather than at each consumer (`internal/tui`, `cmd/list.go`).
+Rationale:
+
+- The spec describes `_*` hiding as a Portal-wide invariant, not a
+  per-consumer concern.
+- Single source of truth — future consumers cannot forget the rule.
+- One filter site, one test, one mental model.
+
+A per-consumer placement (each of `internal/tui` and `cmd/list.go`)
+was rejected because it loses the invariant — the next consumer to
+appear would forget, and the bug would repeat.
+
+### Interaction With The Capture Path
+
+`internal/state/capture.go` does not call `ListSessions`. It uses a
+separate `ListSessionNames` route and applies its own
+`keepSessionNames` filter (lines 218-228). Adding a filter inside
+`ListSessions` does not affect capture behaviour.
+
+If `ListSessionNames` is implemented as a thin wrapper around
+`ListSessions` and the new filter would change its output, the
+implementation MUST preserve current behaviour for the capture path.
+Two acceptable implementations:
+
+1. Apply the underscore filter at the post-processing layer in
+   `ListSessions`, and have `ListSessionNames` call the lower-level
+   raw enumeration directly (bypassing the filter), OR
+2. Apply the filter only in `ListSessions` because the capture path
+   already filters `_*` sessions on top via `keepSessionNames` —
+   double-filtering produces the same result.
+
+The implementation chooses one and documents which.
+
+### Diagnostic Escape Hatch (Future)
+
+If a future caller legitimately needs unfiltered output (e.g. an
+internal diagnostic command), expose a sibling `ListAllSessions` (or
+`ListSessionsRaw`) on the client. This is **not** added now — it is
+documented as the available extension point so the default
+`ListSessions` can remain safe by construction.
+
+### Filter Definition
+
+A session is filtered when `strings.HasPrefix(name, "_")` is true.
+The match is on the literal session name as reported by tmux. No
+trimming, no case-folding.
+
 ---
 
 ## Working Notes
