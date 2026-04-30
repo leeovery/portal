@@ -184,7 +184,7 @@ func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sess
 				continue
 			}
 			fifo := state.FIFOPath(stateDir, liveKey)
-			if err := OpenAndSignalFIFO(fifo, retryDelay, budget); err != nil {
+			if err := openAndSignalFIFO(fifo, retryDelay, budget); err != nil {
 				t.Errorf("signal FIFO %s: %v", fifo, err)
 			}
 		}
@@ -249,17 +249,13 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 	}
 }
 
-// OpenAndSignalFIFO opens path O_WRONLY|O_NONBLOCK, retries ENXIO and
+// openAndSignalFIFO opens path O_WRONLY|O_NONBLOCK, retries ENXIO and
 // EAGAIN at delay intervals until budget elapses, then writes a single
-// byte. Byte-equivalent to cmd/state_signal_hydrate.writeFIFOSignal —
-// shared here because that production helper lives in the cmd package
-// and is unexported, and integration round-trip tests across multiple
-// layers each need to drive the FIFO without going through the CLI.
-//
-// Any open error other than ENXIO/EAGAIN aborts immediately so genuine
-// permission / path errors surface clearly rather than waiting out the
-// full budget.
-func OpenAndSignalFIFO(path string, delay, budget time.Duration) error {
+// byte. Byte-equivalent to cmd/state_signal_hydrate.writeFIFOSignal;
+// internal helper for DriveSignalHydrate. Any open error other than
+// ENXIO/EAGAIN aborts immediately so genuine permission / path errors
+// surface clearly rather than waiting out the full budget.
+func openAndSignalFIFO(path string, delay, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	var lastErr error
 	for {
