@@ -371,13 +371,19 @@ the plugin removed.
 After Fix B, the comment MUST:
 
 - Drop the tmux-resurrect cleanup claim entirely.
+- Drop or reframe the "plugins like tmux-continuum can restore
+  saved sessions" wording — Portal's own bootstrap step 5
+  (`Restore`) is now the beneficiary of keeping the server alive,
+  not external plugins. Reword so the rationale references
+  Portal's own resurrection rather than third-party plugins.
 - Document that the session is created with the reserved name
   `PortalBootstrapName` (`_portal-bootstrap`).
 - Document that the session is hidden from user-facing listings by
   the underscore-prefix filter in `Client.ListSessions`.
 - Retain the `exit-empty on` rationale for using `new-session -d`
   rather than `start-server` (this is still load-bearing — commit
-  `bd659a3`).
+  `bd659a3`) — but framed against Portal's own `Restore` step, per
+  the previous bullet.
 
 ### Convention Precedent
 
