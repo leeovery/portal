@@ -343,3 +343,15 @@ approved_at: 2026-04-23
 | built-in-session-resurrection-13-3 | Add the two missing Phase 5 task 5-10 acceptance assertions to `cmd/reattach_integration_test.go` | alias vs zoxide pre-seed; saved-only resolution must reach the connector; intentional duplication of `saved_at` assertion (different trigger than marker-suppression test) |
 | built-in-session-resurrection-13-4 | Use `state.SanitizePaneKey` for round-trip hook fixtures and tighten the marker-suppression test scope godoc | `saveBase != 0` would expose silent drift in current implementation; godoc-only changes for the marker-suppression test (no behaviour change) |
 | built-in-session-resurrection-13-5 | Documentation precision cleanup across spec citations, error-warning wording, godoc scope, and historical record | spec section title verification; test fixtures asserting old "corrupt" headline; symlink-traversal claim must align with existing passing test; historical review record gets a reconciliation note (not a rewrite) |
+
+### Phase 14: Analysis (Cycle 7)
+
+**Goal**: Address findings from Analysis (Cycle 7).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| built-in-session-resurrection-14-1 | Add deferred logger Close in state_cleanup RunE | nil-receiver-safe Close(); test injection of nil logger; ordering relative to existing unregister defer |
+| built-in-session-resurrection-14-2 | Fix or remove misleading init() rationale on openTUIFunc / openPathFunc seams | hypothetical compile cycle discovered late; preserve compile-time signature assertions; sibling seam pattern parity with state_signal_hydrate.go and state_hydrate.go |
+| built-in-session-resurrection-14-3 | Unexport OpenAndSignalFIFO in internal/restoretest | undiscovered external caller surfaces during repo-wide grep; integration build tag required to exercise call site; godoc rewrite must not re-imply external use |

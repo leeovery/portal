@@ -10,7 +10,7 @@ total_proposed: 3
 
 ## Task 1: Add deferred logger Close in state_cleanup RunE
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** duplication (D1)
 
@@ -39,7 +39,7 @@ total_proposed: 3
 
 ## Task 2: Fix or remove misleading init() rationale on openTUIFunc / openPathFunc seams
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** architecture (A1)
 
@@ -71,7 +71,7 @@ total_proposed: 3
 
 ## Task 3: Unexport OpenAndSignalFIFO in internal/restoretest
 
-- **status:** pending
+- **status:** approved
 - **severity:** low
 - **sources:** architecture (A2)
 
