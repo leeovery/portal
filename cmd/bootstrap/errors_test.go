@@ -67,7 +67,7 @@ func TestFatalError_AsExtractsType(t *testing.T) {
 func TestCorruptSessionsJSONWarning_returnsExactSpecCopy(t *testing.T) {
 	got := CorruptSessionsJSONWarning()
 	want := []string{
-		"Portal state file is corrupt — restoration skipped.",
+		"Portal state file unusable — restoration skipped.",
 		"Check `portal state status` or ~/.config/portal/state/portal.log.",
 	}
 	if len(got.Lines) != len(want) {

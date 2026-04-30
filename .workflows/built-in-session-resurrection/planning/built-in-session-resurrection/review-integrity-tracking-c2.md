@@ -253,6 +253,8 @@ If Phase 5 ships as-currently-written, the FIFO sweep code from task 3-12 is dea
     8. Return `(serverStarted, restoreErr)` — if `Restore()` errored, surface it; otherwise `nil`.
 ```
 
+> _Resolved by T12-9 (review-cycle 1): step 6 Clear `@portal-restoring` is fatal on failure — see `cmd/bootstrap/bootstrap.go:227-229`. The "log WARN and continue" wording above captures the disagreement state at cycle-2 review time and is preserved here as a historical record only._
+
 **Proposed**:
 
 ```
@@ -261,6 +263,8 @@ If Phase 5 ships as-currently-written, the FIFO sweep code from task 3-12 is dea
     8. `if err := o.Clean.CleanStale(); err != nil` → log, continue. CleanStale failure is soft (non-critical pruning step).
     9. Return `(serverStarted, restoreErr)` — if `Restore()` errored, surface it; otherwise `nil`.
 ```
+
+> _Resolved by T12-9 (review-cycle 1): step 6 Clear `@portal-restoring` is fatal on failure — see `cmd/bootstrap/bootstrap.go:227-229`. The "log WARN and continue" wording above captures the disagreement state at cycle-2 review time and is preserved here as a historical record only._
 
 (Renumbered: the spec's 8-step "PersistentPreRunE Sequence" already groups the FIFO sweep within step 7's broader "post-restore housekeeping" — task 5-2 documents it as a distinct call inside the orchestrator. Phase 5 acceptance bullet "`CleanStale` runs in step 7" still holds because the orchestrator's step-numbering is internal to the implementation.)
 

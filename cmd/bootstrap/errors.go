@@ -45,11 +45,15 @@ func NewFatal(userMsg string, cause error) *FatalError {
 type Warning = warning.Warning
 
 // CorruptSessionsJSONWarning returns the canonical warning for the
-// "sessions.json exists but is unparseable" path. Wording matches the
-// Observability section of the specification verbatim.
+// "sessions.json exists but cannot be used" path. Both unparseable
+// content (malformed JSON, unsupported version) AND unreadable files
+// (permission denied — see T12-8) flow through this warning, since
+// internal/state/index_reader.go wraps every non-nil error with
+// state.ErrCorruptIndex. Wording matches the Observability section of
+// the specification verbatim.
 func CorruptSessionsJSONWarning() Warning {
 	return Warning{Lines: []string{
-		"Portal state file is corrupt — restoration skipped.",
+		"Portal state file unusable — restoration skipped.",
 		"Check `portal state status` or ~/.config/portal/state/portal.log.",
 	}}
 }

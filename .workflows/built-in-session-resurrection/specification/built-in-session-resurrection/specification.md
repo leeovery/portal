@@ -1373,10 +1373,10 @@ The output includes a "recent warnings" line that scans `portal.log` for entries
   Run `portal state status` for details.
   ```
 
-- `sessions.json` exists but is unparseable:
+- `sessions.json` exists but cannot be used (corrupt content, unsupported schema version, or unreadable due to permission denial):
 
   ```
-  Portal state file is corrupt — restoration skipped.
+  Portal state file unusable — restoration skipped.
   Check `portal state status` or ~/.config/portal/state/portal.log.
   ```
 
@@ -1392,6 +1392,7 @@ One line. No banners, no colors, no interactive UI. Just enough signal that the 
 - **`EnsureServer()` fails** (tmux server cannot start, e.g., permission error): emit stderr error, exit non-zero.
 - **`set-hook -ga` calls fail** en masse (version check passed but hook calls error anyway): log, emit one-line stderr warning if on CLI path; on TUI path, dismiss loading page cleanly, emit error, exit non-zero.
 - **`@portal-restoring` set-option fails**: same as `set-hook` failure.
+- **`@portal-restoring` clear (unset) fails at step 6**: same as set-option failure. The marker MUST NOT leak past bootstrap — a stuck `@portal-restoring=1` would suppress every subsequent daemon tick across this server's lifetime, silently breaking persistence.
 
 TUI path: loading page never "hangs forever." Any unrecoverable error tears down the Bubble Tea program cleanly, emits the error, exits. The loading page is only kept up while bootstrap is making progress.
 

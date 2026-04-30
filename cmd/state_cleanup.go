@@ -124,8 +124,16 @@ func runPurge(logger *state.Logger) error {
 // a different volume, or macOS's `~/Library` symlink farm). Earlier revisions
 // rejected any such case via filepath.EvalSymlinks strict-equality, which
 // produced false-positive "refusing to purge" errors on real users with
-// symlinked config setups. The Lstat check below is sufficient — RemoveAll
-// follows the leaf inode and never traverses through a symlink target.
+// symlinked config setups.
+//
+// The Lstat check below covers the leaf-symlink case (PORTAL_STATE_DIR
+// resolves directly to a symlink — refused). RemoveAll DOES traverse
+// intermediate symlinked components by design, since users may
+// legitimately have `~/.config` symlinked to a different volume.
+// Whatever leaf directory PORTAL_STATE_DIR points at — after intermediate
+// resolution — is what gets purged. The
+// TestStateCleanup_PurgeAllowsSymlinkedIntermediatePathComponents
+// regression test pins this scope.
 //
 // Successful purges and RemoveAll failures are logged at INFO and ERROR
 // respectively under ComponentDaemon. The logger may be nil; *state.Logger's

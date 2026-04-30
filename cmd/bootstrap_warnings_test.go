@@ -222,7 +222,7 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 	wantLines := []string{
 		"Portal save daemon failed to start — sessions won't be captured.",
 		"Run `portal state status` for details.",
-		"Portal state file is corrupt — restoration skipped.",
+		"Portal state file unusable — restoration skipped.",
 		"Check `portal state status` or ~/.config/portal/state/portal.log.",
 	}
 	for _, want := range wantLines {
@@ -233,7 +233,7 @@ func TestPersistentPreRunE_EmitsWarningsToStderrOnCLIPath(t *testing.T) {
 
 	// Order: saver lines must precede corrupt-index lines.
 	saverIdx := strings.Index(got, "Portal save daemon failed")
-	corruptIdx := strings.Index(got, "Portal state file is corrupt")
+	corruptIdx := strings.Index(got, "Portal state file unusable")
 	if saverIdx < 0 || corruptIdx < 0 {
 		t.Fatalf("expected both warnings in stderr; got %q", got)
 	}

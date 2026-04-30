@@ -14,10 +14,11 @@ import (
 
 // signalHydrateRetryDelays is the back-off ladder used when the per-pane FIFO
 // is not yet readable. The cumulative budget is 500ms (10+20+40+80+160+190 =
-// 500). Spec → "FIFO open-for-write semantics": signal-hydrate retries
-// O_WRONLY|O_NONBLOCK opens that return ENXIO/EAGAIN before giving up; the
-// helper inside the pane will eventually reach its O_RDONLY call and the next
-// attach path will re-signal.
+// 500). Spec § "Signal Mechanism: FIFO Per Pane" describes the per-pane
+// FIFO contract; signal-hydrate retries O_WRONLY|O_NONBLOCK opens that
+// return ENXIO/EAGAIN before giving up. The helper inside the pane will
+// eventually reach its O_RDONLY call (spec § "Helper Behavior on Startup")
+// and the next attach path will re-signal.
 var signalHydrateRetryDelays = []time.Duration{
 	10 * time.Millisecond,
 	20 * time.Millisecond,
