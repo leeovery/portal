@@ -35,7 +35,7 @@ Task 2-1's Do step instructs the implementer to "Locate the existing `TestStartS
 
 ---
 
-### 2. `Client.ListSessions` line range off by 2; `ListSessionNames` off by 5
+### 2. `Client.ListSessions` line range off by 2; `ListSessionNames` off by 5 [FIXED]
 
 **Severity**: Minor
 **Plan Reference**: `phase-1-tasks.md`, Task 1-1 ("Do" first bullet, "Context" final paragraph)
@@ -75,8 +75,8 @@ Task 1-1 cites `Client.ListSessions` at "lines 106-150" and `ListSessionNames` a
 > Existing `Client.ListSessions` lives at `internal/tmux/tmux.go:108-150`. Existing `ListSessionNames` lives at `internal/tmux/tmux.go:157-167`. Existing `TestListSessions` and `MockCommander` live at `internal/tmux/tmux_test.go:12-100+`. Existing `TestStartServer` lives at `internal/tmux/tmux_test.go:404+`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: All three citations updated in `phase-1-tasks.md` Task 1-1: "Do" first bullet (106-150 → 108-150), "Do" third bullet (152-167 → 157-167), and Context final paragraph (both ranges + added `TestStartServer` line citation).
 
 ---
 

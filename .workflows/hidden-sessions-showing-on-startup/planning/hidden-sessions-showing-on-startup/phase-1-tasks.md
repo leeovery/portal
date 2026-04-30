@@ -15,9 +15,9 @@ total: 2
 **Outcome**: After this task, `Client.ListSessions` never returns a session whose name starts with `_`; the returned slice is always non-nil (empty when fully filtered); `ListSessionNames` continues to delegate to `ListSessions` with no new low-level enumeration; the capture path's existing `keepSessionNames` filter (`internal/state/capture.go:218-228`) double-filters `_*` names as a verifiable no-op; the new unit test guards against regression of Root Cause 1; `go test ./...` is green.
 
 **Do**:
-- In `internal/tmux/tmux.go`, edit `Client.ListSessions` (currently at lines 106-150). After the existing parsing loop builds the `sessions` slice, add a final post-processing pass that filters out any `Session` whose `Name` satisfies `strings.HasPrefix(s.Name, "_")`. The filter is unconditional (no flag, no escape hatch) and runs **last** — after parsing and any future ordering/enrichment — so the contract "the returned slice never contains a `_*` name" survives further pipeline evolution.
+- In `internal/tmux/tmux.go`, edit `Client.ListSessions` (currently at lines 108-150). After the existing parsing loop builds the `sessions` slice, add a final post-processing pass that filters out any `Session` whose `Name` satisfies `strings.HasPrefix(s.Name, "_")`. The filter is unconditional (no flag, no escape hatch) and runs **last** — after parsing and any future ordering/enrichment — so the contract "the returned slice never contains a `_*` name" survives further pipeline evolution.
 - Preserve the existing non-nil-slice contract: when every parsed session is filtered, return a non-nil empty `[]Session{}` (never `nil`). The simplest way is to allocate a fresh `filtered := make([]Session, 0, len(sessions))` and append survivors; do not return the input slice short-circuited to nil.
-- Do **not** touch `ListSessionNames` (lines 152-167). It is a thin wrapper around `ListSessions` and the spec mandates it stay that way ("`ListSessionNames` MUST remain a delegation to `ListSessions` — it MUST NOT bypass `ListSessions` to query tmux directly"). Leave the existing delegation in place; it inherits the filter for free.
+- Do **not** touch `ListSessionNames` (lines 157-167). It is a thin wrapper around `ListSessions` and the spec mandates it stay that way ("`ListSessionNames` MUST remain a delegation to `ListSessions` — it MUST NOT bypass `ListSessions` to query tmux directly"). Leave the existing delegation in place; it inherits the filter for free.
 - In `internal/tmux/tmux_test.go`, add a new top-level test (suggested name: `TestListSessionsFiltersUnderscorePrefixed`) that uses `MockCommander` (already defined at lines 12-42) to drive `list-sessions` output. Use the existing table-driven style of `TestListSessions` (lines 44+).
 - The new test must include at minimum these table entries:
   1. **Mixed names** — mocked output `dev|2|0\n_portal-saver|1|0\nwork|3|1\n_portal-bootstrap|1|0`; assert returned slice contains exactly `dev` and `work`, in that order, with all metadata preserved.
@@ -68,7 +68,7 @@ total: 2
 >
 > From Test Requirements → Capture-Path Regression Guard: "The capture-path tests (`internal/state/capture_test.go:135` and related) MUST continue to pass unchanged."
 >
-> Existing `Client.ListSessions` lives at `internal/tmux/tmux.go:106-150`. Existing `ListSessionNames` lives at `internal/tmux/tmux.go:152-167`. Existing `TestListSessions` and `MockCommander` live at `internal/tmux/tmux_test.go:12-100+`.
+> Existing `Client.ListSessions` lives at `internal/tmux/tmux.go:108-150`. Existing `ListSessionNames` lives at `internal/tmux/tmux.go:157-167`. Existing `TestListSessions` and `MockCommander` live at `internal/tmux/tmux_test.go:12-100+`. Existing `TestStartServer` lives at `internal/tmux/tmux_test.go:404+`.
 
 **Spec Reference**: `.workflows/hidden-sessions-showing-on-startup/specification/hidden-sessions-showing-on-startup/specification.md` — sections "Fix A — Filter `_*` Sessions In `Client.ListSessions`" and "Test Requirements — Unit — `Client.ListSessions` Excludes `_*` Sessions" and "Test Requirements — Capture-Path Regression Guard".
 
