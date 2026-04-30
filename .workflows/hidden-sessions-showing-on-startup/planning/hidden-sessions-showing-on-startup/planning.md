@@ -20,6 +20,14 @@ approved_at: 2026-04-30
 - [ ] `tmux.PortalSaverName` doc-comment is reviewed in the post-fix context — either updated to correctly reference `Client.ListSessions` as the chokepoint for TUI-picker filtering, or explicitly noted as "reviewed, no change required" in the commit message.
 - [ ] `go test ./...` is green; change ships as a single targeted commit (Fix A + unit test + doc-comment) per the Rollout section.
 
+#### Tasks
+status: draft
+
+| ID | Task | Acceptance | Edge Cases |
+|----|------|------------|------------|
+| hidden-sessions-showing-on-startup-1-1 | Add underscore-prefix filter to `Client.ListSessions` with unit test | Filter applied as final post-processing step before return using `strings.HasPrefix(name, "_")`; returns empty (non-nil) slice when all sessions filtered; `ListSessionNames` continues to delegate to `ListSessions`; new unit test in `internal/tmux/tmux_test.go` drives mocked `Commander` output containing a mix of `_*` and non-`_*` names and asserts only non-`_*` names survive plus a fully-filtered case yields a non-nil empty slice; existing `internal/state/capture_test.go` regression tests pass unchanged; `go test ./...` green | all sessions filtered (empty non-nil slice, never nil), zero sessions reported by tmux, `ListSessionNames` delegation invariant preserved, capture-path `keepSessionNames` double-filter remains a no-op |
+| hidden-sessions-showing-on-startup-1-2 | Verify `cmd/list.go` empty-input contract and refresh `tmux.PortalSaverName` doc-comment | `cmd/list.go` confirmed to emit no output when `ListSessions` returns empty slice (existing `len(sessions) == 0 { return nil }` guard at line 66-68 is compliant — no code change, verification recorded in commit message); `tmux.PortalSaverName` doc-comment reviewed against post-fix reality and either revised to reference `Client.ListSessions` as the chokepoint for TUI-picker filtering or explicitly noted "reviewed, no change required" in the commit message; entire phase ships as a single targeted commit per Rollout (Fix A + unit test from task 1 + this verification + doc-comment) | existing empty-input path already compliant (verification-only outcome), doc-comment already accurate after Fix A lands (commit-message note path), no per-consumer code change in `cmd/list.go` or `internal/tui` |
+
 ### Phase 2: Rename Bootstrap Session to `_portal-bootstrap`
 status: approved
 approved_at: 2026-04-30
