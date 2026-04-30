@@ -66,9 +66,7 @@ package cmd
 // attachDeps, openTUIFunc) and MUST NOT use t.Parallel.
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -77,6 +75,7 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -91,65 +90,24 @@ var reattachBuildOnce sync.Once
 var reattachBinDir string
 var reattachBuildErr error
 
-// ensurePortalOnPATH builds the portal binary into a temp dir (once
-// per test process) and prepends that dir to PATH for the lifetime of
-// the calling test. The temp dir lives until process exit — sharing it
-// across tests is intentional because the only consumer is the in-pane
-// hydrate helper, which never mutates the binary.
+// ensurePortalOnPATH builds the portal binary into a stable temp dir
+// (once per test process via sync.Once) and prepends that dir to PATH
+// for the lifetime of the calling test. The temp dir lives until
+// process exit — sharing it across tests is intentional because the
+// only consumer is the in-pane hydrate helper, which never mutates the
+// binary. We delegate to restoretest.BuildPortalBinaryStable (which
+// uses os.MkdirTemp, NOT t.TempDir) because t.TempDir would be removed
+// when the test that triggered the once-Do exits, leaving subsequent
+// tests pointing at a deleted path.
 func ensurePortalOnPATH(t *testing.T) {
 	t.Helper()
 	reattachBuildOnce.Do(func() {
-		dir, err := buildPortalBinaryForReattach()
-		reattachBinDir = dir
-		reattachBuildErr = err
+		reattachBinDir, reattachBuildErr = restoretest.BuildPortalBinaryStable()
 	})
 	if reattachBuildErr != nil {
 		t.Fatalf("build portal: %v", reattachBuildErr)
 	}
 	t.Setenv("PATH", reattachBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-// buildPortalBinaryForReattach compiles the portal CLI into a stable
-// temp dir under os.TempDir() (NOT t.TempDir, which would be removed
-// when the first test that triggers the build exits). Returns the dir
-// containing the binary so callers can prepend it to PATH.
-func buildPortalBinaryForReattach() (string, error) {
-	dir, err := os.MkdirTemp("", "ptl-reattach-")
-	if err != nil {
-		return "", fmt.Errorf("mkdir temp: %w", err)
-	}
-	binary := filepath.Join(dir, "portal")
-	root, err := reattachProjectRoot()
-	if err != nil {
-		return "", fmt.Errorf("locate project root: %w", err)
-	}
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("go build: %v\n%s", err, out)
-	}
-	return dir, nil
-}
-
-// reattachProjectRoot walks up from the test's runtime CWD to the
-// directory holding go.mod. The test binary's CWD is cmd/ at runtime;
-// the closest go.mod is one level up at the repo root, which is where
-// `go build .` must run from to compile the portal CLI.
-func reattachProjectRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("go.mod not found above %s", dir)
-		}
-		dir = parent
-	}
 }
 
 // buildReattachOrchestrator constructs a bootstrap.Orchestrator wired

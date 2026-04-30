@@ -216,7 +216,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 12,
+          "current_phase": 13,
           "current_task": "~",
           "completed_tasks": [
             "built-in-session-resurrection-1-1",
@@ -338,7 +338,8 @@
             "built-in-session-resurrection-12-11",
             "built-in-session-resurrection-12-12",
             "built-in-session-resurrection-12-13",
-            "built-in-session-resurrection-12-14"
+            "built-in-session-resurrection-12-14",
+            "built-in-session-resurrection-13-1"
           ],
           "completed_phases": [
             7,

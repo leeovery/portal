@@ -38,13 +38,10 @@ package bootstrap_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -52,6 +49,7 @@ import (
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -123,8 +121,8 @@ func TestPhase5RebootRoundTripBaseIndexDrift(t *testing.T) {
 func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	t.Helper()
 
-	binDir := buildPortalBinaryDir(t)
-	prependPathDir(t, binDir)
+	binDir := restoretest.BuildPortalBinaryDir(t)
+	restoretest.PrependPATH(t, binDir)
 
 	stateDir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -311,7 +309,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// the pane will then read the byte, dump scrollback, sleep
 	// 100ms, unset the skeleton marker, fire the on-resume hook, and
 	// exec $SHELL.
-	driveSignalHydrate(t, client, stateDir,
+	restoretest.DriveSignalHydrate(t, client, stateDir,
 		[]string{"alpha", "beta"})
 
 	// Wait for every helper to finish: the spec contract is that the
@@ -319,7 +317,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// post-dump and post-settle (step 8 of "Helper Behavior on
 	// Startup"). Polling the marker set is a reliable barrier without
 	// having to introspect helper subprocesses.
-	waitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
 
 	// ANSI scrollback bytes survive: capture-pane -e -p -S - against
 	// the hook-owning pane should contain the red SGR sequence and
@@ -489,133 +487,6 @@ func verifyCapturedIndex(t *testing.T, idx state.Index, cfg roundTripCfg) {
 	}
 }
 
-// driveSignalHydrate is the test-side replacement for
-// `portal state signal-hydrate <session>`. For each named session, it
-// enumerates skeleton-marked panes and writes 1 byte to each pane's
-// hydration FIFO, retrying ENXIO/EAGAIN at 50ms intervals up to a
-// 10-second budget.
-//
-// Why a much longer budget than production's 500ms: the production
-// path runs from a tmux client-attached hook with the live server
-// already past startup latency. This test runs `go build` and a fresh
-// tmux server arm in the same process; under parallel load
-// (`go test ./...`) the in-pane fork+exec for the helper can take
-// well over a second before reaching its open(O_RDONLY). 10 seconds
-// is generous enough to absorb worst-case CI scheduling without
-// masking a real regression — a stuck helper would still time out.
-//
-// We do this instead of spawning `portal state signal-hydrate` because
-// the production CLI path adds nothing under test (it's covered by
-// dedicated unit tests in cmd/state_signal_hydrate_test.go) and
-// runSignalHydrate is unexported anyway.
-func driveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sessions []string) {
-	t.Helper()
-	const (
-		retryDelay = 50 * time.Millisecond
-		budget     = 10 * time.Second
-	)
-	markers, err := state.ListSkeletonMarkers(client)
-	if err != nil {
-		t.Fatalf("ListSkeletonMarkers: %v", err)
-	}
-	if len(markers) == 0 {
-		t.Fatal("no skeleton markers; restore did not arm any panes")
-	}
-	for _, session := range sessions {
-		panes, err := client.ListPanesInSession(session)
-		if err != nil {
-			t.Fatalf("ListPanesInSession %q: %v", session, err)
-		}
-		for _, p := range panes {
-			liveKey := state.SanitizePaneKey(session, p.Window, p.Pane)
-			if _, marked := markers[liveKey]; !marked {
-				continue
-			}
-			fifo := state.FIFOPath(stateDir, liveKey)
-			if err := openAndSignalFIFO(fifo, retryDelay, budget); err != nil {
-				t.Errorf("signal FIFO %s: %v", fifo, err)
-			}
-		}
-	}
-}
-
-// openAndSignalFIFO opens path O_WRONLY|O_NONBLOCK, retries ENXIO and
-// EAGAIN at delay intervals until budget elapses, then writes a single
-// byte. This is the byte-equivalent of cmd/state_signal_hydrate.
-// writeFIFOSignal — duplicated here (rather than imported) because
-// runSignalHydrate lives in the cmd package and is unexported.
-//
-// Any open error other than ENXIO/EAGAIN aborts immediately so genuine
-// permission / path errors surface clearly rather than waiting out the
-// full budget.
-func openAndSignalFIFO(path string, delay, budget time.Duration) error {
-	deadline := time.Now().Add(budget)
-	var lastErr error
-	for {
-		f, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-		if err == nil {
-			if _, werr := f.Write([]byte{1}); werr != nil {
-				_ = f.Close()
-				return fmt.Errorf("write byte: %w", werr)
-			}
-			_ = f.Close()
-			return nil
-		}
-		if !errors.Is(err, syscall.ENXIO) && !errors.Is(err, syscall.EAGAIN) {
-			return fmt.Errorf("open: %w", err)
-		}
-		lastErr = err
-		if time.Now().After(deadline) {
-			return fmt.Errorf("retries exhausted after %s: %w", budget, lastErr)
-		}
-		time.Sleep(delay)
-	}
-}
-
-// waitForSkeletonMarkersCleared polls until every `@portal-skeleton-*`
-// server option has been unset. Each helper unsets its own marker after
-// scrollback dump + 100ms settle (or after the file-missing recovery
-// path), so an empty marker set means every helper has reached the
-// hook-or-shell exec step. timeout is the deadline; on expiry the test
-// fails — a stuck marker indicates the helper crashed before unsetting
-// it (and the round-trip's later assertions would be flaky if we just
-// proceeded blindly).
-func waitForSkeletonMarkersCleared(t *testing.T, client *tmux.Client, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		markers, err := state.ListSkeletonMarkers(client)
-		if err != nil {
-			t.Fatalf("ListSkeletonMarkers: %v", err)
-		}
-		if len(markers) == 0 {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	markers, _ := state.ListSkeletonMarkers(client)
-	t.Fatalf("skeleton markers still set after %s: %v", timeout, sortedKeySet(markers))
-}
-
-// sortedKeySet flattens a presence-set to a sorted string slice for
-// stable diagnostic output. Used only by the markers-not-cleared error
-// path so a flaky CI failure prints a deterministic key list.
-func sortedKeySet(set map[string]struct{}) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	// Cheap n^2 sort — set is at most a handful of keys in this test.
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j] < out[i] {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
-	return out
-}
-
 // verifyLiveStructure asserts the restored topology matches the saved
 // shape: alpha has windows at restoreBase+{0,1} with the right pane
 // counts; beta has a single window with a single pane.
@@ -771,55 +642,5 @@ func verifyHookFiredOnce(t *testing.T, hookFireFile string) {
 	if count != 1 {
 		t.Errorf("hook fired %d times; want exactly 1\nfile contents:\n%s",
 			count, data)
-	}
-}
-
-// buildPortalBinaryDir compiles `portal` into a fresh temp directory and
-// returns the dir path so the caller can prepend it to PATH. The binary
-// must exist at that path before the bootstrap orchestrator's Restore
-// step runs — Restore arms each pane with `respawn-pane -k` whose
-// command is `sh -c 'portal state hydrate ...'`; the in-pane shell
-// resolves "portal" by looking on PATH.
-func buildPortalBinaryDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "portal")
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = projectRoot(t)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build portal: %v\n%s", err, out)
-	}
-	return dir
-}
-
-// prependPathDir prefixes dir to the test process's PATH (visible to
-// the tmux server we'll fork next, since tmux inherits our env). Using
-// t.Setenv guarantees the original PATH is restored on test exit so
-// subsequent tests in the same package see the unmodified value.
-func prependPathDir(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-// projectRoot walks up from the test's runtime CWD to the directory
-// holding go.mod. The bootstrap test binary's CWD is cmd/bootstrap/ at
-// runtime; the closest go.mod is two levels up at the repo root, which
-// is where `go build .` must run from to compile the portal CLI.
-func projectRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not locate project root (go.mod)")
-		}
-		dir = parent
 	}
 }
