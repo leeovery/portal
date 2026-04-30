@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "scrollback-not-restored-with-non-zero-base-index": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 3,
           "finding_gate_mode": "auto",
           "date": "2026-04-30",
