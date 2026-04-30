@@ -136,6 +136,66 @@ func TestListSessions(t *testing.T) {
 	}
 }
 
+func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   []tmux.Session
+	}{
+		{
+			name:   "filters _* names from mixed output",
+			output: "dev|2|0\n_portal-saver|1|0\nwork|3|1\n_portal-bootstrap|1|0",
+			want: []tmux.Session{
+				{Name: "dev", Windows: 2, Attached: false},
+				{Name: "work", Windows: 3, Attached: true},
+			},
+		},
+		{
+			name:   "all underscore sessions yields non-nil empty slice",
+			output: "_portal-saver|1|0\n_portal-bootstrap|1|0",
+			want:   []tmux.Session{},
+		},
+		{
+			name:   "underscore mid-name is not filtered (HasPrefix not Contains)",
+			output: "foo_bar|1|0",
+			want: []tmux.Session{
+				{Name: "foo_bar", Windows: 1, Attached: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockCommander{Output: tt.output}
+			client := tmux.NewClient(mock)
+
+			got, err := client.ListSessions()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got == nil {
+				t.Fatal("ListSessions returned nil slice, want non-nil")
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d sessions (%v), want %d (%v)", len(got), got, len(tt.want), tt.want)
+			}
+
+			for i, session := range got {
+				if session.Name != tt.want[i].Name {
+					t.Errorf("session[%d].Name = %q, want %q", i, session.Name, tt.want[i].Name)
+				}
+				if session.Windows != tt.want[i].Windows {
+					t.Errorf("session[%d].Windows = %d, want %d", i, session.Windows, tt.want[i].Windows)
+				}
+				if session.Attached != tt.want[i].Attached {
+					t.Errorf("session[%d].Attached = %v, want %v", i, session.Attached, tt.want[i].Attached)
+				}
+			}
+		})
+	}
+}
+
 func TestServerRunning(t *testing.T) {
 	t.Run("returns true when tmux server is running", func(t *testing.T) {
 		mock := &MockCommander{}

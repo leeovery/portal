@@ -146,7 +146,21 @@ func (c *Client) ListSessions() ([]Session, error) {
 		})
 	}
 
-	return sessions, nil
+	// Filter out sessions whose names start with "_". Portal-wide invariant:
+	// underscore-prefixed names (e.g. _portal-saver) are internal and must
+	// never leak into user-visible output. Applied as the final post-
+	// processing step so every current and future caller — including
+	// ListSessionNames, which delegates to ListSessions — inherits the
+	// invariant without per-consumer code changes. Always returns a non-nil
+	// slice so callers can rely on len(result) == 0 and JSON [] (not null).
+	filtered := make([]Session, 0, len(sessions))
+	for _, s := range sessions {
+		if strings.HasPrefix(s.Name, "_") {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered, nil
 }
 
 // ListSessionNames returns just the names of running tmux sessions, in the
