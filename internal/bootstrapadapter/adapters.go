@@ -48,17 +48,25 @@ func (m *RestoringMarker) Clear() error {
 	return m.Client.UnsetServerOption(state.RestoringMarkerName)
 }
 
-// HookRegistrar wraps tmux.RegisterPortalHooks to satisfy
+// HookRegistrar wraps tmux.RegisterPortalHooksWithLogger to satisfy
 // bootstrap.HookRegistrar. Step 2 of the bootstrap sequence; idempotent
 // — safe to invoke on every bootstrap.
+//
+// Logger is forwarded to tmux.RegisterPortalHooksWithLogger so the
+// one-shot signal-hydrate migration's INFO/WARN diagnostics land in
+// portal.log under the bootstrap component. nil is tolerated:
+// *state.Logger is itself nil-safe and the underlying tmux migration
+// substitutes a no-op MigrationLogger when Logger is nil.
 type HookRegistrar struct {
 	Client *tmux.Client
+	Logger *state.Logger
 }
 
-// RegisterPortalHooks delegates to the package-level helper on the
-// wrapped client.
+// RegisterPortalHooks delegates to tmux.RegisterPortalHooksWithLogger so
+// the migration logger seam is wired through. *state.Logger satisfies
+// tmux.MigrationLogger structurally.
 func (r *HookRegistrar) RegisterPortalHooks() error {
-	return tmux.RegisterPortalHooks(r.Client)
+	return tmux.RegisterPortalHooksWithLogger(r.Client, r.Logger)
 }
 
 // RestoreAdapter wraps a *restore.Orchestrator so its Restore method

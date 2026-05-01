@@ -112,7 +112,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 
 	orch := &bootstrap.Orchestrator{
 		Server:    client,
-		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
+		Hooks:     &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},

@@ -82,7 +82,8 @@
           "current_phase": 1,
           "current_task": "scrollback-not-restored-with-non-zero-base-index-1-2",
           "completed_tasks": [
-            "scrollback-not-restored-with-non-zero-base-index-1-1"
+            "scrollback-not-restored-with-non-zero-base-index-1-1",
+            "scrollback-not-restored-with-non-zero-base-index-1-2"
           ]
         }
       }

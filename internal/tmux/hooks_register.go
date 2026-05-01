@@ -3,6 +3,7 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -119,19 +120,152 @@ var portalHookCategories = []hookCategory{
 	{events: hydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
 }
 
-// RegisterPortalHooks idempotently registers Portal's full hook table on
-// the supplied tmux Client. Categories are processed in the order declared
-// in portalHookCategories; within each category, events are processed in the
-// order declared in the spec.
+// MigrationLogger is the minimal logging seam migrateHydrationHooks needs.
+// Two methods (Info, Warn) is the smallest surface that conveys the spec's
+// observable shape: a single INFO line summarising eviction count, plus a
+// per-failure WARN line on UnsetGlobalHookAt errors.
 //
-// Each registration is delegated to RegisterHookIfAbsent, which performs the
-// content-based dedupe check. A failure on one event does not short-circuit
-// the remaining events — every event is attempted. On any failures the
-// returned error is an errors.Join aggregate; each leaf error names the
-// failing event and wraps the underlying tmux error so callers can use
-// errors.Is on a sentinel.
+// *state.Logger satisfies this interface structurally; defining a local
+// interface avoids a dependency cycle (internal/state imports internal/tmux
+// transitively via its callers) while keeping the seam mockable from tests.
+type MigrationLogger interface {
+	Info(component, format string, args ...any)
+	Warn(component, format string, args ...any)
+}
+
+// noopMigrationLogger satisfies MigrationLogger with no-op methods. Used by
+// the no-logger external-caller surface (RegisterPortalHooks) so the
+// migration code path always has a safe sink.
+type noopMigrationLogger struct{}
+
+func (noopMigrationLogger) Info(component, format string, args ...any) {}
+func (noopMigrationLogger) Warn(component, format string, args ...any) {}
+
+// staleSignalHydratePrefix is one of the two substrings the eviction
+// predicate requires: every Portal-authored signal-hydrate hook body
+// begins with `command -v portal >/dev/null 2>&1 &&` regardless of vintage.
+// Requiring this guard prefix prevents the migration from removing
+// hand-authored user hooks that reference `portal state signal-hydrate` in
+// a different shape.
+const staleSignalHydratePrefix = "command -v portal >/dev/null 2>&1 &&"
+
+// staleSignalHydrateMarker is the second substring the eviction predicate
+// requires: any Portal-authored signal-hydrate body contains the literal
+// `portal state signal-hydrate`. Combined with the absence of
+// signalHydrateSubstring (`portal state signal-hydrate --`), this isolates
+// the legacy un-separated body from the new fixed body.
+const staleSignalHydrateMarker = "portal state signal-hydrate"
+
+// isStaleSignalHydrateEntry reports whether a hook body is the legacy
+// Portal-authored signal-hydrate command lacking the `--` end-of-flags
+// separator. Eligible-for-eviction iff it contains both the
+// `command -v portal` guard prefix and `portal state signal-hydrate`, AND
+// does NOT contain `portal state signal-hydrate --`.
+func isStaleSignalHydrateEntry(cmd string) bool {
+	return strings.Contains(cmd, staleSignalHydratePrefix) &&
+		strings.Contains(cmd, staleSignalHydrateMarker) &&
+		!strings.Contains(cmd, signalHydrateSubstring)
+}
+
+// MigrateHydrationHooks scans every event in hydrationTriggerEvents and
+// evicts any pre-existing hook entry whose body matches the legacy
+// un-separated `portal state signal-hydrate` shape. Indices are processed
+// in descending order so successful removals do not shift the indices of
+// later targets.
+//
+// Returns (evicted, nil) on the happy path and on partial-failure paths —
+// per-index UnsetGlobalHookAt failures are best-effort and surface only as
+// WARN log lines via the supplied MigrationLogger. The only path that
+// returns a non-nil err is a ShowGlobalHooks failure, which is wrapped with
+// "show-hooks failed: %w" and aborts the migration before any unset call.
+//
+// When at least one entry was evicted across all events, the function
+// emits a single INFO line of the form "evicted N stale signal-hydrate
+// hook(s) lacking '--' separator". Bootstraps with no evictions are silent.
+//
+// The function is intended to be called once per bootstrap, immediately
+// before the install step reaches the hydration-trigger category. It is
+// idempotent: a second invocation against the same hook table is a no-op.
+func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
+	if log == nil {
+		log = noopMigrationLogger{}
+	}
+
+	raw, err := c.ShowGlobalHooks()
+	if err != nil {
+		return 0, fmt.Errorf("show-hooks failed: %w", err)
+	}
+
+	parsed := ParseShowHooks(raw)
+
+	var evicted int
+	for _, event := range hydrationTriggerEvents {
+		// Collect indices of stale entries on this event in descending order.
+		var staleIndices []int
+		for _, entry := range parsed[event] {
+			if isStaleSignalHydrateEntry(entry.Command) {
+				staleIndices = append(staleIndices, entry.Index)
+			}
+		}
+		// Process highest-first so removing one does not shift earlier indices.
+		sort.Sort(sort.Reverse(sort.IntSlice(staleIndices)))
+
+		for _, idx := range staleIndices {
+			if err := c.UnsetGlobalHookAt(event, idx); err != nil {
+				log.Warn("bootstrap", "failed to evict stale signal-hydrate hook on %s at index %d: %v", event, idx, err)
+				continue
+			}
+			evicted++
+		}
+	}
+
+	if evicted > 0 {
+		log.Info("bootstrap", "evicted %d stale signal-hydrate hook(s) lacking '--' separator", evicted)
+	}
+
+	return evicted, nil
+}
+
+// RegisterPortalHooks idempotently registers Portal's full hook table on
+// the supplied tmux Client. Delegates to RegisterPortalHooksWithLogger
+// with a no-op MigrationLogger; this is the stable external-caller surface
+// for sites that do not have a logger in hand.
 func RegisterPortalHooks(c *Client) error {
+	return RegisterPortalHooksWithLogger(c, noopMigrationLogger{})
+}
+
+// RegisterPortalHooksWithLogger idempotently registers Portal's full hook
+// table, threading a MigrationLogger through to MigrateHydrationHooks so
+// the bootstrap-step *state.Logger can capture eviction diagnostics.
+//
+// Categories are processed in the order declared in portalHookCategories;
+// within each category, events are processed in the order declared in the
+// spec.
+//
+// Before the per-category register loop reaches the hydration-trigger
+// category, MigrateHydrationHooks runs once to evict any pre-existing
+// un-separated `portal state signal-hydrate` entry left behind by an older
+// portal install. Migration failures are best-effort and never abort
+// bootstrap — only a ShowGlobalHooks failure inside the migration would
+// produce an error, and that error is folded into the same errors.Join
+// aggregate as register failures.
+//
+// Each registration is delegated to RegisterHookIfAbsent, which performs
+// the content-based dedupe check. A failure on one event does not
+// short-circuit the remaining events — every event is attempted. On any
+// failures the returned error is an errors.Join aggregate; each leaf error
+// names the failing event and wraps the underlying tmux error so callers
+// can use errors.Is on a sentinel.
+func RegisterPortalHooksWithLogger(c *Client, log MigrationLogger) error {
+	if log == nil {
+		log = noopMigrationLogger{}
+	}
+
 	var errs []error
+
+	if _, err := MigrateHydrationHooks(c, log); err != nil {
+		errs = append(errs, fmt.Errorf("migrate hydration hooks: %w", err))
+	}
 
 	for _, cat := range portalHookCategories {
 		for _, event := range cat.events {
