@@ -473,8 +473,7 @@ func createSavedTopology(t *testing.T, ts *tmuxtest.Socket, args savedTopologyAr
 // applyBaseIndices sets server-scope and global base-index / pane-base-
 // index on the live tmux server. -g controls the values new sessions
 // inherit; -s controls what `show-option -sv` reports — both matter for
-// PredictLiveIndices and for the live coords tmux assigns to fresh
-// sessions/panes.
+// the live coords tmux assigns to fresh sessions/panes.
 func applyBaseIndices(t *testing.T, ts *tmuxtest.Socket, base, paneBase int) {
 	t.Helper()
 	ts.Run(t, "set-option", "-g", "base-index", fmt.Sprintf("%d", base))

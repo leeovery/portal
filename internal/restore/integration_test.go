@@ -262,42 +262,6 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 	}
 }
 
-// TestPhase3Integration_BaseIndexDrift exercises PredictLiveIndices against a
-// real tmux server that has been configured with non-default base-index and
-// pane-base-index. The orchestrator's prediction path must read the live
-// values rather than assume zero. Setting up a saved-state restoration with
-// base-index=1 is structurally complex (it would require either authoring a
-// hand-built sessions.json or capturing under a base-index=1 server); the
-// pragmatic shape adopted here is to validate the prediction primitive
-// directly — ApplyWindowGeometry / ApplySkeletonMarkers consume its output,
-// so a correct prediction is the load-bearing precondition.
-func TestPhase3Integration_BaseIndexDrift(t *testing.T) {
-	tmuxtest.SkipIfNoTmux(t)
-
-	ts := tmuxtest.New(t, "ptl-")
-	// A bootstrap session is required to keep the server alive long enough to
-	// set the global options; tmux exits with no sessions present.
-	ts.Run(t, "new-session", "-d", "-s", "_bootstrap")
-	ts.WaitForSession(t, "_bootstrap", 2*time.Second)
-
-	ts.Run(t, "set-option", "-g", "base-index", "1")
-	ts.Run(t, "set-option", "-g", "pane-base-index", "1")
-	// Server-scope copies — tmux's `show-option -sv` reads these.
-	ts.Run(t, "set-option", "-s", "base-index", "1")
-	ts.Run(t, "set-option", "-s", "pane-base-index", "1")
-
-	client := ts.Client()
-	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
-
-	base, paneBase := r.PredictLiveIndices()
-	if base != 1 {
-		t.Errorf("base-index = %d, want 1", base)
-	}
-	if paneBase != 1 {
-		t.Errorf("pane-base-index = %d, want 1", paneBase)
-	}
-}
-
 // TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift is the
 // regression test for Phase 7 task 7-9: when a session is saved with default
 // (0,0) indices but restored against a tmux server configured with non-zero

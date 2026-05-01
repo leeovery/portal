@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
@@ -231,9 +230,9 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 // zoom state for every window in sess against the live tmux session of the
 // same name. livePanes is the list of live (window, pane) coords that the arm
 // phase already gathered from `list-panes -s` — sourcing geometry targets
-// from this slice (rather than from PredictLiveIndices) keeps the create-arm
-// path and the geometry path consistent under base-index drift, so a single
-// re-query is the source of truth for every operation in the restore phase.
+// from this slice keeps the create-arm path and the geometry path consistent
+// under base-index drift, so a single re-query is the source of truth for
+// every operation in the restore phase.
 //
 // Per the spec's "Per-Window Restoration Order", the call sequence per window
 // is select-layout → select-pane → resize-pane -Z; zoom is applied only when
@@ -266,10 +265,10 @@ func (r *SessionRestorer) ApplyWindowGeometry(sess state.Session, livePanes []tm
 }
 
 // groupLivePanesBySavedWindow buckets livePanes into one slice per saved
-// window ordinal, preserving structural order. The orchestrator's
-// flattenSavedPanePositions and list-panes both walk in (window, pane)
-// sorted order, so the i-th saved pane pairs with the i-th livePane and
-// saved window ordinals map onto live window groups by structural position.
+// window ordinal, preserving structural order. The saved topology and
+// list-panes both walk in (window, pane) sorted order, so the i-th saved
+// pane pairs with the i-th livePane and saved window ordinals map onto live
+// window groups by structural position.
 //
 // On count mismatch, extras (live panes beyond the saved sequence) are
 // silently dropped — the arm-phase warning has already surfaced the mismatch
@@ -348,9 +347,7 @@ func (r *SessionRestorer) applyZoom(session string, window, pane int) {
 //
 // The function only writes markers; it does not clear them. Markers are
 // volatile (server-option scope) and are unset by the hydrate helper after
-// successful scrollback dump. It is a pure write primitive — drift diagnostics
-// live in the orchestrator, alongside the prediction (PredictLiveIndices),
-// rather than coupling a write primitive to a diagnostic concern.
+// successful scrollback dump.
 func (r *SessionRestorer) ApplySkeletonMarkers(sess state.Session, livePanes []tmux.PaneCoord) {
 	savedCount := countSavedPanes(sess)
 	r.warnOnPaneCountMismatch(sess.Name, len(livePanes), savedCount)
@@ -407,38 +404,6 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 			// Continue per spec — environment is best-effort.
 		}
 	}
-}
-
-// PredictLiveIndices reads the server's base-index and pane-base-index. Both
-// ErrOptionNotFound and an empty value are treated as "use default 0" — tmux's
-// documented default when the user has not customised either option.
-//
-// As of the 8-6 signature simplification this is consulted **only** by the
-// orchestrator's drift-warning helper (Orchestrator.warnOnPaneKeyDrift in
-// restore.go). Restore arms panes from the live list-panes re-query (via
-// armPanes), and ApplyWindowGeometry / ApplySkeletonMarkers consume the same
-// live []tmux.PaneCoord threaded through from Restore — neither consumes the
-// predicted indices. The drift warning compares the predicted paneKey to the
-// actual live paneKey so users notice when base-index / pane-base-index
-// changed between save and restore.
-func (r *SessionRestorer) PredictLiveIndices() (int, int) {
-	return readIndexOption(r.Client, "base-index"), readIndexOption(r.Client, "pane-base-index")
-}
-
-// readIndexOption returns the parsed integer value of name, defaulting to 0
-// when the option is unset (ErrOptionNotFound), empty, or unparseable. Each
-// failure mode collapses to the same fallback because tmux's documented
-// default for both base-index and pane-base-index is 0.
-func readIndexOption(client *tmux.Client, name string) int {
-	v, err := client.GetServerOption(name)
-	if err != nil || v == "" {
-		return 0
-	}
-	i, err := strconv.Atoi(v)
-	if err != nil {
-		return 0
-	}
-	return i
 }
 
 // buildHydrateCommand returns the spec-canonical `sh -c '...; exec $SHELL'`

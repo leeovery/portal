@@ -36,20 +36,16 @@ func (m *mockCommander) RunRaw(args ...string) (string, error) {
 	return "", nil
 }
 
-// defaultRunFunc returns ErrOptionNotFound for show-option queries (so
-// predictLiveIndices defaults to 0/0) and empty-success for everything else.
-// Tests that exercise the create-then-arm Restore path should use
-// restoreRunFunc to provide a list-panes oracle reflecting their topology.
+// defaultRunFunc returns empty-success for every tmux call. Tests that
+// exercise the create-then-arm Restore path should use restoreRunFunc to
+// provide a list-panes oracle reflecting their topology.
 func defaultRunFunc(args ...string) (string, error) {
-	if len(args) >= 2 && args[0] == "show-option" && args[1] == "-sv" {
-		return "", errors.New("unknown option")
-	}
 	return "", nil
 }
 
 // restoreRunFunc returns a RunFunc that responds to list-panes queries with
-// `livePanesOutput` (newline-separated `<window>:<pane>` lines) and defers
-// every other call to defaultRunFunc. Used by Restore tests where the arm
+// `livePanesOutput` (newline-separated `<window>:<pane>` lines) and returns
+// empty-success for every other call. Used by Restore tests where the arm
 // phase re-queries list-panes to discover live indices for FIFO creation and
 // send-keys targeting.
 func restoreRunFunc(livePanesOutput string) func(args ...string) (string, error) {
@@ -57,7 +53,7 @@ func restoreRunFunc(livePanesOutput string) func(args ...string) (string, error)
 		if len(args) > 0 && args[0] == "list-panes" {
 			return livePanesOutput, nil
 		}
-		return defaultRunFunc(args...)
+		return "", nil
 	}
 }
 
@@ -112,8 +108,6 @@ func TestSessionRestorer_SinglePaneNoEnvironment(t *testing.T) {
 	}
 
 	// Expect: 1 new-session, no set-environment, no new-window, no split-window.
-	// (Show-option queries now happen in PredictLiveIndices, called by the
-	// orchestrator — not by Restore itself.)
 	if got := len(findAllCalls(mock.Calls, "new-session")); got != 1 {
 		t.Errorf("new-session calls = %d, want 1", got)
 	}
@@ -425,85 +419,6 @@ func TestSessionRestorer_FIFOUsesLivePaneKeyFromListPanesReQuery(t *testing.T) {
 		if strings.Contains(a, "portal state hydrate") {
 			t.Errorf("new-session must not carry hydrate command; got args %v", mock.Calls[nsIdx])
 		}
-	}
-}
-
-func TestSessionRestorer_PredictLiveIndicesQueriesShowOptions(t *testing.T) {
-	var seenBase, seenPaneBase bool
-	mock := &mockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 3 && args[0] == "show-option" && args[1] == "-sv" {
-				switch args[2] {
-				case "base-index":
-					seenBase = true
-					return "1", nil
-				case "pane-base-index":
-					seenPaneBase = true
-					return "1", nil
-				}
-			}
-			return "", nil
-		},
-	}
-	client := tmux.NewClient(mock)
-	r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
-
-	gotBase, gotPaneBase := r.PredictLiveIndices()
-
-	if !seenBase {
-		t.Error("expected show-option -sv base-index call")
-	}
-	if !seenPaneBase {
-		t.Error("expected show-option -sv pane-base-index call")
-	}
-	if gotBase != 1 {
-		t.Errorf("base = %d, want 1", gotBase)
-	}
-	if gotPaneBase != 1 {
-		t.Errorf("paneBase = %d, want 1", gotPaneBase)
-	}
-}
-
-func TestSessionRestorer_PredictLiveIndicesDefaultsToZeroWhenOptionUnset(t *testing.T) {
-	tests := []struct {
-		name  string
-		runFn func(args ...string) (string, error)
-	}{
-		{
-			name: "ErrOptionNotFound for both",
-			runFn: func(args ...string) (string, error) {
-				if len(args) >= 2 && args[0] == "show-option" && args[1] == "-sv" {
-					return "", errors.New("unknown option")
-				}
-				return "", nil
-			},
-		},
-		{
-			name: "empty string for both",
-			runFn: func(args ...string) (string, error) {
-				if len(args) >= 2 && args[0] == "show-option" && args[1] == "-sv" {
-					return "", nil
-				}
-				return "", nil
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockCommander{RunFunc: tt.runFn}
-			client := tmux.NewClient(mock)
-			r := &restore.SessionRestorer{Client: client, StateDir: t.TempDir()}
-
-			base, paneBase := r.PredictLiveIndices()
-
-			if base != 0 {
-				t.Errorf("base = %d, want 0", base)
-			}
-			if paneBase != 0 {
-				t.Errorf("paneBase = %d, want 0", paneBase)
-			}
-		})
 	}
 }
 
