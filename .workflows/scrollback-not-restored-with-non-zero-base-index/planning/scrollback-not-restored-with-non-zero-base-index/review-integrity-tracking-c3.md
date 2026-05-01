@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 3
 phase: Plan Integrity Review
@@ -63,7 +63,7 @@ The fix is to invoke `RegisterPortalHooksWithLogger` with an injected capturing 
   - Assert install proceeds normally, eviction count is 0, and the capturing logger recorded zero INFO and zero WARN lines.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -94,7 +94,7 @@ Cycle 1 finding 2 locked in Option B (the new `RegisterPortalHooksWithLogger` si
   - Assert all are evicted. Confirms the migration loop reads the slice rather than hard-coding events.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

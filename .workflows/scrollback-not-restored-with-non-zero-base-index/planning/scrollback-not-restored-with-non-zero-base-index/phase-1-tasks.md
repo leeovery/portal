@@ -114,16 +114,16 @@ total: 3
 - `TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed` (real-tmux fixture preferred via `internal/tmuxtest`):
   - Set up a tmux server.
   - For each event in `hydrationTriggerEvents`, append the legacy un-separated command verbatim: `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"` (no `--`).
-  - Call `RegisterPortalHooks` once.
+  - Construct a capturing `MigrationLogger` (test-local stub recording INFO/WARN calls) and call `RegisterPortalHooksWithLogger(c, capturingLogger)` once. The no-op-logger wrapper `RegisterPortalHooks` is exercised separately by the bootstrap-adapter wiring; this test must use the logger-aware sibling so the captured-output assertions are reachable.
   - Assert that for each event, `ShowGlobalHooks` returns exactly one entry containing `portal state signal-hydrate`, and that entry contains `portal state signal-hydrate --`.
-  - Assert one INFO line `evicted N stale signal-hydrate hook(s) lacking '--' separator` was written to a captured logger, with N equal to `len(hydrationTriggerEvents)`.
+  - Assert one INFO line `evicted N stale signal-hydrate hook(s) lacking '--' separator` was written to the capturing logger, with N equal to `len(hydrationTriggerEvents)`.
 - `TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap`:
-  - Run the same fixture; call `RegisterPortalHooks` twice in a row.
+  - Run the same fixture; call `RegisterPortalHooksWithLogger(c, capturingLogger)` twice in a row, resetting the capturing logger between calls.
   - Assert hook state is unchanged after the second call.
-  - Assert the second call's logger captured zero INFO lines and zero WARN lines.
+  - Assert the second call's capturing logger recorded zero INFO lines and zero WARN lines.
 - `TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp`:
-  - Fresh server with no pre-existing entries; call `RegisterPortalHooks` once.
-  - Assert install proceeds normally, eviction count is 0, no INFO and no WARN lines emitted.
+  - Fresh server with no pre-existing entries; call `RegisterPortalHooksWithLogger(c, capturingLogger)` once.
+  - Assert install proceeds normally, eviction count is 0, and the capturing logger recorded zero INFO and zero WARN lines.
 - `TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder`:
   - Append three un-separated entries on `client-attached` (indices 0, 1, 2).
   - Call `migrateHydrationHooks` directly.
@@ -138,7 +138,7 @@ total: 3
   - Call `migrateHydrationHooks`.
   - Assert the captured logger contains one WARN line of the expected shape; assert the function returns `(1, nil)` (one successful eviction, error is nil because per-index failures are best-effort).
 - `TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime`:
-  - Stub or temporarily extend `hydrationTriggerEvents` (via a test-only export or by exercising a function that takes the slice as a parameter — choose whichever fits the chosen Option A/B shape).
+  - Stub or temporarily extend `hydrationTriggerEvents` (via a test-only package-internal export, since `migrateHydrationHooks` reads the package-scoped slice directly per the locked-in Option-B shape; do not introduce a parameterised public surface for this test alone).
   - Append un-separated entries on every listed event.
   - Assert all are evicted. Confirms the migration loop reads the slice rather than hard-coding events.
 
