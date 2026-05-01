@@ -41,6 +41,9 @@
     },
     "scrollback-not-restored-with-non-zero-base-index": {
       "work_type": "bugfix"
+    },
+    "session-scrollback-preview": {
+      "work_type": "feature"
     }
   },
   "defaults": {
