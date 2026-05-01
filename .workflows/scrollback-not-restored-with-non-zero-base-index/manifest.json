@@ -38,11 +38,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "scrollback-not-restored-with-non-zero-base-index-1-2",
+          "task": "scrollback-not-restored-with-non-zero-base-index-1-3",
           "task_map": {
             "scrollback-not-restored-with-non-zero-base-index": "tick-5acb4a",
             "scrollback-not-restored-with-non-zero-base-index-1": "tick-991fa9",
-            "scrollback-not-restored-with-non-zero-base-index-1-1": "tick-c029be"
+            "scrollback-not-restored-with-non-zero-base-index-1-1": "tick-c029be",
+            "scrollback-not-restored-with-non-zero-base-index-1-2": "tick-4929cb"
           },
           "external_id": "tick-5acb4a"
         }
