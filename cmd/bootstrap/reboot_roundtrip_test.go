@@ -1098,3 +1098,265 @@ func verifySwitchClientLiveStructure(t *testing.T, ts *tmuxtest.Socket) {
 		}
 	}
 }
+
+// leadingDashHydrationTriggerEvents mirrors the canonical
+// hydrationTriggerEvents list in internal/tmux/hooks_register.go. It is
+// duplicated here (rather than imported) because the underlying var is
+// unexported and the round-trip test runs in the bootstrap_test external
+// package. A drift between this list and the canonical one is caught by
+// expectedHydrationTriggerEvents in internal/tmux/hooks_register_test.go,
+// which already pins the production list.
+var leadingDashHydrationTriggerEvents = []string{
+	"client-attached",
+	"client-session-changed",
+}
+
+// TestRebootRoundTrip_LeadingDashSessionName is the integration regression
+// guard for spec § "Acceptance Criteria" items 1 (the `--` separator) and
+// 5 (legacy hook migration). It performs a full reboot round-trip on an
+// isolated tmuxtest socket using a session whose name begins with `-`
+// (`-dotfiles-test`), which is the failure mode the production fix targets.
+//
+// Why this test cannot be replaced by the alpha/beta round-trips:
+//   - Existing TestPhase5RebootRoundTripEndToEnd / *BaseIndexDrift use
+//     "alpha" and "beta" — neither begins with `-`. tmux's `run-shell`
+//     never resolves a leading-dash session name into the hook command
+//     for those tests, so a regression of either the `--` separator
+//     (Task 1-1) or the migration eviction (Task 1-2) would not surface.
+//   - This test wires PRODUCTION hook-registration adapters via
+//     bootstrapadapter.HookRegistrar so the migration code from Task 1-2
+//     and the `--` separator from Task 1-1 actually run.
+//
+// Coverage:
+//   - For each event in hydrationTriggerEvents, exactly one entry contains
+//     `portal state signal-hydrate` and contains the `-- ` separator.
+//   - signal-hydrate exec'd via the built portal binary against the
+//     leading-dash session reaches runSignalHydrate, writes the FIFO, and
+//     unblocks the hydrate helper.
+//   - All skeleton markers for the leading-dash session clear within the
+//     budget.
+//   - portal.log contains zero `hydrate timeout` WARN lines.
+//   - ANSI scrollback fixture survives on the restored pane.
+func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	const sessionName = "-dotfiles-test"
+	const saveBase, savePaneBase = 1, 1
+	const restoreBase, restorePaneBase = 1, 1
+
+	binDir := restoretest.BuildPortalBinaryDir(t)
+	restoretest.PrependPATH(t, binDir)
+
+	stateDir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
+	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
+
+	cwd := t.TempDir()
+
+	ts := tmuxtest.New(t, "ptl-rt-leadingdash-")
+	client := ts.Client()
+
+	// Bootstrap with a `_seed` session so we can configure base-index
+	// BEFORE creating the leading-dash session. The seed is underscore-
+	// prefixed so capture excludes it (mirrors the daemon's
+	// `_portal-saver` discipline).
+	ts.Run(t, "new-session", "-d", "-s", "_seed")
+	ts.WaitForSession(t, "_seed", 2*time.Second)
+	applyBaseIndices(t, ts, saveBase, savePaneBase)
+
+	// Create the leading-dash session. The positional `-s -dotfiles-test`
+	// form may be rejected by tmux's argv parser if it interprets the
+	// leading dash as a flag; fall back to `-s -- -dotfiles-test`. If
+	// even that fails, abort with a clear diagnostic — the test cannot
+	// silently degrade into a no-op against an absent session.
+	createLeadingDashSession(t, ts, sessionName, cwd)
+	ts.WaitForSession(t, sessionName, 2*time.Second)
+
+	// Drive the save path inline (no daemon). This produces sessions.json
+	// + per-pane scrollback files exactly as production save would.
+	idx := captureAndCommit(t, client, stateDir)
+	if got := len(idx.Sessions); got != 1 {
+		t.Fatalf("captured %d sessions; want 1", got)
+	}
+	if idx.Sessions[0].Name != sessionName {
+		t.Fatalf("captured session name = %q; want %q", idx.Sessions[0].Name, sessionName)
+	}
+
+	// Override the pane's scrollback file with a known ANSI fixture so
+	// post-restore verification is deterministic (capture-pane output is
+	// timing- and terminal-dependent otherwise).
+	ansiFixture := []byte("\x1b[31mred\x1b[0m\nbefore reboot\n")
+	paneKey := state.SanitizePaneKey(sessionName, saveBase+0, savePaneBase+0)
+	scrollbackPath := state.ScrollbackFile(stateDir, paneKey)
+	if err := os.WriteFile(scrollbackPath, ansiFixture, 0o600); err != nil {
+		t.Fatalf("write fixture scrollback: %v", err)
+	}
+
+	// Kill the server. The next list-sessions MUST error so we know
+	// Restore operates on a fresh server.
+	ts.KillServer()
+	if _, err := ts.TryRun("list-sessions"); err == nil {
+		t.Fatalf("list-sessions succeeded after kill-server; expected error")
+	}
+
+	// Restart with `_seed` and apply restore-time base indices.
+	ts.Run(t, "new-session", "-d", "-s", "_seed")
+	ts.WaitForSession(t, "_seed", 2*time.Second)
+	applyBaseIndices(t, ts, restoreBase, restorePaneBase)
+
+	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	restoreInner := &restore.Orchestrator{
+		Client:   client,
+		StateDir: stateDir,
+		Logger:   logger,
+	}
+
+	// Wire PRODUCTION hook-registration adapters this time — this is the
+	// load-bearing difference vs the existing alpha/beta round-trips.
+	// HookRegistrar runs MigrateHydrationHooks (Task 1-2) and registers
+	// the new `--`-separated signalHydrateCommand (Task 1-1) end-to-end.
+	o := &bootstrap.Orchestrator{
+		Server:    client,
+		Hooks:     &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:     bootstrap.NoOpSaver{},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Sweeper: &bootstrapadapter.FIFOSweeper{
+			Client:   client,
+			StateDir: stateDir,
+			Logger:   logger,
+		},
+		Clean: bootstrap.NoOpStaleCleaner{},
+	}
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Orchestrator.Run: %v", err)
+	}
+
+	// Hook table assertion — for each hydration-trigger event there must
+	// be exactly one entry containing `portal state signal-hydrate` AND
+	// that entry must contain the `-- ` end-of-flags separator. Catches
+	// both Task 1-1 (separator) and Task 1-2 (migration evicted any
+	// stale un-separated entry; only one entry remains per event).
+	verifyHydrationHookEntries(t, client)
+
+	// Drive signal-hydrate via the built portal binary — argv-identical
+	// to what the registered tmux client-attached hook fires via
+	// run-shell. DriveSignalHydrateBinary wraps the session arg with `--`
+	// internally so the leading-dash session reaches runSignalHydrate.
+	restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
+		stateDir, hooksPath, []string{sessionName})
+
+	// Wait for every helper's @portal-skeleton-<paneKey> marker to
+	// clear. A timeout means the helper either crashed before unsetting
+	// its marker, or never reached its open(O_RDONLY) — both regressions
+	// we want to catch.
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+
+	// portal.log must contain ZERO `hydrate timeout` WARN lines for any
+	// pane in the leading-dash session. A regression of Task 1-1 or 1-2
+	// would leave the helper waiting on the FIFO until its own budget
+	// expires, emitting the WARN line — this assertion is the spec's
+	// observable signal that the fix held end-to-end.
+	verifyNoHydrateTimeoutWarns(t, filepath.Join(stateDir, "portal.log"), sessionName)
+
+	// ANSI scrollback bytes must survive: capture-pane -e -p -S - against
+	// the live restored pane should contain the red SGR sequence and the
+	// literal "before reboot" line we wrote pre-kill.
+	verifyANSIScrollback(t, ts, sessionName, restoreBase+0, restorePaneBase+0)
+}
+
+// createLeadingDashSession creates a session whose name begins with `-`.
+// It tries the positional `-s <name>` form first; on failure it falls back
+// to the `-s -- <name>` end-of-flags form. If both shapes fail the test
+// is fatalled — silently skipping would leave the round-trip a no-op.
+func createLeadingDashSession(t *testing.T, ts *tmuxtest.Socket, name, cwd string) {
+	t.Helper()
+	if _, err := ts.TryRun("new-session", "-d", "-s", name, "-c", cwd, "sleep", "infinity"); err == nil {
+		return
+	}
+	if _, err := ts.TryRun("new-session", "-d", "-s", "--", name, "-c", cwd, "sleep", "infinity"); err == nil {
+		return
+	}
+	t.Fatalf("could not create leading-dash session %q via positional or `--` form; tmux CLI rejected both shapes", name)
+}
+
+// verifyHydrationHookEntries asserts that for each event in
+// hydrationTriggerEvents, the live tmux server's global hook table contains
+// exactly one entry whose body contains `portal state signal-hydrate`, and
+// that entry also contains the `-- ` end-of-flags separator.
+//
+// This is the structural assertion that proves both Task 1-1 (separator
+// present in the new entry) and Task 1-2 (migration evicted any pre-
+// existing un-separated entry, leaving exactly one entry) held under the
+// production HookRegistrar adapter wiring.
+func verifyHydrationHookEntries(t *testing.T, client *tmux.Client) {
+	t.Helper()
+	raw, err := client.ShowGlobalHooks()
+	if err != nil {
+		t.Fatalf("ShowGlobalHooks: %v", err)
+	}
+	parsed := tmux.ParseShowHooks(raw)
+	for _, event := range leadingDashHydrationTriggerEvents {
+		entries := parsed[event]
+		var matching []string
+		for _, e := range entries {
+			if strings.Contains(e.Command, "portal state signal-hydrate") {
+				matching = append(matching, e.Command)
+			}
+		}
+		if len(matching) != 1 {
+			t.Errorf("event %q: %d entries contain `portal state signal-hydrate`; want 1\nentries:\n%s",
+				event, len(matching), strings.Join(matching, "\n"))
+			continue
+		}
+		if !strings.Contains(matching[0], "portal state signal-hydrate -- ") {
+			t.Errorf("event %q: entry missing `-- ` separator before #{session_name}; got %q",
+				event, matching[0])
+		}
+	}
+}
+
+// verifyNoHydrateTimeoutWarns reads portal.log and asserts no line
+// contains `hydrate timeout` referencing a pane in session. Substring
+// matching against the literal `hydrate timeout` is appropriate — the
+// state package emits the canonical phrase verbatim, and a leading-dash
+// session can only appear in a pane key built from its own name.
+//
+// Returns silently on a missing log file: an absent log means no WARN
+// was ever emitted, which is the success state.
+func verifyNoHydrateTimeoutWarns(t *testing.T, logPath, session string) {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read portal.log %s: %v", logPath, err)
+	}
+	// SanitizePaneKey produces `<sanitized>__<win>.<pane>`; the
+	// sanitized form of "-dotfiles-test" preserves the dashes (only
+	// path-illegal characters are replaced). We match on the session
+	// substring rather than reconstructing the exact pane key so a
+	// regression in pane-key formatting still surfaces as a failure.
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.Contains(line, "hydrate timeout") {
+			continue
+		}
+		if strings.Contains(line, session) {
+			t.Errorf("portal.log contains `hydrate timeout` WARN for session %q: %s", session, line)
+		}
+	}
+}

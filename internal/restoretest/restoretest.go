@@ -227,7 +227,14 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 		// `command -v portal >/dev/null 2>&1 && ...` for the not-on-PATH
 		// case; we already control PATH (and pass an absolute binary
 		// path here) so the wrap is unnecessary.
-		cmd := exec.Command(binary, "state", "signal-hydrate", session)
+		// `--` end-of-flags separator before the session arg mirrors the
+		// production hook command (signalHydrateCommand in
+		// internal/tmux/hooks_register.go) and is load-bearing for
+		// leading-dash session names: without it, cobra/pflag treats
+		// `-dotfiles-test` as a short-flag cluster and exits non-zero
+		// before runSignalHydrate runs. With `--`, every following token
+		// is treated as a positional argument regardless of leading dashes.
+		cmd := exec.Command(binary, "state", "signal-hydrate", "--", session)
 		// Env construction: prepend os.Environ() then append overrides.
 		// exec.Cmd honours last-write-wins for duplicate keys, so any
 		// inherited TMUX/PORTAL_STATE_DIR/PORTAL_HOOKS_FILE/PATH from the
