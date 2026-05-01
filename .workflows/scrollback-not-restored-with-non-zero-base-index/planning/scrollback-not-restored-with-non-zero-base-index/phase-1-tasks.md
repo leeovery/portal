@@ -106,7 +106,7 @@ total: 3
 - [ ] Two consecutive back-to-back bootstraps yield identical hook state and the second emits no INFO line (silent no-op).
 - [ ] Hand-authored user hooks that reference `portal state signal-hydrate` but lack the `command -v portal >/dev/null 2>&1 &&` prefix are NOT evicted.
 - [ ] If `hydrationTriggerEvents` is extended at compile time, the migration covers the new event without further code changes (i.e. the loop iterates the slice, not a hard-coded list).
-- [ ] A `ShowGlobalHooks` failure causes `migrateHydrationHooks` to return a wrapped error; the caller in `RegisterPortalHooks` aggregates it via `errors.Join` alongside any per-event register errors. Bootstrap does not abort on this path; the orchestrator surfaces the result as a soft warning per the existing bootstrap-step error contract.
+- [ ] A `ShowGlobalHooks` failure causes `migrateHydrationHooks` to return a wrapped error; the caller in `RegisterPortalHooksWithLogger` aggregates it via `errors.Join` alongside any per-event register errors (the no-op-logger wrapper `RegisterPortalHooks` inherits this behaviour by delegation). Bootstrap does not abort on this path; the orchestrator surfaces the result as a soft warning per the existing bootstrap-step error contract.
 - [ ] `go build ./...` and `go test ./...` pass.
 - [ ] No test added uses `t.Parallel()`.
 

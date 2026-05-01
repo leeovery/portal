@@ -95,8 +95,8 @@ total: 2
 - [ ] No `t.Parallel()` call is added (per project convention in `CLAUDE.md`).
 
 **Tests**:
-- `"portal.log contains zero predicted-vs-live WARN lines under non-zero base-index"` — the headline assertion this task adds.
-- `"regex does not false-positive on the preserved armPanes:202 pane-count mismatch warning"` — verify by inspection that the existing warning shape (`live pane count %d != saved count %d`) cannot match `predicted=.*__\d+\.\d+ live=.*__\d+\.\d+`.
+- `"portal.log contains zero predicted-vs-live WARN lines under non-zero base-index"` — the headline integration assertion this task adds, gated by `//go:build integration`.
+- `TestPredictedVsLiveRegex_MatchesOffendingShapeAndIgnoresArmPanesWarning` — plain `go test` unit test (no integration tag) compiling the same `predicted=.*__\d+\.\d+ live=.*__\d+\.\d+` regex used by the integration assertion and asserting (a) it matches a representative `WARN | restore | session "alpha": pane 0 predicted=alpha__0.0 live=alpha__1.1` line and (b) it does NOT match the preserved `armPanes:202` shape (`WARN | restore | session "alpha": live pane count 2 != saved count 3`).
 - `"existing base-index drift round-trip behaviour is unchanged"` — the rest of `runRebootRoundTrip`'s assertions (structural-key drift, hook firing, scrollback replay) continue to pass.
 - `"no developer-primary-server interaction"` — verify by inspection that the test only references `tmuxtest.New(...)` / its returned `Client`; no bare `exec.Command("tmux", ...)` against the default socket.
 

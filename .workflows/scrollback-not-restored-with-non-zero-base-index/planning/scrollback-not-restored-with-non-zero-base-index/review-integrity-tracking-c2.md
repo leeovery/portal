@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 2
 phase: Plan Integrity Review
@@ -40,7 +40,7 @@ Cycle 1 finding 2 locked the logger-aware caller to the new sibling `RegisterPor
 - [ ] A `ShowGlobalHooks` failure causes `migrateHydrationHooks` to return a wrapped error; the caller in `RegisterPortalHooksWithLogger` aggregates it via `errors.Join` alongside any per-event register errors (the no-op-logger wrapper `RegisterPortalHooks` inherits this behaviour by delegation). Bootstrap does not abort on this path; the orchestrator surfaces the result as a soft warning per the existing bootstrap-step error contract.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -74,7 +74,7 @@ Cycle 1 finding 4 added a concrete unit test (`TestPredictedVsLiveRegex_MatchesO
 - `"no developer-primary-server interaction"` — verify by inspection that the test only references `tmuxtest.New(...)` / its returned `Client`; no bare `exec.Command("tmux", ...)` against the default socket.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
