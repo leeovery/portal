@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-04-30
 cycle: 1
 phase: Plan Integrity Review
@@ -30,7 +30,7 @@ Task 2-1's `Do` step lists `savedPanePos` as a deletion target (the struct paire
 - [ ] Pre-deletion repo-wide grep confirms zero remaining references to `PredictLiveIndices`, `warnOnPaneKeyDrift`, `flattenSavedPanePositions`, `savedPanePos`, and `readIndexOption` outside the deletion list; any unexpected reference is surfaced for review rather than silently deleted.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -61,7 +61,7 @@ The import boundary question is decidable now: `internal/tmux` already imports `
 - `migrateHydrationHooks` is called once at the top of `RegisterPortalHooksWithLogger`, before the per-category register loop reaches the hydration-trigger category.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -87,7 +87,7 @@ Step 11 says "Wire the bootstrap orchestrator with **production** hook-registrat
   11. Wire the bootstrap orchestrator with **production** hook-registration adapters this time — i.e. pass the real hooks adapter from `internal/bootstrapadapter` that calls `RegisterPortalHooksWithLogger` (so the migration code from Task 1-2 and the `--` separator from Task 1-1 actually run). The existing test wires `bootstrap.NoOpHooks{}`; this new test must substitute the production wiring. If the adapter type's exported name has changed during Task 1-2 implementation, update this step to match — the load-bearing requirement is "use the same wiring the production `cmd/root.go` `PersistentPreRunE` uses", not the literal type name.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -129,7 +129,7 @@ Replace AC item 8 with:
 - [ ] A unit test (`TestPredictedVsLiveRegex_MatchesOffendingShapeAndIgnoresArmPanesWarning`) compiles the same regex used by the integration assertion and proves it (a) matches a representative `predicted=...__0.0 live=...__1.1` line and (b) does not match the preserved `armPanes:202` "live pane count != saved count" shape.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -157,7 +157,7 @@ Task 1-3's value (asserting end-to-end scrollback replay with the new `--`-separ
 
 (Note: this overlaps with finding 3's proposed text. If finding 3 is approved first, this clarification is already covered.)
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---

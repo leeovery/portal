@@ -43,7 +43,7 @@ approved_at: 2026-05-01
 **Why this order**: Sequenced after Phase 1 because Phase 1 delivers the real fix; Phase 2 is pure dead-code excision. With hydration already correct, removing the diagnostic carries no risk of masking a live failure mode. Independently valuable but lower priority than the user-visible bug, and cleanly separable so a regression in one phase cannot contaminate the other.
 
 **Acceptance**:
-- [ ] Pre-deletion repo-wide grep confirms zero remaining references to `PredictLiveIndices`, `warnOnPaneKeyDrift`, `flattenSavedPanePositions`, and `readIndexOption` outside the deletion list; any unexpected reference is surfaced for review rather than silently deleted.
+- [ ] Pre-deletion repo-wide grep confirms zero remaining references to `PredictLiveIndices`, `warnOnPaneKeyDrift`, `flattenSavedPanePositions`, `savedPanePos`, and `readIndexOption` outside the deletion list; any unexpected reference is surfaced for review rather than silently deleted.
 - [ ] `internal/restore/session.go::PredictLiveIndices` is removed.
 - [ ] `internal/restore/session.go::flattenSavedPanePositions` is removed.
 - [ ] `internal/restore/session.go::readIndexOption` is removed if it has no remaining callers after the above deletions.

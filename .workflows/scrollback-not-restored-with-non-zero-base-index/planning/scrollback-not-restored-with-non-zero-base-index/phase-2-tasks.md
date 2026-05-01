@@ -78,7 +78,10 @@ total: 2
 - Use a session name without a leading dash (the existing fixture's `"alpha"` / `"beta"` are fine). Phase 1 task 1-3 already exercises the leading-dash session name; this test's contribution is orthogonal — the base-index regression — so reusing the standard fixture names keeps the two integration legs cleanly separated.
 - Confirm the `tmuxtest.New` fixture is the one in use (it spins up an isolated socket via `tmux -L <test-socket>`); do **not** add code that touches the developer's primary tmux server, and do **not** invoke `tmux kill-server` against anything other than the fixture socket.
 - Run `go test -tags=integration ./cmd/bootstrap/...` and confirm the new assertion passes.
-- Verify the assertion is meaningful: temporarily reintroduce a fake `WARN | restore | session "alpha": pane 0 predicted=alpha__0.0 live=alpha__1.1` log line via the test's logger (or a one-line manual injection) and confirm the assertion fails. Remove the temporary injection before committing.
+- Verify the regex is meaningful and false-positive-safe with a unit test (in the same `_test.go` file or a sibling `cmd/bootstrap/predicted_vs_live_regex_test.go`) named `TestPredictedVsLiveRegex_MatchesOffendingShapeAndIgnoresArmPanesWarning`. The test compiles the same `predicted=.*__\d+\.\d+ live=.*__\d+\.\d+` regex used by the integration assertion and asserts:
+  - It matches a representative offending line (`WARN | restore | session "alpha": pane 0 predicted=alpha__0.0 live=alpha__1.1`).
+  - It does NOT match the preserved `armPanes:202` shape (e.g. `WARN | restore | session "alpha": live pane count 2 != saved count 3`).
+  This unit test is plain `go test ./cmd/bootstrap/...` (no `integration` build tag) so it runs on every CI invocation without requiring tmux.
 
 **Acceptance Criteria**:
 - [ ] A test in `cmd/bootstrap/reboot_roundtrip_test.go` runs under the `integration` build tag with non-zero `base-index` and `pane-base-index` on the test tmux server.
@@ -88,7 +91,7 @@ total: 2
 - [ ] The regex is anchored enough to avoid false positives on unrelated log lines (e.g. it must not match `armPanes:202`'s pane-count warning, which uses a different shape).
 - [ ] The assertion runs **after** the bootstrap orchestrator has completed and hydrate has been driven — not before — so any drift WARN that would have been emitted has had a chance to be written to disk.
 - [ ] `go test -tags=integration ./cmd/bootstrap/...` passes.
-- [ ] Manual sanity-check: temporarily injecting a fake `predicted=...__0.0 live=...__1.1` line into `portal.log` causes the assertion to fail (verify locally; do not commit the injection).
+- [ ] A unit test (`TestPredictedVsLiveRegex_MatchesOffendingShapeAndIgnoresArmPanesWarning`) compiles the same regex used by the integration assertion and proves it (a) matches a representative `predicted=...__0.0 live=...__1.1` line and (b) does not match the preserved `armPanes:202` "live pane count != saved count" shape.
 - [ ] No `t.Parallel()` call is added (per project convention in `CLAUDE.md`).
 
 **Tests**:
