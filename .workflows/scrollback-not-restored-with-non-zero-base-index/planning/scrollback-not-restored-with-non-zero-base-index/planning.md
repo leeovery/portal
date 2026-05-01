@@ -24,6 +24,15 @@ approved_at: 2026-05-01
 - [ ] Sessions whose names do not start with `-` continue to restore and hydrate as before; pane-count mismatch logging at `armPanes:202` is preserved.
 - [ ] No test uses `t.Parallel()`; existing mock injection patterns (`bootstrapDeps` etc.) are respected.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| scrollback-not-restored-with-non-zero-base-index-1-1 | Add `--` Separator to signal-hydrate Hook Command | leading-dash session name, internal-dash-only session name, future regression of the constant losing the `--` |
+| scrollback-not-restored-with-non-zero-base-index-1-2 | Migrate Pre-Existing Un-Separated Hook Entries on Bootstrap | zero pre-existing entries (silent no-op), one stale entry per event, multiple stale entries on same event (index-shift safety), `UnsetGlobalHookAt` partial failure, hand-authored user hooks lacking `command -v portal` prefix must not be evicted, back-to-back bootstraps idempotent, `hydrationTriggerEvents` slice extended later |
+| scrollback-not-restored-with-non-zero-base-index-1-3 | Reboot Round-Trip Integration Test with Leading-Dash Session Name | non-zero `base-index` / `pane-base-index` on test server, isolated test socket only (developer's primary server untouched), regression check that non-dash session names still hydrate |
+
 ### Phase 2: Delete PredictLiveIndices and the Misleading Drift Diagnostic
 status: approved
 approved_at: 2026-05-01
