@@ -620,15 +620,52 @@ func TestSignalHydrate_RunEDefersLoggerClose(t *testing.T) {
 // the command exits non-zero before runSignalHydrate is reached, so no FIFO
 // byte is written and the hydrate helper times out.
 func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.T) {
-	t.Run("with -- separator, leading-dash session name parses and reaches RunE", func(t *testing.T) {
+	t.Run("with -- separator, leading-dash session name parses, reaches RunE, and writes FIFO byte", func(t *testing.T) {
+		// AC #2: drive cobra Execute() against a leading-dash positional and
+		// assert exit 0 + FIFO byte written. We install a signalHydrateRunFunc
+		// seam that swaps cfg.Client / cfg.OpenFIFO for in-memory test doubles
+		// then calls the real runSignalHydrate so the full enumeration → open
+		// → write pipeline executes against the captured cobra-parsed session.
+		const sessionName = "-dotfiles-HM9Zhw"
+		paneKey := state.SanitizePaneKey(sessionName, 0, 0)
+
+		stateDir := t.TempDir()
+		t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+		// Stub FIFO: hand back the writable end of an os.Pipe so the byte
+		// runSignalHydrate writes is observable on the read end.
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = r.Close()
+			_ = w.Close()
+		})
+
+		var openedPath string
+		openedCalls := 0
+		stubOpen := func(path string) (*os.File, error) {
+			openedCalls++
+			openedPath = path
+			return w, nil
+		}
+
+		stubClient, _ := signalHydrateClient(t, markersOption(paneKey), [][2]int{{0, 0}})
+
 		var captured string
 		prev := signalHydrateRunFunc
 		signalHydrateRunFunc = func(cfg signalHydrateConfig) error {
 			captured = cfg.Session
-			return nil
+			// Replace external dependencies with test doubles, then invoke
+			// the real runSignalHydrate so the FIFO-write clause is exercised
+			// end-to-end through the cobra Execute() entry point.
+			cfg.Client = stubClient
+			cfg.OpenFIFO = stubOpen
+			cfg.Sleep = func(time.Duration) {}
+			return runSignalHydrate(cfg)
 		}
 		t.Cleanup(func() { signalHydrateRunFunc = prev })
-		t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 
 		outBuf := new(bytes.Buffer)
 		errBuf := new(bytes.Buffer)
@@ -636,13 +673,28 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 		resetStateCmdFlags()
 		rootCmd.SetOut(outBuf)
 		rootCmd.SetErr(errBuf)
-		rootCmd.SetArgs([]string{"state", "signal-hydrate", "--", "-dotfiles-HM9Zhw"})
+		rootCmd.SetArgs([]string{"state", "signal-hydrate", "--", sessionName})
 
 		if err := rootCmd.Execute(); err != nil {
-			t.Fatalf("expected nil error, got %v\nstderr: %s", err, errBuf.String())
+			t.Fatalf("expected nil error (exit 0), got %v\nstderr: %s", err, errBuf.String())
 		}
-		if captured != "-dotfiles-HM9Zhw" {
-			t.Errorf("captured session = %q, want %q", captured, "-dotfiles-HM9Zhw")
+		if captured != sessionName {
+			t.Errorf("captured session = %q, want %q", captured, sessionName)
+		}
+		if openedCalls != 1 {
+			t.Errorf("OpenFIFO calls = %d, want 1", openedCalls)
+		}
+		if wantPath := state.FIFOPath(stateDir, paneKey); openedPath != wantPath {
+			t.Errorf("OpenFIFO path = %q, want %q", openedPath, wantPath)
+		}
+
+		// Verify the FIFO seam received exactly the production payload (one
+		// byte). Close the writer so Read sees EOF after draining the byte.
+		_ = w.Close()
+		buf := make([]byte, 8)
+		n, _ := r.Read(buf)
+		if n != 1 {
+			t.Errorf("FIFO read %d bytes, want 1", n)
 		}
 	})
 
