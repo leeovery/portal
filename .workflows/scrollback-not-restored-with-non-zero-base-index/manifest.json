@@ -68,7 +68,7 @@
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 1,
+          "analysis_cycle": 2,
           "linters": [
             {
               "name": "go vet",
@@ -87,7 +87,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 3,
-          "current_task": "scrollback-not-restored-with-non-zero-base-index-3-6",
+          "current_task": "~",
           "completed_tasks": [
             "scrollback-not-restored-with-non-zero-base-index-1-1",
             "scrollback-not-restored-with-non-zero-base-index-1-2",
@@ -103,7 +103,8 @@
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       }
