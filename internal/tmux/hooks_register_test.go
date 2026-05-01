@@ -22,14 +22,6 @@ var expectedSaveTriggerEvents = []string{
 	"pane-focus-out",
 }
 
-// expectedHydrationTriggerEvents is the canonical hydration-trigger event
-// list, in registration order. Mirrors hydrationTriggerEvents in
-// hooks_register.go.
-var expectedHydrationTriggerEvents = []string{
-	"client-attached",
-	"client-session-changed",
-}
-
 // expectedNotifyCommand is the exact full command Portal registers on every
 // save-trigger event. Mirrors notifyCommand in hooks_register.go.
 const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
@@ -89,7 +81,7 @@ func allPortalHooksRegisteredOutput() string {
 	for _, e := range expectedSaveTriggerEvents {
 		fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
 	}
-	for _, e := range expectedHydrationTriggerEvents {
+	for _, e := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
 	}
 	return b.String()
@@ -142,7 +134,7 @@ func TestSignalHydrateCommand_HasEndOfFlagsSeparator(t *testing.T) {
 
 		got := setHookCalls(mock.Calls)
 		base := len(expectedSaveTriggerEvents)
-		for i := range expectedHydrationTriggerEvents {
+		for i := range tmux.HydrationTriggerEvents {
 			cmd := got[base+i][1]
 			if !strings.Contains(cmd, "portal state signal-hydrate -- #{session_name}") {
 				t.Errorf("hydration call[%d] command = %q, missing `signal-hydrate -- #{session_name}`", base+i, cmd)
@@ -374,7 +366,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
-		want := len(expectedSaveTriggerEvents) + len(expectedHydrationTriggerEvents)
+		want := len(expectedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
 		if len(got) != want {
 			t.Fatalf("set-hook -ga call count = %d, want %d: %v", len(got), want, got)
 		}
@@ -392,7 +384,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 
 		got := setHookCalls(mock.Calls)
 		want := append([]string{}, expectedSaveTriggerEvents...)
-		want = append(want, expectedHydrationTriggerEvents...)
+		want = append(want, tmux.HydrationTriggerEvents...)
 
 		if len(got) != len(want) {
 			t.Fatalf("set-hook count = %d, want %d (got %v)", len(got), len(want), got)
@@ -435,7 +427,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 				fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
 			}
 		}
-		for _, e := range expectedHydrationTriggerEvents {
+		for _, e := range tmux.HydrationTriggerEvents {
 			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
 		}
 
@@ -476,7 +468,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatal("expected aggregate error, got nil")
 		}
 		got := setHookCalls(mock.Calls)
-		want := len(expectedSaveTriggerEvents) + len(expectedHydrationTriggerEvents)
+		want := len(expectedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
 		if len(got) != want {
 			t.Errorf("set-hook -ga call count = %d, want %d (every event attempted): %v", len(got), want, got)
 		}
@@ -542,7 +534,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("first bootstrap: unexpected error: %v", err)
 		}
 		firstBootstrapAppends := len(setHookCalls(mock.Calls))
-		want := len(expectedSaveTriggerEvents) + len(expectedHydrationTriggerEvents)
+		want := len(expectedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
 		if firstBootstrapAppends != want {
 			t.Fatalf("first bootstrap set-hook count = %d, want %d", firstBootstrapAppends, want)
 		}
@@ -587,7 +579,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		// The two hydration-trigger calls sit immediately after the
 		// save-trigger calls in the current 9-hook registration order.
 		base := len(expectedSaveTriggerEvents)
-		for i, ev := range expectedHydrationTriggerEvents {
+		for i, ev := range tmux.HydrationTriggerEvents {
 			idx := base + i
 			if got[idx][0] != ev {
 				t.Errorf("call[%d] event = %q, want %q", idx, got[idx][0], ev)
@@ -616,10 +608,10 @@ func TestRegisterPortalHooks(t *testing.T) {
 		}
 
 		got := setHookCalls(mock.Calls)
-		wantCount := len(expectedSaveTriggerEvents) + len(expectedHydrationTriggerEvents)
+		wantCount := len(expectedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
 		if len(got) != wantCount {
 			t.Fatalf("set-hook -ga call count = %d, want %d (only two categories: %d save + %d hydrate)",
-				len(got), wantCount, len(expectedSaveTriggerEvents), len(expectedHydrationTriggerEvents))
+				len(got), wantCount, len(expectedSaveTriggerEvents), len(tmux.HydrationTriggerEvents))
 		}
 		for _, c := range got {
 			if strings.Contains(c[1], "portal state migrate-rename") {

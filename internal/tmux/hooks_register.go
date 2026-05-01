@@ -20,10 +20,16 @@ var saveTriggerEvents = []string{
 	"pane-focus-out",
 }
 
-// hydrationTriggerEvents lists every tmux event on which Portal registers a
+// HydrationTriggerEvents lists every tmux event on which Portal registers a
 // `portal state signal-hydrate #{session_name}` hook. The literal
 // `#{session_name}` is preserved verbatim — tmux expands it at hook-fire time.
-var hydrationTriggerEvents = []string{
+//
+// Exported so external test packages (in-package external tests and the
+// cross-package bootstrap round-trip) can iterate the canonical list rather
+// than maintaining hand-rolled mirrors that would silently under-cover
+// extension. Adding a new event here automatically widens coverage in every
+// consuming test. Treat the slice as read-only at runtime.
+var HydrationTriggerEvents = []string{
 	"client-attached",
 	"client-session-changed",
 }
@@ -117,7 +123,7 @@ type hookCategory struct {
 // (save-trigger first, then hydration-trigger) matches the spec.
 var portalHookCategories = []hookCategory{
 	{events: saveTriggerEvents, substring: notifySubstring, command: notifyCommand},
-	{events: hydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
+	{events: HydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
 }
 
 // MigrationLogger is the minimal logging seam migrateHydrationHooks needs.
@@ -167,7 +173,7 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 		!strings.Contains(cmd, signalHydrateSubstring)
 }
 
-// MigrateHydrationHooks scans every event in hydrationTriggerEvents and
+// MigrateHydrationHooks scans every event in HydrationTriggerEvents and
 // evicts any pre-existing hook entry whose body matches the legacy
 // un-separated `portal state signal-hydrate` shape. Indices are processed
 // in descending order so successful removals do not shift the indices of
@@ -199,7 +205,7 @@ func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	parsed := ParseShowHooks(raw)
 
 	var evicted int
-	for _, event := range hydrationTriggerEvents {
+	for _, event := range HydrationTriggerEvents {
 		// Collect indices of stale entries on this event in descending order.
 		var staleIndices []int
 		for _, entry := range parsed[event] {

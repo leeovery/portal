@@ -3,7 +3,7 @@ package tmux_test
 // Migration tests for migrateHydrationHooks — Task 1-2 of the
 // scrollback-not-restored-with-non-zero-base-index spec.
 //
-// The migration scans every event in hydrationTriggerEvents, evicts any
+// The migration scans every event in HydrationTriggerEvents, evicts any
 // pre-existing un-separated `portal state signal-hydrate` entry (so the
 // new fixed entry can be cleanly installed by RegisterHookIfAbsent), and
 // emits diagnostics via a small MigrationLogger seam.
@@ -45,7 +45,7 @@ func (r *recordingLogger) Warn(component, format string, args ...any) {
 }
 
 // countSignalHydrateEntries returns, for each event in
-// expectedHydrationTriggerEvents, the number of hook entries on that event
+// tmux.HydrationTriggerEvents, the number of hook entries on that event
 // whose command body contains "portal state signal-hydrate". Used to assert
 // AC #3's "exactly 1 entry per event after bootstrap" invariant.
 func countSignalHydrateEntries(t *testing.T, client *tmux.Client) map[string]int {
@@ -56,7 +56,7 @@ func countSignalHydrateEntries(t *testing.T, client *tmux.Client) map[string]int
 	}
 	parsed := tmux.ParseShowHooks(raw)
 	counts := make(map[string]int)
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		for _, e := range parsed[ev] {
 			if strings.Contains(e.Command, "portal state signal-hydrate") {
 				counts[ev]++
@@ -67,11 +67,11 @@ func countSignalHydrateEntries(t *testing.T, client *tmux.Client) map[string]int
 }
 
 // installStaleHooks appends a stale (un-separated) signal-hydrate hook
-// entry to every event in expectedHydrationTriggerEvents on the supplied
+// entry to every event in tmux.HydrationTriggerEvents on the supplied
 // real-tmux server.
 func installStaleHooks(t *testing.T, client *tmux.Client) {
 	t.Helper()
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		if err := client.AppendGlobalHook(ev, staleSignalHydrateCommand); err != nil {
 			t.Fatalf("AppendGlobalHook(%s): %v", ev, err)
 		}
@@ -98,7 +98,7 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	}
 
 	counts := countSignalHydrateEntries(t, client)
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		if counts[ev] != 1 {
 			t.Errorf("event %q: signal-hydrate entry count = %d, want 1", ev, counts[ev])
 		}
@@ -118,7 +118,7 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 		t.Fatalf("ShowGlobalHooks: %v", err)
 	}
 	parsed := tmux.ParseShowHooks(raw)
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		var found bool
 		for _, e := range parsed[ev] {
 			if strings.Contains(e.Command, "portal state signal-hydrate -- ") {
@@ -166,7 +166,7 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 	}
 
 	counts := countSignalHydrateEntries(t, client)
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		if counts[ev] != 1 {
 			t.Errorf("event %q: signal-hydrate entry count = %d, want 1", ev, counts[ev])
 		}
@@ -198,7 +198,7 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 	}
 
 	counts := countSignalHydrateEntries(t, client)
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		if counts[ev] != 1 {
 			t.Errorf("event %q: signal-hydrate entry count = %d, want 1", ev, counts[ev])
 		}
@@ -315,7 +315,7 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) {
 	// show-hooks output: one stale entry per hydration event.
 	var raw strings.Builder
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
 	}
 
@@ -368,13 +368,13 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 }
 
 // TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime
-// proves the migration scans every event in hydrationTriggerEvents (read at
+// proves the migration scans every event in HydrationTriggerEvents (read at
 // runtime, not hard-coded). The set-hook -gu calls observed must cover every
 // event in the canonical list — extending the slice later requires no code
 // change in migration.
 func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t *testing.T) {
 	var raw strings.Builder
-	for _, ev := range expectedHydrationTriggerEvents {
+	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
 	}
 
@@ -396,8 +396,8 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	if err != nil {
 		t.Fatalf("migrateHydrationHooks: %v", err)
 	}
-	if evicted != len(expectedHydrationTriggerEvents) {
-		t.Errorf("evicted = %d, want %d (one per hydration event)", evicted, len(expectedHydrationTriggerEvents))
+	if evicted != len(tmux.HydrationTriggerEvents) {
+		t.Errorf("evicted = %d, want %d (one per hydration event)", evicted, len(tmux.HydrationTriggerEvents))
 	}
 
 	// The unset calls should target every event in the canonical slice.
@@ -412,9 +412,9 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 			gotEvents[ev] = true
 		}
 	}
-	for _, want := range expectedHydrationTriggerEvents {
+	for _, want := range tmux.HydrationTriggerEvents {
 		if !gotEvents[want] {
-			t.Errorf("event %q in hydrationTriggerEvents was NOT scanned by migration; got=%v", want, gotEvents)
+			t.Errorf("event %q in HydrationTriggerEvents was NOT scanned by migration; got=%v", want, gotEvents)
 		}
 	}
 }

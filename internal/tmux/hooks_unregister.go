@@ -40,7 +40,7 @@ var portalCommandSubstrings = []string{
 // Legacy `migrate-rename` entries from older binaries land on
 // `session-renamed`, which is part of saveTriggerEvents, so they remain
 // reachable through portalCommandSubstrings without a dedicated event entry.
-var portalEvents = slices.Concat(saveTriggerEvents, hydrationTriggerEvents)
+var portalEvents = slices.Concat(saveTriggerEvents, HydrationTriggerEvents)
 
 // UnregisterPortalHooks removes every Portal-owned hook entry from the global
 // tmux hook table.

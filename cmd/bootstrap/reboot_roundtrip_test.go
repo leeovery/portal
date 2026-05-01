@@ -1134,18 +1134,6 @@ func verifySwitchClientLiveStructure(t *testing.T, ts *tmuxtest.Socket) {
 	}
 }
 
-// leadingDashHydrationTriggerEvents mirrors the canonical
-// hydrationTriggerEvents list in internal/tmux/hooks_register.go. It is
-// duplicated here (rather than imported) because the underlying var is
-// unexported and the round-trip test runs in the bootstrap_test external
-// package. A drift between this list and the canonical one is caught by
-// expectedHydrationTriggerEvents in internal/tmux/hooks_register_test.go,
-// which already pins the production list.
-var leadingDashHydrationTriggerEvents = []string{
-	"client-attached",
-	"client-session-changed",
-}
-
 // TestRebootRoundTrip_LeadingDashSessionName is the integration regression
 // guard for spec § "Acceptance Criteria" items 1 (the `--` separator) and
 // 5 (legacy hook migration). It performs a full reboot round-trip on an
@@ -1163,7 +1151,7 @@ var leadingDashHydrationTriggerEvents = []string{
 //     and the `--` separator from Task 1-1 actually run.
 //
 // Coverage:
-//   - For each event in hydrationTriggerEvents, exactly one entry contains
+//   - For each event in HydrationTriggerEvents, exactly one entry contains
 //     `portal state signal-hydrate` and contains the `-- ` separator.
 //   - signal-hydrate exec'd via the built portal binary against the
 //     leading-dash session reaches runSignalHydrate, writes the FIFO, and
@@ -1329,7 +1317,7 @@ func createLeadingDashSession(t *testing.T, ts *tmuxtest.Socket, name, cwd strin
 }
 
 // verifyHydrationHookEntries asserts that for each event in
-// hydrationTriggerEvents, the live tmux server's global hook table contains
+// HydrationTriggerEvents, the live tmux server's global hook table contains
 // exactly one entry whose body contains `portal state signal-hydrate`, and
 // that entry also contains the `-- ` end-of-flags separator.
 //
@@ -1344,7 +1332,7 @@ func verifyHydrationHookEntries(t *testing.T, client *tmux.Client) {
 		t.Fatalf("ShowGlobalHooks: %v", err)
 	}
 	parsed := tmux.ParseShowHooks(raw)
-	for _, event := range leadingDashHydrationTriggerEvents {
+	for _, event := range tmux.HydrationTriggerEvents {
 		entries := parsed[event]
 		var matching []string
 		for _, e := range entries {
