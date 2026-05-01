@@ -1,7 +1,7 @@
 # Analysis Tasks: scrollback-not-restored-with-non-zero-base-index (Cycle 1)
 
 ## Task 1: Export hydrationTriggerEvents and eliminate two test-side shadows
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -31,7 +31,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Extract shared portal.log scan helper for assertion reuse
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -58,7 +58,7 @@ sources: duplication
 ---
 
 ## Task 3: Promote applyBaseIndices to a shared test helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -85,7 +85,7 @@ sources: duplication
 ---
 
 ## Task 4: Tighten AC #2 unit test to cover FIFO byte-write clause
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -115,7 +115,7 @@ sources: standards
 ---
 
 ## Task 5: Collapse RegisterPortalHooks/RegisterPortalHooksWithLogger into a single entry point
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -143,7 +143,7 @@ sources: architecture
 ---
 
 ## Task 6: Unexport MigrateHydrationHooks to seal it inside RegisterPortalHooks
-status: pending
+status: approved
 severity: low
 sources: architecture
 
