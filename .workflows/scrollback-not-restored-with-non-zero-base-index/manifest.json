@@ -87,7 +87,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 3,
-          "current_task": "scrollback-not-restored-with-non-zero-base-index-3-2",
+          "current_task": "scrollback-not-restored-with-non-zero-base-index-3-3",
           "completed_tasks": [
             "scrollback-not-restored-with-non-zero-base-index-1-1",
             "scrollback-not-restored-with-non-zero-base-index-1-2",
@@ -95,7 +95,8 @@
             "scrollback-not-restored-with-non-zero-base-index-2-1",
             "scrollback-not-restored-with-non-zero-base-index-2-2",
             "scrollback-not-restored-with-non-zero-base-index-3-1",
-            "scrollback-not-restored-with-non-zero-base-index-3-2"
+            "scrollback-not-restored-with-non-zero-base-index-3-2",
+            "scrollback-not-restored-with-non-zero-base-index-3-3"
           ],
           "completed_phases": [
             1,

@@ -241,7 +241,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// affects new sessions; -s affects what `show-options -s` reports.
 	// We need both so capture sees the value AND tmux assigns the
 	// configured indices to the sessions we create next.
-	applyBaseIndices(t, ts, cfg.saveBase, cfg.savePaneBase)
+	tmuxtest.ApplyBaseIndices(t, ts, cfg.saveBase, cfg.savePaneBase)
 
 	// Build the saved topology live in tmux. Two sessions:
 	//
@@ -319,7 +319,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// is invisible to the spec-level state model.
 	ts.Run(t, "new-session", "-d", "-s", "_seed")
 	ts.WaitForSession(t, "_seed", 2*time.Second)
-	applyBaseIndices(t, ts, cfg.restoreBase, cfg.restorePaneBase)
+	tmuxtest.ApplyBaseIndices(t, ts, cfg.restoreBase, cfg.restorePaneBase)
 
 	// Wire the bootstrap orchestrator with production adapters for the
 	// steps we want to exercise (Restoring marker lifecycle, real
@@ -518,18 +518,6 @@ func createSavedTopology(t *testing.T, ts *tmuxtest.Socket, args savedTopologyAr
 	// beta session — single window, single pane.
 	ts.Run(t, "new-session", "-d", "-s", "beta", "-c", args.cwdBeta, "sleep", "infinity")
 	ts.WaitForSession(t, "beta", 2*time.Second)
-}
-
-// applyBaseIndices sets server-scope and global base-index / pane-base-
-// index on the live tmux server. -g controls the values new sessions
-// inherit; -s controls what `show-option -sv` reports — both matter for
-// the live coords tmux assigns to fresh sessions/panes.
-func applyBaseIndices(t *testing.T, ts *tmuxtest.Socket, base, paneBase int) {
-	t.Helper()
-	ts.Run(t, "set-option", "-g", "base-index", fmt.Sprintf("%d", base))
-	ts.Run(t, "set-option", "-g", "pane-base-index", fmt.Sprintf("%d", paneBase))
-	ts.Run(t, "set-option", "-s", "base-index", fmt.Sprintf("%d", base))
-	ts.Run(t, "set-option", "-s", "pane-base-index", fmt.Sprintf("%d", paneBase))
 }
 
 // captureAndCommit drives the daemon's per-tick save path inline:
@@ -1207,7 +1195,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// `_portal-saver` discipline).
 	ts.Run(t, "new-session", "-d", "-s", "_seed")
 	ts.WaitForSession(t, "_seed", 2*time.Second)
-	applyBaseIndices(t, ts, saveBase, savePaneBase)
+	tmuxtest.ApplyBaseIndices(t, ts, saveBase, savePaneBase)
 
 	// Create the leading-dash session. The positional `-s -dotfiles-test`
 	// form may be rejected by tmux's argv parser if it interprets the
@@ -1247,7 +1235,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// Restart with `_seed` and apply restore-time base indices.
 	ts.Run(t, "new-session", "-d", "-s", "_seed")
 	ts.WaitForSession(t, "_seed", 2*time.Second)
-	applyBaseIndices(t, ts, restoreBase, restorePaneBase)
+	tmuxtest.ApplyBaseIndices(t, ts, restoreBase, restorePaneBase)
 
 	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
 	if err != nil {

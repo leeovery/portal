@@ -322,10 +322,7 @@ func TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift(t *testing.
 	// tmux exits when there are no sessions.
 	ts.Run(t, "new-session", "-d", "-s", "_bootstrap")
 	ts.WaitForSession(t, "_bootstrap", 2*time.Second)
-	ts.Run(t, "set-option", "-g", "base-index", "1")
-	ts.Run(t, "set-option", "-g", "pane-base-index", "1")
-	ts.Run(t, "set-option", "-s", "base-index", "1")
-	ts.Run(t, "set-option", "-s", "pane-base-index", "1")
+	tmuxtest.ApplyBaseIndices(t, ts, 1, 1)
 
 	// RESTORE.
 	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
