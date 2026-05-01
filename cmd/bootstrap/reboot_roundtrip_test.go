@@ -431,6 +431,30 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	verifyNoPredictedVsLiveWarns(t, filepath.Join(stateDir, "portal.log"))
 }
 
+// assertNoLogLineMatches reads portal.log at logPath and fails the test on
+// the first line for which pred returns true, formatting the failure with
+// failFmt + args (the matched line is appended as the final %s arg).
+//
+// Returns silently on a missing log file: an absent log means no WARN was
+// ever emitted, which is the success state. The shared scan plumbing keeps
+// file-IO + ENOENT-tolerance + line-iteration in one place; per-call
+// diagnostic wording is supplied by the caller.
+func assertNoLogLineMatches(t *testing.T, logPath string, pred func(string) bool, failFmt string, args ...any) {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read portal.log %s: %v", logPath, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if pred(line) {
+			t.Fatalf(failFmt, append(args, line)...)
+		}
+	}
+}
+
 // verifyNoPredictedVsLiveWarns reads portal.log and fails if any line matches
 // the predictedVsLiveWarnRegex (defined in predicted_vs_live_regex_test.go).
 // The single shared regex var keeps the integration assertion and the unit
@@ -442,19 +466,9 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 // ever emitted, which is the success state.
 func verifyNoPredictedVsLiveWarns(t *testing.T, logPath string) {
 	t.Helper()
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		t.Fatalf("read portal.log %s: %v", logPath, err)
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if predictedVsLiveWarnRegex.MatchString(line) {
-			t.Fatalf("portal.log contains predicted-vs-live WARN line "+
-				"(spec AC #4 — diagnostic must be gone, not silenced): %s", line)
-		}
-	}
+	assertNoLogLineMatches(t, logPath, predictedVsLiveWarnRegex.MatchString,
+		"portal.log contains predicted-vs-live WARN line "+
+			"(spec AC #4 — diagnostic must be gone, not silenced): %s")
 }
 
 // savedTopologyArgs bundles the per-CWD strings and base indices used to
@@ -1362,24 +1376,14 @@ func verifyHydrationHookEntries(t *testing.T, client *tmux.Client) {
 // was ever emitted, which is the success state.
 func verifyNoHydrateTimeoutWarns(t *testing.T, logPath, session string) {
 	t.Helper()
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		t.Fatalf("read portal.log %s: %v", logPath, err)
-	}
 	// SanitizePaneKey produces `<sanitized>__<win>.<pane>`; the
 	// sanitized form of "-dotfiles-test" preserves the dashes (only
 	// path-illegal characters are replaced). We match on the session
 	// substring rather than reconstructing the exact pane key so a
 	// regression in pane-key formatting still surfaces as a failure.
-	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.Contains(line, "hydrate timeout") {
-			continue
-		}
-		if strings.Contains(line, session) {
-			t.Errorf("portal.log contains `hydrate timeout` WARN for session %q: %s", session, line)
-		}
+	pred := func(line string) bool {
+		return strings.Contains(line, "hydrate timeout") && strings.Contains(line, session)
 	}
+	assertNoLogLineMatches(t, logPath, pred,
+		"portal.log contains `hydrate timeout` WARN for session %q: %s", session)
 }
