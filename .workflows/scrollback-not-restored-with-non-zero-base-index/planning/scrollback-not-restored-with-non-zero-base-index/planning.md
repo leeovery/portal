@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Fix signal-hydrate Argv Parse and Migrate Existing Hook Installations
-status: draft
+status: approved
+approved_at: 2026-05-01
 
 **Goal**: Restore scrollback hydration for sessions whose names begin with `-` by adding the `--` end-of-flags separator to the `signal-hydrate` hook command, tightening the dedupe substring, and migrating any pre-existing un-separated hook entries on bootstrap.
 
@@ -24,7 +25,8 @@ status: draft
 - [ ] No test uses `t.Parallel()`; existing mock injection patterns (`bootstrapDeps` etc.) are respected.
 
 ### Phase 2: Delete PredictLiveIndices and the Misleading Drift Diagnostic
-status: draft
+status: approved
+approved_at: 2026-05-01
 
 **Goal**: Remove the dead diagnostic prediction path (`PredictLiveIndices`, `readIndexOption` if unused, `flattenSavedPanePositions`, `warnOnPaneKeyDrift`, and its call site) so the misleading `predicted=...__0.0 live=...__X.Y` WARN can never fire under any tmux config.
 
