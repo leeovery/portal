@@ -25,7 +25,8 @@ approved_at: 2026-05-01
 - [ ] No test uses `t.Parallel()`; existing mock injection patterns (`bootstrapDeps` etc.) are respected.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-01
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|

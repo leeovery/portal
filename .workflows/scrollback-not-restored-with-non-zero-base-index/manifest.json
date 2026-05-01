@@ -33,12 +33,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "65f198ea70f861394a6c47eef624664ba7c9b5a6",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "scrollback-not-restored-with-non-zero-base-index-1-1",
           "task_map": {}
         }
       }
