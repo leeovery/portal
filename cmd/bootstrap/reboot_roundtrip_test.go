@@ -419,6 +419,42 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// and only once per restored pane (per the spec §"Resume
 	// Hooks", the helper-driven path fires on reboot recovery).
 	verifyHookFiredOnce(t, hookFireFile)
+
+	// Spec § "Acceptance Criteria" item 4: the misleading
+	// `predicted=...__0.0 live=...__X.Y` WARN must be gone (deleted
+	// in Phase 2-1), not silenced. portal.log must contain ZERO lines
+	// matching the predicted-vs-live regex after a full bootstrap +
+	// hydrate cycle. The base-index drift variant (saveBase=0,
+	// restoreBase=1) is the configuration that would have produced
+	// the WARN pre-fix; running the assertion here for both variants
+	// provides a stronger runtime guarantee at no extra cost.
+	verifyNoPredictedVsLiveWarns(t, filepath.Join(stateDir, "portal.log"))
+}
+
+// verifyNoPredictedVsLiveWarns reads portal.log and fails if any line matches
+// the predictedVsLiveWarnRegex (defined in predicted_vs_live_regex_test.go).
+// The single shared regex var keeps the integration assertion and the unit
+// test (TestPredictedVsLiveRegex_MatchesOffendingShapeAndIgnoresArmPanesWarning)
+// compiling byte-identical patterns — a rename or shape-change in one is a
+// rename or shape-change in both.
+//
+// Returns silently on a missing log file: an absent log means no WARN was
+// ever emitted, which is the success state.
+func verifyNoPredictedVsLiveWarns(t *testing.T, logPath string) {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read portal.log %s: %v", logPath, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if predictedVsLiveWarnRegex.MatchString(line) {
+			t.Fatalf("portal.log contains predicted-vs-live WARN line "+
+				"(spec AC #4 — diagnostic must be gone, not silenced): %s", line)
+		}
+	}
 }
 
 // savedTopologyArgs bundles the per-CWD strings and base indices used to
