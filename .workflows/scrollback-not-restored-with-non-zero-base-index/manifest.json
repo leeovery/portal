@@ -34,12 +34,17 @@
           "format": "tick",
           "spec_commit": "65f198ea70f861394a6c47eef624664ba7c9b5a6",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "scrollback-not-restored-with-non-zero-base-index-1-1",
-          "task_map": {}
+          "task": "scrollback-not-restored-with-non-zero-base-index-1-2",
+          "task_map": {
+            "scrollback-not-restored-with-non-zero-base-index": "tick-5acb4a",
+            "scrollback-not-restored-with-non-zero-base-index-1": "tick-991fa9",
+            "scrollback-not-restored-with-non-zero-base-index-1-1": "tick-c029be"
+          },
+          "external_id": "tick-5acb4a"
         }
       }
     }
