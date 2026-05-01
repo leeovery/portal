@@ -1,7 +1,7 @@
 {
   "name": "scrollback-not-restored-with-non-zero-base-index",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-04-30",
   "description": "Restore predicts pane keys from default tmux indices, so scrollback hydration silently times out when users set non-zero base-index/pane-base-index.",
   "phases": {
@@ -109,5 +109,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-01"
 }
