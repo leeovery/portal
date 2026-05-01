@@ -128,7 +128,7 @@ func TestSignalHydrateCommand_HasEndOfFlagsSeparator(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -360,7 +360,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		err := tmux.RegisterPortalHooks(client)
+		err := tmux.RegisterPortalHooks(client, nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -378,7 +378,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -400,7 +400,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, allPortalHooksRegisteredOutput(), nil)}
 		client := tmux.NewClient(mock)
 
-		err := tmux.RegisterPortalHooks(client)
+		err := tmux.RegisterPortalHooks(client, nil)
 
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -434,7 +434,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -462,7 +462,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", failures)}
 		client := tmux.NewClient(mock)
 
-		err := tmux.RegisterPortalHooks(client)
+		err := tmux.RegisterPortalHooks(client, nil)
 
 		if err == nil {
 			t.Fatal("expected aggregate error, got nil")
@@ -484,7 +484,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", failures)}
 		client := tmux.NewClient(mock)
 
-		err := tmux.RegisterPortalHooks(client)
+		err := tmux.RegisterPortalHooks(client, nil)
 
 		if err == nil {
 			t.Fatal("expected error, got nil")
@@ -530,7 +530,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: runFunc}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("first bootstrap: unexpected error: %v", err)
 		}
 		firstBootstrapAppends := len(setHookCalls(mock.Calls))
@@ -541,7 +541,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 
 		// Reset call log; run again.
 		mock.Calls = nil
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("second bootstrap: unexpected error: %v", err)
 		}
 		if got := setHookCalls(mock.Calls); len(got) != 0 {
@@ -553,7 +553,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
@@ -572,7 +572,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
@@ -603,7 +603,7 @@ func TestRegisterPortalHooks(t *testing.T) {
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
 		client := tmux.NewClient(mock)
 
-		if err := tmux.RegisterPortalHooks(client); err != nil {
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 

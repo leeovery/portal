@@ -139,9 +139,9 @@ type MigrationLogger interface {
 	Warn(component, format string, args ...any)
 }
 
-// noopMigrationLogger satisfies MigrationLogger with no-op methods. Used by
-// the no-logger external-caller surface (RegisterPortalHooks) so the
-// migration code path always has a safe sink.
+// noopMigrationLogger satisfies MigrationLogger with no-op methods. Used as
+// the internal fallback when callers pass a nil MigrationLogger to
+// RegisterPortalHooks so the migration code path always has a safe sink.
 type noopMigrationLogger struct{}
 
 func (noopMigrationLogger) Info(component, format string, args ...any) {}
@@ -232,17 +232,10 @@ func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	return evicted, nil
 }
 
-// RegisterPortalHooks idempotently registers Portal's full hook table on
-// the supplied tmux Client. Delegates to RegisterPortalHooksWithLogger
-// with a no-op MigrationLogger; this is the stable external-caller surface
-// for sites that do not have a logger in hand.
-func RegisterPortalHooks(c *Client) error {
-	return RegisterPortalHooksWithLogger(c, noopMigrationLogger{})
-}
-
-// RegisterPortalHooksWithLogger idempotently registers Portal's full hook
-// table, threading a MigrationLogger through to MigrateHydrationHooks so
-// the bootstrap-step *state.Logger can capture eviction diagnostics.
+// RegisterPortalHooks idempotently registers Portal's full hook table,
+// threading a MigrationLogger through to MigrateHydrationHooks so the
+// bootstrap-step *state.Logger can capture eviction diagnostics. A nil
+// log is tolerated and falls through to a no-op sink.
 //
 // Categories are processed in the order declared in portalHookCategories;
 // within each category, events are processed in the order declared in the
@@ -262,7 +255,7 @@ func RegisterPortalHooks(c *Client) error {
 // failures the returned error is an errors.Join aggregate; each leaf error
 // names the failing event and wraps the underlying tmux error so callers
 // can use errors.Is on a sentinel.
-func RegisterPortalHooksWithLogger(c *Client, log MigrationLogger) error {
+func RegisterPortalHooks(c *Client, log MigrationLogger) error {
 	if log == nil {
 		log = noopMigrationLogger{}
 	}

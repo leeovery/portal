@@ -81,7 +81,7 @@ func installStaleHooks(t *testing.T, client *tmux.Client) {
 // TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed proves the
 // happy-path upgrade: an installation with one stale un-separated entry on
 // every hydration event ends up with exactly one fixed entry per event
-// after bootstrap (eviction then install via RegisterPortalHooksWithLogger).
+// after bootstrap (eviction then install via RegisterPortalHooks).
 func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
@@ -93,8 +93,8 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	installStaleHooks(t, client)
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, log); err != nil {
-		t.Fatalf("RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
 	counts := countSignalHydrateEntries(t, client)
@@ -148,14 +148,14 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 
 	// First bootstrap: evicts and installs.
 	first := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, first); err != nil {
-		t.Fatalf("first RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, first); err != nil {
+		t.Fatalf("first RegisterPortalHooks: %v", err)
 	}
 
 	// Second bootstrap: must be a complete no-op.
 	second := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, second); err != nil {
-		t.Fatalf("second RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, second); err != nil {
+		t.Fatalf("second RegisterPortalHooks: %v", err)
 	}
 
 	if len(second.infos) != 0 {
@@ -186,8 +186,8 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, log); err != nil {
-		t.Fatalf("RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
 	if len(log.infos) != 0 {
@@ -230,8 +230,8 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, log); err != nil {
-		t.Fatalf("RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
 	counts := countSignalHydrateEntries(t, client)
@@ -272,8 +272,8 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooksWithLogger(client, log); err != nil {
-		t.Fatalf("RegisterPortalHooksWithLogger: %v", err)
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
 	// User entry must still be there. After migration the Portal-fixed
