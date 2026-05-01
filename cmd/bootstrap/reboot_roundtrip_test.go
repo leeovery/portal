@@ -1251,7 +1251,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 
 	// Wire PRODUCTION hook-registration adapters this time — this is the
 	// load-bearing difference vs the existing alpha/beta round-trips.
-	// HookRegistrar runs MigrateHydrationHooks (Task 1-2) and registers
+	// HookRegistrar runs migrateHydrationHooks (Task 1-2) and registers
 	// the new `--`-separated signalHydrateCommand (Task 1-1) end-to-end.
 	o := &bootstrap.Orchestrator{
 		Server:    client,

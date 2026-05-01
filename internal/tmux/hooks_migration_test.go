@@ -304,16 +304,19 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 
 // TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues uses a
 // MockCommander to inject a per-index UnsetGlobalHookAt failure that the
-// real-tmux harness does not expose. The test asserts:
+// real-tmux harness does not expose. The test drives the migration through
+// the canonical entry point RegisterPortalHooks (migrateHydrationHooks is
+// unexported, sealed inside it) and asserts:
 //
-//   - migrateHydrationHooks returns (evicted, nil) — per-index failures
+//   - RegisterPortalHooks returns nil — per-index migration failures
 //     surface only via WARN log lines, never as a returned error.
 //   - At least one WARN line names the failing event and a "failed to
 //     evict" message.
-//   - Successful evictions on other events still increment the count and
-//     trigger the INFO emission.
+//   - Successful evictions on other events trigger the INFO emission.
 func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) {
-	// show-hooks output: one stale entry per hydration event.
+	// show-hooks output: one stale entry per hydration event. The same
+	// content is returned for every show-hooks call (migration scan plus
+	// the per-event register-loop dedupe checks).
 	var raw strings.Builder
 	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
@@ -332,7 +335,8 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 			}
 			return "", nil
 		}
-		// set-hook -ga and any other downstream calls — accept silently.
+		// set-hook -ga (register-loop appends across save+hydrate
+		// categories) — accept silently.
 		if len(args) >= 2 && args[0] == "set-hook" && args[1] == "-ga" {
 			return "", nil
 		}
@@ -343,15 +347,8 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	evicted, err := tmux.MigrateHydrationHooks(client, log)
-	if err != nil {
-		t.Fatalf("migrateHydrationHooks returned err: %v (per-index failures must not error)", err)
-	}
-
-	// One eviction failed, one (or more) succeeded. evicted reflects
-	// successful removals only.
-	if evicted < 1 {
-		t.Errorf("evicted = %d, want >= 1 (other events should succeed)", evicted)
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks returned err: %v (per-index migration failures must not error)", err)
 	}
 
 	// At least one WARN line naming the failing event and message.
@@ -365,13 +362,22 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	if !sawFailureWarn {
 		t.Errorf("no WARN line names the failing event with `failed to evict`; warns=%v", log.warns)
 	}
+
+	// Successful evictions on other hydration events should trigger the
+	// single INFO summary line (count >= 1).
+	if len(log.infos) != 1 {
+		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
+	}
+	if !strings.Contains(log.infos[0], "evicted") || !strings.Contains(log.infos[0], "stale signal-hydrate") {
+		t.Errorf("INFO line = %q, missing eviction summary", log.infos[0])
+	}
 }
 
 // TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime
 // proves the migration scans every event in HydrationTriggerEvents (read at
-// runtime, not hard-coded). The set-hook -gu calls observed must cover every
-// event in the canonical list — extending the slice later requires no code
-// change in migration.
+// runtime, not hard-coded). Driving through RegisterPortalHooks, the
+// set-hook -gu calls observed must cover every event in the canonical list
+// — extending the slice later requires no code change in migration.
 func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t *testing.T) {
 	var raw strings.Builder
 	for _, ev := range tmux.HydrationTriggerEvents {
@@ -382,7 +388,9 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
 			return raw.String(), nil
 		}
-		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+		// set-hook -gu (migration evictions) and set-hook -ga
+		// (register-loop appends) are both expected. Accept silently.
+		if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-gu" || args[1] == "-ga") {
 			return "", nil
 		}
 		t.Fatalf("unexpected command: %v", args)
@@ -392,15 +400,14 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	evicted, err := tmux.MigrateHydrationHooks(client, log)
-	if err != nil {
-		t.Fatalf("migrateHydrationHooks: %v", err)
-	}
-	if evicted != len(tmux.HydrationTriggerEvents) {
-		t.Errorf("evicted = %d, want %d (one per hydration event)", evicted, len(tmux.HydrationTriggerEvents))
+	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
 	// The unset calls should target every event in the canonical slice.
+	// Filter mock.Calls to set-hook -gu only — set-hook -ga calls from the
+	// register loop are unrelated to the migration's runtime-slice
+	// invariant.
 	gotEvents := map[string]bool{}
 	for _, c := range mock.Calls {
 		if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" {
@@ -417,13 +424,27 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 			t.Errorf("event %q in HydrationTriggerEvents was NOT scanned by migration; got=%v", want, gotEvents)
 		}
 	}
+
+	// Exactly one INFO line summarising eviction count = len(HydrationTriggerEvents).
+	if len(log.infos) != 1 {
+		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
+	}
+	wantSummary := fmt.Sprintf("evicted %d", len(tmux.HydrationTriggerEvents))
+	if !strings.Contains(log.infos[0], wantSummary) {
+		t.Errorf("INFO line = %q, want eviction count = %d", log.infos[0], len(tmux.HydrationTriggerEvents))
+	}
 }
 
 // TestMigrateHydrationHooks_ShowHooksFailureWrapsError proves the only path
-// that surfaces an error from migrateHydrationHooks: a ShowGlobalHooks
-// failure. Per-index UnsetGlobalHookAt failures are best-effort (WARN +
-// continue), but a failure to enumerate at all aborts the migration with
-// the wrapped error.
+// that surfaces an error from the migration: a ShowGlobalHooks failure.
+// Per-index UnsetGlobalHookAt failures are best-effort (WARN + continue),
+// but a failure to enumerate at all aborts the migration with the wrapped
+// error. Driving through RegisterPortalHooks: the migration's wrapped
+// error is folded into the errors.Join aggregate alongside per-event
+// register failures (which also fail because show-hooks fails everywhere),
+// so we assert via errors.Is on the sentinel and substring containment of
+// "show-hooks failed". No set-hook call must ever be made when every
+// show-hooks call fails.
 func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure")
 	mock := &MockCommander{
@@ -438,18 +459,20 @@ func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	evicted, err := tmux.MigrateHydrationHooks(client, log)
+	err := tmux.RegisterPortalHooks(client, log)
 
-	if evicted != 0 {
-		t.Errorf("evicted = %d, want 0 on show-hooks failure", evicted)
-	}
 	if err == nil {
-		t.Fatal("expected wrapped error, got nil")
+		t.Fatal("expected error from RegisterPortalHooks, got nil")
 	}
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
 	}
 	if !strings.Contains(err.Error(), "show-hooks failed") {
 		t.Errorf("error %q does not contain expected wrap %q", err.Error(), "show-hooks failed")
+	}
+	// The migration leg must contribute a "migrate hydration hooks:" leaf
+	// to the errors.Join aggregate.
+	if !strings.Contains(err.Error(), "migrate hydration hooks") {
+		t.Errorf("error %q missing migration-leg wrap %q", err.Error(), "migrate hydration hooks")
 	}
 }

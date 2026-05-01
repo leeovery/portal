@@ -173,7 +173,7 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 		!strings.Contains(cmd, signalHydrateSubstring)
 }
 
-// MigrateHydrationHooks scans every event in HydrationTriggerEvents and
+// migrateHydrationHooks scans every event in HydrationTriggerEvents and
 // evicts any pre-existing hook entry whose body matches the legacy
 // un-separated `portal state signal-hydrate` shape. Indices are processed
 // in descending order so successful removals do not shift the indices of
@@ -189,10 +189,10 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 // emits a single INFO line of the form "evicted N stale signal-hydrate
 // hook(s) lacking '--' separator". Bootstraps with no evictions are silent.
 //
-// The function is intended to be called once per bootstrap, immediately
-// before the install step reaches the hydration-trigger category. It is
-// idempotent: a second invocation against the same hook table is a no-op.
-func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
+// Sealed inside RegisterPortalHooks: it is unexported to ensure exactly one
+// canonical entry point for "hook installation". A second invocation against
+// the same hook table is a no-op (idempotent).
+func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	if log == nil {
 		log = noopMigrationLogger{}
 	}
@@ -233,7 +233,7 @@ func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 }
 
 // RegisterPortalHooks idempotently registers Portal's full hook table,
-// threading a MigrationLogger through to MigrateHydrationHooks so the
+// threading a MigrationLogger through to migrateHydrationHooks so the
 // bootstrap-step *state.Logger can capture eviction diagnostics. A nil
 // log is tolerated and falls through to a no-op sink.
 //
@@ -242,7 +242,7 @@ func MigrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 // spec.
 //
 // Before the per-category register loop reaches the hydration-trigger
-// category, MigrateHydrationHooks runs once to evict any pre-existing
+// category, migrateHydrationHooks runs once to evict any pre-existing
 // un-separated `portal state signal-hydrate` entry left behind by an older
 // portal install. Migration failures are best-effort and never abort
 // bootstrap — only a ShowGlobalHooks failure inside the migration would
@@ -262,7 +262,7 @@ func RegisterPortalHooks(c *Client, log MigrationLogger) error {
 
 	var errs []error
 
-	if _, err := MigrateHydrationHooks(c, log); err != nil {
+	if _, err := migrateHydrationHooks(c, log); err != nil {
 		errs = append(errs, fmt.Errorf("migrate hydration hooks: %w", err))
 	}
 
