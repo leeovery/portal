@@ -53,3 +53,12 @@ approved_at: 2026-05-01
 - [ ] Reboot round-trip integration test, run with non-zero `base-index` and `pane-base-index` on the test tmux server, confirms `portal.log` contains zero lines matching the regex `predicted=.*__\d+\.\d+ live=.*__\d+\.\d+` after bootstrap completes.
 - [ ] `go build ./...` and `go test ./...` pass with no compilation errors and no failing tests.
 - [ ] Live-index path is unchanged; pane-count mismatch logging at `armPanes:202` is preserved.
+
+#### Tasks
+status: approved
+approved_at: 2026-05-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| scrollback-not-restored-with-non-zero-base-index-2-1 | Excise Diagnostic Prediction Path and Audit Test Scaffolding | unexpected reference outside deletion list (surface for review, do not silently delete), `readIndexOption` retains a caller after other deletions (keep it), test helpers/fixtures in `cmd/bootstrap/` still referencing deleted symbols, pane-count mismatch logging at `armPanes:202` must remain intact, live-index path untouched |
+| scrollback-not-restored-with-non-zero-base-index-2-2 | Regression Assertion: No predicted-vs-live WARN Under Non-Zero base-index | isolated tmux socket only (developer's primary server untouched), session name without leading dash (orthogonal to Phase 1's leading-dash test), regex must not false-positive on unrelated diagnostic lines, assertion runs after bootstrap completes |

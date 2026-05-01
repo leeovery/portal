@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "~",
+          "task": "scrollback-not-restored-with-non-zero-base-index-2-1",
           "task_map": {
             "scrollback-not-restored-with-non-zero-base-index": "tick-5acb4a",
             "scrollback-not-restored-with-non-zero-base-index-1": "tick-991fa9",
