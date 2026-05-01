@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -610,6 +611,73 @@ func TestSignalHydrate_RunEDefersLoggerClose(t *testing.T) {
 	if !errors.Is(err, os.ErrClosed) {
 		t.Errorf("expected logger.Close() to return os.ErrClosed (deferred Close already ran), got %v", err)
 	}
+}
+
+// TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute exercises
+// the full cobra/pflag argv-parse path with a leading-dash session name (the
+// primary failure mode that motivated the `--` end-of-flags separator).
+// Without `--`, pflag treats `-dotfiles-HM9Zhw` as a short-flag cluster and
+// the command exits non-zero before runSignalHydrate is reached, so no FIFO
+// byte is written and the hydrate helper times out.
+func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.T) {
+	t.Run("with -- separator, leading-dash session name parses and reaches RunE", func(t *testing.T) {
+		var captured string
+		prev := signalHydrateRunFunc
+		signalHydrateRunFunc = func(cfg signalHydrateConfig) error {
+			captured = cfg.Session
+			return nil
+		}
+		t.Cleanup(func() { signalHydrateRunFunc = prev })
+		t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+
+		outBuf := new(bytes.Buffer)
+		errBuf := new(bytes.Buffer)
+		resetRootCmd()
+		resetStateCmdFlags()
+		rootCmd.SetOut(outBuf)
+		rootCmd.SetErr(errBuf)
+		rootCmd.SetArgs([]string{"state", "signal-hydrate", "--", "-dotfiles-HM9Zhw"})
+
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("expected nil error, got %v\nstderr: %s", err, errBuf.String())
+		}
+		if captured != "-dotfiles-HM9Zhw" {
+			t.Errorf("captured session = %q, want %q", captured, "-dotfiles-HM9Zhw")
+		}
+	})
+
+	t.Run("without -- separator, leading-dash session is misparsed as short-flag cluster", func(t *testing.T) {
+		// Negative sub-case: confirms the failure mode the `--` fix addresses.
+		// The seam is still installed so an accidental successful parse would
+		// be caught by the captured assertion below.
+		var captured string
+		prev := signalHydrateRunFunc
+		signalHydrateRunFunc = func(cfg signalHydrateConfig) error {
+			captured = cfg.Session
+			return nil
+		}
+		t.Cleanup(func() { signalHydrateRunFunc = prev })
+		t.Setenv("PORTAL_STATE_DIR", t.TempDir())
+
+		outBuf := new(bytes.Buffer)
+		errBuf := new(bytes.Buffer)
+		resetRootCmd()
+		resetStateCmdFlags()
+		rootCmd.SetOut(outBuf)
+		rootCmd.SetErr(errBuf)
+		rootCmd.SetArgs([]string{"state", "signal-hydrate", "-dotfiles-HM9Zhw"})
+
+		err := rootCmd.Execute()
+		if err == nil {
+			t.Fatalf("expected non-nil error from cobra argv-parse, got nil; captured = %q", captured)
+		}
+		if !strings.Contains(err.Error(), "unknown shorthand flag") {
+			t.Errorf("error %q does not contain `unknown shorthand flag`", err.Error())
+		}
+		if captured != "" {
+			t.Errorf("seam should not have been invoked; captured = %q", captured)
+		}
+	})
 }
 
 func TestSignalHydrate_CompletesWithin500msCumulativeBudget(t *testing.T) {

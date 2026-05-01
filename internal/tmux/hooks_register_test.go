@@ -37,8 +37,10 @@ const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && p
 // expectedSignalHydrateCommand is the exact full command Portal registers on
 // every hydration-trigger event. Mirrors signalHydrateCommand in
 // hooks_register.go. The literal #{session_name} is preserved verbatim — tmux
-// expands it at hook-fire time.
-const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`
+// expands it at hook-fire time. The `--` end-of-flags separator before
+// #{session_name} prevents cobra/pflag from misparsing leading-dash session
+// names (e.g. `-dotfiles-HM9Zhw`) as short-flag clusters.
+const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"`
 
 // The migrate-rename hook category was deferred to v2 (see hooks_register.go
 // note). RegisterPortalHooks ships only the two surviving categories —
@@ -107,6 +109,46 @@ func dispatchShowHooks(t *testing.T, showOutput string, setHookErr error) func(a
 		t.Fatalf("unexpected command: %v", args)
 		return "", nil
 	}
+}
+
+// TestSignalHydrateCommand_HasEndOfFlagsSeparator pins the shape of the two
+// hydration-trigger constants. The `--` end-of-flags separator before
+// #{session_name} is load-bearing: leading-dash session names (which arise
+// when SanitiseProjectName substitutes `.` -> `-` for projects whose basename
+// starts with `.`) would otherwise be parsed by cobra/pflag as short-flag
+// clusters and the hook would exit non-zero before runSignalHydrate runs.
+//
+// The dedupe substring must include `--` so RegisterHookIfAbsent distinguishes
+// the new fixed entry from any pre-existing un-separated entry left behind by
+// an older portal install.
+func TestSignalHydrateCommand_HasEndOfFlagsSeparator(t *testing.T) {
+	t.Run("signalHydrateCommand resolves with -- before #{session_name}", func(t *testing.T) {
+		want := `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"`
+		if expectedSignalHydrateCommand != want {
+			t.Errorf("expectedSignalHydrateCommand = %q, want %q", expectedSignalHydrateCommand, want)
+		}
+		if !strings.Contains(expectedSignalHydrateCommand, " -- #{session_name}") {
+			t.Errorf("expectedSignalHydrateCommand %q missing ` -- #{session_name}` separator", expectedSignalHydrateCommand)
+		}
+	})
+
+	t.Run("RegisterPortalHooks emits the -- separator on every hydration event", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		base := len(expectedSaveTriggerEvents)
+		for i := range expectedHydrationTriggerEvents {
+			cmd := got[base+i][1]
+			if !strings.Contains(cmd, "portal state signal-hydrate -- #{session_name}") {
+				t.Errorf("hydration call[%d] command = %q, missing `signal-hydrate -- #{session_name}`", base+i, cmd)
+			}
+		}
+	})
 }
 
 func TestRegisterHookIfAbsent(t *testing.T) {

@@ -36,7 +36,15 @@ const notifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal st
 // signalHydrateCommand is the exact command Portal appends to every
 // hydration-trigger event. Same defensive guard as notifyCommand. The
 // `#{session_name}` token is a tmux format variable expanded at fire time.
-const signalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`
+//
+// The ` -- ` end-of-flags separator before #{session_name} is load-bearing:
+// session names that begin with `-` (e.g. `-dotfiles-HM9Zhw`, which arises
+// when SanitiseProjectName substitutes `.` -> `-` for projects whose basename
+// starts with `.`) would otherwise be parsed by cobra/pflag as short-flag
+// clusters, producing `unknown shorthand flag: 'd'` and exiting non-zero
+// before runSignalHydrate runs. With `--`, every following token is treated
+// as a positional argument regardless of leading dashes.
+const signalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"`
 
 // notifySubstring is the per-event content fingerprint used to detect a
 // previously-registered Portal save-trigger hook. Distinct from
@@ -44,8 +52,12 @@ const signalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && po
 const notifySubstring = "portal state notify"
 
 // signalHydrateSubstring is the per-event content fingerprint used to detect
-// a previously-registered Portal hydration-trigger hook.
-const signalHydrateSubstring = "portal state signal-hydrate"
+// a previously-registered Portal hydration-trigger hook. The trailing `--`
+// is intentional: it distinguishes the new fixed entry from any pre-existing
+// un-separated entry registered by an older portal install, so the dedupe
+// check in RegisterHookIfAbsent does not mistake a stale entry for the
+// current one.
+const signalHydrateSubstring = "portal state signal-hydrate --"
 
 // Note on the v1 deferral of the rename-key migration hook:
 //
