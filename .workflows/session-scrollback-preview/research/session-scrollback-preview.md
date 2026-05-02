@@ -161,6 +161,14 @@ Implication: the rendering pipeline can be `viewport.SetContent(rawAnsiBytes)` +
 
 Per-pane bounded capture (`-S -<n>`) is sub-10ms per F1. With observed wild-data pane counts of 1–3 per session, total capture cost per preview is sub-30ms — comfortably within stepping budget. The disk-read path is even cheaper (file I/O for ~20KB × N). Not a blocker for any rendering shape.
 
+### F12. Inside-tmux invariant eliminates recursive-capture edge case for free
+
+When portal runs inside tmux (the common case), the existing tui-session-picker spec excludes the current session from the picker list — `internal/tui/model.go` filters it out before calling `SetItems`. Preview is therefore *never* asked to capture the session whose pane is currently rendering portal's own UI. Eliminates the awkward case where `capture-pane` against the active session would show portal's TUI rendered into its own preview viewport (recursive Bubble Tea redraw, garbled output). The invariant is inherited — preview does not need to add any guard for this case.
+
+### F13. Stale-capture handling under rapid stepping (marker-branched path only)
+
+If the live-capture vs always-disk choice (Open Design Question 2) lands on marker-branched, the tmux IPC for hydrated panes runs as a `tea.Cmd` (off the event loop). With sub-second stepping through several sessions, a slow capture for session N can return *after* the user has moved to session N+1, overwriting the newer view with stale bytes. Standard mitigation in Bubble Tea: tag each capture request with a generation/sequence token, ignore replies whose token doesn't match the current selection. Implementation-level concern, not a feasibility blocker. The always-disk path largely sidesteps this — file I/O is fast enough (microseconds per ~20KB read) that the race window is negligible — but the same mitigation is cheap to add either way.
+
 ---
 
 ## Open Design Questions for Discussion Phase
