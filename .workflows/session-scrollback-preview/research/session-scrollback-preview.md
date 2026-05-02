@@ -24,7 +24,7 @@ These are constraints from the user, locked during research and shaping every fe
 
 ## Existing Codebase Surface Area
 
-The primitives the feature composes are already in the codebase. No new tmux command wrappers strictly required — feasibility risk is concentrated in TUI rendering and routing.
+The primitives the feature composes are already in the codebase. Whether new tmux command wrappers are needed depends on the *live-capture vs always-disk* choice (Open Design Question 2): the always-disk shape uses zero `CapturePane` calls and needs nothing new; the marker-branched shape needs a bounded-capture variant (e.g. `CapturePaneTail(target, lines)`) — `tmux.Client.CapturePane`'s `-S -` is hardcoded and shared with `internal/state/scrollback.go::CaptureAndHashPane` which depends on full-buffer semantics, so in-place parameterisation isn't viable. Either way, feasibility risk is concentrated in TUI rendering and routing, not in tmux IPC.
 
 | Primitive | Location | Notes |
 |---|---|---|
@@ -58,7 +58,7 @@ Methodology: 3 runs each per session against the user's live tmux, history sizes
 
 ### F2. Daemon save interval
 
-`cmd/state_daemon.go:258`: `TickerPeriod: 1 * time.Second`. So scrollback `.bin` files for live (non-skeleton) panes are stale by at most ~1s during normal operation. Indistinguishable from live for almost any user perception.
+`cmd/state_daemon.go:258`: `TickerPeriod: 1 * time.Second`. So scrollback `.bin` files for live (non-skeleton) panes are stale by at most *one tick interval plus the tick's capture+hash+write duration* during normal operation. Per F1, full-buffer capture against a busy 50k-line pane is ~160–290ms; if the daemon iterates many such panes serially in a single tick, a tick can exceed 1s. The "indistinguishable from live for user perception" claim holds for typical workspaces (1–5 panes) but is best-effort, not a guarantee. Verifying the daemon's per-tick worst-case under realistic load is an implementation-time concern; for design purposes the staleness ceiling is "small but not strictly bounded by 1s".
 
 ### F3. Lazy hydration model — and the side-effect-free preview path
 
@@ -92,7 +92,7 @@ Because the daemon updates `.bin` every ~1s for every live pane (F2), preview ca
 - **Hook integrity** ✓ — hook lookup happens inside `execShellOrHookAndExit`, only invoked when the helper exec's. Reading `.bin` does not go near it.
 - **Marker integrity** ✓ — marker-unset is the helper's responsibility, post-replay. Disk read doesn't touch markers.
 - **Atomic write** ✓ — `fileutil.AtomicWrite0600` (temp file + rename) means a concurrent reader sees old-or-new full content, never torn.
-- **Concurrent attach via another tmux client** ✓ — if hydrate fires externally during preview, marker becomes unset; next read source-selects naturally. Stale viewport content until refresh, but no inconsistency.
+- **Concurrent attach via another tmux client** — if hydrate fires externally during preview, marker becomes unset and next read source-selects naturally. There is a brief race window during the helper's exec sequence (emit preamble → `io.Copy` from `.bin` → 100ms settle → marker unset → exec hook/shell): a preview read landing inside this window could see partial replay or empty pane mid-transition. Outcome is benign (stale-but-recognisable bytes, refreshed on next read), not corrupting — but worth treating as "best-effort consistency under concurrent attach", not unconditional.
 - **Brand-new session never captured by daemon** — `.bin` may not exist (created within the past second, save tick missed it). Edge case for v1 — preview shows a "no saved content" placeholder.
 - **Permissions** ✓ — files written with mode 0600; TUI runs as the same user.
 
@@ -123,7 +123,7 @@ Grammar:
 
 Recursive — splits nest arbitrarily. Single-pass bracket-matched recursive descent ~50–100 LOC. **Portal does not parse this today** — it stores the raw string and replays it verbatim via `tmux.Client.SelectLayout`. So a *literal-layout* multi-pane preview shape would need a custom parser. Sequential and per-window shapes do not.
 
-Real-world distribution from the user's live tmux: 14 of 16 sessions are 1-pane; 2 are 2-pane vertical splits; 0 are nested. Multi-window is rare for portal-managed sessions; multi-pane within a single window is the more common case to handle well.
+Real-world distribution sampled from the user's own running tmux server (one user, one moment): 14 of 16 sessions are 1-pane; 2 are 2-pane vertical splits; 0 are nested. **N=1 user — does not generalise** to portal's user base, which likely includes power-tmux users with 4+ pane workspaces (test-runner + editor + REPL + logs is a common shape). Cited as a *floor* for what design must handle gracefully, not as a representative distribution. The cost-benefit framing of multi-pane rendering shape (Open Design Question 1) should not lean on this single-user sample as authoritative.
 
 ### F7. `capture-pane` target resolution under "active pane" assumption
 
@@ -172,10 +172,10 @@ These are all *what to build*, not *can we build it* — feasibility is establis
 3. **History depth.** Bounded snapshot (e.g. last viewport-height × N lines) vs scrollable into deeper history. F1 establishes that *bounded* is necessary for fast stepping; whether deeper history is reachable on demand (e.g. `r` to load full buffer, page-down extends) is design-phase.
 4. **Stepping key inside preview.** Arrow up/down (Claude Code default) vs Tab/Shift-Tab vs j/k (vim-style) vs all of the above. No conflict because preview owns its keymap.
 5. **List cursor sync vs no sync.** When stepping inside preview, does the underlying sessions-list cursor follow along (so Esc returns to last-previewed session) or stay where it started?
-6. **Filter behaviour during preview.** If a filter is active on the sessions page, in-preview stepping iterates filtered items only (recommended consistency with `bubbles/list` behaviour) or all items.
+6. **Filter behaviour during preview.** Two distinct sub-questions: (a) once preview is open, in-preview stepping iterates filtered items only (recommended for `bubbles/list` consistency) or all items; (b) **load-bearing UX path** — the primary use case is "type filter to narrow to lookalikes → arrow to one → press Space". With `bubbles/list`'s default `SettingFilter()` true while filter is being typed, Space inserts a literal space into the filter text rather than opening preview. The user must commit the filter (Enter) or escape it (Esc) before Space works. Options: keep that behaviour (commit-then-preview), or wire Space-while-filtering to commit-and-open-preview in one step, or use a different key to open preview. Discussion-phase choice — not a feasibility unknown — but the primary use case lives directly on this fork.
 7. **Refresh semantics.** Snapshot at preview-open and frozen vs manual `r` refresh vs live tail (poll `capture-pane` every Ns). Live tail adds tmux IPC churn and a polling timer.
 8. **Brand-new-session edge case.** When `.bin` does not yet exist for a saved pane, what does preview render? Likely a "(no saved content)" placeholder; design-phase to define wording and whether to fall back to live capture (works only if the pane is hydrated).
-9. **Privacy / threat model.** Scrollback can contain typed secrets (sudo prompts, pasted keys, .env contents echoed). Preview makes them one-keypress-glanceable from the picker. Same threat surface as actually attaching the session, but materially easier to stumble across (e.g. during screen-share). Worth a short paragraph in the spec; not a feasibility blocker.
+9. **Privacy / threat model.** Scrollback can contain typed secrets (sudo prompts, pasted API keys, `.env` contents echoed by debug scripts, ssh keys). Preview is **the first portal surface that renders arbitrary captured pane bytes** in a UI — every other UI surface (sessions list, projects list, file browser) renders only metadata (names, paths). This is a qualitative shift in exposure surface, not just a UX shortcut over attach: today, surfacing a secret requires a *deliberate* attach + scroll; preview makes it 1-keypress-glanceable from the picker, which matters during screen-share, demos, pairing, OBS-recording. Worth design-phase consideration of: (a) opt-in/opt-out toggle, (b) a redaction layer for known secret patterns (API key prefixes, "password:" lines), (c) pure documentation. Not a feasibility blocker — but the consolidated stance "same threat surface as attaching" is asserted, not analysed; the right framing is *broader* threat surface than today, narrower than freely browsing files in the home directory.
 
 ---
 
