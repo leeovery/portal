@@ -36,6 +36,24 @@ Three structurally different shapes; the rest of the feature design changes arou
 - **Sub-page** (peer of `pageFileBrowser`) — full-screen preview with its own keymap. Maximum content area. Loses the surrounding list but Esc returns instantly. Matches the user's word *"preview screen"*. Slightly more code than a modal because it adds a fourth page, but the page-state machine is built for it.
 - **Side pane / column view** — list on left, live preview on right (Finder Column View shape). Preview updates as cursor moves. Most ergonomic for fast disambiguation, but: (a) needs a wide terminal, (b) complicates layout sizing with `bubbles/list`'s built-in dimensions, (c) likely re-captures on every cursor move (need a debounce + cancel pattern).
 
+**Leaning (post-conversation):** sub-page, with in-preview navigation between candidate sessions (i.e. step from one preview to the next without exiting back to the list). User confirmed the failure mode is *scanning through several lookalikes*, not inspecting one in isolation. Cited prior art: Claude Code's resume-session picker, which uses a full-screen preview with arrow-key stepping across recent sessions. That hybrid — full-screen preview + in-preview cursor — captures the "scan several" use case without paying the column-view cost (wide-terminal requirement, layout sizing battles with `bubbles/list`).
+
+This shifts the next fork from *"which shape?"* to *"how does in-preview navigation behave?"* — see T1a.
+
+### T1a. In-preview navigation (only relevant if T1 settles on sub-page-with-stepping)
+
+If preview supports stepping across candidates without returning to the list, several sub-decisions:
+
+- **Stepping key** — arrow up/down (matches Claude Code), Tab/Shift-Tab, or j/k (vim-style). Arrows are the obvious default; j/k is a free shortcut that doesn't conflict because preview owns its keymap.
+- **List cursor sync** — when the user steps from session A to session B inside the preview, does the underlying list cursor move too? Two options:
+  - **Sync on step**: Esc returns to whichever session was *last previewed*. Simplest mental model for the user — preview navigation is just "moving the list cursor with extra rendering".
+  - **No sync**: Esc returns to the original highlighted session; preview navigation is a transient inspection. More complex but preserves "where you were".
+
+  Sync-on-step is clearly cheaper to implement and matches the Quick Look mental model.
+- **Wraparound** — at end of list, does stepping wrap or stop? `bubbles/list` defaults to wrap-around behaviour; matching that is consistent.
+- **Filtered-list interaction** — if a filter is active on the sessions page, in-preview nav should step through *filtered* items only, not all items. Otherwise the user could step into a session they explicitly hid.
+- **Capture timing** — stepping rapidly through 6 candidates means 6 capture calls. Snapshot must run as a `tea.Cmd` (off the event loop) and the result must include a generation token so a stale capture for the previous selection doesn't clobber the current view (cancel-on-step pattern). Even at 30ms per capture, holding arrow-down would visibly lag without this.
+
 ### T2. Capture target & content shape
 
 `capture-pane` needs a pane target. Plausible defaults:
