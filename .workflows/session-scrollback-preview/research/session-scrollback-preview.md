@@ -154,6 +154,50 @@ Filter-typing protection pattern (`m.projectList.SettingFilter()`) lets a page c
 - Known gotcha (Bubble Tea community): when content wraps inside viewport, ANSI sequences spanning a wrap boundary can render as literal escape characters because naive `strings.Split` on `\n` fragments styled spans. Mitigations: (a) use `tmux capture-pane -J` to join wrapped lines so the source has only logical newlines, (b) match the viewport width to the source pane width (queryable via `#{pane_width}` per pane), or (c) ANSI-aware re-wrap on display.
 - **Unverified end-to-end** — the failure mode is content-dependent; a representative Claude session capture rendered through viewport would prove or disprove this. Worth a small spike before committing to the rendering approach.
 
+### F5. `window_layout` is parseable; recursive split spec
+
+Empirical sample from a 3-pane test session:
+
+```
+4725,120x30,0,0{60x30,0,0,2,59x30,61,0[59x15,61,0,3,59x14,61,16,4]}
+```
+
+Grammar (confirmed against tmux source / docs):
+
+- Root: `<checksum>,<W>x<H>,<x>,<y>{...}` for the top window.
+- `{ ... }` — *horizontal split container* (children are arranged left-to-right). Children separated by commas.
+- `[ ... ]` — *vertical split container* (children are arranged top-to-bottom). Children separated by commas.
+- Leaf: `<W>x<H>,<x>,<y>,<pane_id>` — a pane occupying the rectangle.
+
+The format is recursive — splits nest arbitrarily. Parsing is straightforward (single-pass, bracket-matched recursive descent). No dependency exists in the codebase yet; rolling our own parser is ~50–100 LOC. Once parsed, layout-tree + viewport dimensions feed directly into `lipgloss.JoinHorizontal` / `lipgloss.JoinVertical` for composition.
+
+Live samples from the user's running tmux: 14 of 16 sessions are 1-pane (`<checksum>,WxH,0,0,<id>`); 2 are 2-pane vertical splits (`<checksum>,73x37,0,0[73x18,0,0,N,73x18,0,19,M]`). No nested splits in observed wild data, but the parser must handle them.
+
+### F6. Per-pane capture must use *live* indices, not predicted
+
+When capturing by pane target (`<session>:<window>.<pane>`), portal must enumerate panes with `list-panes` and use the returned indices verbatim. The empirical test against a server with `pane-base-index=1` returned panes `:1.1, :1.2, :1.3`, not `:0.0, :0.1, :0.2`. Calls to `capture-pane -t multi:0.0` failed with `can't find window: 0`.
+
+This is the same lesson as the recent `scrollback-not-restored-with-non-zero-base-index` fix: never predict, always re-query. The existing `tmux.Client.ListPanesInSession(name)` returns `[]PaneCoord{Window, Pane}` with live values; preview should compose pane targets from those, not from saved/predicted indices.
+
+### F7. Alt-screen capture semantics (from tmux docs; empirical test inconclusive)
+
+Documented behaviour:
+
+- When a pane is in alt-screen mode (vim, htop, less +F, possibly Claude Code TUI):
+  - `capture-pane` (no `-a`) returns the *currently active screen* — the alt-screen contents (the live UI frame).
+  - `capture-pane -a` returns the *other* (i.e. main) screen — what was on the main screen before alt-screen was entered.
+- When a pane is *not* in alt-screen mode, `-a` is a no-op equivalent (tmux returns the main screen either way).
+
+Empirical test was inconclusive: the spike sent the alt-screen toggle escape via `tmux send-keys`, which did not reliably move the pane into alt-screen state (`pane_in_alt_screen` reported empty after the toggle). A proper verification needs a real alt-screen program (vim or a Bubble Tea program with `tea.WithAltScreen`) and is best run as a Go test or a small spike against the implementation rather than as a shell test.
+
+**Implication for design:** default `capture-pane` is the right primitive for "show me what attaching would look like". For Claude Code:
+
+- If Claude's TUI uses alt-screen → capture returns the live UI frame. That *is* what attach would show. Good.
+- If Claude's TUI is in-line (Bubble Tea default without `WithAltScreen`) → capture returns the in-line printed conversation. Also good.
+- If we wanted the *underlying conversation* before Claude's TUI took over (i.e. main-screen scrollback hidden behind alt-screen), we'd need `-a`. User has not asked for this — they want the visual state, not the historical pre-TUI content.
+
+So the rendering primitive remains `capture-pane -e` (no `-a`) per pane, with `-S -<n>` for bounded history. The unverified piece — alt-screen content rendering through `bubbles/viewport` without ANSI corruption — is a *display* feasibility check, not a *capture* one.
+
 ### F4. `capture-pane` target resolution under "active pane" assumption
 
 `tmux capture-pane -t <session>` (no window/pane suffix) resolves to the session's *current* (active) window's *active* pane — verified empirically against the test runs above (no errors when only session name is supplied). This eliminates the need for portal to enumerate panes and pick the active one for the v1 case where preview shows "what you'd see if you attached now". `tmux.Client.CapturePane(target)` already accepts a target string, so passing just the session name works.
