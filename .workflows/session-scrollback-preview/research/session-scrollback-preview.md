@@ -1,160 +1,112 @@
 # Research: Session Scrollback Preview
 
-Quick Look-style preview of a session's scrollback from the portal open panel, so users can disambiguate similarly-named sessions (especially Claude/team-up sessions in the same project) without paying the attach/detach cost.
-
-## Starting Point
-
-What we know so far:
-- Prompted by: TUI picker shows multiple sessions per project named `{directory}-{nanoid}` that are visually indistinguishable. User currently loops attach → realise wrong → detach → guess again. Wants Quick Look-style preview without committing to attach.
-- Interaction model is borrowed from macOS Finder Quick Look — Space previews highlighted session, Enter attaches, Escape returns. Attach/switch behaviour on Enter is unchanged from today.
-- Surface area: `internal/tui` (sessions page of the page state machine) and `internal/tmux` (likely a new `tmux.Client` method around `capture-pane` to read the active pane's scrollback).
-- Starting point: technical feasibility — how to capture session scrollback via tmux, how to render it inside Bubble Tea (including ANSI colour), how the preview pane fits the current page state machine.
-- Constraints: AI-based auto-renaming of sessions is explicitly out of scope.
-- Open questions to defer (don't answer in research): which pane to capture for multi-pane/multi-window sessions, how much history, scrollable vs fixed snapshot, ANSI colour rendering approach.
+Quick Look-style preview of a session's scrollback from the portal open panel, so users can disambiguate similarly-named sessions (especially Claude/team-up sessions in the same project, where session names are `{directory}-{nanoid}` and the only distinguishing context lives in the running content) without paying the attach/detach cost.
 
 ---
 
-## Existing Surface Area (already in the codebase)
+## Stated Feature Shape (user-confirmed — not for re-litigation)
 
-The build-side primitives the feature would compose are already present — no new tmux wrapper is strictly required, only TUI work.
+These are constraints from the user, locked during research and shaping every feasibility check below:
 
-- `tmux.Client.CapturePane(target string) (string, error)` (`internal/tmux/tmux.go:535`) — runs `capture-pane -e -p -S - -t <target>`. Flags: `-e` preserves ANSI escape sequences, `-p` writes to stdout, `-S -` starts from the very top of the history buffer. Returns verbatim raw output. Currently used by the save-side state daemon to dump per-pane scrollback to disk during `portal state daemon`.
-- `tmux.Client.ListPanesInSession(session) ([]PaneCoord, error)` (`internal/tmux/tmux.go:385`) — enumerates `(window, pane)` coords across all windows. Sorted by window then pane.
-- TUI page state machine in `internal/tui/model.go` already supports four pages: `PageLoading | PageSessions | PageProjects | pageFileBrowser`. Adding a preview page (or another modal state) is structurally cheap.
-- Modal overlay infrastructure already exists at `internal/tui/modal.go`: `renderListWithModal` composites `lipgloss`-styled content over the list view ANSI-aware via `charmbracelet/x/ansi`. Used for kill confirm, rename, project edit, delete project.
-- `charmbracelet/x/ansi` is already an import (used in modal.go for `ansi.StringWidth` / `ansi.Truncate` / `ansi.TruncateLeft`) — ANSI-aware width and truncation are available without a new dependency.
+- **Trigger model.** Space on a highlighted session opens preview; Enter attaches as today; Esc returns to the list.
+- **Interaction shape.** Sub-page peer of the existing `pageFileBrowser` — full-screen preview with its own keymap and progressive Esc semantics. Not a modal, not a side pane.
+- **In-preview stepping.** Preview supports stepping between candidate sessions without exiting back to the list (Claude Code resume-style). Failure mode being solved is *scanning through several lookalikes*, not inspecting one in isolation.
+- **Content centrepiece.** Preview renders the *visual terminal state* of the session's panes — the same bytes a fully attached client would see. Not metadata labels (current process, registered hook command), not auto-renamed labels.
+- **Multi-pane / multi-window in scope.** Preview must represent panes and windows of the session, not only the active pane. Specific rendering shape (literal layout vs sequential vs per-window) is design phase territory; feasibility is established below.
+- **Side-effect-free preview.** Pressing Space and then Esc must leave session state byte-identical to before. No hydration triggered, no on-resume hook fired, no markers mutated, no FIFO consumed. Hooks fire only on actual attach (Enter), via the existing `client-attached` → `signal-hydrate` chain.
 
-Implication: feasibility risk is concentrated in the *rendering* and *interaction* layers, not in fetching the data.
+## Out of Scope
 
-## Threads to Explore (parked — not yet investigated)
+- AI-based auto-renaming of sessions to make them more distinguishable.
+- Showing registered hook command (`claude --resume <uid>`) as a metadata *label*. Earlier exploration drifted into this; corrected — preview shows the running session visually, the hook is just the mechanism that put Claude in the pane.
 
-### T1. Interaction model: modal overlay vs sub-page vs side pane
+---
 
-Three structurally different shapes; the rest of the feature design changes around the choice.
+## Existing Codebase Surface Area
 
-- **Modal overlay** — reuses the `renderListWithModal` infrastructure verbatim. Quick to build. List stays visible behind preview. Border + padding consume usable screen — preview content is bounded by the modal box, not the terminal. Best when preview is *informational* (recent ~20 lines).
-- **Sub-page** (peer of `pageFileBrowser`) — full-screen preview with its own keymap. Maximum content area. Loses the surrounding list but Esc returns instantly. Matches the user's word *"preview screen"*. Slightly more code than a modal because it adds a fourth page, but the page-state machine is built for it.
-- **Side pane / column view** — list on left, live preview on right (Finder Column View shape). Preview updates as cursor moves. Most ergonomic for fast disambiguation, but: (a) needs a wide terminal, (b) complicates layout sizing with `bubbles/list`'s built-in dimensions, (c) likely re-captures on every cursor move (need a debounce + cancel pattern).
+The primitives the feature composes are already in the codebase. No new tmux command wrappers strictly required — feasibility risk is concentrated in TUI rendering and routing.
 
-**Leaning (post-conversation):** sub-page, with in-preview navigation between candidate sessions (i.e. step from one preview to the next without exiting back to the list). User confirmed the failure mode is *scanning through several lookalikes*, not inspecting one in isolation. Cited prior art: Claude Code's resume-session picker, which uses a full-screen preview with arrow-key stepping across recent sessions. That hybrid — full-screen preview + in-preview cursor — captures the "scan several" use case without paying the column-view cost (wide-terminal requirement, layout sizing battles with `bubbles/list`).
+| Primitive | Location | Notes |
+|---|---|---|
+| `tmux.Client.CapturePane(target string) (string, error)` | `internal/tmux/tmux.go:535` | Runs `capture-pane -e -p -S - -t <target>`. `-e` preserves ANSI escapes; verbatim raw output. |
+| `tmux.Client.ListPanesInSession(session) ([]PaneCoord, error)` | `internal/tmux/tmux.go:385` | Enumerates live `(window, pane)` coords. Use the live indices, never predict. |
+| `tmux.Client.SelectLayout(session, window, layout)` | `internal/tmux/tmux.go:616` | Replays opaque `window_layout` strings. Portal stores layout as opaque pass-through; *no structural parser exists today*. |
+| `state.ListSkeletonMarkers(client) (map[string]struct{}, error)` | `internal/state/markers.go:61` | Returns set of paneKeys whose `@portal-skeleton-<paneKey>` is currently set. One call gives the hydrated/un-hydrated map. |
+| `state.ScrollbackFile(stateDir, paneKey) string` | `internal/state/paths.go:92` | Resolves the per-pane `<paneKey>.bin` path. Files are atomically written by the daemon (`AtomicWrite0600`). |
+| TUI page state machine | `internal/tui/model.go:22-31` | Four pages today (`PageLoading | PageSessions | PageProjects | pageFileBrowser`). `Update` routes by `activePage`. |
+| Modal overlay rendering | `internal/tui/modal.go` | `renderListWithModal` composites styled content over the list view, ANSI-aware via `charmbracelet/x/ansi`. Not used for the chosen sub-page shape but sets precedent. |
+| `charmbracelet/x/ansi` | already imported | `ansi.StringWidth`, `ansi.Truncate`, `ansi.TruncateLeft`, `ansi.Cut`. |
+| `charmbracelet/bubbles/viewport` | transitively in `bubbles v1.0.0` | Sub-package of an existing dep. No `go.mod` change needed. |
 
-This shifts the next fork from *"which shape?"* to *"how does in-preview navigation behave?"* — see T1a.
-
-### T1a. In-preview navigation (only relevant if T1 settles on sub-page-with-stepping)
-
-If preview supports stepping across candidates without returning to the list, several sub-decisions:
-
-- **Stepping key** — arrow up/down (matches Claude Code), Tab/Shift-Tab, or j/k (vim-style). Arrows are the obvious default; j/k is a free shortcut that doesn't conflict because preview owns its keymap.
-- **List cursor sync** — when the user steps from session A to session B inside the preview, does the underlying list cursor move too? Two options:
-  - **Sync on step**: Esc returns to whichever session was *last previewed*. Simplest mental model for the user — preview navigation is just "moving the list cursor with extra rendering".
-  - **No sync**: Esc returns to the original highlighted session; preview navigation is a transient inspection. More complex but preserves "where you were".
-
-  Sync-on-step is clearly cheaper to implement and matches the Quick Look mental model.
-- **Wraparound** — at end of list, does stepping wrap or stop? `bubbles/list` defaults to wrap-around behaviour; matching that is consistent.
-- **Filtered-list interaction** — if a filter is active on the sessions page, in-preview nav should step through *filtered* items only, not all items. Otherwise the user could step into a session they explicitly hid.
-- **Capture timing** — stepping rapidly through 6 candidates means 6 capture calls. Snapshot must run as a `tea.Cmd` (off the event loop) and the result must include a generation token so a stale capture for the previous selection doesn't clobber the current view (cancel-on-step pattern). Even at 30ms per capture, holding arrow-down would visibly lag without this.
-
-### T2. Capture target & content shape
-
-`capture-pane` needs a pane target. Plausible defaults:
-
-- **Active pane of active window** in the session. tmux supports omitting the pane suffix (`-t <session>` resolves to the session's active pane), or we can list panes and pick the one with `pane_active = 1`.
-- **Active window, all panes joined** — useful if the session is a tmux split, but visually noisy (we'd need to compose multiple captures with separators).
-- **All windows + panes** — overkill for a Quick Look-style peek.
-
-The user has explicitly deferred multi-pane handling, so v1 likely sticks with active-pane-of-active-window. Worth confirming the defer.
-
-History depth: `-S -` (full buffer) can be 10k+ lines. For preview the *recent* state matters most. tmux supports `-S -<n>` for "n lines back from bottom". A natural cap is "what fits the preview viewport plus a small overshoot to allow scrolling". Trades off:
-
-- Fixed snapshot — capture a fixed window (e.g. last 200 lines), no scrolling.
-- Scrollable — capture more (or full) and use `bubbles/viewport` to scroll within the preview.
-
-User has parked this. Worth noting as a fork in the road.
-
-### T3. ANSI rendering inside Bubble Tea
-
-`capture-pane -e` emits raw ANSI escapes. Three approaches:
-
-- **Pass-through** — render the captured text verbatim inside the View() string. Bubble Tea writes to an ANSI-aware terminal so this *generally* works. But: any code that measures width or truncates the content (for line wrapping, viewport sizing, modal composition) must use ANSI-aware utilities. The `charmbracelet/x/ansi` package already used in `modal.go` provides these. Risk: malformed ANSI sequences or bracketed-paste markers leaking into the buffer could confuse rendering.
-- **Strip ANSI** — feed plain text into a viewport. Loses colour, which is the very thing that makes Claude/team-up sessions distinguishable. Probably a non-starter.
-- **`bubbles/viewport`** — Bubble Tea's idiomatic scrollable content widget. Accepts arbitrary string content (including ANSI). Combines well with the pass-through approach.
-
-`bubbles/viewport` is the obvious primitive if scrolling is in scope. It is *not* currently a dependency — `go.mod` includes `bubbles/list` and `bubbles/textinput` but viewport is a sibling package in the same module so the import is already transitively available.
-
-### T4. Capture timing & responsiveness
-
-`tmux capture-pane` is fast (single process, typically <30ms even on large buffers) but synchronous. Two patterns:
-
-- **Lazy on Space** — capture only when preview is invoked. Matches user's stated UX. Simplest. Single `tea.Cmd` returns a `previewCapturedMsg`.
-- **Eager on cursor change** (column-view style) — capture on every selection change, debounced. More responsive but: more tmux process churn; need cancellation / staleness handling so a slow capture for session N doesn't render after the user has moved to session N+1.
-
-Capture cost is bounded — even a 10k-line buffer with `-J` collapsing is small in absolute terms, but a 10ms × 60 keypress/sec arrow-hold is real cost. Mitigation is debounce + cancel-on-select.
-
-### T5. Inside-tmux invariant simplifies ownership
-
-When portal runs inside tmux (the common case), the tui-session-picker spec excludes the current session from the list (`internal/tui/model.go` filters it before `SetItems`). So preview is *never* asked to capture the session whose UI is currently rendering portal. Eliminates the most awkward edge case (recursive capture, tmux client recursion) for free. Worth confirming this still holds in the v1 design.
-
-### T6. Esc / progressive-back integration
-
-The tui-session-picker spec defines a 4-step progressive Esc unwind: modal → filter → file browser → exit. Preview needs a slot in that order — most naturally as **layer 0** (preview dismisses before filter clears, before browser, before exit), in the same position as a modal. Confirms preview should be modelled as a modal-like overlay or a top-of-stack page, not as a sibling page.
-
-### T7. Status / framing of the preview view
-
-Quick Look has a header band with the file name. Preview equivalent: small header showing the session name + a footer hint `[Enter] attach  [Esc] back  [r] refresh`. Trivial to render. Worth keeping the framing minimal so terminal width does not steal preview content.
-
-### T8. Refresh semantics
-
-If the user holds Space on a session running an active stream (Claude generating), the snapshot at preview time is what they see. Should preview:
-
-- Stay frozen at the snapshot (simple — what user described)
-- Live-tail (poll capture-pane every Ns)
-- Provide manual refresh (`r`)
-
-The cheapest useful v1 is snapshot + manual `r`. Live-tail adds capture churn and a polling timer — defer.
+---
 
 ## Empirical Findings
 
-### F1. `tmux capture-pane` latency (measured against 5 live sessions)
+### F1. `tmux capture-pane` latency
 
-Methodology: 3 runs each per session, on the user's running tmux server, against sessions ranging from 706 to 50,330 history lines. `/usr/bin/time -p`.
+Methodology: 3 runs each per session against the user's live tmux, history sizes 706–50,330 lines, `/usr/bin/time -p`.
 
-| Session             | History | `-S -` (full)    | `-S -200` (last 200 lines) |
-|---------------------|---------|------------------|----------------------------|
-| infra-terraform     |     706 | <10ms / 44 KB    | <10ms / 13 KB              |
-| portal              |  15,454 | 50–170ms / 1 MB  | <10ms / 21 KB              |
-| agentic-workflows   |  28,388 | 110ms / 2.4 MB   | <10ms (after warm) / 18 KB |
-| codeintel           |  50,330 | 160ms / 3.7 MB   | <10ms / 20 KB              |
-| pigeon              |  49,812 | 160–290ms / 3.8 MB | <10ms / 18 KB            |
+| Session | History | `-S -` (full) | `-S -200` (last 200 lines) |
+|---|---|---|---|
+| infra-terraform | 706 | <10ms / 44 KB | <10ms / 13 KB |
+| portal | 15,454 | 50–170ms / 1 MB | <10ms / 21 KB |
+| agentic-workflows | 28,388 | 110ms / 2.4 MB | <10ms / 18 KB |
+| codeintel | 50,330 | 160ms / 3.7 MB | <10ms / 20 KB |
+| pigeon | 49,812 | 160–290ms / 3.8 MB | <10ms / 18 KB |
 
-**Interpretation:**
-- Full-buffer capture scales with history size — at 50k lines, ~160ms typical, occasionally 290ms under load. Stepping through 6 such sessions = ~1s of cumulative lag. **Not viable for stepping UX.**
-- Last-N capture (here N=200) is essentially free (sub-10ms) regardless of total history. Output is 13–22 KB — small. **Comfortably within the stepping budget** (~60ms total for 6 sessions = imperceptible).
+**Interpretation.** Full-buffer capture scales with history; 6 sequential captures across busy sessions = ~1s of cumulative lag. **Bounded capture (`-S -<n>`) is essentially free regardless of total history** — comfortable for stepping UX even across 6+ sessions. Bounded N tied to viewport height (with overshoot for scroll headroom) is the design implication.
 
-**Design implication (not a decision):** the stepping interaction model implies a *bounded capture* (e.g. last viewport-height ± buffer lines). If users want to look further back than the bounded snapshot, that becomes a separate read-more interaction (manual `r`-refresh, or page-down extends the capture window). Single full-buffer capture per preview-step is off the table for sessions with large history.
+### F2. Daemon save interval
 
-**Secondary observation:** even bounded capture is 70–110 bytes/line on `-e`-decorated content. A 200-line preview is ~20 KB of ANSI text — not noticeable for Bubble Tea to render, but worth knowing for memory/event-message sizing.
+`cmd/state_daemon.go:258`: `TickerPeriod: 1 * time.Second`. So scrollback `.bin` files for live (non-skeleton) panes are stale by at most ~1s during normal operation. Indistinguishable from live for almost any user perception.
 
-### F2. Page-state-machine integration cost
+### F3. Lazy hydration model — and the side-effect-free preview path
 
-`internal/tui/model.go::Update` (line 785) routes by `activePage` via a switch — `PageLoading | PageSessions | PageProjects | pageFileBrowser`. Adding a fifth `pagePreview` is one `case` arm + one method (`updatePreviewPage`). Each page handler has the same shape:
-- Top-of-handler check `if m.modal != modalNone { return m.updateModal(msg) }` (modal routing is per-page, not global)
-- `tea.KeyCtrlC` → quit
-- Page-specific keymap
+This is the load-bearing architectural finding for the feature. Confirmed by reading `cmd/state_hydrate.go`, `cmd/state_signal_hydrate.go`, `internal/restore/session.go`, `internal/state/scrollback.go`.
 
-The Esc-progressive-back semantics live inside each page handler (each decides what Esc means in its own context) — there is no central "esc stack" to extend. This means a preview page would own its own Esc handling: dismiss → sessions list. Clean.
+**Bootstrap step 5 (Restore)** recreates each saved session: sessions/windows/panes via `new-session`/`split-window`/`new-window` with cwd, geometry via `select-layout`/`select-pane`/`resize-pane -Z`, then on each pane `respawn-pane -k` swaps the default shell for `portal state hydrate --hook-key=... --fifo=... --file=...`. The helper opens its FIFO `O_RDONLY` and **blocks**. The skeleton marker `@portal-skeleton-<liveKey>` is set on the pane.
 
-Filter-typing protection pattern (`m.projectList.SettingFilter()`) lets a page conditionally swallow keys while a filter is being entered — applies the same way for preview's Space trigger on the sessions page (don't open preview while user is mid-filter).
+**At this point the picker shows the sessions** but each pane is empty: no shell prompt, no scrollback, no hook fired, helper still blocked.
 
-**Cost rating:** small. The page-state machine is built for this; no architectural pressure.
+**On attach** (Enter), the `client-attached` tmux hook fires `portal state signal-hydrate -- <session>`. That writes one byte to each pane's FIFO. Each blocked helper unblocks → emits reset preamble → `io.Copy` of the saved `.bin` to stdout (the PTY) → 100ms settle sleep → unsets the skeleton marker → `execShellOrHookAndExit` looks up the on-resume hook and either exec's `/bin/sh -c '<HOOK>; exec $SHELL'` (firing the user's `claude --resume <uid>`) or bare `$SHELL`.
 
-### F3. `bubbles/viewport` availability and ANSI behaviour
+**The side-effect-free preview path:**
 
-- Already transitively available — `bubbles v1.0.0` is in `go.mod`; `viewport` is a sibling sub-package of `list`. No new direct dependency required.
-- Width measurement in viewport uses `lipgloss.Width`, which is ANSI-aware (delegates to `charmbracelet/x/ansi.StringWidth`). Already used in `internal/tui/modal.go`.
-- Known gotcha (Bubble Tea community): when content wraps inside viewport, ANSI sequences spanning a wrap boundary can render as literal escape characters because naive `strings.Split` on `\n` fragments styled spans. Mitigations: (a) use `tmux capture-pane -J` to join wrapped lines so the source has only logical newlines, (b) match the viewport width to the source pane width (queryable via `#{pane_width}` per pane), or (c) ANSI-aware re-wrap on display.
-- **Unverified end-to-end** — the failure mode is content-dependent; a representative Claude session capture rendered through viewport would prove or disprove this. Worth a small spike before committing to the rendering approach.
+For each pane in the previewed session, branch on the skeleton marker:
 
-### F5. `window_layout` is parseable; recursive split spec
+```
+if @portal-skeleton-<paneKey> is set (un-hydrated):
+    read state.ScrollbackFile(stateDir, paneKey) from disk
+else (hydrated, live):
+    tmux.Client.CapturePane(<session>:<window>.<pane>)
+```
+
+Both branches yield the same byte format (`-e`-decorated ANSI from `capture-pane -e -p -S -`) — `internal/state/scrollback.go::CaptureAndHashPane` saves bytes via the same call, so disk-bytes are byte-identical to live-bytes at last save tick. Rendering pipeline does not fork.
+
+**Equivalent simpler shape — always read from disk:**
+
+Because the daemon updates `.bin` every ~1s for every live pane (F2), preview can also be implemented as a single disk-read path for *both* hydrated and un-hydrated panes, accepting a ~1s staleness ceiling on live previews. Single code path, no marker check, no per-preview tmux IPC. The freshness/simplicity tradeoff is a design-phase choice — feasibility-wise both shapes work.
+
+**Knock-on effects (verified):**
+
+- **Hook integrity** ✓ — hook lookup happens inside `execShellOrHookAndExit`, only invoked when the helper exec's. Reading `.bin` does not go near it.
+- **Marker integrity** ✓ — marker-unset is the helper's responsibility, post-replay. Disk read doesn't touch markers.
+- **Atomic write** ✓ — `fileutil.AtomicWrite0600` (temp file + rename) means a concurrent reader sees old-or-new full content, never torn.
+- **Concurrent attach via another tmux client** ✓ — if hydrate fires externally during preview, marker becomes unset; next read source-selects naturally. Stale viewport content until refresh, but no inconsistency.
+- **Brand-new session never captured by daemon** — `.bin` may not exist (created within the past second, save tick missed it). Edge case for v1 — preview shows a "no saved content" placeholder.
+- **Permissions** ✓ — files written with mode 0600; TUI runs as the same user.
+
+The user's worry "if I press Esc to go back, do we discard something?" — answer: nothing. Disk-read preview is a pure read.
+
+### F4. Skeleton-marker query API exists with O(1) per-pane check
+
+`state.ListSkeletonMarkers(client)` returns `map[string]struct{}` of all skeleton paneKeys in a single tmux call (`show-options -sv` over server-scope `@portal-skeleton-*`). Preview opens it once at preview-open, then per-pane membership check is O(1). No per-pane tmux call needed for the hydrated/un-hydrated decision.
+
+### F5. Per-pane capture must use *live* indices
+
+Empirical test against a server with `pane-base-index=1`: panes returned as `:1.1, :1.2, :1.3`, not `:0.0, :0.1, :0.2`. Calls to `capture-pane -t multi:0.0` failed with `can't find window: 0`. Same lesson the recent `scrollback-not-restored-with-non-zero-base-index` fix codified — never predict, always re-query via `ListPanesInSession`. Existing wrapper returns live `[]PaneCoord{Window, Pane}` correctly.
+
+### F6. `window_layout` grammar is parseable; opaque to portal today
 
 Empirical sample from a 3-pane test session:
 
@@ -162,167 +114,91 @@ Empirical sample from a 3-pane test session:
 4725,120x30,0,0{60x30,0,0,2,59x30,61,0[59x15,61,0,3,59x14,61,16,4]}
 ```
 
-Grammar (confirmed against tmux source / docs):
+Grammar:
 
 - Root: `<checksum>,<W>x<H>,<x>,<y>{...}` for the top window.
-- `{ ... }` — *horizontal split container* (children are arranged left-to-right). Children separated by commas.
-- `[ ... ]` — *vertical split container* (children are arranged top-to-bottom). Children separated by commas.
-- Leaf: `<W>x<H>,<x>,<y>,<pane_id>` — a pane occupying the rectangle.
+- `{ ... }` — *horizontal split* (children left-to-right). Comma-separated.
+- `[ ... ]` — *vertical split* (children top-to-bottom). Comma-separated.
+- Leaf: `<W>x<H>,<x>,<y>,<pane_id>`.
 
-The format is recursive — splits nest arbitrarily. Parsing is straightforward (single-pass, bracket-matched recursive descent). No dependency exists in the codebase yet; rolling our own parser is ~50–100 LOC. Once parsed, layout-tree + viewport dimensions feed directly into `lipgloss.JoinHorizontal` / `lipgloss.JoinVertical` for composition.
+Recursive — splits nest arbitrarily. Single-pass bracket-matched recursive descent ~50–100 LOC. **Portal does not parse this today** — it stores the raw string and replays it verbatim via `tmux.Client.SelectLayout`. So a *literal-layout* multi-pane preview shape would need a custom parser. Sequential and per-window shapes do not.
 
-Live samples from the user's running tmux: 14 of 16 sessions are 1-pane (`<checksum>,WxH,0,0,<id>`); 2 are 2-pane vertical splits (`<checksum>,73x37,0,0[73x18,0,0,N,73x18,0,19,M]`). No nested splits in observed wild data, but the parser must handle them.
+Real-world distribution from the user's live tmux: 14 of 16 sessions are 1-pane; 2 are 2-pane vertical splits; 0 are nested. Multi-window is rare for portal-managed sessions; multi-pane within a single window is the more common case to handle well.
 
-### F6. Per-pane capture must use *live* indices, not predicted
+### F7. `capture-pane` target resolution under "active pane" assumption
 
-When capturing by pane target (`<session>:<window>.<pane>`), portal must enumerate panes with `list-panes` and use the returned indices verbatim. The empirical test against a server with `pane-base-index=1` returned panes `:1.1, :1.2, :1.3`, not `:0.0, :0.1, :0.2`. Calls to `capture-pane -t multi:0.0` failed with `can't find window: 0`.
+`tmux capture-pane -t <session>` (no window/pane suffix) resolves to the session's *current* (active) window's *active* pane. Empirically verified. Lets v1 capture the active pane without enumerating, when scope is "single-pane" only. For multi-pane, enumerate via `ListPanesInSession` and capture each `<session>:<window>.<pane>` target.
 
-This is the same lesson as the recent `scrollback-not-restored-with-non-zero-base-index` fix: never predict, always re-query. The existing `tmux.Client.ListPanesInSession(name)` returns `[]PaneCoord{Window, Pane}` with live values; preview should compose pane targets from those, not from saved/predicted indices.
+### F8. Alt-screen capture semantics
 
-### F7. Alt-screen capture semantics (from tmux docs; empirical test inconclusive)
+Documented behaviour (tmux man page; my empirical send-keys-based test was inconclusive — alt-screen entry via send-keys did not reliably register, so a real alt-screen program would be needed for definitive verification — but the documented contract is well-established):
 
-Documented behaviour:
+- Pane in alt-screen mode (vim, htop, possibly Claude Code TUI):
+  - `capture-pane` (no `-a`) returns the active screen — the alt-screen contents (the live UI frame).
+  - `capture-pane -a` returns the *other* (main) screen — main-screen content hidden behind alt-screen.
+- Pane not in alt-screen mode: `-a` is functionally a no-op.
 
-- When a pane is in alt-screen mode (vim, htop, less +F, possibly Claude Code TUI):
-  - `capture-pane` (no `-a`) returns the *currently active screen* — the alt-screen contents (the live UI frame).
-  - `capture-pane -a` returns the *other* (i.e. main) screen — what was on the main screen before alt-screen was entered.
-- When a pane is *not* in alt-screen mode, `-a` is a no-op equivalent (tmux returns the main screen either way).
+**Implication.** Default `capture-pane` (and therefore the saved `.bin`) is the right primitive for "what attaching now would show". For Claude Code: if Claude's TUI uses alt-screen, capture returns the live UI frame; if in-line, capture returns the in-line conversation. Either matches what the user would see on attach. The user has not asked for the underlying main-screen scrollback, so `-a` is not needed. The existing `CapturePane` wrapper (no `-a`) is the right shape.
 
-Empirical test was inconclusive: the spike sent the alt-screen toggle escape via `tmux send-keys`, which did not reliably move the pane into alt-screen state (`pane_in_alt_screen` reported empty after the toggle). A proper verification needs a real alt-screen program (vim or a Bubble Tea program with `tea.WithAltScreen`) and is best run as a Go test or a small spike against the implementation rather than as a shell test.
+### F9. `bubbles/viewport` does not auto-wrap; ANSI rendering is clean
 
-**Implication for design:** default `capture-pane` is the right primitive for "show me what attaching would look like". For Claude Code:
+Read `bubbles/viewport/viewport.go`:
 
-- If Claude's TUI uses alt-screen → capture returns the live UI frame. That *is* what attach would show. Good.
-- If Claude's TUI is in-line (Bubble Tea default without `WithAltScreen`) → capture returns the in-line printed conversation. Also good.
-- If we wanted the *underlying conversation* before Claude's TUI took over (i.e. main-screen scrollback hidden behind alt-screen), we'd need `-a`. User has not asked for this — they want the visual state, not the historical pre-TUI content.
+- `SetContent(s)`: splits on `\n`, stores `[]string` of lines as-is. Does not wrap or re-flow.
+- `visibleLines()`: slices by Y offset/height; for any horizontal scrolling or content-wider-than-viewport uses `ansi.Cut(line, xOffset, xOffset+w)` — ANSI-aware, charmbracelet/x/ansi.
 
-So the rendering primitive remains `capture-pane -e` (no `-a`) per pane, with `-S -<n>` for bounded history. The unverified piece — alt-screen content rendering through `bubbles/viewport` without ANSI corruption — is a *display* feasibility check, not a *capture* one.
+So the wrap-boundary ANSI corruption gotcha I was worried about (community-reported) **does not apply** to this implementation — viewport never wraps long lines, only truncates per-line ANSI-aware. Since `tmux capture-pane` outputs lines hard-wrapped to the source pane's display width, line widths are bounded; if preview viewport ≥ source pane width, no truncation; if preview is narrower, clean ANSI-aware horizontal cut. No corruption risk in either case.
 
-### F8. Hydration is **lazy by design** — and there's a side-effect-free preview path that exploits this
+Implication: the rendering pipeline can be `viewport.SetContent(rawAnsiBytes)` + `viewport.View()` — no preprocessing, no ANSI-aware re-wrap, no sanitisation needed.
 
-**Source-of-truth from CLAUDE.md confirmed by reading `cmd/state_hydrate.go`, `cmd/state_signal_hydrate.go`, `internal/restore/session.go`, `internal/state/scrollback.go`:**
+### F10. Page-state-machine integration cost
 
-The hydration model:
+`internal/tui/model.go::Update` (line 785) routes by `activePage` via a switch. Adding a fifth `pagePreview` is one `case` arm + one method (`updatePreviewPage`). Each page handler has the same shape: top-of-handler modal-routing check (`if m.modal != modalNone { return m.updateModal(msg) }`), `tea.KeyCtrlC` quit, page-specific keymap. Esc-progressive-back is per-page (no central stack), so preview owns its own Esc handling: dismiss → return to Sessions page. Filter-typing protection (`SettingFilter()`) ensures Space doesn't open preview while filter is being typed.
 
-1. **Bootstrap step 5 (Restore)** — for each saved session not already live, portal recreates session/windows/panes, applies geometry, then **on each pane** runs `respawn-pane -k` to swap the default shell for `portal state hydrate --hook-key=... --fifo=... --file=...`. The helper opens the FIFO `O_RDONLY` and **blocks**. The skeleton marker `@portal-skeleton-<liveKey>` is set on the pane.
-2. **Sessions are now visible** in the picker — but each pane's helper is blocked on FIFO. The pane is *empty* (no shell, no scrollback, nothing has been written to the PTY yet).
-3. **`client-attached` tmux hook** fires only when the user attaches (via `tmux attach-session` / `switch-client`). The hook runs `portal state signal-hydrate -- <session_name>`.
-4. **`signal-hydrate`** lists panes, finds skeleton-marked ones, opens each pane's FIFO `O_WRONLY|O_NONBLOCK`, writes one byte (with retries).
-5. **The blocked helper unblocks**, prints reset preamble, dumps the saved scrollback file via `io.Copy` to stdout (which is the pane's PTY), sleeps 100ms (PTY parser settle), unsets the marker, looks up the on-resume hook, and exec's `/bin/sh -c '<HOOK>; exec $SHELL'` or bare `$SHELL`.
+**Cost rating:** small. The page-state machine is built for this — no architectural pressure.
 
-**State of an un-hydrated session as seen by the picker:**
+### F11. Capture cost for multi-pane preview
 
-- Pane is empty — `tmux capture-pane -t <session>` returns blank or whitespace. Default capture is **not** a usable preview source for un-hydrated sessions.
-- Saved scrollback file persists on disk at `~/.config/portal/state/scrollback/<paneKey>.bin` (path: `state.ScrollbackFile(stateDir, paneKey)`). Content is verbatim `capture-pane -e -p -S -` bytes from the last save cycle (`CaptureAndHashPane` in `internal/state/scrollback.go:79`).
-- Skeleton marker `@portal-skeleton-<paneKey>` is set on the pane.
-- on-resume hook entry is still in `~/.config/portal/hooks.json` and untouched.
-- The blocked helper has not exec'd anything; the hook has not fired.
+Per-pane bounded capture (`-S -<n>`) is sub-10ms per F1. With observed wild-data pane counts of 1–3 per session, total capture cost per preview is sub-30ms — comfortably within stepping budget. The disk-read path is even cheaper (file I/O for ~20KB × N). Not a blocker for any rendering shape.
 
-**The clean preview path: read from disk, never touch hydrate.**
+---
 
-For an un-hydrated pane, preview reads the saved scrollback file directly. The bytes are exactly what `capture-pane -e` returned at the daemon's last save tick — same format as a live capture, identical rendering pipeline. **Side effects: zero.** Marker stays set, FIFO stays blocked, hook stays pending, helper keeps waiting. The user can preview, navigate between sessions, dismiss with Esc — and the session state is identical to before preview opened. Hooks fire only when the user *actually attaches* (Enter), via the existing `client-attached` → `signal-hydrate` chain. No new code path needed for that.
+## Open Design Questions for Discussion Phase
 
-For a hydrated pane (already-attached at least once this server lifetime), default `capture-pane -t <session>` returns the live current content. So preview's per-pane source-selection rule is:
+These are all *what to build*, not *can we build it* — feasibility is established for each.
 
-```
-if @portal-skeleton-<paneKey> set:  read state.ScrollbackFile(stateDir, paneKey) from disk
-else:                                tmux.Client.CapturePane(<session>:<window>.<pane>)
-```
+1. **Multi-pane rendering shape.** Sequential/tabbed (one pane at a time, key to step) vs per-window (one window at a time, panes within shown sequentially) vs literal-layout (parse `window_layout`, divide viewport, render each pane in its slot). Cost gradient from cheap (sequential) to most fidelity (literal-layout, +parser). Real-world data: most sessions are 1-pane; literal-layout matters most for the few 2+ pane cases.
+2. **Live-capture vs always-disk.** Marker-branched (live `capture-pane` for hydrated panes, disk for skeletons) vs always-disk (single code path, ~1s staleness ceiling). Tradeoff: code simplicity vs liveness for active sessions.
+3. **History depth.** Bounded snapshot (e.g. last viewport-height × N lines) vs scrollable into deeper history. F1 establishes that *bounded* is necessary for fast stepping; whether deeper history is reachable on demand (e.g. `r` to load full buffer, page-down extends) is design-phase.
+4. **Stepping key inside preview.** Arrow up/down (Claude Code default) vs Tab/Shift-Tab vs j/k (vim-style) vs all of the above. No conflict because preview owns its keymap.
+5. **List cursor sync vs no sync.** When stepping inside preview, does the underlying sessions-list cursor follow along (so Esc returns to last-previewed session) or stay where it started?
+6. **Filter behaviour during preview.** If a filter is active on the sessions page, in-preview stepping iterates filtered items only (recommended consistency with `bubbles/list` behaviour) or all items.
+7. **Refresh semantics.** Snapshot at preview-open and frozen vs manual `r` refresh vs live tail (poll `capture-pane` every Ns). Live tail adds tmux IPC churn and a polling timer.
+8. **Brand-new-session edge case.** When `.bin` does not yet exist for a saved pane, what does preview render? Likely a "(no saved content)" placeholder; design-phase to define wording and whether to fall back to live capture (works only if the pane is hydrated).
+9. **Privacy / threat model.** Scrollback can contain typed secrets (sudo prompts, pasted keys, .env contents echoed). Preview makes them one-keypress-glanceable from the picker. Same threat surface as actually attaching the session, but materially easier to stumble across (e.g. during screen-share). Worth a short paragraph in the spec; not a feasibility blocker.
 
-Both branches yield the same byte format (`-e`-decorated ANSI), so downstream rendering doesn't fork.
+---
 
-**Knock-on effects (verified):**
+## Verifiable Items Deferred to Implementation-Phase Spike
 
-- **Hook integrity:** the on-resume hook command lives in `hooks.json` and is read only by `execShellOrHookAndExit` inside the helper. Reading the disk scrollback file does not invoke that path. ✓
-- **Marker integrity:** marker-unset happens only inside the helper after scrollback replay. Reading the file doesn't touch markers. ✓
-- **Daemon save loop:** the daemon's capture loop only writes when the pane has no skeleton marker (skeleton marker means the helper hasn't replayed yet, so capturing now would dump the *empty* pane and overwrite the saved bytes). Preview's read does not interact with this — readers can open `.bin` files concurrently with the daemon writing them; `WriteScrollbackIfChanged` uses `fileutil.AtomicWrite0600` (temp + rename), so a reader either sees the old or new full file, never a torn write. ✓
-- **Concurrent attach:** if another tmux client attaches the session while preview is open, hydrate fires and the pane becomes live. Preview's source switches naturally on next read (marker now unset → live capture). Stale snapshot in the preview viewport until refresh, but no inconsistency.
-- **Brand-new session never captured by daemon:** the `.bin` file may not exist (e.g. session was created very recently and the next capture cycle hasn't run). Preview shows a "(no preview available — never saved)" placeholder. Acceptable v1 edge case.
+Items that should be checked during initial implementation but don't change the architectural picture:
 
-**Why this matters for the design:**
+- **Real alt-screen program capture.** Run `capture-pane -e -p -S -200` against a live Claude TUI session and inspect the bytes — confirms F8's behaviour on the actual primary use case. Trivial once a Claude session is available.
+- **`viewport.SetContent` + real ANSI bytes.** End-to-end confirmation of F9 by feeding a real `.bin` file through a viewport in a Bubble Tea harness. Source-code analysis suggests no risks, but a 30-line spike removes residual uncertainty.
 
-The user's worry — "if I press Escape to go back, do we discard something?" — is fully resolved. With the disk-read path:
+---
 
-- **Preview never triggers hydration.** Hooks stay pending. Sessions stay un-hydrated. Escape returns to the list with zero residual state change.
-- **The `claude --resume <uid>` API call** (or whatever the on-resume hook is) runs *only* on actual attach (Enter), as today.
-- The user gets to inspect the post-reboot state-as-saved without "spending" any side effects.
+## Closed / Superseded Notes
 
-This also collapses the alt-screen concern (F7) for un-hydrated sessions: there's no live alt-screen to capture, only the bytes that were captured during the last live save cycle pre-restart. Whatever alt-screen behaviour was in those bytes is what we render — same fidelity question as F2 (`bubbles/viewport` ANSI passthrough), no new dimensions.
+- **Modal-overlay vs side-pane interaction shapes** — explored, both viable, user chose sub-page (locked in *Stated Feature Shape*).
+- **Hook command as a metadata label** — explored as a way to "show registered hooks somehow"; user clarified the intent was that preview should show the *running session* (post-hook visual state via the captured bytes), not surface the hook command as a label. Dropped from scope.
+- **Inbox idea — multi-pane explicitly deferred** — research initially treated multi-pane as deferred, then user elevated it during discussion. Now in scope per *Stated Feature Shape*.
 
-**Verifiable feasibility points (not yet checked):**
+---
 
-- Does the hash-dedup save loop write a `.bin` file for every pane in `sessions.json`, or are there cases where a pane is in the index but has no scrollback file? The skeleton-marker check in the daemon means a pane that has *only ever been skeleton* (never live + captured) won't have a file. Worth checking what the GC logic does — `gcOrphanScrollback` removes files not referenced in the index, but a saved-pane-without-file is not the inverse case I'm worried about. Need to read more carefully.
-- File staleness in steady state: the save daemon's capture interval determines max age. A live session being typed into would have stale-by-N-seconds scrollback in preview. Acceptable, but worth noting.
-- Permissions / read access: scrollback files are written with mode 0600 (`AtomicWrite0600`). The TUI runs as the same user, so reads succeed. ✓
+## Source-Material Cross-References
 
-### F4. `capture-pane` target resolution under "active pane" assumption
-
-`tmux capture-pane -t <session>` (no window/pane suffix) resolves to the session's *current* (active) window's *active* pane — verified empirically against the test runs above (no errors when only session name is supplied). This eliminates the need for portal to enumerate panes and pick the active one for the v1 case where preview shows "what you'd see if you attached now". `tmux.Client.CapturePane(target)` already accepts a target string, so passing just the session name works.
-
-For multi-pane / multi-window inspection (deferred per inbox), `ListPanesInSession` plus a per-pane format that includes `pane_active` would let portal pick or compose. Not needed for v1.
-
-## Threads from Conversation
-
-### T9. ~~Preview as session metadata~~ — **misread, dropped**
-
-Earlier I extrapolated the user's "show registered hooks somehow" into a metadata-label feature (display `claude --resume <uid>` next to the session). That's not what was asked. The user clarified: when an on-resume hook has fired (e.g. on reboot, the hook calls `portal state hydrate` which exec's `claude --resume <uid>` in the pane), the *Claude session is now running in that pane*. Pressing Space should show **the running Claude session itself, visually** — not a metadata label about the hook. The hook is just the mechanism that put Claude in the pane; preview's job is to render whatever's currently in the pane.
-
-**Outcome:** scrollback / live pane content remains the preview centrepiece. No hook-display layer. No metadata-as-substitute thread. The `claude --resume <uid>` command (correct syntax — `--resume` not `--continue`) is an implementation detail of the user's hook, not a thing preview surfaces.
-
-This collapses the "what does preview show" question back to: *the rendered terminal state of the session's panes*. T10 (alt-screen) is therefore the load-bearing thread, because Claude's TUI is one of the very things the user wants to see in preview.
-
-### T10. Alt-screen capture behaviour for TUI sessions
-
-`capture-pane` against a pane currently running an alt-screen program (vim, htop, etc.) captures the *alt-screen* contents — the live redraw frame — not the main-screen scrollback that exists "underneath". Several open questions:
-
-- **Does Claude Code's TUI use alt-screen?** Bubble Tea programs only use alt-screen if `tea.WithAltScreen()` is set; default is in-line render. If Claude Code is in-line, capture sees the conversation; if alt-screen, capture sees the live UI frame (which may be visually rich but not what the user reads to identify the conversation).
-- **Empirical check needed** — capture against a live Claude session and inspect the output. None of the user's currently running sessions are in alt-screen (verified via `pane_in_alt_screen=` empty across the board), so this needs a deliberate test.
-- **`-a` flag** — `tmux capture-pane -a` captures the *alternate* screen contents specifically when alt-screen is *not* active, or vice-versa. Doesn't directly help "give me the recent terminal output" if the active screen is the alt-screen.
-- **Connecting to T9** — for sessions running alt-screen TUIs (Claude included if it uses alt-screen), the *registered hook* and *current process* metadata may be more disambiguating than the captured pixels. The preview could degrade gracefully: scrollback for shell sessions, metadata-prominent for alt-screen sessions.
-
-This is verifiable. A small spike: start a Claude conversation in a tmux session, run `tmux capture-pane -e -p -S -200 -t <session>` and inspect what comes back. Until that's done, the rendering pipeline is shaped by an unverified assumption about what `capture-pane` returns for the most important target case (Claude sessions are the very ones the user said are hardest to disambiguate).
-
-### T11. Multi-pane / multi-window preview (elevated to in-scope)
-
-User clarified: preview must show **all panes and windows** of a session, not just the active pane. (Originally listed as deferred per the inbox; now in-scope.)
-
-**What "show all panes" can mean — spectrum of rendering shapes:**
-
-- **Active-pane-only** (rejected by user — too narrow).
-- **Sequential / tabbed** — show one pane at a time, with a key (e.g. Tab / 1/2/3) to step between. Per-window first, panes within. Lowest layout complexity; preserves full content per pane; loses spatial relationship.
-- **Stacked content** — render each pane's capture vertically with a header label, no geometry. Keeps content contiguous; loses layout entirely; arbitrary terminal-height pressure.
-- **Literal layout reproduction** — parse tmux's `#{window_layout}` (a packed string like `bb62,80x24,0,0{40x24,0,0,0,39x24,41,0,1}` describing a binary-tree split), divide the preview viewport proportionally, render each pane's capture into its slot. Highest fidelity (matches what attaching would look like). Highest implementation cost: layout parser, viewport math, per-pane width-fitting of captured ANSI, and resizing on terminal width changes.
-- **Per-window only** — show one window at a time (the active pane within it), step between windows. Compromise: keeps a sense of "windows are tabs" without solving pane geometry.
-
-**Practical context from the user's live tmux:** every session in the earlier `list-sessions` sample had `windows=1`. Multi-window is rare for portal-managed sessions; multi-pane within a single window is more common (Claude + side terminal split, etc.). This biases the design space — getting *multi-pane within a window* right matters more than multi-window navigation.
-
-**Cost factors:**
-
-- **Capture latency multiplies by N panes.** With N=3 and bounded `-S -200` capture (sub-10ms each per F1), total still ~30ms — fine. With N=8 panes and an ambitious history depth, could climb. Mostly bounded.
-- **Layout parsing.** `window_layout` format is documented in the tmux source and is parseable but not trivial. Free-text spec, no library wrapper currently in `internal/tmux`. Rolling our own is a meaningful cost.
-- **Viewport math.** Bubble Tea / Lipgloss have positioning primitives (`lipgloss.JoinHorizontal`, `lipgloss.JoinVertical`, `lipgloss.Place`) that compose pre-rendered strings. They handle ANSI-aware width but not layout-tree-driven sizing. A layout-tree renderer is custom code.
-- **Per-pane width fitting.** When a pane's source width is 80 but its slot in preview is 26, the captured ANSI content has to be width-clipped (or re-flowed). Width-clip is supported by `charmbracelet/x/ansi.Truncate`; reflow is harder.
-
-The literal-layout shape is feasible but non-trivial — likely the largest single chunk of new code in the feature. Sequential and per-window shapes are dramatically cheaper and *might* solve the disambiguation problem if the user's pain is mostly recognising "this is the Claude session" vs "this is the build session", regardless of geometry.
-
-**Verifiable feasibility points:**
-
-- Inspect `window_layout` output empirically against a real multi-pane session.
-- Measure per-pane capture latency at typical pane counts (most sessions: 1–3 panes).
-- Verify that ANSI-aware width truncation against a width-mismatched capture renders cleanly (touches T10's rendering pipeline).
-
-## Open Questions
-
-- **How much history** — full vs last-N — drives whether preview is scrollable. F1 says full-buffer is too slow for stepping-load; bounded is the only viable default.
-- **Scrollable vs fixed snapshot** — depends on history-depth choice and terminal size; deferred to discussion.
-- **ANSI rendering specifics** — pass-through with `bubbles/viewport` is the leading candidate but unverified end-to-end (alt-screen content from a Claude pane is the load-bearing test case).
-- **Multi-pane rendering shape** — sequential vs literal-layout vs per-window, see T11.
-
-## Stated Feature Shape (user-confirmed, not for re-litigation)
-
-These are constraints from the user, not research outputs:
-
-- **Sub-page interaction model** with in-preview stepping (Claude Code resume-style).
-- **Trigger:** Space on highlighted session opens preview; Enter attaches; Esc returns to list.
-- **Content:** the actual rendered terminal state of the session's panes (post-hook if hooks have fired). Not metadata labels, not hook-command text.
-- **Multi-pane / multi-window:** in scope. Preview must represent panes and windows of the session, not just the active pane.
+- CLAUDE.md `## Architecture` § *Server bootstrap* — bootstrap step ordering (load-bearing).
+- CLAUDE.md `## Architecture` § *Resume hooks* — hooks fire on hydrate (reboot recovery), not on every attach.
+- `.workflows/scrollback-not-restored-with-non-zero-base-index/specification/...` — recent fix codifying "live indices, never predict" — same principle applies to per-pane capture targeting.
+- `.workflows/tui-session-picker/specification/tui-session-picker/specification.md` — modal overlay infrastructure, page state machine, `bubbles/list` patterns. Preview reuses the page-state-machine extensibility, not the modal pattern.
