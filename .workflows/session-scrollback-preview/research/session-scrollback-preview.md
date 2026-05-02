@@ -160,6 +160,40 @@ Filter-typing protection pattern (`m.projectList.SettingFilter()`) lets a page c
 
 For multi-pane / multi-window inspection (deferred per inbox), `ListPanesInSession` plus a per-pane format that includes `pane_active` would let portal pick or compose. Not needed for v1.
 
+## Threads from Conversation
+
+### T9. Preview as session metadata, not just scrollback content
+
+User raised: "if the user has registered a hook to resume Claude Code, previewing the session would ideally show this somehow." Pushes the preview from "raw terminal pixels" to "what is this session?" — multiple data sources can answer that, with different freshness and semantics.
+
+**Available data sources for session metadata:**
+
+- **Current process per pane** — `tmux list-panes -F "#{pane_current_command}"` returns the foreground process name (e.g. `claude`, `nvim`, `node`). Live, cheap, single tmux call. Tells the user *what's running right now*.
+- **Pane title** — `#{pane_title}` is settable by escape sequences (`OSC 0` etc.); some shells/programs set it to the current command line or context. Often empty in plain shells, occasionally rich in TUIs.
+- **Registered on-resume hooks** — `internal/hooks/lookup.go::LookupOnResume(store, hookKey)` returns `(cmd, ok, err)` keyed by `session:window.pane`. Tells the user *what'll fire on the next hydrate (reboot recovery)* — **not** on every attach. Per CLAUDE.md: "hooks fire on reboot recovery, not on every detach/reattach inside the same tmux server lifetime."
+- **Captured scrollback** — already covered (F1).
+- **Working directory per pane** — `#{pane_current_path}`. Cheap. Disambiguates same-named sessions if they're in different sub-paths.
+
+**Important semantic precision** for hooks display: showing `claude --continue abc123` next to a session label *without* a "(on next reboot)" qualifier could mislead the user into expecting that command to run on attach. It won't. Two framings:
+
+- "Last hook: `claude --continue abc123` (runs on next reboot)" — explicit.
+- Treat the hook as a *labelling hint* (this session is the one that'll resume conversation abc123) rather than a behavioural promise.
+
+The second framing aligns with the user's stated need ("show this somehow" = recognise the session, not "tell me what'll happen").
+
+**Ergonomic implication unrelated to scrollback:** session metadata may be useful even *before* preview is opened — a small inline marker in the sessions list (e.g. `*` for "has on-resume hook" or showing the current process beside the name) could disambiguate without any preview interaction at all. That's a different feature surface — possibly subsumes some of preview's job for the most common case (recognise by current process / hook). Worth flagging as an alternative *complement* to preview, not a replacement.
+
+### T10. Alt-screen capture behaviour for TUI sessions
+
+`capture-pane` against a pane currently running an alt-screen program (vim, htop, etc.) captures the *alt-screen* contents — the live redraw frame — not the main-screen scrollback that exists "underneath". Several open questions:
+
+- **Does Claude Code's TUI use alt-screen?** Bubble Tea programs only use alt-screen if `tea.WithAltScreen()` is set; default is in-line render. If Claude Code is in-line, capture sees the conversation; if alt-screen, capture sees the live UI frame (which may be visually rich but not what the user reads to identify the conversation).
+- **Empirical check needed** — capture against a live Claude session and inspect the output. None of the user's currently running sessions are in alt-screen (verified via `pane_in_alt_screen=` empty across the board), so this needs a deliberate test.
+- **`-a` flag** — `tmux capture-pane -a` captures the *alternate* screen contents specifically when alt-screen is *not* active, or vice-versa. Doesn't directly help "give me the recent terminal output" if the active screen is the alt-screen.
+- **Connecting to T9** — for sessions running alt-screen TUIs (Claude included if it uses alt-screen), the *registered hook* and *current process* metadata may be more disambiguating than the captured pixels. The preview could degrade gracefully: scrollback for shell sessions, metadata-prominent for alt-screen sessions.
+
+This is verifiable. A small spike: start a Claude conversation in a tmux session, run `tmux capture-pane -e -p -S -200 -t <session>` and inspect what comes back. Until that's done, the rendering pipeline is shaped by an unverified assumption about what `capture-pane` returns for the most important target case (Claude sessions are the very ones the user said are hardest to disambiguate).
+
 ## Open Questions (deferred per inbox note)
 
 - Which pane to capture when a session has multiple panes/windows — assume active-pane-of-active-window for v1.
