@@ -198,6 +198,63 @@ Empirical test was inconclusive: the spike sent the alt-screen toggle escape via
 
 So the rendering primitive remains `capture-pane -e` (no `-a`) per pane, with `-S -<n>` for bounded history. The unverified piece — alt-screen content rendering through `bubbles/viewport` without ANSI corruption — is a *display* feasibility check, not a *capture* one.
 
+### F8. Hydration is **lazy by design** — and there's a side-effect-free preview path that exploits this
+
+**Source-of-truth from CLAUDE.md confirmed by reading `cmd/state_hydrate.go`, `cmd/state_signal_hydrate.go`, `internal/restore/session.go`, `internal/state/scrollback.go`:**
+
+The hydration model:
+
+1. **Bootstrap step 5 (Restore)** — for each saved session not already live, portal recreates session/windows/panes, applies geometry, then **on each pane** runs `respawn-pane -k` to swap the default shell for `portal state hydrate --hook-key=... --fifo=... --file=...`. The helper opens the FIFO `O_RDONLY` and **blocks**. The skeleton marker `@portal-skeleton-<liveKey>` is set on the pane.
+2. **Sessions are now visible** in the picker — but each pane's helper is blocked on FIFO. The pane is *empty* (no shell, no scrollback, nothing has been written to the PTY yet).
+3. **`client-attached` tmux hook** fires only when the user attaches (via `tmux attach-session` / `switch-client`). The hook runs `portal state signal-hydrate -- <session_name>`.
+4. **`signal-hydrate`** lists panes, finds skeleton-marked ones, opens each pane's FIFO `O_WRONLY|O_NONBLOCK`, writes one byte (with retries).
+5. **The blocked helper unblocks**, prints reset preamble, dumps the saved scrollback file via `io.Copy` to stdout (which is the pane's PTY), sleeps 100ms (PTY parser settle), unsets the marker, looks up the on-resume hook, and exec's `/bin/sh -c '<HOOK>; exec $SHELL'` or bare `$SHELL`.
+
+**State of an un-hydrated session as seen by the picker:**
+
+- Pane is empty — `tmux capture-pane -t <session>` returns blank or whitespace. Default capture is **not** a usable preview source for un-hydrated sessions.
+- Saved scrollback file persists on disk at `~/.config/portal/state/scrollback/<paneKey>.bin` (path: `state.ScrollbackFile(stateDir, paneKey)`). Content is verbatim `capture-pane -e -p -S -` bytes from the last save cycle (`CaptureAndHashPane` in `internal/state/scrollback.go:79`).
+- Skeleton marker `@portal-skeleton-<paneKey>` is set on the pane.
+- on-resume hook entry is still in `~/.config/portal/hooks.json` and untouched.
+- The blocked helper has not exec'd anything; the hook has not fired.
+
+**The clean preview path: read from disk, never touch hydrate.**
+
+For an un-hydrated pane, preview reads the saved scrollback file directly. The bytes are exactly what `capture-pane -e` returned at the daemon's last save tick — same format as a live capture, identical rendering pipeline. **Side effects: zero.** Marker stays set, FIFO stays blocked, hook stays pending, helper keeps waiting. The user can preview, navigate between sessions, dismiss with Esc — and the session state is identical to before preview opened. Hooks fire only when the user *actually attaches* (Enter), via the existing `client-attached` → `signal-hydrate` chain. No new code path needed for that.
+
+For a hydrated pane (already-attached at least once this server lifetime), default `capture-pane -t <session>` returns the live current content. So preview's per-pane source-selection rule is:
+
+```
+if @portal-skeleton-<paneKey> set:  read state.ScrollbackFile(stateDir, paneKey) from disk
+else:                                tmux.Client.CapturePane(<session>:<window>.<pane>)
+```
+
+Both branches yield the same byte format (`-e`-decorated ANSI), so downstream rendering doesn't fork.
+
+**Knock-on effects (verified):**
+
+- **Hook integrity:** the on-resume hook command lives in `hooks.json` and is read only by `execShellOrHookAndExit` inside the helper. Reading the disk scrollback file does not invoke that path. ✓
+- **Marker integrity:** marker-unset happens only inside the helper after scrollback replay. Reading the file doesn't touch markers. ✓
+- **Daemon save loop:** the daemon's capture loop only writes when the pane has no skeleton marker (skeleton marker means the helper hasn't replayed yet, so capturing now would dump the *empty* pane and overwrite the saved bytes). Preview's read does not interact with this — readers can open `.bin` files concurrently with the daemon writing them; `WriteScrollbackIfChanged` uses `fileutil.AtomicWrite0600` (temp + rename), so a reader either sees the old or new full file, never a torn write. ✓
+- **Concurrent attach:** if another tmux client attaches the session while preview is open, hydrate fires and the pane becomes live. Preview's source switches naturally on next read (marker now unset → live capture). Stale snapshot in the preview viewport until refresh, but no inconsistency.
+- **Brand-new session never captured by daemon:** the `.bin` file may not exist (e.g. session was created very recently and the next capture cycle hasn't run). Preview shows a "(no preview available — never saved)" placeholder. Acceptable v1 edge case.
+
+**Why this matters for the design:**
+
+The user's worry — "if I press Escape to go back, do we discard something?" — is fully resolved. With the disk-read path:
+
+- **Preview never triggers hydration.** Hooks stay pending. Sessions stay un-hydrated. Escape returns to the list with zero residual state change.
+- **The `claude --resume <uid>` API call** (or whatever the on-resume hook is) runs *only* on actual attach (Enter), as today.
+- The user gets to inspect the post-reboot state-as-saved without "spending" any side effects.
+
+This also collapses the alt-screen concern (F7) for un-hydrated sessions: there's no live alt-screen to capture, only the bytes that were captured during the last live save cycle pre-restart. Whatever alt-screen behaviour was in those bytes is what we render — same fidelity question as F2 (`bubbles/viewport` ANSI passthrough), no new dimensions.
+
+**Verifiable feasibility points (not yet checked):**
+
+- Does the hash-dedup save loop write a `.bin` file for every pane in `sessions.json`, or are there cases where a pane is in the index but has no scrollback file? The skeleton-marker check in the daemon means a pane that has *only ever been skeleton* (never live + captured) won't have a file. Worth checking what the GC logic does — `gcOrphanScrollback` removes files not referenced in the index, but a saved-pane-without-file is not the inverse case I'm worried about. Need to read more carefully.
+- File staleness in steady state: the save daemon's capture interval determines max age. A live session being typed into would have stale-by-N-seconds scrollback in preview. Acceptable, but worth noting.
+- Permissions / read access: scrollback files are written with mode 0600 (`AtomicWrite0600`). The TUI runs as the same user, so reads succeed. ✓
+
 ### F4. `capture-pane` target resolution under "active pane" assumption
 
 `tmux capture-pane -t <session>` (no window/pane suffix) resolves to the session's *current* (active) window's *active* pane — verified empirically against the test runs above (no errors when only session name is supplied). This eliminates the need for portal to enumerate panes and pick the active one for the v1 case where preview shows "what you'd see if you attached now". `tmux.Client.CapturePane(target)` already accepts a target string, so passing just the session name works.
