@@ -162,26 +162,13 @@ For multi-pane / multi-window inspection (deferred per inbox), `ListPanesInSessi
 
 ## Threads from Conversation
 
-### T9. Preview as session metadata, not just scrollback content
+### T9. ~~Preview as session metadata~~ — **misread, dropped**
 
-User raised: "if the user has registered a hook to resume Claude Code, previewing the session would ideally show this somehow." Pushes the preview from "raw terminal pixels" to "what is this session?" — multiple data sources can answer that, with different freshness and semantics.
+Earlier I extrapolated the user's "show registered hooks somehow" into a metadata-label feature (display `claude --resume <uid>` next to the session). That's not what was asked. The user clarified: when an on-resume hook has fired (e.g. on reboot, the hook calls `portal state hydrate` which exec's `claude --resume <uid>` in the pane), the *Claude session is now running in that pane*. Pressing Space should show **the running Claude session itself, visually** — not a metadata label about the hook. The hook is just the mechanism that put Claude in the pane; preview's job is to render whatever's currently in the pane.
 
-**Available data sources for session metadata:**
+**Outcome:** scrollback / live pane content remains the preview centrepiece. No hook-display layer. No metadata-as-substitute thread. The `claude --resume <uid>` command (correct syntax — `--resume` not `--continue`) is an implementation detail of the user's hook, not a thing preview surfaces.
 
-- **Current process per pane** — `tmux list-panes -F "#{pane_current_command}"` returns the foreground process name (e.g. `claude`, `nvim`, `node`). Live, cheap, single tmux call. Tells the user *what's running right now*.
-- **Pane title** — `#{pane_title}` is settable by escape sequences (`OSC 0` etc.); some shells/programs set it to the current command line or context. Often empty in plain shells, occasionally rich in TUIs.
-- **Registered on-resume hooks** — `internal/hooks/lookup.go::LookupOnResume(store, hookKey)` returns `(cmd, ok, err)` keyed by `session:window.pane`. Tells the user *what'll fire on the next hydrate (reboot recovery)* — **not** on every attach. Per CLAUDE.md: "hooks fire on reboot recovery, not on every detach/reattach inside the same tmux server lifetime."
-- **Captured scrollback** — already covered (F1).
-- **Working directory per pane** — `#{pane_current_path}`. Cheap. Disambiguates same-named sessions if they're in different sub-paths.
-
-**Important semantic precision** for hooks display: showing `claude --continue abc123` next to a session label *without* a "(on next reboot)" qualifier could mislead the user into expecting that command to run on attach. It won't. Two framings:
-
-- "Last hook: `claude --continue abc123` (runs on next reboot)" — explicit.
-- Treat the hook as a *labelling hint* (this session is the one that'll resume conversation abc123) rather than a behavioural promise.
-
-The second framing aligns with the user's stated need ("show this somehow" = recognise the session, not "tell me what'll happen").
-
-**Ergonomic implication unrelated to scrollback:** session metadata may be useful even *before* preview is opened — a small inline marker in the sessions list (e.g. `*` for "has on-resume hook" or showing the current process beside the name) could disambiguate without any preview interaction at all. That's a different feature surface — possibly subsumes some of preview's job for the most common case (recognise by current process / hook). Worth flagging as an alternative *complement* to preview, not a replacement.
+This collapses the "what does preview show" question back to: *the rendered terminal state of the session's panes*. T10 (alt-screen) is therefore the load-bearing thread, because Claude's TUI is one of the very things the user wants to see in preview.
 
 ### T10. Alt-screen capture behaviour for TUI sessions
 
@@ -194,9 +181,47 @@ The second framing aligns with the user's stated need ("show this somehow" = rec
 
 This is verifiable. A small spike: start a Claude conversation in a tmux session, run `tmux capture-pane -e -p -S -200 -t <session>` and inspect what comes back. Until that's done, the rendering pipeline is shaped by an unverified assumption about what `capture-pane` returns for the most important target case (Claude sessions are the very ones the user said are hardest to disambiguate).
 
-## Open Questions (deferred per inbox note)
+### T11. Multi-pane / multi-window preview (elevated to in-scope)
 
-- Which pane to capture when a session has multiple panes/windows — assume active-pane-of-active-window for v1.
-- How much history — full vs last-N — drives whether preview is scrollable.
-- Scrollable vs fixed snapshot — depends on history-depth choice and terminal size.
-- ANSI rendering specifics — pass-through with `bubbles/viewport` is the leading candidate but unverified end-to-end.
+User clarified: preview must show **all panes and windows** of a session, not just the active pane. (Originally listed as deferred per the inbox; now in-scope.)
+
+**What "show all panes" can mean — spectrum of rendering shapes:**
+
+- **Active-pane-only** (rejected by user — too narrow).
+- **Sequential / tabbed** — show one pane at a time, with a key (e.g. Tab / 1/2/3) to step between. Per-window first, panes within. Lowest layout complexity; preserves full content per pane; loses spatial relationship.
+- **Stacked content** — render each pane's capture vertically with a header label, no geometry. Keeps content contiguous; loses layout entirely; arbitrary terminal-height pressure.
+- **Literal layout reproduction** — parse tmux's `#{window_layout}` (a packed string like `bb62,80x24,0,0{40x24,0,0,0,39x24,41,0,1}` describing a binary-tree split), divide the preview viewport proportionally, render each pane's capture into its slot. Highest fidelity (matches what attaching would look like). Highest implementation cost: layout parser, viewport math, per-pane width-fitting of captured ANSI, and resizing on terminal width changes.
+- **Per-window only** — show one window at a time (the active pane within it), step between windows. Compromise: keeps a sense of "windows are tabs" without solving pane geometry.
+
+**Practical context from the user's live tmux:** every session in the earlier `list-sessions` sample had `windows=1`. Multi-window is rare for portal-managed sessions; multi-pane within a single window is more common (Claude + side terminal split, etc.). This biases the design space — getting *multi-pane within a window* right matters more than multi-window navigation.
+
+**Cost factors:**
+
+- **Capture latency multiplies by N panes.** With N=3 and bounded `-S -200` capture (sub-10ms each per F1), total still ~30ms — fine. With N=8 panes and an ambitious history depth, could climb. Mostly bounded.
+- **Layout parsing.** `window_layout` format is documented in the tmux source and is parseable but not trivial. Free-text spec, no library wrapper currently in `internal/tmux`. Rolling our own is a meaningful cost.
+- **Viewport math.** Bubble Tea / Lipgloss have positioning primitives (`lipgloss.JoinHorizontal`, `lipgloss.JoinVertical`, `lipgloss.Place`) that compose pre-rendered strings. They handle ANSI-aware width but not layout-tree-driven sizing. A layout-tree renderer is custom code.
+- **Per-pane width fitting.** When a pane's source width is 80 but its slot in preview is 26, the captured ANSI content has to be width-clipped (or re-flowed). Width-clip is supported by `charmbracelet/x/ansi.Truncate`; reflow is harder.
+
+The literal-layout shape is feasible but non-trivial — likely the largest single chunk of new code in the feature. Sequential and per-window shapes are dramatically cheaper and *might* solve the disambiguation problem if the user's pain is mostly recognising "this is the Claude session" vs "this is the build session", regardless of geometry.
+
+**Verifiable feasibility points:**
+
+- Inspect `window_layout` output empirically against a real multi-pane session.
+- Measure per-pane capture latency at typical pane counts (most sessions: 1–3 panes).
+- Verify that ANSI-aware width truncation against a width-mismatched capture renders cleanly (touches T10's rendering pipeline).
+
+## Open Questions
+
+- **How much history** — full vs last-N — drives whether preview is scrollable. F1 says full-buffer is too slow for stepping-load; bounded is the only viable default.
+- **Scrollable vs fixed snapshot** — depends on history-depth choice and terminal size; deferred to discussion.
+- **ANSI rendering specifics** — pass-through with `bubbles/viewport` is the leading candidate but unverified end-to-end (alt-screen content from a Claude pane is the load-bearing test case).
+- **Multi-pane rendering shape** — sequential vs literal-layout vs per-window, see T11.
+
+## Stated Feature Shape (user-confirmed, not for re-litigation)
+
+These are constraints from the user, not research outputs:
+
+- **Sub-page interaction model** with in-preview stepping (Claude Code resume-style).
+- **Trigger:** Space on highlighted session opens preview; Enter attaches; Esc returns to list.
+- **Content:** the actual rendered terminal state of the session's panes (post-hook if hooks have fired). Not metadata labels, not hook-command text.
+- **Multi-pane / multi-window:** in scope. Preview must represent panes and windows of the session, not just the active pane.
