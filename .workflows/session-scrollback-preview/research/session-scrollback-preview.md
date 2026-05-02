@@ -112,6 +112,54 @@ If the user holds Space on a session running an active stream (Claude generating
 
 The cheapest useful v1 is snapshot + manual `r`. Live-tail adds capture churn and a polling timer — defer.
 
+## Empirical Findings
+
+### F1. `tmux capture-pane` latency (measured against 5 live sessions)
+
+Methodology: 3 runs each per session, on the user's running tmux server, against sessions ranging from 706 to 50,330 history lines. `/usr/bin/time -p`.
+
+| Session             | History | `-S -` (full)    | `-S -200` (last 200 lines) |
+|---------------------|---------|------------------|----------------------------|
+| infra-terraform     |     706 | <10ms / 44 KB    | <10ms / 13 KB              |
+| portal              |  15,454 | 50–170ms / 1 MB  | <10ms / 21 KB              |
+| agentic-workflows   |  28,388 | 110ms / 2.4 MB   | <10ms (after warm) / 18 KB |
+| codeintel           |  50,330 | 160ms / 3.7 MB   | <10ms / 20 KB              |
+| pigeon              |  49,812 | 160–290ms / 3.8 MB | <10ms / 18 KB            |
+
+**Interpretation:**
+- Full-buffer capture scales with history size — at 50k lines, ~160ms typical, occasionally 290ms under load. Stepping through 6 such sessions = ~1s of cumulative lag. **Not viable for stepping UX.**
+- Last-N capture (here N=200) is essentially free (sub-10ms) regardless of total history. Output is 13–22 KB — small. **Comfortably within the stepping budget** (~60ms total for 6 sessions = imperceptible).
+
+**Design implication (not a decision):** the stepping interaction model implies a *bounded capture* (e.g. last viewport-height ± buffer lines). If users want to look further back than the bounded snapshot, that becomes a separate read-more interaction (manual `r`-refresh, or page-down extends the capture window). Single full-buffer capture per preview-step is off the table for sessions with large history.
+
+**Secondary observation:** even bounded capture is 70–110 bytes/line on `-e`-decorated content. A 200-line preview is ~20 KB of ANSI text — not noticeable for Bubble Tea to render, but worth knowing for memory/event-message sizing.
+
+### F2. Page-state-machine integration cost
+
+`internal/tui/model.go::Update` (line 785) routes by `activePage` via a switch — `PageLoading | PageSessions | PageProjects | pageFileBrowser`. Adding a fifth `pagePreview` is one `case` arm + one method (`updatePreviewPage`). Each page handler has the same shape:
+- Top-of-handler check `if m.modal != modalNone { return m.updateModal(msg) }` (modal routing is per-page, not global)
+- `tea.KeyCtrlC` → quit
+- Page-specific keymap
+
+The Esc-progressive-back semantics live inside each page handler (each decides what Esc means in its own context) — there is no central "esc stack" to extend. This means a preview page would own its own Esc handling: dismiss → sessions list. Clean.
+
+Filter-typing protection pattern (`m.projectList.SettingFilter()`) lets a page conditionally swallow keys while a filter is being entered — applies the same way for preview's Space trigger on the sessions page (don't open preview while user is mid-filter).
+
+**Cost rating:** small. The page-state machine is built for this; no architectural pressure.
+
+### F3. `bubbles/viewport` availability and ANSI behaviour
+
+- Already transitively available — `bubbles v1.0.0` is in `go.mod`; `viewport` is a sibling sub-package of `list`. No new direct dependency required.
+- Width measurement in viewport uses `lipgloss.Width`, which is ANSI-aware (delegates to `charmbracelet/x/ansi.StringWidth`). Already used in `internal/tui/modal.go`.
+- Known gotcha (Bubble Tea community): when content wraps inside viewport, ANSI sequences spanning a wrap boundary can render as literal escape characters because naive `strings.Split` on `\n` fragments styled spans. Mitigations: (a) use `tmux capture-pane -J` to join wrapped lines so the source has only logical newlines, (b) match the viewport width to the source pane width (queryable via `#{pane_width}` per pane), or (c) ANSI-aware re-wrap on display.
+- **Unverified end-to-end** — the failure mode is content-dependent; a representative Claude session capture rendered through viewport would prove or disprove this. Worth a small spike before committing to the rendering approach.
+
+### F4. `capture-pane` target resolution under "active pane" assumption
+
+`tmux capture-pane -t <session>` (no window/pane suffix) resolves to the session's *current* (active) window's *active* pane — verified empirically against the test runs above (no errors when only session name is supplied). This eliminates the need for portal to enumerate panes and pick the active one for the v1 case where preview shows "what you'd see if you attached now". `tmux.Client.CapturePane(target)` already accepts a target string, so passing just the session name works.
+
+For multi-pane / multi-window inspection (deferred per inbox), `ListPanesInSession` plus a per-pane format that includes `pane_active` would let portal pick or compose. Not needed for v1.
+
 ## Open Questions (deferred per inbox note)
 
 - Which pane to capture when a session has multiple panes/windows — assume active-pane-of-active-window for v1.
