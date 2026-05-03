@@ -50,9 +50,10 @@ build*, not *can we build it*.
 
   Source of preview bytes (live-capture vs always-disk) [decided]
 
-  Multi-pane rendering shape [pending]
-  ├─ Sequential vs per-window vs literal-layout
-  └─ Cost vs fidelity tradeoff against real-world pane-count distribution
+  Multi-pane rendering shape [decided]
+  ├─ Sequential, one pane at a time
+  ├─ Window-grouped cycling
+  └─ Header chrome with keystroke hints (Portal convention)
 
   History depth [pending]
   ├─ Bounded snapshot for fast stepping (capture cost ceiling)
@@ -195,6 +196,144 @@ Confidence: high. Grounded in actual workflow, with genuine reversibility.
 
 ---
 
+## Multi-pane Rendering Shape
+
+### Context
+
+Sessions can contain multiple windows, each with multiple panes. Preview must
+represent that structure (Stated Feature Shape: "Multi-pane / multi-window in
+scope"), but *how* the structure is rendered has a real cost gradient. The
+question is whether we render the literal `window_layout` (best fidelity,
+custom parser ~50–100 LOC) or use a sequential / window-grouped flat
+presentation that doesn't honour the actual layout shape.
+
+Real-world distribution sample is N=1 — 14 of 16 sessions on the user's
+machine are 1-pane (research F6) — so the dominant case collapses regardless
+of the choice. Decision matters only for the 2+ pane minority.
+
+### Options Considered
+
+**Option A — Sequential / tabbed (flat cycle)**
+
+One pane shown at a time. Single key cycles through every pane in the
+session, flat ordering: w1.p1 → w1.p2 → … → w2.p1 → wraps. Header shows
+position.
+
+- Pros: cheapest. Reuses single-pane rendering verbatim. Header line tells
+  the whole story.
+- Cons: collapses the window/pane hierarchy. For sessions with multiple
+  windows of distinct purpose, the flat list is harder to navigate
+  intentionally.
+
+**Option B — Sequential, window-grouped**
+
+One pane shown at a time, but cycling is hierarchical: one key cycles panes
+*within the current window*, another key jumps windows. Header shows both
+window position and pane position.
+
+- Pros: matches tmux's own mental model (windows contain panes; you switch
+  between windows, you cycle panes within). Maps cleanly to the natural
+  phrasing — "this session has two windows; window 1 has four panes,
+  window 2 has one". Still cheap — same renderer.
+- Cons: two keys instead of one. Marginal added concept.
+
+**Option C — Literal `window_layout`**
+
+Parse the opaque `window_layout` string, divide the preview viewport
+proportionally, render each pane in its slot.
+
+- Pros: best visual fidelity. Layout shape itself becomes a strong
+  disambiguation signal — "the session with the four-pane grid" reads
+  instantly without cycling.
+- Cons: ~50–100 LOC parser nobody else in portal needs. Per-pane content
+  fits a smaller box (typical 120×30 → ~30×12 per pane in a 4-pane grid).
+  Header/footer chrome eats more vertical room. Higher implementation cost
+  for a benefit that mostly accrues to a minority of sessions.
+
+### Journey
+
+Opened framing as a cost-fidelity gradient with three stops. User cut
+straight through:
+
+> If I open that up, as long as it says somewhere that this window has two
+> windows, window one has four panes, and window two has one pane, I'm fine
+> with that. As long as I can see that and tab between the panes and the
+> windows. 95% of the time it's single window, single pane per session.
+
+That argument lands twice:
+
+1. **Distribution kills the case for fidelity.** The sessions where literal
+   layout would shine are a minority of a minority. Most sessions are 1×1
+   and all three options render identically.
+2. **Recognition needs structure, not shape.** A header that says "window 1
+   of 2, pane 2 of 4" *is* the structural disambiguation signal. The user
+   doesn't need to *see* the layout to recognise the session; knowing the
+   structural shape (counts and current position) is enough.
+
+Picked the cycle semantics next: flat-vs-grouped. User went grouped — it
+matches tmux's natural mental model and the way the user phrased the
+overview in conversation ("window one has four panes, window two has one").
+
+User added: keystroke hints visible in the chrome, matching portal's
+existing UI convention elsewhere.
+
+Literal-layout was explicitly deferred, not rejected:
+
+> If later I decide I'd like to actually recreate the window layout
+> structure, then we can add that in later. But for now, I just don't think
+> we need it.
+
+### Decision
+
+**Sequential, window-grouped.** One pane shown at a time. Two keys for
+in-preview navigation:
+
+- **Window-cycle key** — moves across windows (forward; reverse via
+  shift-modifier or sibling key).
+- **Pane-cycle key** — moves across panes within the current window
+  (forward; reverse via shift-modifier or sibling key).
+
+Header (or footer) chrome shows structural overview and current position
+explicitly — sufficient detail that the user can identify "which window am
+I in" and "how many siblings does this pane have" at a glance — plus
+visible keystroke hints in portal's existing UI convention.
+
+The actual keybindings (which key to use for which axis) are owned by the
+**Stepping key inside preview** subtopic, which now has two distinct
+concerns to resolve:
+
+1. *Between-session* stepping (cycle through the candidate sessions in the
+   picker without exiting preview).
+2. *Within-session* stepping (the window/pane cycles decided here).
+
+Deciding factors:
+
+- Real-world distribution makes literal-layout a low-leverage investment.
+- Header chrome carries the structural disambiguation signal that fidelity
+  would otherwise carry.
+- Window-grouped matches tmux's mental model — natural for users who already
+  think in tmux terms.
+- Reversibility is high — literal-layout can be added later without
+  invalidating the sequential renderer (additive flag/mode, not a rewrite).
+
+Trade-offs accepted:
+
+- Multi-pane sessions don't preview *as themselves* shape-wise. Mitigated by
+  the chrome.
+- Two cycle keys instead of one. Marginal.
+
+Confidence: high. Decision is explicitly staged for upgrade if v1 feels
+weak in practice.
+
+### Open Sub-decision Carried Forward
+
+Header chrome content is sketched but not pinned: counts + current position
++ keystroke hints. Exact wording / placement (header vs footer, single-line
+vs two-line) is a UI detail to settle alongside the broader preview chrome
+during specification or build. Not a discussion-phase blocker.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -204,6 +343,8 @@ Confidence: high. Grounded in actual workflow, with genuine reversibility.
 *(populated as discussion progresses)*
 
 ### Current State
-- 1 of 9 subtopics decided (Source of Preview Bytes — always-disk).
+- 2 of 9 subtopics decided.
 - Refresh Semantics has an early signal: snapshot, not live tail.
-- 8 subtopics still pending.
+- Stepping Key subtopic now owns two distinct concerns (between-session
+  stepping + within-session window/pane cycle keys).
+- 7 subtopics still pending.
