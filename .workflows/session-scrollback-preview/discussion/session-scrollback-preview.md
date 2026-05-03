@@ -48,7 +48,7 @@ build*, not *can we build it*.
 
 ### Map
 
-  Source of preview bytes (live-capture vs always-disk) [pending]
+  Source of preview bytes (live-capture vs always-disk) [decided]
 
   Multi-pane rendering shape [pending]
   ├─ Sequential vs per-window vs literal-layout
@@ -83,6 +83,118 @@ exploration to capture.*
 
 ---
 
+## Source of Preview Bytes
+
+### Context
+
+Preview must show the visual terminal state of each pane in the previewed
+session. Two architectural shapes were viable per research:
+
+- **Always-disk.** Read each pane's `.bin` file written by the save daemon.
+- **Marker-branched.** Branch on `@portal-skeleton-<paneKey>`: live
+  `tmux capture-pane -e -p -S -<n>` for hydrated panes, disk for skeletons.
+
+Both are feasible and side-effect-free (research F3). This is a what-to-build
+choice — staleness vs liveness vs code-path complexity — not a feasibility
+question.
+
+### Options Considered
+
+**Option A — Always-disk**
+
+- Pros:
+  - Single read path. No marker check. No fork in the rendering pipeline.
+  - No new tmux wrapper. The existing `CapturePane` hardcodes `-S -` and is
+    shared with save-daemon semantics; a bounded variant
+    (`CapturePaneTail(target, n)`) would be net-new.
+  - No per-preview tmux IPC. File reads are microseconds, so stepping is
+    essentially instant.
+  - F13 rapid-stepping race largely vanishes — the window where a slow
+    capture overwrites a newer view is too small to matter when the read is
+    file I/O.
+  - Skeleton panes already require this path. Extending it to hydrated panes
+    adds zero new code.
+- Cons:
+  - Up to ~1s stale, longer if the daemon's per-tick worst case exceeds 1s
+    under heavy load (research F2: "small but not strictly bounded by 1s").
+  - Brand-new sessions created within the last save tick may have no `.bin`
+    yet — placeholder needed (separate subtopic).
+  - Surface labelled "what attaching now would show" is actually a snapshot
+    of the previous tick.
+
+**Option B — Marker-branched (live for hydrated, disk for skeletons)**
+
+- Pros:
+  - Zero staleness for hydrated panes.
+  - Sets up infrastructure if a future live-tail mode is wanted.
+- Cons:
+  - Two code paths; rendering forks on marker.
+  - Requires a new `CapturePaneTail` wrapper.
+  - F13: rapid stepping → in-flight captures for session N landing after
+    user has stepped to N+1; needs generation/sequence tokens to ignore
+    stale replies.
+  - Per-preview tmux IPC adds latency (sub-30ms typical, real cost on busy
+    multi-pane workspaces).
+
+### Journey
+
+Opened the decision against the actual use case rather than the abstract
+property: disambiguation is a **recognition** task, not a **live monitoring**
+task. The user is glancing to identify "which `pigeon-AbCdEf` is which",
+not watching a session change in real time.
+
+User probed the worst-case staleness directly:
+
+> If a log is tailing 100 lines/sec and the daemon is busy, we could be
+> hundreds of lines out of date — still doesn't matter. I'm not looking at
+> line content; I'm recognising "this is my tailing log session". It catches
+> up once I attach.
+
+Two ends of the bandwidth spectrum both hold:
+- Slow output (Claude TUI): 1-2s stale is invisible because Claude moves
+  slowly in the first place.
+- Fast output (busy logs): the user isn't reading individual lines, they're
+  identifying the session by overall shape.
+
+User also independently confirmed: not a single-user-on-multiple-machines
+environment. No concurrent attach contention worth designing for — they
+won't be working on the previewed session from elsewhere while previewing it.
+
+Live preview was explicitly rejected as a separate concern: previews are
+**snapshots at the moment they're taken**, not real-time feeds. This pre-empts
+part of the Refresh Semantics subtopic — though "do we re-read on each step?"
+and "is `r` worth offering?" remain open there.
+
+### Decision
+
+**Always-disk.** Single read path: `state.ScrollbackFile(stateDir, paneKey)`
+for every pane in the previewed session, regardless of skeleton-marker state.
+
+Deciding factors:
+
+- Disambiguation use case is recognition, not live monitoring — staleness is
+  invisible at the user-perception level for both ends of the bandwidth
+  spectrum.
+- Single-user-per-machine environment means no concurrent-attach contention
+  worth designing complexity around.
+- Architectural simplicity: no marker check, no rendering fork, no F13
+  mitigation, no new tmux wrapper.
+- Reversibility is high — if liveness ever matters later, marker-branched
+  can be added as a per-pane source override without changing the rendering
+  pipeline.
+
+Trade-offs accepted:
+
+- Staleness ceiling is "small but not strictly bounded by 1s". Accepted
+  because it doesn't bite the use case.
+- Brand-new session edge case (no `.bin` yet) is owned by its own subtopic.
+- The "live state" surface label is a small honesty cost — preview is a
+  snapshot, full stop.
+
+Confidence: high. Grounded in actual workflow, with genuine reversibility.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -92,4 +204,6 @@ exploration to capture.*
 *(populated as discussion progresses)*
 
 ### Current State
-- Discussion just initialised; all subtopics pending.
+- 1 of 9 subtopics decided (Source of Preview Bytes — always-disk).
+- Refresh Semantics has an early signal: snapshot, not live tail.
+- 8 subtopics still pending.
