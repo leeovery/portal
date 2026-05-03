@@ -55,9 +55,9 @@ build*, not *can we build it*.
   ├─ Window-grouped cycling
   └─ Header chrome with keystroke hints (Portal convention)
 
-  History depth [pending]
-  ├─ Bounded snapshot for fast stepping (capture cost ceiling)
-  └─ Reachable deeper history on demand?
+  History depth [decided]
+  ├─ Bounded snapshot, scrollable within bounds
+  └─ Generous N (e.g. ~500-1000 lines), pin in spec
 
   Refresh semantics [pending]
   ├─ Snapshot-frozen vs manual `r` vs live tail
@@ -334,6 +334,112 @@ during specification or build. Not a discussion-phase blocker.
 
 ---
 
+## History Depth
+
+### Context
+
+Each pane's `.bin` file on disk holds the full saved scrollback — for busy
+sessions this can be 50k+ lines, ~3.7MB (research F1). The viewport renders
+maybe 30 lines at a time. Question: how much of the file do we feed into the
+viewport per preview, and is deeper history reachable from inside preview?
+
+### Options Considered
+
+**Option A — Bounded snapshot, fixed depth, no scroll**
+
+Read last N lines (e.g. 200 = ~10× viewport). Viewport shows what fits. No
+scroll. No way to reach deeper history.
+
+- Pros: minimal memory footprint, simplest mental model.
+- Cons: even within the bounded slice, the user can't peek above the visible
+  viewport. Wastes the cheap part of `bubbles/viewport`.
+
+**Option B — Bounded snapshot, scrollable within bounds**
+
+Read last N lines. Viewport renders the tail by default. User scrolls up
+within the viewport to see content within those N lines. Scroll boundary at
+the top is the bounded read. Deeper history (beyond N) is not reachable in
+v1.
+
+- Pros: scroll within preview is free with `bubbles/viewport`. Generous N
+  costs nothing extra at read time (we're disk-reading the full `.bin`
+  regardless and tail-clipping in memory).
+- Cons: scroll boundary is invisible to the user — pressing up at the top
+  silently no-ops. Mitigated by chrome or by simply choosing N large enough
+  that nobody notices.
+
+**Option C — Bounded with lazy extend**
+
+As B, but pressing `r` (or scrolling past top edge) extends the read to the
+full file. Deferred load.
+
+- Pros: deeper history reachable without paying for it on every preview.
+- Cons: meaningful additional state per pane, second code path, edge
+  cases on the trigger UI. Adds scope without clearly serving a current
+  use case.
+
+**Option D — Always full file**
+
+Read everything every time. Simplest read pipeline.
+
+- Pros: zero ceiling on visible history.
+- Cons: feeds 50k-line content into `viewport.SetContent` for every step
+  through every busy pane. Memory churn during fast stepping is real even
+  if the disk read itself is cheap.
+
+### Journey
+
+The use case argument from earlier subtopics carries: disambiguation is
+recognition, not forensics. "What command did I run earlier" is genuinely a
+different feature — answered by full attach, not preview.
+
+User's instinct landed on A first, then refined to B once it was clear that
+scroll-within-bounds is essentially free in `bubbles/viewport`:
+
+> Bounded snapshot, fixed depth, but just make it big enough that it shows
+> enough information and can scroll up to and including whatever's
+> captured. If later I want more, we can add it.
+
+The "scroll within bounds is free" detail mattered: it removes the false
+trade-off between "no scroll at all" and "full deferred extend".
+Reversibility was confirmed in three concrete shapes (bigger N, lazy
+extend, live tail) — none of which invalidate B as the v1 choice.
+
+### Decision
+
+**Option B — Bounded snapshot, scrollable within bounds.** Read the full
+`.bin` from disk, tail-clip to the last N lines in memory, feed N to
+`viewport.SetContent`. User can scroll up within those N lines via the
+viewport's native scroll keymap.
+
+The exact value of N is a spec detail. Research F1 used 200 lines as the
+sub-10ms ceiling for `tmux capture-pane -S -200`, but since we're
+disk-reading the full file and tail-clipping in memory the read cost is
+constant regardless of N. We can be generous — ~500-1000 lines gives
+comfortable scroll headroom without paying for it. Pin in spec.
+
+Deciding factors:
+
+- The disambiguation use case doesn't need deep history; the recent screen
+  is the load-bearing content.
+- Scroll within bounds is free with `bubbles/viewport` — no architectural
+  cost.
+- Reversibility into "more history" is easy in three independent shapes:
+  bump N, add lazy extend, add live tail. None of these require revisiting
+  this decision.
+
+Trade-offs accepted:
+
+- Hard top-edge boundary at N is invisible to the user. Acceptable if N is
+  generous enough that the boundary rarely surfaces.
+- Memory: holds N lines per previewed pane during preview. Negligible at
+  N≤1000.
+
+Confidence: high. Reversibility is genuine and the use case is well
+constrained.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -343,8 +449,9 @@ during specification or build. Not a discussion-phase blocker.
 *(populated as discussion progresses)*
 
 ### Current State
-- 2 of 9 subtopics decided.
+- 3 of 9 subtopics decided.
 - Refresh Semantics has an early signal: snapshot, not live tail.
 - Stepping Key subtopic now owns two distinct concerns (between-session
   stepping + within-session window/pane cycle keys).
-- 7 subtopics still pending.
+- N (history depth ceiling) carried forward as a spec-time detail.
+- 6 subtopics still pending.
