@@ -63,7 +63,8 @@ build*, not *can we build it*.
   ├─ Snapshot-frozen vs manual `r` vs live tail
   └─ Interaction with rapid stepping
 
-  Stepping key inside preview [pending]
+  Stepping key inside preview [pending] (only between-session left;
+  within-session pinned to `]`/`[`/`Tab`)
 
   List cursor sync vs no sync on Esc [pending]
 
@@ -285,26 +286,25 @@ Literal-layout was explicitly deferred, not rejected:
 
 ### Decision
 
-**Sequential, window-grouped.** One pane shown at a time. Two keys for
-in-preview navigation:
+**Sequential, window-grouped.** One pane shown at a time. Within-preview
+navigation keys:
 
-- **Window-cycle key** — moves across windows (forward; reverse via
-  shift-modifier or sibling key).
-- **Pane-cycle key** — moves across panes within the current window
-  (forward; reverse via shift-modifier or sibling key).
+- **`]`** — next window. **`[`** — previous window. Bidirectional because
+  windows are typically purposeful (editor / logs / repl) and overshoot is
+  costly.
+- **`Tab`** — next pane within current window, forward-only with
+  wraparound. Pane counts are small enough that wraparound isn't painful;
+  bidirectional bindings would be over-spec for the dominant case.
 
 Header (or footer) chrome shows structural overview and current position
 explicitly — sufficient detail that the user can identify "which window am
 I in" and "how many siblings does this pane have" at a glance — plus
 visible keystroke hints in portal's existing UI convention.
 
-The actual keybindings (which key to use for which axis) are owned by the
-**Stepping key inside preview** subtopic, which now has two distinct
-concerns to resolve:
-
-1. *Between-session* stepping (cycle through the candidate sessions in the
-   picker without exiting preview).
-2. *Within-session* stepping (the window/pane cycles decided here).
+Within-session keys are pinned here. The **Stepping key inside preview**
+subtopic now owns only *between-session* stepping (cycling through
+candidate sessions in the picker without exiting preview), and must avoid
+colliding with `]` / `[` / `Tab`.
 
 Deciding factors:
 
