@@ -325,12 +325,31 @@ Trade-offs accepted:
 Confidence: high. Decision is explicitly staged for upgrade if v1 feels
 weak in practice.
 
-### Open Sub-decision Carried Forward
+### Chrome Floor
 
-Header chrome content is sketched but not pinned: counts + current position
-+ keystroke hints. Exact wording / placement (header vs footer, single-line
-vs two-line) is a UI detail to settle alongside the broader preview chrome
-during specification or build. Not a discussion-phase blocker.
+Because the rationale leans on chrome to discharge the promise the
+literal-layout option would otherwise carry, the minimum chrome content is
+a discussion-level commitment, not a spec detail:
+
+**Floor (must show, v1):**
+
+- **Window M of N** — without this, users have no signal that the session
+  has multiple windows.
+- **Pane X of Y** — same logic within a window.
+- **Window name** — tmux's `#W` / window name. Adds disambiguation signal
+  for users who name their windows.
+- **Keystroke hints** — Portal's existing UI convention. Without them users
+  don't know the cycle keys exist.
+
+**Above the floor (rejected for v1):**
+
+- Per-pane current-command (e.g. `nvim`, `claude`). Costs a `list-panes -F`
+  call per preview; nice-to-have not load-bearing.
+- Pane position hint (e.g. `(top-right)`). Faint layout nod without parsing
+  layout — declined; the cycle nav covers the same gap.
+
+Exact wording / placement (header vs footer, single-line vs two-line) is
+still UI work for spec or build — but the *content* is now pinned.
 
 ---
 
