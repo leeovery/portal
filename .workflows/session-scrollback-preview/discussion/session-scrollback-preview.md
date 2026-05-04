@@ -59,9 +59,9 @@ build*, not *can we build it*.
   ├─ Bounded snapshot, scrollable within bounds
   └─ Generous N (e.g. ~500-1000 lines), pin in spec
 
-  Refresh semantics [pending] — live-tail foreclosed by always-disk
-  ├─ Snapshot-frozen vs manual `r` vs re-read on step
-  └─ Interaction with rapid stepping
+  Refresh semantics [decided] — re-read on every step
+  ├─ File is source of truth; no content cached in model
+  └─ Dwell refresh: step away + back (no `r` key needed)
 
   Stepping key inside preview [pending] (only between-session left;
   within-session pinned to `]`/`[`/`Tab`)
@@ -470,6 +470,100 @@ constrained.
 
 ---
 
+## Refresh Semantics
+
+### Context
+
+Live-tail was foreclosed by the Source of Preview Bytes decision (snapshots,
+not streams). The remaining question: between preview-open and dismiss,
+when (if ever) is the disk re-read?
+
+### Options Considered
+
+**Option A — Snapshot at preview-open, frozen for whole preview**
+
+Read each pane once when first seen. Never re-read until preview closes.
+
+- Pros: cheapest, most predictable.
+- Cons: dwelling on one session for 30s shows a 30-second-stale view. Esc
+  + Space again to refresh (heavy-handed for a tiny problem).
+
+**Option B — Re-read on every step**
+
+Every focus event (between-session step, `]`, `[`, `Tab`) triggers a fresh
+read of the focused pane's `.bin`. No timer, no polling — only reads when
+the user acts.
+
+- Pros: file is the source of truth, no content held in model state.
+  Stepping cost is one disk read (microseconds for ~20KB tail-clipped from
+  the typical `.bin`). Naturally handles dwell — step away + back is
+  refresh.
+- Cons: same content re-read on every visit (negligible cost).
+
+**Option C — Manual `r` to refresh**
+
+Snapshot frozen until user presses `r`.
+
+- Pros: explicit user control over staleness.
+- Cons: adds a key for a case already covered by stepping.
+
+### Journey
+
+User cut through quickly with the architectural framing:
+
+> Re-reading on each step avoids having to store the content too — file is
+> source of truth.
+
+That observation is load-bearing for more than just refresh: it implies
+the model doesn't cache pane content at all. Per-pane state stays at
+"position cursor" and "currently focused pane key" — content is computed
+on demand from disk every render-changing event. Memory footprint stays
+bounded regardless of how long preview is open or how many panes have
+been visited.
+
+Dwell case (open preview, sit for 30s) is handled implicitly: any focus
+change re-reads, and re-acquiring focus after stepping out and back is the
+natural refresh idiom.
+
+### Decision
+
+**Option B — Re-read on every step.** No content cache, no `r` key, no
+timer. Disk is the source of truth; preview is essentially stateless with
+respect to byte content.
+
+Read trigger events:
+
+- Between-session step (the picker's session cursor changing while preview
+  is open).
+- `]` / `[` window cycle.
+- `Tab` pane cycle.
+- Initial preview-open (Space).
+
+Deciding factors:
+
+- File-as-source-of-truth eliminates content state from the preview model.
+- Disk reads are microseconds — re-reading on every event is essentially
+  free.
+- Dwell refresh falls out naturally from stepping.
+- One less key surface to design (`r`).
+
+Trade-offs accepted:
+
+- Sit-and-stare-at-one-pane case sees stale content. Low-friction recovery
+  (step away + back). Acceptable.
+
+Implementation detail flagged for spec/build (not a discussion-phase
+decision): synchronous read in Update vs `tea.Cmd` async with generation
+token. Disk reads of ~20KB are sub-millisecond and synchronous-in-Update is
+likely fine, but if a `.bin` file is multi-MB the read becomes worth
+deferring. Generation tokens (research F13) handle out-of-order returns if
+async is chosen.
+
+Confidence: high. The architectural framing makes this almost a
+consequence of the always-disk decision rather than a separate choice.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -479,9 +573,9 @@ constrained.
 *(populated as discussion progresses)*
 
 ### Current State
-- 3 of 9 subtopics decided.
-- Refresh Semantics has an early signal: snapshot, not live tail.
-- Stepping Key subtopic now owns two distinct concerns (between-session
-  stepping + within-session window/pane cycle keys).
+- 4 of 9 subtopics decided.
+- Stepping Key subtopic now owns only between-session stepping;
+  within-session pinned to `]`/`[`/`Tab`.
 - N (history depth ceiling) carried forward as a spec-time detail.
-- 6 subtopics still pending.
+- File-as-source-of-truth: preview model holds no byte cache.
+- 5 subtopics still pending.
