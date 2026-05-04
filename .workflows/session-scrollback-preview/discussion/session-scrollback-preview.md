@@ -59,8 +59,8 @@ build*, not *can we build it*.
   ├─ Bounded snapshot, scrollable within bounds
   └─ Generous N (e.g. ~500-1000 lines), pin in spec
 
-  Refresh semantics [pending]
-  ├─ Snapshot-frozen vs manual `r` vs live tail
+  Refresh semantics [pending] — live-tail foreclosed by always-disk
+  ├─ Snapshot-frozen vs manual `r` vs re-read on step
   └─ Interaction with rapid stepping
 
   Stepping key inside preview [pending] (only between-session left;
@@ -295,6 +295,9 @@ navigation keys:
 - **`Tab`** — next pane within current window, forward-only with
   wraparound. Pane counts are small enough that wraparound isn't painful;
   bidirectional bindings would be over-spec for the dominant case.
+
+Degenerate cases (the dominant 95%+ single-window single-pane case): all
+three keys silently no-op. No flicker, no error feedback, just nothing.
 
 Header (or footer) chrome shows structural overview and current position
 explicitly — sufficient detail that the user can identify "which window am
