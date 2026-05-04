@@ -75,9 +75,8 @@ build*, not *can we build it*.
   Filter behaviour during preview [decided]
   └─ Default `bubbles/list` semantics — commit filter (Enter), then Space
 
-  Brand-new-session edge case (no `.bin` yet) [pending]
-  └─ Also: per-pane .bin gap in multi-pane sessions
-     (split-window mid-session, daemon hasn't ticked the new pane yet)
+  Brand-new-session edge case (no `.bin` yet) [decided]
+  └─ Placeholder per-pane; chrome still works (tmux structural counts)
 
   Privacy / threat model [pending]
   ├─ Glanceability vs deliberate-attach exposure shift
@@ -798,6 +797,47 @@ Trade-offs accepted:
 
 Confidence: high. The principle ("filtering is filtering") generalises
 beyond this feature.
+
+---
+
+## Brand-new-session Edge Case
+
+### Context
+
+Two related "no `.bin` content" scenarios:
+
+1. **Whole-session.** A session created within the last save tick — daemon
+   hasn't captured any of its panes yet.
+2. **Per-pane** (F9 from review-001). A multi-pane session where one pane
+   was just split-windowed in and the daemon hasn't ticked it yet. Other
+   panes have `.bin`; the new one doesn't.
+
+### Decision
+
+**Per-pane "(no saved content)" placeholder.** Same shape used for the
+read-failure / deleted-bin case in Refresh Semantics — preview renders a
+visible placeholder in the viewport for any pane whose `.bin` is missing
+or unreadable. Other panes in the same session render normally.
+
+Chrome (window M of N, pane X of Y, window name) is unaffected: those
+counts come from tmux structural enumeration, not from `.bin` content.
+The user sees the correct structure with placeholders where content is
+missing.
+
+The exact placeholder wording is a spec/UX detail, not a discussion-phase
+decision. "(no saved content)" is the working label.
+
+Deciding factors:
+
+- Reuses the read-failure placeholder already pinned in Refresh Semantics.
+  Single rendering primitive across all "no content" cases.
+- No fallback to live capture — would contradict always-disk and only
+  work for hydrated panes anyway.
+- Per-pane granularity matches the per-pane disk read; treating the whole
+  session as "incomplete" would lose information unnecessarily.
+
+Confidence: high. Largely a consequence of read-failure handling already
+landed.
 
 ---
 
