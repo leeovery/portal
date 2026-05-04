@@ -23,6 +23,8 @@ build*, not *can we build it*.
   keymap, progressive Esc.
 - **In-preview stepping.** Step between candidate sessions without exiting back
   to the list (Claude Code resume-style).
+  *(Overridden during discussion in favour of an Esc → arrow → Space loop.
+  See the Stepping Key Inside Preview subtopic for the rationale.)*
 - **Centrepiece.** Visual terminal state of the session's panes — same bytes a
   fully attached client would see. Not metadata labels.
 - **Multi-pane / multi-window in scope.** Specific rendering shape is design
@@ -63,13 +65,13 @@ build*, not *can we build it*.
   ├─ File is source of truth; no content cached in model
   └─ Dwell refresh: step away + back (no `r` key needed)
 
-  Stepping key inside preview [pending] (only between-session left;
-  within-session pinned to `]`/`[`/`Tab`)
+  Stepping key inside preview [decided] — no between-session stepping;
+  Esc → arrow → Space loop replaces it
 
-  List cursor sync vs no sync on Esc [pending]
+  List cursor sync vs no sync on Esc [decided] — N/A (preview can't move
+  the cursor; Esc returns to original position)
 
   Filter behaviour during preview [pending]
-  ├─ In-preview stepping iterates filtered set or all items
   └─ Space-while-filtering — load-bearing primary-use-case fork
 
   Brand-new-session edge case (no `.bin` yet) [pending]
@@ -533,11 +535,14 @@ respect to byte content.
 
 Read trigger events:
 
-- Between-session step (the picker's session cursor changing while preview
-  is open).
+- Initial preview-open (Space).
 - `]` / `[` window cycle.
 - `Tab` pane cycle.
-- Initial preview-open (Space).
+
+(Between-session step is *not* a trigger because in-preview between-session
+stepping was removed — see Stepping Key. To preview a different session,
+the user Esc's back to the list, moves the cursor, and presses Space —
+which fires the initial-open trigger fresh.)
 
 Deciding factors:
 
@@ -564,6 +569,110 @@ consequence of the always-disk decision rather than a separate choice.
 
 ---
 
+## Stepping Key Inside Preview (and List Cursor Sync — N/A)
+
+### Context
+
+Research's Stated Feature Shape called for "in-preview stepping" between
+candidate sessions, Claude Code resume-style: Space to open preview on the
+highlighted session, then arrows (or some key) move you to the next
+candidate session without exiting preview. The motivation was scanning
+through several lookalikes without the Esc-Space-Esc-Space cost.
+
+In-preview stepping created a cluster of design surface: which keys move
+between sessions, whether the underlying list cursor follows along (List
+Cursor Sync), whether stepping iterates the filter-narrowed set or all
+sessions, and how those keys avoid colliding with within-session
+navigation (`]`/`[`/`Tab`).
+
+### Options Considered
+
+**Option A — In-preview between-session stepping**
+
+Arrow up/down (or similar) inside preview moves to next/previous candidate
+session without leaving preview. Cursor in the underlying picker list
+follows along (or doesn't — separate sub-decision).
+
+- Pros: matches Claude Code's `--resume` picker mental model. One
+  keypress per session-step when scanning lookalikes.
+- Cons: surface area — keymap, cursor sync, filter set boundary, key
+  collision with within-session keys. Nontrivial to implement and reason
+  about. Two pending subtopics ride on it (List Cursor Sync, part of
+  Filter Behaviour).
+
+**Option B — Esc → arrow → Space loop**
+
+Preview is bound to one session at a time. To preview another, Esc back
+to the list, move the cursor, Space again.
+
+- Pros: dramatic simplification. List Cursor Sync becomes N/A (preview
+  can't move the cursor; Esc returns to where you were). Filter
+  Behaviour loses its "stepping iterates filtered or all" sub-question.
+  Refresh Semantics' trigger list narrows. No between-session keymap to
+  design.
+- Cons: ~2 extra keypresses per session-step when scanning lookalikes
+  (Esc + Space added on top of arrow). For a 5-way scan that's ~10
+  extra keystrokes versus Option A.
+
+### Journey
+
+User overrode the research-locked "in-preview stepping" constraint
+directly:
+
+> I don't think we should do this — Esc to go back, then arrow up and
+> down is fine.
+
+That trades the keystroke savings for a much smaller, simpler surface.
+The tradeoff is genuine — Option A is faster for the multi-candidate
+scan use case — but Option B's simplification is real and the keystroke
+cost is bounded (2 extra keypresses per step is small absolutely).
+
+The research's framing of in-preview stepping as solving "scanning
+through several lookalikes" was acknowledged but not load-bearing
+enough to justify the design surface.
+
+### Decision
+
+**Option B — No in-preview between-session stepping. Esc → arrow → Space
+loop replaces it.**
+
+Cascade:
+
+- **Stepping Key inside preview**: no between-session keys to bind.
+  Within-session keys (`]`/`[`/`Tab`) remain pinned by Multi-pane
+  decision.
+- **List Cursor Sync vs no sync on Esc**: N/A. Preview can't move the
+  cursor, so the cursor stays where it was when Space was pressed; Esc
+  returns to that same cursor position. No sync question.
+- **Refresh Semantics**: the "between-session step" trigger no longer
+  applies. Trigger list narrows to initial-open, `]`, `[`, `Tab`. (See
+  the updated trigger list in the Refresh Semantics section.)
+- **Filter Behaviour**: the "in-preview stepping iterates filtered set
+  or all items" sub-question is moot. Space-while-filtering fork
+  remains relevant.
+
+Deciding factors:
+
+- Simplification of three pending subtopics (Stepping Key + List Cursor
+  Sync + part of Filter Behaviour) into one decision point.
+- Esc-Arrow-Space is a familiar idiom across CLI tools; users already
+  know it.
+- Reversibility is easy — adding in-preview stepping later is additive
+  (new keymap entry + cursor-sync-or-not), not a rewrite.
+
+Trade-offs accepted:
+
+- ~2 extra keypresses per session-step when scanning multiple lookalikes.
+  Bounded cost, real but small.
+- Overrides a research-locked Stated Feature Shape constraint.
+  Documented here so the override is traceable.
+
+Confidence: high. The simplicity payoff is concrete (subtopics collapse,
+keymap design surface shrinks); the cost is bounded and behavioural, not
+architectural.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -573,9 +682,11 @@ consequence of the always-disk decision rather than a separate choice.
 *(populated as discussion progresses)*
 
 ### Current State
-- 4 of 9 subtopics decided.
-- Stepping Key subtopic now owns only between-session stepping;
-  within-session pinned to `]`/`[`/`Tab`.
+- 6 of 9 subtopics decided (Stepping Key + List Cursor Sync collapsed
+  into the Esc → arrow → Space loop decision).
 - N (history depth ceiling) carried forward as a spec-time detail.
 - File-as-source-of-truth: preview model holds no byte cache.
-- 5 subtopics still pending.
+- Research's "in-preview stepping" Stated Feature Shape constraint was
+  overridden during discussion. Documented in Context and Stepping Key.
+- 3 subtopics still pending: Filter Behaviour (Space-while-filtering
+  fork), Brand-new-session edge case, Privacy / Threat Model.
