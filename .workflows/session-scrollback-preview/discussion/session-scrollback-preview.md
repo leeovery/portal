@@ -72,8 +72,8 @@ build*, not *can we build it*.
   List cursor sync vs no sync on Esc [decided] — N/A (preview can't move
   the cursor; Esc returns to original position)
 
-  Filter behaviour during preview [pending]
-  └─ Space-while-filtering — load-bearing primary-use-case fork
+  Filter behaviour during preview [decided]
+  └─ Default `bubbles/list` semantics — commit filter (Enter), then Space
 
   Brand-new-session edge case (no `.bin` yet) [pending]
   └─ Also: per-pane .bin gap in multi-pane sessions
@@ -703,6 +703,101 @@ Trade-offs accepted:
 Confidence: high. The simplicity payoff is concrete (subtopics collapse,
 keymap design surface shrinks); the cost is bounded and behavioural, not
 architectural.
+
+---
+
+## Filter Behaviour During Preview
+
+### Context
+
+`bubbles/list`'s filter mode has two phases:
+
+1. *Filtering* (`SettingFilter()` true) — every keypress is text input.
+   Space inserts a literal space.
+2. *Filter committed* (after Enter) — list shows the filtered set, arrows
+   move the cursor, Space is free to do something else.
+
+The primary-use-case path the research called out is "type filter to narrow
+lookalikes → arrow → Space". That collides with phase 1: while typing, Space
+goes to the filter input, not to preview. Three reconciliation shapes were
+on the table.
+
+### Options Considered
+
+**Option A — Default semantics (commit-then-preview)**
+
+Type filter → Enter to commit → arrows + Space work as expected.
+
+- Pros: zero new code, zero edge cases. Consistent with how filter works
+  in every other portal command. Mode-switching is what users expect from
+  any text-input + list-nav combo.
+- Cons: one extra Enter at the start of each filter session. First-time
+  users may wonder why Space "doesn't do anything" while typing.
+
+**Option B — Magic Space (commit-and-preview in one step)**
+
+Intercept Space while filtering: commits the filter, then opens preview
+on the highlighted match.
+
+- Pros: saves the Enter. Slightly faster for the primary use case.
+- Cons: literal space in filter input becomes impossible during typing
+  (workaround: commit filter first then re-edit, awkward). Inconsistent
+  with the rest of Portal's filter behaviour. Magic — surprising for
+  users who know `bubbles/list`.
+
+**Option C — Different key for preview while filtering**
+
+Space stays as literal-space-in-filter. Some other key (e.g. `?`,
+`Ctrl+P`) opens preview, working regardless of filter state.
+
+- Pros: no magic, no edge cases on filter input.
+- Cons: invents a second binding for "open preview", competing with the
+  spec's `Space`. Loses the muscle-memory simplicity.
+
+### Journey
+
+User cut through with the cleanest framing:
+
+> Filtering is filtering. It's expected for the space bar to change
+> behaviour when typing into a text field vs scrolling a list.
+
+That's the principle that justifies A: text input and list navigation are
+two distinct modes, and Space behaves differently in each is not a bug,
+it's how every text-input UI in existence works. The "consistent with
+Portal" framing was a corollary of the deeper "consistent with how text
+input always works".
+
+### Decision
+
+**Option A — Default `bubbles/list` semantics. Commit filter (Enter)
+before Space opens preview.**
+
+User flow:
+
+1. Type filter (e.g. `pigeon`).
+2. Press Enter to commit filter (list narrows to matches).
+3. Arrow to candidate.
+4. Space to preview.
+5. Esc back to list (filter still committed; cursor stays in narrowed
+   set).
+6. Arrow + Space to preview next candidate.
+7. Esc to clear filter or quit.
+
+Deciding factors:
+
+- Filter typing and list navigation are distinct interaction modes;
+  Space changing role between them is the universal text-input
+  convention.
+- Zero new code, zero magic, zero edge cases.
+- Consistent with how every other Portal command's filter works.
+
+Trade-offs accepted:
+
+- One extra Enter at the start of each filter session. Bounded cost,
+  trainable in seconds.
+
+Confidence: high. The principle ("filtering is filtering") generalises
+beyond this feature.
 
 ---
 
