@@ -309,6 +309,12 @@ subtopic now owns only *between-session* stepping (cycling through
 candidate sessions in the picker without exiting preview), and must avoid
 colliding with `]` / `[` / `Tab`.
 
+**Position on session re-entry: reset.** Stepping out to session B and back
+to session A re-opens A at window 1 / pane 1, not at the last viewed
+position within A. Reasoning: the use case is disambiguation, fresh-view
+matches "step ↔ recognise" better than memory; per-session position state
+adds complexity for an interaction shape that doesn't need it.
+
 Deciding factors:
 
 - Real-world distribution makes literal-layout a low-leverage investment.
