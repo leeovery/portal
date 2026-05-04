@@ -78,9 +78,8 @@ build*, not *can we build it*.
   Brand-new-session edge case (no `.bin` yet) [decided]
   └─ Placeholder per-pane; chrome still works (tmux structural counts)
 
-  Privacy / threat model [pending]
-  ├─ Glanceability vs deliberate-attach exposure shift
-  └─ Opt-in toggle / redaction / docs
+  Privacy / threat model [decided] — explicitly no design response
+  └─ User-responsibility framing; not Portal's concern
 
 ---
 
@@ -841,6 +840,90 @@ landed.
 
 ---
 
+## Privacy / Threat Model
+
+### Context
+
+Research flagged this as a *qualitative* shift in Portal's exposure surface,
+not just a UX shortcut over attach. Today, surfacing scrollback secrets
+(sudo prompts, pasted API keys, `.env` echoes, ssh keys) requires a
+deliberate `tmux attach` + scroll. With preview, it becomes 1-keypress
+glanceable from the picker — relevant during screen-shares, demos, OBS
+recording, pairing.
+
+The research's honest framing: *broader* threat surface than today,
+*narrower* than freely browsing files in the home directory. Three design
+responses were on the table.
+
+### Options Considered
+
+**Option A — Pure documentation.** README / CLAUDE.md note. Zero code,
+sets expectation, but nobody reads docs.
+
+**Option B — Opt-out toggle.** Config flag (`portal config set
+preview-disabled true`). Default enabled. Lets paranoid users / team-
+managed environments turn it off. Future-additive cost.
+
+**Option C — Redaction layer.** Pattern-match known secret shapes and
+redact. Actively protective, but false negatives + false positives +
+maintenance burden + a *false sense of security* that is arguably worse
+than no protection.
+
+**Option D — No design response.** Explicit decision to do nothing.
+
+### Journey
+
+User cut through with the cleanest possible framing:
+
+> Not our concern at all. It's up to the user to protect their own
+> secrets etc. No need to document. Ignore.
+
+This is a deliberate user-responsibility stance, applied consistently
+across Portal as a single-user developer tool: the user is presumed
+competent, the tool exposes its capabilities sharply, mitigation is the
+user's responsibility.
+
+The framing was understood — the qualitative-shift argument was laid
+out, the screen-share scenario was concrete — and rejected on principle
+rather than dismissed accidentally. Worth capturing for traceability:
+the decision is *not* "we forgot to discuss it" or "we punted to later",
+it is "this is not Portal's problem".
+
+### Decision
+
+**Option D — No design response.** No opt-out toggle, no redaction
+layer, no end-user documentation about preview's exposure surface.
+Preview ships as a sharp tool; users mitigate during sharing contexts
+by simply not pressing Space.
+
+Deciding factors:
+
+- Portal is a single-user developer tool. The user is the operator and
+  the audience.
+- Redaction (C) creates false sense of security — actively harmful for
+  a feature that should be obviously a "what attaching now would show"
+  surface.
+- Opt-out toggle (B) is reasonable but not load-bearing for v1; if any
+  user reports concern, future-additive. Cheap to add later — a config
+  flag check at preview-open.
+- The behaviour is also self-documenting in use: the first time a user
+  opens preview on a session with sensitive content, they see what
+  preview shows. No mystery.
+
+Trade-offs accepted:
+
+- A less-careful user could absentmindedly preview a session with
+  pasted credentials during a Zoom share. Accepted as user
+  responsibility.
+- Reversibility is intact: B (opt-out toggle) can be added later
+  without rework if real users report concern.
+
+Confidence: high. The principle (user responsibility for their own
+threat model) is consistent with how Portal frames the rest of its
+surface area.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -850,11 +933,13 @@ landed.
 *(populated as discussion progresses)*
 
 ### Current State
-- 6 of 9 subtopics decided (Stepping Key + List Cursor Sync collapsed
-  into the Esc → arrow → Space loop decision).
+- All 9 subtopics decided.
 - N (history depth ceiling) carried forward as a spec-time detail.
 - File-as-source-of-truth: preview model holds no byte cache.
 - Research's "in-preview stepping" Stated Feature Shape constraint was
-  overridden during discussion. Documented in Context and Stepping Key.
-- 3 subtopics still pending: Filter Behaviour (Space-while-filtering
-  fork), Brand-new-session edge case, Privacy / Threat Model.
+  overridden during discussion (Esc → arrow → Space loop replaces it).
+- Privacy / threat model: explicit no-design-response, user-
+  responsibility framing.
+- Tail-N read at disk layer is the load-bearing implementation choice
+  that decoupled cost from `.bin` size and closed the F13 race + sync-
+  vs-async concerns.
