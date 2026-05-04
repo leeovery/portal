@@ -73,6 +73,8 @@ build*, not *can we build it*.
   └─ Space-while-filtering — load-bearing primary-use-case fork
 
   Brand-new-session edge case (no `.bin` yet) [pending]
+  └─ Also: per-pane .bin gap in multi-pane sessions
+     (split-window mid-session, daemon hasn't ticked the new pane yet)
 
   Privacy / threat model [pending]
   ├─ Glanceability vs deliberate-attach exposure shift
