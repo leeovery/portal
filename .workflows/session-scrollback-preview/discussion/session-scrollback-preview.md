@@ -59,7 +59,8 @@ build*, not *can we build it*.
 
   History depth [decided]
   ├─ Bounded snapshot, scrollable within bounds
-  └─ Generous N (e.g. ~500-1000 lines), pin in spec
+  ├─ Generous N (e.g. ~500-1000 lines), pin in spec
+  └─ Tail-N read at disk layer (decouples cost from file size)
 
   Refresh semantics [decided] — re-read on every step
   ├─ File is source of truth; no content cached in model
@@ -393,9 +394,7 @@ within the viewport to see content within those N lines. Scroll boundary at
 the top is the bounded read. Deeper history (beyond N) is not reachable in
 v1.
 
-- Pros: scroll within preview is free with `bubbles/viewport`. Generous N
-  costs nothing extra at read time (we're disk-reading the full `.bin`
-  regardless and tail-clipping in memory).
+- Pros: scroll within preview is free with `bubbles/viewport`.
 - Cons: scroll boundary is invisible to the user — pressing up at the top
   silently no-ops. Mitigated by chrome or by simply choosing N large enough
   that nobody notices.
@@ -439,16 +438,20 @@ extend, live tail) — none of which invalidate B as the v1 choice.
 
 ### Decision
 
-**Option B — Bounded snapshot, scrollable within bounds.** Read the full
-`.bin` from disk, tail-clip to the last N lines in memory, feed N to
-`viewport.SetContent`. User can scroll up within those N lines via the
-viewport's native scroll keymap.
+**Option B — Bounded snapshot, scrollable within bounds.** Read last N
+lines directly from disk via a tail-N idiom (open file, seek to end, read
+backwards until N newlines collected), feed N to `viewport.SetContent`.
+User can scroll up within those N lines via the viewport's native scroll
+keymap.
 
-The exact value of N is a spec detail. Research F1 used 200 lines as the
-sub-10ms ceiling for `tmux capture-pane -S -200`, but since we're
-disk-reading the full file and tail-clipping in memory the read cost is
-constant regardless of N. We can be generous — ~500-1000 lines gives
-comfortable scroll headroom without paying for it. Pin in spec.
+The tail-from-disk implementation is load-bearing: it decouples cost from
+total `.bin` file size. A ~3.7MB / 50k-line busy-session file becomes
+sub-millisecond to read at the same cost as a tiny one — no full-file read,
+no `strings.Split` allocating 50k strings per cycle keypress. ~30 LOC,
+standard idiom.
+
+The exact value of N is a spec detail. We can be generous — ~500-1000
+lines gives comfortable scroll headroom. Pin in spec.
 
 Deciding factors:
 
@@ -557,12 +560,11 @@ Trade-offs accepted:
 - Sit-and-stare-at-one-pane case sees stale content. Low-friction recovery
   (step away + back). Acceptable.
 
-Implementation detail flagged for spec/build (not a discussion-phase
-decision): synchronous read in Update vs `tea.Cmd` async with generation
-token. Disk reads of ~20KB are sub-millisecond and synchronous-in-Update is
-likely fine, but if a `.bin` file is multi-MB the read becomes worth
-deferring. Generation tokens (research F13) handle out-of-order returns if
-async is chosen.
+Sync-vs-async is no longer a question: the History Depth decision pinned
+tail-N read at the disk layer, which decouples cost from total file size.
+Every focus event does a sub-millisecond bounded read regardless of `.bin`
+size. Synchronous in `Update` is fine; `tea.Cmd` deferral and generation
+tokens (research F13) are not needed.
 
 Confidence: high. The architectural framing makes this almost a
 consequence of the always-disk decision rather than a separate choice.
