@@ -538,14 +538,45 @@ respect to byte content.
 
 Read trigger events:
 
-- Initial preview-open (Space).
-- `]` / `[` window cycle.
-- `Tab` pane cycle.
+- Initial preview-open (Space) — lazy per focus: reads only the
+  currently-focused pane (window 1 / pane 1 by reset rule). Other panes
+  are read on first focus via `]`/`[`/`Tab`. Chrome counts (window M of
+  N, pane X of Y) come from tmux structural enumeration, not from `.bin`
+  content, so chrome doesn't force eager reads.
+- `]` / `[` window cycle — re-reads the newly-focused pane.
+- `Tab` pane cycle — re-reads the newly-focused pane.
 
 (Between-session step is *not* a trigger because in-preview between-session
 stepping was removed — see Stepping Key. To preview a different session,
 the user Esc's back to the list, moves the cursor, and presses Space —
 which fires the initial-open trigger fresh.)
+
+**Viewport-internal scroll does not re-read.** The active viewport holds
+its current N lines while focused; scrolling up/down within those bounds
+is a pure viewport operation. The "no content cache" framing applies
+*across focus changes* (no per-pane cache held while focus moves
+elsewhere) — the currently-focused viewport is the active rendering
+buffer, not a cache.
+
+**Scroll position resets on focus change.** If the user scrolls 50 lines
+up in window 1 / pane 1, then `Tab` to pane 2, then `Tab` back to pane 1
+— pane 1 re-renders at scroll-tail (default), not at scroll-offset 50.
+Consistent with the position-reset rule already pinned for between-session
+stepping. Scroll position is ephemeral per focus session.
+
+**Read-failure handling.** Three failure modes, all benign:
+
+- *Daemon mid-write while preview reads.* Closed by atomicity:
+  `fileutil.AtomicWrite0600` is tempfile + rename, so the reader sees
+  old-or-new full content, never torn.
+- *`.bin` deleted between two consecutive focus events* (pane killed,
+  daemon cleanup, etc.). Show a "(no saved content)" placeholder for
+  that pane. Same placeholder shape used for the brand-new-session
+  edge case.
+- *OS-level read error* (permissions, disk full, etc.). Show an error
+  string in the viewport rather than crash. No special handling beyond
+  "render the error". Should never occur given mode 0600 / same-user
+  guarantees from the save daemon, but cheap to handle defensively.
 
 Deciding factors:
 
