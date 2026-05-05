@@ -50,12 +50,12 @@ build*, not *can we build it*.
 
 ### Map
 
-  Source of preview bytes (live-capture vs always-disk) [decided]
+  Source of preview bytes [decided] — always-disk
 
-  Multi-pane rendering shape [decided]
-  ├─ Sequential, one pane at a time
-  ├─ Window-grouped cycling
-  └─ Header chrome with keystroke hints (Portal convention)
+  Multi-pane rendering shape [decided] — sequential, window-grouped
+  ├─ `]` / `[` cycle windows; `Tab` cycles panes (forward + wraparound)
+  ├─ Chrome floor: window M of N + pane X of Y + window name + keystrokes
+  └─ Degenerate 1×1 case: keys silently no-op
 
   History depth [decided]
   ├─ Bounded snapshot, scrollable within bounds
@@ -1030,19 +1030,69 @@ in research. No new decision.
 ## Summary
 
 ### Key Insights
-*(populated as discussion progresses)*
+
+1. **Disambiguation is a recognition task, not live monitoring.** Across
+   four subtopics (source of bytes, history depth, refresh semantics,
+   chrome floor), the framing that mattered was "the user is glancing to
+   identify, not watching to track". This collapsed staleness, deep
+   history, live tail, and visual fidelity into non-features.
+2. **File-as-source-of-truth.** The user's framing during refresh
+   semantics — "re-reading on each step avoids having to store the
+   content too" — is load-bearing across the whole feature. Preview
+   holds no byte cache; the disk is canonical. This eliminated content
+   state from the preview model and made every focus event computable
+   on demand.
+3. **Tail-N read at the disk layer.** The choice to read N lines via
+   tail-from-disk rather than full-file-then-clip-in-memory was the
+   single highest-leverage implementation decision. It decoupled cost
+   from `.bin` size, closed the F13 rapid-stepping race, and
+   eliminated the sync-vs-async question.
+4. **"Filtering is filtering."** The user's framing during filter
+   behaviour generalised beyond this feature: text input and list
+   navigation are distinct interaction modes; Space changing role
+   between them is the universal text-input convention, not a portal
+   inconsistency.
+5. **Sharp-tool / user-responsibility for threat model.** Portal is
+   framed as a single-user developer tool where the user is presumed
+   competent; mitigation of secret-exposure during sharing contexts is
+   the user's responsibility, not the tool's. Consistent with how the
+   rest of Portal handles capabilities-without-guardrails.
+6. **Reversibility as a discipline.** Every major decision was
+   explicitly staged for upgrade: literal-layout multi-pane, deeper
+   history, live-capture, opt-out toggle, in-preview stepping. The
+   v1 surface is intentionally minimal but every removed feature has
+   a documented additive return path.
 
 ### Open Threads
-*(populated as discussion progresses)*
+
+No discussion items deferred to future discussion. Spec-phase pinning
+items (handed off to specification, not deferred discussion):
+
+- **N value for history depth.** Working figure ~500-1000 lines.
+- **Chrome wording / placement.** Header vs footer, single-line vs
+  two-line.
+- **Placeholder wording.** Working label "(no saved content)".
+- **`_portal-saver` exclusion confirmation.** Verify existing list
+  filtering already excludes the saver session.
 
 ### Current State
-- All 9 subtopics decided.
-- N (history depth ceiling) carried forward as a spec-time detail.
-- File-as-source-of-truth: preview model holds no byte cache.
-- Research's "in-preview stepping" Stated Feature Shape constraint was
-  overridden during discussion (Esc → arrow → Space loop replaces it).
-- Privacy / threat model: explicit no-design-response, user-
-  responsibility framing.
-- Tail-N read at disk layer is the load-bearing implementation choice
-  that decoupled cost from `.bin` size and closed the F13 race + sync-
-  vs-async concerns.
+
+All 9 subtopics decided. Architecturally, the feature decomposes into:
+
+- **Read pipeline.** `state.ScrollbackFile(stateDir, paneKey)` →
+  tail-N idiom → `viewport.SetContent(rawAnsiBytes)` straight
+  passthrough.
+- **Page state machine.** New `pagePreview` arm in `internal/tui/
+  model.go::Update`. Bound to Sessions page only. Owns its own
+  keymap.
+- **Within-preview keys.** `]` / `[` window cycle, `Tab` pane cycle,
+  Esc back to list.
+- **Chrome.** Window M of N + pane X of Y + window name + keystroke
+  hints; computed from tmux structural enumeration, not from `.bin`.
+- **No new tmux wrappers, no new daemon work, no marker mutations,
+  no hook firing.** Side-effect-free per Stated Feature Shape.
+
+The override of the research-locked "in-preview stepping" constraint
+in favour of the Esc → arrow → Space loop is the only material
+deviation from the Stated Feature Shape; it is documented in two
+places (Locked Feature Shape note, Stepping Key Inside Preview).
