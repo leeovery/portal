@@ -944,6 +944,89 @@ surface area.
 
 ---
 
+## Cross-cutting Seams
+
+Items that surfaced during final review and don't sit cleanly inside one
+subtopic but matter for spec.
+
+### Preview Entry Point — Sessions Page Only
+
+Space-to-preview is a Sessions-page binding only. The TUI's other pages
+(Projects, FileBrowser) don't list sessions, so there's nothing to
+preview from those pages. No need for placeholder treatment of non-
+session list items. Spec should bind Space in `updateSessionsPage`
+exclusively.
+
+### Bootstrap Restore-Window Interaction
+
+The 9-step bootstrap sets `@portal-restoring` across step 5 (Restore),
+recreates skeleton panes with saved `.bin` files on disk, and clears the
+marker in step 6. Loading page is showing during this; Sessions page
+transitions in afterward.
+
+No special handling needed:
+
+- During Loading page, there's no sessions list to highlight, so Space
+  has no target. Non-issue at the page-state level.
+- In Sessions page, even if `@portal-restoring` lingers briefly, the
+  always-disk path works regardless of marker state. Skeleton panes have
+  `.bin` files on disk *because* they're being restored from saved
+  bytes — those are exactly what hydrate will replay. Reading them is
+  harmless and informative.
+- The inside-tmux invariant (research F12) already excludes the current
+  session. Brand-new sessions during restore hit the placeholder pinned
+  in Brand-new-session.
+
+The architecture composes naturally; no new constraints.
+
+### Externally-Killed Session During Preview
+
+If session A is killed externally (another tmux client, `tmux kill-
+session`, `portal clean`) while the user holds preview open on it:
+
+- The `.bin` files persist briefly, then get cleaned by the daemon. Read-
+  failure / deleted-`.bin` is already covered by the placeholder in
+  Refresh Semantics — `]`/`[`/`Tab` will increasingly land on
+  placeholders.
+- Structural enumeration (window/pane counts in chrome) was captured at
+  preview-open. Cycle keys cycle the captured shape; no live re-
+  enumeration needed mid-preview.
+- Esc back to the Sessions list re-fetches the live session list — the
+  killed session simply isn't there anymore. Cursor lands on a
+  neighbouring session via `bubbles/list`'s default behaviour. Nothing
+  graceful to add.
+
+No new decision; the pieces already pinned handle this.
+
+### `_portal-saver` Self-Reference
+
+The `_portal-saver` detached session that hosts `portal state daemon`
+should not appear in the picker list at all (existing list-population
+logic). If it does, previewing the daemon's own pane would be a self-
+referential edge case, but the existing inside-tmux invariant + list
+filtering should already exclude it. Confirm during spec/build by
+reading the existing list code; no new preview-layer suppression
+required.
+
+### ANSI Passthrough vs Viewport Width
+
+Research F9 already established that `bubbles/viewport` does not auto-
+wrap (only ANSI-aware horizontal cut via `ansi.Cut` when content is
+wider than viewport), and tmux `capture-pane -e` outputs lines hard-
+wrapped to the source pane's display width. So:
+
+- If preview viewport ≥ source pane width: no truncation, full lines
+  rendered.
+- If preview viewport < source pane width: clean ANSI-aware horizontal
+  cut. No corruption.
+
+The pipeline is straight passthrough — `viewport.SetContent(rawAnsiBytes)`
+with no preprocessing, no sanitisation, no re-wrap. Re-stating it here
+because it's load-bearing for the implementation but was previously only
+in research. No new decision.
+
+---
+
 ## Summary
 
 ### Key Insights
