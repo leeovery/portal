@@ -662,6 +662,26 @@ The research's framing of in-preview stepping as solving "scanning
 through several lookalikes" was acknowledged but not load-bearing
 enough to justify the design surface.
 
+### Esc Level Structure
+
+Progressive Esc was part of the locked feature shape. Pinning the level
+tree explicitly because the spec needs it:
+
+- **In preview** → Esc → back to Sessions list. Filter stays committed
+  if it was; cursor stays on the previewed session.
+- **In Sessions list with committed filter** → Esc → clear filter. Back
+  to unfiltered list; cursor preserved. Standard `bubbles/list`.
+- **In Sessions list with no filter** → Esc → quit Portal (or back to
+  caller). Existing Portal behaviour.
+- **In Sessions list mid-typing-filter** → Esc → cancel filter input,
+  return to unfiltered list. Existing `bubbles/list` behaviour.
+
+A typical "filter, then preview, then quit" path is preview → Esc →
+committed-filter list → Esc → unfiltered list → Esc → quit. Three Escs
+to fully exit from inside preview with a filter active. Each Esc
+discharges exactly one level of state — the user model is "Esc backs
+out of one thing at a time".
+
 ### Decision
 
 **Option B — No in-preview between-session stepping. Esc → arrow → Space
