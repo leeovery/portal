@@ -11,6 +11,13 @@
           "status": "completed"
         }
       }
+    },
+    "discussion": {
+      "items": {
+        "session-scrollback-preview": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
