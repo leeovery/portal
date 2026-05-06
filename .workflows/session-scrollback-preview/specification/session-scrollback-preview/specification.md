@@ -385,6 +385,13 @@ The feature decomposes into a small, well-bounded set of additions:
 - **TmuxEnumerator** — interface returning the window-grouped pane structure described in *Concrete enumeration call*. Backed in production by `*tmux.Client`; mocked in tests with a fixed in-memory shape.
 - **ScrollbackReader** — interface with `Tail(paneKey) ([]byte, error)` returning the tail-N bytes for a given `paneKey`. The interface intentionally hides `stateDir` (closed over at construction). Backed in production by the new tail-N helper in `internal/state` (with `stateDir` resolved at TUI startup per § *Cross-cutting Seams > State Package API Reuse > stateDir resolution*); mocked in tests with a fixed bytes-or-error map keyed by `paneKey`.
 
+  **Return contract.** Three observable outcomes via `(bytes, err)`:
+  - **`(bytes != nil, nil)`** — normal content; caller renders bytes verbatim.
+  - **`(nil, nil)`** — "no content available" — collapses ENOENT, zero-byte file, and zero-line result (file with only an unterminated partial line) into one shape. Caller renders the placeholder ("(no saved content)").
+  - **`(nil, err != nil)`** — OS-level read failure (EACCES, EIO, etc.). Caller renders the error string.
+
+  The helper unifies the three "no content" cases by design — the placeholder/error decision lives at the call site in `internal/tui`, not in the helper. The mock honours the same three shapes.
+
 **Wiring shape.** Dependencies are passed through the `previewModel` constructor (constructor-injected), not via a package-level mutable `previewDeps` variable. This is idiomatic for Bubble Tea models. Tests construct `previewModel` directly with mock implementations of `TmuxEnumerator` and `ScrollbackReader`; no package-level state to restore, no `t.Cleanup()` plumbing required, and `t.Parallel()` is safe in `pagepreview_test.go`. The `cmd` package's package-level `*Deps` convention (`bootstrapDeps`, `openDeps`, etc.) is preserved at the cmd layer for compatibility with existing tests but is not extended into `internal/tui`.
 
 The TUI page-state tests exercise `Update` directly with synthetic `tea.KeyMsg` values per the project's existing test convention. A new `pagepreview_test.go` (or equivalent) houses the new tests; it must not require a real tmux server (no `tmuxtest` import). Production-code adapters wire `*tmux.Client` and the tail-N helper to the seams at TUI construction.

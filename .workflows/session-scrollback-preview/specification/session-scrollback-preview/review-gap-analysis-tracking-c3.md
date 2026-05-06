@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 3
 phase: Gap Analysis
@@ -36,7 +36,7 @@ A planner breaking this into tasks would have to choose one of these contracts b
 **Proposed Addition**:
 {leave blank — to be discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Pinned the ScrollbackReader return contract under § Architecture Summary > Test seams: `(bytes, nil)` = render content; `(nil, nil)` = placeholder (collapses ENOENT, zero-byte, zero-line); `(nil, err)` = error string. Helper unifies "no content" shapes; placeholder/error decision lives in internal/tui at the call site.
 
 ---
