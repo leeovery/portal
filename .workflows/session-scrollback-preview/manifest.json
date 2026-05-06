@@ -39,7 +39,7 @@
         "session-scrollback-preview": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "7f3542ec980b10809ae36964dc229a009f0ed396",
+          "spec_commit": "0a91621db44c5f5412ea79745e35f3b98b7a91d1",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
