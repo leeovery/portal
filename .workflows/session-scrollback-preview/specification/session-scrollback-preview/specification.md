@@ -34,6 +34,7 @@ Preview reads pane content **only from disk** — the `.bin` scrollback files wr
 - No per-preview tmux IPC.
 - The same path that already serves skeleton panes during restore is reused for hydrated panes.
 - The rapid-stepping race between two in-flight tmux captures cannot occur (file reads are microseconds and synchronous).
+- No new tmux wrapper. The existing `tmux.Client.CapturePane` hardcodes `-S -` (full scrollback) and is shared with save-daemon semantics; a bounded variant (e.g. `CapturePaneTail(target, n)`) would have been net-new code. Always-disk avoids that addition entirely.
 
 **Snapshot semantics — not live.** Preview is a snapshot at the moment each pane is read. Worst-case staleness is bounded by the daemon's per-tick interval (small but not strictly bounded by 1s under heavy load). This is acceptable for the recognition use case at both ends of the bandwidth spectrum:
 - Slow output (e.g. Claude TUI): staleness invisible because content moves slowly.

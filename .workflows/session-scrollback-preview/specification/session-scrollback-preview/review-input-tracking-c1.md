@@ -75,8 +75,8 @@ The discussion's Source of Preview Bytes options analysis grounds the "no new tm
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added bullet to "Single read path consequences" anchoring the no-new-wrapper claim in CapturePane's hardcoded `-S -` flag.
 
 ---
 
