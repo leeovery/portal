@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 1
 phase: Input Review
@@ -139,7 +139,7 @@ The spec asserts "The rapid-stepping race between two in-flight tmux captures ca
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Refined Single-read-path bullet to frame the F13 race as a mitigation cost the always-disk decision avoided rather than a property that simply doesn't exist.
 
 ---
