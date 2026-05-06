@@ -88,6 +88,8 @@ Preview renders a **bounded snapshot, scrollable within bounds**, of each pane's
 
 **Slice size.** The last **N lines** of the pane's `.bin` file are read on each focus event, where **N = 1000**. This pins the working figure of "generous N (e.g. ~500–1000 lines)" at the upper end. The exact value is a constant in the read pipeline.
 
+**Memory trade-off.** Holding N lines per previewed pane while focused is the dominant memory cost of preview. At N ≤ 1000, this footprint is negligible (typical line widths × 1000 ≪ a few MB) — the cap on N is set by this trade-off as much as by the recognition use case. If a future revision wants deeper history, raising N has a real, if still small, memory cost that should be re-justified rather than silently bumped.
+
 **Scroll within bounds.** The viewport (`bubbles/viewport`) renders the tail by default; the user can scroll up within the loaded N lines using the viewport's native scroll keymap. The top boundary of the slice is a hard edge — pressing scroll-up at the top silently no-ops. Deeper history (beyond N) is not reachable in v1.
 
 **No deeper-history extend.** No `r`-to-extend, no scroll-past-top trigger, no lazy load. Reaching content older than the last 1000 lines is a "full attach" affordance, not a preview affordance.

@@ -51,8 +51,8 @@ The discussion's History Depth decision explicitly accepts a memory trade-off an
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Memory trade-off" paragraph in § History Depth between slice size and scroll-within-bounds.
 
 ---
 
