@@ -115,8 +115,8 @@ The discussion's Privacy decision lists "self-documenting in use" as one of the 
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded "self-documenting in use" rationale into the Privacy rationale paragraph.
 
 ---
 

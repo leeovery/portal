@@ -223,7 +223,7 @@ Two related "no `.bin` content yet" scenarios are handled by the same placeholde
 
 **Decision: no design response.** Preview ships as a sharp tool. There is no opt-out toggle, no redaction layer, no end-user documentation about preview's exposure surface, and no automatic suppression of any session content based on heuristics.
 
-**Rationale.** Portal is a single-user developer tool; the user is the operator and the audience. Mitigation of secret-exposure during sharing contexts (screen-shares, demos, OBS recording, pairing) is the user's responsibility — accomplished simply by not pressing `Space`. Redaction would create a false sense of security that is worse than no protection.
+**Rationale.** Portal is a single-user developer tool; the user is the operator and the audience. Mitigation of secret-exposure during sharing contexts (screen-shares, demos, OBS recording, pairing) is the user's responsibility — accomplished simply by not pressing `Space`. Redaction would create a false sense of security that is worse than no protection. The behaviour is also **self-documenting in use**: the first time a user opens preview on a session containing sensitive output, they see immediately what preview shows. There is no hidden mechanism to surprise them later, which is part of why no in-product documentation of the exposure surface is shipped.
 
 **Reversibility.** A future opt-out toggle (e.g. `portal config set preview-disabled true`) is additive — a config flag check at preview-open. It is intentionally not built in v1; it can be added later without rework if real users report concern.
 
