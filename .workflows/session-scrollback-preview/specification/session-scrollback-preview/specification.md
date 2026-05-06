@@ -17,11 +17,13 @@ A Quick Look-style preview of a session's scrollback, opened from the Sessions p
 - **Attach.** `Enter` continues to attach as today (unchanged).
 - **Dismiss.** `Esc` returns to the Sessions list at the same cursor position the user was on when `Space` was pressed.
 - **Self-exclusion.** The current session (when running inside tmux) and the `_portal-saver` detached session are already excluded from the Sessions list by existing logic; preview inherits this exclusion — no new suppression layer required.
+- **Empty list / no highlighted item.** If the Sessions list is empty (no sessions, or a committed filter has narrowed the list to zero matches), `Space` is a no-op — there is no item to preview. The user remains on the Sessions page; no error is shown.
 
 ### Interaction Shape
 
 - **Sub-page peer of `pageFileBrowser`.** Preview is a full-screen page in the TUI's page state machine, with its own keymap. Implemented as a new `pagePreview` arm in `internal/tui/model.go::Update`.
 - **Bound to one session per open.** Preview shows the session that was highlighted when `Space` was pressed. To preview a different session, the user `Esc`s back to the list, moves the cursor, and presses `Space` again. There is no in-preview between-session stepping.
+- **Layout.** Preview occupies the full terminal — chrome on a single line (header **or** footer; final placement is a build-phase decision per *Open Items*) plus the embedded `bubbles/viewport` filling the remaining vertical space. Viewport width = terminal width; viewport height = terminal height minus chrome lines. `tea.WindowSizeMsg` is forwarded to the embedded viewport so the slice re-flows on resize; scroll offset is preserved by `bubbles/viewport`'s native resize handling.
 
 ### Source of Preview Bytes
 
@@ -34,7 +36,7 @@ Preview reads pane content **only from disk** — the `.bin` scrollback files wr
 - No per-preview tmux IPC.
 - The same path that already serves skeleton panes during restore is reused for hydrated panes.
 - No rapid-stepping race to mitigate. A live-capture path would require generation/sequence tokens to discard in-flight captures for session N landing after the user has stepped to N+1. Always-disk eliminates that mitigation cost entirely — file reads are microseconds and synchronous, and there are no in-flight async results to reconcile.
-- No new tmux wrapper. The existing `tmux.Client.CapturePane` hardcodes `-S -` (full scrollback) and is shared with save-daemon semantics; a bounded variant (e.g. `CapturePaneTail(target, n)`) would have been net-new code. Always-disk avoids that addition entirely.
+- No new tmux **capture** wrapper. The existing `tmux.Client.CapturePane` hardcodes `-S -` (full scrollback) and is shared with save-daemon semantics; a bounded variant (e.g. `CapturePaneTail(target, n)`) would have been net-new code. Always-disk avoids that addition entirely. (A separate, unrelated read-only **listing** method may still be added for chrome enumeration — see § *Multi-pane Rendering Shape > Concrete enumeration call*.)
 
 **Snapshot semantics — not live.** Preview is a snapshot at the moment each pane is read. Worst-case staleness is bounded by the daemon's per-tick interval (small but not strictly bounded by 1s under heavy load). This is acceptable for the recognition use case at both ends of the bandwidth spectrum:
 - Slow output (e.g. Claude TUI): staleness invisible because content moves slowly.
@@ -60,12 +62,21 @@ The literal `window_layout` is **not** rendered. No layout parser. Visual fideli
 | `[` | Previous window (wraps from first → last) |
 | `Tab` | Next pane within current window (forward-only with wraparound) |
 | `Esc` | Dismiss preview, return to Sessions list |
+| Viewport scroll | All `bubbles/viewport` defaults pass through unchanged: `Up` / `Down` / `PgUp` / `PgDn` / `Home` / `End` / `ctrl-u` / `ctrl-d` / `j` / `k`. These scroll within the focused pane's loaded N-line slice. |
+
+**Keymap policy.** Preview owns `]`, `[`, `Tab`, `Esc`. Everything else either passes through to the embedded `bubbles/viewport` (scroll keys above) or is unbound/no-op (arrow `Left` / `Right`, `n` / `p`, alphanumerics, etc.). There are no between-session keys to bind. Up/Down are explicitly **not** between-session navigation — they scroll the focused viewport.
 
 **Why bidirectional for windows but not panes.** Windows are typically purposeful (editor / logs / repl) and overshoot is costly, so `[` and `]` are both bound. Pane counts are small; forward-only `Tab` with wraparound is sufficient for the dominant case.
 
 **Degenerate cases.** In single-window single-pane sessions (the dominant ~95% case), all three cycle keys silently no-op. No flicker, no error feedback, just nothing.
 
 **Position on session re-entry.** Stepping out via `Esc` and re-opening preview on the same session re-opens at **window 1 / pane 1**, not at the last viewed position. Per-session position state is not retained — the use case is disambiguation, and fresh-view matches recognition better than memory.
+
+**Model lifecycle.** A new `previewModel` is constructed each time `Space` is pressed. There is no singleton or cached instance. Consequences:
+
+- Structural enumeration runs fresh on every open.
+- The tail-N read for window 1 / pane 1 runs fresh on every open of the same session.
+- No state (focus indices, viewport scroll offset, content) survives across opens of the same session.
 
 #### Chrome Floor (v1 must-show)
 
@@ -76,7 +87,16 @@ Chrome must show structural overview and current position so the user can identi
 - **Window name** — tmux's `#W` / window name; adds disambiguation signal for users who name their windows.
 - **Keystroke hints** — visible cycle-key reminders (`] [ Tab Esc`), matching Portal's existing UI convention elsewhere.
 
-**Chrome data source.** Window/pane counts and names come from **tmux structural enumeration** (e.g. `list-panes -F`), not from `.bin` content. Chrome is computed once at preview-open and cycled in place; no live re-enumeration mid-preview.
+**Chrome data source.** Window/pane counts and names come from **tmux structural enumeration** (`list-panes -t <session> -F`), not from `.bin` content. Chrome is computed once at preview-open and cycled in place; no live re-enumeration mid-preview.
+
+**Concrete enumeration call.** No existing `tmux.Client` method returns window-grouped panes plus window names for a single session in one call. The build phase therefore composes the enumeration from one of:
+
+- (a) Add a new `tmux.Client` method (e.g. `ListWindowsAndPanesInSession(session) ([]WindowGroup, error)`) that runs `tmux list-panes -t <session> -F "#{window_index}|#{window_name}|#{pane_index}"` and groups results by `window_index`. Preferred — keeps the call cohesive in `internal/tmux`.
+- (b) Compose existing methods: `ListPanesInSession` for coords plus a separate `list-windows -t <session> -F "#{window_index}|#{window_name}"` invocation. Mechanically equivalent; chosen only if (a) is rejected during build.
+
+The earlier claim "No new methods on `tmux.Client`" is qualified by this concrete enumeration shape: a single new read-only listing method is permissible. The "no new tmux wrapper" rationale in § *Source of Preview Bytes* applies specifically to **capture** wrappers (i.e. avoiding `CapturePaneTail`); a new listing method is a different category and does not contradict it.
+
+**Enumeration failure handling.** If the enumeration call itself fails at preview-open (e.g. session disappeared between `Space` press and the call), preview returns to the Sessions list silently — no preview page is shown. The Sessions list re-fetches on return per § *Cross-cutting Seams > Externally-Killed Session During Preview*.
 
 **Above the floor (rejected for v1, additive later if wanted):**
 - Per-pane current-command (e.g. `nvim`, `claude`).
@@ -103,9 +123,13 @@ The read is implemented as a **tail-N idiom at the disk layer**: open the file, 
 
 **Implementation shape.** ~30 LOC in a new helper, packaged with `state.ScrollbackFile` resolution. Standard Go idiom — `os.File` + `Seek(0, io.SeekEnd)` + reverse chunked scan. No external dependency.
 
+**Definition of "line".** A line is a `\n`-terminated record in the `.bin` file as written by the daemon. The reverse scan counts newline bytes. There is no re-wrap, no logical-line reconstruction, and no consultation of the source pane's display width. Because the daemon captures via `tmux capture-pane -e`, each `\n` already corresponds to a display line at capture-time pane width — so "1000 lines" is "1000 display lines as captured", which is the unit the memory budget assumes.
+
 **Output handoff.** The tail bytes are passed to `viewport.SetContent(rawAnsiBytes)` as a single string. ANSI escape sequences are preserved verbatim (see *ANSI Passthrough* below). No preprocessing, no sanitisation, no re-wrap.
 
 **Read is synchronous.** Because the read is bounded and sub-millisecond regardless of file size, the read happens inline in `Update` for the focus-changing event. No `tea.Cmd` deferral, no generation tokens, no async I/O.
+
+**Performance budget.** The synchronous-in-`Update` decision rests on the read staying fast. Pinned target: **tail-N read p99 < 5ms on a 4 MB `.bin` file** (representative of a busy-session worst case). The build phase ships a benchmark guarding this assertion. If a future change pushes p99 above the budget, the synchronous-read decision must be revisited (likely by deferring the read via `tea.Cmd`); the budget is the audit threshold, not a soft aspiration.
 
 ### Refresh Semantics
 
@@ -120,6 +144,15 @@ A fresh tail-N read is performed when:
 - **Initial preview-open (Space)** — lazy per focus: reads only the currently-focused pane (window 1 / pane 1 by reset rule). Other panes are read on first focus via `]` / `[` / `Tab`.
 - **`]` or `[`** — re-reads the newly-focused pane after a window cycle.
 - **`Tab`** — re-reads the newly-focused pane after a within-window pane cycle.
+
+**Initial-open ordering.** On `Space`:
+
+1. Structural enumeration call runs first (synchronous; see § *Multi-pane Rendering Shape > Concrete enumeration call*).
+2. If enumeration fails → return to Sessions list silently; no preview page is shown.
+3. Otherwise the focus indices are set to window 0 / pane 0 (first window, first pane in enumeration order) and the tail-N read for that pane runs synchronously.
+4. The first frame renders both chrome (from step 1) and viewport content (from step 3) atomically. Chrome is never shown without a corresponding viewport state.
+
+If the tail-N read in step 3 fails (missing or unreadable `.bin`), the viewport renders the placeholder per § *Read-Failure Handling*; the preview page still opens.
 
 Chrome counts (window M of N, pane X of Y, window name) come from tmux structural enumeration captured at preview-open and **do not** force eager `.bin` reads for unfocused panes.
 
@@ -141,15 +174,25 @@ Sitting on one pane for an extended period shows a snapshot that grows progressi
 
 Three failure modes, all handled benignly without aborting the preview:
 
-- **Daemon mid-write while preview reads.** Closed by atomicity: the daemon writes via `fileutil.AtomicWrite0600` (tempfile + rename), so the reader observes either the previous full content or the new full content — never torn bytes. No special handling required.
+- **Daemon mid-write while preview reads.** Closed by atomicity: the daemon writes via `state.WriteScrollbackIfChanged`, which calls `fileutil.AtomicWrite0600` (tempfile + rename). On Unix, rename of the same filesystem is atomic, so the reader observes either the previous full content or the new full content — never torn bytes. This is verified against the current daemon implementation (`internal/state/scrollback.go` :: `WriteScrollbackIfChanged`); if a future revision of the daemon ever switches to in-place append, the read-side claim must be revisited.
 - **`.bin` deleted between two consecutive focus events** (pane killed, daemon cleanup, etc.). The viewport renders a placeholder for that pane (see *Placeholder* below). Other panes in the session continue to render normally.
 - **OS-level read error** (permissions, disk full, etc.). The viewport renders a brief error string in place of content. Should never occur given mode 0600 / same-user guarantees from the save daemon, but handled defensively rather than crashing the TUI.
 
 #### Placeholder
 
-A single placeholder shape is used across all "no content available" cases — read failures, deleted `.bin`, and the brand-new-session edge case (covered separately below). Working label: **"(no saved content)"**.
+A single placeholder shape is used across all "no content available" cases — read failures, deleted `.bin`, zero-byte `.bin`, and the brand-new-session edge case (covered separately below). Working label: **"(no saved content)"**.
 
-Chrome (window M of N, pane X of Y, window name) is unaffected by content placeholders: the structural counts come from tmux enumeration, so the user always sees the correct shape with placeholders only where content is missing.
+**Triggering conditions for the placeholder.**
+
+- `.bin` file does not exist (ENOENT).
+- `.bin` file exists but is zero bytes (no captures yet).
+- OS-level read error (permissions, EIO, etc.) — see *Error string* below.
+
+**Non-triggering condition.** A `.bin` file with **fewer than N lines** (e.g. 5 lines from a brand-new pane that has had a few captures but not 1000 of them) does **not** trigger the placeholder. Preview simply renders whatever lines are present, with the viewport at scroll-tail. The tail-N read returns "all lines in file" when the file has fewer than N — a partial read is a successful read.
+
+**Error string.** OS-level read errors render a single short error string in the viewport rather than the placeholder. The wording is build-phase TBD; the same string is used for every error type (no per-errno differentiation, no EACCES vs EIO branching). Future focus changes onto the same pane retry the read fresh — there is no per-pane error cache.
+
+Chrome (window M of N, pane X of Y, window name) is unaffected by content placeholders or error strings: the structural counts come from tmux enumeration, so the user always sees the correct shape with placeholders only where content is missing.
 
 **Open spec-pinning items handed to the build phase:**
 - Exact placeholder wording.
@@ -174,7 +217,7 @@ Preview is bound to **one session per open**. There are no key bindings inside p
 
 **Cascading consequences (anchored here so the spec is self-contained):**
 
-- **No between-session keymap.** Arrow keys, `j`/`k`, `n`/`p`, etc. inside preview are unbound or no-op (TBD by build phase keymap design); they do not advance to the next session.
+- **No between-session keymap.** Arrow keys (`Up` / `Down`) and `j` / `k` pass through to the embedded `bubbles/viewport` for content scrolling per § *Within-preview Key Bindings > Keymap policy* — they are explicitly not between-session navigation. Other plausible candidates (`Left` / `Right`, `n` / `p`) are unbound and no-op.
 - **List cursor sync is not a question.** Preview cannot move the underlying list cursor, so on `Esc` the cursor is exactly where it was when `Space` was pressed. There is no sync mode to design.
 - **Filter set boundary is not a question.** "Stepping iterates filtered set vs all sessions" does not arise — preview never iterates.
 - **Refresh trigger list does not include between-session step** (already reflected above).
@@ -253,7 +296,9 @@ If session A is killed externally (another tmux client, `tmux kill-session`, `po
 - **Chrome.** Window/pane structural counts and names were captured at preview-open. Cycle keys cycle the captured shape; no live re-enumeration is performed mid-preview, so chrome stays stable.
 - **Esc back to list.** The Sessions list re-fetches the live session list on return — the killed session simply isn't there anymore. Cursor lands on a neighbouring session via `bubbles/list`'s default behaviour.
 
-No new graceful-degradation logic is required; the pieces already pinned (placeholder, chrome captured at open, list re-fetch) handle this case.
+**Re-fetch contract.** Preview owns the re-fetch on the `pagePreview → pageSessions` transition. The build phase confirms during implementation whether the existing Sessions page already re-fetches on entry from another page; if not, the transition handler dispatched by `Esc` from preview must trigger a Sessions-list refresh before rendering the Sessions page. Either path satisfies the contract — what matters is that the transition does not show a stale list containing a killed session.
+
+No new graceful-degradation logic is required beyond the re-fetch contract; the other pieces already pinned (placeholder, chrome captured at open) handle the in-preview portion.
 
 #### `_portal-saver` Self-Reference
 
@@ -282,7 +327,8 @@ The build phase must not introduce wrapping, sanitisation, or escape-stripping i
 Preview's read pipeline uses the existing `state` package surface:
 
 - **`state.ScrollbackFile(stateDir, paneKey)`** — resolves the on-disk path. Reused unchanged.
-- **Pane-key resolution** — preview must look up structural pane keys consistent with how the daemon writes them (see `internal/state` paneKey helpers).
+- **`state.SanitizePaneKey(session, window, pane)`** — canonical pane-key helper that produces the same key the daemon uses when writing `.bin` files. Reused unchanged.
+- **Resolution chain.** For each `(session, window_index, pane_index)` returned by structural enumeration, preview computes `paneKey = state.SanitizePaneKey(session, window_index, pane_index)`, then `path = state.ScrollbackFile(stateDir, paneKey)`, then performs the tail-N read on `path`. This chain is addressable from runtime tmux fields alone — preview never reads `@portal-skeleton-<paneKey>` markers, never inspects the daemon's hash map, and never depends on the daemon being live.
 - **Tail-N read helper** — new addition (~30 LOC), packaged in `internal/state` alongside `ScrollbackFile`. Naming and exact placement TBD by build phase.
 
 No new methods on `tmux.Client`. No new daemon work. No marker mutations. No hook firing. The feature is purely additive on top of existing surfaces.
@@ -312,12 +358,19 @@ The feature decomposes into a small, well-bounded set of additions:
 - Floor: window M of N + pane X of Y + window name + keystroke hints.
 
 **No changes to:**
-- `tmux.Client` (no new commands).
+- `tmux.Client` capture path (no new capture wrappers; one new read-only listing method is permissible per § *Multi-pane Rendering Shape > Concrete enumeration call*).
 - `state` daemon (no new save/replay logic).
 - `restore` engine.
 - `cmd/bootstrap` orchestrator.
 - `hooks` store or hydrate helper.
 - Save format or `.bin` file shape.
+
+**Test seams.** Per the project's DI convention (small interfaces, package-level `*Deps` structs, `t.Cleanup()` restoration), preview introduces a `previewDeps`-shaped seam in `internal/tui` covering:
+
+- **TmuxEnumerator** — interface returning the window-grouped pane structure described in *Concrete enumeration call*. Backed in production by `*tmux.Client`; mocked in tests with a fixed in-memory shape.
+- **ScrollbackReader** — interface returning the tail-N bytes for a given `paneKey`. Backed in production by the new tail-N helper in `internal/state`; mocked in tests with a fixed bytes-or-error map keyed by `paneKey`.
+
+The TUI page-state tests exercise `Update` directly with synthetic `tea.KeyMsg` values per the project's existing test convention. A new `pagepreview_test.go` (or equivalent) houses the new tests; it must not require a real tmux server (no `tmuxtest` import). Production-code adapters wire `*tmux.Client` and the tail-N helper to the seams.
 
 ### Out of Scope (v1)
 
@@ -334,6 +387,48 @@ Documented for traceability. Each is reversible — adding any of these later is
 - **Privacy / threat-model design response.** No opt-out toggle, no redaction layer, no documentation gating.
 - **Preview entry point on Projects or FileBrowser pages.**
 - **Preview-layer `_portal-saver` suppression** (excluded at list-population layer instead).
+
+### Acceptance Criteria
+
+The feature is complete when all of the following are observable:
+
+**Entry & dismiss**
+- Pressing `Space` on a highlighted session in the Sessions page opens the preview page.
+- Preview opens at the first window's first pane (window 0 / pane 0 in enumeration order).
+- Pressing `Esc` returns to the Sessions list with the cursor at the same position it was in when `Space` was pressed.
+- Filter state (committed filter / no filter / mid-typing-filter) is preserved across preview open/dismiss per the Esc level tree.
+
+**Within-preview navigation**
+- `]` advances to the next window, wrapping from last to first.
+- `[` advances to the previous window, wrapping from first to last.
+- `Tab` advances to the next pane within the current window, wrapping from last to first.
+- In single-window single-pane sessions, `]` / `[` / `Tab` are no-ops (no flicker, no error).
+- The viewport's native scroll keys (`Up` / `Down` / `PgUp` / `PgDn` / `Home` / `End`, and any other `bubbles/viewport` defaults) scroll within the focused pane's loaded N-line slice.
+
+**Read pipeline**
+- Each focus-changing event (initial open, `]`, `[`, `Tab`) triggers a fresh tail-N read of the newly-focused pane.
+- The tail-N helper reads at most the last 1000 `\n`-terminated lines, regardless of `.bin` file size.
+- The read pipeline does **not** invoke `tmux capture-pane`, does **not** mutate any tmux marker, does **not** drain any FIFO, does **not** fire any resume hook.
+- Re-opening preview on the same session re-reads window 0 / pane 0 fresh; no position or scroll state is carried over.
+
+**Chrome**
+- Chrome shows window M of N, pane X of Y, window name (`#W`), and visible cycle-key hints.
+- Chrome reflects the structural enumeration captured at preview-open and does not re-enumerate mid-preview.
+
+**Edge cases**
+- A pane with a missing `.bin` renders the placeholder; chrome counts remain correct.
+- A pane with a zero-byte `.bin` renders the placeholder.
+- A pane with fewer than 1000 lines renders all available lines (no placeholder).
+- An OS-level read error renders the error string; subsequent focus changes onto the same pane retry the read.
+- A brand-new session whose panes have no `.bin` yet shows the placeholder for each pane; chrome remains correct.
+- An externally-killed session whose preview is open continues to render with placeholders as `.bin` files are cleaned; `Esc` returns to the Sessions list, which re-fetches and the killed session is gone.
+
+**Filter integration**
+- While typing a filter, `Space` inserts a literal space into the filter input (does not open preview).
+- After committing the filter (`Enter`), `Space` opens preview on the highlighted match.
+
+**Side-effect-free contract**
+- A test that opens preview on session S, cycles through every pane in S, dismisses, and re-attaches to S observes session state (markers, FIFOs, hooks, scrollback content) byte-identical to a baseline that did not open preview at all.
 
 ### Open Items Handed to the Build Phase
 
