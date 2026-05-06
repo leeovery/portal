@@ -33,6 +33,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "session-scrollback-preview": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "7f3542ec980b10809ae36964dc229a009f0ed396",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }

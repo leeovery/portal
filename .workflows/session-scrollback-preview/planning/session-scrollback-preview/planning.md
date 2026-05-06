@@ -1,0 +1,1 @@
+# Plan: Session Scrollback Preview
