@@ -66,11 +66,15 @@ The literal `window_layout` is **not** rendered. No layout parser. Visual fideli
 
 **Keymap policy.** Preview owns `]`, `[`, `Tab`, `Esc`. Everything else either passes through to the embedded `bubbles/viewport` (scroll keys above) or is unbound/no-op (arrow `Left` / `Right`, `n` / `p`, alphanumerics, etc.). There are no between-session keys to bind. Up/Down are explicitly **not** between-session navigation — they scroll the focused viewport.
 
+**Pane focus on window cycle.** After `]` or `[`, the focused pane within the new window resets to **pane 0** (first pane in enumeration order). Per-window pane focus is **not** preserved across window cycles. `Tab` then cycles forward from pane 0. Rationale: in the dominant 1-pane case the rule is trivial; in the multi-pane case, resetting matches the position-on-session-re-entry rule (always start at the beginning) and avoids invisible per-window state the user has no signal of.
+
 **Why bidirectional for windows but not panes.** Windows are typically purposeful (editor / logs / repl) and overshoot is costly, so `[` and `]` are both bound. Pane counts are small; forward-only `Tab` with wraparound is sufficient for the dominant case.
 
 **Degenerate cases.** In single-window single-pane sessions (the dominant ~95% case), all three cycle keys silently no-op. No flicker, no error feedback, just nothing.
 
-**Position on session re-entry.** Stepping out via `Esc` and re-opening preview on the same session re-opens at **window 1 / pane 1**, not at the last viewed position. Per-session position state is not retained — the use case is disambiguation, and fresh-view matches recognition better than memory.
+**Position on session re-entry.** Stepping out via `Esc` and re-opening preview on the same session re-opens at **window 0 / pane 0** in enumeration order (the first entry returned by structural enumeration), not at the last viewed position. Per-session position state is not retained — the use case is disambiguation, and fresh-view matches recognition better than memory.
+
+**Indexing convention.** Preview maintains 0-based enumeration-order indices internally: windows are ordered as returned by structural enumeration (sorted by tmux `window_index` ascending), panes within a window similarly by `pane_index`. Internal references like "window 0 / pane 0" mean "first entry in enumeration order".
 
 **Model lifecycle.** A new `previewModel` is constructed each time `Space` is pressed. There is no singleton or cached instance. Consequences:
 
@@ -88,6 +92,8 @@ Chrome must show structural overview and current position so the user can identi
 - **Keystroke hints** — visible cycle-key reminders (`] [ Tab Esc`), matching Portal's existing UI convention elsewhere.
 
 **Chrome data source.** Window/pane counts and names come from **tmux structural enumeration** (`list-panes -t <session> -F`), not from `.bin` content. Chrome is computed once at preview-open and cycled in place; no live re-enumeration mid-preview.
+
+**Counter semantics.** `M` and `X` in "Window M of N" / "Pane X of Y" are **1-based ordinal positions in enumeration order**, not the tmux `window_index` / `pane_index` values. Under base-index drift (e.g. `set -g base-index 1`) or after window-kill gaps (e.g. `window_index` values `0, 2, 5`), chrome shows `Window 1 of 3`, `Window 2 of 3`, `Window 3 of 3` as the user cycles — never `Window 5 of 3`. The window name (`#W`) carries identity; the counter carries position. The raw tmux `window_index` is **not** displayed in chrome.
 
 **Concrete enumeration call.** No existing `tmux.Client` method returns window-grouped panes plus window names for a single session in one call. The build phase therefore composes the enumeration from one of:
 
@@ -123,7 +129,11 @@ The read is implemented as a **tail-N idiom at the disk layer**: open the file, 
 
 **Implementation shape.** ~30 LOC in a new helper, packaged with `state.ScrollbackFile` resolution. Standard Go idiom — `os.File` + `Seek(0, io.SeekEnd)` + reverse chunked scan. No external dependency.
 
+**Single-fd invariant.** The helper opens the file once via `os.Open`, performs all `Seek` and `Read` calls against that single file descriptor, and closes only after the tail bytes are assembled. The atomic-rename guarantee under § *Read-Failure Handling* only holds across the helper's full scan if the fd is held; a close-and-reopen between chunks would expose a torn-read window where the daemon's atomic rename could swap the inode mid-scan. Within a single scan, an unlinking delete is also benign — the reader keeps reading the unlinked inode until close.
+
 **Definition of "line".** A line is a `\n`-terminated record in the `.bin` file as written by the daemon. The reverse scan counts newline bytes. There is no re-wrap, no logical-line reconstruction, and no consultation of the source pane's display width. Because the daemon captures via `tmux capture-pane -e`, each `\n` already corresponds to a display line at capture-time pane width — so "1000 lines" is "1000 display lines as captured", which is the unit the memory budget assumes.
+
+**Trailing-newline edge case.** A file whose final bytes lack a trailing `\n` has those trailing bytes treated as a partial/in-progress record and **excluded** from the returned tail (the helper returns only fully-terminated records). A zero-byte file and a file containing only an unterminated partial line both render the placeholder under the zero-line outcome. In practice the daemon writes via `tmux capture-pane -e`, whose output always terminates lines, so this case is defensive.
 
 **Output handoff.** The tail bytes are passed to `viewport.SetContent(rawAnsiBytes)` as a single string. ANSI escape sequences are preserved verbatim (see *ANSI Passthrough* below). No preprocessing, no sanitisation, no re-wrap.
 
@@ -149,14 +159,17 @@ A fresh tail-N read is performed when:
 
 1. Structural enumeration call runs first (synchronous; see § *Multi-pane Rendering Shape > Concrete enumeration call*).
 2. If enumeration fails → return to Sessions list silently; no preview page is shown.
-3. Otherwise the focus indices are set to window 0 / pane 0 (first window, first pane in enumeration order) and the tail-N read for that pane runs synchronously.
-4. The first frame renders both chrome (from step 1) and viewport content (from step 3) atomically. Chrome is never shown without a corresponding viewport state.
+3. If enumeration succeeds but returns an **empty result** (zero windows, or a window with zero panes — e.g. session is being torn down between `Space` and the call) → treated identically to enumeration failure: return to Sessions list silently; no preview page is shown.
+4. Otherwise the focus indices are set to window 0 / pane 0 (first window, first pane in enumeration order) and the tail-N read for that pane runs synchronously.
+5. The first frame renders both chrome (from step 1) and viewport content (from step 4) atomically. Chrome is never shown without a corresponding viewport state.
 
-If the tail-N read in step 3 fails (missing or unreadable `.bin`), the viewport renders the placeholder per § *Read-Failure Handling*; the preview page still opens.
+If the tail-N read in step 4 fails (missing or unreadable `.bin`), the viewport renders the placeholder per § *Read-Failure Handling*; the preview page still opens.
 
 Chrome counts (window M of N, pane X of Y, window name) come from tmux structural enumeration captured at preview-open and **do not** force eager `.bin` reads for unfocused panes.
 
 **Between-session step is not a trigger** because in-preview between-session stepping is not part of the feature. To preview a different session, the user `Esc`s back to the list, moves the cursor, and presses `Space` again — which fires the initial-open trigger fresh on the new session.
+
+**Resize is not a read trigger.** `tea.WindowSizeMsg` is forwarded to the embedded viewport for content re-flow per § *Interaction Shape > Layout*; it does **not** trigger a fresh disk read. The loaded N-line buffer is decoupled from viewport dimensions, so the viewport re-renders the existing buffer at the new size without re-reading from disk. This matters for the performance budget: a drag-resize fires many resize events, none of which incur tail-N read cost.
 
 #### Viewport-internal Scroll Does Not Re-read
 
@@ -186,7 +199,8 @@ A single placeholder shape is used across all "no content available" cases — r
 
 - `.bin` file does not exist (ENOENT).
 - `.bin` file exists but is zero bytes (no captures yet).
-- OS-level read error (permissions, EIO, etc.) — see *Error string* below.
+
+**OS-level read errors** (permissions, EIO, etc.) render the **error string** instead, not the placeholder — see *Error string* below.
 
 **Non-triggering condition.** A `.bin` file with **fewer than N lines** (e.g. 5 lines from a brand-new pane that has had a few captures but not 1000 of them) does **not** trigger the placeholder. Preview simply renders whatever lines are present, with the viewport at scroll-tail. The tail-N read returns "all lines in file" when the file has fewer than N — a partial read is a successful read.
 
@@ -327,8 +341,9 @@ The build phase must not introduce wrapping, sanitisation, or escape-stripping i
 Preview's read pipeline uses the existing `state` package surface:
 
 - **`state.ScrollbackFile(stateDir, paneKey)`** — resolves the on-disk path. Reused unchanged.
-- **`state.SanitizePaneKey(session, window, pane)`** — canonical pane-key helper that produces the same key the daemon uses when writing `.bin` files. Reused unchanged.
+- **`state.SanitizePaneKey(session, window, pane)`** — canonical pane-key helper that produces the same key the daemon uses when writing `.bin` files. Reused unchanged. The arguments must match the daemon's call site verbatim (the goal is byte-identical pane keys); the build phase wires the existing helper signature without type adaptation at the call site.
 - **Resolution chain.** For each `(session, window_index, pane_index)` returned by structural enumeration, preview computes `paneKey = state.SanitizePaneKey(session, window_index, pane_index)`, then `path = state.ScrollbackFile(stateDir, paneKey)`, then performs the tail-N read on `path`. This chain is addressable from runtime tmux fields alone — preview never reads `@portal-skeleton-<paneKey>` markers, never inspects the daemon's hash map, and never depends on the daemon being live.
+- **`stateDir` resolution.** Preview consumes `stateDir` via the `ScrollbackReader` seam, **not** directly. The production adapter for `ScrollbackReader.Tail(paneKey)` is constructed once at TUI startup with `stateDir` resolved from the existing `internal/state` paths helper (the same source the daemon and bootstrap orchestrator already use). The interface intentionally hides `stateDir` so tests can mock by `paneKey` alone, and so preview never has its own state-path resolution policy. `stateDir` is captured once and stable for the Portal process lifetime; it is **not** re-resolved per preview-open.
 - **Tail-N read helper** — new addition (~30 LOC), packaged in `internal/state` alongside `ScrollbackFile`. Naming and exact placement TBD by build phase.
 
 No new methods on `tmux.Client`. No new daemon work. No marker mutations. No hook firing. The feature is purely additive on top of existing surfaces.
@@ -365,12 +380,14 @@ The feature decomposes into a small, well-bounded set of additions:
 - `hooks` store or hydrate helper.
 - Save format or `.bin` file shape.
 
-**Test seams.** Per the project's DI convention (small interfaces, package-level `*Deps` structs, `t.Cleanup()` restoration), preview introduces a `previewDeps`-shaped seam in `internal/tui` covering:
+**Test seams.** Preview introduces small dependency interfaces in `internal/tui`:
 
 - **TmuxEnumerator** — interface returning the window-grouped pane structure described in *Concrete enumeration call*. Backed in production by `*tmux.Client`; mocked in tests with a fixed in-memory shape.
-- **ScrollbackReader** — interface returning the tail-N bytes for a given `paneKey`. Backed in production by the new tail-N helper in `internal/state`; mocked in tests with a fixed bytes-or-error map keyed by `paneKey`.
+- **ScrollbackReader** — interface with `Tail(paneKey) ([]byte, error)` returning the tail-N bytes for a given `paneKey`. The interface intentionally hides `stateDir` (closed over at construction). Backed in production by the new tail-N helper in `internal/state` (with `stateDir` resolved at TUI startup per § *Cross-cutting Seams > State Package API Reuse > stateDir resolution*); mocked in tests with a fixed bytes-or-error map keyed by `paneKey`.
 
-The TUI page-state tests exercise `Update` directly with synthetic `tea.KeyMsg` values per the project's existing test convention. A new `pagepreview_test.go` (or equivalent) houses the new tests; it must not require a real tmux server (no `tmuxtest` import). Production-code adapters wire `*tmux.Client` and the tail-N helper to the seams.
+**Wiring shape.** Dependencies are passed through the `previewModel` constructor (constructor-injected), not via a package-level mutable `previewDeps` variable. This is idiomatic for Bubble Tea models. Tests construct `previewModel` directly with mock implementations of `TmuxEnumerator` and `ScrollbackReader`; no package-level state to restore, no `t.Cleanup()` plumbing required, and `t.Parallel()` is safe in `pagepreview_test.go`. The `cmd` package's package-level `*Deps` convention (`bootstrapDeps`, `openDeps`, etc.) is preserved at the cmd layer for compatibility with existing tests but is not extended into `internal/tui`.
+
+The TUI page-state tests exercise `Update` directly with synthetic `tea.KeyMsg` values per the project's existing test convention. A new `pagepreview_test.go` (or equivalent) houses the new tests; it must not require a real tmux server (no `tmuxtest` import). Production-code adapters wire `*tmux.Client` and the tail-N helper to the seams at TUI construction.
 
 ### Out of Scope (v1)
 
@@ -394,7 +411,7 @@ The feature is complete when all of the following are observable:
 
 **Entry & dismiss**
 - Pressing `Space` on a highlighted session in the Sessions page opens the preview page.
-- Preview opens at the first window's first pane (window 0 / pane 0 in enumeration order).
+- Preview opens at the first window's first pane (window 0 / pane 0 in 0-based enumeration order; chrome shows "Window 1 of N" / "Pane 1 of M").
 - Pressing `Esc` returns to the Sessions list with the cursor at the same position it was in when `Space` was pressed.
 - Filter state (committed filter / no filter / mid-typing-filter) is preserved across preview open/dismiss per the Esc level tree.
 
@@ -402,14 +419,17 @@ The feature is complete when all of the following are observable:
 - `]` advances to the next window, wrapping from last to first.
 - `[` advances to the previous window, wrapping from first to last.
 - `Tab` advances to the next pane within the current window, wrapping from last to first.
+- After `]` or `[` lands on a new window, the focused pane is **pane 0** of that window (first in enumeration order). Per-window pane focus is not preserved across window cycles.
 - In single-window single-pane sessions, `]` / `[` / `Tab` are no-ops (no flicker, no error).
 - The viewport's native scroll keys (`Up` / `Down` / `PgUp` / `PgDn` / `Home` / `End`, and any other `bubbles/viewport` defaults) scroll within the focused pane's loaded N-line slice.
+- Under a session with non-contiguous tmux `window_index` values (e.g. `0, 2, 5`) or `pane-base-index 1`, the chrome counter `M of N` shows the **1-based ordinal position in enumeration order** (always `1..N`), not the raw `window_index` or `pane_index`.
 
 **Read pipeline**
 - Each focus-changing event (initial open, `]`, `[`, `Tab`) triggers a fresh tail-N read of the newly-focused pane.
 - The tail-N helper reads at most the last 1000 `\n`-terminated lines, regardless of `.bin` file size.
 - The read pipeline does **not** invoke `tmux capture-pane`, does **not** mutate any tmux marker, does **not** drain any FIFO, does **not** fire any resume hook.
 - Re-opening preview on the same session re-reads window 0 / pane 0 fresh; no position or scroll state is carried over.
+- Window resize during preview re-flows the viewport without triggering a re-read of the focused pane's `.bin`.
 
 **Chrome**
 - Chrome shows window M of N, pane X of Y, window name (`#W`), and visible cycle-key hints.
@@ -422,13 +442,21 @@ The feature is complete when all of the following are observable:
 - An OS-level read error renders the error string; subsequent focus changes onto the same pane retry the read.
 - A brand-new session whose panes have no `.bin` yet shows the placeholder for each pane; chrome remains correct.
 - An externally-killed session whose preview is open continues to render with placeholders as `.bin` files are cleaned; `Esc` returns to the Sessions list, which re-fetches and the killed session is gone.
+- A session that returns empty structural enumeration (zero windows / zero panes) is treated as enumeration failure: preview does not open and the user remains on the Sessions list.
 
 **Filter integration**
 - While typing a filter, `Space` inserts a literal space into the filter input (does not open preview).
 - After committing the filter (`Enter`), `Space` opens preview on the highlighted match.
 
 **Side-effect-free contract**
-- A test that opens preview on session S, cycles through every pane in S, dismisses, and re-attaches to S observes session state (markers, FIFOs, hooks, scrollback content) byte-identical to a baseline that did not open preview at all.
+
+Within a single test that opens preview on session S, cycles through every pane in S, and dismisses (no live daemon, no real tmux server — the seams are mocked):
+
+- The preview code path issues exactly one `TmuxEnumerator` call (the structural enumeration at open) and zero further tmux invocations. Verifiable via the `TmuxEnumerator` mock recording calls.
+- The preview code path issues only `ScrollbackReader.Tail(paneKey)` calls — one per focus event — and never any other I/O on `.bin` paths. Verifiable via the `ScrollbackReader` mock recording calls (no write methods exist on the interface).
+- The preview code path makes zero calls into the `hooks.Store`, no writes via `state` package writers (`SetSkeletonMarker`, `WriteScrollbackIfChanged`, etc.), and no FIFO creation or drain. Verifiable by snapshotting the relevant state before/after the preview interaction.
+
+The intent is a hermetic, no-write code path — the assertions above are the operationalisation of "side-effect-free".
 
 ### Open Items Handed to the Build Phase
 
