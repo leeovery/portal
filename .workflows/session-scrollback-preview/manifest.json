@@ -23,7 +23,7 @@
       "items": {
         "session-scrollback-preview": {
           "status": "in-progress",
-          "review_cycle": 1,
+          "review_cycle": 2,
           "finding_gate_mode": "auto",
           "date": "2026-05-06",
           "sources": {
