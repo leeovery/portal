@@ -31,8 +31,8 @@ The discussion makes a deliberate point of flagging this as the *only* material 
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Override traceability" paragraph at the end of § No In-preview Between-Session Stepping.
 
 ---
 

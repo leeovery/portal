@@ -176,6 +176,8 @@ Preview is bound to **one session per open**. There are no key bindings inside p
 
 **Reversibility.** Adding in-preview between-session stepping later is additive (a new keymap entry plus cursor-sync semantics), not a rewrite. It is intentionally out of scope for v1.
 
+**Override traceability.** Earlier research had locked "in-preview between-session stepping" (Claude Code resume-style) as part of the feature shape. This spec deliberately overrides that constraint in favour of the simpler `Esc → arrow → Space` loop documented above. This is the only material deviation from the research-locked shape; recorded here so future readers (or future spec revisions) do not silently re-introduce the original assumption from the research source.
+
 ### Filter Behaviour with Preview
 
 `bubbles/list`'s filter mode has two phases that interact differently with `Space`:
