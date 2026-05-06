@@ -50,6 +50,8 @@ Sessions can contain multiple windows, each with multiple panes. Preview renders
 
 The literal `window_layout` is **not** rendered. No layout parser. Visual fidelity is discharged by chrome (counts, names, position) rather than by reproducing the spatial grid.
 
+**Real-world distribution.** Empirically the dominant case is single-window single-pane: a sample on the original developer's machine showed 14 of 16 sessions were 1-pane, consistent with a ~95% single-window single-pane share across typical Portal usage. The minimalism choice (sequential window-grouped, no literal layout parser) is anchored to that distribution — the rendering shape only matters for the 2+ pane minority, and even there the chrome carries the structural disambiguation signal that fidelity would otherwise carry. If the distribution shifts (e.g. heavy multi-pane workflows become common), the literal-layout option remains additively reachable.
+
 #### Within-preview Key Bindings
 
 | Key | Action |

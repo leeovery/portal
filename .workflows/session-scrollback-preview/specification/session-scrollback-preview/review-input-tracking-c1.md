@@ -95,8 +95,8 @@ The discussion's Multi-pane decision is partly justified by an empirical observa
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Real-world distribution" paragraph at top of § Multi-pane Rendering Shape grounding minimalism in 14-of-16 / ~95% data.
 
 ---
 
