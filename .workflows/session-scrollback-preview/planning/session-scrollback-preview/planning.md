@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Read pipeline and structural enumeration foundations
-status: draft
+status: approved
+approved_at: 2026-05-07
 
 **Goal**: Establish the two production seams the preview page depends on — a tail-N scrollback reader in `internal/state` and a window-grouped pane enumeration call on `tmux.Client` — each independently testable.
 
@@ -19,7 +20,8 @@ status: draft
 - [ ] Existing `tmux.Client` capture path is unchanged (no new capture wrappers, `CapturePane` signature untouched).
 
 ### Phase 2: Preview page entry, dismiss, and single-pane content rendering
-status: draft
+status: approved
+approved_at: 2026-05-07
 
 **Goal**: Add the `pagePreview` arm to the TUI page state machine with constructor-injected `TmuxEnumerator` and `ScrollbackReader` seams. `Space` on the Sessions page opens preview for the highlighted session, the focused pane's tail-N bytes render verbatim into a `bubbles/viewport`, and `Esc` returns to the Sessions list at the original cursor.
 
@@ -40,7 +42,8 @@ status: draft
 - [ ] Loading and Projects/FileBrowser pages have no `Space` binding for preview.
 
 ### Phase 3: Multi-pane cycling, chrome, and focus-change reads
-status: draft
+status: approved
+approved_at: 2026-05-07
 
 **Goal**: Layer the within-preview keymap (`]`, `[`, `Tab`) and chrome rendering (window M of N, pane X of Y, window name, keystroke hints) onto the preview page, with each focus-changing event triggering a fresh tail-N read of the newly-focused pane.
 
@@ -59,7 +62,8 @@ status: draft
 - [ ] Within-preview keymap collisions with `bubbles/viewport` defaults are resolved in preview's favour — `]`, `[`, and `Tab` are owned by preview and not consumed by the embedded viewport.
 
 ### Phase 4: Edge-case handling and cross-cutting integration
-status: draft
+status: approved
+approved_at: 2026-05-07
 
 **Goal**: Pin down the three placeholder/error outcomes, the externally-killed-session re-fetch contract, the brand-new-session case, and the side-effect-free invariant — so preview behaves correctly across every scenario the spec acceptance criteria enumerate.
 
