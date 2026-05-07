@@ -243,6 +243,7 @@ total: 7
 - [ ] The string contains visible cycle-key hints: at minimum `]`, `[`, `Tab`, `Esc` each appear textually.
 - [ ] Counters never expose raw tmux `WindowIndex` or `PaneIndices[i]` values — confirmed by a test case with non-contiguous indices.
 - [ ] `chromeLine()` is pure: no I/O, no calls to `m.reader` or `m.enumerator`, no goroutines.
+- [ ] The chrome wording does not promise liveness — no substrings such as `"live"`, `"now showing"`, `"current"`, `"realtime"`, or other language implying the rendered content is live tmux output. Preview is a snapshot per spec § *Source of Preview Bytes > Surface label honesty*; chrome wording must reflect that.
 
 **Tests**:
 - `"chromeLine renders 1-based ordinals for 0-indexed groups"`
@@ -251,6 +252,7 @@ total: 7
 - `"chromeLine includes the window name verbatim including spaces"`
 - `"chromeLine includes ] [ Tab Esc as visible hints"`
 - `"chromeLine produces no I/O when invoked (does not call reader or enumerator)"`
+- `"chromeLine wording does not promise liveness"` — assert the rendered string (case-insensitive) contains none of the substrings `live`, `now showing`, `realtime`, `current command`, or other liveness-implying tokens; pin the negative-substring set in the test so future wording changes have to update the guard deliberately.
 
 **Edge Cases**:
 - Window name with whitespace: render verbatim (no trimming, no quoting).

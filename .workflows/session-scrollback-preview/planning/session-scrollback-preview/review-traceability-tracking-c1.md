@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-07
 cycle: 1
 phase: Traceability Review
@@ -70,5 +70,5 @@ Task 3-5 currently asserts only structural content (counters, window name, hint 
 - `"chromeLine wording does not promise liveness"` — assert the rendered string (case-insensitive) contains none of the substrings `live`, `now showing`, `realtime`, `current command`, or other liveness-implying tokens; pin the negative-substring set in the test so future wording changes have to update the guard deliberately.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The proposed criterion is a negative-substring guard, which is the simplest operationalisation of the spec constraint without dictating the build-phase's positive wording choice. The criterion can be revised down to a comment-level note if the orchestrator/user prefers a softer guard, but pinning it as an AC + test is the durable form.
