@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 5
 phase: Plan Integrity Review
@@ -52,5 +52,5 @@ Phase 4 Task 4-5 contains a structurally similar test phrasing at multiple Tests
 - `"Esc dismisses cleanly from a fully-degraded preview"` — after all panes return `(nil, nil)`, send `Esc`; assert transition to `PageSessions` succeeds.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical alignment with the actual `internal/tui/model.go` page-constant casing. No spec content changes; no acceptance criterion changes meaning; no architectural impact. Same category and severity as cycle 4 finding. The narrative transition-arrow form (`pagePreview → pageSessions`) appearing elsewhere in the plan is a defensible spec-inherited convention and is intentionally left unchanged — it describes the abstract transition, not the live constant. Only the backticked code-identifier in Task 4-6's Tests bullet drifts in a way that misleads an implementer.

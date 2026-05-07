@@ -294,7 +294,7 @@ The dismiss handler must continue to preserve the `bubbles/list` cursor and filt
 - `"no live re-enumeration mid-preview when session is killed"` — assert `TmuxEnumerator` call count == 1 across the entire test.
 - `"cycle keys continue to traverse after content vanishes"` — assert all 4 pane positions are reachable even when all return `(nil, nil)`.
 - `"no panic when all panes return (nil, nil) mid-preview"` — assert no error / no crash after full cycle through all-placeholder state.
-- `"Esc dismisses cleanly from a fully-degraded preview"` — after all panes return `(nil, nil)`, send `Esc`; assert transition to `pageSessions` succeeds.
+- `"Esc dismisses cleanly from a fully-degraded preview"` — after all panes return `(nil, nil)`, send `Esc`; assert transition to `PageSessions` succeeds.
 
 **Edge Cases**:
 - `.bin` deleted between two consecutive focus events (the spec's specific scenario).
