@@ -20,7 +20,8 @@ approved_at: 2026-05-07
 - [ ] Existing `tmux.Client` capture path is unchanged (no new capture wrappers, `CapturePane` signature untouched).
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-07
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
