@@ -19,6 +19,18 @@ approved_at: 2026-05-07
 - [ ] The enumeration call surfaces tmux failures as errors (consumed by preview as the silent-no-open path) and returns an empty result faithfully when a session has zero windows or panes.
 - [ ] Existing `tmux.Client` capture path is unchanged (no new capture wrappers, `CapturePane` signature untouched).
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-scrollback-preview-1-1 | Tail-N reverse-scan helper happy path | file with fewer than N lines returns all lines, multi-chunk reverse scan when N lines span chunk boundary, file exactly N lines |
+| session-scrollback-preview-1-2 | Tail-N helper no-content shape | ENOENT vs zero-byte file, file with content but no trailing newline, file with only unterminated partial line, file with terminated lines plus trailing partial |
+| session-scrollback-preview-1-3 | Tail-N helper OS-error shape | permission-denied open, mid-scan read error, ensure ENOENT does NOT take this branch |
+| session-scrollback-preview-1-4 | Tail-N performance benchmark | fixture generation cost excluded from measured region, benchmark resets timer after setup |
+| session-scrollback-preview-1-5 | Window-grouped pane enumeration on tmux.Client | non-contiguous window_index (0, 2, 5), base-index 1 / pane-base-index 1, window names containing the pipe delimiter or whitespace, multiple panes per window |
+| session-scrollback-preview-1-6 | Enumeration failure and empty-result handling | session-disappeared mid-call (tmux exit non-zero), empty stdout vs error, ensure no new capture wrapper introduced |
+
 ### Phase 2: Preview page entry, dismiss, and single-pane content rendering
 status: approved
 approved_at: 2026-05-07
