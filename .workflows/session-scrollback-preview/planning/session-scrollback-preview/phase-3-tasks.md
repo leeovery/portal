@@ -348,7 +348,7 @@ total: 7
 - [ ] Tail call count across the sequence equals 1 (open) + the number of focus-changing cycles in the sequence — i.e. cycle handlers always read once per focus change, never zero, never two.
 
 **Tests**:
-- `"full ] [ Tab cycle sequence produces exactly one Enumerate call"`
+- `"full ] [ Tab cycle sequence produces exactly one ListWindowsAndPanesInSession call"`
 - `"chromeLine after each cycle reflects open-time cached groups"`
 - `"chromeLine never reflects post-open enumerator state changes"`
 - `"Tail calls per cycle = 1 (no double-read, no skipped read)"`

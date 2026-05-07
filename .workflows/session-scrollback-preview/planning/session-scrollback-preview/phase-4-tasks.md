@@ -281,7 +281,7 @@ The dismiss handler must continue to preserve the `bubbles/list` cursor and filt
 - Assert no panic, no error frame, no crash.
 
 **Acceptance Criteria**:
-- [ ] `TmuxEnumerator.Enumerate` is called exactly once across the entire test (regression-pin against mid-preview re-enumeration).
+- [ ] `TmuxEnumerator.ListWindowsAndPanesInSession` is called exactly once across the entire test (regression-pin against mid-preview re-enumeration).
 - [ ] Chrome `Window M of N`, `Pane X of Y`, and window name remain stable across all cycle events, regardless of content availability.
 - [ ] As the mock progressively returns `(nil, nil)`, the viewport renders placeholder for those panes.
 - [ ] No panic / no error frame is raised when content reads start failing.
@@ -380,7 +380,7 @@ Preview must NOT add any name-based check on `_portal-saver` — the spec explic
 **Outcome**: A single test pins the side-effect-free contract end-to-end. Any future change that introduces a hidden write — e.g. a "warm cache" that calls `SetSkeletonMarker`, or a "helpful" hook firing on preview-dismiss — breaks this test.
 
 **Do**:
-- In `internal/tui/pagepreview_test.go`, build a recording `TmuxEnumerator` mock: tracks `Enumerate(session)` call count and arguments.
+- In `internal/tui/pagepreview_test.go`, build a recording `TmuxEnumerator` mock: tracks `ListWindowsAndPanesInSession(session)` call count and arguments.
 - Build a recording `ScrollbackReader` mock: tracks `Tail(paneKey)` call count and arguments.
 - For `hooks.Store`, the preview model should not import or accept a `hooks.Store` at all — assert this structurally (the `previewModel` constructor signature does not include `hooks.Store` or any hook-firing dependency). If somehow it does, the test fails the spec.
 - For `state`-package writers: preview's only `state` dependency is the read-side helper (closed over inside the `ScrollbackReader` adapter). Assert the preview model's package imports do not include any `state` writer — this can be a static assertion via `go/parser` or a grep-style test that reads `pagepreview.go` and asserts the strings `SetSkeletonMarker`, `WriteScrollbackIfChanged`, `os.Create`, `os.Mkdir`, `mkfifo` are absent.
@@ -394,7 +394,7 @@ Preview must NOT add any name-based check on `_portal-saver` — the spec explic
 
 **Acceptance Criteria**:
 - [ ] Test builds against fully-mocked seams; no real tmux, no live daemon, no real filesystem.
-- [ ] After a full open + cycle + dismiss flow, `TmuxEnumerator.Enumerate` was called exactly once.
+- [ ] After a full open + cycle + dismiss flow, `TmuxEnumerator.ListWindowsAndPanesInSession` was called exactly once.
 - [ ] `ScrollbackReader.Tail` was called exactly once per focus event; no other reads.
 - [ ] Static audit (or constructor signature check) confirms preview has zero `hooks.Store` dependency.
 - [ ] Static audit confirms preview has zero `state`-package writer references.

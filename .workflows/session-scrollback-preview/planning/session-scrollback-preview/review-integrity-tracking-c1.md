@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 1
 phase: Plan Integrity Review
@@ -72,7 +72,7 @@ For Task 3-7 — update the first **Tests** entry:
 - `"full ] [ Tab cycle sequence produces exactly one ListWindowsAndPanesInSession call"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Task 2-1's interface declaration and Phase 1 Task 1-5's `*tmux.Client` method both use `ListWindowsAndPanesInSession`. This finding aligns 4-8, 4-6, and 3-7 with that single name. No spec content changes; purely a naming consistency fix.
 
 ---
@@ -121,7 +121,7 @@ The convention in the rest of `internal/tui/` is single-word filenames like `mod
 - In `internal/tui/pagepreview.go` (or wherever `previewModel` lives), in `previewModel.Update`:
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This change harmonises file naming across all four phases. Phase 4 tasks already use `pagepreview.go` correctly; the fix is to update Phase 2 (Tasks 2-2 and 2-4) to match. No content change; purely the filename string. Test file (`pagepreview_test.go`) is already consistent and needs no edit.
 
 ---
@@ -150,5 +150,5 @@ The fix is to align the test wording with the Do section's binding shape — mat
 - `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}` (Bubble Tea has no `tea.KeySpace` constant — space is a runes key), drive `Update`, assert `m.page == pagePreview`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Minor inaccuracy that would surface as a one-line compile error and easy fix at implementation time. Updating the plan keeps the test name list accurate without redesigning anything.

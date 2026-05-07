@@ -56,12 +56,12 @@ total: 7
 
 **Problem**: A preview model is needed that owns the embedded `bubbles/viewport`, current focus indices, captured structural enumeration, and minimal keymap — constructed fresh on every `Space` press with no caching. The initial-open flow has spec-mandated ordering: enumeration first, fail/empty → silent no-open, success → set focus to window 0 / pane 0 and synchronously read tail-N bytes for that pane, then render chrome and viewport atomically in the first frame.
 
-**Solution**: Add a `previewModel` struct in a new file (e.g. `internal/tui/preview.go`) plus an exported constructor `NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, width, height int) (previewModel, bool)` returning `(model, ok)` where `ok=false` signals "do not transition to pagePreview". The constructor performs steps 1–4 of the spec's initial-open ordering inline; the caller (Sessions page) checks `ok` to decide whether to switch pages.
+**Solution**: Add a `previewModel` struct in a new file (e.g. `internal/tui/pagepreview.go`) plus an exported constructor `NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, width, height int) (previewModel, bool)` returning `(model, ok)` where `ok=false` signals "do not transition to pagePreview". The constructor performs steps 1–4 of the spec's initial-open ordering inline; the caller (Sessions page) checks `ok` to decide whether to switch pages.
 
 **Outcome**: A constructor-injected `previewModel` exists that, on construction, runs structural enumeration, returns `ok=false` on enumeration error or empty result (zero windows, or first window having zero panes), and on success sets focus to (0, 0) and reads the focused pane's tail-N bytes synchronously, populating the embedded `viewport.Model` via `SetContent`. A tail-N read failure does NOT block opening — placeholder/error rendering is the v1 default; in this task, the simple form is "pass whatever bytes (possibly nil) into the viewport". The model exposes an `Update`, `View`, and a way to read its current `windowIdx`/`paneIdx` for tests.
 
 **Do**:
-- In `internal/tui/preview.go` declare:
+- In `internal/tui/pagepreview.go` declare:
   - `type previewModel struct { session string; enumerator TmuxEnumerator; reader ScrollbackReader; groups []tmux.WindowGroup; windowIdx, paneIdx int; viewport viewport.Model; width, height int }` (visibility is package-private; only the constructor and any helpers exported as needed for tests).
   - `func NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, width, height int) (previewModel, bool)`.
 - Inside the constructor, in order:
@@ -144,7 +144,7 @@ total: 7
 - [ ] When `Space` is pressed during `SettingFilter()`, this branch does not call `NewPreviewModel` (passthrough integration is finalised in task 2-5).
 
 **Tests**:
-- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeySpace}`, drive `Update`, assert `m.page == pagePreview`.
+- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}` (Bubble Tea has no `tea.KeySpace` constant — space is a runes key), drive `Update`, assert `m.page == pagePreview`.
 - `"it remains on Sessions page when Space is pressed on an empty list"` — empty list, Space; assert page unchanged, `NewPreviewModel` not called (mock counter zero).
 - `"it remains on Sessions page when enumeration fails"` — `TmuxEnumerator` mock returns error; Space; assert page unchanged.
 - `"it remains on Sessions page when enumeration returns empty"` — mock returns empty groups; Space; assert page unchanged.
@@ -175,7 +175,7 @@ total: 7
 **Outcome**: `Esc` while on `pagePreview` returns the user to the Sessions list. The list cursor is byte-identical to where it was when `Space` was pressed (verified by reading `m.list.Index()` before and after). Committed filter state remains committed; no-filter remains no-filter. A second `Esc` (now on the Sessions page with a committed filter) clears the filter via `bubbles/list`'s default behaviour — preview doesn't need to do anything to make this work.
 
 **Do**:
-- In `internal/tui/preview.go` (or wherever `previewModel` lives), in `previewModel.Update`:
+- In `internal/tui/pagepreview.go` (or wherever `previewModel` lives), in `previewModel.Update`:
   - Match `tea.KeyMsg` with `Type == tea.KeyEsc` (or `String() == "esc"`).
   - Return a sentinel `tea.Cmd` that emits `previewDismissedMsg{}` (declare the type in the same file).
 - In `internal/tui/model.go` top-level `Update`, handle `previewDismissedMsg`:
