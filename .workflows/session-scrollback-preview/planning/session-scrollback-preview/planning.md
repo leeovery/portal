@@ -120,3 +120,19 @@ approved_at: 2026-05-07
 - [ ] `_portal-saver` exclusion is confirmed at the Sessions-list source; if any leak is found, it is fixed at the source — no preview-layer name blacklist is introduced.
 - [ ] A side-effect-free hermetic test opens preview on a session, cycles through every pane, and dismisses, asserting: exactly one `TmuxEnumerator` call, `ScrollbackReader.Tail` calls only (one per focus event, no other I/O), zero `hooks.Store` calls, zero `state` package writes (`SetSkeletonMarker`, `WriteScrollbackIfChanged`, etc.), and zero FIFO creation/drain.
 - [ ] No new methods are added to `tmux.Client` beyond the single read-only listing method from Phase 1; no daemon, restore, bootstrap, hooks, or save-format changes are made.
+
+#### Tasks
+status: approved
+approved_at: 2026-05-07
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-scrollback-preview-4-1 | Placeholder rendering for (nil, nil) Tail outcomes | ENOENT, zero-byte file, zero-line file with only an unterminated partial line, chrome integrity under placeholder, focused pane at open vs after cycle |
+| session-scrollback-preview-4-2 | Error-string rendering for (nil, err) Tail outcomes with retry-on-refocus | uniform string across errno types (no EACCES vs EIO branch), no per-pane error cache, retry on Tab-away-and-back, retry on `]` / `[` and back |
+| session-scrollback-preview-4-3 | Fewer-than-N lines renders all available lines (non-placeholder partial read) | 1-line file, exactly 999 lines, viewport opens at scroll-tail not scroll-top, scroll-up at top is silent no-op |
+| session-scrollback-preview-4-4 | Brand-new-session traversal with placeholders on every pane | every pane (nil, nil), mixed session where one pane has bytes and others do not, chrome counts correct under all-placeholder state, cycle keys traverse all structural entries |
+| session-scrollback-preview-4-5 | Sessions-list re-fetch on pagePreview → pageSessions transition | existing on-entry refresh path discovered vs gap requiring new dispatch, cursor lands on a neighbouring session when previous session is gone, no-op when nothing has changed |
+| session-scrollback-preview-4-6 | Externally-killed-session in-preview stability with progressive placeholders | `.bin` deleted between focus events, all panes turn into placeholders, chrome counters do not change mid-preview, no errors crash the page |
+| session-scrollback-preview-4-7 | Confirm _portal-saver exclusion at Sessions-list source | leak found and fixed at source vs already excluded (audit-only outcome), regression-pin test, no preview-layer name blacklist introduced |
+| session-scrollback-preview-4-8 | Side-effect-free hermetic invariant test | exactly one TmuxEnumerator call across full cycle, exactly one ScrollbackReader.Tail call per focus event and zero other I/O, zero hooks.Store calls, zero state-package writes, zero FIFO creation or drain |
+| session-scrollback-preview-4-9 | No-new-surface audit and regression guard | audit-only task, no incidental new tmux.Client wrappers, no daemon / restore / bootstrap / hooks / save-format changes |
