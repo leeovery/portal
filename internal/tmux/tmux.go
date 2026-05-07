@@ -421,6 +421,95 @@ func (c *Client) ListPanesInSession(session string) ([]PaneCoord, error) {
 	return coords, nil
 }
 
+// WindowGroup is a window's enumeration shape: its raw tmux window_index, its
+// window name (#W), and the raw pane_index values of every pane in the window
+// in ascending order. Returned by ListWindowsAndPanesInSession to give callers
+// (notably the preview chrome) everything they need for "Window M of N" /
+// "Pane X of Y" / window-name labels and for state.SanitizePaneKey lookups, in
+// a single read-only tmux call.
+type WindowGroup struct {
+	WindowIndex int
+	WindowName  string
+	PaneIndices []int
+}
+
+// listWindowsAndPanesFieldSep is the field separator embedded in the tmux -F
+// format string for ListWindowsAndPanesInSession. We deliberately use ASCII
+// 0x1f (Unit Separator) rather than '|' so window names containing pipes
+// (which tmux permits) round-trip without ambiguity. The character is non-
+// printable, so it cannot collide with anything tmux emits in window names.
+const listWindowsAndPanesFieldSep = "\x1f"
+
+// ListWindowsAndPanesInSession enumerates every pane in the named session and
+// returns one WindowGroup per window, sorted by raw window_index ascending,
+// with each group's PaneIndices sorted by raw pane_index ascending. The first
+// occurrence of a given window_index supplies that group's WindowName; later
+// rows for the same window only contribute pane indices.
+//
+// Indices are returned verbatim — under base-index 1 / pane-base-index 1 the
+// values are 1-based; non-contiguous window_index values (after window kills)
+// are preserved without gap-padding. Callers that need 1-based ordinal counters
+// for chrome ("Window M of N") derive them from slice position, not from
+// WindowIndex.
+//
+// Field separator: ASCII 0x1f (Unit Separator) — non-printable, chosen so
+// window names containing '|' round-trip intact. See
+// listWindowsAndPanesFieldSep.
+func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, error) {
+	format := "#{window_index}" + listWindowsAndPanesFieldSep +
+		"#{window_name}" + listWindowsAndPanesFieldSep +
+		"#{pane_index}"
+	out, err := c.cmd.Run("list-panes", "-s", "-t", session, "-F", format)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list windows and panes in session %q: %w", session, err)
+	}
+	if out == "" {
+		return []WindowGroup{}, nil
+	}
+
+	// Group rows by window_index, preserving first-seen window name and
+	// accumulating pane indices in encounter order. byIndex tracks position
+	// inside the result slice so we don't have to re-scan to append.
+	groups := make([]WindowGroup, 0)
+	byIndex := make(map[int]int)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, listWindowsAndPanesFieldSep, 3)
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("unexpected window/pane format %q", line)
+		}
+		win, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid window index %q in line %q: %w", parts[0], line, err)
+		}
+		pane, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return nil, fmt.Errorf("invalid pane index %q in line %q: %w", parts[2], line, err)
+		}
+		if pos, ok := byIndex[win]; ok {
+			groups[pos].PaneIndices = append(groups[pos].PaneIndices, pane)
+			continue
+		}
+		byIndex[win] = len(groups)
+		groups = append(groups, WindowGroup{
+			WindowIndex: win,
+			WindowName:  parts[1],
+			PaneIndices: []int{pane},
+		})
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].WindowIndex < groups[j].WindowIndex
+	})
+	for i := range groups {
+		sort.Ints(groups[i].PaneIndices)
+	}
+	return groups, nil
+}
+
 // ListPanes returns the structural keys for panes belonging to the named tmux session.
 // Each key has the form "session_name:window_index.pane_index" (e.g. "my-project:0.0").
 // Structural keys survive tmux server restarts (unlike ephemeral pane IDs).
