@@ -41,12 +41,16 @@
           "format": "tick",
           "spec_commit": "0a91621db44c5f5412ea79745e35f3b98b7a91d1",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "session-scrollback-preview-1-1",
-          "task_map": {}
+          "task": "session-scrollback-preview-1-2",
+          "task_map": {
+            "session-scrollback-preview-1": "tick-5bb838",
+            "session-scrollback-preview-1-1": "tick-20e56b"
+          },
+          "external_id": "tick-6527e1"
         }
       }
     }
