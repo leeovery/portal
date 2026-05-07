@@ -45,7 +45,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 4,
-          "task": "session-scrollback-preview-4-8",
+          "task": "session-scrollback-preview-4-9",
           "task_map": {
             "session-scrollback-preview-1": "tick-5bb838",
             "session-scrollback-preview-1-1": "tick-20e56b",
@@ -77,7 +77,8 @@
             "session-scrollback-preview-4-4": "tick-c07dea",
             "session-scrollback-preview-4-5": "tick-096107",
             "session-scrollback-preview-4-6": "tick-1cda6d",
-            "session-scrollback-preview-4-7": "tick-cc2442"
+            "session-scrollback-preview-4-7": "tick-cc2442",
+            "session-scrollback-preview-4-8": "tick-9cc90b"
           },
           "external_id": "tick-6527e1"
         }
