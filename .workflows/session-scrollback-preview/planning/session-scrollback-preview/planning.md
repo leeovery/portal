@@ -100,7 +100,7 @@ approved_at: 2026-05-07
 | session-scrollback-preview-3-4 | Keymap precedence over embedded viewport | `]` `[` `Tab` never reach viewport.Update, scroll keys still passthrough, no double-handling |
 | session-scrollback-preview-3-5 | Chrome rendering: counters, window name, and keystroke hints | non-contiguous window_index never leaks into M/N, base-index 1 still shows 1..N, window name with spaces or unusual characters, hint string visible |
 | session-scrollback-preview-3-6 | Chrome layout integration with viewport sizing | small terminal heights, tea.WindowSizeMsg updates chrome+viewport atomically, resize triggers zero Tail calls, chrome line height stable across cycles |
-| session-scrollback-preview-3-7 | Chrome stability under focus changes (no mid-preview re-enumeration) | full cycle of `]` `[` `Tab` produces one Enumerate call only, counters update from cached groups, no live tmux re-enumeration mid-preview |
+| session-scrollback-preview-3-7 | Chrome stability under focus changes (no mid-preview re-enumeration) | full cycle of `]` `[` `Tab` produces one ListWindowsAndPanesInSession call only, counters update from cached groups, no live tmux re-enumeration mid-preview |
 
 ### Phase 4: Edge-case handling and cross-cutting integration
 status: approved

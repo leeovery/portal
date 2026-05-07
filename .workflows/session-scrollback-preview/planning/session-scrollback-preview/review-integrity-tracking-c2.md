@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 2
 phase: Plan Integrity Review
@@ -38,5 +38,5 @@ The task body text in `phase-3-tasks.md` is correct; only the summary cell in `p
 | session-scrollback-preview-3-7 | Chrome stability under focus changes (no mid-preview re-enumeration) | full cycle of `]` `[` `Tab` produces one ListWindowsAndPanesInSession call only, counters update from cached groups, no live tmux re-enumeration mid-preview |
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical alignment with cycle 1 finding #1's fix. No architectural or scope impact; pure consistency cleanup.
