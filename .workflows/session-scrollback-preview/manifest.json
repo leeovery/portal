@@ -45,11 +45,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "session-scrollback-preview-1-3",
+          "task": "session-scrollback-preview-1-4",
           "task_map": {
             "session-scrollback-preview-1": "tick-5bb838",
             "session-scrollback-preview-1-1": "tick-20e56b",
-            "session-scrollback-preview-1-2": "tick-103bdc"
+            "session-scrollback-preview-1-2": "tick-103bdc",
+            "session-scrollback-preview-1-3": "tick-184c2f"
           },
           "external_id": "tick-6527e1"
         }
