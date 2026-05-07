@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 3
 phase: Plan Integrity Review
@@ -250,5 +250,5 @@ This is purely a name-translation issue from planning that didn't consult the ac
 - `"it does not register a second open-preview binding for filter mode"` — code-level test: assert no key in the keymap has `Space` while `SettingFilter` is true that fires preview. (Can be enforced via the test that the Space-during-SettingFilter path consumes the message via `m.sessionList.Update` only.)
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical alignment with the actual `internal/tui/model.go` field names. No spec content changes; no architectural impact. Phases 1, 3, and 4 do not contain `m.page` / `m.list` references, so the fix is confined to `phase-2-tasks.md`. After this fix, the plan's pseudo-Go references compile cleanly against the real `Model`.

@@ -125,12 +125,12 @@ total: 7
 - Add a `preview previewModel` field (and optionally a `hasPreview bool` sentinel, since Go zero values for the embedded viewport are not meaningful) to the root `Model`.
 - In the top-level `Update` switch, add a case for `pagePreview` that delegates to `m.preview.Update(msg)` and returns the updated model. Cycle keys, Esc, and resize are handled in tasks 2-3..2-6 (this task lands the routing skeleton; per-key behaviour comes from those tasks or 2-2's `Update` delegation).
 - In `updateSessionsPage` (Sessions page handler), add a `tea.KeyMsg` branch matching `Space` (key string `" "` or use `bubbles/key.NewBinding(key.WithKeys(" "))`):
-  1. If `m.list.SettingFilter()` is true → fall through to `bubbles/list`'s default handler (literal-space passthrough is task 2-5; this branch must NOT fire `NewPreviewModel`).
-  2. If the list is empty (`len(m.list.Items()) == 0`) or `m.list.SelectedItem() == nil` → return without transition (no-op).
+  1. If `m.sessionList.SettingFilter()` is true → fall through to `bubbles/list`'s default handler (literal-space passthrough is task 2-5; this branch must NOT fire `NewPreviewModel`).
+  2. If the list is empty (`len(m.sessionList.Items()) == 0`) or `m.sessionList.SelectedItem() == nil` → return without transition (no-op).
   3. Resolve the highlighted session name from the selected item.
   4. Construct `previewModel := NewPreviewModel(sessionName, m.enumerator, m.reader, m.width, m.height)`. The seams `m.enumerator` and `m.reader` arrive from task 2-7's TUI construction; in this task the fields are added with placeholder zero values acceptable for compilation.
   5. If `ok==false` → return without transition (no preview page shown).
-  6. If `ok==true` → store `m.preview = pmodel`, set `m.page = pagePreview`, return.
+  6. If `ok==true` → store `m.preview = pmodel`, set `m.activePage = pagePreview`, return.
 - Confirm Loading, Projects, and FileBrowser page handlers do NOT bind `Space` to preview. (Verify by code inspection; no edit required if the existing handlers do not match `Space`.)
 
 **Acceptance Criteria**:
@@ -144,13 +144,13 @@ total: 7
 - [ ] When `Space` is pressed during `SettingFilter()`, this branch does not call `NewPreviewModel` (passthrough integration is finalised in task 2-5).
 
 **Tests**:
-- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}` (Bubble Tea has no `tea.KeySpace` constant — space is a runes key), drive `Update`, assert `m.page == pagePreview`.
+- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}` (Bubble Tea has no `tea.KeySpace` constant — space is a runes key), drive `Update`, assert `m.activePage == pagePreview`.
 - `"it remains on Sessions page when Space is pressed on an empty list"` — empty list, Space; assert page unchanged, `NewPreviewModel` not called (mock counter zero).
 - `"it remains on Sessions page when enumeration fails"` — `TmuxEnumerator` mock returns error; Space; assert page unchanged.
 - `"it remains on Sessions page when enumeration returns empty"` — mock returns empty groups; Space; assert page unchanged.
-- `"it does not bind Space on the Loading page"` — drive `Update` with `m.page == PageLoading` and a Space KeyMsg; assert no preview construction.
-- `"it does not bind Space on the Projects page"` — same but `m.page == PageProjects`.
-- `"it does not bind Space on the FileBrowser page"` — same but `m.page == pageFileBrowser`.
+- `"it does not bind Space on the Loading page"` — drive `Update` with `m.activePage == PageLoading` and a Space KeyMsg; assert no preview construction.
+- `"it does not bind Space on the Projects page"` — same but `m.activePage == PageProjects`.
+- `"it does not bind Space on the FileBrowser page"` — same but `m.activePage == pageFileBrowser`.
 
 **Edge Cases**:
 - Enumeration failure must be treated identically to empty enumeration (silent no-open).
@@ -170,40 +170,40 @@ total: 7
 
 **Problem**: Within preview, `Esc` must return the user to the Sessions list with the cursor at the same position it was on when `Space` was pressed, and with filter state preserved per the Esc level tree (committed filter remains committed; no filter remains no filter; mid-typing-filter is a sessions-page concern handled by `bubbles/list`'s default Esc behaviour, not preview's). The preview model owns one Esc level: dismiss preview.
 
-**Solution**: In `previewModel.Update`, intercept `Esc` and return a marker (either via a returned `tea.Cmd` carrying a `previewDismissedMsg`, or by setting a flag the root model consults). The root model reacts by setting `m.page = PageSessions`. The `bubbles/list` model is left untouched across the open/dismiss round-trip — its cursor and filter state survive automatically because preview never mutates it.
+**Solution**: In `previewModel.Update`, intercept `Esc` and return a marker (either via a returned `tea.Cmd` carrying a `previewDismissedMsg`, or by setting a flag the root model consults). The root model reacts by setting `m.activePage = PageSessions`. The `bubbles/list` model is left untouched across the open/dismiss round-trip — its cursor and filter state survive automatically because preview never mutates it.
 
-**Outcome**: `Esc` while on `pagePreview` returns the user to the Sessions list. The list cursor is byte-identical to where it was when `Space` was pressed (verified by reading `m.list.Index()` before and after). Committed filter state remains committed; no-filter remains no-filter. A second `Esc` (now on the Sessions page with a committed filter) clears the filter via `bubbles/list`'s default behaviour — preview doesn't need to do anything to make this work.
+**Outcome**: `Esc` while on `pagePreview` returns the user to the Sessions list. The list cursor is byte-identical to where it was when `Space` was pressed (verified by reading `m.sessionList.Index()` before and after). Committed filter state remains committed; no-filter remains no-filter. A second `Esc` (now on the Sessions page with a committed filter) clears the filter via `bubbles/list`'s default behaviour — preview doesn't need to do anything to make this work.
 
 **Do**:
 - In `internal/tui/pagepreview.go` (or wherever `previewModel` lives), in `previewModel.Update`:
   - Match `tea.KeyMsg` with `Type == tea.KeyEsc` (or `String() == "esc"`).
   - Return a sentinel `tea.Cmd` that emits `previewDismissedMsg{}` (declare the type in the same file).
 - In `internal/tui/model.go` top-level `Update`, handle `previewDismissedMsg`:
-  - Set `m.page = PageSessions`.
-  - Do NOT mutate `m.list` (cursor and filter state must survive untouched).
+  - Set `m.activePage = PageSessions`.
+  - Do NOT mutate `m.sessionList` (cursor and filter state must survive untouched).
   - Optional: zero out `m.preview` to release viewport memory; the next `Space` constructs fresh.
-- Confirm that `bubbles/list` cursor (`m.list.Index()`) and filter state (`m.list.IsFiltered()`, `m.list.FilterValue()`) are not consulted/mutated during preview lifetime.
+- Confirm that `bubbles/list` cursor (`m.sessionList.Index()`) and filter state (`m.sessionList.IsFiltered()`, `m.sessionList.FilterValue()`) are not consulted/mutated during preview lifetime.
 - Note: re-fetch on dismiss (for externally-killed sessions) is Phase 4 scope; this task only preserves existing cursor/filter, not session-list refresh.
 
 **Acceptance Criteria**:
 - [ ] `Esc` while on `pagePreview` transitions back to `PageSessions`.
-- [ ] After dismiss, `m.list.Index()` equals the value captured before `Space`.
-- [ ] After dismiss, `m.list.FilterValue()` equals the value captured before `Space` (no filter case).
-- [ ] After dismiss when a filter was committed before `Space`, the filter remains committed (`m.list.IsFiltered() == true` and same `FilterValue()`).
+- [ ] After dismiss, `m.sessionList.Index()` equals the value captured before `Space`.
+- [ ] After dismiss, `m.sessionList.FilterValue()` equals the value captured before `Space` (no filter case).
+- [ ] After dismiss when a filter was committed before `Space`, the filter remains committed (`m.sessionList.IsFiltered() == true` and same `FilterValue()`).
 - [ ] A subsequent `Esc` on the Sessions page falls through to `bubbles/list`'s default Esc handling (committed filter clears, then unfiltered list), confirmed by integration test driving two consecutive Escs.
 - [ ] Re-opening preview after dismiss constructs a fresh `previewModel` (no carried-over state).
 
 **Tests**:
 - `"it dismisses preview on Esc and returns to PageSessions"` — open preview, drive Esc; assert page transitions.
-- `"it preserves the list cursor across open/dismiss"` — set list cursor to index 3, Space, Esc; assert `m.list.Index() == 3`.
-- `"it preserves the no-filter state across open/dismiss"` — list with no filter, Space, Esc; assert `m.list.FilterValue() == ""`.
+- `"it preserves the list cursor across open/dismiss"` — set list cursor to index 3, Space, Esc; assert `m.sessionList.Index() == 3`.
+- `"it preserves the no-filter state across open/dismiss"` — list with no filter, Space, Esc; assert `m.sessionList.FilterValue() == ""`.
 - `"it preserves committed filter across open/dismiss"` — commit a filter (`pigeon`), Space, Esc; assert filter still committed with same value.
 - `"a second Esc clears a committed filter via list default behaviour"` — commit filter, Space, Esc (back to list with filter), Esc; assert filter cleared.
 - `"it constructs a fresh previewModel on re-open after dismiss"` — open, dismiss, re-open; assert `Tail` was called twice total (once per open).
 
 **Edge Cases**:
 - `bubbles/list` distinguishes "filter input mode" (`SettingFilter()`) from "filter committed" — preview never opens during filter input mode (task 2-5), so dismiss never lands back into mid-typing-filter.
-- The cursor preservation invariant relies on preview NEVER calling `m.list.Select` or any list mutator. Confirm by code review.
+- The cursor preservation invariant relies on preview NEVER calling `m.sessionList.Select` or any list mutator. Confirm by code review.
 
 **Context**:
 > Spec § *Esc Level Tree* defines the four-level Esc semantics. Preview owns level 1 (in-preview → return to list). Levels 2–4 are existing `bubbles/list` and Portal behaviours preview must not break. Spec § *Trigger and Entry Point* mandates "cursor stays on the previewed session" on Esc. Spec § *No In-preview Between-Session Stepping* notes "Preview cannot move the underlying list cursor, so on `Esc` the cursor is exactly where it was when `Space` was pressed."
@@ -218,35 +218,35 @@ total: 7
 
 **Problem**: `bubbles/list`'s filter input mode (`SettingFilter()` true) treats every keypress as text input — `Space` must insert a literal space into the filter, not open preview. The spec mandates "default `bubbles/list` semantics" — no magic-Space, no second binding for "open preview while filtering". The user must commit the filter (`Enter`) before `Space` opens preview.
 
-**Solution**: In `updateSessionsPage`, the `Space` branch added in task 2-3 must explicitly check `m.list.SettingFilter()` and fall through to the `bubbles/list` default handler (passing the message via `m.list.Update(msg)`) when true. Only after the filter is committed (`SettingFilter()` returns false) does `Space` invoke `NewPreviewModel`.
+**Solution**: In `updateSessionsPage`, the `Space` branch added in task 2-3 must explicitly check `m.sessionList.SettingFilter()` and fall through to the `bubbles/list` default handler (passing the message via `m.sessionList.Update(msg)`) when true. Only after the filter is committed (`SettingFilter()` returns false) does `Space` invoke `NewPreviewModel`.
 
 **Outcome**: Typing `pigeon ` (with a space) into the filter input adds a literal space character — no preview is opened. After pressing `Enter` to commit the filter, the highlighted match (e.g. `pigeon-AbCdEf`) opens preview when `Space` is pressed. The filter input field accepts spaces transparently as part of text entry.
 
 **Do**:
 - In `updateSessionsPage` in `internal/tui/model.go`, ensure the `Space` branch from task 2-3 begins with:
   ```go
-  if m.list.SettingFilter() {
+  if m.sessionList.SettingFilter() {
       // Filter input mode: Space is text input — pass through to bubbles/list.
       var cmd tea.Cmd
-      m.list, cmd = m.list.Update(msg)
+      m.sessionList, cmd = m.sessionList.Update(msg)
       return m, cmd
   }
   ```
 - Confirm there is exactly one `Space` keybinding in `updateSessionsPage` — no second binding for "open preview while filtering".
-- Confirm that after `Enter` commits the filter, `m.list.SettingFilter()` returns false on subsequent `Space` events, so preview opens normally on the highlighted match.
+- Confirm that after `Enter` commits the filter, `m.sessionList.SettingFilter()` returns false on subsequent `Space` events, so preview opens normally on the highlighted match.
 
 **Acceptance Criteria**:
-- [ ] When `m.list.SettingFilter()` is true, `Space` passes through to `m.list.Update(msg)` and is consumed by `bubbles/list` as text input.
-- [ ] When `m.list.SettingFilter()` is true, `NewPreviewModel` is NOT called (verified via mock counter).
+- [ ] When `m.sessionList.SettingFilter()` is true, `Space` passes through to `m.sessionList.Update(msg)` and is consumed by `bubbles/list` as text input.
+- [ ] When `m.sessionList.SettingFilter()` is true, `NewPreviewModel` is NOT called (verified via mock counter).
 - [ ] After `Enter` commits the filter, `Space` opens preview on the highlighted match.
 - [ ] No second key binding exists for "open preview while filtering" (verified by code review — exactly one `Space` branch in `updateSessionsPage`).
-- [ ] A literal space character is observably present in `m.list.FilterValue()` after typing `Space` during `SettingFilter()`.
+- [ ] A literal space character is observably present in `m.sessionList.FilterValue()` after typing `Space` during `SettingFilter()`.
 
 **Tests**:
-- `"it inserts a literal space into the filter while SettingFilter"` — start filter input mode (drive a `/` key or whatever bubble/list uses to enter filter mode), type `pigeon`, then Space; assert `m.list.FilterValue()` contains `"pigeon "` and `NewPreviewModel` was not called.
-- `"it does not open preview while SettingFilter"` — same setup, drive Space; assert `m.page != pagePreview`.
-- `"Space after Enter-commit opens preview on the highlighted match"` — drive filter input, type `pigeon`, Enter, then Space; assert `m.page == pagePreview` and the previewed session matches the highlighted item.
-- `"it does not register a second open-preview binding for filter mode"` — code-level test: assert no key in the keymap has `Space` while `SettingFilter` is true that fires preview. (Can be enforced via the test that the Space-during-SettingFilter path consumes the message via `m.list.Update` only.)
+- `"it inserts a literal space into the filter while SettingFilter"` — start filter input mode (drive a `/` key or whatever bubble/list uses to enter filter mode), type `pigeon`, then Space; assert `m.sessionList.FilterValue()` contains `"pigeon "` and `NewPreviewModel` was not called.
+- `"it does not open preview while SettingFilter"` — same setup, drive Space; assert `m.activePage != pagePreview`.
+- `"Space after Enter-commit opens preview on the highlighted match"` — drive filter input, type `pigeon`, Enter, then Space; assert `m.activePage == pagePreview` and the previewed session matches the highlighted item.
+- `"it does not register a second open-preview binding for filter mode"` — code-level test: assert no key in the keymap has `Space` while `SettingFilter` is true that fires preview. (Can be enforced via the test that the Space-during-SettingFilter path consumes the message via `m.sessionList.Update` only.)
 
 **Edge Cases**:
 - A space character at the start of the filter (typed before any other character) — passthrough must still work; `bubbles/list` accepts leading spaces in filter text.
