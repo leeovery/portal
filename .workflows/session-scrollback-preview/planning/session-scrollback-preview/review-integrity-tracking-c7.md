@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 7
 phase: Plan Integrity Review
@@ -74,7 +74,7 @@ The acceptance criteria on task 2-3 already list "no second binding for filter m
 - `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeySpace}` (matches the runtime shape bubbletea produces for a standalone space keypress; see `internal/ui/browser_test.go` for the existing in-tree pattern), drive `Update`, assert `m.activePage == pagePreview`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Reverts the cycle-1 regression. No production-code recipe changes — the Do section still uses `key.NewBinding(key.WithKeys(" "))`, which works regardless. Only the test-synthesis identifier and the no-longer-true parenthetical change. The new parenthetical points the implementer at the in-tree precedent (`internal/ui/browser_test.go:477`), which is the correct authority for "how Portal tests synthesise Space".
 
 ---
@@ -108,5 +108,5 @@ The function does not consult `XDG_STATE_HOME` at any point. The Edge Cases bull
 - The `stateDir` resolution helper consults `$PORTAL_STATE_DIR` first, then falls back through `$XDG_CONFIG_HOME/portal/state` to `$HOME/.config/portal/state` (per `internal/state/paths.go::Dir`) — preview must use this exact helper so both preview and the daemon resolve to the same directory; otherwise preview reads from an empty dir.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical alignment with `internal/state/paths.go`. No spec content changes; no acceptance criterion changes meaning; no architectural impact. Pin keeps the plan factually accurate without expanding scope.

@@ -144,7 +144,7 @@ total: 7
 - [ ] When `Space` is pressed during `SettingFilter()`, this branch does not call `NewPreviewModel` (passthrough integration is finalised in task 2-5).
 
 **Tests**:
-- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}` (Bubble Tea has no `tea.KeySpace` constant — space is a runes key), drive `Update`, assert `m.activePage == pagePreview`.
+- `"it transitions to pagePreview on Space when a session is highlighted"` — synthesise a `tea.KeyMsg{Type: tea.KeySpace}` (matches the runtime shape bubbletea produces for a standalone space keypress; see `internal/ui/browser_test.go` for the existing in-tree pattern), drive `Update`, assert `m.activePage == pagePreview`.
 - `"it remains on Sessions page when Space is pressed on an empty list"` — empty list, Space; assert page unchanged, `NewPreviewModel` not called (mock counter zero).
 - `"it remains on Sessions page when enumeration fails"` — `TmuxEnumerator` mock returns error; Space; assert page unchanged.
 - `"it remains on Sessions page when enumeration returns empty"` — mock returns empty groups; Space; assert page unchanged.
@@ -370,7 +370,7 @@ total: 7
 - `"pane key matches daemon writer"` — read both call sites and assert identical argument shape (the test can be a doc/code-review item if a programmatic assertion is awkward).
 
 **Edge Cases**:
-- The `stateDir` resolution helper may consult `XDG_STATE_HOME` or fall back to a default — preview must use the exact same source the daemon uses (so both sides resolve to the same directory, otherwise preview reads from an empty dir).
+- The `stateDir` resolution helper consults `$PORTAL_STATE_DIR` first, then falls back through `$XDG_CONFIG_HOME/portal/state` to `$HOME/.config/portal/state` (per `internal/state/paths.go::Dir`) — preview must use this exact helper so both preview and the daemon resolve to the same directory; otherwise preview reads from an empty dir.
 - If `state.TailScrollback` is the Phase 1 export but Phase 1 used a different name (e.g. `state.Tail` or `state.ReadTail`), use whatever name Phase 1 landed.
 - The compile-time assertion `var _ TmuxEnumerator = (*tmux.Client)(nil)` may live in any non-test file in `internal/tui` — but it must be in a place that prevents accidental signature drift.
 
