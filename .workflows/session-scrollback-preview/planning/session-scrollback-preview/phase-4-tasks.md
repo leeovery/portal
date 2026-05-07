@@ -432,7 +432,7 @@ Preview must NOT add any name-based check on `_portal-saver` — the spec explic
 **Problem**: The spec's bottom-line constraint is that preview is **purely additive on top of existing surfaces** — no new methods on `tmux.Client` beyond the single read-only listing method added in Phase 1, no daemon work, no restore changes, no bootstrap changes, no hooks changes, no save-format changes. With nine tasks across four phases, scope creep is plausible: a "tiny" tmux helper here, a "harmless" daemon flag there. This task is the non-modification audit — verify nothing has incidentally crept in.
 
 **Solution**: Audit the diff produced by Phases 1–4 and assert no out-of-scope surface was introduced. Concrete checks:
-- Diff `internal/tmux/client.go` (and any other files in `internal/tmux/`): the only new method is the Phase 1 window-grouped pane enumeration. No new capture wrappers (no `CapturePaneTail`, no `CapturePaneN`, etc.). The existing `CapturePane` signature is unchanged.
+- Diff `internal/tmux/tmux.go` (and any other files in `internal/tmux/`): the only new method is the Phase 1 window-grouped pane enumeration. No new capture wrappers (no `CapturePaneTail`, no `CapturePaneN`, etc.). The existing `CapturePane` signature is unchanged.
 - Diff `internal/state/`: only the Phase 1 tail-N read helper and `ScrollbackFile` reuse. No new daemon writers, no new save-format fields, no new marker helpers.
 - Diff `internal/restore/`: no changes.
 - Diff `cmd/bootstrap/`: no changes (no preview-aware steps, no new orchestrator hooks).
@@ -445,7 +445,7 @@ This is an audit-only task — no production code is modified. The deliverable i
 
 **Do**:
 - In `internal/tui/pagepreview_audit_test.go` (or equivalent — a test file is the durable form of an audit), add tests that operate against fixed file contents:
-  - Assert `internal/tmux/client.go` does not contain new symbols matching `CapturePaneTail`, `CapturePaneN`, or other capture-wrapper-shaped names — substring or regex on the file contents.
+  - Assert `internal/tmux/tmux.go` does not contain new symbols matching `CapturePaneTail`, `CapturePaneN`, or other capture-wrapper-shaped names — substring or regex on the file contents.
   - Assert `internal/state/` exposes exactly the writers it had before (a fixed list of expected functions; any new writer fails the test).
   - Assert `internal/restore/` source is unchanged (file-hash or substring-pin against any preview-related additions).
   - Assert `cmd/bootstrap/` source contains no `preview` or `pagePreview` references.
@@ -455,7 +455,7 @@ This is an audit-only task — no production code is modified. The deliverable i
 
 **Acceptance Criteria**:
 - [ ] Audit test exists and passes.
-- [ ] `internal/tmux/client.go` has exactly one new method beyond pre-feature baseline (the Phase 1 enumeration method); the existing `CapturePane` signature is unchanged.
+- [ ] `internal/tmux/tmux.go` has exactly one new method beyond pre-feature baseline (the Phase 1 enumeration method); the existing `CapturePane` signature is unchanged.
 - [ ] `internal/state/` adds only the tail-N helper; existing daemon writers are byte-identical to pre-feature baseline.
 - [ ] `internal/restore/` is unchanged.
 - [ ] `cmd/bootstrap/` is unchanged.
@@ -464,7 +464,7 @@ This is an audit-only task — no production code is modified. The deliverable i
 - [ ] No new package was added in service of preview (the feature lives in `internal/tui` plus the Phase 1 helpers in `internal/state` and `internal/tmux`).
 
 **Tests**:
-- `"audit: tmux.Client has no new capture wrapper"` — assert source of `internal/tmux/client.go` does not contain `CapturePaneTail` / `CapturePaneN` / similar.
+- `"audit: tmux.Client has no new capture wrapper"` — assert source of `internal/tmux/tmux.go` does not contain `CapturePaneTail` / `CapturePaneN` / similar.
 - `"audit: tmux.Client capture method signature unchanged"` — assert the existing `CapturePane` signature line is present in source verbatim.
 - `"audit: internal/state exposes only the expected writers"` — enumerate expected writer names; assert the package's exported writer surface is a subset.
 - `"audit: internal/restore source has no preview references"` — substring search for `preview` / `pagePreview` returns no matches in `internal/restore/`.

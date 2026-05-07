@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-07
 cycle: 6
 phase: Plan Integrity Review
@@ -54,7 +54,7 @@ Task 4-9 instructs the implementer to "Diff `internal/tmux/client.go`" and pins 
 - `"audit: tmux.Client has no new capture wrapper"` — assert source of `internal/tmux/tmux.go` does not contain `CapturePaneTail` / `CapturePaneN` / similar.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -109,7 +109,7 @@ type Client struct {
 - When `c.cmd.Run` returns `(nil, nil)` (i.e. successful but empty stdout — e.g. zero panes), return `([]WindowGroup{}, nil)` explicitly, not `(nil, nil)`. The empty-but-non-nil slice signals "session exists but has no panes/windows" cleanly to callers.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The bare `Commander.Run` mentions (in test names "it uses the Commander.Run interface", and "any sentinel errors Commander.Run exposes") refer to the interface method symbolically, not a field access, and are correct as written — leave them alone.
 
 ---

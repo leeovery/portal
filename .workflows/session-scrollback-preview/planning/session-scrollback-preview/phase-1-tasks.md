@@ -219,7 +219,7 @@ total: 6
   ```go
   func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, error)
   ```
-- Use `c.Commander.Run(...)` (the trim variant) — pipe-delimited output does not need verbatim preservation, and trimming the trailing newline is desirable. Match the pattern used by `ListPanesInSession`.
+- Use `c.cmd.Run(...)` (the trim variant) — pipe-delimited output does not need verbatim preservation, and trimming the trailing newline is desirable. Match the pattern used by `ListPanesInSession`.
 - Build the tmux command: `tmux list-panes -s -t <session> -F "#{window_index}|#{window_name}|#{pane_index}"`. The `-s` flag scopes to the session and emits all panes across all its windows.
 - Parse the output line-by-line; for each line, split on `|` with exactly 2 splits expected (3 fields: window_index, window_name, pane_index). If a window name contains a literal `|`, this naive split corrupts it — see edge-case handling below.
 - Group lines by `window_index` (preserving first-seen window name per group), build the `[]WindowGroup` slice sorted by `window_index` ascending, and within each group sort `PaneIndices` ascending.
@@ -234,7 +234,7 @@ total: 6
 - [ ] Window names containing whitespace (`my window`) are returned intact.
 - [ ] Window names containing the chosen delimiter character require careful handling; the chosen approach (non-printable separator OR `SplitN(_, _, 3)`) is documented in the method comment and exercised by a test fixture.
 - [ ] Multiple panes per window are grouped into the correct `WindowGroup` and sorted ascending by `pane_index`.
-- [ ] The method uses `c.Commander.Run` (or equivalent existing trim wrapper) — no direct `os/exec.Command` call.
+- [ ] The method uses `c.cmd.Run` (or equivalent existing trim wrapper) — no direct `os/exec.Command` call.
 - [ ] No changes to `tmux.Client.CapturePane` or any other existing capture wrapper. The diff to `internal/tmux/` is purely additive.
 
 **Tests**:
@@ -275,8 +275,8 @@ total: 6
 **Outcome**: When tmux returns an error (session gone, server crash, etc.), the method returns `(nil, non-nil err)`. When tmux returns successfully but stdout is empty, the method returns `([]WindowGroup{}, nil)` — a usable empty slice, not nil. No new capture wrapper is introduced (the spec's "no new tmux wrapper" constraint applies to capture, not listing — already discharged in task 1-5; this task re-asserts the diff stays additive on the listing side only).
 
 **Do**:
-- In the method from task 1-5, when `c.Commander.Run` returns a non-nil error, wrap it with the session name for traceability: `return nil, fmt.Errorf("list windows and panes for session %s: %w", session, err)`. Use `%w` so callers can `errors.Is` against any sentinel errors `Commander.Run` returns.
-- When `c.Commander.Run` returns `(nil, nil)` (i.e. successful but empty stdout — e.g. zero panes), return `([]WindowGroup{}, nil)` explicitly, not `(nil, nil)`. The empty-but-non-nil slice signals "session exists but has no panes/windows" cleanly to callers.
+- In the method from task 1-5, when `c.cmd.Run` returns a non-nil error, wrap it with the session name for traceability: `return nil, fmt.Errorf("list windows and panes for session %s: %w", session, err)`. Use `%w` so callers can `errors.Is` against any sentinel errors `Commander.Run` returns.
+- When `c.cmd.Run` returns `(nil, nil)` (i.e. successful but empty stdout — e.g. zero panes), return `([]WindowGroup{}, nil)` explicitly, not `(nil, nil)`. The empty-but-non-nil slice signals "session exists but has no panes/windows" cleanly to callers.
 - When stdout has only whitespace (e.g. trailing `\n` from tmux), parse it as zero lines and return `([]WindowGroup{}, nil)` — same as the strictly-empty case.
 - Add a code-comment assertion (or a CI-time grep test, if the project has any) that the diff to `internal/tmux/` adds **only** the new `ListWindowsAndPanesInSession` method and `WindowGroup` type — no changes to `CapturePane`, `CapturePane*` variants, or any other existing method. This is a guard against scope creep into capture wrappers, which the spec explicitly forbids.
 
