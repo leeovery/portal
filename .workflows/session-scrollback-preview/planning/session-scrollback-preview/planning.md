@@ -88,6 +88,20 @@ approved_at: 2026-05-07
 - [ ] Pane key resolution uses `state.SanitizePaneKey(session, window_index, pane_index)` → `state.ScrollbackFile(stateDir, paneKey)` for every read, with `stateDir` captured once at TUI startup and hidden behind the `ScrollbackReader` interface.
 - [ ] Within-preview keymap collisions with `bubbles/viewport` defaults are resolved in preview's favour — `]`, `[`, and `Tab` are owned by preview and not consumed by the embedded viewport.
 
+#### Tasks
+status: approved
+approved_at: 2026-05-07
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-scrollback-preview-3-1 | Focus state and pane-key resolution helpers | non-contiguous window_index (0, 2, 5), base-index 1 / pane-base-index 1, pane key uses raw tmux window_index / pane_index not ordinal position |
+| session-scrollback-preview-3-2 | Tab cycle: next pane within current window with wrap and re-read | single-pane window Tab is silent no-op, last pane wraps to first, scroll position resets to tail on focus change, exactly one Tail call per Tab press |
+| session-scrollback-preview-3-3 | Bracket cycles: next/previous window with pane-0 reset and re-read | single-window session keys silent no-op, `]` last wraps to first, `[` first wraps to last, per-window pane focus not preserved, scroll resets to tail |
+| session-scrollback-preview-3-4 | Keymap precedence over embedded viewport | `]` `[` `Tab` never reach viewport.Update, scroll keys still passthrough, no double-handling |
+| session-scrollback-preview-3-5 | Chrome rendering: counters, window name, and keystroke hints | non-contiguous window_index never leaks into M/N, base-index 1 still shows 1..N, window name with spaces or unusual characters, hint string visible |
+| session-scrollback-preview-3-6 | Chrome layout integration with viewport sizing | small terminal heights, tea.WindowSizeMsg updates chrome+viewport atomically, resize triggers zero Tail calls, chrome line height stable across cycles |
+| session-scrollback-preview-3-7 | Chrome stability under focus changes (no mid-preview re-enumeration) | full cycle of `]` `[` `Tab` produces one Enumerate call only, counters update from cached groups, no live tmux re-enumeration mid-preview |
+
 ### Phase 4: Edge-case handling and cross-cutting integration
 status: approved
 approved_at: 2026-05-07
