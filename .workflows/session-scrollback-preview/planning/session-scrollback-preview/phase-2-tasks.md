@@ -116,7 +116,7 @@ total: 7
 
 **Problem**: The TUI's page state machine has no preview arm and no Space binding. The spec mandates a new `pagePreview` arm peer to `pageFileBrowser`, with `Space` opening preview only from the Sessions page (Loading, Projects, FileBrowser pages must not bind it).
 
-**Solution**: Add `pagePreview` to the `page` constant block in `internal/tui/model.go`, hold a `*previewModel` (or value-typed `previewModel` with a sentinel) on the root `Model`, route the page in the top-level `Update` switch, and bind `Space` in `updateSessionsPage` to construct a `previewModel` and transition to `pagePreview` when the constructor returns `ok=true`. When `ok=false`, the user remains on the Sessions page silently.
+**Solution**: Add `pagePreview` to the `page` constant block in `internal/tui/model.go`, hold a `*previewModel` (or value-typed `previewModel` with a sentinel) on the root `Model`, route the page in the top-level `Update` switch, and bind `Space` in `updateSessionList` to construct a `previewModel` and transition to `pagePreview` when the constructor returns `ok=true`. When `ok=false`, the user remains on the Sessions page silently.
 
 **Outcome**: Pressing `Space` on a highlighted session in the Sessions page transitions the TUI to the preview page with the tail bytes already loaded. Pressing `Space` on an empty Sessions list, with no highlighted item, while the list filter is in `SettingFilter()` mode (handled by passthrough — see task 2-5), or when enumeration fails, keeps the user on the Sessions page silently. Loading, Projects, and FileBrowser pages do not bind `Space` to preview.
 
@@ -124,7 +124,7 @@ total: 7
 - In `internal/tui/model.go`, add `pagePreview` to the `page` const block as a peer of `pageFileBrowser`.
 - Add a `preview previewModel` field (and optionally a `hasPreview bool` sentinel, since Go zero values for the embedded viewport are not meaningful) to the root `Model`.
 - In the top-level `Update` switch, add a case for `pagePreview` that delegates to `m.preview.Update(msg)` and returns the updated model. Cycle keys, Esc, and resize are handled in tasks 2-3..2-6 (this task lands the routing skeleton; per-key behaviour comes from those tasks or 2-2's `Update` delegation).
-- In `updateSessionsPage` (Sessions page handler), add a `tea.KeyMsg` branch matching `Space` (key string `" "` or use `bubbles/key.NewBinding(key.WithKeys(" "))`):
+- In `updateSessionList` (Sessions page handler), add a `tea.KeyMsg` branch matching `Space` (key string `" "` or use `bubbles/key.NewBinding(key.WithKeys(" "))`):
   1. If `m.sessionList.SettingFilter()` is true → fall through to `bubbles/list`'s default handler (literal-space passthrough is task 2-5; this branch must NOT fire `NewPreviewModel`).
   2. If the list is empty (`len(m.sessionList.Items()) == 0`) or `m.sessionList.SelectedItem() == nil` → return without transition (no-op).
   3. Resolve the highlighted session name from the selected item.
@@ -218,12 +218,12 @@ total: 7
 
 **Problem**: `bubbles/list`'s filter input mode (`SettingFilter()` true) treats every keypress as text input — `Space` must insert a literal space into the filter, not open preview. The spec mandates "default `bubbles/list` semantics" — no magic-Space, no second binding for "open preview while filtering". The user must commit the filter (`Enter`) before `Space` opens preview.
 
-**Solution**: In `updateSessionsPage`, the `Space` branch added in task 2-3 must explicitly check `m.sessionList.SettingFilter()` and fall through to the `bubbles/list` default handler (passing the message via `m.sessionList.Update(msg)`) when true. Only after the filter is committed (`SettingFilter()` returns false) does `Space` invoke `NewPreviewModel`.
+**Solution**: In `updateSessionList`, the `Space` branch added in task 2-3 must explicitly check `m.sessionList.SettingFilter()` and fall through to the `bubbles/list` default handler (passing the message via `m.sessionList.Update(msg)`) when true. Only after the filter is committed (`SettingFilter()` returns false) does `Space` invoke `NewPreviewModel`.
 
 **Outcome**: Typing `pigeon ` (with a space) into the filter input adds a literal space character — no preview is opened. After pressing `Enter` to commit the filter, the highlighted match (e.g. `pigeon-AbCdEf`) opens preview when `Space` is pressed. The filter input field accepts spaces transparently as part of text entry.
 
 **Do**:
-- In `updateSessionsPage` in `internal/tui/model.go`, ensure the `Space` branch from task 2-3 begins with:
+- In `updateSessionList` in `internal/tui/model.go`, ensure the `Space` branch from task 2-3 begins with:
   ```go
   if m.sessionList.SettingFilter() {
       // Filter input mode: Space is text input — pass through to bubbles/list.
@@ -232,14 +232,14 @@ total: 7
       return m, cmd
   }
   ```
-- Confirm there is exactly one `Space` keybinding in `updateSessionsPage` — no second binding for "open preview while filtering".
+- Confirm there is exactly one `Space` keybinding in `updateSessionList` — no second binding for "open preview while filtering".
 - Confirm that after `Enter` commits the filter, `m.sessionList.SettingFilter()` returns false on subsequent `Space` events, so preview opens normally on the highlighted match.
 
 **Acceptance Criteria**:
 - [ ] When `m.sessionList.SettingFilter()` is true, `Space` passes through to `m.sessionList.Update(msg)` and is consumed by `bubbles/list` as text input.
 - [ ] When `m.sessionList.SettingFilter()` is true, `NewPreviewModel` is NOT called (verified via mock counter).
 - [ ] After `Enter` commits the filter, `Space` opens preview on the highlighted match.
-- [ ] No second key binding exists for "open preview while filtering" (verified by code review — exactly one `Space` branch in `updateSessionsPage`).
+- [ ] No second key binding exists for "open preview while filtering" (verified by code review — exactly one `Space` branch in `updateSessionList`).
 - [ ] A literal space character is observably present in `m.sessionList.FilterValue()` after typing `Space` during `SettingFilter()`.
 
 **Tests**:

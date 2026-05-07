@@ -204,7 +204,7 @@ total: 9
 
 **Problem**: When the user dismisses preview with `Esc`, the Sessions list must re-fetch live tmux state so a session killed externally during the preview window does not appear in the returned-to list. The spec explicitly says preview owns the re-fetch contract on this transition; the build phase must audit whether the existing Sessions page already refreshes on entry from another page, and only add a refresh dispatch if there is a gap. This is audit-first work — adding an unconditional refresh on every transition would be over-shooting; missing one would silently fail the externally-killed-session contract.
 
-**Solution**: Audit `internal/tui/model.go::updateSessionsPage` and the page transition handlers for any existing on-entry refresh path (e.g. a `loadSessionsCmd` already dispatched on `pageProjects → pageSessions` or `pageFileBrowser → pageSessions`). Two outcomes:
+**Solution**: Audit `internal/tui/model.go::updateSessionList` and the page transition handlers for any existing on-entry refresh path (e.g. a `loadSessionsCmd` already dispatched on `pageProjects → pageSessions` or `pageFileBrowser → pageSessions`). Two outcomes:
 1. **Existing refresh found and applies to `pagePreview → pageSessions`**: add a regression-pinning test that exercises the dismiss path with a mock session lister whose return changes between the open and the dismiss, confirming the post-dismiss list reflects the new state.
 2. **Gap found**: add a refresh dispatch in the dismiss handler (the `Esc`-from-preview branch in `Update`) that returns a `tea.Cmd` re-fetching the sessions list before re-rendering `pageSessions`. Re-test against the same scenario.
 

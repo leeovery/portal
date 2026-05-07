@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 4
 phase: Plan Integrity Review
@@ -106,5 +106,5 @@ The dismiss handler must continue to preserve the `bubbles/list` cursor and filt
 The dismiss handler must continue to preserve the `bubbles/list` cursor and filter state per Phase 2 task 2-4 — the refresh updates the list items, but cursor positioning falls back to `bubbles/list`'s default behaviour when the previously-selected session is gone (lands on a neighbouring entry).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Mechanical alignment with the actual `internal/tui/model.go` symbol name. No spec content changes; no acceptance criterion changes meaning; no architectural impact. Phases 1 and 3 do not contain `updateSessionsPage` references, so the fix is confined to `phase-2-tasks.md` (six sites) and `phase-4-tasks.md` (one site). Same category and severity as cycle 3 finding.
