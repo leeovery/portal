@@ -70,7 +70,8 @@ total: 7
   3. Set `windowIdx = 0`, `paneIdx = 0`. Construct `viewport.New(width, height)` (full terminal for v1; chrome layout is Phase 3).
   4. Compute `paneKey := state.SanitizePaneKey(session, groups[0].WindowIndex, groups[0].PaneIndices[0])`.
   5. Call `reader.Tail(paneKey)`. Pass the resulting bytes (which may be `nil`) verbatim to `viewport.SetContent(string(bytes))`. Do NOT translate `(nil, nil)` into placeholder text yet — Phase 4 owns placeholder/error wording. For now, `nil` bytes become an empty viewport; this is a permitted "preview still opens" outcome per spec acceptance.
-  6. Return `(model, true)`.
+  6. Call `m.viewport.GotoBottom()` so the first frame renders at scroll-tail. `bubbles@v1.0.0/viewport.SetContent` only auto-jumps to bottom when `YOffset > len(lines)-1`; a fresh viewport has `YOffset == 0`, so without an explicit `GotoBottom()` the user sees the OLDEST lines, contradicting spec § *History Depth > Scroll within bounds* ("the viewport renders the tail by default") and the Phase 4 task 4-3 test that asserts `AtBottom()` immediately post-construction. Tasks 3-2 / 3-3 already call `GotoBottom()` after focus-change reads — this preserves that invariant for the initial-open read.
+  7. Return `(model, true)`.
 - Implement `Update(msg tea.Msg) (previewModel, tea.Cmd)` that delegates messages to the embedded viewport. Cycle-key handling (`]`, `[`, `Tab`) is Phase 3 — leave a placeholder no-op or omit until Phase 3 lands. Esc handling is task 2-4. WindowSizeMsg handling is task 2-6.
 - Implement `View() string` that returns `m.viewport.View()`. Chrome rendering is Phase 3 — for Phase 2 the view is just the viewport.
 - Critical: bytes from `reader.Tail` must reach `viewport.SetContent` verbatim — no preprocessing, sanitisation, re-wrap, or escape stripping (spec § *Cross-cutting Seams > ANSI Passthrough vs Viewport Width*).
@@ -85,6 +86,7 @@ total: 7
 - [ ] `reader.Tail` is called exactly once during construction with the paneKey produced by `state.SanitizePaneKey(session, groups[0].WindowIndex, groups[0].PaneIndices[0])`.
 - [ ] If `reader.Tail` returns `(nil, err)` or `(nil, nil)`, `ok=true` is still returned (preview opens).
 - [ ] If `reader.Tail` returns `(bytes, nil)`, those exact bytes are the argument to `viewport.SetContent` (no transformation).
+- [ ] After `SetContent`, the viewport is at scroll-tail (`m.viewport.AtBottom()` returns true) — `GotoBottom()` is called explicitly because `bubbles@v1.0.0/viewport.SetContent` does not jump to bottom when `YOffset == 0`.
 - [ ] Re-invoking `NewPreviewModel` for the same session triggers a fresh enumeration AND a fresh `Tail` call (no caching).
 
 **Tests**:
@@ -94,6 +96,7 @@ total: 7
 - `"it sets focus to (0,0) on successful enumeration"` — mock returns two groups, several panes; assert `m.windowIdx==0`, `m.paneIdx==0`.
 - `"it reads tail-N for the (0,0) pane synchronously during construction"` — mock records the paneKey argument; assert it equals `state.SanitizePaneKey(session, groups[0].WindowIndex, groups[0].PaneIndices[0])`.
 - `"it passes raw ANSI bytes verbatim to viewport.SetContent"` — reader returns bytes containing ANSI escape sequences (e.g. `\x1b[31mred\x1b[0m`); assert viewport's content equals the input string byte-for-byte.
+- `"it positions the viewport at scroll-tail on initial open"` — fixture: bytes containing more lines than the viewport height; assert `m.viewport.AtBottom() == true` immediately after construction; regression-pin against any future change that drops the explicit `GotoBottom()`.
 - `"it returns ok=true when Tail returns (nil, nil)"` — reader returns `nil, nil`; assert `ok==true`, viewport content is empty.
 - `"it returns ok=true when Tail returns (nil, err)"` — reader returns `nil, errors.New("eio")`; assert `ok==true` (placeholder/error wording is Phase 4).
 - `"it constructs a fresh model per call with no carried state"` — call `NewPreviewModel` twice with the same session; assert `Tail` was called twice (no caching).
@@ -128,7 +131,7 @@ total: 7
   1. If `m.sessionList.SettingFilter()` is true → fall through to `bubbles/list`'s default handler (literal-space passthrough is task 2-5; this branch must NOT fire `NewPreviewModel`).
   2. If the list is empty (`len(m.sessionList.Items()) == 0`) or `m.sessionList.SelectedItem() == nil` → return without transition (no-op).
   3. Resolve the highlighted session name from the selected item.
-  4. Construct `previewModel := NewPreviewModel(sessionName, m.enumerator, m.reader, m.width, m.height)`. The seams `m.enumerator` and `m.reader` arrive from task 2-7's TUI construction; in this task the fields are added with placeholder zero values acceptable for compilation.
+  4. Construct `previewModel := NewPreviewModel(sessionName, m.enumerator, m.reader, m.termWidth, m.termHeight)`. The seams `m.enumerator` and `m.reader` arrive from task 2-7's TUI construction; in this task the fields are added with placeholder zero values acceptable for compilation. The root `Model` already caches terminal dimensions in `termWidth` / `termHeight` — see `internal/tui/model.go` line 174 and the `tea.WindowSizeMsg` branch at line 700.
   5. If `ok==false` → return without transition (no preview page shown).
   6. If `ok==true` → store `m.preview = pmodel`, set `m.activePage = pagePreview`, return.
 - Confirm Loading, Projects, and FileBrowser page handlers do NOT bind `Space` to preview. (Verify by code inspection; no edit required if the existing handlers do not match `Space`.)

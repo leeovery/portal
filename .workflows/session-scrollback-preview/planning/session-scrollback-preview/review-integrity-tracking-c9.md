@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 9
 phase: Plan Integrity Review
@@ -90,7 +90,7 @@ Also update Acceptance Criteria to add a scroll-tail invariant, and add a corres
 - `"it returns ok=true when Tail returns (nil, nil)"` — reader returns `nil, nil`; assert `ok==true`, viewport content is empty.
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -128,5 +128,5 @@ Note: the `m.width`/`m.height` fields on the **`previewModel`** struct (declared
   4. Construct `previewModel := NewPreviewModel(sessionName, m.enumerator, m.reader, m.termWidth, m.termHeight)`. The seams `m.enumerator` and `m.reader` arrive from task 2-7's TUI construction; in this task the fields are added with placeholder zero values acceptable for compilation. The root `Model` already caches terminal dimensions in `termWidth` / `termHeight` — see `internal/tui/model.go` line 174 and the `tea.WindowSizeMsg` branch at line 700.
 ````
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
