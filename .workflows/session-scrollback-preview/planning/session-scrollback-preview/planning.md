@@ -54,6 +54,20 @@ approved_at: 2026-05-07
 - [ ] Re-opening preview on the same session constructs a fresh `previewModel` — no focus, scroll, or content state survives.
 - [ ] Loading and Projects/FileBrowser pages have no `Space` binding for preview.
 
+#### Tasks
+status: approved
+approved_at: 2026-05-07
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-scrollback-preview-2-1 | Define TmuxEnumerator and ScrollbackReader seam interfaces in internal/tui | Tail three-shape contract (bytes-nil / nil-nil / nil-err), stateDir hidden behind interface (closed over at construction) |
+| session-scrollback-preview-2-2 | previewModel constructor with injected seams and initial-open flow | enumeration error signals no-open, empty enumeration (zero windows or window with zero panes) signals no-open, tail-N read failure does not block open, raw bytes passed verbatim to viewport.SetContent |
+| session-scrollback-preview-2-3 | Add pagePreview arm to page state machine and bind Space on Sessions page | empty Sessions list Space is no-op, no highlighted item is no-op, enumeration failure stays on sessions silently, Loading and Projects/FileBrowser pages have no Space binding |
+| session-scrollback-preview-2-4 | Esc dismiss returns to Sessions list preserving cursor and filter state | cursor preserved across open/dismiss, committed filter still applied on return, no filter case, re-opening preview constructs fresh model with no carried state |
+| session-scrollback-preview-2-5 | Filter-mode Space passthrough integration | literal space inserted into filter text while SettingFilter is true, Space after Enter-commit opens preview on highlighted match, no second binding for open-while-filtering |
+| session-scrollback-preview-2-6 | Viewport scroll keys and resize handling within preview | scroll-up at top silently no-ops, scroll-down at bottom silently no-ops, drag-resize incurs zero tail-N reads, scroll offset preserved across resize |
+| session-scrollback-preview-2-7 | Production adapters wired at TUI construction | stateDir captured once for process lifetime, pane key derivation via state.SanitizePaneKey matching daemon writer call site verbatim, no tmuxtest import in pagepreview_test.go |
+
 ### Phase 3: Multi-pane cycling, chrome, and focus-change reads
 status: approved
 approved_at: 2026-05-07
