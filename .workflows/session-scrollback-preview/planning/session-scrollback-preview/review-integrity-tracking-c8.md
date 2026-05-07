@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-06
 cycle: 8
 phase: Plan Integrity Review
@@ -184,7 +184,7 @@ The plan needs to either (a) drop `Home`/`End` from these locations or (b) add D
 - [ ] Viewport default scroll keys (`Up`, `Down`, `j`, `k`, `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`) continue to pass through to `m.viewport.Update(msg)` and produce viewport scroll offset changes; `Home` and `End` (preview-owned via task 2-6 bindings) continue to invoke `m.viewport.GotoTop()` / `m.viewport.GotoBottom()` after this task's keymap-precedence reordering.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The drift is inherited from specification.md lines 65 and 431, which describe `Home` and `End` as "viewport defaults". The plan is the implementation blueprint; correcting it does not contradict spec intent (the spec wants `Home`/`End` to work) — it makes the wiring explicit so the implementer doesn't burn cycles on tests that fail because the library doesn't provide what the spec assumed it provided. The fix adds ~6 LOC to preview's Update (two `case` branches), aligns acceptance criteria with library reality, and pins test recipes against the actual API. No phase boundary, no architectural change, no scope expansion. Keeps the user-visible keymap matching the spec's working note.
 
 ---

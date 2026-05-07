@@ -264,17 +264,26 @@ total: 7
 
 ### Task 2-6: Viewport scroll keys and resize handling within preview
 
-**Problem**: Inside preview, `bubbles/viewport`'s native scroll keymap (`Up`, `Down`, `PgUp`, `PgDn`, `Home`, `End`, `ctrl-u`, `ctrl-d`, `j`, `k`) must scroll within the focused pane's loaded N-line slice, with scroll-up at the top silently no-opping (the tail-N slice is a hard top edge — no deeper history extend in v1). Window resize during preview must re-flow the viewport without triggering a fresh disk read (the loaded buffer is decoupled from viewport dimensions). Drag-resize fires many events; none must incur tail-N read cost.
+**Problem**: Inside preview, scroll keys must scroll within the focused pane's loaded N-line slice, with scroll-up at the top silently no-opping (the tail-N slice is a hard top edge — no deeper history extend in v1). `bubbles/viewport`'s `DefaultKeyMap` covers `Up`, `Down`, `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`, `j`, `k` natively (verifiable in `bubbles@v1.0.0/viewport/keymap.go`); `Home` and `End` are NOT in the default keymap and need explicit handling in preview's Update — calling `m.viewport.GotoTop()` / `m.viewport.GotoBottom()`. Window resize during preview must re-flow the viewport without triggering a fresh disk read (the loaded buffer is decoupled from viewport dimensions). Drag-resize fires many events; none must incur tail-N read cost.
 
 **Solution**: In `previewModel.Update`, delegate `tea.KeyMsg` events for scroll keys directly to the embedded `viewport.Model.Update` (passing the message through). Intercept `tea.WindowSizeMsg` to update `m.width`/`m.height` and resize the embedded viewport, but do NOT call `m.reader.Tail`. `bubbles/viewport` handles scroll boundaries natively (no-op at top and bottom).
 
 **Outcome**: With preview open on a session whose tail-N read returned non-trivial bytes, pressing `Down` scrolls the viewport content down by one line; pressing `End` jumps to the bottom; pressing `Home` jumps to the top; pressing `Up` at the top is a silent no-op (no error, no flicker). Pressing `tea.WindowSizeMsg{Width: 120, Height: 40}` reflows the viewport at the new dimensions; scroll offset is preserved by `bubbles/viewport`'s native resize handling. Across many resize messages in succession (simulating drag-resize), `m.reader.Tail` is called exactly zero additional times beyond the initial-open call.
 
 **Do**:
-- In `previewModel.Update`, after the Esc branch (task 2-4) and before any cycle-key handlers (Phase 3), default-delegate `tea.KeyMsg` events to `m.viewport, cmd = m.viewport.Update(msg)`. The `bubbles/viewport` default keymap covers all the scroll keys listed in the spec.
+- In `previewModel.Update`, after the Esc branch (task 2-4) and before any cycle-key handlers (Phase 3), intercept `tea.KeyHome` and `tea.KeyEnd` explicitly — `bubbles@v1.0.0/viewport/keymap.go::DefaultKeyMap` does NOT bind these. Concretely:
+  ```go
+  case msg.Type == tea.KeyHome:
+      m.viewport.GotoTop()
+      return m, nil
+  case msg.Type == tea.KeyEnd:
+      m.viewport.GotoBottom()
+      return m, nil
+  ```
+- For the remaining scroll keys (`Up`, `Down`, `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`, `j`, `k`), default-delegate `tea.KeyMsg` events to `m.viewport, cmd = m.viewport.Update(msg)` — the viewport's default keymap covers exactly these eight via `PageDown`, `PageUp`, `HalfPageUp`, `HalfPageDown`, `Down`, `Up`, `Left`, `Right` bindings (note: `Left`/`Right` are also passed through as harmless no-ops since the loaded N-line slice has no horizontal scroll dimension).
 - Add a `tea.WindowSizeMsg` branch:
   - Update `m.width = msg.Width`, `m.height = msg.Height`.
-  - Call `m.viewport.Width = msg.Width` and `m.viewport.Height = msg.Height` (or use whatever the `bubbles/viewport` API exposes — some versions use `SetSize`).
+  - Set `m.viewport.Width = msg.Width` and `m.viewport.Height = msg.Height` directly — `bubbles@v1.0.0/viewport.Model` exposes `Width` and `Height` as exported fields; there is no `SetSize` method in this version.
   - Do NOT call `m.reader.Tail`.
   - Return updated model with no command (or any non-`Tail` command needed by viewport).
 - Confirm by code review that `m.reader.Tail` is invoked only from `NewPreviewModel` (task 2-2). Phase 3 will add focus-change reads; this phase has only the initial-open read.
@@ -285,8 +294,8 @@ total: 7
 - [ ] `Up` scrolls the viewport up by one line.
 - [ ] `Up` at the top of the loaded slice (`YOffset == 0`) is a silent no-op (no error, `YOffset` stays at 0).
 - [ ] `Down` at the bottom of the loaded slice is a silent no-op (`YOffset` stays at max).
-- [ ] `Home` jumps to `YOffset == 0`.
-- [ ] `End` jumps to the bottom of the loaded slice.
+- [ ] `Home` jumps to `YOffset == 0` via preview-owned `m.viewport.GotoTop()` (the viewport library does not bind `Home` natively).
+- [ ] `End` jumps to the bottom of the loaded slice via preview-owned `m.viewport.GotoBottom()` (the viewport library does not bind `End` natively).
 - [ ] `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`, `j`, `k` all behave per `bubbles/viewport` defaults (no preview-specific overrides).
 - [ ] `tea.WindowSizeMsg` resizes the viewport without calling `m.reader.Tail`.
 - [ ] 100 successive `tea.WindowSizeMsg` events trigger zero additional `Tail` calls beyond the initial-open call (drag-resize simulation).
@@ -295,9 +304,9 @@ total: 7
 **Tests**:
 - `"it scrolls down on Down key"` — open preview with multi-line content, drive Down; assert `YOffset` increased.
 - `"it silently no-ops scroll-up at the top"` — open preview, drive Up while `YOffset == 0`; assert `YOffset == 0` and no error.
-- `"it silently no-ops scroll-down at the bottom"` — drive End, then Down; assert `YOffset` unchanged.
-- `"it jumps to top on Home"` — scroll down then drive Home; assert `YOffset == 0`.
-- `"it jumps to bottom on End"` — drive End; assert `YOffset` is at max for the loaded slice.
+- `"it silently no-ops scroll-down at the bottom"` — synthesise `tea.KeyMsg{Type: tea.KeyEnd}` to jump to bottom, then drive Down; assert `YOffset` unchanged.
+- `"it jumps to top on Home via preview-owned binding"` — scroll down with PgDn, then synthesise `tea.KeyMsg{Type: tea.KeyHome}`; assert `YOffset == 0`. Recipe note: the test exercises preview's own Home interception (`m.viewport.GotoTop()`), not viewport's default keymap, which has no Home binding in `bubbles@v1.0.0`.
+- `"it jumps to bottom on End via preview-owned binding"` — synthesise `tea.KeyMsg{Type: tea.KeyEnd}`; assert `YOffset` equals viewport's max offset for the loaded slice. Recipe note: same as Home — preview owns this via `m.viewport.GotoBottom()`.
 - `"it does NOT call Tail on WindowSizeMsg"` — open preview (records 1 Tail call), send `tea.WindowSizeMsg{Width: 120, Height: 40}`; assert `Tail` call count remains 1.
 - `"it does NOT call Tail across 100 successive WindowSizeMsg events"` — open preview, send 100 resize messages with varying dimensions; assert `Tail` count remains 1.
 - `"it preserves scroll offset across resize"` — scroll to a known offset, resize, assert offset preserved.

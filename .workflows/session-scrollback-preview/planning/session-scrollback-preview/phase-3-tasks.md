@@ -180,7 +180,7 @@ total: 7
 
 **Acceptance Criteria**:
 - [ ] Preview-owned keys (`]`, `[`, `Tab`, `Esc`) never reach `m.viewport.Update` — verifiable by snapshotting the viewport's scroll offset across the keypress and asserting it changes only via the post-read `GotoBottom`, not via a viewport scroll handler.
-- [ ] Viewport default scroll keys (`Up`, `Down`, `j`, `k`, `PgUp`, `PgDn`, `Home`, `End`, `ctrl-u`, `ctrl-d`) continue to pass through and produce viewport scroll offset changes.
+- [ ] Viewport default scroll keys (`Up`, `Down`, `j`, `k`, `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`) continue to pass through to `m.viewport.Update(msg)` and produce viewport scroll offset changes; `Home` and `End` (preview-owned via task 2-6 bindings) continue to invoke `m.viewport.GotoTop()` / `m.viewport.GotoBottom()` after this task's keymap-precedence reordering.
 - [ ] `tea.WindowSizeMsg` still reaches the viewport (resize handling from Phase 2 is not regressed).
 - [ ] No double-handling: a single `Tab` keypress produces exactly one `Tail` call (not two — which would happen if both preview and viewport handlers ran).
 

@@ -47,7 +47,7 @@ approved_at: 2026-05-07
 - [ ] On open, structural enumeration runs first; if it fails or returns empty (zero windows or zero panes), preview does not open and the user remains on the Sessions list silently.
 - [ ] On successful enumeration, focus is set to window 0 / pane 0 (enumeration order) and the tail-N read for that pane runs synchronously in `Update`; the first frame renders viewport content atomically with the page transition.
 - [ ] The viewport receives raw ANSI bytes verbatim via `SetContent` — no preprocessing, sanitisation, re-wrap, or escape stripping.
-- [ ] `bubbles/viewport` native scroll keys (`Up`, `Down`, `PgUp`, `PgDn`, `Home`, `End`, `ctrl-u`, `ctrl-d`, `j`, `k`) scroll within the loaded N-line slice; scroll-up at the top silently no-ops.
+- [ ] Viewport scroll keys (`Up`, `Down`, `PgUp`, `PgDn`, `ctrl-u`, `ctrl-d`, `j`, `k`) scroll within the loaded N-line slice via `bubbles/viewport`'s native keymap; `Home` and `End` are wired in preview's own Update (the viewport library's `DefaultKeyMap` does not bind them) by intercepting `tea.KeyHome` → `m.viewport.GotoTop()` and `tea.KeyEnd` → `m.viewport.GotoBottom()`; scroll-up at the top silently no-ops.
 - [ ] `tea.WindowSizeMsg` is forwarded to the embedded viewport for re-flow and does NOT trigger a fresh disk read.
 - [ ] `Esc` returns to the Sessions list with the cursor at the same position it was on when `Space` was pressed; filter state (no filter / committed / mid-typing) is preserved per the Esc level tree.
 - [ ] While the `bubbles/list` filter input is active (`SettingFilter`), `Space` inserts a literal space and does not open preview; after `Enter` commits the filter, `Space` opens preview on the highlighted match.
