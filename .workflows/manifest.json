@@ -44,6 +44,9 @@
     },
     "session-scrollback-preview": {
       "work_type": "feature"
+    },
+    "daemon-merge-reintroduces-dead-sessions": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
