@@ -26,7 +26,7 @@ No cleanup path currently exists. Once a marker leaks, it persists for the tmux 
 
 - **Severity:** High — silent corruption of persisted state; user-visible "zombie" sessions. **Business impact:** Trust regression on a core product promise (user controls their session list).
 - **Scope:** All users running `portal state daemon`; triggers under any path producing a stale `@portal-skeleton-*` marker.
-- **Manifestation:** Killed session reappears in `~/.config/portal/state/sessions.json` within one daemon tick (≤30s). No error or warning surfaces.
+- **Manifestation:** Killed session reappears in `~/.config/portal/state/sessions.json` within one daemon tick (~1s under normal load; the daemon's `TickerPeriod` is 1s. The previously-cited "≤30s" figure refers to `MaxGap`, the forced-save fallback for idle systems, not the tick interval). No error or warning surfaces.
 - **User-visible surfaces affected:** Any consumer that reads `sessions.json` sees the ghost session — including `internal/restore` (reconstructs ghost sessions on bootstrap), CLI list commands, and the TUI session picker after a restart.
 
 ### Empirical Confirmation
@@ -38,6 +38,16 @@ Live in-the-wild observation (2026-05-08): three specific sessions resurrected a
 **Location:** `internal/state/capture.go`
 
 **Behavior change:** Before processing prev's panes, build a structural map from the fresh index — session names → per-session window indices → per-window pane indices. The merge proceeds for a given prev pane only when **all three structural levels** (session, window, pane) exist in the fresh index. A skeleton marker is no longer treated as authoritative; it only protects panes whose full structural path tmux still acknowledges.
+
+### Data Flow / Signature Approach
+
+The structural map (session names → window indices → pane indices) is **built locally inside `mergeSkippedPanes` from `idx.Sessions`** — the freshly-built index that is already in scope at the call site (`internal/state/capture.go:100`, where `mergeSkippedPanes(&idx, *prev, skipSet)` is invoked). This is preferred over threading `keep` (or another live-truth value) through the function signature because:
+
+- `idx.Sessions` already contains the live tmux truth at this call site (built from `keep` immediately above on lines 85-96).
+- Keeps the change internal to `mergeSkippedPanes` — no signature/caller updates required.
+- Avoids surface-area changes to `mergePane` / `findOrAppendSession` which remain helpers of the merge.
+
+The function may grow a small private helper (e.g. `buildLiveStructure(idx)` returning a nested map) but its public surface stays the same.
 
 ### Filtering Levels
 
@@ -64,7 +74,7 @@ The merge's intended use case — hydrate-in-progress panes briefly invisible to
 
 ## Fix Component B: Stale-Marker Cleanup Bootstrap Step
 
-**Location:** New step in the bootstrap orchestrator (`cmd/bootstrap/`), inserted **between current step 5 (Restore) and step 7 (SweepOrphanFIFOs)** — making it the new step 6, with subsequent steps renumbered (the existing "Clear `@portal-restoring`" step remains immediately after Restore as it does today; the new cleanup runs after that and before SweepOrphanFIFOs).
+**Location:** New step in the bootstrap orchestrator (`cmd/bootstrap/`), inserted **between current step 6 (Clear `@portal-restoring`) and step 7 (SweepOrphanFIFOs)** — becoming the new step 7, with subsequent steps renumbered.
 
 **Note on numbering:** The existing nine-step orchestrator has steps "5. Restore" → "6. Clear `@portal-restoring`" → "7. SweepOrphanFIFOs". The new cleanup step inserts between steps 6 and 7 in the existing sequence (i.e. after the restoring marker is cleared, before orphan FIFO sweep), pushing SweepOrphanFIFOs and later steps down by one.
 
@@ -79,14 +89,27 @@ The merge's intended use case — hydrate-in-progress panes briefly invisible to
 
 Best-effort, mirrors the warning-soft semantics of the existing `CleanStale` step (step 8). Failure (tmux unavailable, individual unset error) surfaces as a soft warning collected by the orchestrator and drained post-bootstrap; it never escalates to a fatal abort.
 
+### Concurrency with the Daemon
+
+EnsureSaver (existing step 4) starts the `_portal-saver` session that hosts the daemon, so by the time the cleanup step runs the daemon may already be ticking. The cleanup step **does not require serialisation** with daemon ticks because Fix Component A neutralises the marker's authority over the merge — concurrent daemon reads of a marker about to be unset cannot resurrect a dead session, and the merge's structural filter rejects any prev session/window/pane no longer present in tmux regardless of marker state. Implementers should not add locks or sequencing constraints between the cleanup step and the daemon.
+
+### Synergy with `SweepOrphanFIFOs`
+
+The cleanup runs immediately before `SweepOrphanFIFOs` (step 7 of the existing sequence). `SweepOrphanFIFOs` removes orphan `hydrate-*.fifo` files whose paneKey is no longer represented by a live `@portal-skeleton-*` marker. Because the new step unsets stale markers immediately before the sweep, FIFOs whose markers were stale become eligible for sweep in the same bootstrap. **This compound cleanup is intentional** — both halves of a stale-marker / orphan-FIFO pair are reclaimed in one bootstrap rather than the orphan-FIFO sweep being indefinitely blocked by the stale marker that protects it.
+
+### Behaviour Against Partial Restore Failures
+
+The cleanup step runs after Restore (step 5) and Clear `@portal-restoring` (step 6). If Restore partially succeeded — some panes skeleton-restored and marked, others failed before reaching `setSkeletonMarker` — the cleanup operates only on markers that were successfully set. For markers whose corresponding session/window/pane is alive in tmux (the normal hydrate-in-progress case), the cleanup leaves them alone; for markers whose pane is not alive (genuinely stale), cleanup unsets them. **No special-casing of just-failed restore leftovers is required**: by the time cleanup runs, "stale" is observably defined as "no live pane for this paneKey", and that definition is correct regardless of how the staleness arose.
+
 ### Adapter Wiring
 
-A new seam interface exposed by the bootstrap Orchestrator, with the production adapter in `bootstrapadapter` wiring concrete dependencies:
-- Marker enumeration (`state.ListSkeletonMarkers` or equivalent live read).
-- Live pane enumeration (via `*tmux.Client`).
-- Marker unset (via `*tmux.Client`).
+A new seam interface exposed by the bootstrap Orchestrator (recommended name `StaleMarkerCleaner` or similar; final name is an implementation detail consistent with adjacent bootstrap seams), with the production adapter in `bootstrapadapter` wiring concrete dependencies:
 
-Tests exercise the seam with mock implementations following the existing `bootstrap` testing pattern.
+- **Marker enumeration** — `state.ListSkeletonMarkers` is the canonical source. It already returns a `map[string]struct{}` keyed by **paneKey** (the `<paneKey>` portion of `@portal-skeleton-<paneKey>`, with the prefix stripped). No additional parsing is required on the marker side.
+- **Live pane enumeration** — `(*tmux.Client).ListAllPanes()` returns `[]string` of `session:window.pane` form (e.g. `my-session:0.1`). The cleanup step **must convert each entry to canonical paneKey form** via `state.SanitizePaneKey(session, window, pane)` (which produces `session__window.pane` form, e.g. `my-session__0.1`) before computing the set difference. Without this conversion the two sides have incompatible separators (`:` vs `__`) and the diff is meaningless.
+- **Marker unset** — `(*tmux.Client).UnsetServerOption(name)` with the full option name `@portal-skeleton-<paneKey>` (i.e. the `SkeletonMarkerPrefix` constant followed by the canonical paneKey).
+
+The seam should expose three methods (one per responsibility) so each can be mocked independently in tests; whether they live on a single composite interface or three small interfaces is an implementation choice consistent with existing bootstrap conventions. Tests exercise the seam with mock implementations following the existing `bootstrap` testing pattern.
 
 ### Why This Step Is Needed
 
@@ -132,7 +155,7 @@ The fix is complete when:
 1. The synthetic repro (set marker, kill session, wait one daemon tick) does **not** reintroduce the killed session into `sessions.json`.
 2. The user's empirical scenario (the three resurrecting sessions with matching stale markers) does not recur after applying both Fix Component A and Fix Component B.
 3. `sessions.json` self-heals on the next daemon tick after a previously-polluted commit (the polluted `prev` no longer perpetuates dead sessions).
-4. After bootstrap, no `@portal-skeleton-*` marker exists for a paneKey that has no corresponding live pane.
+4. After a successful bootstrap (cleanup step did not surface a soft warning), no `@portal-skeleton-*` marker exists for a paneKey that has no corresponding live pane. When the cleanup step degrades to a soft warning (e.g. tmux temporarily unavailable), markers may legitimately remain — the warning is the user-visible signal, and the next successful bootstrap completes the cleanup.
 5. While a stale marker exists between daemon ticks (before bootstrap cleanup runs), the merge filter prevents resurrection regardless of marker staleness.
 6. The legitimate hydrate-in-progress flow remains correct — phase A skeleton-restored panes (marker set, session/window/pane present in tmux) are still merged from prev as expected.
 7. All new tests pass; the previously-buggy test is replaced; existing happy-path tests remain green.
@@ -152,8 +175,8 @@ These rationales justify why this work unit must add **adversarial marker-stalen
 
 Both changes are local to layers already in scope for the merge logic — they compose without architectural surgery:
 
-- **Fix Component A** — Live-set filtering in `mergeSkippedPanes` (`internal/state/capture.go`). Approximately 15 lines (session/window/pane filtering).
-- **Fix Component B** — New stale-marker cleanup bootstrap step. Approximately 50 lines including adapter wiring, plus orchestrator sequence and test updates.
+- **Fix Component A** — Live-set filtering in `mergeSkippedPanes` (`internal/state/capture.go`). Estimated ~15 lines (session/window/pane filtering). The figure is illustrative, not a scope budget.
+- **Fix Component B** — New stale-marker cleanup bootstrap step. Estimated ~50 lines including adapter wiring, plus orchestrator sequence and test updates. The figure is illustrative, not a scope budget.
 
 ### Files Touched
 
@@ -161,7 +184,8 @@ Both changes are local to layers already in scope for the merge logic — they c
 - `internal/state/capture_test.go` — replace the codifying-bug test; add new structural-level and regression tests.
 - `cmd/bootstrap/` — orchestrator sequence (insert new step), seam interface for marker cleanup.
 - `internal/bootstrapadapter/` — production adapter wiring for the cleanup step.
-- Bootstrap tests for the new step (sequence + soft-warning behaviour).
+- `cmd/bootstrap/bootstrap_test.go` — orchestrator sequence and soft-warning behaviour for the new step.
+- `internal/bootstrapadapter/adapters_test.go` — production adapter wiring for the new seam.
 
 ### Regression Risk
 
@@ -225,7 +249,7 @@ Does not require triggering the hydrate cascade:
 1. Inside a live tmux server, identify an existing pane and its paneKey.
 2. Set the marker manually: `tmux set-option -s @portal-skeleton-<paneKey> 1`
 3. `tmux kill-session -t <session>` against the session containing that pane.
-4. Wait one daemon tick (≤30s).
+4. Wait one daemon tick (~1s; up to ≤30s on idle systems where `MaxGap` is the bound).
 5. Inspect `~/.config/portal/state/sessions.json` — the killed session is present (pre-fix) / absent (post-fix).
 
 **Reproducibility:** Always, given the marker set + session killed conditions.
