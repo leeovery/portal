@@ -306,8 +306,10 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 
 // View returns the chrome line composed vertically above the embedded
 // viewport contents. Chrome on top, viewport below — single newline
-// separator. The orientation (header on top) is fixed in v1 per
-// § Interaction Shape > Layout, and pinned by tests.
+// separator. Header-on-top is the build-phase choice (spec § Open Items >
+// Chrome Floor defers placement); only previewChromeHeight and this
+// orientation change if footer is later preferred. Pinned by tests so
+// drift is caught loudly.
 func (m previewModel) View() string {
 	return m.chromeLine() + "\n" + m.viewport.View()
 }
