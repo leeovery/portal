@@ -2398,6 +2398,98 @@ func TestListWindowsAndPanesInSession(t *testing.T) {
 		}
 		assertWindowGroups(t, got, want)
 	})
+
+	t.Run("it returns an error when tmux exits non-zero", func(t *testing.T) {
+		mock := &MockCommander{Output: "", Err: errors.New("exit status 1: no such session")}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err == nil {
+			t.Fatalf("expected non-nil error, got nil")
+		}
+		if got != nil {
+			t.Errorf("expected nil slice on error, got %+v", got)
+		}
+	})
+
+	t.Run("it returns an empty slice when stdout is empty and exit is zero", func(t *testing.T) {
+		mock := &MockCommander{Output: "", Err: nil}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatalf("expected non-nil empty slice, got nil")
+		}
+		if len(got) != 0 {
+			t.Errorf("expected length 0, got %d (%+v)", len(got), got)
+		}
+	})
+
+	t.Run("it returns an empty slice for whitespace-only stdout", func(t *testing.T) {
+		mock := &MockCommander{Output: "\n", Err: nil}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListWindowsAndPanesInSession("work")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatalf("expected non-nil empty slice, got nil")
+		}
+		if len(got) != 0 {
+			t.Errorf("expected length 0, got %d (%+v)", len(got), got)
+		}
+	})
+
+	t.Run("the wrapped error includes the session name", func(t *testing.T) {
+		const sessionName = "my-session-name"
+		mock := &MockCommander{Err: errors.New("exit status 1")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListWindowsAndPanesInSession(sessionName)
+		if err == nil {
+			t.Fatalf("expected non-nil error, got nil")
+		}
+		if !strings.Contains(err.Error(), sessionName) {
+			t.Errorf("error %q does not contain session name %q", err.Error(), sessionName)
+		}
+	})
+
+	t.Run("the wrapped error preserves the original via errors.Is", func(t *testing.T) {
+		sentinel := errors.New("sentinel tmux failure")
+		mock := &MockCommander{Err: sentinel}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListWindowsAndPanesInSession("work")
+		if err == nil {
+			t.Fatalf("expected non-nil error, got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("errors.Is(err, sentinel) = false; err = %v", err)
+		}
+	})
+
+	t.Run("the wrapped error uses the spec-mandated prefix without quoting the session name", func(t *testing.T) {
+		// Spec mandates the wrap shape "list windows and panes for session %s: %w"
+		// — bare %s, not %q. Lock the prefix and that the session name appears
+		// unquoted so the message is grep-friendly and matches the spec contract.
+		const sessionName = "work"
+		sentinel := errors.New("boom")
+		mock := &MockCommander{Err: sentinel}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ListWindowsAndPanesInSession(sessionName)
+		if err == nil {
+			t.Fatalf("expected non-nil error, got nil")
+		}
+		want := "list windows and panes for session " + sessionName + ": boom"
+		if err.Error() != want {
+			t.Errorf("err.Error() = %q, want %q", err.Error(), want)
+		}
+	})
 }
 
 // assertWindowGroups compares two []WindowGroup slices field-by-field with

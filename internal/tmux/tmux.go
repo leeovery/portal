@@ -461,9 +461,9 @@ func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, er
 		"#{pane_index}"
 	out, err := c.cmd.Run("list-panes", "-s", "-t", session, "-F", format)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list windows and panes in session %q: %w", session, err)
+		return nil, fmt.Errorf("list windows and panes for session %s: %w", session, err)
 	}
-	if out == "" {
+	if strings.TrimSpace(out) == "" {
 		return []WindowGroup{}, nil
 	}
 
