@@ -94,7 +94,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 	// content; on a fresh viewport (YOffset == 0) it leaves the scroll
 	// position at the top, so the helper jumps explicitly to satisfy the
 	// "anchored at scroll-tail" contract.
-	m.readFocusedPaneIntoViewport()
+	m.viewport = m.readFocusedPaneIntoViewport()
 
 	return m, true
 }
@@ -187,20 +187,27 @@ func (m previewModel) chromeLine() string {
 //     pane (Tab/]/[ away and back) re-issues a fresh Tail call through
 //     this dispatcher, so a transient error can recover on retry.
 //
-// Pointer receiver because the helper mutates m.viewport via SetContent /
-// GotoBottom and the caller relies on those mutations being visible on the
-// value it returns from Update.
-func (m *previewModel) readFocusedPaneIntoViewport() {
+// Value receiver — the helper operates on a local copy of m.viewport and
+// returns the mutated viewport.Model. Callers (NewPreviewModel and every
+// focus-changing branch of Update) assign the returned value back onto
+// m.viewport so the surrounding value-receiver style stays consistent
+// across the type. Returning the viewport rather than mutating in place
+// keeps every method on previewModel a value receiver, eliminating the
+// latent bug class where future non-copyable fields could silently desync
+// after a value copy.
+func (m previewModel) readFocusedPaneIntoViewport() viewport.Model {
+	vp := m.viewport
 	bytes, err := m.reader.Tail(m.currentPaneKey())
 	switch {
 	case bytes == nil && err == nil:
-		m.viewport.SetContent(previewPlaceholder)
+		vp.SetContent(previewPlaceholder)
 	case err != nil:
-		m.viewport.SetContent(previewReadError)
+		vp.SetContent(previewReadError)
 	default:
-		m.viewport.SetContent(string(bytes))
+		vp.SetContent(string(bytes))
 	}
-	m.viewport.GotoBottom()
+	vp.GotoBottom()
+	return vp
 }
 
 // previewDismissedMsg is emitted when the user presses Esc inside the
@@ -262,7 +269,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 				return m, nil
 			}
 			m.paneIdx = (m.paneIdx + 1) % paneCount
-			m.readFocusedPaneIntoViewport()
+			m.viewport = m.readFocusedPaneIntoViewport()
 			return m, nil
 		case tea.KeyRunes:
 			// `]` advances to the next window; `[` rewinds to the previous
@@ -279,7 +286,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 				}
 				m.windowIdx = (m.windowIdx + 1) % len(m.groups)
 				m.paneIdx = 0
-				m.readFocusedPaneIntoViewport()
+				m.viewport = m.readFocusedPaneIntoViewport()
 				return m, nil
 			case "[":
 				if len(m.groups) <= 1 {
@@ -287,7 +294,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 				}
 				m.windowIdx = (m.windowIdx - 1 + len(m.groups)) % len(m.groups)
 				m.paneIdx = 0
-				m.readFocusedPaneIntoViewport()
+				m.viewport = m.readFocusedPaneIntoViewport()
 				return m, nil
 			}
 		}
