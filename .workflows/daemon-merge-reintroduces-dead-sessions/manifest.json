@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "daemon-merge-reintroduces-dead-sessions": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
