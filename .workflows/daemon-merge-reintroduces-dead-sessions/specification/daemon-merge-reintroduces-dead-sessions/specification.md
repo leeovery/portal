@@ -61,6 +61,40 @@ The merge's intended use case — hydrate-in-progress panes briefly invisible to
 - **Pre-filter `skipSet` in `captureAndCommit`** — Costs an extra `ListSessionNames` tmux call per tick that `CaptureStructure` already makes internally; staleness is a merge-layer concern.
 - **Drop "introduce missing session" merge behaviour entirely** — May break the legitimate hydrate-phase-A race where a skeleton-restored session is briefly invisible to list-sessions. Higher behavioural risk than targeted filtering.
 
+## Fix Component B: Stale-Marker Cleanup Bootstrap Step
+
+**Location:** New step in the bootstrap orchestrator (`cmd/bootstrap/`), inserted **between current step 5 (Restore) and step 7 (SweepOrphanFIFOs)** — making it the new step 6, with subsequent steps renumbered (the existing "Clear `@portal-restoring`" step remains immediately after Restore as it does today; the new cleanup runs after that and before SweepOrphanFIFOs).
+
+**Note on numbering:** The existing nine-step orchestrator has steps "5. Restore" → "6. Clear `@portal-restoring`" → "7. SweepOrphanFIFOs". The new cleanup step inserts between steps 6 and 7 in the existing sequence (i.e. after the restoring marker is cleared, before orphan FIFO sweep), pushing SweepOrphanFIFOs and later steps down by one.
+
+### Behavior
+
+1. Enumerate the live `@portal-skeleton-*` server-option markers via tmux.
+2. Enumerate live tmux panes (paneKeys).
+3. Compute the set difference: markers whose paneKey is **not** present in the live pane set.
+4. For each stale marker, unset it via tmux (`set-option -us @portal-skeleton-<key>`).
+
+### Soft-Warning Posture
+
+Best-effort, mirrors the warning-soft semantics of the existing `CleanStale` step (step 8). Failure (tmux unavailable, individual unset error) surfaces as a soft warning collected by the orchestrator and drained post-bootstrap; it never escalates to a fatal abort.
+
+### Adapter Wiring
+
+A new seam interface exposed by the bootstrap Orchestrator, with the production adapter in `bootstrapadapter` wiring concrete dependencies:
+- Marker enumeration (`state.ListSkeletonMarkers` or equivalent live read).
+- Live pane enumeration (via `*tmux.Client`).
+- Marker unset (via `*tmux.Client`).
+
+Tests exercise the seam with mock implementations following the existing `bootstrap` testing pattern.
+
+### Why This Step Is Needed
+
+Fix Component A alone resolves the user-visible resurrection symptom because `sessions.json` self-heals once the merge filter rejects dead sessions. However, a quieter side-effect remains: while a marker is live for a paneKey, the daemon's capture loop **skips scrollback save** for that pane (`cmd/state_daemon.go:131-133`). For panes whose markers leaked but whose underlying sessions are still alive (or were re-created with the same key), scrollback content is silently not being saved. The cleanup step closes this gap and prevents indefinite marker accumulation across the tmux server's lifetime.
+
+### Rejected Alternative
+
+- **Defer marker cleanup to a separate work unit** — Rejected per user direction. The scrollback-save side effect is real for users now; bundling produces the cleaner outcome and both changes are local to layers already in scope for the merge logic.
+
 ---
 
 ## Working Notes
