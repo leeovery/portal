@@ -41,6 +41,10 @@ const previewReadError = "(unable to read scrollback)"
 // unexported so the constructor is the only way to wire one up. Both seams
 // (TmuxEnumerator and ScrollbackReader) are constructor-injected; there is no
 // package-level seam variable for preview.
+//
+// Zero value reserved for "between opens"; methods must not be called on a
+// zero previewModel — currentPaneKey would silently return SanitizePaneKey("",
+// 0, 0) and currentGroup would index an empty slice.
 type previewModel struct {
 	session    string
 	enumerator TmuxEnumerator
@@ -257,6 +261,9 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEsc:
 			return m, func() tea.Msg { return previewDismissedMsg{} }
+		// viewport.DefaultKeyMap (bubbles@v1.0.0) does not bind Home/End;
+		// preview must own them to satisfy the acceptance criterion that
+		// these keys jump to top/bottom inside the loaded buffer.
 		case tea.KeyHome:
 			m.viewport.GotoTop()
 			return m, nil

@@ -889,6 +889,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// consumes; cursor is re-anchored by name so a still-existing
 		// previously-highlighted session keeps its cursor and a removed
 		// one falls back to a clamped neighbour.
+		// Capture preserveName BEFORE zeroing m.preview below — flipping
+		// the order silently sends an empty value to the refresh handler.
 		preserveName := m.preview.session
 		m.activePage = PageSessions
 		m.preview = previewModel{}
