@@ -110,6 +110,20 @@ func (m previewModel) degenerate() bool {
 	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
 }
 
+// readFocusedPaneIntoViewport performs the synchronous tail-N read for the
+// currently-focused pane and pushes the bytes into the embedded viewport
+// verbatim, anchored at scroll-tail. Shared by every focus-changing branch
+// of Update (Tab, `]`, `[`); reader.Tail's (nil, err) and (nil, nil) shapes
+// are intentionally not translated here — Phase 4 owns the placeholder /
+// error wording. Pointer receiver because the helper mutates m.viewport
+// via SetContent / GotoBottom and the caller relies on those mutations
+// being visible on the value it returns from Update.
+func (m *previewModel) readFocusedPaneIntoViewport() {
+	bytes, _ := m.reader.Tail(m.currentPaneKey())
+	m.viewport.SetContent(string(bytes))
+	m.viewport.GotoBottom()
+}
+
 // previewDismissedMsg is emitted when the user presses Esc inside the
 // preview page. The top-level Update consumes it to flip activePage back
 // to PageSessions without mutating the underlying sessionList — preserving
@@ -152,10 +166,34 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 				return m, nil
 			}
 			m.paneIdx = (m.paneIdx + 1) % paneCount
-			bytes, _ := m.reader.Tail(m.currentPaneKey())
-			m.viewport.SetContent(string(bytes))
-			m.viewport.GotoBottom()
+			m.readFocusedPaneIntoViewport()
 			return m, nil
+		case tea.KeyRunes:
+			// `]` advances to the next window; `[` rewinds to the previous
+			// window. Both reset paneIdx to 0 (per § Multi-pane Rendering
+			// Shape > Pane focus on window cycle — per-window pane focus is
+			// not retained) and synchronously re-read the new pane's tail-N
+			// per § Refresh Semantics > Read Trigger Events. In a session
+			// with one window the keys are a silent no-op regardless of pane
+			// count — `]` / `[` iterate windows, not panes.
+			switch string(msg.Runes) {
+			case "]":
+				if len(m.groups) <= 1 {
+					return m, nil
+				}
+				m.windowIdx = (m.windowIdx + 1) % len(m.groups)
+				m.paneIdx = 0
+				m.readFocusedPaneIntoViewport()
+				return m, nil
+			case "[":
+				if len(m.groups) <= 1 {
+					return m, nil
+				}
+				m.windowIdx = (m.windowIdx - 1 + len(m.groups)) % len(m.groups)
+				m.paneIdx = 0
+				m.readFocusedPaneIntoViewport()
+				return m, nil
+			}
 		}
 	}
 	var cmd tea.Cmd
