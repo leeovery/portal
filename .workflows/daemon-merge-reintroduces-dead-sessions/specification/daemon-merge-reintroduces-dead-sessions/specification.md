@@ -32,6 +32,35 @@ No cleanup path currently exists. Once a marker leaks, it persists for the tmux 
 
 Live in-the-wild observation (2026-05-08): three specific sessions resurrected after kill — `agentic-workflows-XXrJ3J`, `leeovery-Gi5NLG`, `leeovery-feqhpg`. `tmux show-options -s` revealed exactly three matching stale `@portal-skeleton-*` markers (`agentic-workflows-XXrJ3J__1.1`, `leeovery-Gi5NLG__1.1`, `leeovery-feqhpg__1.1`). Killing an unmarkered session (`game-ideas`) did NOT resurrect it. Marker presence is necessary AND sufficient (given a daemon tick) for the resurrection symptom.
 
+## Fix Component A: Live-Set Filtering in `mergeSkippedPanes`
+
+**Location:** `internal/state/capture.go`
+
+**Behavior change:** Before processing prev's panes, build a structural map from the fresh index — session names → per-session window indices → per-window pane indices. The merge proceeds for a given prev pane only when **all three structural levels** (session, window, pane) exist in the fresh index. A skeleton marker is no longer treated as authoritative; it only protects panes whose full structural path tmux still acknowledges.
+
+### Filtering Levels
+
+All three levels must filter, not just session:
+
+- **Session level** — A prev session whose name is not in fresh must NOT be merged, even when its paneKey is in `skipSet`.
+- **Window level** — A prev window that exists in `skipSet` but whose window index is not present in the (otherwise-live) fresh session must be dropped from the merge result.
+- **Pane level** — A prev pane that exists in `skipSet` but whose pane index is not present in the (otherwise-live) fresh window must be dropped from the merge result.
+
+Session-level filtering alone was rejected: the same defensive flaw exists at window and pane level — `kill-window` or `kill-pane` against a still-live session leaves the analogous resurrection path open.
+
+### Self-Healing Behavior
+
+Once `mergeSkippedPanes` no longer reintroduces dead sessions, `sessions.json` self-heals on the next daemon tick. The polluted `prev` from prior ticks is discarded when the dead session no longer survives the merge — `captureAndCommit` then commits the clean index, and `deps.PrevIndex = &idx` propagates clean state forward.
+
+### Preserved Behavior
+
+The merge's intended use case — hydrate-in-progress panes briefly invisible to `list-sessions` — must remain correct. Phase A of restore creates the session in tmux **before** the marker is set, so legitimate hydrate-in-progress panes always have their session/window/pane visible in the fresh enumeration. The filter is structurally distinct from this case and does not affect it.
+
+### Rejected Alternatives
+
+- **Pre-filter `skipSet` in `captureAndCommit`** — Costs an extra `ListSessionNames` tmux call per tick that `CaptureStructure` already makes internally; staleness is a merge-layer concern.
+- **Drop "introduce missing session" merge behaviour entirely** — May break the legitimate hydrate-phase-A race where a skeleton-restored session is briefly invisible to list-sessions. Higher behavioural risk than targeted filtering.
+
 ---
 
 ## Working Notes
