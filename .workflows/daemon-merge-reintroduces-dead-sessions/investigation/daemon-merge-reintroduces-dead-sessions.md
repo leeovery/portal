@@ -55,21 +55,59 @@ The merge step in `CaptureStructure` trusts the `@portal-skeleton-<paneKey>` mar
 
 ### Code Trace
 
-To be filled during code analysis.
+**Entry point:** `tick` in `cmd/state_daemon.go:77` — fires every 1s in the `_portal-saver` daemon.
+
+**Execution path:**
+
+1. `cmd/state_daemon.go:115` `captureAndCommit` reads the marker set:
+   `skipSet, err := state.ListSkeletonMarkers(deps.Client)` — this is the full set of `@portal-skeleton-<paneKey>` server options regardless of whether the underlying session still exists.
+2. `cmd/state_daemon.go:121` calls `state.CaptureStructure(deps.Client, skipSet, deps.PrevIndex)`.
+3. `internal/state/capture.go:62-106` `CaptureStructure`:
+   - Line 66: `ListSessionNames` → live tmux session names.
+   - Line 71: `keepSessionNames` strips internal-prefix → set of live, non-internal session names. **This is the live-session truth.**
+   - Lines 85-96: builds the fresh `[]Session` from `keep`. **Killed sessions are correctly absent here.**
+   - Line 100: `if len(skipSet) > 0 && prev != nil { mergeSkippedPanes(&idx, *prev, skipSet) }` — **the bug surface.**
+4. `internal/state/capture.go:117-130` `mergeSkippedPanes` iterates `prev.Sessions` and for each pane whose `SanitizePaneKey` is in `skipSet`, calls `mergePane`. **No reference to `keep` or `idx.Sessions` for live-session validation.**
+5. `internal/state/capture.go:137-148` `mergePane` → `findOrAppendSession` (line 154) — this is where the dead session is re-created in `idx.Sessions` if not present.
+6. After `CaptureStructure` returns, `captureAndCommit` writes the polluted index to `sessions.json` via `state.Commit` (line 152) and updates `deps.PrevIndex = &idx` (line 156). **The dead session is now part of `prev` for every subsequent tick — bug self-sustains.**
+7. Next bootstrap (`cmd/bootstrap` step 5, Restore) reads `sessions.json` and reconstructs the dead session.
+
+**Key files involved:**
+- `internal/state/capture.go` — `mergeSkippedPanes`, `mergePane`, `findOrAppendSession`. The defective layer.
+- `cmd/state_daemon.go` — `captureAndCommit`, `tick`. Caller; updates `PrevIndex` to the committed (polluted) index every tick.
+- `internal/state/markers.go` — `ListSkeletonMarkers`. Faithfully reads markers; not at fault.
+- `internal/state/capture_test.go:570-617` — the test `merges a skipped pane's session and window from prev when missing from fresh` **codifies the current (buggy) behaviour** and will need updating as part of the fix.
+
+**Marker lifecycle (how stale markers arise):**
+- **Set** by `internal/restore/session.go:380-384` (`setSkeletonMarker` → `state.SetSkeletonMarker`) during bootstrap step 5 skeleton restore.
+- **Unset** by hydrate helper at `cmd/state_hydrate.go:312` (`UnsetSkeletonMarkerForFIFO`) after scrollback replay completes.
+- **Leak paths** (any of these produces a stale marker whose session may later be killed):
+  1. Hydrate timeout — pane never gets hydrated; marker survives.
+  2. Daemon crash mid-hydrate — never reaches the unset.
+  3. User runs `tmux kill-session` against a not-yet-hydrated pane — pane goes away, marker stays.
+  4. Version-upgrade of `_portal-saver` mid-hydrate.
+  5. Manual `tmux set-option -s @portal-skeleton-<key>` (synthetic repro).
+- **No cleanup path exists.** The bootstrap orchestrator's step 8 `CleanStale` only prunes hook-store entries (`cmd/bootstrap_production.go:63`), not markers. `SweepOrphanFIFOs` in step 7 only removes orphan FIFO files. Once a marker leaks, it persists for the tmux server's lifetime.
 
 ### Root Cause
 
-To be filled during synthesis.
+`mergeSkippedPanes` (`internal/state/capture.go:117`) treats the `@portal-skeleton-<paneKey>` marker set as authoritative evidence that the session is "in flight." It does not validate against the live tmux session list — which is already known inside the same `CaptureStructure` call as `keep` / `idx.Sessions`. A stale marker therefore causes `findOrAppendSession` (line 154) to append a dead session into the freshly-built index, which then gets committed to `sessions.json` and persists into `prev` indefinitely (self-reinforcing through `captureAndCommit`'s `deps.PrevIndex = &idx` at line 156).
+
+**Why this happens:** The merge logic was designed under the implicit assumption that markers cannot be stale. It correctly handles the *intended* case (pane skeleton-created, awaiting hydrate, briefly invisible to tmux) but does not defend against the *unintended* case (marker outlives its underlying session via any of the leak paths above).
 
 ### Contributing Factors
 
-- Marker is server-scoped (`set-option -s`), persists across hydrate failures, daemon restarts, and manual tmux ops.
-- `prev` in `captureAndCommit` is updated to the just-committed index every tick, so once a dead session is committed once, it persists in `prev` indefinitely — the bug is self-sustaining.
-- No defensive check at the merge step; the merge currently treats the marker set as the sole gate.
+- Marker is server-scoped (`set-option -s`), persisting across hydrate failures, daemon restarts, manual tmux ops, and indefinitely if hydrate never runs.
+- `prev` in `captureAndCommit` is replaced with the just-committed index every successful tick (`cmd/state_daemon.go:156`), so once a dead session is committed once, it lives in `prev` indefinitely — the bug is self-sustaining even if the marker were later cleared.
+- No marker cleanup path in bootstrap. `SweepOrphanFIFOs` cleans orphan FIFOs but not the markers that point at them; `CleanStale` cleans hook entries but not markers.
+- The merge currently has no live-session cross-check — `keep` (the live-tmux truth, computed at line 71 of `CaptureStructure`) is not threaded into `mergeSkippedPanes`.
 
 ### Why It Wasn't Caught
 
-To be filled during analysis.
+- The existing unit test (`capture_test.go:570-617`) explicitly asserts the buggy behaviour as correct ("merges a skipped pane's session and window from prev when missing from fresh") — this codifies the wrong invariant.
+- The original spec for the resurrection feature (`built-in-session-resurrection`) framed merge intent around the hydrate-in-progress scenario without modelling marker-staleness adversarial cases.
+- The `built-in-session-resurrection` feature integration tests exercise the happy-path skeleton → hydrate flow, not the killed-mid-flight path.
+- Reproducing in the wild requires either a hydrate failure (hard to engineer in CI) or a manual marker injection, so the bug was unlikely to surface during normal QA.
 
 ### Blast Radius
 
