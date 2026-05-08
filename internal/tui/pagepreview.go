@@ -210,6 +210,23 @@ func (m *previewModel) readFocusedPaneIntoViewport() {
 // open/dismiss round trip.
 type previewDismissedMsg struct{}
 
+// previewSessionsRefreshedMsg carries the result of the live Sessions-list
+// re-fetch dispatched when previewDismissedMsg is consumed. PreserveName is
+// the name of the session that was highlighted when preview opened — the
+// top-level handler uses it to re-anchor the bubbles/list cursor by name
+// so that a still-existing previously-highlighted session keeps its cursor
+// and a removed one falls back to a clamped valid neighbour.
+//
+// Lister errors are intentionally surfaced (not swallowed inside the cmd)
+// so the handler can decide policy: the current policy is to keep the
+// pre-refresh list intact rather than zero it out, because the user has
+// just dismissed preview and expects to land on a usable Sessions list.
+type previewSessionsRefreshedMsg struct {
+	Sessions     []tmux.Session
+	Err          error
+	PreserveName string
+}
+
 // Update routes Esc to a synthesised previewDismissedMsg, intercepts
 // Home / End for preview-owned top/bottom jumps, and absorbs
 // tea.WindowSizeMsg to resize the embedded viewport in place. All other

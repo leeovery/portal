@@ -648,6 +648,59 @@ func (m *Model) evaluateDefaultPage() {
 	m.initialFilter = ""
 }
 
+// refreshSessionsAfterPreviewCmd builds the tea.Cmd that performs the live
+// Sessions-list re-fetch dispatched when the user dismisses the preview
+// page (see § Cross-cutting Seams > Externally-Killed Session During
+// Preview). preserveName is forwarded into the resulting message so the
+// handler can re-anchor the cursor by name without re-reading the model.
+//
+// Returns nil when no SessionLister is wired (test harnesses may construct
+// Model without one) — callers must tolerate a nil cmd.
+func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
+	if m.sessionLister == nil {
+		return nil
+	}
+	lister := m.sessionLister
+	return func() tea.Msg {
+		sessions, err := lister.ListSessions()
+		return previewSessionsRefreshedMsg{
+			Sessions:     sessions,
+			Err:          err,
+			PreserveName: preserveName,
+		}
+	}
+}
+
+// reanchorSessionCursor moves the bubbles/list cursor onto the visible item
+// whose session name matches name, after a SetItems update. If name is no
+// longer present (e.g. the session was killed externally during preview),
+// the cursor is clamped to the new last index, satisfying the "fall back
+// to a valid neighbour without panic" contract.
+//
+// Operates on filtered (visible) order so the cursor lands on the
+// expected item even with a committed filter.
+func (m *Model) reanchorSessionCursor(name string) {
+	if name == "" {
+		return
+	}
+	visible := m.sessionList.VisibleItems()
+	if len(visible) == 0 {
+		return
+	}
+	for i, it := range visible {
+		si, ok := it.(SessionItem)
+		if !ok {
+			continue
+		}
+		if si.Session.Name == name {
+			m.sessionList.Select(i)
+			return
+		}
+	}
+	// Name no longer present — clamp to last visible index.
+	m.sessionList.Select(len(visible) - 1)
+}
+
 // loadProjects returns a command that cleans stale projects and loads the list.
 func (m Model) loadProjects() tea.Cmd {
 	if m.projectStore == nil {
@@ -817,8 +870,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// activePage. Zero out preview to release the viewport buffer;
 		// re-opening preview constructs a fresh previewModel via Space
 		// (which re-runs enumeration and re-reads the tail-N slice).
+		//
+		// Per § Cross-cutting Seams > Externally-Killed Session During
+		// Preview, dismissing must also re-fetch the live Sessions list so
+		// a session killed externally during preview does not linger in the
+		// post-dismiss view. The refresh is dispatched as a tea.Cmd that
+		// emits previewSessionsRefreshedMsg, which the handler below
+		// consumes; cursor is re-anchored by name so a still-existing
+		// previously-highlighted session keeps its cursor and a removed
+		// one falls back to a clamped neighbour.
+		preserveName := m.preview.session
 		m.activePage = PageSessions
 		m.preview = previewModel{}
+		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
+	case previewSessionsRefreshedMsg:
+		// Lister errors are non-fatal here: the user just dismissed
+		// preview and expects to land on the Sessions list. A tea.Quit
+		// would be hostile, and zeroing out the list would also be wrong
+		// — the pre-refresh snapshot is the best information we still
+		// have. Drop the error silently and leave the existing list
+		// intact.
+		if msg.Err != nil {
+			return m, nil
+		}
+		m.sessions = msg.Sessions
+		filtered := m.filteredSessions()
+		m.sessionList.SetItems(ToListItems(filtered))
+		if m.termWidth > 0 || m.termHeight > 0 {
+			m.sessionList.SetSize(m.termWidth, m.termHeight)
+		}
+		m.reanchorSessionCursor(msg.PreserveName)
 		return m, nil
 	}
 
