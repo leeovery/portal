@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/state"
@@ -108,6 +110,40 @@ func (m previewModel) currentPaneKey() string {
 // trivial ("Window 1 of 1 / Pane 1 of 1").
 func (m previewModel) degenerate() bool {
 	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
+}
+
+// chromeLine renders the single-line chrome floor described in
+// § Multi-pane Rendering Shape > Chrome Floor: window/pane ordinal
+// counters, the focused window's name, and visible cycle-key hints.
+//
+// Counters are 1-based ordinals — wOrdinal in 1..len(groups), pOrdinal in
+// 1..len(currentGroup().PaneIndices) — derived from slice position, not
+// the raw tmux WindowIndex / PaneIndices values. Under non-contiguous
+// window_index (e.g. 0,2,5) or pane-base-index 1, this preserves the
+// "1..N as the user cycles, never the raw index" contract per
+// § Multi-pane Rendering Shape > Counter semantics. Window name is
+// rendered verbatim — pipe handling and other escaping is the
+// enumeration layer's responsibility.
+//
+// Pure: no I/O, no enumerator / reader calls. Wired into View() by the
+// build-phase task that follows; this method is callable in isolation
+// from tests and produces the same string regardless of mid-flight model
+// state on enumerator/reader.
+//
+// Wording deliberately excludes liveness-implying tokens
+// ("live", "now showing", "realtime", "current command", etc.) per
+// § Source of Preview Bytes > Surface label honesty: preview is a
+// snapshot, not a live tail.
+func (m previewModel) chromeLine() string {
+	wTotal := len(m.groups)
+	pTotal := len(m.currentGroup().PaneIndices)
+	wOrdinal := m.windowIdx + 1
+	pOrdinal := m.paneIdx + 1
+	windowName := m.currentGroup().WindowName
+	return fmt.Sprintf(
+		"Window %d of %d · Pane %d of %d · #W: %s    ] [ Tab Esc",
+		wOrdinal, wTotal, pOrdinal, pTotal, windowName,
+	)
 }
 
 // readFocusedPaneIntoViewport performs the synchronous tail-N read for the
