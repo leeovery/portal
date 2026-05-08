@@ -28,6 +28,8 @@ const (
 	PageProjects
 	// pageFileBrowser displays the file browser sub-view.
 	pageFileBrowser
+	// pagePreview displays the session scrollback preview sub-view.
+	pagePreview
 )
 
 // SessionLister defines the interface for listing tmux sessions.
@@ -172,6 +174,15 @@ type Model struct {
 
 	// Terminal dimensions (cached for re-applying after data loads)
 	termWidth, termHeight int
+
+	// Preview page seams and live model. enumerator and reader are
+	// constructor-injected at TUI startup (wired in task 2-7) — declared
+	// here so the page state machine can compile against the preview
+	// arm. preview holds the live previewModel between pagePreview entry
+	// (via Space on PageSessions) and dismissal back to PageSessions.
+	enumerator TmuxEnumerator
+	reader     ScrollbackReader
+	preview    previewModel
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -792,6 +803,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateProjectsPage(msg)
 	case pageFileBrowser:
 		return m.updateFileBrowser(msg)
+	case pagePreview:
+		var cmd tea.Cmd
+		m.preview, cmd = m.preview.Update(msg)
+		return m, cmd
 	default:
 		return m.updateSessionList(msg)
 	}
@@ -1130,6 +1145,28 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When the list is actively filtering, let it handle all key input
 		if m.sessionList.SettingFilter() {
 			break
+		}
+		// Space opens the scrollback preview for the highlighted session.
+		// Bound before the rest of the keymap so it never collides with
+		// later rune-based handlers. No-op when the list is empty, when
+		// no item is highlighted (committed filter narrowed to zero
+		// matches), or when NewPreviewModel reports ok=false (enumeration
+		// failure or empty enumeration — both observably identical).
+		if msg.Type == tea.KeySpace {
+			if len(m.sessionList.Items()) == 0 {
+				return m, nil
+			}
+			si, ok := m.selectedSessionItem()
+			if !ok {
+				return m, nil
+			}
+			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.termWidth, m.termHeight)
+			if !ok {
+				return m, nil
+			}
+			m.preview = pmodel
+			m.activePage = pagePreview
+			return m, nil
 		}
 		switch {
 		case msg.Type == tea.KeyEsc:
