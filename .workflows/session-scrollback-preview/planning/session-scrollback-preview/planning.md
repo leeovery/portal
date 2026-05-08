@@ -136,3 +136,17 @@ approved_at: 2026-05-07
 | session-scrollback-preview-4-7 | Confirm _portal-saver exclusion at Sessions-list source | leak found and fixed at source vs already excluded (audit-only outcome), regression-pin test, no preview-layer name blacklist introduced |
 | session-scrollback-preview-4-8 | Side-effect-free hermetic invariant test | exactly one TmuxEnumerator call across full cycle, exactly one ScrollbackReader.Tail call per focus event and zero other I/O, zero hooks.Store calls, zero state-package writes, zero FIFO creation or drain |
 | session-scrollback-preview-4-9 | No-new-surface audit and regression guard | audit-only task, no incidental new tmux.Client wrappers, no daemon / restore / bootstrap / hooks / save-format changes |
+
+### Phase 5: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-scrollback-preview-5-1 | Extract applySessions helper to deduplicate session-list refresh | preserve inside-tmux title rewrite at SessionsMsg call site, conditional SetSize when width/height non-zero, both handler arms reduce to single call |
+| session-scrollback-preview-5-2 | Unify previewModel receiver discipline | viewport.Model survives value copy today, future non-copyable fields (mutex/channel/atomic) would silently break, all cycle branches re-read after mutation |
+| session-scrollback-preview-5-3 | Drop `#W:` prefix from preview chrome | window name still present, separator preserved, chrome-line snapshot/golden assertions updated |
+| session-scrollback-preview-5-4 | Correct View() doc-comment about chrome placement | header-on-top is build-phase choice not spec-fixed, type-level comment may also need update, comment-only edit |
+| session-scrollback-preview-5-5 | Add invariant comments around preview lifecycle fragilities | Home/End rationale (viewport DefaultKeyMap gap), preserveName read-before-zero ordering, previewModel zero-value reservation, no behaviour change |

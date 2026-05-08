@@ -79,7 +79,13 @@
             "session-scrollback-preview-4-6": "tick-1cda6d",
             "session-scrollback-preview-4-7": "tick-cc2442",
             "session-scrollback-preview-4-8": "tick-9cc90b",
-            "session-scrollback-preview-4-9": "tick-6b38b3"
+            "session-scrollback-preview-4-9": "tick-6b38b3",
+            "session-scrollback-preview-5": "tick-89e065",
+            "session-scrollback-preview-5-1": "tick-c76ca5",
+            "session-scrollback-preview-5-2": "tick-91bed0",
+            "session-scrollback-preview-5-3": "tick-174bce",
+            "session-scrollback-preview-5-4": "tick-fcc4d0",
+            "session-scrollback-preview-5-5": "tick-ce0570"
           },
           "external_id": "tick-6527e1"
         }
@@ -91,7 +97,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

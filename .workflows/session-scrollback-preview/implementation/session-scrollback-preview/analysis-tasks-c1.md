@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: session-scrollback-preview (Cycle 1)
 
 ## Task 1: Extract applySessions helper to deduplicate session-list refresh
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -33,7 +33,7 @@ sources: duplication
 ---
 
 ## Task 2: Unify previewModel receiver discipline
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -60,7 +60,7 @@ sources: architecture
 ---
 
 ## Task 3: Drop `#W:` prefix from preview chrome
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -85,7 +85,7 @@ sources: standards
 ---
 
 ## Task 4: Correct View() doc-comment about chrome placement
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -109,7 +109,7 @@ sources: standards
 ---
 
 ## Task 5: Add invariant comments around preview lifecycle fragilities
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
