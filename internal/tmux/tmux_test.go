@@ -196,6 +196,88 @@ func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 	}
 }
 
+// TestListSessions_PortalSaverExcludedAtSource is a behavioural regression
+// pin: the Sessions-list source (Client.ListSessions) must omit
+// _portal-saver even when tmux's raw output includes it. Pinned at this
+// layer rather than the preview layer because § Cross-cutting Seams >
+// _portal-saver Self-Reference of the spec mandates filtering at list-
+// population, not preview.
+func TestListSessions_PortalSaverExcludedAtSource(t *testing.T) {
+	// Raw tmux output deliberately includes _portal-saver alongside two
+	// real user sessions to verify the filter strips only the internal
+	// session.
+	rawOutput := fmt.Sprintf("dev|2|0\n%s|1|0\nwork|3|1", tmux.PortalSaverName)
+	mock := &MockCommander{Output: rawOutput}
+	client := tmux.NewClient(mock)
+
+	got, err := client.ListSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, s := range got {
+		if s.Name == tmux.PortalSaverName {
+			t.Fatalf("ListSessions returned %q in rendered list; must be excluded at source", tmux.PortalSaverName)
+		}
+	}
+
+	wantNames := []string{"dev", "work"}
+	if len(got) != len(wantNames) {
+		t.Fatalf("got %d sessions %v, want %d %v", len(got), got, len(wantNames), wantNames)
+	}
+	for i, name := range wantNames {
+		if got[i].Name != name {
+			t.Errorf("session[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
+	}
+}
+
+// TestListSessions_PortalSaverExclusionRefactorPin is a refactor-resistance
+// pin: a future change that strips the underscore-prefix filter from
+// Client.ListSessions (or from any wrapper that consumes its output) must
+// fail this test. The check is deliberately worded to fail loudly with a
+// pointer to § Cross-cutting Seams > _portal-saver Self-Reference so the
+// reviewer who removes the filter sees the spec invariant they are
+// breaking.
+func TestListSessions_PortalSaverExclusionRefactorPin(t *testing.T) {
+	// Mix of similar prefixes to also pin the exact-match-on-prefix
+	// invariant: _portal-saver and _portal-bootstrap must be filtered;
+	// _foo (any underscore-prefixed) must be filtered; pigeon and
+	// pigeon-saver (no underscore prefix, mid-name 'saver' substring)
+	// must NOT be filtered.
+	rawOutput := fmt.Sprintf(
+		"pigeon|1|0\n%s|1|0\npigeon-saver|1|0\n%s|1|0\n_foo|1|0",
+		tmux.PortalSaverName,
+		tmux.PortalBootstrapName,
+	)
+	mock := &MockCommander{Output: rawOutput}
+	client := tmux.NewClient(mock)
+
+	got, err := client.ListSessions()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rendered := make(map[string]bool, len(got))
+	for _, s := range got {
+		rendered[s.Name] = true
+	}
+
+	mustExclude := []string{tmux.PortalSaverName, tmux.PortalBootstrapName, "_foo"}
+	for _, name := range mustExclude {
+		if rendered[name] {
+			t.Errorf("rendered Sessions list contains %q; must be excluded at list-population source per spec § Cross-cutting Seams > _portal-saver Self-Reference", name)
+		}
+	}
+
+	mustInclude := []string{"pigeon", "pigeon-saver"}
+	for _, name := range mustInclude {
+		if !rendered[name] {
+			t.Errorf("rendered Sessions list missing %q; exclusion must be exact prefix-match on '_', not substring", name)
+		}
+	}
+}
+
 func TestServerRunning(t *testing.T) {
 	t.Run("returns true when tmux server is running", func(t *testing.T) {
 		mock := &MockCommander{}

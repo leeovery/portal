@@ -112,7 +112,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 4,
-          "current_task": "session-scrollback-preview-4-7",
+          "current_task": "session-scrollback-preview-4-9",
           "completed_tasks": [
             "session-scrollback-preview-1-1",
             "session-scrollback-preview-1-5",
@@ -140,7 +140,8 @@
             "session-scrollback-preview-4-4",
             "session-scrollback-preview-4-5",
             "session-scrollback-preview-4-6",
-            "session-scrollback-preview-4-8"
+            "session-scrollback-preview-4-8",
+            "session-scrollback-preview-4-7"
           ],
           "completed_phases": [
             1,
