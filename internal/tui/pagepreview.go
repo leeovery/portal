@@ -72,10 +72,21 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 	return m, true
 }
 
-// Update delegates messages to the embedded viewport. Cycle-key handling,
-// Esc dismissal, and WindowSizeMsg-driven resize land in later tasks
-// (2-4 / 2-6 / Phase 3).
+// previewDismissedMsg is emitted when the user presses Esc inside the
+// preview page. The top-level Update consumes it to flip activePage back
+// to PageSessions without mutating the underlying sessionList — preserving
+// cursor position and filter state byte-identically across the
+// open/dismiss round trip.
+type previewDismissedMsg struct{}
+
+// Update routes Esc to a synthesised previewDismissedMsg so the top-level
+// Update can flip pages without preview ever touching the sessionList.
+// All other messages delegate to the embedded viewport (covering scroll
+// keys and future WindowSizeMsg forwarding).
 func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		return m, func() tea.Msg { return previewDismissedMsg{} }
+	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd

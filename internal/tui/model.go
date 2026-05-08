@@ -790,6 +790,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionCreateErrMsg:
 		// On error, return to current page
 		return m, nil
+	case previewDismissedMsg:
+		// Esc inside preview: flip back to Sessions page. The sessionList
+		// is intentionally NOT mutated here — cursor position and filter
+		// state must round-trip byte-identically, so the only change is
+		// activePage. Zero out preview to release the viewport buffer;
+		// re-opening preview constructs a fresh previewModel via Space
+		// (which re-runs enumeration and re-reads the tail-N slice).
+		m.activePage = PageSessions
+		m.preview = previewModel{}
+		return m, nil
 	}
 
 	// Delegate to the active view
