@@ -21,7 +21,7 @@
           "date": "2026-05-08",
           "sources": {
             "daemon-merge-reintroduces-dead-sessions": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }
