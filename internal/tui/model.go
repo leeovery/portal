@@ -608,6 +608,23 @@ func (m Model) filteredSessions() []tmux.Session {
 	return filtered
 }
 
+// applySessions ingests a fresh session slice into the list model: it stores
+// the slice on the model, recomputes the filtered (inside-tmux excluded)
+// view, pushes the resulting items into sessionList, and re-applies the
+// terminal size so pagination accounts for full help height. This is the
+// single canonical sequence shared by the SessionsMsg and
+// previewSessionsRefreshedMsg handlers; handler-specific tail logic
+// (e.g. inside-tmux title rewrite) stays at the call site.
+func (m *Model) applySessions(sessions []tmux.Session) {
+	m.sessions = sessions
+	filtered := m.filteredSessions()
+	m.sessionList.SetItems(ToListItems(filtered))
+	// Re-apply terminal size so pagination accounts for full help height
+	if m.termWidth > 0 || m.termHeight > 0 {
+		m.sessionList.SetSize(m.termWidth, m.termHeight)
+	}
+}
+
 // evaluateDefaultPage sets the active page based on loaded data.
 // It only runs once both sessions and projects have been loaded.
 // In command-pending mode, always sets PageProjects regardless of session list contents.
@@ -799,14 +816,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, tea.Quit
 		}
-		m.sessions = msg.Sessions
-		filtered := m.filteredSessions()
-		items := ToListItems(filtered)
-		m.sessionList.SetItems(items)
-		// Re-apply terminal size so pagination accounts for full help height
-		if m.termWidth > 0 || m.termHeight > 0 {
-			m.sessionList.SetSize(m.termWidth, m.termHeight)
-		}
+		m.applySessions(msg.Sessions)
 
 		if m.insideTmux && m.currentSession != "" {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
@@ -893,12 +903,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, nil
 		}
-		m.sessions = msg.Sessions
-		filtered := m.filteredSessions()
-		m.sessionList.SetItems(ToListItems(filtered))
-		if m.termWidth > 0 || m.termHeight > 0 {
-			m.sessionList.SetSize(m.termWidth, m.termHeight)
-		}
+		m.applySessions(msg.Sessions)
 		m.reanchorSessionCursor(msg.PreserveName)
 		return m, nil
 	}
