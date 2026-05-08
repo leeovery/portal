@@ -1476,6 +1476,8 @@ func (m Model) View() string {
 		return m.viewProjectList()
 	case pageFileBrowser:
 		return m.fileBrowser.View()
+	case pagePreview:
+		return m.preview.View()
 	default:
 		return m.viewSessionList()
 	}
