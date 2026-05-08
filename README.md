@@ -20,6 +20,15 @@ Portal is a CLI that runs at bare shell (before entering tmux) and provides an i
 
 After [shell integration](#shell-integration), you interact with Portal through two functions: **`x`** (session picker / opener) and **`xctl`** (subcommands like list, kill, alias). The function names are customizable — see `--cmd` below.
 
+## Features
+
+- **Interactive session picker** — fuzzy-filterable TUI for switching, creating, renaming, or killing tmux sessions from a bare shell.
+- **Scrollback preview** — press `Space` on any session in the picker for a read-only Quick Look of its terminal scrollback. Cycle windows and panes without attaching. See [Scrollback Preview](#scrollback-preview).
+- **Path aliases + zoxide** — open sessions by short name (`x work`) or recent directory; falls back to a TUI filter when nothing matches.
+- **Project memory + git roots** — new sessions auto-resolve to the repository root and are remembered for next time.
+- **Reboot-safe sessions** — automatic tmux server bootstrap plus full restoration of session structure, layout, working dirs, and ANSI scrollback after a reboot. Replaces tmux-resurrect/tmux-continuum.
+- **Per-pane resume hooks** — register commands (`npm start`, `claude --resume`, etc.) that fire only when a pane is re-created from saved state.
+
 ## Install
 
 ### Requirements
@@ -229,12 +238,34 @@ portal init bash --cmd p
 | `↑`/`k` | Move up |
 | `↓`/`j` | Move down |
 | `Enter` | Select session / confirm |
+| `Space` | Preview scrollback of highlighted session (sessions list only) |
 | `/` | Filter mode (fuzzy search) |
 | `R` | Rename session |
 | `K` | Kill session |
 | `q`/`Esc` | Quit |
 
-The TUI has three views: session list, project picker, and file browser.
+The TUI has four views: session list, project picker, file browser, and scrollback preview.
+
+### Scrollback Preview
+
+`Space` on the highlighted session opens a Quick Look-style preview of that
+session's saved scrollback so you can disambiguate similarly-named sessions
+without paying the attach/detach cost. The preview is read-only — opening and
+dismissing it leaves the session byte-identical (no hydration, no resume-hook
+firing, no tmux state mutation).
+
+| Key | Action |
+|---|---|
+| `]` | Next window (wraps) |
+| `[` | Previous window (wraps) |
+| `Tab` | Next pane within the current window (wraps) |
+| `↑`/`↓`/`j`/`k`/`PgUp`/`PgDn`/`Home`/`End` | Scroll within the loaded buffer |
+| `Esc` | Return to the sessions list |
+
+Each pane shows the last ~1000 lines of saved scrollback, anchored at the
+tail. Chrome shows `Window M of N · Pane X of Y · <window-name>` plus key
+hints. A pane that has no saved content yet (brand-new session, daemon
+hasn't ticked) renders `(no saved content)`.
 
 ## Automatic Server Bootstrap & Restoration
 
