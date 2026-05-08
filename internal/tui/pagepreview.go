@@ -79,13 +79,36 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 // open/dismiss round trip.
 type previewDismissedMsg struct{}
 
-// Update routes Esc to a synthesised previewDismissedMsg so the top-level
-// Update can flip pages without preview ever touching the sessionList.
-// All other messages delegate to the embedded viewport (covering scroll
-// keys and future WindowSizeMsg forwarding).
+// Update routes Esc to a synthesised previewDismissedMsg, intercepts
+// Home / End for preview-owned top/bottom jumps, and absorbs
+// tea.WindowSizeMsg to resize the embedded viewport in place. All other
+// messages — including the remaining viewport scroll keys (Up, Down,
+// PgUp, PgDn, ctrl-u, ctrl-d, j, k) — delegate to bubbles/viewport so
+// its native keymap and resize-clamp behaviour are preserved.
+//
+// reader.Tail is intentionally NOT called here: scroll and resize
+// operate on the already-loaded N-line buffer per § Refresh Semantics
+// (resize is not a read trigger; viewport-internal scroll does not
+// re-read).
 func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		return m, func() tea.Msg { return previewDismissedMsg{} }
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height
+		return m, nil
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEsc:
+			return m, func() tea.Msg { return previewDismissedMsg{} }
+		case tea.KeyHome:
+			m.viewport.GotoTop()
+			return m, nil
+		case tea.KeyEnd:
+			m.viewport.GotoBottom()
+			return m, nil
+		}
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
