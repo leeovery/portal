@@ -15,6 +15,14 @@ import (
 // resize math is centralised on it.
 const previewChromeHeight = 1
 
+// previewPlaceholder is the canonical user-facing string rendered into the
+// viewport when the ScrollbackReader returns the unified "no content
+// available" shape — (nil, nil) — collapsing ENOENT, zero-byte .bin, and
+// zero-line file (only an unterminated partial) per § Architecture Summary
+// > Test seams > ScrollbackReader return contract. Chrome counts are
+// unaffected: the placeholder lives strictly inside the viewport surface.
+const previewPlaceholder = "(no saved content)"
+
 // previewModel renders a single tmux pane's saved scrollback inside a
 // viewport. v1 of the preview page covers the full terminal; chrome (header,
 // footer, borders) is layered on by Phase 3 and does not exist yet.
@@ -40,13 +48,14 @@ type previewModel struct {
 //  2. on enumeration error or empty result (no groups, or first group has no
 //     panes) return (zero, false) so the caller can fall through to the
 //     dismiss-to-sessions silent no-open path,
-//  3. otherwise focus (0,0), synchronously read the tail-N for that pane,
-//     SetContent the bytes verbatim, and GotoBottom() so initial scroll
-//     position is anchored at the latest output.
+//  3. otherwise focus (0,0) and dispatch to readFocusedPaneIntoViewport so
+//     the synchronous tail-N read and the (bytes, err) → viewport translation
+//     run through the single shared dispatcher (placeholder for (nil, nil),
+//     bytes verbatim otherwise) and the viewport is anchored at scroll-tail.
 //
-// reader.Tail's return shapes are NOT translated here; (nil, nil) and
-// (nil, err) both still yield ok=true and an empty viewport. Phase 4 owns
-// the placeholder/error wording.
+// The (nil, err) error-string branch is owned by Phase 4 task 4-2; this
+// constructor does not encode error wording itself — it delegates to the
+// shared helper.
 func NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, width, height int) (previewModel, bool) {
 	groups, err := enumerator.ListWindowsAndPanesInSession(session)
 	if err != nil {
@@ -68,17 +77,14 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		height:     height,
 	}
 
-	// Helpers compose over m.windowIdx / m.paneIdx (both 0 here), reading raw
-	// indices off groups[0] and feeding state.SanitizePaneKey — byte-identical
-	// to the daemon writer's key for that pane. Single source of truth shared
-	// with focus-change reads in later phases.
-	bytes, _ := reader.Tail(m.currentPaneKey())
-	m.viewport.SetContent(string(bytes))
-	// bubbles@v1.0.0 viewport.SetContent only auto-jumps to bottom when the
-	// previous YOffset overshoots the new content; on a fresh viewport
-	// (YOffset == 0) it leaves the scroll position at the top, so we must
-	// jump explicitly to satisfy the "anchored at scroll-tail" contract.
-	m.viewport.GotoBottom()
+	// Single dispatcher shared with cycle handlers (Tab, ], [) so the three
+	// (bytes, err) shapes from ScrollbackReader.Tail are translated to viewport
+	// state in exactly one place. bubbles@v1.0.0 viewport.SetContent only
+	// auto-jumps to bottom when the previous YOffset overshoots the new
+	// content; on a fresh viewport (YOffset == 0) it leaves the scroll
+	// position at the top, so the helper jumps explicitly to satisfy the
+	// "anchored at scroll-tail" contract.
+	m.readFocusedPaneIntoViewport()
 
 	return m, true
 }
@@ -153,16 +159,39 @@ func (m previewModel) chromeLine() string {
 }
 
 // readFocusedPaneIntoViewport performs the synchronous tail-N read for the
-// currently-focused pane and pushes the bytes into the embedded viewport
-// verbatim, anchored at scroll-tail. Shared by every focus-changing branch
-// of Update (Tab, `]`, `[`); reader.Tail's (nil, err) and (nil, nil) shapes
-// are intentionally not translated here — Phase 4 owns the placeholder /
-// error wording. Pointer receiver because the helper mutates m.viewport
-// via SetContent / GotoBottom and the caller relies on those mutations
-// being visible on the value it returns from Update.
+// currently-focused pane and translates the ScrollbackReader.Tail (bytes, err)
+// outcome to viewport content, anchored at scroll-tail. Shared by every
+// focus-changing branch of Update (Tab, `]`, `[`) AND by NewPreviewModel's
+// initial-open path, so the three observable shapes are dispatched in exactly
+// one place per § Architecture Summary > Test seams > ScrollbackReader
+// return contract:
+//
+//   - (bytes != nil, _) — bytes rendered verbatim.
+//   - (nil, nil) — placeholder ("(no saved content)") rendered. Collapses
+//     ENOENT, zero-byte .bin, and zero-line file (only an unterminated
+//     partial) into one shape.
+//   - (nil, err != nil) — OS-level read failure. Phase 4 task 4-2 owns the
+//     error string; for now this branch falls through to the existing
+//     SetContent(string(nil)) behaviour so the (nil, err) path remains
+//     observably distinct from (nil, nil).
+//
+// Pointer receiver because the helper mutates m.viewport via SetContent /
+// GotoBottom and the caller relies on those mutations being visible on the
+// value it returns from Update.
 func (m *previewModel) readFocusedPaneIntoViewport() {
-	bytes, _ := m.reader.Tail(m.currentPaneKey())
-	m.viewport.SetContent(string(bytes))
+	bytes, err := m.reader.Tail(m.currentPaneKey())
+	switch {
+	case bytes == nil && err == nil:
+		m.viewport.SetContent(previewPlaceholder)
+	case err != nil:
+		// Phase 4 task 4-2 will translate this branch to the canonical
+		// error string. For this task the existing behaviour is
+		// preserved untouched so (nil, err) and (nil, nil) remain
+		// observably distinct.
+		m.viewport.SetContent(string(bytes))
+	default:
+		m.viewport.SetContent(string(bytes))
+	}
 	m.viewport.GotoBottom()
 }
 
