@@ -89,7 +89,9 @@ The merge's intended use case — hydrate-in-progress panes briefly invisible to
 
 ### Soft-Warning Posture
 
-Best-effort, mirrors the warning-soft semantics of the existing `CleanStale` step (step 8). Failure (tmux unavailable, individual unset error) surfaces as a soft warning collected by the orchestrator and drained post-bootstrap; it never escalates to a fatal abort.
+Best-effort, mirrors the warning-soft semantics of the existing `CleanStale` step (step 8). Failure (tmux unavailable, individual unset error, live-pane enumeration error) surfaces as a soft warning collected by the orchestrator and drained post-bootstrap; it never escalates to a fatal abort.
+
+**Mass-unset hazard guard:** The cleanup must never treat a silently-empty live-pane result as authoritative. If live-pane enumeration fails or returns zero panes due to tmux instability, the cleanup must skip the unset pass and emit a soft warning. The hazard guarded against: an empty live-pane set would cause **every** `@portal-skeleton-*` marker to be computed as stale, including markers protecting legitimate hydrate-in-progress panes — destabilising a still-live tmux server. The error-propagating live-pane call (above) is the primary defence; an explicit "if zero panes, skip cleanup" guard is recommended belt-and-braces if the runtime can plausibly observe zero live panes when markers exist.
 
 ### Concurrency with the Daemon
 
@@ -108,7 +110,16 @@ The cleanup step runs after Restore (step 5) and Clear `@portal-restoring` (step
 A new seam interface exposed by the bootstrap Orchestrator (recommended name `StaleMarkerCleaner` or similar; final name is an implementation detail consistent with adjacent bootstrap seams), with the production adapter in `bootstrapadapter` wiring concrete dependencies:
 
 - **Marker enumeration** — `state.ListSkeletonMarkers` is the canonical source. It already returns a `map[string]struct{}` keyed by **paneKey** (the `<paneKey>` portion of `@portal-skeleton-<paneKey>`, with the prefix stripped). No additional parsing is required on the marker side.
-- **Live pane enumeration** — `(*tmux.Client).ListAllPanes()` returns `[]string` of `session:window.pane` form (e.g. `my-session:0.1`). The cleanup step **must convert each entry to canonical paneKey form** via `state.SanitizePaneKey(session, window, pane)` (which produces `session__window.pane` form, e.g. `my-session__0.1`) before computing the set difference. Without this conversion the two sides have incompatible separators (`:` vs `__`) and the diff is meaningless.
+- **Live pane enumeration** — Must use an **error-propagating** tmux call so that a tmux failure surfaces as a soft warning rather than a silently-empty result. `(*tmux.Client).ListAllPanes()` is **unsuitable** here because it swallows tmux errors and returns `([]string{}, nil)` on failure (`internal/tmux/tmux.go:551-557`); using it would cause every `@portal-skeleton-*` marker to be computed as stale and unset on tmux failure, including markers protecting genuinely live hydrate-in-progress panes. The cleanup step **must use `(*tmux.Client).ListAllPanesWithFormat(format)`** (which propagates errors per `internal/tmux/tmux.go:528-534`) with a format such as `#{session_name}:#{window_index}.#{pane_index}` and parse the result. On error from this call, the cleanup degrades to a soft warning per the Soft-Warning Posture below — it must never fall through to "live pane set is empty, therefore unset all markers".
+
+- **PaneKey conversion** — Each live-pane entry from the format string above is of form `session:window.pane` (e.g. `my-session:0.1`). The cleanup step **must convert each entry to canonical paneKey form** via `state.SanitizePaneKey(session, window, pane)` (which produces `session__window.pane` form, e.g. `my-session__0.1`) before computing the set difference. Without this conversion the two sides have incompatible separators (`:` vs `__`) and the diff is meaningless.
+
+  **Parse contract for `session:window.pane`:**
+  - Split on the **rightmost** `:` (tmux session names may contain `:`; the rightmost `:` separates session from `window.pane`).
+  - Split the right half on `.` to obtain `window` and `pane` strings.
+  - Parse `window` and `pane` as integers via `strconv.Atoi`.
+  - On parse failure for any line, **skip that line** (do not abort cleanup; do not include it in the live-pane set; emit a soft warning if the failure is unexpected). A malformed line must not cause cleanup to mass-unset markers.
+  - Whether to extract this parse + sanitize as a shared helper or inline it in the cleanup step is an implementation choice; the contract above is what matters.
 - **Marker unset** — `(*tmux.Client).UnsetServerOption(name)` with the full option name `@portal-skeleton-<paneKey>` (i.e. the `SkeletonMarkerPrefix` constant followed by the canonical paneKey).
 
 The seam should expose three methods (one per responsibility) so each can be mocked independently in tests; whether they live on a single composite interface or three small interfaces is an implementation choice consistent with existing bootstrap conventions. Tests exercise the seam with mock implementations following the existing `bootstrap` testing pattern.
@@ -164,6 +175,7 @@ The fix is complete when:
 5. While a stale marker exists between daemon ticks (before bootstrap cleanup runs), the merge filter prevents resurrection regardless of marker staleness.
 6. The legitimate hydrate-in-progress flow remains correct — phase A skeleton-restored panes (marker set, session/window/pane present in tmux) are still merged from prev as expected.
 7. All new tests pass; the previously-buggy test is replaced; existing happy-path tests remain green.
+8. **Scrollback-save resumption** — After the cleanup step unsets a stale marker whose underlying pane is still live (the case where a marker leaked but the pane was retained or re-created), the next daemon tick saves scrollback for that pane (i.e. the skip-save guard at `cmd/state_daemon.go:131-133` no longer applies). This verifies the secondary harm closed by Fix Component B (scrollback save was being silently skipped for live-marker panes) is actually resolved, not merely the resurrection symptom.
 
 ## Why This Bug Wasn't Caught
 
