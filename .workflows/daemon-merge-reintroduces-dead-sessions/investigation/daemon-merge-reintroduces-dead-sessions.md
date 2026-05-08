@@ -124,7 +124,51 @@ The merge step in `CaptureStructure` trusts the `@portal-skeleton-<paneKey>` mar
 
 ## Fix Direction
 
-To be filled during findings review.
+### Chosen Approach
+
+Two coordinated changes, both inside this work unit:
+
+1. **Live-set filtering in `mergeSkippedPanes`** (`internal/state/capture.go`). Before processing prev's panes, build a structural map from the fresh index — session names, then per-session window indices, then per-window pane indices. The merge proceeds only when all three levels exist in fresh. A skeleton marker is no longer treated as authoritative; it only protects panes whose session/window/pane path tmux still acknowledges.
+
+2. **Stale-marker cleanup as a new bootstrap step** (between current step 5 Restore and step 7 SweepOrphanFIFOs). Enumerates the live `@portal-skeleton-*` markers, intersects against live tmux panes, and unsets any marker whose paneKey no longer corresponds to a live pane. Best-effort, mirrors the warning-soft semantics of the existing CleanStale step. Restores scrollback-save coverage for panes whose markers leaked.
+
+**Deciding factor:** the user requested a proper-and-clean fix that hardens both layers. The merge filter alone resolves the user-visible resurrection symptom but leaves a quieter scrollback-save defect on currently-marked panes; the cleanup closes that gap and prevents indefinite marker accumulation. Both changes are local to layers already in scope for the merge logic — they compose without architectural surgery.
+
+### Options Explored
+
+- **Session-level filtering only.** Smallest possible change. Rejected: the same defensive flaw exists at window and pane level — kill-window or kill-pane against a still-live session leaves the analogous resurrection path open. The user asked for a complete fix; partial filtering leaves a known sibling defect.
+
+- **Pre-filter `skipSet` in `captureAndCommit` (higher layer).** Rejected: costs an extra `ListSessionNames` tmux call per tick that `CaptureStructure` already makes internally; staleness is a merge-layer concern and pushing it up muddies responsibility split.
+
+- **Drop "introduce missing session" merge behaviour entirely.** Rejected: may break the legitimate hydrate-phase-A race where a skeleton-restored session is briefly invisible to list-sessions. Higher behavioural risk than targeted filtering.
+
+- **Defer marker cleanup to a separate work unit.** Rejected per user direction — the side effect (skipped scrollback saves for currently-marked panes) is real for the user right now; bundling is the cleaner outcome.
+
+### Discussion
+
+Empirical confirmation came partway through the review: the user's three resurrecting sessions matched exactly with three stale `@portal-skeleton-*` markers (`agentic-workflows-XXrJ3J__1.1`, `leeovery-Gi5NLG__1.1`, `leeovery-feqhpg__1.1`). Killing an unmarkered session (`game-ideas`) did not resurrect it. This pinned the diagnosis: marker presence is necessary AND sufficient for the symptom.
+
+Discussion progression:
+- **Self-cleaning:** the merge fix alone restores correctness for the resurrection symptom (sessions.json self-heals on the next tick once a dead session is no longer reintroduced). User asked whether cleanup was needed — the resurrection symptom alone does not require it, but a separate side effect (scrollback-save skipped for live-marker panes per `cmd/state_daemon.go:131-133`) does.
+- **Scope progression:** user shifted from "tight surgical fix" toward "fix it properly" after the side-effect concern surfaced. Final scope settled on full filtering (all three levels) plus the cleanup step.
+- **Architectural sanity:** every consumer of `sessions.json` and the daemon's `prev` was traced; no caller depends on the buggy "merge can introduce arbitrary prev sessions" behaviour. Hydrate-in-progress (the merge's intended use case) survives unchanged because phase A creates the session in tmux before the marker is set.
+
+Companion bug (`killed-sessions-resurrect-on-restart`, logged 2026-05-08) is the most likely producer of stale markers in normal use but lives in a different layer (`cmd/state_hydrate.go` / `cmd/state_signal_hydrate.go`) and is independently scoped. This work unit does not depend on it; the fixes are orthogonal.
+
+### Testing Recommendations
+
+- **Replace** the existing test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` (`internal/state/capture_test.go:570`) with its inverse: a prev session whose name is not in fresh must NOT be merged, even when its paneKey is in skipSet.
+- **Add** unit tests for window-level and pane-level filtering: a marker for a window or pane that exists in prev but not in fresh (within an otherwise-live session) must be dropped from the merge result.
+- **Add** a regression test mirroring the user's empirical scenario: marker set, session killed, daemon tick → fresh capture must NOT reintroduce the session.
+- **Add** a unit test for the stale-marker cleanup function: given a marker whose paneKey doesn't correspond to a live pane, the cleanup unsets it; given a live marker, the cleanup leaves it alone.
+- **Add** a bootstrap-step integration test asserting the new cleanup step runs at the right point in the orchestrator sequence and degrades to a warning on tmux failure (matching the soft-warning posture of CleanStale).
+- **Preserve** the existing happy-path skeleton-marker tests in `internal/restore/session_markers_test.go` — the fix must not regress legitimate hydrate-in-progress merge behaviour.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium. The merge change is ~15 lines (session/window/pane filtering). The cleanup step is a new bootstrap step (~50 lines including adapter wiring) plus updates to the orchestrator sequence and its tests.
+- **Regression risk:** Low. Every consumer of `sessions.json` and `prev` was traced; no caller depends on the buggy behaviour. The merge's intended use case (hydrate-in-progress) is structurally distinct from the bug surface and remains correct.
+- **Recommended approach:** Regular release. No hotfix needed — the symptom is recoverable (kill the same session twice, or restart tmux server) and the workaround (manual marker unset via `tmux set-option -us @portal-skeleton-<key>`) is available for affected users.
 
 ---
 
