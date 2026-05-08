@@ -44,21 +44,27 @@ func SetOpenFileForTest(open func(name string) (*os.File, error)) (restore func(
 //
 // All "no content available" outcomes converge on (nil, nil) with NO error:
 // ENOENT on open, a zero-byte file, and a file whose reverse scan finds zero
-// '\n' bytes (e.g. only an unterminated partial line). OS-level read errors
-// other than ENOENT propagate as (nil, err).
+// '\n' bytes (e.g. only an unterminated partial line).
+//
+// Any other open error (e.g. EACCES) and any Seek/Read error encountered
+// during the reverse scan propagate as (nil, err) wrapped with the unified
+// prefix "tail scrollback <path>: ..." and %w, so errors.Is works against
+// fs.ErrPermission, os.ErrClosed, etc. There are no retries — a single
+// attempt per call. The deferred Close runs on every return path, including
+// errors, so the file descriptor is never leaked.
 func TailScrollback(path string, n int) ([]byte, error) {
 	f, err := openFileForTail(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("open scrollback %s: %w", path, err)
+		return nil, fmt.Errorf("tail scrollback %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
-		return nil, fmt.Errorf("seek end %s: %w", path, err)
+		return nil, fmt.Errorf("tail scrollback %s: %w", path, err)
 	}
 	if size == 0 {
 		return nil, nil
@@ -83,11 +89,11 @@ func TailScrollback(path string, n int) ([]byte, error) {
 		}
 		readAt := cursor - stride
 		if _, err := f.Seek(readAt, io.SeekStart); err != nil {
-			return nil, fmt.Errorf("seek %d in %s: %w", readAt, path, err)
+			return nil, fmt.Errorf("tail scrollback %s: %w", path, err)
 		}
 		buf := chunk[:stride]
 		if _, err := io.ReadFull(f, buf); err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			return nil, fmt.Errorf("tail scrollback %s: %w", path, err)
 		}
 		// Prepend buf to tail (file-order). Allocate once per iteration.
 		merged := make([]byte, len(buf)+len(tail))
