@@ -141,12 +141,14 @@
             "session-scrollback-preview-4-5",
             "session-scrollback-preview-4-6",
             "session-scrollback-preview-4-8",
-            "session-scrollback-preview-4-7"
+            "session-scrollback-preview-4-7",
+            "session-scrollback-preview-4-9"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4
           ]
         }
       }
