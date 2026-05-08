@@ -452,6 +452,26 @@ func WithDirLister(d DirLister, startPath string) Option {
 	}
 }
 
+// WithEnumerator wires the TmuxEnumerator seam used by the scrollback
+// preview page. Production callers pass a *tmux.Client; tests that do not
+// exercise preview entry can omit this option, leaving enumerator nil.
+func WithEnumerator(e TmuxEnumerator) Option {
+	return func(m *Model) {
+		m.enumerator = e
+	}
+}
+
+// WithScrollbackReader wires the ScrollbackReader seam used by the
+// scrollback preview page. Production callers pass a
+// scrollbackReaderAdapter constructed once at TUI startup with stateDir
+// resolved via internal/state's paths helper; tests that do not exercise
+// preview entry can omit this option, leaving reader nil.
+func WithScrollbackReader(r ScrollbackReader) Option {
+	return func(m *Model) {
+		m.reader = r
+	}
+}
+
 // sessionHelpKeys returns key.Binding entries for session-specific actions.
 func sessionHelpKeys() []key.Binding {
 	return []key.Binding{

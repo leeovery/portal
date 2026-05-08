@@ -11,6 +11,7 @@ import (
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
 	"github.com/spf13/cobra"
@@ -289,6 +290,8 @@ type tuiConfig struct {
 	aliasEditor    tui.AliasEditor
 	sessionCreator tui.SessionCreator
 	dirLister      tui.DirLister
+	enumerator     tui.TmuxEnumerator
+	reader         tui.ScrollbackReader
 	cwd            string
 	insideTmux     bool
 	currentSession string
@@ -313,6 +316,12 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 	}
 	if cfg.aliasEditor != nil {
 		opts = append(opts, tui.WithAliasEditor(cfg.aliasEditor))
+	}
+	if cfg.enumerator != nil {
+		opts = append(opts, tui.WithEnumerator(cfg.enumerator))
+	}
+	if cfg.reader != nil {
+		opts = append(opts, tui.WithScrollbackReader(cfg.reader))
 	}
 	m := tui.New(cfg.lister, opts...)
 	if len(command) > 0 {
@@ -359,6 +368,17 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		return fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
+	// Resolve stateDir once per Portal process — captured into the
+	// scrollback reader adapter at TUI construction so the preview page
+	// reads from the same directory the daemon and bootstrap orchestrator
+	// write to. state.Dir() is the single source of truth for state-path
+	// policy; preview never resolves stateDir on its own.
+	stateDir, err := state.Dir()
+	if err != nil {
+		return fmt.Errorf("failed to resolve state directory: %w", err)
+	}
+	previewReader := tui.NewProductionScrollbackReader(stateDir)
+
 	cfg := tuiConfig{
 		lister:         client,
 		killer:         client,
@@ -368,6 +388,8 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		aliasEditor:    aliasStore,
 		sessionCreator: session.NewSessionCreator(gitResolver, store, client, gen),
 		dirLister:      &osDirLister{},
+		enumerator:     client,
+		reader:         previewReader,
 		cwd:            cwd,
 		serverStarted:  serverStarted,
 	}
