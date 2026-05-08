@@ -9,6 +9,12 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
+// previewChromeHeight is the number of lines occupied by the chrome line
+// rendered above the viewport. v1 uses a single header line; if chrome
+// later grows to multiple lines, only this constant changes — viewport
+// resize math is centralised on it.
+const previewChromeHeight = 1
+
 // previewModel renders a single tmux pane's saved scrollback inside a
 // viewport. v1 of the preview page covers the full terminal; chrome (header,
 // footer, borders) is layered on by Phase 3 and does not exist yet.
@@ -57,7 +63,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(width, height),
+		viewport:   viewport.New(width, max(0, height-previewChromeHeight)),
 		width:      width,
 		height:     height,
 	}
@@ -184,7 +190,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height
+		m.viewport.Height = max(0, msg.Height-previewChromeHeight)
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -237,8 +243,10 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 	return m, cmd
 }
 
-// View returns the rendered viewport contents. Chrome (header/footer/border)
-// is Phase 3.
+// View returns the chrome line composed vertically above the embedded
+// viewport contents. Chrome on top, viewport below — single newline
+// separator. The orientation (header on top) is fixed in v1 per
+// § Interaction Shape > Layout, and pinned by tests.
 func (m previewModel) View() string {
-	return m.viewport.View()
+	return m.chromeLine() + "\n" + m.viewport.View()
 }
