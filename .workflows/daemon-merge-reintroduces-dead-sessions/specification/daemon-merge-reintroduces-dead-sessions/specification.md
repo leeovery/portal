@@ -95,6 +95,47 @@ Fix Component A alone resolves the user-visible resurrection symptom because `se
 
 - **Defer marker cleanup to a separate work unit** — Rejected per user direction. The scrollback-save side effect is real for users now; bundling produces the cleaner outcome and both changes are local to layers already in scope for the merge logic.
 
+## Testing Requirements
+
+### Existing Tests to Replace
+
+**`internal/state/capture_test.go:570`** — The test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` codifies the buggy behaviour as correct and **must be replaced** with its inverse:
+
+> A prev session whose name is not in fresh must NOT be merged, even when its paneKey is in `skipSet`.
+
+### Tests to Add
+
+**Merge filter — structural-level tests:**
+- Window-level filtering: a marker for a window that exists in prev but not in fresh (within an otherwise-live session) must be dropped from the merge result.
+- Pane-level filtering: a marker for a pane that exists in prev but not in fresh (within an otherwise-live window) must be dropped from the merge result.
+
+**Merge filter — regression test mirroring the empirical scenario:**
+- Marker set, session killed, daemon tick → fresh capture must NOT reintroduce the session.
+
+**Stale-marker cleanup — unit:**
+- Given a marker whose paneKey doesn't correspond to a live pane, the cleanup unsets it.
+- Given a live marker (paneKey still corresponds to a live pane), the cleanup leaves it alone.
+
+**Stale-marker cleanup — bootstrap integration:**
+- The new cleanup step runs at the right point in the orchestrator sequence (after step 6 "Clear `@portal-restoring`", before existing step 7 SweepOrphanFIFOs).
+- The cleanup degrades to a warning on tmux failure, matching the soft-warning posture of `CleanStale`.
+
+### Tests to Preserve
+
+- Existing happy-path skeleton-marker tests in `internal/restore/session_markers_test.go` — the fix must not regress legitimate hydrate-in-progress merge behaviour.
+
+## Acceptance Criteria
+
+The fix is complete when:
+
+1. The synthetic repro (set marker, kill session, wait one daemon tick) does **not** reintroduce the killed session into `sessions.json`.
+2. The user's empirical scenario (the three resurrecting sessions with matching stale markers) does not recur after applying both Fix Component A and Fix Component B.
+3. `sessions.json` self-heals on the next daemon tick after a previously-polluted commit (the polluted `prev` no longer perpetuates dead sessions).
+4. After bootstrap, no `@portal-skeleton-*` marker exists for a paneKey that has no corresponding live pane.
+5. While a stale marker exists between daemon ticks (before bootstrap cleanup runs), the merge filter prevents resurrection regardless of marker staleness.
+6. The legitimate hydrate-in-progress flow remains correct — phase A skeleton-restored panes (marker set, session/window/pane present in tmux) are still merged from prev as expected.
+7. All new tests pass; the previously-buggy test is replaced; existing happy-path tests remain green.
+
 ---
 
 ## Working Notes
