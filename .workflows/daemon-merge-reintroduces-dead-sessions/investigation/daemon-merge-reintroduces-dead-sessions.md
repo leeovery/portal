@@ -28,6 +28,8 @@ Synthetic repro (does not require triggering the hydrate cascade):
 
 **Reproducibility:** Always, given the marker set + session killed conditions.
 
+**Live in-the-wild confirmation (2026-05-08):** the user observed three specific sessions resurrecting after kill: `agentic-workflows-XXrJ3J`, `leeovery-Gi5NLG`, `leeovery-feqhpg`. Inspecting `tmux show-options -s` revealed exactly three matching stale `@portal-skeleton-*` markers (`agentic-workflows-XXrJ3J__1.1`, `leeovery-Gi5NLG__1.1`, `leeovery-feqhpg__1.1`). Killing an unmarkered session (`game-ideas`) did NOT resurrect it. This is the cleanest possible empirical confirmation: presence of marker is necessary AND sufficient (given a daemon tick) for the resurrection symptom.
+
 ### Environment
 
 - **Affected environments:** Local — any installation running `portal state daemon`.
