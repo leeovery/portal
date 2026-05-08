@@ -12,6 +12,12 @@ import (
 // exercised against curated groups without depending on the constructor's I/O
 // path. previewModel is unexported and lives in this package, so this is the
 // canonical way to drive it from in-package tests.
+//
+// enumerator and reader are intentionally left nil: the helpers under test
+// (currentGroup, currentRawIndices, currentPaneKey, degenerate, chromeLine)
+// must be pure — any helper that accidentally calls m.enumerator or m.reader
+// would nil-panic in these tests, locking the purity contract from the
+// outside.
 func newPreviewModelForHelpers(session string, groups []tmux.WindowGroup, windowIdx, paneIdx int) previewModel {
 	return previewModel{
 		session:   session,

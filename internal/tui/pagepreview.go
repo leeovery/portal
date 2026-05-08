@@ -205,6 +205,11 @@ func (m previewModel) readFocusedPaneIntoViewport() viewport.Model {
 	switch {
 	case bytes == nil && err == nil:
 		vp.SetContent(previewPlaceholder)
+	// The (nil, nil) arm above takes precedence so the (nil, err) shape from
+	// the spec's three-shape contract lands here cleanly. The helper never
+	// returns (bytes != nil, err != nil); this arm is shaped defensively to
+	// route any such future drift to the user-visible error string rather
+	// than silently rendering bytes alongside an ignored error.
 	case err != nil:
 		vp.SetContent(previewReadError)
 	default:

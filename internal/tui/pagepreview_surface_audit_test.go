@@ -348,3 +348,58 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		}
 	}
 }
+
+// TestSurfaceAudit_SaveFormatConstantsUnchanged pins the on-disk save format
+// for scrollback `.bin` files and hydration FIFOs. Per spec § Architecture
+// Summary > No changes to: "Save format or `.bin` file shape" must remain
+// untouched. Per § Cross-cutting Seams > State Package API Reuse, preview
+// reads via state.ScrollbackFile, so any drift in the path scheme here would
+// invisibly redirect preview reads to a non-existent location.
+//
+// The check pins literal substrings rather than calling the helpers so a
+// future refactor that silently swaps the path-construction strategy without
+// renaming exported helpers still trips the audit.
+func TestSurfaceAudit_SaveFormatConstantsUnchanged(t *testing.T) {
+	pathsFile := repoRelative("internal", "state", "paths.go")
+	b, err := os.ReadFile(pathsFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", pathsFile, err)
+	}
+	src := string(b)
+
+	type pin struct {
+		name    string
+		literal string
+		why     string
+	}
+	pins := []pin{
+		{
+			name:    "scrollbackSubdir",
+			literal: `scrollbackSubdir  = "scrollback"`,
+			why:     "scrollback subdirectory name is part of the save format; preview reads from this exact subdir",
+		},
+		{
+			name:    "ScrollbackFile suffix",
+			literal: `paneKey+".bin"`,
+			why:     `.bin extension is part of the save-format contract — daemon writes and preview reads must agree`,
+		},
+		{
+			name:    "FIFOPath prefix",
+			literal: `"hydrate-"+paneKey+".fifo"`,
+			why:     "hydration FIFO naming is part of the save format; the surface audit pins it even though preview itself does not touch FIFOs",
+		},
+	}
+
+	for _, p := range pins {
+		t.Run(p.name, func(t *testing.T) {
+			if !strings.Contains(src, p.literal) {
+				t.Errorf(
+					"%s no longer contains %q (%s); per spec "+
+						"§ Architecture Summary > No changes to, the save "+
+						"format and `.bin` file shape must remain unchanged.",
+					pathsFile, p.literal, p.why,
+				)
+			}
+		})
+	}
+}

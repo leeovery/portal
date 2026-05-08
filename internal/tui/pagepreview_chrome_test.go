@@ -209,3 +209,20 @@ func TestPreviewChromeLine_WindowNameWithPipeRenderedVerbatim(t *testing.T) {
 		t.Errorf("chromeLine() = %q; want substring %q (verbatim)", got, "weird|name with spaces")
 	}
 }
+
+// Regression guard for analysis-cycle-1 task 5-3: the original chrome format
+// embedded the literal "#W:" tmux-format-code as a user-facing label. Pinning
+// its absence here so a future revision cannot silently reintroduce it.
+func TestPreviewChromeLine_DoesNotEmbedTmuxFormatCodePrefix(t *testing.T) {
+	groups := []tmux.WindowGroup{
+		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0, 1}},
+	}
+	for _, paneIdx := range []int{0} {
+		m := newPreviewModelForHelpers("work", groups, 0, paneIdx)
+		got := stripANSI(m.chromeLine())
+		if strings.Contains(got, "#W:") {
+			t.Errorf("chromeLine() = %q; must not contain raw tmux format-code label %q", got, "#W:")
+		}
+	}
+}

@@ -301,7 +301,7 @@ func TestTailScrollback(t *testing.T) {
 		}
 	})
 
-	t.Run("returns an error from a mid-scan seek/read failure", func(t *testing.T) {
+	t.Run("returns an error from a mid-scan seek failure", func(t *testing.T) {
 		// Inject via the openFunc seam: open the file, immediately close it,
 		// then return the closed *os.File. The first Seek call inside
 		// TailScrollback will fail with "file already closed", exercising the

@@ -213,13 +213,16 @@ func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *test
 		}
 	}
 
-	// Final chrome shape preserved — same totals as initial.
+	// Final chrome shape preserved — same totals as initial. The cycle sequence
+	// lands us on (windowIdx=1, paneIdx=0), so chrome should read
+	// "Window 2 of 2" / "Pane 1 of 2" with the "of N" totals unchanged from
+	// the at-open enumeration.
 	finalChrome := stripANSI(models[len(models)-1].chromeLine())
 	if !strings.Contains(finalChrome, "Window 2 of 2") {
-		t.Errorf("final chrome did not reflect (windowIdx=1) under preserved 'of 2' total: %q", finalChrome)
+		t.Errorf("final chrome must show ordinal Window 2 (from windowIdx=1) with preserved 'of 2' total; got: %q", finalChrome)
 	}
 	if !strings.Contains(finalChrome, "Pane 1 of 2") {
-		t.Errorf("final chrome did not reflect (paneIdx=0) under preserved 'of 2' total: %q", finalChrome)
+		t.Errorf("final chrome must show ordinal Pane 1 (from paneIdx=0) with preserved 'of 2' total; got: %q", finalChrome)
 	}
 }
 
@@ -379,10 +382,9 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 	// is the most likely panic surface if the model has lost a structural
 	// invariant under degradation.
 	for i, mm := range models {
-		_ = mm.View()
-		_ = mm.chromeLine()
-		_ = mm.viewport.View()
-		// Sanity: View output must contain the chrome line.
+		// View() composes chromeLine() and viewport.View() internally; if
+		// any of the three would panic, the contains-check below would
+		// not be reached. The assertion doubles as the panic surface.
 		if !strings.Contains(stripANSI(mm.View()), stripANSI(mm.chromeLine())) {
 			t.Errorf("step %d: View() did not contain chromeLine() — composition broken", i)
 		}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,27 +24,10 @@ func buildLines(lineCount int) []byte {
 	var b strings.Builder
 	for i := 1; i <= lineCount; i++ {
 		b.WriteString("line")
-		// itoa via fmt is overkill; manual base-10 keeps the helper pure.
-		b.WriteString(decimal(i))
+		b.WriteString(strconv.Itoa(i))
 		b.WriteString("\n")
 	}
 	return []byte(b.String())
-}
-
-// decimal returns the base-10 string for n>=0 without pulling in fmt;
-// callers only ever pass small positive ints.
-func decimal(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }
 
 func newFewerThanNModel(t *testing.T, lineCount int) (previewModel, *recordingReader) {
@@ -186,7 +170,7 @@ func TestPreviewFewerThanN_NeverTriggersThePlaceholderBranch(t *testing.T) {
 	cases := []int{1, 2, 50, 500, 999}
 
 	for _, lineCount := range cases {
-		t.Run("lines="+decimal(lineCount), func(t *testing.T) {
+		t.Run("lines="+strconv.Itoa(lineCount), func(t *testing.T) {
 			m, _ := newFewerThanNModel(t, lineCount)
 
 			// Anchored at bottom by initial-open: check the bottom view.

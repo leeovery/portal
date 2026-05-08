@@ -101,10 +101,15 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 		t.Fatalf("Esc cmd produced %T; want previewDismissedMsg", cmd())
 	}
 
-	// Enumerator: exactly one call across the full lifecycle.
+	// Enumerator: exactly one call across the full lifecycle, with the
+	// session name flowing from NewPreviewModel's first argument verbatim.
 	if enum.calls != 1 {
 		t.Errorf("expected ListWindowsAndPanesInSession called exactly 1 time across full lifecycle, got %d",
 			enum.calls)
+	}
+	if enum.lastArg != "work" {
+		t.Errorf("enumerator received session %q; want %q (constructor must pass the session arg through verbatim)",
+			enum.lastArg, "work")
 	}
 
 	// Reader: exactly 1 (open) + 6 (cycle keypresses) = 7 calls.
