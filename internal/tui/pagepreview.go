@@ -23,6 +23,16 @@ const previewChromeHeight = 1
 // unaffected: the placeholder lives strictly inside the viewport surface.
 const previewPlaceholder = "(no saved content)"
 
+// previewReadError is the canonical user-facing string rendered into the
+// viewport when the ScrollbackReader returns (nil, err) — an OS-level read
+// failure such as EACCES or EIO — per § Read-Failure Handling > Placeholder
+// > Error string. Uniform across errno types: every error produces this
+// byte-identical string. Distinct from previewPlaceholder so the (nil, err)
+// outcome is observably different from (nil, nil). No per-pane error cache
+// exists on previewModel; future focus changes onto the same pane retry the
+// read fresh via the dispatcher.
+const previewReadError = "(unable to read scrollback)"
+
 // previewModel renders a single tmux pane's saved scrollback inside a
 // viewport. v1 of the preview page covers the full terminal; chrome (header,
 // footer, borders) is layered on by Phase 3 and does not exist yet.
@@ -170,10 +180,12 @@ func (m previewModel) chromeLine() string {
 //   - (nil, nil) — placeholder ("(no saved content)") rendered. Collapses
 //     ENOENT, zero-byte .bin, and zero-line file (only an unterminated
 //     partial) into one shape.
-//   - (nil, err != nil) — OS-level read failure. Phase 4 task 4-2 owns the
-//     error string; for now this branch falls through to the existing
-//     SetContent(string(nil)) behaviour so the (nil, err) path remains
-//     observably distinct from (nil, nil).
+//   - (nil, err != nil) — OS-level read failure. Renders the canonical
+//     error string ("(unable to read scrollback)") uniformly across errno
+//     types per § Read-Failure Handling > Placeholder > Error string. No
+//     per-pane error state is cached on the model; refocusing the same
+//     pane (Tab/]/[ away and back) re-issues a fresh Tail call through
+//     this dispatcher, so a transient error can recover on retry.
 //
 // Pointer receiver because the helper mutates m.viewport via SetContent /
 // GotoBottom and the caller relies on those mutations being visible on the
@@ -184,11 +196,7 @@ func (m *previewModel) readFocusedPaneIntoViewport() {
 	case bytes == nil && err == nil:
 		m.viewport.SetContent(previewPlaceholder)
 	case err != nil:
-		// Phase 4 task 4-2 will translate this branch to the canonical
-		// error string. For this task the existing behaviour is
-		// preserved untouched so (nil, err) and (nil, nil) remain
-		// observably distinct.
-		m.viewport.SetContent(string(bytes))
+		m.viewport.SetContent(previewReadError)
 	default:
 		m.viewport.SetContent(string(bytes))
 	}
