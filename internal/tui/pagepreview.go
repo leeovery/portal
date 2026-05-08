@@ -146,6 +146,16 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		case tea.KeyEnd:
 			m.viewport.GotoBottom()
 			return m, nil
+		case tea.KeyTab:
+			paneCount := len(m.currentGroup().PaneIndices)
+			if paneCount <= 1 {
+				return m, nil
+			}
+			m.paneIdx = (m.paneIdx + 1) % paneCount
+			bytes, _ := m.reader.Tail(m.currentPaneKey())
+			m.viewport.SetContent(string(bytes))
+			m.viewport.GotoBottom()
+			return m, nil
 		}
 	}
 	var cmd tea.Cmd
