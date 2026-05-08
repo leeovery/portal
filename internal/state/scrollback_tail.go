@@ -2,8 +2,10 @@ package state
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 )
 
@@ -30,7 +32,8 @@ func SetOpenFileForTest(open func(name string) (*os.File, error)) (restore func(
 
 // TailScrollback returns the bytes of the last n newline-terminated lines
 // from the .bin scrollback file at path. The returned slice always ends on
-// a '\n' byte and contains complete records only.
+// a '\n' byte and contains complete records only — any trailing bytes after
+// the final '\n' (a partial/in-progress record) are excluded.
 //
 // The implementation opens the file once, seeks to end, and reads backwards
 // in fixed-size chunks against a single held file descriptor — never closing
@@ -38,12 +41,17 @@ func SetOpenFileForTest(open func(name string) (*os.File, error)) (restore func(
 //
 // If the file holds at least one but fewer than n terminated lines, the
 // function returns every available terminated line (no padding, no error).
-// An empty file or a file containing zero terminated lines returns
-// (nil, nil); error-shape and partial-trailing handling are tightened by
-// follow-up tasks (see § Read Pipeline > Trailing-newline edge case).
+//
+// All "no content available" outcomes converge on (nil, nil) with NO error:
+// ENOENT on open, a zero-byte file, and a file whose reverse scan finds zero
+// '\n' bytes (e.g. only an unterminated partial line). OS-level read errors
+// other than ENOENT propagate as (nil, err).
 func TailScrollback(path string, n int) ([]byte, error) {
 	f, err := openFileForTail(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("open scrollback %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
@@ -92,16 +100,24 @@ func TailScrollback(path string, n int) ([]byte, error) {
 		if bytes.Count(tail, []byte{'\n'}) >= target {
 			cut := indexOfNthNewlineFromEnd(tail, target)
 			// cut is the index of the (target)th-from-last \n. The returned
-			// slice starts at the byte after it so we keep n full lines
-			// terminating at the file's final \n.
-			return tail[cut+1:], nil
+			// slice starts at the byte after it so we keep n full lines.
+			// Slice end is the last \n (inclusive) so any trailing partial
+			// bytes after the final \n are excluded.
+			last := bytes.LastIndexByte(tail, '\n')
+			return tail[cut+1 : last+1], nil
 		}
 	}
 
-	// Fewer than (n+1) newlines in the entire file. Return everything we
-	// have — the caller asked for "up to n terminated lines" and got every
-	// terminated line in the file.
-	return tail, nil
+	// Reverse scan exhausted the file. If it has zero newlines, the whole
+	// file is a partial/in-progress record — collapse to "no content".
+	last := bytes.LastIndexByte(tail, '\n')
+	if last < 0 {
+		return nil, nil
+	}
+	// Fewer than (n+1) newlines in the entire file. Return every fully
+	// terminated record — bytes from start through the final \n inclusive,
+	// excluding any trailing partial bytes.
+	return tail[:last+1], nil
 }
 
 // indexOfNthNewlineFromEnd returns the byte index of the n-th '\n' counting

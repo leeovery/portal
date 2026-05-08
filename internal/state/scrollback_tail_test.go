@@ -2,7 +2,9 @@ package state_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +158,79 @@ func TestTailScrollback(t *testing.T) {
 				start = 0
 			}
 			t.Fatalf("expected trailing \\n; got tail ending in %q", string(got[start:]))
+		}
+	})
+
+	t.Run("returns (nil, nil) for a missing file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "does-not-exist.bin")
+
+		got, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("TailScrollback: unexpected error %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil bytes, got %d bytes", len(got))
+		}
+	})
+
+	t.Run("returns (nil, nil) for a zero-byte file", func(t *testing.T) {
+		path := writeTailFixture(t, nil)
+
+		got, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("TailScrollback: unexpected error %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil bytes, got %d bytes", len(got))
+		}
+	})
+
+	t.Run("returns (nil, nil) for a file with only an unterminated partial line", func(t *testing.T) {
+		path := writeTailFixture(t, []byte("partial line without newline"))
+
+		got, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("TailScrollback: unexpected error %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil bytes, got %q", string(got))
+		}
+	})
+
+	t.Run("excludes a trailing partial line from the returned tail", func(t *testing.T) {
+		path := writeTailFixture(t, []byte("line1\nline2\npartial"))
+
+		got, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("TailScrollback: unexpected error %v", err)
+		}
+		want := []byte("line1\nline2\n")
+		if !bytes.Equal(got, want) {
+			t.Fatalf("tail mismatch: got %q, want %q", string(got), string(want))
+		}
+	})
+
+	t.Run("preserves a single empty terminated line as content", func(t *testing.T) {
+		path := writeTailFixture(t, []byte("\n"))
+
+		got, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("TailScrollback: unexpected error %v", err)
+		}
+		want := []byte("\n")
+		if !bytes.Equal(got, want) {
+			t.Fatalf("tail mismatch: got %q, want %q", string(got), string(want))
+		}
+	})
+
+	t.Run("does not surface ENOENT as an error", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "missing.bin")
+
+		_, err := state.TailScrollback(path, 1000)
+		if err != nil {
+			t.Fatalf("expected literal nil error, got %v (is fs.ErrNotExist = %v)", err, errors.Is(err, fs.ErrNotExist))
 		}
 	})
 
