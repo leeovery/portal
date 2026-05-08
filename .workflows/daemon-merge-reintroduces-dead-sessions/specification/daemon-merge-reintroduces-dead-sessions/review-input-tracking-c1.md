@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-08
 cycle: 1
 phase: Input Review
@@ -26,9 +26,10 @@ The investigation has a dedicated "Why It Wasn't Caught" section enumerating fou
 The specification mentions item 1 in passing ("the test codifies the buggy behaviour as correct and must be replaced") but loses items 2-4. These rationale points matter for the planning phase: they justify why new test categories (adversarial marker-staleness, killed-mid-flight) need to be added beyond simply replacing the existing test.
 
 **Proposed Addition**:
+New section "Why This Bug Wasn't Caught" added before "Scope and Risk" enumerating all four reasons and noting they justify the new adversarial/regression test categories.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Section added before "Scope and Risk".
 
 ---
 
@@ -54,9 +55,10 @@ The specification's Impact section captures the bootstrap/restore path but does 
 > - **Manifestation:** Killed session reappears in `~/.config/portal/state/sessions.json` within one daemon tick (≤30s). No error or warning surfaces.
 
 **Proposed Addition**:
+Added a new bullet under Impact: "User-visible surfaces affected" listing internal/restore, CLI list commands, and TUI session picker after restart.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Added as new "User-visible surfaces affected" bullet in Impact.
 
 ---
 
@@ -73,9 +75,10 @@ Investigation cites the buggy test's full line range (`capture_test.go:570-617`)
 > **`internal/state/capture_test.go:570`** — The test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` codifies the buggy behaviour as correct and **must be replaced** with its inverse:
 
 **Proposed Addition**:
+Updated reference to `internal/state/capture_test.go:570-617`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Line range updated.
 
 ---
 
@@ -92,8 +95,9 @@ The investigation explicitly frames a "Business impact" beyond severity/scope/ma
 > - **Severity:** High — silent corruption of persisted state; user-visible "zombie" sessions; eroded trust that `kill-session` is permanent.
 
 **Proposed Addition**:
+Updated Severity bullet to surface "Business impact: Trust regression on a core product promise (user controls their session list)" as an explicit sub-frame.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Approved via auto mode. Severity bullet updated to preserve "Business impact" framing.
 
 ---

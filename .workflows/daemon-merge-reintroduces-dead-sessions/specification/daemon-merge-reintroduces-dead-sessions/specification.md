@@ -24,9 +24,10 @@ No cleanup path currently exists. Once a marker leaks, it persists for the tmux 
 
 ### Impact
 
-- **Severity:** High — silent corruption of persisted state; user-visible "zombie" sessions; eroded trust that `kill-session` is permanent.
+- **Severity:** High — silent corruption of persisted state; user-visible "zombie" sessions. **Business impact:** Trust regression on a core product promise (user controls their session list).
 - **Scope:** All users running `portal state daemon`; triggers under any path producing a stale `@portal-skeleton-*` marker.
 - **Manifestation:** Killed session reappears in `~/.config/portal/state/sessions.json` within one daemon tick (≤30s). No error or warning surfaces.
+- **User-visible surfaces affected:** Any consumer that reads `sessions.json` sees the ghost session — including `internal/restore` (reconstructs ghost sessions on bootstrap), CLI list commands, and the TUI session picker after a restart.
 
 ### Empirical Confirmation
 
@@ -99,7 +100,7 @@ Fix Component A alone resolves the user-visible resurrection symptom because `se
 
 ### Existing Tests to Replace
 
-**`internal/state/capture_test.go:570`** — The test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` codifies the buggy behaviour as correct and **must be replaced** with its inverse:
+**`internal/state/capture_test.go:570-617`** — The test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` codifies the buggy behaviour as correct and **must be replaced** with its inverse:
 
 > A prev session whose name is not in fresh must NOT be merged, even when its paneKey is in `skipSet`.
 
@@ -135,6 +136,15 @@ The fix is complete when:
 5. While a stale marker exists between daemon ticks (before bootstrap cleanup runs), the merge filter prevents resurrection regardless of marker staleness.
 6. The legitimate hydrate-in-progress flow remains correct — phase A skeleton-restored panes (marker set, session/window/pane present in tmux) are still merged from prev as expected.
 7. All new tests pass; the previously-buggy test is replaced; existing happy-path tests remain green.
+
+## Why This Bug Wasn't Caught
+
+1. **Existing test codifies the buggy behaviour** — The unit test `TestCaptureStructureMergeSkippedPanes/merges a skipped pane's session and window from prev when missing from fresh` (`internal/state/capture_test.go:570-617`) explicitly asserts the buggy behaviour as correct, codifying the wrong invariant.
+2. **Original spec scope** — The original `built-in-session-resurrection` spec framed merge intent around the hydrate-in-progress scenario without modelling marker-staleness adversarial cases.
+3. **Integration test coverage gap** — The `built-in-session-resurrection` feature integration tests exercise the happy-path skeleton → hydrate flow, not the killed-mid-flight path.
+4. **Difficult to reproduce in CI** — Reproducing in the wild requires either a hydrate failure (hard to engineer in CI) or a manual marker injection, so the bug was unlikely to surface during normal QA.
+
+These rationales justify why this work unit must add **adversarial marker-staleness tests** and **killed-mid-flight regression tests** beyond simply replacing the existing buggy test.
 
 ## Scope and Risk
 
