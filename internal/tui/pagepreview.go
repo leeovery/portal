@@ -60,8 +60,11 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		height:     height,
 	}
 
-	paneKey := state.SanitizePaneKey(session, groups[0].WindowIndex, groups[0].PaneIndices[0])
-	bytes, _ := reader.Tail(paneKey)
+	// Helpers compose over m.windowIdx / m.paneIdx (both 0 here), reading raw
+	// indices off groups[0] and feeding state.SanitizePaneKey — byte-identical
+	// to the daemon writer's key for that pane. Single source of truth shared
+	// with focus-change reads in later phases.
+	bytes, _ := reader.Tail(m.currentPaneKey())
 	m.viewport.SetContent(string(bytes))
 	// bubbles@v1.0.0 viewport.SetContent only auto-jumps to bottom when the
 	// previous YOffset overshoots the new content; on a fresh viewport
@@ -70,6 +73,41 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 	m.viewport.GotoBottom()
 
 	return m, true
+}
+
+// currentGroup returns the cached tmux.WindowGroup at the model's current
+// windowIdx. Pure read-only view over m.groups; never re-enumerates and never
+// mutates the model.
+func (m previewModel) currentGroup() tmux.WindowGroup {
+	return m.groups[m.windowIdx]
+}
+
+// currentRawIndices returns the raw tmux WindowIndex and PaneIndex for the
+// focused pane — *not* the 0-based ordinal positions m.windowIdx / m.paneIdx.
+// Under non-contiguous window_index (e.g. 0,2,5) or pane-base-index 1, these
+// are the values needed to compose the daemon's canonical pane key. Chrome
+// ordinals ("Window M of N") are derived elsewhere from slice position.
+func (m previewModel) currentRawIndices() (windowIndex, paneIndex int) {
+	g := m.currentGroup()
+	return g.WindowIndex, g.PaneIndices[m.paneIdx]
+}
+
+// currentPaneKey returns the canonical paneKey for the focused pane, byte-
+// identical to the key the daemon writer uses for that pane. Composed from
+// the raw indices via state.SanitizePaneKey so the resolution chain
+// (paneKey → ScrollbackFile → tail-N read) addresses the same `.bin` file
+// the daemon wrote.
+func (m previewModel) currentPaneKey() string {
+	rawWindow, rawPane := m.currentRawIndices()
+	return state.SanitizePaneKey(m.session, rawWindow, rawPane)
+}
+
+// degenerate reports whether the session is the dominant ~95% case of one
+// window with one pane. In that shape ] / [ / Tab silently no-op; callers
+// can also use this to suppress structural chrome that would otherwise be
+// trivial ("Window 1 of 1 / Pane 1 of 1").
+func (m previewModel) degenerate() bool {
+	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
 }
 
 // previewDismissedMsg is emitted when the user presses Esc inside the
