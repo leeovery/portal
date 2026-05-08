@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: session-scrollback-preview (Cycle 2)
 
 ## Task 1: Add pagePreview arm to top-level Model.View() — preview never renders
-status: pending
+status: approved
 severity: high
 sources: standards, architecture
 
