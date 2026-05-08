@@ -136,6 +136,43 @@ The fix is complete when:
 6. The legitimate hydrate-in-progress flow remains correct — phase A skeleton-restored panes (marker set, session/window/pane present in tmux) are still merged from prev as expected.
 7. All new tests pass; the previously-buggy test is replaced; existing happy-path tests remain green.
 
+## Scope and Risk
+
+### In Scope
+
+Both changes are local to layers already in scope for the merge logic — they compose without architectural surgery:
+
+- **Fix Component A** — Live-set filtering in `mergeSkippedPanes` (`internal/state/capture.go`). Approximately 15 lines (session/window/pane filtering).
+- **Fix Component B** — New stale-marker cleanup bootstrap step. Approximately 50 lines including adapter wiring, plus orchestrator sequence and test updates.
+
+### Files Touched
+
+- `internal/state/capture.go` — `mergeSkippedPanes`, `mergePane`, `findOrAppendSession`.
+- `internal/state/capture_test.go` — replace the codifying-bug test; add new structural-level and regression tests.
+- `cmd/bootstrap/` — orchestrator sequence (insert new step), seam interface for marker cleanup.
+- `internal/bootstrapadapter/` — production adapter wiring for the cleanup step.
+- Bootstrap tests for the new step (sequence + soft-warning behaviour).
+
+### Regression Risk
+
+**Low.** Every consumer of `sessions.json` and the daemon's `prev` was traced; no caller depends on the buggy "merge can introduce arbitrary prev sessions" behaviour. The merge's intended use case (hydrate-in-progress) is structurally distinct from the bug surface and remains correct because phase A creates sessions in tmux before setting markers.
+
+### Release Posture
+
+**Regular release.** No hotfix needed — the symptom is recoverable (kill the same session twice, or restart the tmux server) and a manual workaround exists for affected users (`tmux set-option -us @portal-skeleton-<key>`).
+
+## Out of Scope
+
+### Companion Bug
+
+The companion bug `killed-sessions-resurrect-on-restart` (logged 2026-05-08) is the most likely producer of stale markers in normal use, but it lives in a different layer (`cmd/state_hydrate.go` / `cmd/state_signal_hydrate.go`) and is independently scoped. **This work unit does not depend on it; the fixes are orthogonal.**
+
+This bug is independently wrong from the companion hydrate-cascade bug. Even with a perfect FIFO IPC, markers can become stale via process crashes, version-upgrade restart, or manual tmux operations. The merge logic should not assume marker validity on the user's behalf — that property must hold regardless of how the companion bug is eventually resolved.
+
+### Marker Production Path
+
+This work unit does not modify the marker-set path (`internal/restore/session.go:380-384` `setSkeletonMarker`) or the marker-unset path (`cmd/state_hydrate.go:312` `UnsetSkeletonMarkerForFIFO`). The fix is defensive: it accepts that markers can leak and ensures the consumer (merge) and one new periodic cleanup (bootstrap) handle stale markers correctly.
+
 ---
 
 ## Working Notes
