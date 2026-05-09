@@ -51,6 +51,57 @@ The three changes are bundled because (a) the eager-signaling step resolves the 
 - **The transient `daemon | capture pane … exit status 1` warnings** noted in the investigation — sporadic, same panes capture cleanly on later ticks. Tracked separately if it persists.
 - **Any change to the daemon's merge logic** — the companion fix on `main` already neutralises Symptom A's user-visible resurrection.
 
+## Fix 1: Bootstrap Eager-Signaling Step
+
+### Behaviour
+
+A new bootstrap orchestrator step is inserted **after step 5 (Restore) and before step 6 (Clear `@portal-restoring`)**. The step iterates the freshly-set `@portal-skeleton-*` marker map and writes the single-byte hydrate signal to every pane's per-pane FIFO. After the step completes, every helper armed during restore has received its signal — usually within milliseconds of being respawned — and proceeds through the success path: marker unset, scrollback replayed, hooks fired (if registered), then `exec $SHELL`.
+
+### Placement and Ordering Invariant
+
+The step **must** run while `@portal-restoring` is still set. The daemon's `captureAndCommit` loop is suppressed during the `@portal-restoring` window, so helpers can dump scrollback and unset their markers without any chance of a concurrent capture on a pane mid-replay. This matches the existing helper invariants (the 100 ms settle sleep + marker-unset sequence) without introducing a new contract.
+
+The placement also runs the step **after** restore has populated the skeleton-marker set, so the iteration source — `state.ListSkeletonMarkers` (via the existing `@portal-skeleton-*` server-option enumeration) — has the complete set of freshly-armed panes.
+
+### Pane Enumeration and FIFO Resolution
+
+The step does not require an additional tmux round-trip beyond `state.ListSkeletonMarkers`. The pane-target list is the marker map itself; the corresponding FIFO path is deterministic via `state.FIFOPath(stateDir, paneKey)`. No `list-panes` enumeration is needed at this layer.
+
+### Write Primitive
+
+The step uses the existing `writeFIFOSignal` helper and `signalHydrateRetryDelays` retry schedule from `cmd/state_signal_hydrate.go`, mirroring the per-session signaling posture so failure semantics remain identical between the eager step and the existing `client-attached` / `client-session-changed` paths.
+
+### Failure Posture
+
+- **Per-FIFO write failures are soft warnings.** The step logs a `WARN | hydrate | …` entry mirroring `runSignalHydrate`'s posture and continues to the next pane. A failed write does not abort the step.
+- **The step itself never escalates to a fatal bootstrap error.** Mirrors steps 7 (CleanStaleMarkers), 8 (SweepOrphanFIFOs), and 9 (CleanStale) — best-effort cleanup classed alongside other non-fatal post-restore steps.
+- **Zero markers post-Restore is a no-op.** No FIFO writes attempted; step returns nil.
+
+### Relationship to Existing Hook-Driven Signaling
+
+The `client-attached` and `client-session-changed` registrations remain in place. After the eager step has run, the user's subsequent attach (which is what causes the bare-CLI handoff or `tmux switch-client`) fires its hook against panes whose markers have already been unset by the helpers' success path; `signal-hydrate` enumerates the now-empty marker set for that session and exits cleanly. This is the desired "second-fire is a no-op" behaviour.
+
+### Bootstrap Step Numbering Update
+
+After this insertion the orchestrator's step list becomes:
+
+1. EnsureServer
+2. RegisterPortalHooks
+3. Set `@portal-restoring`
+4. EnsureSaver
+5. Restore
+6. **EagerSignalHydrate** *(new)*
+7. Clear `@portal-restoring`
+8. CleanStaleMarkers
+9. SweepOrphanFIFOs
+10. CleanStale
+
+The `CLAUDE.md` "Server bootstrap" section will be updated to reflect the new ordering as part of the fix.
+
+### Adapter Wiring
+
+The new step's seam interface is wired through `internal/bootstrapadapter` in the same shape as the existing post-restore steps (concrete `*tmux.Client`, `state` package functions). No new package-level dependencies introduced.
+
 ---
 
 ## Working Notes
