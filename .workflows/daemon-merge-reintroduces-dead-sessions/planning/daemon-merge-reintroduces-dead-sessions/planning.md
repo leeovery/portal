@@ -20,6 +20,17 @@ approved_at: 2026-05-09
 - [ ] The synthetic repro (set marker via `tmux set-option -s @portal-skeleton-<paneKey> 1`, `tmux kill-session`, wait one daemon tick) does not reintroduce the killed session into `~/.config/portal/state/sessions.json`; on the next tick after a previously-polluted commit, `sessions.json` self-heals.
 - [ ] `go test ./...` passes.
 
+#### Tasks
+status: draft
+
+| ID | Task | Summary | Edge cases |
+|----|------|---------|------------|
+| daemon-merge-reintroduces-dead-sessions-1-1 | Replace codifying-bug test with session-level filter + add session-level filter | Invert the buggy test at `internal/state/capture_test.go:570-617` so a prev session not in fresh is NOT merged despite its paneKey being in `skipSet`; build the local fresh-structural map inside `mergeSkippedPanes` and gate session merging on session-name presence in the fresh index. | prev session name absent from fresh; paneKey present in skipSet; legitimate hydrate-in-progress (all three levels live) still merges; `mergePane`/`findOrAppendSession` signatures unchanged |
+| daemon-merge-reintroduces-dead-sessions-1-2 | Add window-level filtering to `mergeSkippedPanes` | Extend the local fresh-structural map and filter so a prev pane whose session is live but whose window index is missing from fresh is dropped from the merge result, even when its paneKey is in `skipSet`. | live session with stale window; mixed live/stale windows in the same prev session; canonical ordering preserved after partial drop; helpers untouched |
+| daemon-merge-reintroduces-dead-sessions-1-3 | Add pane-level filtering to `mergeSkippedPanes` | Extend the structural map and filter so a prev pane whose session and window are live but whose pane index is missing from fresh is dropped from the merge result, even when its paneKey is in `skipSet`. | live window with stale pane index; existing pane-index replacement contract preserved; no defensive checks added inside `mergePane` / `findOrAppendSession` |
+| daemon-merge-reintroduces-dead-sessions-1-4 | Add empirical-scenario regression test (kill-mid-flight self-heal) | Add a regression test mirroring the in-the-wild repro: seed `prev.Sessions` (or run an initial tick) with the session, mark its paneKey in `skipSet`, drop it from the fresh enumeration (kill), assert the killed session is NOT reintroduced and the polluted prev self-heals on a follow-up tick. | prev-population precondition is load-bearing (without it test passes on buggy code via `prev != nil` gate); marker stays in `skipSet` throughout; two-tick self-heal sequence |
+| daemon-merge-reintroduces-dead-sessions-1-5 | Preserve hydrate-in-progress merge behaviour (positive test) | Add or extend a positive test asserting that a phase-A skeleton-restored pane (marker set, session/window/pane all present in fresh) is still merged from prev with prev's authoritative pane state; confirm `internal/restore/session_markers_test.go` and remaining `TestCaptureStructureMergeSkippedPanes` subtests stay green. | prev pane state (CWD/CurrentCommand) wins at matching coords; sessions present in both fresh and prev not duplicated; canonical ordering survives merge |
+
 ### Phase 2: Bootstrap stale-marker cleanup step (Fix Component B)
 status: approved
 approved_at: 2026-05-09
