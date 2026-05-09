@@ -90,7 +90,8 @@
           "current_task": "~",
           "completed_tasks": [
             "daemon-merge-reintroduces-dead-sessions-1-1",
-            "daemon-merge-reintroduces-dead-sessions-1-2"
+            "daemon-merge-reintroduces-dead-sessions-1-2",
+            "daemon-merge-reintroduces-dead-sessions-1-3"
           ]
         }
       }
