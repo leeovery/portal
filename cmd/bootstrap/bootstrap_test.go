@@ -102,7 +102,7 @@ func (l *recordingLogger) Error(component, format string, args ...any) {
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
-// recorded call slice reflects the canonical ten-step ordering.
+// recorded call slice reflects the canonical nine-step ordering.
 func newOrchestrator(r *stepRecorder, logger Logger) *Orchestrator {
 	return &Orchestrator{
 		Server:       r,
@@ -636,7 +636,7 @@ func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
 }
 
 // TestOrchestratorRun_runsSweepBetweenClearAndCleanStale pins the FIFO
-// sweep step at position 8 of the ten-step sequence: after Clear (step 6)
+// sweep step at position 8 of the nine-step sequence: after Clear (step 6)
 // and CleanStaleMarkers (step 7) so the @portal-restoring suppression
 // window has closed and stale markers protecting orphan FIFOs have been
 // unset, but before CleanStale (step 9). The CleanStaleMarkers step MUST
@@ -725,7 +725,7 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 }
 
 // TestOrchestratorRun_runsCleanStaleMarkersBetweenClearAndSweep pins the
-// stale-marker cleanup step at position 7 of the ten-step sequence:
+// stale-marker cleanup step at position 7 of the nine-step sequence:
 // strictly after Clear (step 6) so it observes the post-restore tmux
 // state, and strictly before Sweep (step 8) so any stale markers
 // protecting orphan FIFOs are unset first, allowing those FIFOs to be

@@ -110,7 +110,8 @@
             "daemon-merge-reintroduces-dead-sessions-2-7",
             "daemon-merge-reintroduces-dead-sessions-3-1",
             "daemon-merge-reintroduces-dead-sessions-3-2",
-            "daemon-merge-reintroduces-dead-sessions-3-3"
+            "daemon-merge-reintroduces-dead-sessions-3-3",
+            "daemon-merge-reintroduces-dead-sessions-3-4"
           ],
           "completed_phases": [
             1,

@@ -68,7 +68,7 @@ All external dependencies use small interfaces (1-3 methods). Commands expose pa
 
 ### Server bootstrap
 
-`PersistentPreRunE` runs a nine-step `bootstrap.Orchestrator` (in `cmd/bootstrap/`) for commands needing tmux (all except version, init, help, alias, clean). Step ordering is load-bearing:
+`PersistentPreRunE` runs a nine-step `bootstrap.Orchestrator` (in `cmd/bootstrap/`) for commands needing tmux (all except version, init, help, alias, clean). Step ordering is load-bearing; "Return" is the post-step boundary, not a numbered step:
 
 1. **EnsureServer** — start the tmux server if not running.
 2. **RegisterPortalHooks** — install global tmux hooks (e.g. `client-attached` running `portal state signal-hydrate`) idempotently.
@@ -76,9 +76,11 @@ All external dependencies use small interfaces (1-3 methods). Commands expose pa
 4. **EnsureSaver** — bootstrap (or version-upgrade) the `_portal-saver` detached session that hosts `portal state daemon`. Best-effort; failure surfaces as a `SaverDownWarning`.
 5. **Restore** — invoke `internal/restore` to reconstruct skeleton + geometry + scrollback FIFOs from the saved state. Never escalates to a fatal abort; corrupt state surfaces as a warning.
 6. **Clear `@portal-restoring`** — fatal on failure (the marker must not leak past bootstrap).
-7. **SweepOrphanFIFOs** — best-effort cleanup of orphan `hydrate-*.fifo` files whose paneKey is no longer represented by a live `@portal-skeleton-*` marker.
-8. **CleanStale** — best-effort cleanup of orphaned markers / stale entries.
-9. **Return** — collect warnings; the TUI's loading page (subject to `LoadingMinDuration` = 1.2s minimum-display pad) drains them via `LoadingMinElapsedMsg`, while the bare-CLI path drains them post-bootstrap.
+7. **CleanStaleMarkers** — best-effort cleanup of `@portal-skeleton-*` server-option markers whose paneKey is no longer represented by a live pane. Runs after Clear so it observes post-restore tmux state, and before Sweep so any stale markers protecting orphan FIFOs are unset first, allowing those FIFOs to be reclaimed in the same bootstrap.
+8. **SweepOrphanFIFOs** — best-effort cleanup of orphan `hydrate-*.fifo` files whose paneKey is no longer represented by a live `@portal-skeleton-*` marker.
+9. **CleanStale** — best-effort cleanup of orphaned markers / stale entries.
+
+After step 9, the orchestrator returns the accumulated warnings; the TUI's loading page (subject to `LoadingMinDuration` = 1.2s minimum-display pad) drains them via `LoadingMinElapsedMsg`, while the bare-CLI path drains them post-bootstrap.
 
 If the server was just started, the TUI shows the loading page until both Restore completes and the 1.2s pad has elapsed; warnings flush to stderr (with alt-screen toggle) only after dismissal so the rendered UI is not corrupted.
 

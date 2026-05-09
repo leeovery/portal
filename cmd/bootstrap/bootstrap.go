@@ -1,5 +1,6 @@
-// Package bootstrap composes the ten-step PersistentPreRunE sequence
-// pinned by the resurrection spec. Step ordering is load-bearing:
+// Package bootstrap composes the nine-step PersistentPreRunE sequence
+// pinned by the resurrection spec. Step ordering is load-bearing;
+// "Return" is the post-step boundary, not a numbered step:
 //
 //  1. EnsureServer
 //  2. RegisterPortalHooks
@@ -17,7 +18,8 @@
 //     @portal-skeleton-* markers from step 5 — those outlive
 //     @portal-restoring and are cleared per-pane on hydration)
 //  9. CleanStale (best-effort)
-//  10. Return
+//
+// Return is the post-step boundary that collects accumulated warnings.
 package bootstrap
 
 import (
@@ -156,7 +158,7 @@ func (noopLogger) Warn(component, format string, args ...any) {}
 // Error is a no-op.
 func (noopLogger) Error(component, format string, args ...any) {}
 
-// Orchestrator runs the ten-step bootstrap sequence. Wiring of
+// Orchestrator runs the nine-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
 // independently testable.
@@ -172,7 +174,7 @@ type Orchestrator struct {
 	Logger       Logger // nil tolerated; Run substitutes a no-op default
 }
 
-// Run executes the ten bootstrap steps in spec order. It returns the
+// Run executes the nine bootstrap steps in spec order. It returns the
 // serverStarted flag from step 1 (EnsureServer) verbatim, the slice of
 // soft Warnings accumulated across steps 4-5 (in step order), and any
 // fatal error. The ctx parameter is reserved for Phase 6 timeout/cancel
@@ -289,9 +291,9 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// Continue per spec.
 	}
 
-	// Step 10 — Return. Step 5 never produces a fatal error; warnings
-	// already carry the user-facing surface.
-	o.Logger.Debug(state.ComponentBootstrap, "step 10 (Return): exiting with %d warning(s)", len(warnings))
+	// Return — post-step boundary (not numbered). Step 5 never produces a
+	// fatal error; warnings already carry the user-facing surface.
+	o.Logger.Debug(state.ComponentBootstrap, "Return: exiting with %d warning(s)", len(warnings))
 	return serverStarted, warnings, nil
 }
 
