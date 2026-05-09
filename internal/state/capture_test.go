@@ -1000,6 +1000,92 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
+	t.Run("kill_mid_flight_self_heal", func(t *testing.T) {
+		// Empirical-scenario regression test mirroring the live-in-the-wild
+		// case (e.g. agentic-workflows-XXrJ3J): a session is captured into
+		// prev, has a stale @portal-skeleton-* marker (its paneKey is in
+		// skipSet), and is then killed in tmux. The next daemon tick sees
+		// the marker but the fresh enumeration omits the session. The merge
+		// must NOT reintroduce the killed session — see specification →
+		// Empirical Confirmation; Acceptance Criteria #1.
+		//
+		// Prev-population is LOAD-BEARING: mergeSkippedPanes is gated on
+		// `prev != nil` and only resurrects sessions present in
+		// prev.Sessions. Without seeding prev with the killed session this
+		// test would pass on the buggy code (false-green). Seeding it forces
+		// the merge layer to make the structural live-set decision.
+		//
+		// Tick 2 then threads the just-returned (clean) idx back in as prev
+		// with the same skipSet, mirroring the daemon's
+		// `deps.PrevIndex = &idx` line at cmd/state_daemon.go:156. This
+		// asserts the self-healing behaviour: even if the marker persists,
+		// once the dead session is gone from prev it stays gone — see
+		// specification → Self-Healing Behavior; Acceptance Criteria #3.
+		const killed = "agentic-workflows-XXrJ3J"
+		const survivor = "survivor"
+
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        killed,
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 1, Name: "main", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index:          1,
+						CWD:            "/old",
+						Active:         true,
+						CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/" + state.SanitizePaneKey(killed, 1, 1) + ".bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor(survivor),
+			listPanes:    paneLine(survivor, 0, "main", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey(killed, 1, 1): {},
+		}
+
+		// Tick 1: marker is set, session has been killed in tmux, prev still
+		// contains it. Fresh enumeration omits the killed session.
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("tick 1: unexpected error: %v", err)
+		}
+		if p := findPane(idx, killed, 1, 1); p != nil {
+			t.Errorf("tick 1: killed session %q reintroduced via merge: %+v", killed, p)
+		}
+		if findPane(idx, survivor, 0, 0) == nil {
+			t.Errorf("tick 1: survivor session %q missing from result", survivor)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != survivor {
+			t.Fatalf("tick 1: Sessions = %+v, want only %q", idx.Sessions, survivor)
+		}
+
+		// Tick 2: re-use the just-returned clean idx as prev (same skipSet).
+		// Even with the marker still present, the killed session must remain
+		// absent — sessions.json self-heals on the next tick because the
+		// polluted prev was discarded.
+		idx2, err := state.CaptureStructure(client, skip, &idx)
+		if err != nil {
+			t.Fatalf("tick 2: unexpected error: %v", err)
+		}
+		if p := findPane(idx2, killed, 1, 1); p != nil {
+			t.Errorf("tick 2 (self-heal): killed session %q reintroduced: %+v", killed, p)
+		}
+		if findPane(idx2, survivor, 0, 0) == nil {
+			t.Errorf("tick 2: survivor session %q missing from result", survivor)
+		}
+		if len(idx2.Sessions) != 1 || idx2.Sessions[0].Name != survivor {
+			t.Errorf("tick 2: Sessions = %+v, want only %q", idx2.Sessions, survivor)
+		}
+	})
+
 	t.Run("re-sorts sessions, windows, and panes after merge", func(t *testing.T) {
 		// Fresh emits "zeta" before "alpha" and out-of-order windows/panes
 		// within each session. Prev contributes prev-authoritative pane data
