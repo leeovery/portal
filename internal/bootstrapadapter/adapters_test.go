@@ -38,7 +38,7 @@ func (s *listerStub) ShowAllServerOptions() (string, error) {
 
 // TestFIFOSweeper_PropagatesListSkeletonMarkersError proves that a
 // ShowAllServerOptions failure surfaces from FIFOSweeper.Sweep wrapped with
-// the "list skeleton markers" prefix so the orchestrator's step-7
+// the "list skeleton markers" prefix so the orchestrator's step-8
 // Warn-and-swallow path can log it uniformly. Pre-cycle-4 the adapter
 // silently returned nil on this path, hiding transient tmux failures from
 // portal.log; this test is the regression guard.
