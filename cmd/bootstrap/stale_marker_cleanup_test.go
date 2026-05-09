@@ -189,6 +189,104 @@ func TestCleanStaleMarkers_fullOverlapNoUnsetCalls(t *testing.T) {
 	}
 }
 
+// TestStaleMarkerCleanup_PaneKeyNormalisation pins the contract that the
+// cleanup compares marker paneKeys (canonical `session__win.pane`) against
+// live-pane paneKeys (tmux's raw `session:win.pane`) by normalising the live
+// side via state.SanitizePaneKey BEFORE diffing. A regression that drops the
+// conversion, applies it to the wrong side, or replaces the diff with naive
+// string equality would re-introduce the mass-unset hazard from a different
+// angle. See spec §Fix Component B (Adapter Wiring → PaneKey conversion,
+// Parse contract) and §Testing Requirements (PaneKey normalisation
+// correctness).
+func TestStaleMarkerCleanup_PaneKeyNormalisation(t *testing.T) {
+	t.Run("it recognises a marker in canonical form against a live pane in tmux session:win.pane form", func(t *testing.T) {
+		// Marker side seeded canonical (`session__win.pane`); live side
+		// supplies tmux's raw `session:win.pane`. After cleanup the marker
+		// must NOT be unset — the cleanup must sanitise the live side via
+		// state.SanitizePaneKey before diffing so the two representations
+		// of the same logical pane match.
+		canonical := state.SanitizePaneKey("my-session", 0, 1) // "my-session__0.1"
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			canonical: {},
+		}}
+		live := &fakeLivePaneLister{output: "my-session:0.1\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls (canonical marker should match live pane after sanitisation), got %v", unsetter.calls)
+		}
+	})
+
+	t.Run("it does not treat raw session:win.pane and canonical session__win.pane as equivalent", func(t *testing.T) {
+		// Marker side seeded with the RAW unsanitised form `session:win.pane`
+		// — a buggy producer might persist this. Live side supplies the same
+		// raw form; cleanup sanitises live to `session__win.pane`. The marker
+		// raw form is NOT in the canonical live set, so the cleanup unsets it.
+		// This proves the diff is NOT a naive string-equality shortcut: if it
+		// were, the raw-vs-raw match would falsely preserve the marker.
+		raw := "my-session:0.1"
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			raw: {},
+		}}
+		live := &fakeLivePaneLister{output: "my-session:0.1\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected exactly 1 unset call (raw marker form must NOT match canonical live set), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+		want := state.SkeletonMarkerPrefix + raw
+		if unsetter.calls[0] != want {
+			t.Errorf("unset name = %q, want %q", unsetter.calls[0], want)
+		}
+	})
+
+	t.Run("it splits on the rightmost colon to recover session names containing colons", func(t *testing.T) {
+		// Session name literally contains ':' (e.g. `host:1234`). Marker side
+		// holds canonical `host:1234__0.0`; live side supplies tmux's raw
+		// `host:1234:0.0`. The cleanup MUST split on the rightmost ':' to
+		// recover (session=`host:1234`, window=0, pane=0); a leftmost-':'
+		// split would corrupt the session name and produce a non-matching
+		// canonical key, falsely unsetting the marker.
+		canonical := state.SanitizePaneKey("host:1234", 0, 0) // "host:1234__0.0"
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			canonical: {},
+		}}
+		live := &fakeLivePaneLister{output: "host:1234:0.0\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls (rightmost-colon split must recover session name with colon), got %v", unsetter.calls)
+		}
+	})
+}
+
 func TestCleanStaleMarkers_noOverlapUnsetsEveryMarker(t *testing.T) {
 	lister := &fakeMarkerLister{markers: map[string]struct{}{
 		"stale1__0.0": {},
