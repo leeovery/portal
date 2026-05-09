@@ -21,7 +21,8 @@ approved_at: 2026-05-09
 - [ ] `go test ./...` passes.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-09
 
 | ID | Task | Summary | Edge cases |
 |----|------|---------|------------|
