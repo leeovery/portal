@@ -14,7 +14,8 @@ package cmd
 //     *tmux.Client, the *restore.Orchestrator, the state directory, the
 //     *state.Logger. Test suites import these directly so production-shape
 //     wirings are reusable without pulling in the rest of cmd/. Currently:
-//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper.
+//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper,
+//     StaleMarkerCleaner.
 //
 //   - cmd/bootstrap_production.go (camelCase, unexported): adapters that
 //     compose dependencies test code cannot reach in this package's
@@ -48,7 +49,7 @@ func (a *saverAdapter) EnsureSaver() error {
 }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
-// structural key no longer matches a live tmux pane. Step 8 of the
+// structural key no longer matches a live tmux pane. Step 9 of the
 // bootstrap sequence; best-effort per spec.
 type cleanStaleAdapter struct {
 	client *tmux.Client
