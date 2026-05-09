@@ -102,6 +102,40 @@ The `CLAUDE.md` "Server bootstrap" section will be updated to reflect the new or
 
 The new step's seam interface is wired through `internal/bootstrapadapter` in the same shape as the existing post-restore steps (concrete `*tmux.Client`, `state` package functions). No new package-level dependencies introduced.
 
+## Fix 2: Timeout-Path Corrections in `handleHydrateTimeout`
+
+### Behaviour
+
+`handleHydrateTimeout` (`cmd/state_hydrate.go`) is rewritten from a "leave-the-mess-and-degrade-to-bare-shell" bypass into a correct recovery path. After the change, a hydrate timeout produces a clean state: marker unset, FIFO removed, on-resume hook fired (if registered), shell exec'd.
+
+### Specific Changes
+
+1. **Unset `@portal-skeleton-<paneKey>` on timeout.** The handler calls the same marker-unset primitive used by `handleHydrateFileMissing` (`state.UnsetSkeletonMarkerForFIFO` / `unsetSkeletonMarkerOrLog`) before returning. Failure to unset is logged as a soft warning (mirrors the file-missing path); does not block the shell exec.
+
+2. **Route timeout fall-through through `execShellOrHookAndExit`** (the hook-firing exec) instead of `execShellAndExit` (bare shell). The timeout and file-missing recovery paths now share the same exec contract: both unset the marker, both fire hooks if registered, both exec `$SHELL` if not. The current divergence between them is eliminated.
+
+3. **Remove the "marker stays set so the next attach re-signals" comment** at line 262. That comment encoded a non-deliverable invariant: the FIFO is unlinked at line 256 of the same handler before any subsequent attach could write to it, so "next attach re-signals" was a no-op that just re-fired ENOENT. The comment is replaced with a one-line note explaining the recovery contract.
+
+4. **The 100 ms settle-sleep is preserved** before exec — same posture as the success path, gives tmux time to settle the post-restore state before respawn-pane chains take over.
+
+### Spec Supersession (Original Resurrection Spec)
+
+This change deliberately supersedes two invariants from `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`:
+
+- **Original line 838: "Helper does NOT unset marker on FIFO timeout — next attach re-signals, retry happens naturally."** Superseded because the implementation cannot deliver the "next attach re-signals" semantic — the FIFO is unlinked before any next attach. Leaving the marker set with no possibility of retry just feeds Symptom C (stuck markers suppress scrollback save indefinitely).
+
+- **Original line 873: "Resume hooks fire only from inside the hydrate helper's exec chain, at the end of successful hydration."** Refined: hooks fire from inside the helper's exec chain on **any non-fatal terminal path** — successful hydration, file-missing recovery, and timeout recovery. The original phrasing reflected an assumption that timeout was an exceptional condition; in practice it was the steady state, which made the "hooks unsafe on timeout" rationale incoherent. With Fix 1 in place, timeout is genuinely rare, and when it fires, the recovery path should match file-missing's already-tested behaviour.
+
+The original session-resurrection spec is not modified in place; the supersession is recorded here as the canonical updated semantic for the timeout path.
+
+### Hook-Firing Safety on Timeout
+
+Resume hooks are command-launchers (e.g. `claude --resume`). They do not depend on scrollback replay having succeeded — scrollback is for the visible terminal buffer, hook execution is for re-launching processes. Firing the hook on the timeout path is therefore independent of the scrollback-replay outcome. The hook may produce a slightly degraded user experience (terminal blank instead of restored scrollback) but the user's resume command runs, which is the feature contract.
+
+### Logging
+
+The existing `WARN | hydrate | timeout waiting for signal on …` log line is preserved — under the new design, it is now a genuine signal that something is wrong (FIFO disappeared, signal-hydrate regression, eager-signal step's writer failed) rather than ambient noise on every cold-start. Log volume drops dramatically as a side effect of Fix 1.
+
 ---
 
 ## Working Notes
