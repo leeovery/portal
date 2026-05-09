@@ -34,11 +34,9 @@ package bootstrap_test
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -104,26 +102,14 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	// StaleMarkerCleaner adapter wired; every other step is stubbed to
 	// a NoOp so a regression in this test's failure pinpoints the
 	// cleanup step rather than incidental orchestrator wiring.
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-
-	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   bootstrap.NoOpRestorer{},
+	logger := openTestLogger(t, stateDir)
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		StaleMarkers: &bootstrapadapter.StaleMarkerCleaner{
 			Client: client,
 			Logger: logger,
 		},
-		Sweeper: bootstrap.NoOpFIFOSweeper{},
-		Clean:   bootstrap.NoOpStaleCleaner{},
-		Logger:  logger,
-	}
+		Logger: logger,
+	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
@@ -213,28 +199,16 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 		t.Fatalf("SetServerOption seed marker: %v", err)
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	// The only difference from the primary positive: NoOpMarkerCleaner
-	// in StaleMarkers. Step 7 is effectively disabled. The whole point
-	// of this sub-test is to prove the primary positive's assertions
-	// would fail under this configuration — i.e. the regression guard
-	// is sharp.
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      bootstrap.NoOpRestorer{},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
-		Logger:       logger,
-	}
+	// in StaleMarkers (the default). Step 7 is effectively disabled. The
+	// whole point of this sub-test is to prove the primary positive's
+	// assertions would fail under this configuration — i.e. the
+	// regression guard is sharp.
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Logger: logger,
+	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
@@ -323,26 +297,14 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 		t.Fatalf("SetServerOption live marker: %v", err)
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-
-	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   bootstrap.NoOpRestorer{},
+	logger := openTestLogger(t, stateDir)
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		StaleMarkers: &bootstrapadapter.StaleMarkerCleaner{
 			Client: client,
 			Logger: logger,
 		},
-		Sweeper: bootstrap.NoOpFIFOSweeper{},
-		Clean:   bootstrap.NoOpStaleCleaner{},
-		Logger:  logger,
-	}
+		Logger: logger,
+	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}

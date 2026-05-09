@@ -62,7 +62,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
@@ -327,31 +326,21 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// the rest (Hooks registration, EnsureSaver, CleanStale) — the
 	// step under test is Restore + the marker discipline around it,
 	// not hook registration or saver bootstrap.
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,
 		Logger:   logger,
 	}
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean: bootstrap.NoOpStaleCleaner{},
-	}
+	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
@@ -944,31 +933,21 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 		t.Fatalf("list-sessions succeeded after kill-server; expected error")
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,
 		Logger:   logger,
 	}
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean: bootstrap.NoOpStaleCleaner{},
-	}
+	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
@@ -1200,11 +1179,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	ts.WaitForSession(t, "_seed", 2*time.Second)
 	tmuxtest.ApplyBaseIndices(t, ts, restoreBase, restorePaneBase)
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
@@ -1216,20 +1191,15 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// load-bearing difference vs the existing alpha/beta round-trips.
 	// HookRegistrar runs migrateHydrationHooks (Task 1-2) and registers
 	// the new `--`-separated signalHydrateCommand (Task 1-1) end-to-end.
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Hooks:   &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean: bootstrap.NoOpStaleCleaner{},
-	}
+	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}

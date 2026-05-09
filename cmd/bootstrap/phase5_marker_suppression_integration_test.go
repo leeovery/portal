@@ -40,7 +40,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
@@ -139,11 +138,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 		_, _ = ts.TryRun("set-hook", "-gu", "session-created")
 	})
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
@@ -151,16 +146,9 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 		Logger:   logger,
 	}
 
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
-	}
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)

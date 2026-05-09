@@ -20,12 +20,10 @@ package bootstrap_test
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
@@ -66,16 +64,9 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 	ts.Run(t, "new-session", "-d", "-s", "alpha")
 	ts.WaitForSession(t, "alpha", 2*time.Second)
 
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        &bootstrapadapter.HookRegistrar{Client: client},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      bootstrap.NoOpRestorer{},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
-	}
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Hooks: &bootstrapadapter.HookRegistrar{Client: client},
+	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -196,11 +187,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Fatal("missing-foo unexpectedly live before Run")
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
@@ -208,16 +195,9 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		Logger:   logger,
 	}
 
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
-	}
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -314,11 +294,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := openTestLogger(t, stateDir)
 
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
@@ -326,20 +302,14 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 		Logger:   logger,
 	}
 
-	o := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
 			Logger:   logger,
 		},
-		Clean: bootstrap.NoOpStaleCleaner{},
-	}
+	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)

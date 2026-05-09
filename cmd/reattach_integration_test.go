@@ -144,9 +144,18 @@ func ensurePortalOnPATH(t *testing.T) {
 // for the reattach integration scenario: real RestoringMarker
 // (Set/Clear) and real RestoreAdapter (so step 5 actually creates the
 // skeleton from sessions.json), with NoOp shims for the steps
-// incidental to this scenario (Hooks, Saver, Sweeper, Clean). The same
-// adapter shape used by Phase 5's TestPhase5_RestoreCreatesMissingSession
-// in cmd/bootstrap/phase5_integration_test.go.
+// incidental to this scenario (Hooks, Saver, StaleMarkers, Sweeper,
+// Clean). The same adapter shape used by Phase 5's
+// TestPhase5_RestoreCreatesMissingSession in
+// cmd/bootstrap/phase5_integration_test.go.
+//
+// This file's package (cmd) cannot import the shared
+// buildIntegrationOrchestrator helper in
+// cmd/bootstrap/orchestrator_builder_test.go because Go test-file
+// symbols are not visible across packages. Adding a new step interface
+// therefore requires editing two places: that helper (covering the ten
+// cmd/bootstrap sites) and this builder. Keep the field set in lock
+// step with bootstrap.Orchestrator's struct literal there.
 //
 // stateDir holds the seeded sessions.json and the per-pane scrollback
 // files (written by the helper after hydration). client points at the
