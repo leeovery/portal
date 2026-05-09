@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
@@ -321,4 +322,147 @@ func TestCleanStaleMarkers_noOverlapUnsetsEveryMarker(t *testing.T) {
 			t.Errorf("missing expected unset for %q; got %v", k, unsetter.calls)
 		}
 	}
+}
+
+// TestStaleMarkerCleanup_MassUnsetHazardGuard pins the spec invariant that
+// the cleanup must NEVER fall through to "live set is empty, therefore
+// unset every marker". Two failure modes trigger the guard:
+//
+//  1. ListAllPanesWithFormat returns a non-nil error (tmux unavailable,
+//     transient socket error). The error is propagated so the orchestrator
+//     wires it as a soft warning per task 2-5; zero unset calls.
+//  2. ListAllPanesWithFormat returns no error but zero parsed live panes
+//     (whitespace-only output, all-malformed lines, or genuinely empty)
+//     while at least one marker exists. A non-nil error is returned (no
+//     unset calls) so the orchestrator surfaces a soft warning rather than
+//     destabilising a still-live tmux server by mass-unsetting markers
+//     that may protect legitimate hydrate-in-progress panes.
+//
+// The third sub-case — zero live panes AND zero markers — is a clean no-op
+// (nil return, zero unset calls): no marker means no hazard.
+//
+// See spec §Fix Component B (Mass-unset hazard guard, Soft-Warning Posture).
+func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
+	t.Run("it skips unset and emits a warning when ListAllPanesWithFormat returns an error", func(t *testing.T) {
+		sentinel := errors.New("tmux: connection refused")
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"protected__0.0": {},
+		}}
+		live := &fakeLivePaneLister{err: sentinel}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error from CleanStaleMarkers; got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("expected returned error to wrap sentinel %v, got %v", sentinel, err)
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls when ListAllPanesWithFormat fails, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("it skips unset and emits a warning when zero live panes are returned with markers present", func(t *testing.T) {
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"protected__0.0": {},
+			"another__1.2":   {},
+		}}
+		// No error, but zero panes parsed.
+		live := &fakeLivePaneLister{output: ""}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error when zero live panes returned with markers present; got nil")
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls under zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("it is a clean no-op when zero live panes are returned with zero markers", func(t *testing.T) {
+		lister := &fakeMarkerLister{markers: map[string]struct{}{}}
+		live := &fakeLivePaneLister{output: ""}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("expected nil error for zero markers + zero live panes; got %v", err)
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls for empty markers + empty live, got %v", unsetter.calls)
+		}
+	})
+
+	t.Run("the zero-panes guard runs before any unset", func(t *testing.T) {
+		// Multiple markers — were the guard absent, every one would be
+		// computed as stale and unset. Guard must short-circuit BEFORE any
+		// UnsetServerOption call lands.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"a__0.0": {},
+			"b__0.1": {},
+			"c__1.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "   \n  \n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error when whitespace-only output yields zero live panes with markers present; got nil")
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls (guard must run before any unset), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("it never mass-unsets when ListAllPanesWithFormat fails", func(t *testing.T) {
+		// Many markers; ListAllPanesWithFormat fails. The guard must
+		// prevent EVERY marker from being unset on a tmux failure.
+		sentinel := errors.New("tmux gone")
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"m1__0.0": {},
+			"m2__0.1": {},
+			"m3__1.0": {},
+			"m4__1.1": {},
+			"m5__2.0": {},
+		}}
+		live := &fakeLivePaneLister{err: sentinel}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error from ListAllPanesWithFormat failure; got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("expected returned error to wrap sentinel %v, got %v", sentinel, err)
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls when ListAllPanesWithFormat fails (mass-unset hazard), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
 }

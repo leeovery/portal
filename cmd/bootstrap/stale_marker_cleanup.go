@@ -1,11 +1,22 @@
 package bootstrap
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
 )
+
+// ErrZeroLivePanesWithMarkers is the sentinel returned by CleanStaleMarkers
+// when ListAllPanesWithFormat returns no error but parses to zero live
+// panes while at least one `@portal-skeleton-*` marker exists. Treating
+// such a state as authoritative would mass-unset every marker — including
+// markers protecting legitimate hydrate-in-progress panes — and
+// destabilise a still-live tmux server. The orchestrator (task 2-5) wraps
+// this sentinel as a soft warning rather than abort. See spec §Fix
+// Component B (Mass-unset hazard guard).
+var ErrZeroLivePanesWithMarkers = errors.New("stale-marker cleanup: zero live panes parsed; skipping to avoid mass-unset hazard")
 
 // MarkerLister enumerates the live `@portal-skeleton-*` server-option markers
 // keyed by canonical paneKey (no prefix). The production adapter delegates to
@@ -60,11 +71,23 @@ type StaleMarkerCleaner struct {
 // Algorithm:
 //  1. Enumerate canonical-paneKey markers via Markers.ListSkeletonMarkers.
 //  2. Enumerate live panes via Panes.ListAllPanesWithFormat using the literal
-//     `#{session_name}:#{window_index}.#{pane_index}` format string.
+//     `#{session_name}:#{window_index}.#{pane_index}` format string. On
+//     error, return without invoking any unset — the orchestrator surfaces
+//     the error as a soft warning per spec §Fix Component B.
 //  3. Parse each non-empty trimmed line into (session, window, pane) and
 //     convert to canonical paneKey form via state.SanitizePaneKey.
-//  4. For each marker paneKey absent from the live set, invoke
+//  4. Mass-unset hazard guard: if the parsed live-pane set is empty AND at
+//     least one marker exists, return ErrZeroLivePanesWithMarkers without
+//     invoking any unset. Treating an empty live set as authoritative would
+//     destabilise a still-live tmux server by unsetting every marker —
+//     including markers protecting legitimate hydrate-in-progress panes.
+//  5. If the parsed live-pane set is empty AND no markers exist, return nil
+//     — there is nothing to do and no hazard to guard against.
+//  6. For each marker paneKey absent from the live set, invoke
 //     Unsetter.UnsetServerOption(state.SkeletonMarkerPrefix + paneKey).
+//
+// CleanStaleMarkers never returns a *FatalError; every non-nil return is
+// soft per spec §Fix Component B (Soft-Warning Posture).
 func (c *StaleMarkerCleaner) CleanStaleMarkers() error {
 	markers, err := c.Markers.ListSkeletonMarkers()
 	if err != nil {
@@ -77,6 +100,18 @@ func (c *StaleMarkerCleaner) CleanStaleMarkers() error {
 	}
 
 	live := parseLivePaneSet(raw)
+
+	// Mass-unset hazard guard. The guard MUST run before any unset so a
+	// silently-empty live-pane result (whitespace-only output, all-malformed
+	// lines, or genuinely zero live panes during tmux instability) cannot
+	// fall through to "live set empty → unset every marker".
+	if len(live) == 0 {
+		if len(markers) == 0 {
+			// Empty markers + empty live: nothing to do, no hazard.
+			return nil
+		}
+		return ErrZeroLivePanesWithMarkers
+	}
 
 	for paneKey := range markers {
 		if _, alive := live[paneKey]; alive {
