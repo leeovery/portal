@@ -13,7 +13,7 @@ total_proposed: 6
 ---
 
 ## Task 1: Consolidate duplicated daemon-tick test helpers in cmd/bootstrap
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -42,7 +42,7 @@ sources: duplication
 ---
 
 ## Task 2: Extract shared bootstrap.Orchestrator builder for integration tests
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -72,7 +72,7 @@ sources: duplication
 ---
 
 ## Task 3: Extract shared stateDir + logger preamble for cmd/bootstrap integration tests
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -100,7 +100,7 @@ sources: duplication
 ---
 
 ## Task 4: Align bootstrap step-count nomenclature (nine-step vs ten-step)
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
@@ -130,7 +130,7 @@ sources: standards, architecture
 ---
 
 ## Task 5: Resolve StaleMarkerCleaner dual-type collision and per-call inner construction
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -167,7 +167,7 @@ sources: architecture
 ---
 
 ## Task 6: Reclassify mass-unset hazard guard from error to warn-and-return-nil
-status: pending
+status: approved
 severity: medium
 sources: architecture
 

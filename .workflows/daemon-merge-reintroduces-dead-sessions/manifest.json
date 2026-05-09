@@ -54,7 +54,14 @@
             "daemon-merge-reintroduces-dead-sessions-2-4": "tick-1c02dc",
             "daemon-merge-reintroduces-dead-sessions-2-5": "tick-908e18",
             "daemon-merge-reintroduces-dead-sessions-2-6": "tick-c8b80e",
-            "daemon-merge-reintroduces-dead-sessions-2-7": "tick-c38402"
+            "daemon-merge-reintroduces-dead-sessions-2-7": "tick-c38402",
+            "daemon-merge-reintroduces-dead-sessions-3": "tick-84cb17",
+            "daemon-merge-reintroduces-dead-sessions-3-1": "tick-6c8c03",
+            "daemon-merge-reintroduces-dead-sessions-3-2": "tick-a169b4",
+            "daemon-merge-reintroduces-dead-sessions-3-3": "tick-f8d4e6",
+            "daemon-merge-reintroduces-dead-sessions-3-4": "tick-1b0c38",
+            "daemon-merge-reintroduces-dead-sessions-3-5": "tick-043fa5",
+            "daemon-merge-reintroduces-dead-sessions-3-6": "tick-e7e469"
           },
           "external_id": "tick-3b2193"
         }
@@ -66,7 +73,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
