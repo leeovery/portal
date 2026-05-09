@@ -179,6 +179,56 @@ The bare form must be passed through the same tmux argument-construction helpers
 
 This change closes Defect D from the problem statement (orphan `sh -c` wrappers post-timeout). It is bundled with Fixes 1 and 2 because it lives at the same code site (`buildHydrateCommand`) that is touched by the helper's exec contract — the wrapper shape and the timeout-path's exec target are coupled, and treating them in one work product is cheaper than splitting.
 
+## Acceptance Criteria
+
+The fix is complete when all of the following hold:
+
+### Behavioural
+
+- **AC1**: After a tmux server cold-start with N≥2 saved sessions, all `@portal-skeleton-<paneKey>` markers are unset within reasonable time post-bootstrap (no client attach required to drive the unset).
+- **AC2**: On-resume hooks registered via `portal hooks set --on-resume "<cmd>"` fire end-to-end on cold-start for **every** restored pane that has a hook registered, regardless of which session the user attached to.
+- **AC3**: A pane killed via `portal` TUI `K` (or `tmux kill-session` from inside) does not reappear on the next `portal open`. (Already neutralised on `main` by the daemon-merge live-set filter; verified post-fix as a regression guard rather than a new behaviour.)
+- **AC4**: Scrollback save resumes for previously-stuck-marker panes — daemon `captureAndCommit` no longer indefinitely skips any live pane.
+- **AC5**: `exit` typed in a restored pane closes the pane on the first invocation. No orphan `sh` parent process under tmux for any restored pane.
+
+### Logging
+
+- **AC6**: `WARN | hydrate | write fifo … no such file or directory` and `WARN | hydrate | timeout waiting for signal on …` log volume on every cold-start drops to zero in the steady state. These warnings appear only when a genuine signal-flow bug occurs.
+
+### Spec Conformance (Original Resurrection Spec)
+
+- **AC7**: All happy-path resurrection invariants stated in `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` continue to hold for the success path: scrollback dumped, marker unset by helper, on-resume hook fires once at end of successful hydration, `exec $SHELL`.
+- **AC8**: Daemon suppression during the `@portal-restoring` window remains intact — the new eager-signaling step does not introduce any race between the daemon's capture loop and helper-driven scrollback replay.
+
+## Test Plan
+
+### Unit
+
+- **`cmd/bootstrap` (new step)**:
+  - Given a marker map of N entries, the step writes the signal byte to N FIFOs (mock the FIFO writer) and returns nil. Verify each write goes to the correct path derived from `state.FIFOPath(stateDir, paneKey)`.
+  - A per-FIFO write failure logs a soft warning and continues to the next pane. The step never escalates to a fatal error.
+  - Zero-marker case is a no-op — no FIFO writes attempted.
+
+- **`cmd/state_hydrate.go` (timeout-path corrections)**:
+  - `handleHydrateTimeout` calls the marker-unset primitive (`state.UnsetSkeletonMarkerForFIFO` / equivalent) before returning. Use the existing `unsetSkeletonMarkerOrLog` mock pattern.
+  - `runHydrate` timeout fall-through routes to `execShellOrHookAndExit` (template: existing `state_hydrate_test.go` file-missing-path test — replicate for timeout).
+  - Hook-firing on timeout end-to-end: registered on-resume hook, force `OpenFIFO` to return `ErrHydrateTimeout`, assert exec target is `sh -c '<HOOK>; exec $SHELL'`.
+
+- **`internal/restore/session.go` (wrapper drop)**:
+  - `buildHydrateCommand` returns the bare `portal state hydrate ...` string (no `sh -c` envelope, no `; exec $SHELL` trailer). Update the existing snapshot/equality test in `session_test.go` to the new shape.
+
+### Integration (real tmux fixture)
+
+- **Bootstrap orchestrator ordering**: New step runs at the correct position (after step 5 Restore, before step 6 Clear `@portal-restoring`). Sequence test asserts ordering by injecting a recording orchestrator deps fake.
+- **Multi-session cold-start**: Boot with N≥2 saved sessions. Assert all `@portal-skeleton-*` markers are unset within reasonable time post-bootstrap (no client attach required).
+- **End-to-end hook firing on cold-start**: Register an on-resume hook for a non-attached saved session. Cold-start. Assert the hook ran in the restored pane.
+- **Pane close on `exit`**: Restored pane runs `exit` once; tmux `list-panes` shows the pane is gone (not respawned with a fresh shell).
+
+### Regression Coverage to Preserve
+
+- All existing happy-path skeleton + signal + dump + hook + shell integration tests in the `built-in-session-resurrection` test surface remain green.
+- Companion daemon-merge fix's tests (`internal/state/capture_test.go` filter tests, `cmd/bootstrap/stale_marker_cleanup_test.go`) remain green.
+
 ---
 
 ## Working Notes
