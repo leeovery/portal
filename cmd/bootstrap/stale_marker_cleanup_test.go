@@ -82,7 +82,7 @@ func TestCleanStaleMarkers_unsetsMarkerWhosePaneKeyIsNotInLiveSet(t *testing.T) 
 	live := &fakeLivePaneLister{output: "live:0.0\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -107,7 +107,7 @@ func TestCleanStaleMarkers_leavesLiveMarkerAlone(t *testing.T) {
 	live := &fakeLivePaneLister{output: "live:0.0\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -126,7 +126,7 @@ func TestCleanStaleMarkers_requestsLivePanesWithCanonicalFormat(t *testing.T) {
 	live := &fakeLivePaneLister{output: "live:0.0\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -148,7 +148,7 @@ func TestCleanStaleMarkers_composesOptionNameFromSkeletonMarkerPrefix(t *testing
 	live := &fakeLivePaneLister{output: "foo:0.0\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -171,7 +171,7 @@ func TestCleanStaleMarkers_emptyMarkerSet(t *testing.T) {
 	live := &fakeLivePaneLister{output: "foo:0.0\nbar:1.2\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -193,7 +193,7 @@ func TestCleanStaleMarkers_fullOverlapNoUnsetCalls(t *testing.T) {
 	live := &fakeLivePaneLister{output: "foo:0.0\nbar:1.2\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -230,7 +230,7 @@ func TestStaleMarkerCleanup_PaneKeyNormalisation(t *testing.T) {
 		live := &fakeLivePaneLister{output: "my-session:0.1\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -258,7 +258,7 @@ func TestStaleMarkerCleanup_PaneKeyNormalisation(t *testing.T) {
 		live := &fakeLivePaneLister{output: "my-session:0.1\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -290,7 +290,7 @@ func TestStaleMarkerCleanup_PaneKeyNormalisation(t *testing.T) {
 		live := &fakeLivePaneLister{output: "host:1234:0.0\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -314,7 +314,7 @@ func TestCleanStaleMarkers_noOverlapUnsetsEveryMarker(t *testing.T) {
 	live := &fakeLivePaneLister{output: "alive:9.9\n"}
 	unsetter := &fakeMarkerUnsetter{}
 
-	c := &StaleMarkerCleaner{
+	c := &MarkerCleanupCore{
 		Markers:  lister,
 		Panes:    live,
 		Unsetter: unsetter,
@@ -368,7 +368,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		live := &fakeLivePaneLister{err: sentinel}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -394,7 +394,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		live := &fakeLivePaneLister{output: ""}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -413,7 +413,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		live := &fakeLivePaneLister{output: ""}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -438,7 +438,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		live := &fakeLivePaneLister{output: "   \n  \n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -466,7 +466,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		live := &fakeLivePaneLister{err: sentinel}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -508,7 +508,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 			errs: map[int]error{2: sentinel},
 		}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -536,7 +536,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		sentinel := errors.New("every unset boom")
 		unsetter := &fakeMarkerUnsetter{err: sentinel}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -574,7 +574,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "good:0.0\nmalformed-no-colon\ngood2:1.0\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -603,7 +603,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "good:abc.0\nalive:9.9\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -628,7 +628,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "good:0.xyz\nalive:9.9\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -653,7 +653,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "good:01\nalive:9.9\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -674,7 +674,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "goodonly\nalive:9.9\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -701,7 +701,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		sentinel := errors.New("unset boom")
 		unsetter := &fakeMarkerUnsetter{err: sentinel}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -729,7 +729,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "malformed1\nmalformed2:nope\nmalformed3:0.zzz\n"}
 		unsetter := &fakeMarkerUnsetter{}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
@@ -756,7 +756,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		live := &fakeLivePaneLister{output: "malformed\nalive:9.9\n"}
 		unsetter := &fakeMarkerUnsetter{err: errors.New("boom")}
 
-		c := &StaleMarkerCleaner{
+		c := &MarkerCleanupCore{
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,

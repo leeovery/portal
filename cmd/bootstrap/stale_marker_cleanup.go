@@ -48,7 +48,7 @@ type MarkerUnsetter interface {
 // state.SanitizePaneKey before set-difference computation.
 const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 
-// StaleMarkerCleaner is the orchestrator seam responsible for diffing
+// MarkerCleanupCore is the orchestrator seam responsible for diffing
 // canonical-paneKey markers against live-pane paneKeys and unsetting any
 // marker whose paneKey is absent from the live-pane set. Each responsibility
 // (marker enumeration, live-pane enumeration, marker unset) is a separate
@@ -65,7 +65,7 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // ComponentBootstrap. A nil Logger is tolerated — *state.Logger is
 // nil-safe and every Warn call is a no-op. This mirrors
 // bootstrapadapter.FIFOSweeper's logger contract.
-type StaleMarkerCleaner struct {
+type MarkerCleanupCore struct {
 	Markers  MarkerLister
 	Panes    LivePaneLister
 	Unsetter MarkerUnsetter
@@ -102,7 +102,7 @@ type StaleMarkerCleaner struct {
 // parseLivePaneSet (with a Logger.Warn breadcrumb when a Logger is wired)
 // rather than aborting cleanup, since aborting would also leave stale
 // markers in place.
-func (c *StaleMarkerCleaner) CleanStaleMarkers() error {
+func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	markers, err := c.Markers.ListSkeletonMarkers()
 	if err != nil {
 		return err

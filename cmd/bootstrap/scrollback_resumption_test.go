@@ -100,11 +100,8 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	// cleanup step rather than incidental orchestrator wiring.
 	logger := openTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		StaleMarkers: &bootstrapadapter.StaleMarkerCleaner{
-			Client: client,
-			Logger: logger,
-		},
-		Logger: logger,
+		StaleMarkers: bootstrapadapter.NewStaleMarkerCleaner(client, logger),
+		Logger:       logger,
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
@@ -287,11 +284,8 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 
 	logger := openTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		StaleMarkers: &bootstrapadapter.StaleMarkerCleaner{
-			Client: client,
-			Logger: logger,
-		},
-		Logger: logger,
+		StaleMarkers: bootstrapadapter.NewStaleMarkerCleaner(client, logger),
+		Logger:       logger,
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)

@@ -116,10 +116,7 @@ func TestStaleMarkerCleaner_PropagatesListAllPanesWithFormatError(t *testing.T) 
 		showOut: state.SkeletonMarkerPrefix + "stale__0.0 \"1\"\n",
 		listErr: sentinel,
 	}
-	c := &bootstrapadapter.StaleMarkerCleaner{
-		Client: stub,
-		Logger: nil, // *state.Logger is nil-safe.
-	}
+	c := bootstrapadapter.NewStaleMarkerCleaner(stub, nil) // *state.Logger is nil-safe.
 
 	err := c.CleanStaleMarkers()
 	if err == nil {
@@ -144,10 +141,7 @@ func TestStaleMarkerCleaner_PropagatesListAllPanesWithFormatError(t *testing.T) 
 func TestStaleMarkerCleaner_PropagatesListSkeletonMarkersError(t *testing.T) {
 	sentinel := errors.New("show-options boom")
 	stub := &staleClientStub{showErr: sentinel}
-	c := &bootstrapadapter.StaleMarkerCleaner{
-		Client: stub,
-		Logger: nil,
-	}
+	c := bootstrapadapter.NewStaleMarkerCleaner(stub, nil)
 
 	err := c.CleanStaleMarkers()
 	if err == nil {
@@ -195,10 +189,7 @@ func TestStaleMarkerCleaner_LiveTmuxStaleVsLive(t *testing.T) {
 		t.Fatalf("SetSkeletonMarker(stale): %v", err)
 	}
 
-	c := &bootstrapadapter.StaleMarkerCleaner{
-		Client: client,
-		Logger: nil,
-	}
+	c := bootstrapadapter.NewStaleMarkerCleaner(client, nil)
 	if err := c.CleanStaleMarkers(); err != nil {
 		t.Fatalf("CleanStaleMarkers: %v", err)
 	}
