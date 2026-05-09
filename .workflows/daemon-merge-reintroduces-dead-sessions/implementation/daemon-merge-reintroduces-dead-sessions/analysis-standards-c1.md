@@ -1,0 +1,13 @@
+AGENT: standards
+STATUS: findings
+FINDINGS_COUNT: 1
+
+FINDINGS:
+
+- FINDING: Bootstrap step-count docstring drift (nine-step → ten-step)
+  SEVERITY: low
+  FILES: cmd/bootstrap/bootstrap.go:1-21, cmd/bootstrap/bootstrap.go:159-296
+  DESCRIPTION: Spec §"Fix Component B" mandates inserting a new step "between current step 6 and step 7 ... pushing SweepOrphanFIFOs and later steps down by one." Canonical project documentation in CLAUDE.md describes the orchestrator as a nine-step sequence with "Return" as step 9. The implementation correctly inserts CleanStaleMarkers at the right position, but the package-level docstring relabels the orchestrator as a "ten-step PersistentPreRunE sequence" with Return becoming step 10. "Return" is not a step in the spec/CLAUDE.md vocabulary — it is the post-step boundary. Behaviour is correct; only the wording diverges from the canonical project description.
+  RECOMMENDATION: Realign cmd/bootstrap/bootstrap.go's package docstring and Run docstring/log labels to nine-step semantics: CleanStaleMarkers as step 7, Sweep as step 8, CleanStale as step 9, with "Return" as the post-step boundary (matching CLAUDE.md). Alternatively, accept ten-step framing and update CLAUDE.md so the two sources of truth agree.
+
+SUMMARY: Implementation conforms to specification on every load-bearing decision: Fix Component A's live-set filtering is implemented at all three structural levels via a local `buildLiveStructure` helper inside `mergeSkippedPanes` (matching spec §"Data Flow / Signature Approach"); helper functions `mergePane` / `findOrAppendSession` are correctly left untouched per spec §"Filtering Levels"; the codifying-bug test was replaced with its inverse and all spec-mandated tests (window-level, pane-level, kill-mid-flight regression mirroring `agentic-workflows-XXrJ3J`, self-heal across two ticks) are present in capture_test.go. Fix Component B's `StaleMarkerCleaner` uses the spec-mandated error-propagating `ListAllPanesWithFormat` (not `ListAllPanes`), the canonical literal format string, rightmost-colon split, `SanitizePaneKey` normalisation, mass-unset hazard guard via `ErrZeroLivePanesWithMarkers`, soft-warning posture (errors.Join, no `*FatalError`), and inserts at step 7 between Clear and Sweep. Adapter wiring narrows the seam to a three-method `staleMarkerClient` interface to prevent future drift back to the error-swallowing `ListAllPanes`. Acceptance Criterion #8 (scrollback-save resumption) is covered by dedicated positive + negative-control + selectivity integration tests. Project skill MUST DOs (table-driven tests, %w error wrapping, errors.Is/As, narrow interfaces) are followed. Only a minor docstring-wording inconsistency was found.
