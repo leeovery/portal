@@ -41,7 +41,6 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/state"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
@@ -392,74 +391,8 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 	}
 }
 
-// runDaemonTick drives a single daemon-equivalent capture-and-commit
-// against the live tmux server backing client, mirroring the production
-// daemon's per-tick body in cmd/state_daemon.go captureAndCommit. Every
-// step matches the daemon's sequence:
-//
-//   - state.ListSkeletonMarkers to read the skip-save set,
-//   - state.CaptureStructure to walk live sessions/windows/panes,
-//   - per-pane skip-save guard (the spec § Why This Step Is Needed
-//     guard at cmd/state_daemon.go:131-133),
-//   - state.CaptureAndHashPane + state.WriteScrollbackIfChanged for
-//     each non-skipped pane,
-//   - state.Commit to atomically persist sessions.json.
-//
-// The helper is intentionally inline in the test rather than reaching
-// for an exported daemon-tick seam: a refactor that exposes such a seam
-// would touch cmd/state_daemon.go (the daemon production path) which
-// the spec § Out of Scope and this task's "MUST NOT modify" guard rail
-// forbid. Driving the underlying state primitives directly here keeps
-// the regression test free of any coupling to forbidden production
-// paths while still exercising the same skip-save guard the daemon
-// applies in production.
-//
-// PrevIndex is intentionally nil for this single-tick fixture — Fix
-// Component A's merge filter only kicks in when both prev and skipSet
-// are non-empty, and these tests focus on the cleanup-then-tick flow,
-// not the merge filter (covered separately by tasks 2-1 and 2-2).
-func runDaemonTick(t *testing.T, client *tmux.Client, stateDir string) {
-	t.Helper()
-
-	skipSet, err := state.ListSkeletonMarkers(client)
-	if err != nil {
-		t.Fatalf("ListSkeletonMarkers: %v", err)
-	}
-
-	idx, err := state.CaptureStructure(client, skipSet, nil)
-	if err != nil {
-		t.Fatalf("CaptureStructure: %v", err)
-	}
-
-	hm := state.HashMap{}
-	anyChanged := false
-	for _, sess := range idx.Sessions {
-		for _, win := range sess.Windows {
-			for _, pane := range win.Panes {
-				key := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
-				// Skip-save guard — the exact behaviour the spec
-				// calls out at cmd/state_daemon.go:131-133. Markers
-				// in skipSet block scrollback save for their paneKey.
-				if _, skipped := skipSet[key]; skipped {
-					continue
-				}
-				target := tmux.PaneTarget(sess.Name, win.Index, pane.Index)
-				data, hash, err := state.CaptureAndHashPane(client, target)
-				if err != nil {
-					t.Fatalf("CaptureAndHashPane %s: %v", target, err)
-				}
-				written, err := state.WriteScrollbackIfChanged(stateDir, key, data, hash, hm)
-				if err != nil {
-					t.Fatalf("WriteScrollbackIfChanged %s: %v", key, err)
-				}
-				if written {
-					anyChanged = true
-				}
-			}
-		}
-	}
-
-	if err := state.Commit(stateDir, idx, anyChanged, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-}
+// runDaemonTick lives in daemon_tick_test_helpers_test.go — a shared
+// helper consumed by the reboot round-trip too. The default option set
+// (skip-guard ON, real CaptureAndHashPane bytes) is exactly what these
+// scrollback-resumption tests need, so all call sites above pass no
+// options.

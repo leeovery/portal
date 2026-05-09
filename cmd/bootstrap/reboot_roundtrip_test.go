@@ -275,7 +275,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// exactly what daemonDeps.captureAndCommit does — invoked here
 	// outside the tick loop so the test doesn't depend on daemon
 	// timing or the saver session existing.
-	idx := captureAndCommit(t, client, stateDir)
+	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
 
 	// Override one pane's scrollback with a known ANSI fixture. Doing
 	// this AFTER Commit means the on-disk schema is still produced by
@@ -288,7 +288,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// in-memory hash for hookScrollbackPath is stale relative to disk.
 	// This test never re-captures after the reboot, so the staleness
 	// is invisible. A future variant that adds a post-hydrate
-	// captureAndCommit step would need to invalidate the hash entry
+	// runDaemonTick step would need to invalidate the hash entry
 	// (or re-seed it) before that capture, otherwise dedup will skip
 	// the rewrite and the new fixture won't land on disk.
 	ansiFixture := []byte("\x1b[31mred\x1b[0m\nbefore reboot\n")
@@ -521,52 +521,13 @@ func createSavedTopology(t *testing.T, ts *tmuxtest.Socket, args savedTopologyAr
 	ts.WaitForSession(t, "beta", 2*time.Second)
 }
 
-// captureAndCommit drives the daemon's per-tick save path inline:
-//   - List skeleton markers (none on a fresh server, so empty set).
-//   - state.CaptureStructure to walk live sessions/windows/panes.
-//   - Write per-pane scrollback bytes (we use a deterministic placeholder;
-//     the round-trip body overwrites the hook pane's file with a known
-//     ANSI fixture afterwards).
-//   - state.Commit to atomically persist sessions.json.
-//
-// Returns the captured Index so the caller can sanity-check.
-func captureAndCommit(t *testing.T, client *tmux.Client, stateDir string) state.Index {
-	t.Helper()
-	skipSet, err := state.ListSkeletonMarkers(client)
-	if err != nil {
-		t.Fatalf("ListSkeletonMarkers: %v", err)
-	}
-	idx, err := state.CaptureStructure(client, skipSet, nil)
-	if err != nil {
-		t.Fatalf("CaptureStructure: %v", err)
-	}
-
-	// Write per-pane scrollback. CaptureAndHashPane is the production
-	// helper, but we don't need its output bytes here — the round-trip
-	// body overwrites the one file we'll byte-compare. Other panes get
-	// empty bytes so file presence (and Commit's GC discipline) is
-	// exercised but no large/non-deterministic content lands on disk.
-	hm := state.HashMap{}
-	anyChanged := false
-	for _, sess := range idx.Sessions {
-		for _, w := range sess.Windows {
-			for _, p := range w.Panes {
-				key := state.SanitizePaneKey(sess.Name, w.Index, p.Index)
-				written, err := state.WriteScrollbackIfChanged(stateDir, key, []byte{}, 0, hm)
-				if err != nil {
-					t.Fatalf("WriteScrollbackIfChanged %s: %v", key, err)
-				}
-				if written {
-					anyChanged = true
-				}
-			}
-		}
-	}
-	if err := state.Commit(stateDir, idx, anyChanged, nil); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	return idx
-}
+// The daemon-tick save path used by this round-trip lives in
+// daemon_tick_test_helpers_test.go as runDaemonTick. The reboot
+// round-trip calls it with WithoutSkipGuard() (the original inline
+// body never honoured a skip guard) and WithEmptyScrollback() (the
+// round-trip body overwrites the hook pane's scrollback file with a
+// known ANSI fixture afterwards; capture-pane output is timing- and
+// terminal-dependent and would make a byte-compare flaky).
 
 // verifyCapturedIndex sanity-checks that the captured snapshot matches
 // the topology createSavedTopology built. Failures here mean the test
@@ -972,7 +933,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 
 	// Capture + commit using the same helper the primary round-trip
 	// uses, so any regression in CaptureStructure shows up here too.
-	idx := captureAndCommit(t, client, stateDir)
+	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
 	if got := len(idx.Sessions); got != 2 {
 		t.Fatalf("captured %d sessions; want 2", got)
 	}
@@ -1209,7 +1170,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 
 	// Drive the save path inline (no daemon). This produces sessions.json
 	// + per-pane scrollback files exactly as production save would.
-	idx := captureAndCommit(t, client, stateDir)
+	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
 	if got := len(idx.Sessions); got != 1 {
 		t.Fatalf("captured %d sessions; want 1", got)
 	}
