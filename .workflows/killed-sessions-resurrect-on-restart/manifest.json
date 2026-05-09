@@ -4,5 +4,13 @@
   "status": "in-progress",
   "created": "2026-05-09",
   "description": "Hydrate timeout cascade leaves stuck @portal-skeleton markers, causing killed sessions to resurrect on restart and on-resume hooks to silently skip",
-  "phases": {}
+  "phases": {
+    "investigation": {
+      "items": {
+        "killed-sessions-resurrect-on-restart": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
 }
