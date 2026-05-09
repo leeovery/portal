@@ -98,32 +98,135 @@ Two design decisions in `handleHydrateTimeout` then compound the timeout into th
 
 ### Code Trace
 
-_To be filled in during code analysis._
+**Bootstrap step 5 (cold-start only — `internal/restore/restore.go:116-119`):**
+
+```go
+if _, alive := liveSet[sess.Name]; alive {
+    // Silent skip per spec — the steady-state common case.
+    return
+}
+```
+
+Restore SKIPS already-live sessions. The skeleton path (and therefore the entire hydrate machinery) ONLY runs on the first `portal` invocation after a tmux server cold-start. Subsequent invocations of `portal open` see all sessions live and skip restore for them. **This bug is therefore a cold-start phenomenon** — the user sees it on first attach after a reboot or after the user kills the tmux server, not on every `portal open`.
+
+**Skeleton arm phase (`internal/restore/session.go:194-227`, `armPanes`):**
+
+For each saved pane in each non-live saved session:
+1. `state.CreateFIFO(fifo)` — `mkfifo` at `<state>/hydrate-<paneKey>.fifo`. Creates the path.
+2. `r.Client.RespawnPane(liveTarget, hydrateCmd)` — runs `respawn-pane -k`, killing the default shell created by `new-session`/`split-window` and replacing it with the wrapper from `buildHydrateCommand` (`internal/restore/session.go:419-426`):
+   ```
+   sh -c 'portal state hydrate --fifo X --file Y --hook-key Z; exec $SHELL'
+   ```
+3. After all panes in a session, `ApplySkeletonMarkers` (`internal/restore/session.go:351-359`) sets `@portal-skeleton-<liveKey>` for every live pane.
+
+**Helper start (`cmd/state_hydrate.go:98-184`, `runHydrate`):**
+
+Inside the wrapper sh, `portal state hydrate` runs and immediately calls `cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)` (`runHydrate` step 1) — `os.OpenFile(path, O_RDONLY, 0)` blocks until a writer arrives or the 3-second timeout fires.
+
+**Signal path (`cmd/state_signal_hydrate.go:58-84`, `runSignalHydrate`):**
+
+Triggered by tmux's `client-attached` and `client-session-changed` global hooks (registered in `internal/tmux/hooks_register.go:32-35` against both events). Receives the session name via `#{session_name}`, enumerates panes IN THAT SESSION ONLY, looks up each pane's marker, and writes a single byte to its FIFO via `O_WRONLY|O_NONBLOCK`.
+
+**Hook firing (`cmd/state_hydrate.go:221-239`, `execShellOrHookAndExit`):**
+
+Reached only on the **signal-arrived** path (step 9 of `runHydrate`) and the **file-missing** path (`handleHydrateFileMissing`, `state_hydrate.go:279-300` — also unsets the marker before falling through). Looks up the structural hook key in `hooks.json` and exec's `sh -c '<HOOK>; exec $SHELL'` if found, or bare `$SHELL` if not.
+
+**Timeout path (`cmd/state_hydrate.go:248-266`, `handleHydrateTimeout`):**
+
+Fires when `openFIFOWithTimeout` returns `ErrHydrateTimeout` after 3 s with no signal. The handler:
+
+1. Writes the reset preamble to stdout.
+2. `os.Remove(cfg.FIFO)` — unlinks the FIFO from the filesystem.
+3. Logs `WARN | hydrate | timeout waiting for signal on …`.
+4. **Deliberately does NOT** unset `@portal-skeleton-<paneKey>` (comment at line 262: "marker stays set so the next attach re-signals").
+5. Deliberately does NOT sleep 100 ms.
+
+`runHydrate` then falls through to `execShellAndExit` (line 109) — bare shell, **no hook firing**.
 
 ### Root Cause
 
-_To be confirmed during code analysis._
+The bug has **one upstream trigger** producing **three downstream symptoms**, plus a fourth defect in the wrapper construction.
+
+**Upstream trigger — selective signaling:**
+
+`signal-hydrate` is fired by `client-attached` / `client-session-changed`, which are **per-session** hooks scoped via `#{session_name}` to the session the client is attaching to or switching to. Bootstrap step 5 creates skeletons for **every** non-live saved session, but `signal-hydrate` only writes to the FIFOs of the session being attached (the user's `portal open <X>` target). On a cold-start bootstrap with N saved sessions, only the panes of session X get signaled. The remaining N−1 sessions' helpers wait 3 seconds, never receive the signal, and time out.
+
+This is not a race with the helper's `O_RDONLY` open — it's a missing trigger. Even if the helper opens the FIFO immediately, no signal will ever arrive for non-attached sessions during this server lifetime.
+
+**Symptom A — killed sessions resurrect on next `portal open`:**
+
+The timed-out helpers run `handleHydrateTimeout`, which deliberately leaves `@portal-skeleton-<paneKey>` set. When the user kills one of those panes' sessions, the daemon's next `captureAndCommit` tick runs:
+- Pre-companion-fix: `mergeSkippedPanes` (`internal/state/capture.go`) saw the marker in `skipSet` and re-injected the dead session from `prev` into the freshly-captured index → killed session reappears in `sessions.json` and on next bootstrap.
+- Post-companion-fix (currently on `main`): the merge filter requires session/window/pane to exist live in `idx.Sessions` before merging from prev. With the session killed, the merge correctly drops it.
+
+So Symptom A's user-visible behaviour is **already fixed on `main`** by the companion bug's merge filter. The marker still leaks (this bug owns the marker-production path), but the merge no longer turns the leak into a resurrection. **This must be empirically reconfirmed against HEAD before scope-shaping the fix.**
+
+**Symptom B — on-resume hooks never fire:**
+
+`handleHydrateTimeout` returns nil without invoking the hook-firing exec; control returns to `runHydrate` at line 109 which falls through to `execShellAndExit` (bare shell). The pane gets a shell with no hook command run.
+
+By design (`built-in-session-resurrection` spec, "Helper Behavior on Startup", step 3e: "exec $SHELL (bare shell; no hook firing on this path)"), the timeout path bypasses hooks. The spec's reasoning was that timeout signals "something went wrong with the signal flow" and bare shell is safer than potentially mis-firing the hook.
+
+But because the upstream selective-signaling trigger turns the timeout path into the **steady-state path for every non-attached session on every cold-start bootstrap**, the on-resume-hooks feature is effectively non-functional for any user with multiple saved sessions. The "we don't know if the pane is in a healthy state" rationale doesn't hold when timeout has become a deterministic outcome of normal cold-start behaviour, not an exception.
+
+**Symptom C — scrollback save silently skipped for stuck-marker panes:**
+
+`captureAndCommit` (`cmd/state_daemon.go:131-133`) skips capturing scrollback for any pane whose paneKey is in the marker set. So while a marker is stuck (pane is live but marker survives the timeout), the daemon never saves that pane's scrollback. Across the server lifetime, the saved scrollback for affected panes goes stale.
+
+The companion-fix step 7 (`CleanStaleMarkers`) does NOT close this gap because its predicate is "marker without a live pane" — but timeout-stuck markers are ON live panes (a wrapper sh + bare shell is still a live tmux pane). The cleanup correctly leaves them alone, and the markers therefore survive to suppress scrollback save indefinitely.
+
+This is the "secondary harm" the companion spec flagged but cannot fully resolve from outside the marker-production layer.
+
+**Defect D — orphan `sh -c` wrapper after timeout:**
+
+`buildHydrateCommand` produces `sh -c 'portal state hydrate ...; exec $SHELL'`. The wrapper sh forks `portal state hydrate`, which on the timeout path calls `defaultExecShell` (`cmd/state_hydrate.go:322-325`) → `syscall.Exec($SHELL, [$SHELL], env)`. The portal process image becomes the user's shell; the wrapper sh remains the parent, blocked in `wait()` for that PID's exit. When the user eventually exits the shell, the wrapper proceeds to `; exec $SHELL` and replaces itself with **another** shell. Two consequences:
+
+1. **Orphan `sh` parent**, observed at ~20 hours uptime in the addendum. Every timed-out hydrate leaves an `sh` process parented to the tmux server until the pane closes. Same on the success path — the helper exec's $SHELL inside `execShellAndExit` / `execShellOrHookAndExit`, so the wrapper sh is also parked across normal hydration.
+2. **Pane does not close on `exit`** — the wrapper's trailing `; exec $SHELL` re-spawns a fresh shell when the user types `exit`. The user has to type `exit` twice to close the pane, contradicting the comment in `buildHydrateCommand` ("exiting the shell ends the pane"). The trailing `exec $SHELL` was apparently intended as a defensive fallback for the case where the inner `portal hydrate` exits without exec'ing — a scenario that does not happen in practice because both exit paths always exec.
 
 ### Contributing Factors
 
-_To be filled in._
+- **No bootstrap-driven signaling.** The hydrate-trigger contract assumes tmux's `client-attached` / `client-session-changed` will eventually deliver a signal to every skeleton pane. That contract holds only for the session the user attaches to; it has no answer for non-attached sessions.
+- **Spec design choice: timeout path is a bypass, not a recovery.** The original `built-in-session-resurrection` spec treats timeout as an exceptional condition where degrading to bare shell is preferable to firing hooks blind. Under selective-signaling, timeout is the steady state for non-attached sessions.
+- **Marker production is fire-and-forget.** `setSkeletonMarker` is non-fatal-if-missing and is set unconditionally for every live pane in the skeleton phase. There is no inverse "if hydration never completes, who cleans this?" lifecycle invariant — the timeout handler explicitly opts out of cleanup, and the bootstrap-time step 7 cleanup only handles the dead-pane case.
+- **`exec $SHELL` fallback in the wrapper is dead code on the success path and harmful on the timeout path.** It exists for crash-resilience but is unreachable in practice (both exit paths exec) AND breaks the natural pane-close-on-exit semantics.
+- **Both `client-attached` and `client-session-changed` register signal-hydrate.** When user attaches to a session, both events can fire near-simultaneously (the original `client-attached` plus an internal session-change event). Each invocation does a full marker enumeration and FIFO write attempt. For panes whose helpers have already timed out (FIFO removed, marker still set), both invocations log `ENOENT` warnings at the same timestamp. This explains the duplicate-write observation in the inbox.
 
 ### Why It Wasn't Caught
 
-_To be filled in._
+- **Integration tests cover only the happy path.** The `built-in-session-resurrection` integration tests verify the signal-arrived flow end-to-end (skeleton + signal + dump + hook + shell). They don't model the case where multiple sessions are skeletoned and only one is attached.
+- **Manual reproduction requires multiple saved sessions.** A user with one saved session always attaches to it on first `portal open`, so the timeout path is unreachable. The bug only surfaces when N≥2 saved sessions exist and the user attaches to one — the steady-state shape of any actual user.
+- **Timeout handler's "next attach re-signals" comment encoded the wrong invariant as true.** The comment at line 262 of `state_hydrate.go` reads as a deliberate design choice and was not flagged in review. The actual mechanism (FIFO unlinked at line 256, helper exec'd shell, no reader) makes "next attach re-signals" a no-op that just re-fires `ENOENT`.
+- **Symptom B's user-visible signal is silent.** The on-resume-hooks feature failing produces no error — just a bare shell where the user expected `claude --resume`. The reporter inferred the failure from the absence of expected behaviour, not from any user-visible error.
+- **Symptom C is even more silent.** Stuck markers suppressing scrollback save produces no error, no warning, no diagnostic — the user only notices on the next reboot when scrollback is empty. By then the connection to "marker leaked from a previous timeout" is invisible.
 
 ### Blast Radius
 
-_To be filled in._
+**Directly affected:**
+- `cmd/state_hydrate.go` — `handleHydrateTimeout` (deliberate bypass of marker-unset and hook-firing), `runHydrate` step 1 (timeout fall-through to `execShellAndExit`), `defaultExecShell` (`syscall.Exec` semantics that the wrapper depends on).
+- `cmd/state_signal_hydrate.go` — `runSignalHydrate` (per-session enumeration; no global "signal everyone" path).
+- `internal/restore/session.go` — `armPanes` (skeleton arm sequence; FIFO + respawn-pane + marker), `buildHydrateCommand` (wrapper construction with the harmful `; exec $SHELL` trailer).
+- `cmd/bootstrap/stale_marker_cleanup.go` — `CleanStaleMarkers` only handles dead panes; does not address timeout-stuck markers on live panes.
+
+**Potentially affected (downstream readers of stuck markers):**
+- `cmd/state_daemon.go:131-133` — daemon's capture loop skips scrollback save for marked panes. While a marker is stuck, the affected pane's scrollback is silently not saved across the server lifetime.
+- `internal/state/capture.go` — `mergeSkippedPanes`. With the companion fix in place this is defensively guarded; without the fix it was the path that turned stuck markers into resurrection.
+
+**Not affected:**
+- The single-saved-session user (no race ever happens; one session = one attach = one signal). All visible bugs vanish.
+- Hot-path `portal open <existing-session>` after the cold-start bootstrap completes (Restore skips live sessions; no skeleton, no helpers, no race).
 
 ---
 
 ## Fix Direction
 
-_To be discussed in findings review after code analysis is complete._
+_To be discussed in findings review after presenting the analysis to the user._
 
 ---
 
 ## Notes
 
-- The "already-fixed" daemon-merge bug referenced above is currently in the `daemon-merge-reintroduces-dead-sessions` branch (review phase, in progress on `main`). That fix removes one of two compounding factors on Symptom A — the marker-driven session re-injection — but the upstream race and the marker-leakage design choice still exist. Investigate whether, with the daemon-merge fix in place, Symptom A still reproduces purely from the `@portal-skeleton-*` marker leakage, or whether it has been incidentally masked.
+- **Empirical reconfirmation needed against HEAD.** The companion-bug fix is on `main` but the inbox was written before that fix landed. Specifically: re-verify whether killing one of the affected sessions on a current-HEAD build still reproduces Symptom A (resurrect on next `portal open`), or whether the merge filter has already neutralised the user-visible symptom even with the marker still leaking.
+- **Cold-start scope.** Restore skips live sessions, so the skeleton + hydrate machinery only runs on the first `portal` invocation after the tmux server cold-starts. The bug's cardinality is therefore "once per server lifetime, affecting all-saved-sessions-minus-one" rather than "once per `portal open`".
+- **Wrapper redesign and timeout-path redesign are the same code site.** Both observable defects (no hooks on timeout, orphan sh after timeout) live in the construction at `internal/restore/session.go:419` together with the consumption at `cmd/state_hydrate.go:248-266` (timeout) and `cmd/state_hydrate.go:191-194` (`execShellAndExit` final terminator). Treating these as one work product is likely cheaper than treating them as two.
+- **Open question for fix direction:** does the fix push hydration into bootstrap (eagerly signal every skeleton pane right after step 5, before the user attaches), redesign the timeout path (fire hooks on timeout; unset marker on timeout; possibly drop the wrapper), or both? The findings review will sketch options and trade-offs before scope-shaping.
