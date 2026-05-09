@@ -47,14 +47,31 @@ func (f *fakeLivePaneLister) ListAllPanesWithFormat(format string) (string, erro
 
 // fakeMarkerUnsetter records every UnsetServerOption call in invocation order
 // so tests can assert which option names were unset and how many times.
+//
+// errs lets tests inject per-call errors keyed by the (1-based) invocation
+// index. A missing key returns nil. errOn keys tests that want a specific
+// option name to fail. err is the legacy single-error-for-every-call hook;
+// when set, it overrides errs/errOn and returns on every call. Used to
+// drive the per-unset-failure soft-warning posture tests.
 type fakeMarkerUnsetter struct {
 	calls []string
 	err   error
+	errs  map[int]error
+	errOn map[string]error
 }
 
 func (f *fakeMarkerUnsetter) UnsetServerOption(name string) error {
 	f.calls = append(f.calls, name)
-	return f.err
+	if f.err != nil {
+		return f.err
+	}
+	if e, ok := f.errs[len(f.calls)]; ok {
+		return e
+	}
+	if e, ok := f.errOn[name]; ok {
+		return e
+	}
+	return nil
 }
 
 func TestCleanStaleMarkers_unsetsMarkerWhosePaneKeyIsNotInLiveSet(t *testing.T) {
@@ -463,6 +480,291 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		}
 		if len(unsetter.calls) != 0 {
 			t.Errorf("expected zero unset calls when ListAllPanesWithFormat fails (mass-unset hazard), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+}
+
+// TestStaleMarkerCleanup_SoftWarningPosture pins the spec invariant from
+// §Fix Component B (Soft-Warning Posture): a single failed UnsetServerOption
+// call must NEVER abort the cleanup loop, malformed live-pane lines must
+// never propagate as a fatal, and the cleanup MUST NOT return *FatalError
+// under any code path. Failures are recorded and aggregated; the orchestrator
+// (task 2-5) wires the aggregate as a Warn.
+func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
+	t.Run("it continues attempting unsets when one fails mid-loop", func(t *testing.T) {
+		// Three stale markers; mock unset returns error on the second call.
+		// All three calls must still be attempted; returned error is non-nil
+		// and wraps the failing sentinel.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"a__0.0": {},
+			"b__0.0": {},
+			"c__0.0": {},
+		}}
+		// Live set non-empty so the zero-panes guard does not trip; the
+		// live pane is unrelated to any marker so all three are stale.
+		live := &fakeLivePaneLister{output: "alive:9.9\n"}
+		sentinel := errors.New("tmux: option boom")
+		unsetter := &fakeMarkerUnsetter{
+			errs: map[int]error{2: sentinel},
+		}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error when one unset fails mid-loop; got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("expected returned error to wrap sentinel %v, got %v", sentinel, err)
+		}
+		if len(unsetter.calls) != 3 {
+			t.Errorf("expected all 3 unset calls attempted despite mid-loop failure, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("it attempts every unset when all fail", func(t *testing.T) {
+		// Edge case: every unset fails. The cleanup must still attempt
+		// each one; the returned error is non-nil; no fatal escalation.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"a__0.0": {},
+			"b__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "alive:9.9\n"}
+		sentinel := errors.New("every unset boom")
+		unsetter := &fakeMarkerUnsetter{err: sentinel}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error when every unset fails; got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("expected returned error to wrap sentinel %v, got %v", sentinel, err)
+		}
+		if len(unsetter.calls) != 2 {
+			t.Errorf("expected both unset calls attempted, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+		var fatal *FatalError
+		if errors.As(err, &fatal) {
+			t.Errorf("expected non-fatal error; got *FatalError = %v", fatal)
+		}
+	})
+
+	t.Run("it skips malformed live-pane lines without aborting cleanup", func(t *testing.T) {
+		// Mix of well-formed and malformed lines. The well-formed lines
+		// land in the live-pane set; the malformed line is skipped and
+		// must NOT abort cleanup.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			// Both well-formed live entries are also marked → they are
+			// alive and not unset.
+			state.SanitizePaneKey("good", 0, 0):  {},
+			state.SanitizePaneKey("good2", 1, 0): {},
+			// This marker is stale: not present in the live set. Cleanup
+			// MUST unset it after skipping the malformed line, proving
+			// processing continued past the malformed line.
+			"stale__9.9": {},
+		}}
+		live := &fakeLivePaneLister{output: "good:0.0\nmalformed-no-colon\ngood2:1.0\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected exactly 1 unset call (stale marker), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+		want := state.SkeletonMarkerPrefix + "stale__9.9"
+		if unsetter.calls[0] != want {
+			t.Errorf("unset name = %q, want %q", unsetter.calls[0], want)
+		}
+	})
+
+	t.Run("it skips a line whose window index is not an integer", func(t *testing.T) {
+		// `good:abc.0` — non-integer window index. The line is skipped;
+		// the marker `good__0.0` is therefore stale and unset. This
+		// proves the malformed line did NOT enter the live set.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"good__0.0": {},
+		}}
+		// Provide one well-formed unrelated live entry so the zero-panes
+		// guard does not trip.
+		live := &fakeLivePaneLister{output: "good:abc.0\nalive:9.9\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected 1 unset call (malformed window must NOT enter live set), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+		want := state.SkeletonMarkerPrefix + "good__0.0"
+		if unsetter.calls[0] != want {
+			t.Errorf("unset name = %q, want %q", unsetter.calls[0], want)
+		}
+	})
+
+	t.Run("it skips a line whose pane index is not an integer", func(t *testing.T) {
+		// `good:0.xyz` — non-integer pane index. Line skipped; marker is stale.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"good__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "good:0.xyz\nalive:9.9\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected 1 unset call (malformed pane must NOT enter live set), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+		want := state.SkeletonMarkerPrefix + "good__0.0"
+		if unsetter.calls[0] != want {
+			t.Errorf("unset name = %q, want %q", unsetter.calls[0], want)
+		}
+	})
+
+	t.Run("it skips a line missing the dot separator", func(t *testing.T) {
+		// `good:01` — the rest of the line after `:` has no `.` separator.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"good__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "good:01\nalive:9.9\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected 1 unset call (missing-dot line must NOT enter live set), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("it skips a line missing the colon separator", func(t *testing.T) {
+		// `goodonly` — no `:` at all.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"good__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "goodonly\nalive:9.9\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers returned error: %v", err)
+		}
+		if len(unsetter.calls) != 1 {
+			t.Fatalf("expected 1 unset call (missing-colon line must NOT enter live set), got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("the cleanup never returns a fatal error", func(t *testing.T) {
+		// Combined per-unset failure AND malformed-line conditions: the
+		// returned error MUST NOT be wrappable to *FatalError. The
+		// orchestrator (task 2-5) Warn-and-swallows a non-nil return; a
+		// fatal escalation here would abort bootstrap.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			// All three are stale; the live entries are unrelated.
+			"a__0.0": {},
+			"b__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "malformed-no-colon\nalive:9.9\n"}
+		sentinel := errors.New("unset boom")
+		unsetter := &fakeMarkerUnsetter{err: sentinel}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error from per-unset failures; got nil")
+		}
+		var fatal *FatalError
+		if errors.As(err, &fatal) {
+			t.Errorf("CleanStaleMarkers returned *FatalError = %v; soft-warning posture forbids fatal escalation", fatal)
+		}
+	})
+
+	t.Run("zero-panes guard fires when all lines are malformed and markers exist", func(t *testing.T) {
+		// All live-pane lines malformed → live set parses to empty. With
+		// markers present, the zero-panes guard MUST trigger so no
+		// mass-unset lands. The cleanup returns the sentinel; zero unset
+		// calls.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"a__0.0": {},
+			"b__0.0": {},
+			"c__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "malformed1\nmalformed2:nope\nmalformed3:0.zzz\n"}
+		unsetter := &fakeMarkerUnsetter{}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+		}
+		err := c.CleanStaleMarkers()
+		if err == nil {
+			t.Fatalf("expected non-nil error when all lines malformed AND markers exist (zero-panes guard); got nil")
+		}
+		if !errors.Is(err, ErrZeroLivePanesWithMarkers) {
+			t.Errorf("expected returned error to wrap ErrZeroLivePanesWithMarkers; got %v", err)
+		}
+		if len(unsetter.calls) != 0 {
+			t.Errorf("expected zero unset calls under all-malformed + zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+	})
+
+	t.Run("logger is nil-safe under per-unset failure and malformed lines", func(t *testing.T) {
+		// Logger field nil: cleanup MUST NOT panic on either malformed
+		// lines or per-unset failures. Mirrors bootstrapadapter.FIFOSweeper
+		// nil-safety convention.
+		lister := &fakeMarkerLister{markers: map[string]struct{}{
+			"a__0.0": {},
+		}}
+		live := &fakeLivePaneLister{output: "malformed\nalive:9.9\n"}
+		unsetter := &fakeMarkerUnsetter{err: errors.New("boom")}
+
+		c := &StaleMarkerCleaner{
+			Markers:  lister,
+			Panes:    live,
+			Unsetter: unsetter,
+			Logger:   nil,
+		}
+		// Should return non-nil (per-unset failure) but never panic.
+		if err := c.CleanStaleMarkers(); err == nil {
+			t.Fatalf("expected non-nil error; got nil")
 		}
 	})
 }
