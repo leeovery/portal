@@ -567,10 +567,13 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("merges a skipped pane's session and window from prev when missing from fresh", func(t *testing.T) {
-		// prev has session "old"; fresh capture lists only "new". Skip set marks
-		// the prev pane — the merge must reintroduce its session/window/pane
-		// into the result.
+	t.Run("does not merge a skipped pane whose session is absent from fresh", func(t *testing.T) {
+		// prev has session "old"; fresh capture lists only "new". Skip set
+		// marks the prev pane. Even though the marker is present, "old" must
+		// NOT be reintroduced into the result because tmux no longer
+		// acknowledges the session — a stale skeleton marker cannot resurrect
+		// a killed session. See specification → Fix Component A → Filtering
+		// Levels.
 		prev := state.Index{
 			Version: state.SchemaVersion,
 			Sessions: []state.Session{{
@@ -606,13 +609,12 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		if findPane(idx, "new", 0, 0) == nil {
 			t.Errorf("fresh pane new:0.0 missing")
 		}
-		// "old" reintroduced via merge.
-		p := findPane(idx, "old", 1, 2)
-		if p == nil {
-			t.Fatalf("merged pane old:1.2 missing")
+		// "old" must NOT be merged — its session is absent from fresh.
+		if p := findPane(idx, "old", 1, 2); p != nil {
+			t.Errorf("dead session pane old:1.2 was reintroduced via merge: %+v", p)
 		}
-		if p.CWD != "/prev" || p.CurrentCommand != "tmux" {
-			t.Errorf("merged pane = %+v, want prev's /prev + tmux", p)
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "new" {
+			t.Errorf("Sessions = %+v, want only fresh 'new'", idx.Sessions)
 		}
 	})
 
@@ -671,31 +673,41 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 	})
 
 	t.Run("re-sorts sessions, windows, and panes after merge", func(t *testing.T) {
-		// prev has a session "alpha" alphabetically before fresh's "zeta",
-		// plus a pane at index 5 with a window at index 3. Verify the
-		// post-merge ordering is canonical.
+		// Fresh emits "zeta" before "alpha" and out-of-order windows/panes
+		// within each session. Prev contributes prev-authoritative pane data
+		// at one set of coords (zeta:0.0) so the merge mutates fresh; the
+		// canonical post-merge ordering must be sessions ascending by name,
+		// windows ascending by index, panes ascending by index. Both sessions
+		// are live in fresh so the session-level filter does not drop the
+		// merge — the test exercises sort-order, not the filter.
 		prev := state.Index{
 			Version: state.SchemaVersion,
 			Sessions: []state.Session{{
-				Name:        "alpha",
+				Name:        "zeta",
 				Environment: map[string]string{},
 				Windows: []state.Window{{
-					Index: 3, Name: "w3", Layout: "L", Active: true,
+					Index: 0, Name: "z", Layout: "L", Active: true,
 					Panes: []state.Pane{{
-						Index: 5, CWD: "/prev", Active: true, CurrentCommand: "vim",
-						ScrollbackFile: "scrollback/alpha__3.5.bin",
+						Index: 0, CWD: "/prev", Active: true, CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/zeta__0.0.bin",
 					}},
 				}},
 			}},
 		}
 		mock := &captureMock{
-			listSessions: listSessionsFor("zeta"),
-			listPanes:    paneLine("zeta", 0, "z", "L", false, true, 0, "/new", true, "zsh"),
-			t:            t,
+			listSessions: listSessionsFor("zeta", "alpha"),
+			listPanes: strings.Join([]string{
+				// Out-of-order window indices and pane indices to verify sort.
+				paneLine("zeta", 1, "z1", "L", false, false, 1, "/z1.1", false, "zsh"),
+				paneLine("zeta", 1, "z1", "L", false, false, 0, "/z1.0", true, "zsh"),
+				paneLine("zeta", 0, "z0", "L", false, true, 0, "/z0.0", true, "zsh"),
+				paneLine("alpha", 0, "a", "L", false, true, 0, "/a", true, "zsh"),
+			}, "\n"),
+			t: t,
 		}
 		client := tmux.NewClient(mock)
 		skip := map[string]struct{}{
-			state.SanitizePaneKey("alpha", 3, 5): {},
+			state.SanitizePaneKey("zeta", 0, 0): {},
 		}
 
 		idx, err := state.CaptureStructure(client, skip, &prev)
@@ -708,6 +720,20 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		if idx.Sessions[0].Name != "alpha" || idx.Sessions[1].Name != "zeta" {
 			t.Errorf("session order = [%s, %s], want [alpha, zeta]",
 				idx.Sessions[0].Name, idx.Sessions[1].Name)
+		}
+		zeta := idx.Sessions[1]
+		if len(zeta.Windows) != 2 || zeta.Windows[0].Index != 0 || zeta.Windows[1].Index != 1 {
+			t.Errorf("zeta window order = %+v, want indices [0, 1]", zeta.Windows)
+		}
+		w1 := zeta.Windows[1]
+		if len(w1.Panes) != 2 || w1.Panes[0].Index != 0 || w1.Panes[1].Index != 1 {
+			t.Errorf("zeta window 1 pane order = %+v, want indices [0, 1]", w1.Panes)
+		}
+		// Skip-set authority is preserved at matching coords: prev's CWD wins
+		// for zeta:0.0.
+		p := findPane(idx, "zeta", 0, 0)
+		if p == nil || p.CWD != "/prev" || p.CurrentCommand != "vim" {
+			t.Errorf("zeta:0.0 = %+v, want prev's /prev + vim", p)
 		}
 	})
 }

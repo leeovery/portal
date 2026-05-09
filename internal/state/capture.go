@@ -106,16 +106,25 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index)
 }
 
 // mergeSkippedPanes reintroduces or overrides panes in fresh whose paneKey is
-// in skipSet, taking authoritative state from prev. Sessions or windows that
-// the fresh capture does not contain are appended; existing panes at matching
+// in skipSet, taking authoritative state from prev. Existing panes at matching
 // (window, pane) coordinates are replaced. The result is re-sorted so the
 // canonical ordering survives the merge.
+//
+// A skeleton marker is no longer treated as authoritative on its own: the
+// merge proceeds for a given prev pane only when its session is still present
+// in the freshly-captured index. This rejects stale markers that point at
+// killed sessions — see specification → Fix Component A → Filtering Levels
+// (session level).
 //
 // Matching is by structural identity — session name, window index, pane
 // index — derived via SanitizePaneKey. That is the same paneKey used to set
 // the skeleton marker, so prev and skipSet always agree on which panes count.
 func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
+	live := buildLiveStructure(*fresh)
 	for _, ps := range prev.Sessions {
+		if _, sessionLive := live[ps.Name]; !sessionLive {
+			continue
+		}
 		for _, pw := range ps.Windows {
 			for _, pp := range pw.Panes {
 				key := SanitizePaneKey(ps.Name, pw.Index, pp.Index)
@@ -127,6 +136,29 @@ func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 		}
 	}
 	resortIndex(fresh)
+}
+
+// buildLiveStructure projects fresh's Sessions/Windows/Panes into a nested
+// lookup map keyed by session name → window index → pane index. The map is
+// the live-tmux truth at the call site of mergeSkippedPanes and is used to
+// gate prev-pane merges so stale skeleton markers cannot resurrect killed
+// sessions, windows, or panes. Window/pane levels are populated now to keep
+// the helper's shape stable as additional filtering levels land in subsequent
+// tasks.
+func buildLiveStructure(idx Index) map[string]map[int]map[int]struct{} {
+	live := make(map[string]map[int]map[int]struct{}, len(idx.Sessions))
+	for _, s := range idx.Sessions {
+		windows := make(map[int]map[int]struct{}, len(s.Windows))
+		for _, w := range s.Windows {
+			panes := make(map[int]struct{}, len(w.Panes))
+			for _, p := range w.Panes {
+				panes[p.Index] = struct{}{}
+			}
+			windows[w.Index] = panes
+		}
+		live[s.Name] = windows
+	}
+	return live
 }
 
 // mergePane integrates a single (session, window, pane) triple from prev into
