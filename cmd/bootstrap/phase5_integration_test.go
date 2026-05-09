@@ -67,13 +67,14 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 	ts.WaitForSession(t, "alpha", 2*time.Second)
 
 	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     &bootstrapadapter.HookRegistrar{Client: client},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   bootstrap.NoOpRestorer{},
-		Sweeper:   bootstrap.NoOpFIFOSweeper{},
-		Clean:     bootstrap.NoOpStaleCleaner{},
+		Server:       client,
+		Hooks:        &bootstrapadapter.HookRegistrar{Client: client},
+		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:        bootstrap.NoOpSaver{},
+		Restore:      bootstrap.NoOpRestorer{},
+		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+		Sweeper:      bootstrap.NoOpFIFOSweeper{},
+		Clean:        bootstrap.NoOpStaleCleaner{},
 	}
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -208,13 +209,14 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 
 	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		Sweeper:   bootstrap.NoOpFIFOSweeper{},
-		Clean:     bootstrap.NoOpStaleCleaner{},
+		Server:       client,
+		Hooks:        bootstrap.NoOpHooks{},
+		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:        bootstrap.NoOpSaver{},
+		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+		Sweeper:      bootstrap.NoOpFIFOSweeper{},
+		Clean:        bootstrap.NoOpStaleCleaner{},
 	}
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -325,11 +327,12 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	}
 
 	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Server:       client,
+		Hooks:        bootstrap.NoOpHooks{},
+		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:        bootstrap.NoOpSaver{},
+		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,

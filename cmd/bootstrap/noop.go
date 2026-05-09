@@ -43,6 +43,16 @@ type NoOpRestorer struct{}
 // Restore always returns (false, nil).
 func (NoOpRestorer) Restore() (bool, error) { return false, nil }
 
+// NoOpMarkerCleaner satisfies MarkerCleaner. CleanStaleMarkers always
+// reports success. Stale-marker cleanup is best-effort and degradable per
+// spec, so a no-op is the natural fallback when the production wiring
+// cannot resolve dependencies — matching the NoOp policy: "only steps
+// that may degrade get a NoOp."
+type NoOpMarkerCleaner struct{}
+
+// CleanStaleMarkers always returns nil.
+func (NoOpMarkerCleaner) CleanStaleMarkers() error { return nil }
+
 // NoOpFIFOSweeper satisfies FIFOSweeper. Sweep always reports success.
 // FIFO sweeping is best-effort and degradable per spec, so a no-op is the
 // natural fallback when the production wiring cannot resolve the state

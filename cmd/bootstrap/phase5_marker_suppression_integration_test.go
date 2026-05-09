@@ -152,13 +152,14 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	}
 
 	o := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		Sweeper:   bootstrap.NoOpFIFOSweeper{},
-		Clean:     bootstrap.NoOpStaleCleaner{},
+		Server:       client,
+		Hooks:        bootstrap.NoOpHooks{},
+		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:        bootstrap.NoOpSaver{},
+		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+		Sweeper:      bootstrap.NoOpFIFOSweeper{},
+		Clean:        bootstrap.NoOpStaleCleaner{},
 	}
 
 	if _, _, err := o.Run(context.Background()); err != nil {
