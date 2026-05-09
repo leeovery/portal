@@ -47,6 +47,12 @@ A third bug — independently logged — is that the daemon's index-merge logic 
 
 The reporter has only observed both symptoms against the Brew binary (v0.3.1); the in-repo HEAD has not been verified to reproduce or to be free of the same defects. The relevant code paths in HEAD are unchanged in spot-checks, so HEAD is expected to reproduce, but the next investigator should confirm before assuming this is release-only.
 
+## Addendum 2026-05-09 — orphan `sh -c` wrappers post-timeout
+
+When investigating a separate slowness issue today, three `sh -c 'portal state hydrate …; exec $SHELL'` wrappers from yesterday's bootstrap were still alive (~20 hours old) for the same three paneKeys this bug already names (`agentic-workflows-XXrJ3J__1.1`, `leeovery-Gi5NLG__1.1`, `leeovery-feqhpg__1.1`). On inspection, the inner `portal state hydrate` had long exited (presumably via the timeout path → `execShellAndExit` → exec'd the user's shell into the pane). The wrapper `sh` is parked waiting on the now-interactive shell child, which won't exit while the user has the pane open. The trailing `; exec $SHELL` in the wrapper is therefore dead code in practice — the helper has already exec'd `$SHELL` itself, and the wrapper's own `; exec $SHELL` after that is unreachable.
+
+Probably minor (not load-causing), but: every timed-out hydrate leaves a `sh` process parented to the tmux server until the pane closes, which in long-running sessions effectively means forever. Worth considering as part of the timeout-path redesign here, since the wrapper construction is the same code site that owns the bypass-hooks decision (Symptom B).
+
 ## Likely-relevant code paths (NOT a fix proposal — pointers only)
 
 - `cmd/state_signal_hydrate.go` — the `client-attached` handler that writes to the FIFO. Race partner.

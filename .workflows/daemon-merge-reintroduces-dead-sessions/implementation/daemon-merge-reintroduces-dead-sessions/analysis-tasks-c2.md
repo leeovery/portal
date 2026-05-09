@@ -12,7 +12,7 @@ total_proposed: 4
 ---
 
 ## Task 1: Fix step-number docstring drift in cmd/bootstrap_production.go and add missing adapter to inventory
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
@@ -38,7 +38,7 @@ sources: standards, architecture
 ---
 
 ## Task 2: Fix step-number drift in adapters_test.go FIFOSweeper docstring
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -64,7 +64,7 @@ sources: standards
 ---
 
 ## Task 3: Re-type MarkerCleanupCore.Logger to the bootstrap.Logger interface
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -93,7 +93,7 @@ sources: architecture
 ---
 
 ## Task 4: Eliminate redundant StaleMarkerCleaner adapter pass-through
-status: pending
+status: approved
 severity: low
 sources: architecture
 

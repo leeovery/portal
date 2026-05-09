@@ -82,3 +82,16 @@ approved_at: 2026-05-09
 | daemon-merge-reintroduces-dead-sessions-3-4 | Align bootstrap step-count nomenclature (nine-step vs ten-step) | `bootstrap.go` doc/Run/comments switch to nine-step framing with CleanStaleMarkers as step 7; CLAUDE.md "Server bootstrap" section updated; no remaining "ten-step" wording in `cmd/bootstrap/`; existing tests pass without modification. |
 | daemon-merge-reintroduces-dead-sessions-3-5 | Resolve StaleMarkerCleaner dual-type collision and per-call inner construction | Rename `cmd/bootstrap.StaleMarkerCleaner` to `MarkerCleanupCore`; `bootstrapadapter.StaleMarkerCleaner` constructs inner cleaner once; `MarkerCleaner` interface name unchanged; no two types named `StaleMarkerCleaner` in the codebase; collision-avoidance doc removed. |
 | daemon-merge-reintroduces-dead-sessions-3-6 | Reclassify mass-unset hazard guard from error to warn-and-return-nil | Zero-live-panes-with-markers branch returns `nil` and emits `Logger.Warn` with `ComponentBootstrap`; `ErrZeroLivePanesWithMarkers` sentinel deleted (or no longer returned for the deferral case); orchestrator no longer special-cases the sentinel; mass-unset assertion preserved; genuine `ListAllPanesWithFormat` error still propagates. |
+
+### Phase 4: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| ID | Task | Edge cases |
+|----|------|------------|
+| daemon-merge-reintroduces-dead-sessions-4-1 | Fix step-number docstring drift in cmd/bootstrap_production.go and add missing adapter to inventory | `cleanStaleAdapter` docstring drift (line 51): "Step 8" → "Step 9"; inventory comment at lines 16-17 missing `StaleMarkerCleaner` — add it; wiring unchanged (docs-only); existing `cmd/bootstrap/...` and `internal/bootstrapadapter/...` tests pass without modification. |
+| daemon-merge-reintroduces-dead-sessions-4-2 | Fix step-number drift in adapters_test.go FIFOSweeper docstring | Only line 41 changes ("step-7" → "step-8"); line 139 (StaleMarkerCleaner step-7 reference) must stay as-is; production docstrings in `adapters.go:107` and `:131` already correct; `go test ./internal/bootstrapadapter/...` passes. |
+| daemon-merge-reintroduces-dead-sessions-4-3 | Re-type MarkerCleanupCore.Logger to the bootstrap.Logger interface | Production `*state.Logger` already satisfies `bootstrap.Logger` — verify no compile break; helper removal conditional on no remaining references; Warn assertions on component and marker count preserved through the port; `recordingLogger{}` is the existing convention in cmd/bootstrap tests. |
+| daemon-merge-reintroduces-dead-sessions-4-4 | Eliminate redundant StaleMarkerCleaner adapter pass-through | Inventory comment update from task 4-1 should be removed (if landed) — coordinate; `staleClientStub`-driven tests in `adapters_test.go` and `adapters_internal_test.go` deleted along with the adapter; `*MarkerCleanupCore`-level coverage subsumes any adapter-level-unique cases (zero-panes-guard Warn, list-skeleton-markers error, normal cleanup); inline `&bootstrap.MarkerCleanupCore{...}` construction matches `cleanStaleAdapter`/`saverAdapter` pattern. |
