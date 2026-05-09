@@ -126,13 +126,15 @@
             "daemon-merge-reintroduces-dead-sessions-4-2",
             "daemon-merge-reintroduces-dead-sessions-4-3",
             "daemon-merge-reintroduces-dead-sessions-4-4",
-            "daemon-merge-reintroduces-dead-sessions-5-1"
+            "daemon-merge-reintroduces-dead-sessions-5-1",
+            "daemon-merge-reintroduces-dead-sessions-5-2"
           ],
           "completed_phases": [
             1,
             2,
             3,
-            4
+            4,
+            5
           ]
         }
       }

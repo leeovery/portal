@@ -74,7 +74,7 @@ func (r *HookRegistrar) RegisterPortalHooks() error {
 // @portal-restoring marker lifecycle separately (steps 3 and 6), so the
 // inner Restore must not bundle marker management. The orphan-FIFO
 // sweep that historically lived inside this adapter has been promoted
-// to its own bootstrap step (FIFOSweeper / step 7) — keeping this
+// to its own bootstrap step (FIFOSweeper / step 8) — keeping this
 // adapter a pure pass-through means the same wrapper is usable from
 // integration tests without dragging in state-dir / logger arguments.
 //

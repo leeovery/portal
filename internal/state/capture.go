@@ -148,11 +148,10 @@ func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 
 // buildLiveStructure projects fresh's Sessions/Windows/Panes into a nested
 // lookup map keyed by session name → window index → pane index. The map is
-// the live-tmux truth at the call site of mergeSkippedPanes and is used to
-// gate prev-pane merges so stale skeleton markers cannot resurrect killed
-// sessions, windows, or panes. Window/pane levels are populated now to keep
-// the helper's shape stable as additional filtering levels land in subsequent
-// tasks.
+// the live-tmux truth at the call site of mergeSkippedPanes and is consumed
+// by the three-level filter (session, window, pane) that gates prev-pane
+// merges so stale skeleton markers cannot resurrect killed sessions, windows,
+// or panes.
 func buildLiveStructure(idx Index) map[string]map[int]map[int]struct{} {
 	live := make(map[string]map[int]map[int]struct{}, len(idx.Sessions))
 	for _, s := range idx.Sessions {

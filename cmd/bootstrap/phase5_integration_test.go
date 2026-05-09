@@ -222,13 +222,13 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 }
 
-// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 7
+// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 8
 // (FIFOSweeper) removes orphan hydrate-*.fifo files whose paneKey is not
 // represented by a live `@portal-skeleton-*` marker, while preserving
 // FIFOs whose paneKey corresponds to a marker freshly set by step 5
 // (Restore). This is the integration-level guarantee that the sweep
 // observes the post-Restore marker set, not the pre-Restore one — i.e.
-// step 7 runs strictly after step 5.
+// step 8 runs strictly after step 5.
 //
 // Wiring: real RestoringMarker, real restore.Orchestrator wrapped in
 // bootstrapadapter.RestoreAdapter (so Restore actually creates the
@@ -269,7 +269,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	// Pre-create two FIFOs in stateDir:
 	//   - liveKey matches the paneKey Restore will mark live.
 	//   - orphanKey is not represented in sessions.json, so no skeleton
-	//     marker will be set for it; step 7 must remove it.
+	//     marker will be set for it; step 8 must remove it.
 	liveKey := state.SanitizePaneKey("swept-foo", 0, 0)
 	orphanKey := state.SanitizePaneKey("ghost-bar", 0, 0)
 	livePath := state.FIFOPath(stateDir, liveKey)
@@ -314,7 +314,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	}
 
 	// Orphan FIFO MUST be removed — no skeleton marker exists for its
-	// paneKey, so step 7 swept it.
+	// paneKey, so step 8 swept it.
 	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {
 		t.Errorf("orphan FIFO not removed (paneKey=%q): lstat err = %v", orphanKey, err)
 	}
