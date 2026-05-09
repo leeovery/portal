@@ -286,7 +286,7 @@ func TestStaleMarkerCleanup_PaneKeyNormalisation(t *testing.T) {
 		}
 	})
 
-	t.Run("it splits on the rightmost colon to recover session names containing colons", func(t *testing.T) {
+	t.Run("it recognises a canonical marker against a live pane whose session name contains a colon", func(t *testing.T) {
 		// Session name literally contains ':' (e.g. `host:1234`). Marker side
 		// holds canonical `host:1234__0.0`; live side supplies tmux's raw
 		// `host:1234:0.0`. The cleanup MUST split on the rightmost ':' to

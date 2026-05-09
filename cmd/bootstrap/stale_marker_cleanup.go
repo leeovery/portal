@@ -103,10 +103,12 @@ var _ MarkerCleaner = (*MarkerCleanupCore)(nil)
 // markers in place.
 func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// Substitute a no-op Logger when none was injected so call sites can
-	// invoke c.Logger.Warn unconditionally, matching the Orchestrator's
-	// Logger contract.
-	if c.Logger == nil {
-		c.Logger = noopLogger{}
+	// invoke logger.Warn unconditionally, matching the Orchestrator's
+	// Logger contract. Use a local var rather than mutating c.Logger so
+	// the receiver's state is not silently rewritten across calls.
+	logger := c.Logger
+	if logger == nil {
+		logger = noopLogger{}
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)
@@ -119,7 +121,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 		return err
 	}
 
-	live := parseLivePaneSet(raw, c.Logger)
+	live := parseLivePaneSet(raw, logger)
 
 	// Mass-unset hazard guard. The guard MUST run before any unset so a
 	// silently-empty live-pane result (whitespace-only output, all-malformed
@@ -132,7 +134,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 			// Empty markers + empty live: nothing to do, no hazard.
 			return nil
 		}
-		c.Logger.Warn(state.ComponentBootstrap,
+		logger.Warn(state.ComponentBootstrap,
 			"stale-marker cleanup: zero live panes parsed with %d marker(s) present; skipping to avoid mass-unset hazard (next bootstrap retries)",
 			len(markers))
 		return nil
@@ -148,7 +150,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 			// Record and continue: a single tmux transient must not
 			// leave the remaining stale markers in place. The
 			// orchestrator (task 2-5) Warn-and-swallows the aggregate.
-			c.Logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: unset %s: %v", name, err)
+			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: unset %s: %v", name, err)
 			unsetErrs = append(unsetErrs, fmt.Errorf("unset %s: %w", name, err))
 		}
 	}
