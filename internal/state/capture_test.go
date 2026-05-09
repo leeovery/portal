@@ -672,6 +672,205 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
+	t.Run("does not merge a skipped pane whose window is absent from a live fresh session", func(t *testing.T) {
+		// prev session "work" has windows 0 and 5, each with one pane. Fresh
+		// has session "work" with only window 0. The skipSet marks window 5's
+		// pane. Even though the session is live, the window has been killed
+		// (e.g. via tmux kill-window) so the prev pane must NOT be merged
+		// — see specification → Fix Component A → Filtering Levels (window
+		// level).
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{
+					{
+						Index: 0, Name: "main", Layout: "L0", Active: true,
+						Panes: []state.Pane{{
+							Index:          0,
+							CWD:            "/old0",
+							Active:         true,
+							CurrentCommand: "vim",
+							ScrollbackFile: "scrollback/work__0.0.bin",
+						}},
+					},
+					{
+						Index: 5, Name: "stale", Layout: "L5", Active: false,
+						Panes: []state.Pane{{
+							Index:          0,
+							CWD:            "/old5",
+							Active:         true,
+							CurrentCommand: "tmux",
+							ScrollbackFile: "scrollback/work__5.0.bin",
+						}},
+					},
+				},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L0", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("work", 5, 0): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Stale window 5 must not appear in the merged result.
+		if p := findPane(idx, "work", 5, 0); p != nil {
+			t.Errorf("dead window pane work:5.0 was reintroduced via merge: %+v", p)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "work" {
+			t.Fatalf("Sessions = %+v, want only fresh 'work'", idx.Sessions)
+		}
+		work := idx.Sessions[0]
+		if len(work.Windows) != 1 || work.Windows[0].Index != 0 {
+			t.Errorf("work windows = %+v, want only [0]", work.Windows)
+		}
+	})
+
+	t.Run("drops only stale windows from a mixed prev session", func(t *testing.T) {
+		// prev session "work" has windows 0 (live in fresh) and 7 (absent).
+		// Both panes are in skipSet. Window 0's pane must merge with prev's
+		// authoritative CWD/CurrentCommand; window 7 must be dropped entirely.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{
+					{
+						Index: 0, Name: "main", Layout: "L0", Active: true,
+						Panes: []state.Pane{{
+							Index:          0,
+							CWD:            "/prev0",
+							Active:         true,
+							CurrentCommand: "vim",
+							ScrollbackFile: "scrollback/work__0.0.bin",
+						}},
+					},
+					{
+						Index: 7, Name: "stale", Layout: "L7", Active: false,
+						Panes: []state.Pane{{
+							Index:          0,
+							CWD:            "/prev7",
+							Active:         true,
+							CurrentCommand: "tmux",
+							ScrollbackFile: "scrollback/work__7.0.bin",
+						}},
+					},
+				},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L0", false, true, 0, "/fresh0", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("work", 0, 0): {},
+			state.SanitizePaneKey("work", 7, 0): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Live-window pane retains prev's authoritative data.
+		p0 := findPane(idx, "work", 0, 0)
+		if p0 == nil {
+			t.Fatalf("live-window pane work:0.0 missing from merge")
+		}
+		if p0.CWD != "/prev0" || p0.CurrentCommand != "vim" {
+			t.Errorf("work:0.0 = %+v, want prev's /prev0 + vim", p0)
+		}
+		// Stale-window pane must not be reintroduced.
+		if p7 := findPane(idx, "work", 7, 0); p7 != nil {
+			t.Errorf("dead window pane work:7.0 was reintroduced via merge: %+v", p7)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "work" {
+			t.Fatalf("Sessions = %+v, want only 'work'", idx.Sessions)
+		}
+		work := idx.Sessions[0]
+		if len(work.Windows) != 1 || work.Windows[0].Index != 0 {
+			t.Errorf("work windows = %+v, want only [0]", work.Windows)
+		}
+	})
+
+	t.Run("canonical ordering preserved after window-level drop", func(t *testing.T) {
+		// prev contributes panes for two live windows out-of-order plus a
+		// stale window that must be dropped. After merge, surviving windows
+		// must be sorted ascending by index.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{
+					{
+						Index: 9, Name: "stale", Layout: "L9", Active: false,
+						Panes: []state.Pane{{
+							Index: 0, CWD: "/prev9", Active: true, CurrentCommand: "tmux",
+							ScrollbackFile: "scrollback/work__9.0.bin",
+						}},
+					},
+					{
+						Index: 2, Name: "two", Layout: "L2", Active: false,
+						Panes: []state.Pane{{
+							Index: 0, CWD: "/prev2", Active: true, CurrentCommand: "vim",
+							ScrollbackFile: "scrollback/work__2.0.bin",
+						}},
+					},
+					{
+						Index: 0, Name: "main", Layout: "L0", Active: true,
+						Panes: []state.Pane{{
+							Index: 0, CWD: "/prev0", Active: true, CurrentCommand: "zsh",
+							ScrollbackFile: "scrollback/work__0.0.bin",
+						}},
+					},
+				},
+			}},
+		}
+		// Fresh has live windows 0 and 2 only; window 9 is dead.
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes: strings.Join([]string{
+				paneLine("work", 2, "two", "L2", false, false, 0, "/fresh2", true, "zsh"),
+				paneLine("work", 0, "main", "L0", false, true, 0, "/fresh0", true, "zsh"),
+			}, "\n"),
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("work", 0, 0): {},
+			state.SanitizePaneKey("work", 2, 0): {},
+			state.SanitizePaneKey("work", 9, 0): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "work" {
+			t.Fatalf("Sessions = %+v, want only 'work'", idx.Sessions)
+		}
+		work := idx.Sessions[0]
+		if len(work.Windows) != 2 {
+			t.Fatalf("work windows = %+v, want 2 (stale window 9 dropped)", work.Windows)
+		}
+		if work.Windows[0].Index != 0 || work.Windows[1].Index != 2 {
+			t.Errorf("window order = [%d, %d], want [0, 2]",
+				work.Windows[0].Index, work.Windows[1].Index)
+		}
+	})
+
 	t.Run("re-sorts sessions, windows, and panes after merge", func(t *testing.T) {
 		// Fresh emits "zeta" before "alpha" and out-of-order windows/panes
 		// within each session. Prev contributes prev-authoritative pane data

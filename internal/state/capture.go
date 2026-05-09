@@ -111,10 +111,11 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index)
 // canonical ordering survives the merge.
 //
 // A skeleton marker is no longer treated as authoritative on its own: the
-// merge proceeds for a given prev pane only when its session is still present
-// in the freshly-captured index. This rejects stale markers that point at
-// killed sessions — see specification → Fix Component A → Filtering Levels
-// (session level).
+// merge proceeds for a given prev pane only when both its session AND its
+// window index are still present in the freshly-captured index. This rejects
+// stale markers that point at killed sessions or killed windows — see
+// specification → Fix Component A → Filtering Levels (session and window
+// levels).
 //
 // Matching is by structural identity — session name, window index, pane
 // index — derived via SanitizePaneKey. That is the same paneKey used to set
@@ -122,10 +123,14 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index)
 func mergeSkippedPanes(fresh *Index, prev Index, skipSet map[string]struct{}) {
 	live := buildLiveStructure(*fresh)
 	for _, ps := range prev.Sessions {
-		if _, sessionLive := live[ps.Name]; !sessionLive {
+		liveWindows, sessionLive := live[ps.Name]
+		if !sessionLive {
 			continue
 		}
 		for _, pw := range ps.Windows {
+			if _, windowLive := liveWindows[pw.Index]; !windowLive {
+				continue
+			}
 			for _, pp := range pw.Panes {
 				key := SanitizePaneKey(ps.Name, pw.Index, pp.Index)
 				if _, skipped := skipSet[key]; !skipped {
