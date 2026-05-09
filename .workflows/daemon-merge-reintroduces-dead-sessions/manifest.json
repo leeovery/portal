@@ -32,7 +32,7 @@
         "daemon-merge-reintroduces-dead-sessions": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "e136b5599f5b8a673831e4afafb9588565f8d59b",
+          "spec_commit": "96d56ae4e1ea2c41fd6d489c824a37ab58596e58",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
