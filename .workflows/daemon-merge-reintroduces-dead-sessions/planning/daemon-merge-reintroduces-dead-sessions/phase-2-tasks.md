@@ -38,7 +38,7 @@ total: 7
 - [ ] `go build ./...` succeeds.
 
 **Tests**:
-- `"it unsets a marker whose paneKey is not present in the live-pane set"` — given marker `{x}` and zero live panes... wait, this overlaps with task 2-3's zero-panes guard. Use markers `{stale__0.0, live__0.0}` and live panes `{live:0.0}` so the live-pane set is non-empty and the zero-panes guard does not skip. Assert exactly one unset call for `@portal-skeleton-stale__0.0`.
+- `"it unsets a marker whose paneKey is not present in the live-pane set"` — given markers `{stale__0.0, live__0.0}` and live panes `{live:0.0}` (non-empty live set so the zero-panes guard from task 2-3 does not short-circuit), assert exactly one unset call for `@portal-skeleton-stale__0.0` and zero unset calls for `@portal-skeleton-live__0.0`.
 - `"it leaves a marker alone whose paneKey is present in the live-pane set"` — given marker `{live__0.0}` and live pane `live:0.0`, assert zero unset calls.
 - `"it requests live panes with the canonical session:window.pane format"` — assert the format string passed to `ListAllPanesWithFormat` is `#{session_name}:#{window_index}.#{pane_index}` exactly.
 - `"it composes the option name from SkeletonMarkerPrefix"` — assert the option name passed to `UnsetServerOption` is `@portal-skeleton-<paneKey>` (constructed via the `state.SkeletonMarkerPrefix` constant; verifiable by checking the literal value matches `state.SkeletonMarkerPrefix + paneKey`).

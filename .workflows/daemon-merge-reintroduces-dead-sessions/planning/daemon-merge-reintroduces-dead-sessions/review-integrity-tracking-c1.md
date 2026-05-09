@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-09
 cycle: 1
 phase: Plan Integrity Review
@@ -38,7 +38,7 @@ The first bullet of the Tests section reads as a stream-of-consciousness draft â
 - `"it composes the option name from SkeletonMarkerPrefix"` â€” assert the option name passed to `UnsetServerOption` is `@portal-skeleton-<paneKey>` (constructed via the `state.SkeletonMarkerPrefix` constant; verifiable by checking the literal value matches `state.SkeletonMarkerPrefix + paneKey`).
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim via `tick update tick-0d5b47 --description ...` and edit to `phase-2-tasks.md`.
 
 ---
