@@ -37,15 +37,16 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "daemon-merge-reintroduces-dead-sessions-1-5",
+          "phase": 2,
+          "task": "~",
           "task_map": {
             "daemon-merge-reintroduces-dead-sessions": "tick-3b2193",
             "daemon-merge-reintroduces-dead-sessions-1": "tick-a09980",
             "daemon-merge-reintroduces-dead-sessions-1-1": "tick-3b8938",
             "daemon-merge-reintroduces-dead-sessions-1-2": "tick-f66404",
             "daemon-merge-reintroduces-dead-sessions-1-3": "tick-51b114",
-            "daemon-merge-reintroduces-dead-sessions-1-4": "tick-35304f"
+            "daemon-merge-reintroduces-dead-sessions-1-4": "tick-35304f",
+            "daemon-merge-reintroduces-dead-sessions-1-5": "tick-1e4710"
           },
           "external_id": "tick-3b2193"
         }
