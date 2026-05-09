@@ -136,6 +136,49 @@ Resume hooks are command-launchers (e.g. `claude --resume`). They do not depend 
 
 The existing `WARN | hydrate | timeout waiting for signal on …` log line is preserved — under the new design, it is now a genuine signal that something is wrong (FIFO disappeared, signal-hydrate regression, eager-signal step's writer failed) rather than ambient noise on every cold-start. Log volume drops dramatically as a side effect of Fix 1.
 
+## Fix 3: Wrapper Drop in `buildHydrateCommand`
+
+### Behaviour
+
+`buildHydrateCommand` (`internal/restore/session.go`) is changed from constructing the wrapped form:
+
+```
+sh -c 'portal state hydrate --fifo X --file Y --hook-key Z; exec $SHELL'
+```
+
+…to the bare form:
+
+```
+portal state hydrate --fifo X --file Y --hook-key Z
+```
+
+The `respawn-pane -k` invocation passes the bare command string directly. Argument quoting/escaping responsibilities shift from the wrapper-shell to the call-site formatter — this is the same shape the existing tmux command-construction helpers in `internal/tmux` already produce for non-shell pane commands.
+
+### Why the Outer Wrapper Is Removable
+
+The wrapper exists for two stated reasons; both fail to materialise in practice.
+
+1. **Trailing `; exec $SHELL` as crash-resilience.** The trailer would only execute if the inner `portal state hydrate` exited *without* exec'ing a replacement. Both helper exit paths — `execShellAndExit` (`syscall.Exec($SHELL, …)` at `cmd/state_hydrate.go:322-325`) and `execShellOrHookAndExit` (`syscall.Exec` of either bare `$SHELL` or `sh -c 'HOOK; exec $SHELL'`) — always exec their replacement. The helper does not have a reachable code path that returns control to the outer wrapper. The trailer is therefore unreachable on every observed exit.
+
+2. **Comment-stated "exiting the shell ends the pane".** Empirically broken under the wrapper: when the user types `exit`, the inner shell exits and control returns to the wrapper sh, which then runs `; exec $SHELL` and replaces itself with a *fresh* shell. The user must type `exit` twice. Dropping the wrapper restores correct exit-on-`exit` semantics.
+
+### Inner Hook-Firing Wrapper Is Untouched
+
+This change drops the **outer** wrapper at the `respawn-pane` site. The **inner** `sh -c '<HOOK>; exec $SHELL'` constructed inside `execShellOrHookAndExit` (when an on-resume hook is registered) is unchanged. The two wrappers are independent — the outer wraps the helper invocation; the inner wraps the user's hook command. Hook-firing semantics are preserved exactly.
+
+### Side Effects
+
+- **Orphan `sh` parent eliminated.** Every restored pane currently leaves a parked `sh` parent under tmux for the lifetime of the pane (observed at ~20 hours uptime in the investigation addendum). After this change, `portal state hydrate` is the pane's initial process and `syscall.Exec`s its replacement directly under tmux — no parked parent.
+- **Pane closes on first `exit`.** Matches the documented `buildHydrateCommand` intent and aligns with non-restored panes, which already close on first `exit`.
+
+### Argument Quoting
+
+The bare form must be passed through the same tmux argument-construction helpers as other multi-arg pane commands. The existing `RespawnPane` interface in `internal/tmux` accepts a single command-string argument; the call-site already constructs a properly-quoted string. The change is in `buildHydrateCommand`'s output, not in the `RespawnPane` interface.
+
+### Defect-D Closure
+
+This change closes Defect D from the problem statement (orphan `sh -c` wrappers post-timeout). It is bundled with Fixes 1 and 2 because it lives at the same code site (`buildHydrateCommand`) that is touched by the helper's exec contract — the wrapper shape and the timeout-path's exec target are coupled, and treating them in one work product is cheaper than splitting.
+
 ---
 
 ## Working Notes
