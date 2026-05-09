@@ -220,7 +220,71 @@ This is the "secondary harm" the companion spec flagged but cannot fully resolve
 
 ## Fix Direction
 
-_To be discussed in findings review after presenting the analysis to the user._
+### Chosen Approach
+
+A single coordinated fix across three code sites that addresses the upstream trigger and the two downstream defects:
+
+1. **Move signal-hydrate triggering into bootstrap (eager).** Insert a new bootstrap step after step 5 Restore and before step 6 Clear `@portal-restoring`. The step iterates the freshly-set `@portal-skeleton-*` marker set and writes the signal byte to every pane's FIFO using the existing `writeFIFOSignal` + `signalHydrateRetryDelays` primitives from `cmd/state_signal_hydrate.go`. The pane-target enumeration source is the marker map itself (`paneKey → FIFOPath` is deterministic via `state.FIFOPath`), so no extra tmux round-trip is needed beyond `state.ListSkeletonMarkers`. After this step every helper receives its signal within milliseconds of being respawned; the 3 s timeout stops being the steady-state path for non-attached sessions; markers self-clear via the existing hydrate→unset path.
+
+2. **Make `handleHydrateTimeout` a correct recovery path.** With (1) in place the timeout fires only on a real signal-flow bug; when it does, leave the system clean rather than perpetuating the failure. Two changes inside `cmd/state_hydrate.go`:
+   - Unset `@portal-skeleton-<paneKey>` on the way out (mirror `handleHydrateFileMissing`). Remove the "marker stays set so the next attach re-signals" comment at line 262 — that promise was never deliverable because the FIFO is unlinked at line 256 before any subsequent attach could write to it.
+   - Route the timeout fall-through at `runHydrate` line 109 through `execShellOrHookAndExit` instead of `execShellAndExit`. Timeout IS reboot recovery in the rare case it fires; consistent with the file-missing recovery path which already fires hooks.
+
+3. **Drop the wrapper from `buildHydrateCommand`.** Replace `sh -c 'portal state hydrate ...; exec $SHELL'` with the bare `portal state hydrate --fifo X --file Y --hook-key Z`. The trailing `; exec $SHELL` is dead on the success path (the helper always `syscall.Exec`s its replacement) and harmful on user `exit` (re-spawns a fresh shell instead of closing the pane — the documented "pane-close-on-exit" semantic does not hold under the wrapper today). Eliminates the orphan `sh` parent observed in the addendum and restores correct exit semantics.
+
+**Client-attached / client-session-changed hook registrations stay in place** as defensive idempotent fallbacks. They cover disjoint attach paths (outside-tmux `attach-session` fires only `client-attached`; inside-tmux `switch-client` fires only `client-session-changed`); removing either would regress one path. Their second-fire on already-hydrated panes is a no-op (marker already unset, signal-hydrate skips).
+
+**Deciding factor:** the eager-signaling step resolves the root cause architecturally (race goes away by construction, not by reasoning-from-timeline). The timeout-path corrections and wrapper drop are cheap defensive changes at the same code sites; bundling them produces a coherent end-to-end fix for Symptoms B, C, and Defect D in one work unit. Symptom A is already neutralised on HEAD by the merged daemon-merge fix's live-set filter (`internal/state/capture.go:122-147`), so this work additionally hardens the upstream cause without depending on the resurrection symptom still reproducing.
+
+### Options Explored
+
+- **Bootstrap-driven eager signaling (chosen).** Race goes away at the source. Bootstrap pays a small bounded cost (one O_WRONLY|O_NONBLOCK write per skeleton marker; tmux already pays the same cost on `client-attached`).
+- **Drop the timeout entirely; helpers wait forever for a signal.** Rejected — a genuine signal-flow bug (FIFO file disappears between mkfifo and helper open; signal-hydrate logic regression) leaves panes wedged in `O_RDONLY` forever with no safety net. Replacing a guaranteed bug with a possible-but-rare wedge is not an improvement.
+- **Status quo signaling; only fix what happens after timeout.** Rejected — accepts the steady state being wrong. Symptom C (scrollback save silently skipped for stuck-marker panes) is structurally hard to fix from the timeout side because the marker has to outlive the timeout to mean anything. Eager signaling closes the gap at the marker-production layer instead.
+- **Wrapper redesign — keep wrapper, use `exec` inside (`sh -c 'exec portal state hydrate ...'`).** Rejected — same correctness as dropping entirely, no upside, more complex. Drop is simpler.
+- **Wrapper redesign — keep wrapper as a panic-resilience fallback.** Rejected — the fallback only protects against a panic in `portal state hydrate` before any `syscall.Exec`, which is a helper bug to fix at source rather than paper over with a respawn-pane-level fallback. If a real-world panic surfaces, add a `defer recover` in `runHydrate` that exec's `$SHELL` — keep panic-recovery inside the helper.
+- **Remove one of the two hydration-trigger hook registrations.** Rejected — `client-attached` and `client-session-changed` cover disjoint attach paths.
+
+### Discussion
+
+The discussion sharpened around a single demand: name the fix, don't enumerate options. The first pass surfaced three axes (selective-signaling, timeout-path, wrapper) without committing to a single direction; the user pushed back, asking for actual research and a definite choice. Reviewing the merge code on `main` confirmed Symptom A is already structurally fixed by the daemon-merge live-set filter — collapsing the question of "does the fix need to address Symptom A?" from "depends on empirical re-test" to "no, this hardens the upstream cause anyway".
+
+The fix shape is therefore: eager bootstrap signaling (architectural fix for the upstream trigger), defensive timeout-path corrections (Symptom B + correctness for the rare-recovery path), and wrapper drop (Defect D). The wrapper drop rides along on the same code site as the timeout-path work — both touch the helper's exec contract. The hook registrations and the duplicate-write observation were explicitly scoped out: both events are needed for disjoint attach paths, and the duplicate ENOENT warnings vanish on their own once eager signaling unsets markers before either event fires.
+
+The bootstrap-step placement (between Restore and Clear `@portal-restoring`) was chosen so eager signaling runs while `@portal-restoring` is still set. The daemon is suppressed during this window, so helpers can dump scrollback and unset their markers without any chance of the daemon attempting a concurrent capture on a pane mid-replay. This matches the existing helper invariants (the 100 ms settle sleep + marker-unset sequence) without requiring a new contract.
+
+### Testing Recommendations
+
+**Eager-signaling step (cmd/bootstrap):**
+- Unit: given a marker map of N entries, the step writes the signal byte to N FIFOs (mock the FIFO writer) and returns nil. Verify each write goes to the correct path derived from `state.FIFOPath(stateDir, paneKey)`.
+- Unit: a per-FIFO write failure logs a soft warning and continues to the next pane (mirrors `runSignalHydrate`'s posture). The step never escalates to a fatal error.
+- Bootstrap integration: orchestrator runs the new step at the correct position (after step 5 Restore, before step 6 Clear `@portal-restoring`). Sequence test asserts ordering by injecting a recording orchestrator deps fake.
+- Bootstrap integration: when zero markers exist post-Restore (e.g. nothing to restore), the step is a no-op — no FIFO writes attempted.
+- Multi-session cold-start integration (against the real tmux fixture): boot with N≥2 saved sessions, assert all `@portal-skeleton-*` markers are unset within reasonable time post-bootstrap (no client attach required to drive the unset).
+
+**Timeout-path corrections (cmd/state_hydrate.go):**
+- `handleHydrateTimeout` calls `state.UnsetSkeletonMarkerForFIFO(cfg.Client, cfg.FIFO)` before returning nil. Verify with the existing `unsetSkeletonMarkerOrLog` mock pattern.
+- `runHydrate` timeout fall-through routes to `execShellOrHookAndExit` (existing test in `state_hydrate_test.go` covering the file-missing path is the template — replicate for timeout).
+- Hook-firing on timeout end-to-end: registered on-resume hook, force a timeout (mock `OpenFIFO` to return `ErrHydrateTimeout`), assert exec target is `/bin/sh -c '<HOOK>; exec $SHELL'`.
+
+**Wrapper drop (internal/restore/session.go):**
+- `buildHydrateCommand` returns the bare `portal state hydrate ...` string (no `sh -c` envelope, no `; exec $SHELL` trailer). Update the existing snapshot/equality test in `session_test.go` to the new shape.
+- Real-tmux respawn-pane integration: the helper's exit closes the pane (via the tmux fixture's `list-panes` after the helper exits — pane is gone, not respawned with a fresh shell).
+
+**Regression coverage to preserve:**
+- Existing happy-path skeleton + signal + dump + hook + shell integration tests in `built-in-session-resurrection`'s test surface — must remain green.
+- Companion daemon-merge fix's tests (`internal/state/capture_test.go` filter tests, `cmd/bootstrap/stale_marker_cleanup_test.go`) — this work must not regress them.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium. New bootstrap step (~50 lines including adapter wiring + tests; mirrors the existing `CleanStaleMarkers` step pattern). Timeout-path corrections (~5 lines in `handleHydrateTimeout` + a one-line target swap in `runHydrate`). Wrapper drop (~5 lines in `buildHydrateCommand`). Production touchpoints: `cmd/bootstrap/`, `internal/bootstrapadapter/`, `cmd/state_hydrate.go`, `internal/restore/session.go`.
+- **Regression risk:** Low. Eager signaling is additive — it does not change the per-session signaling semantics on `client-attached` / `client-session-changed`, only fires the same primitive earlier. Timeout-path corrections converge two recovery paths (timeout + file-missing) onto the same exec contract, removing a divergence rather than adding one. Wrapper drop is a respawn-pane invocation simplification; the helper's behaviour is unchanged.
+- **Behavioural change for users:**
+  - On-resume hooks fire end-to-end across multi-session cold-start (previously only fired for the attached session).
+  - Scrollback save resumes for previously-stuck-marker panes (previously silently skipped indefinitely).
+  - `exit` closes the pane on the first invocation (previously needed two exits because of the wrapper's trailing exec).
+  - Reduced `WARN` log volume on subsequent attaches (no more repeating `write fifo … no such file or directory` for stuck markers).
+- **Recommended approach:** Regular release. No hotfix needed — Symptom A is already neutralised on `main`; remaining symptoms are quality-of-feature regressions, not data-integrity issues. Manual workaround for affected users in current builds: `tmux set-option -us @portal-skeleton-<key>` on stuck markers (or restart the tmux server).
 
 ---
 
