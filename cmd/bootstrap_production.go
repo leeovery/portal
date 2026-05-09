@@ -23,9 +23,9 @@ package cmd
 //     (cleanStaleAdapter). Lowercase reflects "this struct is the wiring
 //     this binary uses; tests compose their own." The stale-marker
 //     cleanup core (bootstrap.MarkerCleanupCore) is also constructed
-//     inline at the wiring site below — it has no per-binary dependency
-//     beyond the *tmux.Client, so a thin closure-based MarkerLister is
-//     defined locally rather than re-exported.
+//     inline at the wiring site below — *tmux.Client satisfies every one
+//     of its seam fields (Markers, Panes, Unsetter) directly, so no
+//     adapter glue is needed.
 
 import (
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -50,15 +50,6 @@ type saverAdapter struct {
 func (a *saverAdapter) EnsureSaver() error {
 	return tmux.EnsurePortalSaverVersion(a.client, a.stateDir, version)
 }
-
-// markerListerFunc adapts a closure to bootstrap.MarkerLister so the
-// stale-marker cleanup core can call state.ListSkeletonMarkers without a
-// dedicated wrapper struct. Defined here (rather than under
-// internal/bootstrapadapter) because the only call site is the inline
-// construction of *bootstrap.MarkerCleanupCore below.
-type markerListerFunc func() (map[string]struct{}, error)
-
-func (f markerListerFunc) ListSkeletonMarkers() (map[string]struct{}, error) { return f() }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
 // structural key no longer matches a live tmux pane. Step 9 of the
@@ -130,9 +121,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		StaleMarkers: &bootstrap.MarkerCleanupCore{
-			Markers: markerListerFunc(func() (map[string]struct{}, error) {
-				return state.ListSkeletonMarkers(client)
-			}),
+			Markers:  client,
 			Panes:    client,
 			Unsetter: client,
 			Logger:   logger,

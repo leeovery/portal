@@ -43,23 +43,17 @@ import (
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
-// markerListerFunc adapts a closure to bootstrap.MarkerLister so the
-// stale-marker cleanup core can call state.ListSkeletonMarkers without a
-// dedicated wrapper struct. Mirrors the shape used at the production
-// wiring site (cmd/bootstrap_production.go).
-type markerListerFunc func() (map[string]struct{}, error)
-
-func (f markerListerFunc) ListSkeletonMarkers() (map[string]struct{}, error) { return f() }
-
 // newProductionMarkerCleaner wires a *bootstrap.MarkerCleanupCore against a
 // live *tmux.Client — same shape as the production wiring at
 // cmd/bootstrap_production.go. Used by the integration tests in this file
 // that need to exercise the cleanup step against a real tmux server.
+//
+// *tmux.Client satisfies every seam (Markers via state.ServerOptionLister,
+// Panes via LivePaneLister, Unsetter via MarkerUnsetter) directly, so no
+// closure-implementing-an-interface adapter glue is required.
 func newProductionMarkerCleaner(client *tmux.Client, logger *state.Logger) *bootstrap.MarkerCleanupCore {
 	return &bootstrap.MarkerCleanupCore{
-		Markers: markerListerFunc(func() (map[string]struct{}, error) {
-			return state.ListSkeletonMarkers(client)
-		}),
+		Markers:  client,
 		Panes:    client,
 		Unsetter: client,
 		Logger:   logger,

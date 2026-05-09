@@ -16,13 +16,6 @@ import (
 // MarkerCleanupCore literal) untouched while letting tests inject a plain
 // in-memory recording fake instead of opening a real on-disk log file.
 
-// MarkerLister enumerates the live `@portal-skeleton-*` server-option markers
-// keyed by canonical paneKey (no prefix). The production adapter delegates to
-// state.ListSkeletonMarkers; tests inject lightweight fakes.
-type MarkerLister interface {
-	ListSkeletonMarkers() (map[string]struct{}, error)
-}
-
 // LivePaneLister enumerates live tmux panes via tmux's list-panes -a -F format
 // call. The production adapter delegates to (*tmux.Client).ListAllPanesWithFormat
 // — the error-propagating variant required by spec §Fix Component B (Adapter
@@ -66,7 +59,14 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // (HookRegistrar, FIFOSweeper et al.) so tests inject the same
 // recordingLogger fake used elsewhere in the package.
 type MarkerCleanupCore struct {
-	Markers  MarkerLister
+	// Markers is typed as state.ServerOptionLister so *tmux.Client satisfies
+	// it directly via its ShowAllServerOptions method — mirroring the
+	// FIFOSweeper seam shape and eliminating the closure-implementing-an-
+	// interface adapter glue (markerListerFunc) that the production wiring
+	// previously required. CleanStaleMarkers invokes
+	// state.ListSkeletonMarkers(c.Markers) internally to recover the
+	// canonical paneKey set.
+	Markers  state.ServerOptionLister
 	Panes    LivePaneLister
 	Unsetter MarkerUnsetter
 	Logger   Logger
@@ -77,7 +77,7 @@ type MarkerCleanupCore struct {
 // live-pane set.
 //
 // Algorithm:
-//  1. Enumerate canonical-paneKey markers via Markers.ListSkeletonMarkers.
+//  1. Enumerate canonical-paneKey markers via state.ListSkeletonMarkers(c.Markers).
 //  2. Enumerate live panes via Panes.ListAllPanesWithFormat using the literal
 //     `#{session_name}:#{window_index}.#{pane_index}` format string. On
 //     error, return without invoking any unset — the orchestrator surfaces
@@ -115,7 +115,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 		c.Logger = noopLogger{}
 	}
 
-	markers, err := c.Markers.ListSkeletonMarkers()
+	markers, err := state.ListSkeletonMarkers(c.Markers)
 	if err != nil {
 		return err
 	}

@@ -8,23 +8,38 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// fakeMarkerLister is a lightweight in-memory MarkerLister for unit tests.
+// fakeMarkerLister is a lightweight in-memory state.ServerOptionLister for
+// unit tests. It synthesises the tmux `show-options -s` output that
+// state.ListSkeletonMarkers parses from the seeded markers map, so test
+// authors keep the ergonomic "give me a paneKey set" seeding shape while the
+// production code path is exercised end-to-end through the real parser.
+//
+// Re-typing MarkerCleanupCore.Markers to state.ServerOptionLister deleted
+// the dedicated MarkerLister interface (and its closure-implementing-an-
+// interface adapters at the production and integration-test wiring sites);
+// this fake is the unit-test equivalent of *tmux.Client satisfying the
+// same seam.
 type fakeMarkerLister struct {
 	markers map[string]struct{}
 	err     error
 	calls   int
 }
 
-func (f *fakeMarkerLister) ListSkeletonMarkers() (map[string]struct{}, error) {
+func (f *fakeMarkerLister) ShowAllServerOptions() (string, error) {
 	f.calls++
 	if f.err != nil {
-		return nil, f.err
+		return "", f.err
 	}
-	out := make(map[string]struct{}, len(f.markers))
+	if len(f.markers) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
 	for k := range f.markers {
-		out[k] = struct{}{}
+		b.WriteString(state.SkeletonMarkerPrefix)
+		b.WriteString(k)
+		b.WriteString(" \"1\"\n")
 	}
-	return out, nil
+	return b.String(), nil
 }
 
 // fakeLivePaneLister is a lightweight in-memory LivePaneLister for unit tests.
