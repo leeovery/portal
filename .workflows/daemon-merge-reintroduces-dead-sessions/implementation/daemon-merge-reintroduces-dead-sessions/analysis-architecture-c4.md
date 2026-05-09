@@ -1,0 +1,7 @@
+AGENT: architecture
+STATUS: clean
+FINDINGS_COUNT: 0
+
+SUMMARY: Cycle-3 refactor (MarkerLister → state.ServerOptionLister) is clean and complete; no new architectural concerns surface. Verification: (1) `MarkerCleanupCore.Markers` re-typed to `state.ServerOptionLister`, mirroring `FIFOSweeper.Client`; (2) `CleanStaleMarkers` invokes `state.ListSkeletonMarkers(c.Markers)` internally, paralleling `FIFOSweeper.Sweep`; (3) both `markerListerFunc` closure declarations deleted; (4) production wiring collapses to a clean three-line literal with consistent shape across `Markers`, `Panes`, `Unsetter`; (5) integration-test wiring is similarly clean; (6) unit-test fakes synthesise raw `show-options -s` output, more faithful to production data flow.
+
+Other observations: `buildLiveStructure` is a clean private helper. `parseLivePaneSet` faithfully mirrors the spec's parse contract. Soft-warning posture is uniformly applied: `CleanStaleMarkers` never returns `*FatalError`; per-unset failures aggregate via `errors.Join`. Three-tier seam family (Markers/Panes/Unsetter) is each independently mockable. nil-Logger substitution pattern matches `Orchestrator.Run`'s pattern. Tests comprehensively cover unit (per-method, normalisation, mass-unset hazard, soft-warning, genuine-failure), bootstrap ordering, AC#8 scrollback-save resumption with negative control, and structural-level merge filter at session/window/pane granularity.
