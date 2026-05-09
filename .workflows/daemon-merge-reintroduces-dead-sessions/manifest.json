@@ -66,7 +66,10 @@
             "daemon-merge-reintroduces-dead-sessions-4-1": "tick-ecace7",
             "daemon-merge-reintroduces-dead-sessions-4-2": "tick-201d39",
             "daemon-merge-reintroduces-dead-sessions-4-3": "tick-caf733",
-            "daemon-merge-reintroduces-dead-sessions-4-4": "tick-058e10"
+            "daemon-merge-reintroduces-dead-sessions-4-4": "tick-058e10",
+            "daemon-merge-reintroduces-dead-sessions-5": "tick-486e0a",
+            "daemon-merge-reintroduces-dead-sessions-5-1": "tick-9c9774",
+            "daemon-merge-reintroduces-dead-sessions-5-2": "tick-0b7481"
           },
           "external_id": "tick-3b2193"
         }

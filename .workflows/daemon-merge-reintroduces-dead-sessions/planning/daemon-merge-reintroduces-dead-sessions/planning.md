@@ -95,3 +95,14 @@ approved_at: 2026-05-09
 | daemon-merge-reintroduces-dead-sessions-4-2 | Fix step-number drift in adapters_test.go FIFOSweeper docstring | Only line 41 changes ("step-7" → "step-8"); line 139 (StaleMarkerCleaner step-7 reference) must stay as-is; production docstrings in `adapters.go:107` and `:131` already correct; `go test ./internal/bootstrapadapter/...` passes. |
 | daemon-merge-reintroduces-dead-sessions-4-3 | Re-type MarkerCleanupCore.Logger to the bootstrap.Logger interface | Production `*state.Logger` already satisfies `bootstrap.Logger` — verify no compile break; helper removal conditional on no remaining references; Warn assertions on component and marker count preserved through the port; `recordingLogger{}` is the existing convention in cmd/bootstrap tests. |
 | daemon-merge-reintroduces-dead-sessions-4-4 | Eliminate redundant StaleMarkerCleaner adapter pass-through | Inventory comment update from task 4-1 should be removed (if landed) — coordinate; `staleClientStub`-driven tests in `adapters_test.go` and `adapters_internal_test.go` deleted along with the adapter; `*MarkerCleanupCore`-level coverage subsumes any adapter-level-unique cases (zero-panes-guard Warn, list-skeleton-markers error, normal cleanup); inline `&bootstrap.MarkerCleanupCore{...}` construction matches `cleanStaleAdapter`/`saverAdapter` pattern. |
+
+### Phase 5: Analysis (Cycle 3)
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| ID | Task | Edge cases |
+|----|------|------------|
+| daemon-merge-reintroduces-dead-sessions-5-1 | Re-type MarkerCleanupCore.Markers to state.ServerOptionLister, eliminating closure adapter glue | `MarkerCleanupCore.Markers` typed as `state.ServerOptionLister`; `CleanStaleMarkers` invokes `state.ListSkeletonMarkers(c.Markers)` internally; both `markerListerFunc` declarations deleted (production + integration test); inline construction in `cmd/bootstrap_production.go` collapses to `Markers: client,`; `MarkerLister` interface removed if no remaining consumers; unit-test fakes ported to satisfy `ShowAllServerOptions() (string, error)`. |
+| daemon-merge-reintroduces-dead-sessions-5-2 | Fix stale step-numbering and forward-reference docstrings | `internal/bootstrapadapter/adapters.go:77` "FIFOSweeper / step 7" → "step 8"; four FIFOSweeper-attributed "step 7" refs in `cmd/bootstrap/phase5_integration_test.go` (lines 225, 231, 272, 317) → "step 8"; `scrollback_resumption_test.go` "step 7" refs (CleanStaleMarkers) untouched; `internal/state/capture.go:153-155` `buildLiveStructure` docstring trailing sentence rewritten to describe current responsibility (no forward-reference to "subsequent tasks"); docs-only — existing tests pass without modification. |

@@ -28,9 +28,30 @@ The reporter `kill -TERM`'d all seven daemons. Subsequent observations:
 - With those two daemons running, the tmux server **stayed pegged at 75–97% CPU**. A fresh 5-second sample showed the same call graph as the seven-daemon sample: 100% in `cmd_capture_pane_exec` → `grid_string_cells` → `grid_string_cells_add_code`.
 - Some minutes later, both of those daemons had also exited (PIDs no longer present in `ps`). With zero daemons running, tmux server CPU dropped to 0–22% across a 3-second `top -l 3` sample, and `ps aux | grep capture-pane` showed zero capture-pane processes for 5 consecutive 1-second samples. Why those two exited was not directly observed.
 
-The "two daemons → still pegged" data point indicates the load is not solely a function of daemon multiplicity. A single capture-pane call against a 50–90 MB scrollback is non-trivial work for tmux; the daemon is firing them per pane per tick (1s) with `-S -` (full scrollback, no size cap, no incremental delta). Estimated rate from configuration alone: 20 panes × 2 daemons × 1 tick/sec = 40 capture-pane invocations/sec, each formatting a full pane scrollback. The exact instantaneous rate was not measured directly; only the in-flight concurrency count (4–7 with seven daemons; 0–2 with two daemons; 0 with zero daemons).
+The "two daemons → still pegged" data point indicates the load is not solely a function of daemon multiplicity. A single capture-pane call against a 50–90 MB scrollback is non-trivial work for tmux; the daemon is firing them per pane per tick (1s) with `-S -` (full scrollback, no size cap, no incremental delta).
 
-Whether this remains a problem after a singleton-lock fix lands is unverified — it would need re-measuring against a single-daemon configuration with the same scrollback profile.
+## Addendum 2 — measurements with no daemons running
+
+After the daemons exited and tmux returned to idle, individual `tmux capture-pane -e -p -S -t <pane>` calls were timed against the live system. Per-pane wall time scaled with scrollback contents (history_bytes is approximately 5–15× larger than rendered output, so the values below are based on actual capture output size, not the metric). Selected results, single-daemon-equivalent (one capture per pane, sequential):
+
+| Pane | history_bytes | wall time | output bytes |
+|---|---|---|---|
+| fabric-Cja82m:1.1 | 82 MB | 388 ms | 5.1 MB |
+| fabric-lk26UG:1.1 | 58 MB | 308 ms | 4.8 MB |
+| codeintel-54Jd4X:1.1 | 56 MB | 705 ms | 3.7 MB |
+| evvi:1.1 | 50 MB | 859 ms | 2.9 MB |
+| knowledge-wiki-V4aOHa:1.1 | 23 MB | 280 ms | 2.6 MB |
+
+A full sweep across **all 24 panes** (one daemon-tick equivalent) was timed twice — back-to-back, no other load on tmux:
+
+- **Cold sweep (first run):** 3,866 ms total. tmux server CPU peaked at 87.5% during the sweep, sampled once per second.
+- **Warm sweep (immediate re-run):** 1,524 ms total. tmux CPU peaked at 48.4%.
+
+Both exceed the 1,000 ms tick interval defined in `cmd/state_daemon.go:258`. In real use (active Claude panes producing output continuously), cache-warm conditions are the exception, not the norm — so the cold-sweep number is the load-relevant one. **A single daemon cannot complete its capture sweep within one tick at this scrollback profile.**
+
+Same 24-pane sweep with `-S -100` (last 100 lines per pane only): **293 ms total, 213 KB total output** — 13× faster, 130× less data, well inside the tick budget. This isolates the cost driver: it is the unbounded scrollback in `-S -` (`internal/tmux/tmux.go:625`), not the per-call overhead of `capture-pane` itself.
+
+**Implication for the fix:** a singleton-lock fix is necessary but not sufficient. Even at N=1 the daemon cannot keep up against scrollbacks of this size. Bounding the scrollback in `CapturePane` (e.g. `-S -<N>` with a config-tunable cap) — or making the daemon skip panes whose scrollback hasn't grown since the last successful capture — is the high-leverage change. Numbers above suggest a cap in the low thousands of lines would resolve the load issue while preserving the bulk of practical scrollback for resurrection. Caveat: confirming the resurrection feature's correctness against a bounded capture is its own design question — flagged here for whoever picks this up, not assumed solved.
 
 ## Related bugs
 
