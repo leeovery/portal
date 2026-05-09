@@ -15,7 +15,7 @@
 //   - state.CaptureStructure      — walk live sessions/windows/panes
 //   - per-pane skip-save guard    — when WithSkipGuard() is set
 //   - state.CaptureAndHashPane    — production-shape scrollback bytes
-//     (or empty bytes when WithEmptyScrollback() is set, used by the
+//     (or empty bytes when withEmptyScrollback() is set, used by the
 //     reboot round-trip which overwrites the byte-compared file with
 //     a deterministic ANSI fixture afterwards)
 //   - state.WriteScrollbackIfChanged
@@ -35,7 +35,7 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// daemonTickOpts is the internal shape configured by DaemonTickOption
+// daemonTickOpts is the internal shape configured by daemonTickOption
 // values passed to runDaemonTick.
 type daemonTickOpts struct {
 	// skipGuard, when true, mirrors the daemon's per-pane skip-save
@@ -50,26 +50,26 @@ type daemonTickOpts struct {
 	emptyScrollback bool
 }
 
-// DaemonTickOption configures runDaemonTick. Functional options keep
+// daemonTickOption configures runDaemonTick. Functional options keep
 // the call sites readable when only one knob is needed.
-type DaemonTickOption func(*daemonTickOpts)
+type daemonTickOption func(*daemonTickOpts)
 
-// WithoutSkipGuard disables the per-pane skip-save guard. The default
+// withoutSkipGuard disables the per-pane skip-save guard. The default
 // matches the production daemon at cmd/state_daemon.go:131-133 — markers
 // in skipSet block scrollback save for their paneKey. The reboot
 // round-trip opts out because its in-line save path was always
 // guard-free and switching to skip-guard semantics now would change
 // observable behaviour for that test.
-func WithoutSkipGuard() DaemonTickOption {
+func withoutSkipGuard() daemonTickOption {
 	return func(o *daemonTickOpts) { o.skipGuard = false }
 }
 
-// WithEmptyScrollback writes empty bytes for every pane instead of
+// withEmptyScrollback writes empty bytes for every pane instead of
 // invoking state.CaptureAndHashPane. The reboot round-trip uses this
 // because it overwrites the hook pane's scrollback file with a known
 // ANSI fixture immediately after — capture-pane output is timing- and
 // terminal-dependent and would make a byte-compare flaky.
-func WithEmptyScrollback() DaemonTickOption {
+func withEmptyScrollback() daemonTickOption {
 	return func(o *daemonTickOpts) { o.emptyScrollback = true }
 }
 
@@ -79,7 +79,7 @@ func WithEmptyScrollback() DaemonTickOption {
 //
 // Default behaviour (no options) matches the production daemon's tick:
 // skip guard ON, scrollback bytes captured via state.CaptureAndHashPane.
-// Pass WithEmptyScrollback() to suppress real capture (reboot round-trip).
+// Pass withEmptyScrollback() to suppress real capture (reboot round-trip).
 // Default is intentionally production-shape so future call sites get
 // the spec-compliant behaviour without thinking; the reboot round-trip
 // is the only known caller that needs the empty-bytes shape.
@@ -87,7 +87,7 @@ func runDaemonTick(
 	t *testing.T,
 	client *tmux.Client,
 	stateDir string,
-	options ...DaemonTickOption,
+	options ...daemonTickOption,
 ) state.Index {
 	t.Helper()
 

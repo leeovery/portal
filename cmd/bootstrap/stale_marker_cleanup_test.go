@@ -13,12 +13,6 @@ import (
 // state.ListSkeletonMarkers parses from the seeded markers map, so test
 // authors keep the ergonomic "give me a paneKey set" seeding shape while the
 // production code path is exercised end-to-end through the real parser.
-//
-// Re-typing MarkerCleanupCore.Markers to state.ServerOptionLister deleted
-// the dedicated MarkerLister interface (and its closure-implementing-an-
-// interface adapters at the production and integration-test wiring sites);
-// this fake is the unit-test equivalent of *tmux.Client satisfying the
-// same seam.
 type fakeMarkerLister struct {
 	markers map[string]struct{}
 	err     error

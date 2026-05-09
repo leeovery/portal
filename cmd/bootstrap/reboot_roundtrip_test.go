@@ -270,7 +270,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// exactly what daemonDeps.captureAndCommit does — invoked here
 	// outside the tick loop so the test doesn't depend on daemon
 	// timing or the saver session existing.
-	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
+	idx := runDaemonTick(t, client, stateDir, withoutSkipGuard(), withEmptyScrollback())
 
 	// Override one pane's scrollback with a known ANSI fixture. Doing
 	// this AFTER Commit means the on-disk schema is still produced by
@@ -507,12 +507,9 @@ func createSavedTopology(t *testing.T, ts *tmuxtest.Socket, args savedTopologyAr
 }
 
 // The daemon-tick save path used by this round-trip lives in
-// daemon_tick_test_helpers_test.go as runDaemonTick. The reboot
-// round-trip calls it with WithoutSkipGuard() (the original inline
-// body never honoured a skip guard) and WithEmptyScrollback() (the
-// round-trip body overwrites the hook pane's scrollback file with a
-// known ANSI fixture afterwards; capture-pane output is timing- and
-// terminal-dependent and would make a byte-compare flaky).
+// daemon_tick_test_helpers_test.go as runDaemonTick. See that file's
+// docstring for why this round-trip opts out of the skip-save guard
+// and uses empty scrollback bytes.
 
 // verifyCapturedIndex sanity-checks that the captured snapshot matches
 // the topology createSavedTopology built. Failures here mean the test
@@ -914,7 +911,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 
 	// Capture + commit using the same helper the primary round-trip
 	// uses, so any regression in CaptureStructure shows up here too.
-	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
+	idx := runDaemonTick(t, client, stateDir, withoutSkipGuard(), withEmptyScrollback())
 	if got := len(idx.Sessions); got != 2 {
 		t.Fatalf("captured %d sessions; want 2", got)
 	}
@@ -1137,7 +1134,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 
 	// Drive the save path inline (no daemon). This produces sessions.json
 	// + per-pane scrollback files exactly as production save would.
-	idx := runDaemonTick(t, client, stateDir, WithoutSkipGuard(), WithEmptyScrollback())
+	idx := runDaemonTick(t, client, stateDir, withoutSkipGuard(), withEmptyScrollback())
 	if got := len(idx.Sessions); got != 1 {
 		t.Fatalf("captured %d sessions; want 1", got)
 	}

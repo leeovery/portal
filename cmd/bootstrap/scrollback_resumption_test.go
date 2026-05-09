@@ -60,6 +60,40 @@ func newProductionMarkerCleaner(client *tmux.Client, logger *state.Logger) *boot
 	}
 }
 
+// seedLeakedMarker stands up sessionName, kills it, and sets the
+// @portal-skeleton-* marker for its paneKey — leaving exactly the
+// "leaked-but-pane-not-currently-live" precondition the cleanup
+// algorithm operates on. Returns (paneKey, markerName) for assertions.
+//
+// Marker is set via SetServerOption rather than state.SetSkeletonMarker
+// so the test stays uncoupled to the marker-set code path the spec
+// § Out of Scope forbids modifying.
+func seedLeakedMarker(t *testing.T, ts *tmuxtest.Socket, client *tmux.Client, sessionName string) (paneKey, markerName string) {
+	t.Helper()
+	ts.Run(t, "new-session", "-d", "-s", sessionName, "sleep", "infinity")
+	ts.WaitForSession(t, sessionName, 2*time.Second)
+	paneKey = state.SanitizePaneKey(sessionName, 0, 0)
+	markerName = state.SkeletonMarkerPrefix + paneKey
+	ts.Run(t, "kill-session", "-t", sessionName)
+	if err := client.SetServerOption(markerName, "1"); err != nil {
+		t.Fatalf("SetServerOption seed marker for %s: %v", sessionName, err)
+	}
+	return paneKey, markerName
+}
+
+// seedKeepAlivePane stands up the `_seed` keep-alive session so the
+// live-pane set stays non-empty when other sessions are killed during
+// the test — required so the cleanup step's mass-unset hazard guard
+// does not trip and skip the unset pass entirely. The underscore prefix
+// excludes _seed from CaptureStructure (matches the daemon's
+// _portal-saver discipline).
+func seedKeepAlivePane(t *testing.T, ts *tmuxtest.Socket) {
+	t.Helper()
+	ts.Run(t, "new-session", "-d", "-s", "_seed")
+	ts.WaitForSession(t, "_seed", 2*time.Second)
+	tmuxtest.ApplyBaseIndices(t, ts, 0, 0)
+}
+
 // TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup is the
 // primary positive: a leaked marker for a paneKey whose pane has been
 // killed is unset by the bootstrap cleanup step, and once a fresh pane
@@ -79,38 +113,8 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	ts := tmuxtest.New(t, "ptl-sbres-")
 	client := ts.Client()
 
-	// _seed keeps the live-pane set non-empty when we kill the foo
-	// session below — required so the cleanup step's mass-unset hazard
-	// guard does not trip and skip the unset pass entirely. The
-	// underscore prefix excludes _seed from CaptureStructure (matches
-	// the daemon's _portal-saver discipline).
-	ts.Run(t, "new-session", "-d", "-s", "_seed")
-	ts.WaitForSession(t, "_seed", 2*time.Second)
-	tmuxtest.ApplyBaseIndices(t, ts, 0, 0)
-
-	// Stand up the foo session whose paneKey will own the leaked
-	// marker. sleep infinity keeps the pane alive without contaminating
-	// scrollback.
-	ts.Run(t, "new-session", "-d", "-s", "foo", "sleep", "infinity")
-	ts.WaitForSession(t, "foo", 2*time.Second)
-
-	paneKey := state.SanitizePaneKey("foo", 0, 0)
-	markerName := state.SkeletonMarkerPrefix + paneKey
-
-	// Kill the foo session BEFORE seeding the marker so the live-pane
-	// set observed by cleanup excludes paneKey. This is the
-	// "leaked-but-pane-not-currently-live" precondition the cleanup
-	// algorithm operates on. _seed remains alive so the live set is
-	// non-empty (mass-unset hazard guard does not trip).
-	ts.Run(t, "kill-session", "-t", "foo")
-
-	// Seed the leaked marker. Using SetServerOption directly mirrors
-	// the production set path (state.SetSkeletonMarker) without
-	// importing it, keeping the test free of any coupling to the
-	// marker-set code path the spec § Out of Scope forbids modifying.
-	if err := client.SetServerOption(markerName, "1"); err != nil {
-		t.Fatalf("SetServerOption seed marker: %v", err)
-	}
+	seedKeepAlivePane(t, ts)
+	paneKey, markerName := seedLeakedMarker(t, ts, client, "foo")
 
 	// Run the bootstrap orchestrator with the production
 	// MarkerCleanupCore wired; every other step is stubbed to a NoOp so
@@ -190,21 +194,8 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	ts := tmuxtest.New(t, "ptl-sbres-noop-")
 	client := ts.Client()
 
-	ts.Run(t, "new-session", "-d", "-s", "_seed")
-	ts.WaitForSession(t, "_seed", 2*time.Second)
-	tmuxtest.ApplyBaseIndices(t, ts, 0, 0)
-
-	ts.Run(t, "new-session", "-d", "-s", "foo", "sleep", "infinity")
-	ts.WaitForSession(t, "foo", 2*time.Second)
-
-	paneKey := state.SanitizePaneKey("foo", 0, 0)
-	markerName := state.SkeletonMarkerPrefix + paneKey
-
-	ts.Run(t, "kill-session", "-t", "foo")
-
-	if err := client.SetServerOption(markerName, "1"); err != nil {
-		t.Fatalf("SetServerOption seed marker: %v", err)
-	}
+	seedKeepAlivePane(t, ts)
+	paneKey, markerName := seedLeakedMarker(t, ts, client, "foo")
 
 	logger := openTestLogger(t, stateDir)
 
@@ -271,31 +262,17 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 	ts := tmuxtest.New(t, "ptl-sbres-mix-")
 	client := ts.Client()
 
-	ts.Run(t, "new-session", "-d", "-s", "_seed")
-	ts.WaitForSession(t, "_seed", 2*time.Second)
-	tmuxtest.ApplyBaseIndices(t, ts, 0, 0)
+	seedKeepAlivePane(t, ts)
 
-	// Two real sessions: stalefoo will be killed (its marker becomes
-	// stale); livebar stays alive (its marker is the legitimate
+	// Two real sessions: stalefoo follows the leaked-marker pattern via
+	// seedLeakedMarker; livebar stays alive (its marker is the legitimate
 	// hydrate-in-progress case the cleanup must preserve).
-	ts.Run(t, "new-session", "-d", "-s", "stalefoo", "sleep", "infinity")
-	ts.WaitForSession(t, "stalefoo", 2*time.Second)
+	stalePaneKey, staleMarker := seedLeakedMarker(t, ts, client, "stalefoo")
+
 	ts.Run(t, "new-session", "-d", "-s", "livebar", "sleep", "infinity")
 	ts.WaitForSession(t, "livebar", 2*time.Second)
-
-	stalePaneKey := state.SanitizePaneKey("stalefoo", 0, 0)
 	livePaneKey := state.SanitizePaneKey("livebar", 0, 0)
-	staleMarker := state.SkeletonMarkerPrefix + stalePaneKey
 	liveMarker := state.SkeletonMarkerPrefix + livePaneKey
-
-	// Kill stalefoo so its paneKey is absent from the live-pane set
-	// when cleanup runs. livebar stays alive — cleanup must observe it
-	// and preserve its marker.
-	ts.Run(t, "kill-session", "-t", "stalefoo")
-
-	if err := client.SetServerOption(staleMarker, "1"); err != nil {
-		t.Fatalf("SetServerOption stale marker: %v", err)
-	}
 	if err := client.SetServerOption(liveMarker, "1"); err != nil {
 		t.Fatalf("SetServerOption live marker: %v", err)
 	}

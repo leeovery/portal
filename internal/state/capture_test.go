@@ -567,7 +567,7 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("hydrate_in_progress_pane_merges_from_prev_at_matching_coords", func(t *testing.T) {
+	t.Run("merges hydrate-in-progress pane from prev at matching coords", func(t *testing.T) {
 		// Phase A of restore creates the session in tmux BEFORE setting the
 		// @portal-skeleton-<paneKey> marker, so a marker-protected pane in the
 		// legitimate hydrate-in-progress flow has its session, window, and pane
@@ -1073,7 +1073,7 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("kill_mid_flight_self_heal", func(t *testing.T) {
+	t.Run("self-heals after a killed mid-flight session leaks into prev", func(t *testing.T) {
 		// Empirical-scenario regression test mirroring the live-in-the-wild
 		// case (e.g. agentic-workflows-XXrJ3J): a session is captured into
 		// prev, has a stale @portal-skeleton-* marker (its paneKey is in
@@ -1141,9 +1141,11 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 
 		// Tick 2: re-use the just-returned clean idx as prev (same skipSet).
-		// Even with the marker still present, the killed session must remain
-		// absent — sessions.json self-heals on the next tick because the
-		// polluted prev was discarded.
+		// The mock is reused unchanged, so tmux's reported state is
+		// identical between ticks — only prev differs. Even with the marker
+		// still present, the killed session must remain absent —
+		// sessions.json self-heals on the next tick because the polluted
+		// prev was discarded.
 		idx2, err := state.CaptureStructure(client, skip, &idx)
 		if err != nil {
 			t.Fatalf("tick 2: unexpected error: %v", err)

@@ -46,10 +46,6 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // dependency-shape pattern established by the FIFOSweeper / StaleCleaner
 // adjacent seams.
 //
-// CleanStaleMarkers covers the happy path; later tasks layer on normalisation
-// correctness, the mass-unset hazard guard, soft-warning posture, orchestrator
-// wiring, adapter wiring, and end-to-end regression.
-//
 // Logger is optional. When non-nil, soft warnings (per-unset failure,
 // malformed live-pane line) are emitted via Logger.Warn under
 // ComponentBootstrap. A nil Logger is tolerated — CleanStaleMarkers
@@ -59,18 +55,16 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // (HookRegistrar, FIFOSweeper et al.) so tests inject the same
 // recordingLogger fake used elsewhere in the package.
 type MarkerCleanupCore struct {
-	// Markers is typed as state.ServerOptionLister so *tmux.Client satisfies
-	// it directly via its ShowAllServerOptions method — mirroring the
-	// FIFOSweeper seam shape and eliminating the closure-implementing-an-
-	// interface adapter glue (markerListerFunc) that the production wiring
-	// previously required. CleanStaleMarkers invokes
-	// state.ListSkeletonMarkers(c.Markers) internally to recover the
-	// canonical paneKey set.
+	// Markers mirrors FIFOSweeper.Client — *tmux.Client satisfies
+	// state.ServerOptionLister directly via ShowAllServerOptions, so no
+	// closure adapter glue is needed at the wiring site.
 	Markers  state.ServerOptionLister
 	Panes    LivePaneLister
 	Unsetter MarkerUnsetter
 	Logger   Logger
 }
+
+var _ MarkerCleaner = (*MarkerCleanupCore)(nil)
 
 // CleanStaleMarkers diffs the marker paneKey-set against the live-pane
 // paneKey-set and unsets every marker whose paneKey is not present in the
@@ -175,6 +169,11 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 // modes are worse than skipping. logger must be non-nil; CleanStaleMarkers
 // substitutes a no-op default before invoking parseLivePaneSet.
 func parseLivePaneSet(raw string, logger Logger) map[string]struct{} {
+	warn := func(line, reason string, args ...any) {
+		logger.Warn(state.ComponentBootstrap,
+			"stale-marker cleanup: malformed live-pane line %q ("+reason+")",
+			append([]any{line}, args...)...)
+	}
 	set := map[string]struct{}{}
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
@@ -184,24 +183,24 @@ func parseLivePaneSet(raw string, logger Logger) map[string]struct{} {
 		// Split on rightmost ':' so session names containing ':' survive.
 		colon := strings.LastIndex(line, ":")
 		if colon < 0 {
-			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: malformed live-pane line %q (missing colon)", line)
+			warn(line, "missing colon")
 			continue
 		}
 		session := line[:colon]
 		rest := line[colon+1:]
 		dot := strings.Index(rest, ".")
 		if dot < 0 {
-			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: malformed live-pane line %q (missing dot)", line)
+			warn(line, "missing dot")
 			continue
 		}
 		window, err := strconv.Atoi(rest[:dot])
 		if err != nil {
-			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: malformed live-pane line %q (window not int): %v", line, err)
+			warn(line, "window not int: %v", err)
 			continue
 		}
 		pane, err := strconv.Atoi(rest[dot+1:])
 		if err != nil {
-			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: malformed live-pane line %q (pane not int): %v", line, err)
+			warn(line, "pane not int: %v", err)
 			continue
 		}
 		set[state.SanitizePaneKey(session, window, pane)] = struct{}{}
