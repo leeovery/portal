@@ -9,16 +9,6 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// ErrZeroLivePanesWithMarkers is the sentinel returned by CleanStaleMarkers
-// when ListAllPanesWithFormat returns no error but parses to zero live
-// panes while at least one `@portal-skeleton-*` marker exists. Treating
-// such a state as authoritative would mass-unset every marker — including
-// markers protecting legitimate hydrate-in-progress panes — and
-// destabilise a still-live tmux server. The orchestrator (task 2-5) wraps
-// this sentinel as a soft warning rather than abort. See spec §Fix
-// Component B (Mass-unset hazard guard).
-var ErrZeroLivePanesWithMarkers = errors.New("stale-marker cleanup: zero live panes parsed; skipping to avoid mass-unset hazard")
-
 // MarkerLister enumerates the live `@portal-skeleton-*` server-option markers
 // keyed by canonical paneKey (no prefix). The production adapter delegates to
 // state.ListSkeletonMarkers; tests inject lightweight fakes.
@@ -85,10 +75,15 @@ type MarkerCleanupCore struct {
 //  3. Parse each non-empty trimmed line into (session, window, pane) and
 //     convert to canonical paneKey form via state.SanitizePaneKey.
 //  4. Mass-unset hazard guard: if the parsed live-pane set is empty AND at
-//     least one marker exists, return ErrZeroLivePanesWithMarkers without
-//     invoking any unset. Treating an empty live set as authoritative would
-//     destabilise a still-live tmux server by unsetting every marker —
-//     including markers protecting legitimate hydrate-in-progress panes.
+//     least one marker exists, emit a Logger.Warn (component=bootstrap)
+//     describing the deferral (including marker count) and return nil
+//     without invoking any unset. Treating an empty live set as
+//     authoritative would destabilise a still-live tmux server by
+//     unsetting every marker — including markers protecting legitimate
+//     hydrate-in-progress panes. The deferral is a successful soft
+//     outcome ("skip this run; next bootstrap retries"), not a failure;
+//     surfacing it as a return error would conflate it with genuine
+//     dependency failures.
 //  5. If the parsed live-pane set is empty AND no markers exist, return nil
 //     — there is nothing to do and no hazard to guard against.
 //  6. For each marker paneKey absent from the live set, invoke
@@ -118,13 +113,18 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// Mass-unset hazard guard. The guard MUST run before any unset so a
 	// silently-empty live-pane result (whitespace-only output, all-malformed
 	// lines, or genuinely zero live panes during tmux instability) cannot
-	// fall through to "live set empty → unset every marker".
+	// fall through to "live set empty → unset every marker". The deferral
+	// surfaces via Logger.Warn so the error channel of CleanStaleMarkers
+	// exclusively carries genuine dependency failures.
 	if len(live) == 0 {
 		if len(markers) == 0 {
 			// Empty markers + empty live: nothing to do, no hazard.
 			return nil
 		}
-		return ErrZeroLivePanesWithMarkers
+		c.Logger.Warn(state.ComponentBootstrap,
+			"stale-marker cleanup: zero live panes parsed with %d marker(s) present; skipping to avoid mass-unset hazard (next bootstrap retries)",
+			len(markers))
+		return nil
 	}
 
 	var unsetErrs []error

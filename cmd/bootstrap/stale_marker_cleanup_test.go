@@ -2,10 +2,47 @@ package bootstrap
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
 )
+
+// openZeroPanesGuardLogger opens a real *state.Logger writing to
+// <t.TempDir()>/portal.log so tests of the zero-panes-with-markers guard
+// can read the file and assert a single Warn entry was emitted with
+// component=bootstrap. Returns the logger and the on-disk log path.
+//
+// PORTAL_LOG_LEVEL is forced to empty so OpenLogger defaults to LevelWarn,
+// guaranteeing Warn entries land on disk regardless of the developer's
+// shell environment.
+func openZeroPanesGuardLogger(t *testing.T) (*state.Logger, string) {
+	t.Helper()
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "portal.log")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+	return logger, logPath
+}
+
+// readLogFile flushes via Close-on-cleanup is unreliable for the assertion
+// path, so callers Close the logger explicitly before reading. This helper
+// reads the file and returns its contents as a string for substring
+// assertions.
+func readLogFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log %s: %v", path, err)
+	}
+	return string(data)
+}
 
 // fakeMarkerLister is a lightweight in-memory MarkerLister for unit tests.
 type fakeMarkerLister struct {
@@ -385,7 +422,13 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		}
 	})
 
-	t.Run("it skips unset and emits a warning when zero live panes are returned with markers present", func(t *testing.T) {
+	t.Run("it returns nil and emits a Warn log entry when zero live panes are returned with markers present", func(t *testing.T) {
+		// Spec change (task 3-6): the zero-panes-with-markers branch is a
+		// successful soft outcome ("skip this run; next bootstrap retries"),
+		// not a genuine failure. CleanStaleMarkers MUST return nil so the
+		// orchestrator's error channel exclusively carries genuine failures;
+		// the deferral signal moves to portal.log under ComponentBootstrap.
+		logger, logPath := openZeroPanesGuardLogger(t)
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"protected__0.0": {},
 			"another__1.2":   {},
@@ -398,13 +441,31 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
+			Logger:   logger,
 		}
-		err := c.CleanStaleMarkers()
-		if err == nil {
-			t.Fatalf("expected non-nil error when zero live panes returned with markers present; got nil")
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers must return nil for zero-panes-with-markers deferral; got %v", err)
 		}
 		if len(unsetter.calls) != 0 {
 			t.Errorf("expected zero unset calls under zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+
+		// Close before reading so all writes flush.
+		_ = logger.Close()
+		got := readLogFile(t, logPath)
+		if !strings.Contains(got, "WARN") {
+			t.Errorf("expected a WARN-level log line for the deferral, got log:\n%s", got)
+		}
+		if !strings.Contains(got, "bootstrap") {
+			t.Errorf("expected log line component=bootstrap, got log:\n%s", got)
+		}
+		if !strings.Contains(got, "stale-marker cleanup") {
+			t.Errorf("expected log line to identify the stale-marker cleanup deferral, got log:\n%s", got)
+		}
+		// Marker count MUST be embedded so the operator can correlate with
+		// observed marker pressure.
+		if !strings.Contains(got, "2 marker(s)") {
+			t.Errorf("expected log line to embed the marker count (\"2 marker(s)\"), got log:\n%s", got)
 		}
 	})
 
@@ -429,7 +490,8 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 	t.Run("the zero-panes guard runs before any unset", func(t *testing.T) {
 		// Multiple markers — were the guard absent, every one would be
 		// computed as stale and unset. Guard must short-circuit BEFORE any
-		// UnsetServerOption call lands.
+		// UnsetServerOption call lands. Per task 3-6 the deferral surfaces
+		// via Logger.Warn rather than a sentinel error.
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"a__0.0": {},
 			"b__0.1": {},
@@ -443,9 +505,8 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 			Panes:    live,
 			Unsetter: unsetter,
 		}
-		err := c.CleanStaleMarkers()
-		if err == nil {
-			t.Fatalf("expected non-nil error when whitespace-only output yields zero live panes with markers present; got nil")
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers must return nil for whitespace-only zero-panes deferral; got %v", err)
 		}
 		if len(unsetter.calls) != 0 {
 			t.Errorf("expected zero unset calls (guard must run before any unset), got %d (%v)", len(unsetter.calls), unsetter.calls)
@@ -719,8 +780,11 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 	t.Run("zero-panes guard fires when all lines are malformed and markers exist", func(t *testing.T) {
 		// All live-pane lines malformed → live set parses to empty. With
 		// markers present, the zero-panes guard MUST trigger so no
-		// mass-unset lands. The cleanup returns the sentinel; zero unset
-		// calls.
+		// mass-unset lands. Per task 3-6 the deferral surfaces via
+		// Logger.Warn (component=bootstrap) and CleanStaleMarkers returns
+		// nil — the genuine-failure error channel must not carry the
+		// soft-deferral signal.
+		logger, logPath := openZeroPanesGuardLogger(t)
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"a__0.0": {},
 			"b__0.0": {},
@@ -733,16 +797,25 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
+			Logger:   logger,
 		}
-		err := c.CleanStaleMarkers()
-		if err == nil {
-			t.Fatalf("expected non-nil error when all lines malformed AND markers exist (zero-panes guard); got nil")
-		}
-		if !errors.Is(err, ErrZeroLivePanesWithMarkers) {
-			t.Errorf("expected returned error to wrap ErrZeroLivePanesWithMarkers; got %v", err)
+		if err := c.CleanStaleMarkers(); err != nil {
+			t.Fatalf("CleanStaleMarkers must return nil under all-malformed + markers-exist deferral; got %v", err)
 		}
 		if len(unsetter.calls) != 0 {
 			t.Errorf("expected zero unset calls under all-malformed + zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
+		}
+
+		_ = logger.Close()
+		got := readLogFile(t, logPath)
+		// At least one Warn line for the deferral itself; component
+		// bootstrap; mentions the cleanup. (Per-line malformed Warns may
+		// also appear — the deferral Warn is what we're pinning here.)
+		if !strings.Contains(got, "WARN") {
+			t.Errorf("expected a WARN-level log line for the deferral, got log:\n%s", got)
+		}
+		if !strings.Contains(got, "bootstrap") {
+			t.Errorf("expected log line component=bootstrap, got log:\n%s", got)
 		}
 	})
 
@@ -767,4 +840,56 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 			t.Fatalf("expected non-nil error; got nil")
 		}
 	})
+}
+
+// TestStaleMarkerCleanup_GenuineFailurePropagation pins task 3-6's
+// reclassification: after the zero-panes-with-markers branch returns nil
+// + Warn, the error channel of CleanStaleMarkers exclusively carries
+// genuine failures. A non-nil error from a dependency MUST still
+// propagate so the orchestrator's existing soft-warn-and-swallow posture
+// surfaces it in portal.log.
+func TestStaleMarkerCleanup_GenuineFailurePropagation(t *testing.T) {
+	listSentinel := errors.New("list-panes: socket gone")
+	markersSentinel := errors.New("show-options: tmux dead")
+
+	cases := []struct {
+		name     string
+		markers  *fakeMarkerLister
+		panes    *fakeLivePaneLister
+		wantWrap error
+	}{
+		{
+			name:     "ListAllPanesWithFormat error propagates with no unset calls",
+			markers:  &fakeMarkerLister{markers: map[string]struct{}{"m__0.0": {}}},
+			panes:    &fakeLivePaneLister{err: listSentinel},
+			wantWrap: listSentinel,
+		},
+		{
+			name:     "ListSkeletonMarkers error propagates with no unset calls",
+			markers:  &fakeMarkerLister{err: markersSentinel},
+			panes:    &fakeLivePaneLister{output: "live:0.0\n"},
+			wantWrap: markersSentinel,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			unsetter := &fakeMarkerUnsetter{}
+			c := &MarkerCleanupCore{
+				Markers:  tc.markers,
+				Panes:    tc.panes,
+				Unsetter: unsetter,
+			}
+			err := c.CleanStaleMarkers()
+			if err == nil {
+				t.Fatalf("expected non-nil error to propagate genuine failure; got nil")
+			}
+			if !errors.Is(err, tc.wantWrap) {
+				t.Errorf("expected returned error to wrap %v, got %v", tc.wantWrap, err)
+			}
+			if len(unsetter.calls) != 0 {
+				t.Errorf("expected zero unset calls when a dependency fails, got %d (%v)", len(unsetter.calls), unsetter.calls)
+			}
+		})
+	}
 }
