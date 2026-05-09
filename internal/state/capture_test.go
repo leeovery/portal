@@ -567,6 +567,79 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		}
 	})
 
+	t.Run("hydrate_in_progress_pane_merges_from_prev_at_matching_coords", func(t *testing.T) {
+		// Phase A of restore creates the session in tmux BEFORE setting the
+		// @portal-skeleton-<paneKey> marker, so a marker-protected pane in the
+		// legitimate hydrate-in-progress flow has its session, window, and pane
+		// all present in the fresh enumeration. The structural live-set filter
+		// must NOT regress this case: prev's authoritative pane state
+		// (CWD/CurrentCommand captured pre-boot) must still win at matching
+		// coords, and a session present in BOTH fresh and prev must not be
+		// duplicated by the merge. See specification → Fix Component A →
+		// Preserved Behavior; Acceptance Criteria #6.
+		prev := state.Index{
+			Version: state.SchemaVersion,
+			Sessions: []state.Session{{
+				Name:        "work",
+				Environment: map[string]string{},
+				Windows: []state.Window{{
+					Index: 0, Name: "main", Layout: "L", Active: true,
+					Panes: []state.Pane{{
+						Index:          0,
+						CWD:            "/old",
+						Active:         true,
+						CurrentCommand: "vim",
+						ScrollbackFile: "scrollback/work__0.0.bin",
+					}},
+				}},
+			}},
+		}
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    paneLine("work", 0, "main", "L", false, true, 0, "/new", true, "zsh"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+		skip := map[string]struct{}{
+			state.SanitizePaneKey("work", 0, 0): {},
+		}
+
+		idx, err := state.CaptureStructure(client, skip, &prev)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Prev wins at matching coords: CWD/CurrentCommand are prev's, not
+		// fresh's.
+		p := findPane(idx, "work", 0, 0)
+		if p == nil {
+			t.Fatalf("missing pane work:0.0 in result")
+		}
+		if p.CWD != "/old" || p.CurrentCommand != "vim" {
+			t.Errorf("pane = %+v, want prev's /old + vim (skip-set wins at matching coords)", p)
+		}
+
+		// No session duplication: the same session present in BOTH fresh and
+		// prev appears exactly once.
+		if len(idx.Sessions) != 1 {
+			t.Errorf("len(idx.Sessions) = %d, want 1 (no duplication when session is in both fresh and prev)", len(idx.Sessions))
+		}
+		if idx.Sessions[0].Name != "work" {
+			t.Errorf("Sessions[0].Name = %q, want %q", idx.Sessions[0].Name, "work")
+		}
+
+		// Canonical ordering survives the merge: one window at index 0, one
+		// pane at index 0.
+		work := idx.Sessions[0]
+		if len(work.Windows) != 1 || work.Windows[0].Index != 0 {
+			t.Errorf("work.Windows = %+v, want one window at index 0 (canonical ordering)", work.Windows)
+		}
+		w0 := work.Windows[0]
+		if len(w0.Panes) != 1 || w0.Panes[0].Index != 0 {
+			t.Errorf("work:0.Panes = %+v, want one pane at index 0 (canonical ordering)", w0.Panes)
+		}
+	})
+
 	t.Run("does not merge a skipped pane whose session is absent from fresh", func(t *testing.T) {
 		// prev has session "old"; fresh capture lists only "new". Skip set
 		// marks the prev pane. Even though the marker is present, "old" must
