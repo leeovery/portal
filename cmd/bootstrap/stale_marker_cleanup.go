@@ -9,6 +9,13 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
+// stale_marker_cleanup.go's Logger field uses the package-local Logger
+// interface (Debug/Warn/Error) — same shape every other orchestrator step
+// seam depends on. *state.Logger satisfies the interface structurally,
+// keeping production wiring (bootstrapadapter.NewStaleMarkerCleaner)
+// untouched while letting tests inject a plain in-memory recording fake
+// instead of opening a real on-disk log file.
+
 // MarkerLister enumerates the live `@portal-skeleton-*` server-option markers
 // keyed by canonical paneKey (no prefix). The production adapter delegates to
 // state.ListSkeletonMarkers; tests inject lightweight fakes.
@@ -52,14 +59,17 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 //
 // Logger is optional. When non-nil, soft warnings (per-unset failure,
 // malformed live-pane line) are emitted via Logger.Warn under
-// ComponentBootstrap. A nil Logger is tolerated — *state.Logger is
-// nil-safe and every Warn call is a no-op. This mirrors
-// bootstrapadapter.FIFOSweeper's logger contract.
+// ComponentBootstrap. A nil Logger is tolerated — CleanStaleMarkers
+// substitutes a no-op default at entry so call sites can dispatch
+// unconditionally. This mirrors the Orchestrator's Logger contract;
+// the field's interface type matches every other orchestrator step seam
+// (HookRegistrar, FIFOSweeper et al.) so tests inject the same
+// recordingLogger fake used elsewhere in the package.
 type MarkerCleanupCore struct {
 	Markers  MarkerLister
 	Panes    LivePaneLister
 	Unsetter MarkerUnsetter
-	Logger   *state.Logger
+	Logger   Logger
 }
 
 // CleanStaleMarkers diffs the marker paneKey-set against the live-pane
@@ -98,6 +108,13 @@ type MarkerCleanupCore struct {
 // rather than aborting cleanup, since aborting would also leave stale
 // markers in place.
 func (c *MarkerCleanupCore) CleanStaleMarkers() error {
+	// Substitute a no-op Logger when none was injected so call sites can
+	// invoke c.Logger.Warn unconditionally, matching the Orchestrator's
+	// Logger contract.
+	if c.Logger == nil {
+		c.Logger = noopLogger{}
+	}
+
 	markers, err := c.Markers.ListSkeletonMarkers()
 	if err != nil {
 		return err
@@ -152,12 +169,12 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 // state.SanitizePaneKey. Empty lines are silently skipped; lines that fail
 // the parse contract (rightmost `:` for session/window.pane split, `.` for
 // window/pane split, strconv.Atoi for indices) are skipped with a soft
-// Logger.Warn breadcrumb when a logger is wired. Malformed lines NEVER
-// abort cleanup — including a malformed line in the live set would create a
-// spurious "live" entry, while aborting would leave genuinely stale markers
-// in place. Both failure modes are worse than skipping. logger may be nil;
-// *state.Logger is nil-safe and Warn becomes a no-op.
-func parseLivePaneSet(raw string, logger *state.Logger) map[string]struct{} {
+// Logger.Warn breadcrumb. Malformed lines NEVER abort cleanup — including a
+// malformed line in the live set would create a spurious "live" entry,
+// while aborting would leave genuinely stale markers in place. Both failure
+// modes are worse than skipping. logger must be non-nil; CleanStaleMarkers
+// substitutes a no-op default before invoking parseLivePaneSet.
+func parseLivePaneSet(raw string, logger Logger) map[string]struct{} {
 	set := map[string]struct{}{}
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)

@@ -2,47 +2,11 @@ package bootstrap
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
 )
-
-// openZeroPanesGuardLogger opens a real *state.Logger writing to
-// <t.TempDir()>/portal.log so tests of the zero-panes-with-markers guard
-// can read the file and assert a single Warn entry was emitted with
-// component=bootstrap. Returns the logger and the on-disk log path.
-//
-// PORTAL_LOG_LEVEL is forced to empty so OpenLogger defaults to LevelWarn,
-// guaranteeing Warn entries land on disk regardless of the developer's
-// shell environment.
-func openZeroPanesGuardLogger(t *testing.T) (*state.Logger, string) {
-	t.Helper()
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-	return logger, logPath
-}
-
-// readLogFile flushes via Close-on-cleanup is unreliable for the assertion
-// path, so callers Close the logger explicitly before reading. This helper
-// reads the file and returns its contents as a string for substring
-// assertions.
-func readLogFile(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read log %s: %v", path, err)
-	}
-	return string(data)
-}
 
 // fakeMarkerLister is a lightweight in-memory MarkerLister for unit tests.
 type fakeMarkerLister struct {
@@ -427,8 +391,10 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		// successful soft outcome ("skip this run; next bootstrap retries"),
 		// not a genuine failure. CleanStaleMarkers MUST return nil so the
 		// orchestrator's error channel exclusively carries genuine failures;
-		// the deferral signal moves to portal.log under ComponentBootstrap.
-		logger, logPath := openZeroPanesGuardLogger(t)
+		// the deferral signal moves to portal.log under ComponentBootstrap
+		// via Logger.Warn — asserted in-memory via the package's
+		// recordingLogger fake.
+		logger := &recordingLogger{}
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"protected__0.0": {},
 			"another__1.2":   {},
@@ -450,22 +416,24 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 			t.Errorf("expected zero unset calls under zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
 		}
 
-		// Close before reading so all writes flush.
-		_ = logger.Close()
-		got := readLogFile(t, logPath)
-		if !strings.Contains(got, "WARN") {
-			t.Errorf("expected a WARN-level log line for the deferral, got log:\n%s", got)
+		// Locate the deferral Warn entry in-memory. Component routing is
+		// enforced at every Logger.Warn call site by supplying
+		// state.ComponentBootstrap; the recording fake captures the
+		// component alongside the formatted message body so we pin
+		// both: the deferral signature (message body) and the
+		// bootstrap routing (component).
+		foundDeferral := false
+		for i, msg := range logger.warnings {
+			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "2 marker(s)") {
+				if logger.warnComponents[i] != state.ComponentBootstrap {
+					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+				}
+				foundDeferral = true
+				break
+			}
 		}
-		if !strings.Contains(got, "bootstrap") {
-			t.Errorf("expected log line component=bootstrap, got log:\n%s", got)
-		}
-		if !strings.Contains(got, "stale-marker cleanup") {
-			t.Errorf("expected log line to identify the stale-marker cleanup deferral, got log:\n%s", got)
-		}
-		// Marker count MUST be embedded so the operator can correlate with
-		// observed marker pressure.
-		if !strings.Contains(got, "2 marker(s)") {
-			t.Errorf("expected log line to embed the marker count (\"2 marker(s)\"), got log:\n%s", got)
+		if !foundDeferral {
+			t.Errorf("expected a Warn entry identifying the stale-marker cleanup deferral with marker count \"2 marker(s)\"; got warnings=%v", logger.warnings)
 		}
 	})
 
@@ -784,7 +752,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		// Logger.Warn (component=bootstrap) and CleanStaleMarkers returns
 		// nil — the genuine-failure error channel must not carry the
 		// soft-deferral signal.
-		logger, logPath := openZeroPanesGuardLogger(t)
+		logger := &recordingLogger{}
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"a__0.0": {},
 			"b__0.0": {},
@@ -806,16 +774,25 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 			t.Errorf("expected zero unset calls under all-malformed + zero-panes guard, got %d (%v)", len(unsetter.calls), unsetter.calls)
 		}
 
-		_ = logger.Close()
-		got := readLogFile(t, logPath)
-		// At least one Warn line for the deferral itself; component
-		// bootstrap; mentions the cleanup. (Per-line malformed Warns may
-		// also appear — the deferral Warn is what we're pinning here.)
-		if !strings.Contains(got, "WARN") {
-			t.Errorf("expected a WARN-level log line for the deferral, got log:\n%s", got)
+		// At least one Warn entry for the deferral itself; mentions the
+		// stale-marker cleanup deferral signature. (Per-line malformed
+		// Warns may also appear — the deferral Warn is what we're
+		// pinning here.) The component is supplied at every Logger.Warn
+		// call site as state.ComponentBootstrap; the recording fake
+		// captures the component alongside the formatted message body
+		// so we pin bootstrap routing here too.
+		foundDeferral := false
+		for i, msg := range logger.warnings {
+			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "marker(s)") {
+				if logger.warnComponents[i] != state.ComponentBootstrap {
+					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+				}
+				foundDeferral = true
+				break
+			}
 		}
-		if !strings.Contains(got, "bootstrap") {
-			t.Errorf("expected log line component=bootstrap, got log:\n%s", got)
+		if !foundDeferral {
+			t.Errorf("expected a Warn entry identifying the all-malformed + zero-panes deferral; got warnings=%v", logger.warnings)
 		}
 	})
 

@@ -79,26 +79,32 @@ func (r *stepRecorder) CleanStale() error {
 // via Warn, and fatal failures land via Error before the orchestrator
 // returns. Entries are the fully formatted message so tests can verify
 // wrapped causes (e.g. step-7 Sweep error) flow through to portal.log
-// unchanged.
+// unchanged. The parallel component slices (warnComponents, errorComponents,
+// debugComponents) record the component label supplied at each call site so
+// tests can pin component routing (e.g. ComponentBootstrap) without spinning
+// up a real on-disk *state.Logger.
 type recordingLogger struct {
-	debugs   []string
-	warnings []string
-	errors   []string
+	debugs          []string
+	debugComponents []string
+	warnings        []string
+	warnComponents  []string
+	errors          []string
+	errorComponents []string
 }
 
 func (l *recordingLogger) Debug(component, format string, args ...any) {
-	_ = component
 	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
+	l.debugComponents = append(l.debugComponents, component)
 }
 
 func (l *recordingLogger) Warn(component, format string, args ...any) {
-	_ = component
 	l.warnings = append(l.warnings, fmt.Sprintf(format, args...))
+	l.warnComponents = append(l.warnComponents, component)
 }
 
 func (l *recordingLogger) Error(component, format string, args ...any) {
-	_ = component
 	l.errors = append(l.errors, fmt.Sprintf(format, args...))
+	l.errorComponents = append(l.errorComponents, component)
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
