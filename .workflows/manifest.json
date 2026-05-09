@@ -47,6 +47,9 @@
     },
     "daemon-merge-reintroduces-dead-sessions": {
       "work_type": "bugfix"
+    },
+    "killed-sessions-resurrect-on-restart": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
