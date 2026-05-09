@@ -93,3 +93,24 @@ func openTestLogger(t *testing.T, stateDir string) *state.Logger {
 	t.Cleanup(func() { _ = logger.Close() })
 	return logger
 }
+
+// newIntegrationStateDir builds an isolated portal state directory rooted at
+// t.TempDir(), wires it via PORTAL_STATE_DIR (auto-restored by t.Setenv on
+// test teardown), and runs state.EnsureDir so callers can immediately write
+// sessions.json / scrollback / FIFOs into the returned path.
+//
+// Paired with openTestLogger (which writes to <stateDir>/portal.log) the two
+// helpers replace the nine-site stateDir + EnsureDir + OpenLogger preamble
+// previously copy-pasted across the cmd/bootstrap integration tests. They
+// remain split because not every site that needs the stateDir half also
+// needs a real logger (e.g. the orchestrator end-to-end smoke test wires no
+// logger at all and lets the orchestrator substitute its noopLogger).
+func newIntegrationStateDir(t *testing.T) string {
+	t.Helper()
+	stateDir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+	return stateDir
+}

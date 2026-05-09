@@ -143,11 +143,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	// Hand-craft a sessions.json containing one session named "missing-foo"
 	// with one window and one pane. The scrollback file path is recorded
@@ -243,11 +239,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	// sessions.json describing one session — Restore will skeleton-create
 	// it and set the @portal-skeleton-<paneKey> marker for its single pane.

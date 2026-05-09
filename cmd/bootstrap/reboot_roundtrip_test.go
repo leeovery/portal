@@ -177,11 +177,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	binDir := restoretest.BuildPortalBinaryDir(t)
 	restoretest.PrependPATH(t, binDir)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
@@ -889,11 +885,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	binDir := restoretest.BuildPortalBinaryDir(t)
 	restoretest.PrependPATH(t, binDir)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
@@ -1117,11 +1109,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	binDir := restoretest.BuildPortalBinaryDir(t)
 	restoretest.PrependPATH(t, binDir)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)

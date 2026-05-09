@@ -56,11 +56,7 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	}
 	tmuxtest.SkipIfNoTmux(t)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	ts := tmuxtest.New(t, "ptl-sbres-")
 	client := ts.Client()
@@ -174,11 +170,7 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	}
 	tmuxtest.SkipIfNoTmux(t)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	ts := tmuxtest.New(t, "ptl-sbres-noop-")
 	client := ts.Client()
@@ -259,11 +251,7 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 	}
 	tmuxtest.SkipIfNoTmux(t)
 
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	ts := tmuxtest.New(t, "ptl-sbres-mix-")
 	client := ts.Client()

@@ -74,11 +74,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-p5-")
-	stateDir := t.TempDir()
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	if _, err := state.EnsureDir(); err != nil {
-		t.Fatalf("EnsureDir: %v", err)
-	}
+	stateDir := newIntegrationStateDir(t)
 
 	// Probe tempfile: the session-created hook appends one line per fire.
 	// Lives outside stateDir so a stray sessions.json scan cannot mistake it
