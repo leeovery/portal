@@ -14,15 +14,18 @@ package cmd
 //     *tmux.Client, the *restore.Orchestrator, the state directory, the
 //     *state.Logger. Test suites import these directly so production-shape
 //     wirings are reusable without pulling in the rest of cmd/. Currently:
-//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper,
-//     StaleMarkerCleaner.
+//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper.
 //
 //   - cmd/bootstrap_production.go (camelCase, unexported): adapters that
 //     compose dependencies test code cannot reach in this package's
 //     current shape — the package-level cmd.version variable
 //     (saverAdapter), the hook-store path-resolution chain
 //     (cleanStaleAdapter). Lowercase reflects "this struct is the wiring
-//     this binary uses; tests compose their own."
+//     this binary uses; tests compose their own." The stale-marker
+//     cleanup core (bootstrap.MarkerCleanupCore) is also constructed
+//     inline at the wiring site below — it has no per-binary dependency
+//     beyond the *tmux.Client, so a thin closure-based MarkerLister is
+//     defined locally rather than re-exported.
 
 import (
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -47,6 +50,15 @@ type saverAdapter struct {
 func (a *saverAdapter) EnsureSaver() error {
 	return tmux.EnsurePortalSaverVersion(a.client, a.stateDir, version)
 }
+
+// markerListerFunc adapts a closure to bootstrap.MarkerLister so the
+// stale-marker cleanup core can call state.ListSkeletonMarkers without a
+// dedicated wrapper struct. Defined here (rather than under
+// internal/bootstrapadapter) because the only call site is the inline
+// construction of *bootstrap.MarkerCleanupCore below.
+type markerListerFunc func() (map[string]struct{}, error)
+
+func (f markerListerFunc) ListSkeletonMarkers() (map[string]struct{}, error) { return f() }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
 // structural key no longer matches a live tmux pane. Step 9 of the
@@ -112,12 +124,19 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	}
 
 	orch := &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        &saverAdapter{client: client, stateDir: stateDir},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrapadapter.NewStaleMarkerCleaner(client, logger),
+		Server:    client,
+		Hooks:     &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:     &saverAdapter{client: client, stateDir: stateDir},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		StaleMarkers: &bootstrap.MarkerCleanupCore{
+			Markers: markerListerFunc(func() (map[string]struct{}, error) {
+				return state.ListSkeletonMarkers(client)
+			}),
+			Panes:    client,
+			Unsetter: client,
+			Logger:   logger,
+		},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,

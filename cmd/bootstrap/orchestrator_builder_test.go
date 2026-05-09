@@ -82,8 +82,8 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 
 // openTestLogger opens a state.Logger writing to <stateDir>/portal.log and
 // registers t.Cleanup to close it. Tests that wire a real Logger or any
-// adapter that needs one (StaleMarkerCleaner, FIFOSweeper, HookRegistrar)
-// share this helper to avoid duplicating the OpenLogger + Cleanup pattern.
+// adapter that needs one (FIFOSweeper, HookRegistrar) share this helper to
+// avoid duplicating the OpenLogger + Cleanup pattern.
 func openTestLogger(t *testing.T, stateDir string) *state.Logger {
 	t.Helper()
 	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)

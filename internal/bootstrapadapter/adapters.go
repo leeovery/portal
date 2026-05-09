@@ -18,7 +18,6 @@ package bootstrapadapter
 import (
 	"fmt"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -136,110 +135,4 @@ func (s *FIFOSweeper) Sweep() error {
 		return fmt.Errorf("list skeleton markers: %w", err)
 	}
 	return state.SweepOrphanFIFOs(s.StateDir, markers, s.Logger)
-}
-
-// staleMarkerClient is the union of *tmux.Client primitives the
-// StaleMarkerCleaner adapter consumes. Defining the interface inside this
-// package keeps the bootstrap.MarkerCleanupCore construction free of any
-// direct *tmux.Client coupling so unit tests can inject a single stub
-// satisfying all three methods. *tmux.Client satisfies the interface
-// structurally via its existing ShowAllServerOptions, ListAllPanesWithFormat,
-// and UnsetServerOption methods.
-//
-// The interface is intentionally narrow — three methods, the exact set the
-// concrete bootstrap.MarkerCleanupCore cleanup loop needs. A wider seam
-// (e.g. embedding the whole *tmux.Client) would expose drift surface for
-// future contributors to call ListAllPanes (the error-swallowing variant)
-// from the cleanup loop and re-introduce the mass-unset hazard.
-type staleMarkerClient interface {
-	ShowAllServerOptions() (string, error)
-	ListAllPanesWithFormat(format string) (string, error)
-	UnsetServerOption(name string) error
-}
-
-// StaleMarkerCleaner satisfies bootstrap.MarkerCleaner. Step 7 of the
-// bootstrap sequence — runs strictly after step 6 (Clear @portal-restoring)
-// so it observes post-restore tmux state, and strictly before step 8
-// (FIFOSweeper) so any stale markers protecting orphan FIFOs are unset
-// first, allowing those FIFOs to be reclaimed in the same bootstrap.
-//
-// The adapter holds a single inner *bootstrap.MarkerCleanupCore wired
-// once at construction time by NewStaleMarkerCleaner. CleanStaleMarkers
-// is a thin pass-through to the inner cleanup loop so every invocation
-// operates against the same wired seams — no per-call allocation, no
-// closure churn. The shape mirrors the sibling RestoreAdapter (which
-// holds an Inner *restore.Orchestrator).
-//
-// The inner cleanup core wires three production seams to the concrete
-// bootstrap.MarkerCleanupCore:
-//
-//   - MarkerLister: state.ListSkeletonMarkers driven by the wrapped
-//     client's ShowAllServerOptions (*tmux.Client satisfies
-//     state.ServerOptionLister structurally).
-//   - LivePaneLister: the wrapped client's ListAllPanesWithFormat,
-//     called with the canonical literal
-//     `#{session_name}:#{window_index}.#{pane_index}`. This is the
-//     error-propagating variant required by spec §Fix Component B
-//     (Adapter Wiring) so a transient tmux failure surfaces as a soft
-//     warning rather than the silently-empty-set mass-unset hazard
-//     posed by the pre-fix ListAllPanes path.
-//   - MarkerUnsetter: the wrapped client's UnsetServerOption; the
-//     concrete bootstrap.MarkerCleanupCore composes the option name as
-//     state.SkeletonMarkerPrefix + paneKey before each call.
-//
-// Logger is forwarded into the concrete bootstrap.MarkerCleanupCore so
-// per-unset-failure and malformed-live-pane-line diagnostics land in
-// portal.log under ComponentBootstrap. nil is tolerated: *state.Logger is
-// itself nil-safe and the concrete cleanup loop's Warn calls become
-// no-ops. This mirrors FIFOSweeper's Logger contract.
-//
-// Construction: NewStaleMarkerCleaner is the only supported factory; the
-// struct fields are unexported so callers cannot bypass the constructor
-// and end up with a nil inner. The wrapped client must be non-nil;
-// behaviour with a nil client is undefined and will panic at the first
-// method call (matching tmux.Client semantics elsewhere in the codebase).
-type StaleMarkerCleaner struct {
-	// inner holds the wired *bootstrap.MarkerCleanupCore. Initialised
-	// once by NewStaleMarkerCleaner; never reassigned across
-	// CleanStaleMarkers invocations.
-	inner *bootstrap.MarkerCleanupCore
-}
-
-// NewStaleMarkerCleaner constructs a *StaleMarkerCleaner with its inner
-// *bootstrap.MarkerCleanupCore wired once at construction time. Production
-// wiring (cmd/bootstrap_production.go) uses this constructor so the inner
-// cleanup core and its closure-based MarkerLister are allocated exactly
-// once per bootstrap process — no per-call allocation churn.
-//
-// client must be non-nil. logger may be nil; *state.Logger is nil-safe and
-// the inner cleanup loop's Warn calls become no-ops.
-func NewStaleMarkerCleaner(client staleMarkerClient, logger *state.Logger) *StaleMarkerCleaner {
-	return &StaleMarkerCleaner{
-		inner: &bootstrap.MarkerCleanupCore{
-			Markers:  markerListerFunc(func() (map[string]struct{}, error) { return state.ListSkeletonMarkers(client) }),
-			Panes:    client,
-			Unsetter: client,
-			Logger:   logger,
-		},
-	}
-}
-
-// markerListerFunc adapts state.ListSkeletonMarkers to the
-// bootstrap.MarkerLister interface without standing up a per-call wrapper
-// type. The concrete bootstrap.MarkerCleanupCore accepts an interface; this
-// keeps the seam surface minimal at adapter construction.
-type markerListerFunc func() (map[string]struct{}, error)
-
-func (f markerListerFunc) ListSkeletonMarkers() (map[string]struct{}, error) { return f() }
-
-// CleanStaleMarkers delegates to the wired inner *bootstrap.MarkerCleanupCore.
-// Single pointer dereference + method call — no per-call allocation.
-//
-// Error propagation: any non-nil error from the underlying cleanup loop is
-// returned verbatim. The orchestrator's step-7 Warn-and-swallow path
-// (cmd/bootstrap/bootstrap.go) logs the error and continues; bootstrap
-// never aborts on a stale-marker cleanup failure. See spec §Fix Component B
-// (Soft-Warning Posture).
-func (a *StaleMarkerCleaner) CleanStaleMarkers() error {
-	return a.inner.CleanStaleMarkers()
 }

@@ -92,8 +92,8 @@ type Restorer interface {
 // stale-marker cleanup failure must never block PersistentPreRunE.
 //
 // The concrete *MarkerCleanupCore in stale_marker_cleanup.go satisfies
-// this interface and is the production implementation wrapped by
-// bootstrapadapter.StaleMarkerCleaner.
+// this interface and is the production implementation; cmd/bootstrap_production.go
+// constructs it inline at the wiring site.
 //
 // Step 7 of the bootstrap sequence: runs strictly after Clear (step 6)
 // so it observes the post-restore tmux state, and strictly before Sweep

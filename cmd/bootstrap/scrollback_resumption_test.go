@@ -37,10 +37,34 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
+
+// markerListerFunc adapts a closure to bootstrap.MarkerLister so the
+// stale-marker cleanup core can call state.ListSkeletonMarkers without a
+// dedicated wrapper struct. Mirrors the shape used at the production
+// wiring site (cmd/bootstrap_production.go).
+type markerListerFunc func() (map[string]struct{}, error)
+
+func (f markerListerFunc) ListSkeletonMarkers() (map[string]struct{}, error) { return f() }
+
+// newProductionMarkerCleaner wires a *bootstrap.MarkerCleanupCore against a
+// live *tmux.Client — same shape as the production wiring at
+// cmd/bootstrap_production.go. Used by the integration tests in this file
+// that need to exercise the cleanup step against a real tmux server.
+func newProductionMarkerCleaner(client *tmux.Client, logger *state.Logger) *bootstrap.MarkerCleanupCore {
+	return &bootstrap.MarkerCleanupCore{
+		Markers: markerListerFunc(func() (map[string]struct{}, error) {
+			return state.ListSkeletonMarkers(client)
+		}),
+		Panes:    client,
+		Unsetter: client,
+		Logger:   logger,
+	}
+}
 
 // TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup is the
 // primary positive: a leaked marker for a paneKey whose pane has been
@@ -95,12 +119,12 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	}
 
 	// Run the bootstrap orchestrator with the production
-	// StaleMarkerCleaner adapter wired; every other step is stubbed to
-	// a NoOp so a regression in this test's failure pinpoints the
-	// cleanup step rather than incidental orchestrator wiring.
+	// MarkerCleanupCore wired; every other step is stubbed to a NoOp so
+	// a regression in this test's failure pinpoints the cleanup step
+	// rather than incidental orchestrator wiring.
 	logger := openTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		StaleMarkers: bootstrapadapter.NewStaleMarkerCleaner(client, logger),
+		StaleMarkers: newProductionMarkerCleaner(client, logger),
 		Logger:       logger,
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -151,7 +175,7 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 // TestScrollbackResumption_WithoutCleanupScrollbackNotSaved is the
 // negative-control / regression-guard variant. Same setup as the primary
 // positive but the orchestrator is wired with bootstrap.NoOpMarkerCleaner{}
-// instead of the production StaleMarkerCleaner. The leaked marker
+// instead of the production MarkerCleanupCore. The leaked marker
 // therefore survives bootstrap, the daemon's skip-save guard kicks in for
 // the (re-created) pane at the same paneKey, and the scrollback file is
 // NEVER written.
@@ -284,7 +308,7 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 
 	logger := openTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		StaleMarkers: bootstrapadapter.NewStaleMarkerCleaner(client, logger),
+		StaleMarkers: newProductionMarkerCleaner(client, logger),
 		Logger:       logger,
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {

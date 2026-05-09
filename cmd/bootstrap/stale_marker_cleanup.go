@@ -12,9 +12,9 @@ import (
 // stale_marker_cleanup.go's Logger field uses the package-local Logger
 // interface (Debug/Warn/Error) — same shape every other orchestrator step
 // seam depends on. *state.Logger satisfies the interface structurally,
-// keeping production wiring (bootstrapadapter.NewStaleMarkerCleaner)
-// untouched while letting tests inject a plain in-memory recording fake
-// instead of opening a real on-disk log file.
+// keeping production wiring (cmd/bootstrap_production.go's inline
+// MarkerCleanupCore literal) untouched while letting tests inject a plain
+// in-memory recording fake instead of opening a real on-disk log file.
 
 // MarkerLister enumerates the live `@portal-skeleton-*` server-option markers
 // keyed by canonical paneKey (no prefix). The production adapter delegates to
