@@ -116,11 +116,10 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		// StaleMarkers is wired with a NoOp here so bootstrap does not
-		// panic on a nil step interface. Task 2-6 replaces this with the
-		// real bootstrapadapter wiring (MarkerLister/LivePaneLister/
-		// MarkerUnsetter against *tmux.Client).
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+		StaleMarkers: &bootstrapadapter.StaleMarkerCleaner{
+			Client: client,
+			Logger: logger,
+		},
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
