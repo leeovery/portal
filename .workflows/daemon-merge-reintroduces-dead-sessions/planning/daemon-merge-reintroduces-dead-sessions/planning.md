@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Live-set filter in `mergeSkippedPanes` (Fix Component A)
-status: draft
+status: approved
+approved_at: 2026-05-09
 
 **Goal**: Stop the resurrection symptom at the merge layer by filtering prev panes against the freshly-built `idx.Sessions` at session, window, and pane levels; replace the test that codifies the bug; prove `sessions.json` self-heals on the next daemon tick.
 
@@ -20,7 +21,8 @@ status: draft
 - [ ] `go test ./...` passes.
 
 ### Phase 2: Bootstrap stale-marker cleanup step (Fix Component B)
-status: draft
+status: approved
+approved_at: 2026-05-09
 
 **Goal**: Add a new bootstrap step between current step 6 (Clear `@portal-restoring`) and step 7 (SweepOrphanFIFOs) that unsets `@portal-skeleton-*` markers whose paneKey has no corresponding live pane, closing the silent scrollback-save gap (`cmd/state_daemon.go:131-133`) and preventing indefinite marker accumulation across the tmux server's lifetime.
 
