@@ -81,6 +81,8 @@ The step uses the existing `writeFIFOSignal` helper and `signalHydrateRetryDelay
 
 The `client-attached` and `client-session-changed` registrations remain in place. After the eager step has run, the user's subsequent attach (which is what causes the bare-CLI handoff or `tmux switch-client`) fires its hook against panes whose markers have already been unset by the helpers' success path; `signal-hydrate` enumerates the now-empty marker set for that session and exits cleanly. This is the desired "second-fire is a no-op" behaviour.
 
+This also incidentally resolves the duplicate-timestamp ENOENT warnings observed in the investigation — both `client-attached` and `client-session-changed` can fire near-simultaneously on attach, and under the pre-fix flow each invocation logged ENOENT against the now-unlinked FIFO. With markers cleared by the eager step before either event fires, both invocations enumerate empty marker sets and exit silently.
+
 ### Bootstrap Step Numbering Update
 
 After this insertion the orchestrator's step list becomes:

@@ -25,8 +25,8 @@ The investigation explicitly documents that `signal-hydrate` "write fifo … no 
 **Proposed Addition**:
 {Note that this also incidentally resolves the duplicate-timestamp ENOENT warnings observed in the investigation — both `client-attached` and `client-session-changed` can fire near-simultaneously on attach, and under the pre-fix flow each invocation logged ENOENT against the now-unlinked FIFO. With markers cleared by the eager step before either event fires, both invocations enumerate empty marker sets and exit silently.}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added to Fix 1 → Relationship to Existing Hook-Driven Signaling section.
 
 ---
 
