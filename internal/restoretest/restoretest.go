@@ -1,18 +1,9 @@
 //go:build integration
 
-// Package restoretest provides shared test scaffolding for portal's
-// reboot round-trip integration tests. It exists so the helpers
-// originally duplicated across:
-//
-//   - cmd/bootstrap/reboot_roundtrip_test.go
-//   - internal/restore/integration_full_test.go
-//   - cmd/reattach_integration_test.go
-//
-// have a single canonical implementation and cannot drift. The package is
-// gated `//go:build integration` because every consumer is also gated —
-// keeping the gate here means the package contributes zero compile cost
-// and zero surface to default `go test ./...` runs, while still being
-// importable from the integration test files that need it.
+// Integration-only helpers for portal's reboot round-trip tests. The
+// package-level doc lives in doc.go (untagged); this file holds only
+// helpers that depend on tmux fixtures or the portal binary and so are
+// gated `//go:build integration`.
 //
 // Two flavours of "build the portal CLI" are exposed:
 //
@@ -23,9 +14,6 @@
 //     the build (the cmd/reattach pattern). Cleanup is the caller's
 //     responsibility — typically skipped, since the dir lives under
 //     $TMPDIR which the OS reaps.
-//
-// The package depends only on internal/tmux + internal/state + stdlib +
-// testing — no import cycles with internal/restore or cmd/bootstrap.
 package restoretest
 
 import (

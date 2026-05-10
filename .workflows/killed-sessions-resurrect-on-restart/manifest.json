@@ -87,7 +87,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle": 2,
           "linters": [
             {
@@ -107,7 +107,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 5,
-          "current_task": "killed-sessions-resurrect-on-restart-5-4",
+          "current_task": "~",
           "completed_tasks": [
             "killed-sessions-resurrect-on-restart-1-1",
             "killed-sessions-resurrect-on-restart-1-2",
@@ -135,13 +135,15 @@
             "killed-sessions-resurrect-on-restart-4-7",
             "killed-sessions-resurrect-on-restart-5-1",
             "killed-sessions-resurrect-on-restart-5-2",
-            "killed-sessions-resurrect-on-restart-5-3"
+            "killed-sessions-resurrect-on-restart-5-3",
+            "killed-sessions-resurrect-on-restart-5-4"
           ],
           "completed_phases": [
             1,
             2,
             3,
-            4
+            4,
+            5
           ]
         }
       }
