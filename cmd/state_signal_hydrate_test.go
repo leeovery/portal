@@ -255,8 +255,8 @@ func TestSignalHydrate_RetriesOnENXIOWithFullDelayLadder(t *testing.T) {
 		t.Errorf("OpenFIFO calls = %d, want 3", openCalls)
 	}
 	want := []time.Duration{
-		signalHydrateRetryDelays[0], // 10ms
-		signalHydrateRetryDelays[1], // 20ms
+		state.SignalHydrateRetryDelays[0], // 10ms
+		state.SignalHydrateRetryDelays[1], // 20ms
 	}
 	if !reflect.DeepEqual(sleep.Durations, want) {
 		t.Errorf("Sleep durations = %v, want %v", sleep.Durations, want)
@@ -303,7 +303,7 @@ func TestSignalHydrate_RetriesOnEAGAINSameAsENXIO(t *testing.T) {
 	if openCalls != 2 {
 		t.Errorf("OpenFIFO calls = %d, want 2", openCalls)
 	}
-	want := []time.Duration{signalHydrateRetryDelays[0]}
+	want := []time.Duration{state.SignalHydrateRetryDelays[0]}
 	if !reflect.DeepEqual(sleep.Durations, want) {
 		t.Errorf("Sleep durations = %v, want %v", sleep.Durations, want)
 	}
@@ -536,9 +536,11 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 
 func TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags(t *testing.T) {
 	// Validate the production seam by inspecting its observable behavior:
-	// open a real FIFO with no reader and verify openFIFOForSignal returns
-	// ENXIO immediately rather than blocking. Only O_WRONLY|O_NONBLOCK
-	// produces this result on POSIX.
+	// open a real FIFO with no reader and verify state.OpenFIFOForSignal
+	// returns ENXIO immediately rather than blocking. Only O_WRONLY|O_NONBLOCK
+	// produces this result on POSIX. The primitive lives in internal/state;
+	// this test pins the cobra-init wiring (which passes the production
+	// opener through to runSignalHydrate via cfg.OpenFIFO).
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFOs are not supported on Windows")
 	}
@@ -549,20 +551,20 @@ func TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags(t *testing.T) {
 	}
 
 	start := time.Now()
-	f, err := openFIFOForSignal(path)
+	f, err := state.OpenFIFOForSignal(path)
 	elapsed := time.Since(start)
 
 	if f != nil {
 		_ = f.Close()
-		t.Fatal("openFIFOForSignal returned non-nil file with no reader; expected ENXIO")
+		t.Fatal("state.OpenFIFOForSignal returned non-nil file with no reader; expected ENXIO")
 	}
 	if !errors.Is(err, syscall.ENXIO) {
-		t.Fatalf("openFIFOForSignal err = %v, want syscall.ENXIO", err)
+		t.Fatalf("state.OpenFIFOForSignal err = %v, want syscall.ENXIO", err)
 	}
 	// O_NONBLOCK guarantees the call returns immediately rather than blocking
 	// for a reader. 100ms is a generous upper bound.
 	if elapsed >= 100*time.Millisecond {
-		t.Errorf("openFIFOForSignal blocked for %v; expected ~immediate return (O_NONBLOCK missing?)", elapsed)
+		t.Errorf("state.OpenFIFOForSignal blocked for %v; expected ~immediate return (O_NONBLOCK missing?)", elapsed)
 	}
 }
 

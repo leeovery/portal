@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
@@ -12,25 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// signalHydrateRetryDelays is the back-off ladder used when the per-pane FIFO
-// is not yet readable. The cumulative budget is 500ms (10+20+40+80+160+190 =
-// 500). Spec § "Signal Mechanism: FIFO Per Pane" describes the per-pane
-// FIFO contract; signal-hydrate retries O_WRONLY|O_NONBLOCK opens that
-// return ENXIO/EAGAIN before giving up. The helper inside the pane will
-// eventually reach its O_RDONLY call (spec § "Helper Behavior on Startup")
-// and the next attach path will re-signal.
-var signalHydrateRetryDelays = []time.Duration{
-	10 * time.Millisecond,
-	20 * time.Millisecond,
-	40 * time.Millisecond,
-	80 * time.Millisecond,
-	160 * time.Millisecond,
-	190 * time.Millisecond,
-}
-
 // signalHydrateConfig groups every dependency runSignalHydrate needs. OpenFIFO
-// and Sleep are test seams; production wires them to openFIFOForSignal and
-// time.Sleep. Logger is optional (a nil *state.Logger is a valid no-op).
+// and Sleep are test seams; production wires them to state.OpenFIFOForSignal
+// and time.Sleep. Logger is optional (a nil *state.Logger is a valid no-op).
 type signalHydrateConfig struct {
 	Session  string
 	StateDir string
@@ -40,14 +22,6 @@ type signalHydrateConfig struct {
 	Sleep    func(d time.Duration)
 }
 
-// openFIFOForSignal is the production OpenFIFO seam. It opens path with
-// O_WRONLY|O_NONBLOCK so a missing reader surfaces as ENXIO immediately
-// rather than blocking the tmux server (signal-hydrate is invoked via
-// run-shell, which is synchronous).
-func openFIFOForSignal(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
-}
-
 // runSignalHydrate enumerates panes in the named session, opens each
 // skeleton-marked pane's FIFO with retries, and writes a single byte. Every
 // failure path is soft (logs at WARN, returns nil) — signal-hydrate is fired
@@ -55,6 +29,10 @@ func openFIFOForSignal(path string) (*os.File, error) {
 // visible attach. The skeleton marker is intentionally not touched here; the
 // hydrate helper owns marker-unset to close the capture-mid-dump race (spec
 // → "The 100ms Settle Sleep").
+//
+// The FIFO write primitive itself lives in internal/state.WriteFIFOSignal so
+// other packages (cmd/bootstrap) can reuse the same retry ladder without
+// duplicating logic.
 func runSignalHydrate(cfg signalHydrateConfig) error {
 	markers, err := state.ListSkeletonMarkers(cfg.Client)
 	if err != nil {
@@ -74,51 +52,13 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 			continue
 		}
 		fifoPath := state.FIFOPath(cfg.StateDir, livePaneKey)
-		if err := writeFIFOSignal(fifoPath, cfg); err != nil {
+		if err := state.WriteFIFOSignal(fifoPath, cfg.OpenFIFO, cfg.Sleep); err != nil {
 			cfg.Logger.Warn(state.ComponentHydrate, "write fifo %s: %v", fifoPath, err)
 			// Continue — don't touch marker, don't abort other panes.
 		}
 	}
 
 	return nil
-}
-
-// writeFIFOSignal opens the per-pane FIFO O_WRONLY|O_NONBLOCK and writes a
-// single byte. ENXIO (no reader yet) and EAGAIN are retried per
-// signalHydrateRetryDelays; any other error returns immediately. Retry-
-// exhaustion is a soft failure (returned as a wrapped error so the caller
-// can log) — the marker stays set and the next attach path re-signals.
-func writeFIFOSignal(path string, cfg signalHydrateConfig) error {
-	var lastErr error
-	for i := 0; i <= len(signalHydrateRetryDelays); i++ {
-		f, err := cfg.OpenFIFO(path)
-		if err == nil {
-			if _, werr := f.Write([]byte{1}); werr != nil {
-				_ = f.Close()
-				return fmt.Errorf("write byte to %s: %w", path, werr)
-			}
-			_ = f.Close()
-			return nil
-		}
-
-		if !isRetryableFIFOError(err) {
-			return fmt.Errorf("open fifo %s: %w", path, err)
-		}
-
-		lastErr = err
-		if i < len(signalHydrateRetryDelays) {
-			cfg.Sleep(signalHydrateRetryDelays[i])
-		}
-	}
-	return fmt.Errorf("retries exhausted opening fifo %s: %w", path, lastErr)
-}
-
-// isRetryableFIFOError reports whether err should trigger the retry ladder.
-// Only ENXIO (no reader on a FIFO opened O_WRONLY|O_NONBLOCK) and EAGAIN
-// (transient resource shortage) are retryable; everything else — including
-// ENOENT (FIFO removed) — surfaces immediately so the caller can log.
-func isRetryableFIFOError(err error) bool {
-	return errors.Is(err, syscall.ENXIO) || errors.Is(err, syscall.EAGAIN)
 }
 
 // signalHydrateRunFunc is the package-level seam tests use to short-circuit
@@ -155,7 +95,7 @@ var stateSignalHydrateCmd = &cobra.Command{
 			StateDir: dir,
 			Client:   tmux.DefaultClient(),
 			Logger:   logger,
-			OpenFIFO: openFIFOForSignal,
+			OpenFIFO: state.OpenFIFOForSignal,
 			Sleep:    time.Sleep,
 		}
 		return signalHydrateRunFunc(cfg)
