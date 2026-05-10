@@ -25,7 +25,7 @@ import (
 //     adapter is state.DefaultFIFOSignaler{} (zero value), whose SendSignal
 //     delegates to state.SendHydrateSignal — the no-seam production entry
 //     point that bundles state.OpenFIFOForSignal + time.Sleep + the bounded
-//     retry ladder. Tests inject recordingFIFOSignaler.
+//     retry ladder. Tests inject statetest.RecordingFIFOSignaler.
 //   - Logger is optional. When non-nil, per-FIFO write failures are emitted
 //     via Logger.Warn under ComponentHydrate. A nil Logger is tolerated —
 //     EagerSignalHydrate substitutes a no-op default at entry so call sites

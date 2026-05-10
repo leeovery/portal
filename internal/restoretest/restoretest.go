@@ -149,8 +149,8 @@ func PrependPATH(t *testing.T, dir string) {
 // regressions (a stuck helper still times out).
 //
 // Driving the FIFO directly (rather than spawning the production CLI) is
-// byte-equivalent to writeFIFOSignal in cmd/state_signal_hydrate.go;
-// retain only when the binary path cannot be exercised.
+// byte-equivalent to state.WriteFIFOSignal / state.SendHydrateSignal in
+// internal/state; retain only when the binary path cannot be exercised.
 func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sessions []string) {
 	t.Helper()
 	const (
@@ -253,7 +253,7 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 
 // openAndSignalFIFO opens path O_WRONLY|O_NONBLOCK, retries ENXIO and
 // EAGAIN at delay intervals until budget elapses, then writes a single
-// byte. Byte-equivalent to cmd/state_signal_hydrate.writeFIFOSignal;
+// byte. Byte-equivalent to state.WriteFIFOSignal in internal/state;
 // internal helper for DriveSignalHydrate. Any open error other than
 // ENXIO/EAGAIN aborts immediately so genuine permission / path errors
 // surface clearly rather than waiting out the full budget.
