@@ -4,11 +4,13 @@
 
 ### Empirical reconfirmation of Symptom A on `main`
 
-Per spec § "Empirical Reconfirmation Before Implementation Starts", the planning agent ran the kill → reopen check on current `main` before scoping tasks.
+Per spec § "Empirical Reconfirmation Before Implementation Starts", the kill → reopen check against current `main` is required before scoping tasks. The planning agent has **deferred this check to the implementer** because the planning environment lacks a real tmux + Portal cold-start fixture; the spec's branch-behaviour contract is preserved by carrying both branches as conditional plan scope below.
 
-**Outcome**: [TO BE FILLED BY THE IMPLEMENTER BEFORE PHASE 1 STARTS — one of:]
-- *Neutralised*: Symptom A does not reproduce on `main` (the companion daemon-merge live-set filter is in effect). AC3 remains a regression guard and is satisfied by existing coverage in `internal/state/capture_test.go` filter tests and `cmd/bootstrap/stale_marker_cleanup_test.go`. No additional Symptom-A-specific task is added.
-- *Still reproduces*: Symptom A reproduces on `main`. AC3 graduates to "verified fix"; an explicit regression test is added as task `killed-sessions-resurrect-on-restart-1-9` (kill → reopen → assert absent). Phase 1 acceptance is updated to include AC3 verification.
+**Required action before Phase 1 starts** — the implementer runs the verification command and records the outcome here, then applies the matching branch:
+- *Neutralised*: Symptom A does not reproduce on `main` (the companion daemon-merge live-set filter is in effect). AC3 remains a regression guard and is satisfied by existing coverage in `internal/state/capture_test.go` filter tests and `cmd/bootstrap/stale_marker_cleanup_test.go`. No additional Symptom-A-specific task is added; Phase 1 task count stays at 8.
+- *Still reproduces*: Symptom A reproduces on `main`. AC3 graduates to "verified fix"; an explicit regression test is added as task `killed-sessions-resurrect-on-restart-1-9` (kill → reopen → assert absent). Phase 1 task count increases to 9 and Phase 1 acceptance is updated to include AC3 verification.
+
+**Outcome**: [TO BE FILLED BY THE IMPLEMENTER BEFORE PHASE 1 STARTS]
 
 **Verification command**: Boot a tmux server, `portal open` a saved session via Portal, kill the session via TUI `K`, then `portal open` again and confirm whether the killed session reappears in the list.
 
@@ -68,7 +70,7 @@ approved_at: 2026-05-10
 - [ ] Unit test asserts `runHydrate` timeout fall-through targets `execShellOrHookAndExit` (replicates the file-missing-path test shape).
 - [ ] Unit test asserts hook-firing on timeout end-to-end: registered on-resume hook + forced `ErrHydrateTimeout` produces exec target `sh -c '<HOOK>; exec $SHELL'`.
 - [ ] Integration test: register an on-resume hook for a non-attached saved session, cold-start, assert the hook ran in the restored pane (AC2 end-to-end).
-- [ ] Combined with Phase 1, the two `timeout waiting for signal` and `write fifo … no such file or directory` `WARN` lines are absent in steady-state cold-start logs (AC6 fully satisfied).
+- [ ] Combined with Phase 1, the behavioural prerequisites for AC6 are met — the two `timeout waiting for signal` and `write fifo … no such file or directory` `WARN` lines no longer fire in steady-state cold-start. AC6's observational verification gate is owned by task 3-4 (Manual Verification Protocol step 2); this phase does not close AC6 on its own.
 - [ ] Spec supersession recorded: original `built-in-session-resurrection` invariants at lines 838 and 873 are explicitly superseded by this phase's behaviour (no in-place edit of the original spec).
 
 #### Tasks
@@ -83,7 +85,6 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-2-4 | Unit test: runHydrate timeout fall-through with no registered hook still execs bare $SHELL via execShellOrHookAndExit | nil HookStore degrades to bare shell, lookup-not-found degrades to bare shell, lookup-error degrades to bare shell with single WARN |
 | killed-sessions-resurrect-on-restart-2-5 | Unit test: handleHydrateTimeout preserves the 100 ms settle-sleep absence and FIFO-unlink ordering | elapsed time on timeout handler stays well under hydrateSettleSleep, os.Remove(cfg.FIFO) still tolerates missing FIFO silently, marker-unset call ordered before exec fall-through |
 | killed-sessions-resurrect-on-restart-2-6 | Integration test (real tmux): cold-start with non-attached saved session + registered on-resume hook fires end-to-end (AC2) | N>=2 saved sessions where hook is on the non-attached session, hook stdout/effect observable in restored pane, test still passes when eager-signaling (Phase 1) has already cleared markers pre-timeout |
-| killed-sessions-resurrect-on-restart-2-7 | Record spec supersession of built-in-session-resurrection lines 838 and 873 in this work unit's planning notes (no in-place edit of the original spec) | original spec file untouched, supersession note links Phase 2 acceptance back to AC2 and AC6, lines 838/873 quoted verbatim with the replaced semantic stated alongside |
 
 ### Phase 3: Drop Outer sh -c Wrapper in buildHydrateCommand
 status: approved

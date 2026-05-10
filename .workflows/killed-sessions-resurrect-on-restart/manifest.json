@@ -36,7 +36,7 @@
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
           "finding_gate_mode": "auto",
-          "review_cycle": 1,
+          "review_cycle": 2,
           "phase": 4,
           "task": "~",
           "task_map": {
@@ -56,7 +56,6 @@
             "killed-sessions-resurrect-on-restart-2-4": "tick-991ecd",
             "killed-sessions-resurrect-on-restart-2-5": "tick-b0fbaa",
             "killed-sessions-resurrect-on-restart-2-6": "tick-c0a8c9",
-            "killed-sessions-resurrect-on-restart-2-7": "tick-c9dbd7",
             "killed-sessions-resurrect-on-restart-3": "tick-5d7638",
             "killed-sessions-resurrect-on-restart-3-1": "tick-4a8274",
             "killed-sessions-resurrect-on-restart-3-2": "tick-6ef57a",

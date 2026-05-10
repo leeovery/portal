@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-10
 cycle: 2
 phase: Traceability Review
@@ -10,7 +10,7 @@ topic: killed-sessions-resurrect-on-restart
 
 ## Findings
 
-### 1. Task 2-7 invents a planning-side supersession artifact the spec does not require
+### 1. Task 2-7 invents a planning-side supersession artifact the spec does not require [Fixed]
 
 **Type**: Hallucinated content
 **Spec Reference**: § "Fix 2 → Spec Supersession (Original Resurrection Spec)" (lines 156–163): "This change deliberately supersedes two invariants from `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`: ... The original session-resurrection spec is not modified in place; **the supersession is recorded here** as the canonical updated semantic for the timeout path."
@@ -80,14 +80,12 @@ The fix is to remove task 2-7 entirely. Phase 2's existing acceptance line 73 st
 >
 > **Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Fix 2 → Spec Supersession (Original Resurrection Spec)"
 
-**Resolution**: Pending
-**Notes**: The planning.md Phase 2 acceptance bullet at line 73 ("Spec supersession recorded: original `built-in-session-resurrection` invariants at lines 838 and 873 are explicitly superseded by this phase's behaviour (no in-place edit of the original spec).") is already satisfied by the killed-sessions spec at lines 156–163. No edit to that acceptance line is required after task 2-7 is removed; it correctly reflects that the supersession is recorded, just not in the planning directory.
-
-Phase 2 task table in `planning.md` (lines 78–86) also needs the row for `killed-sessions-resurrect-on-restart-2-7` removed. Phase 2 retains 6 tasks after removal; the front-matter `total: 7` in `phase-2-tasks.md` updates to `total: 6`. No other task references task 2-7, so no downstream plumbing edits are needed.
+**Resolution**: Fixed
+**Notes**: Task 2-7 removed from phase-2-tasks.md (replaced with a [Removed] note); planning.md Phase 2 task table row deleted; phase-2-tasks.md front-matter `total: 7` → `total: 6`; tick task tick-c9dbd7 removed via `tick remove --force`; manifest task_map entry deleted. The Phase 2 acceptance bullet at planning.md line 73 ("Spec supersession recorded ...") stays — it correctly reflects that the supersession is recorded in the killed-sessions spec at lines 156–163, not in a planning artifact.
 
 ---
 
-### 2. Pre-Flight Notes contradict themselves on whether the planning agent ran the empirical reconfirmation
+### 2. Pre-Flight Notes contradict themselves on whether the planning agent ran the empirical reconfirmation [Fixed]
 
 **Type**: Incomplete coverage
 **Spec Reference**: § "Empirical Reconfirmation Before Implementation Starts" (lines 326–336): "**Owner**: planning agent runs the check before scoping tasks. **Result recording**: outcome is logged in the plan's pre-flight notes (or PR description for a one-PR plan)."
@@ -139,12 +137,12 @@ Either resolution removes the internal contradiction. The current state is misle
 >
 > **Relationship to fix scope**: Either branch ships Fix 1 / Fix 2 / Fix 3 unchanged — reconfirmation only affects whether a Symptom-A-specific test task is added, not whether the upstream-trigger fix proceeds.
 
-**Resolution**: Pending
-**Notes**: Option A (planning agent runs the check now) is preferable per the spec's literal owner assignment, but is a planning-process action rather than a plan-content edit. Option B is the content-only fix that resolves the contradiction; if the user prefers Option A, the planning agent runs the check and records the outcome (and any resulting task addition) before re-submitting for review. Either resolution clears this finding.
+**Resolution**: Fixed
+**Notes**: Option B applied — Pre-Flight Notes section in planning.md rewritten to honestly acknowledge that the planning environment lacks a real tmux + Portal cold-start fixture and the check is deferred to the implementer with explicit branch contract. Option A would have required a tmux server, unavailable here.
 
 ---
 
-### 3. Phase 2 acceptance overstates AC6 satisfaction
+### 3. Phase 2 acceptance overstates AC6 satisfaction [Fixed]
 
 **Type**: Incomplete coverage (mis-framing)
 **Spec Reference**: § "Acceptance Criteria → Logging → AC6" (line 232): "**Verification is via the Manual Verification Protocol step 2** — observational, not a gated automated test."
@@ -164,7 +162,7 @@ The Phase 2 phrasing risks an implementer concluding AC6 is closed once Phase 2 
 **Proposed**:
 > - [ ] Combined with Phase 1, the behavioural prerequisites for AC6 are met — the two `timeout waiting for signal` and `write fifo … no such file or directory` `WARN` lines no longer fire in steady-state cold-start. AC6's observational verification gate is owned by task 3-4 (Manual Verification Protocol step 2); this phase does not close AC6 on its own.
 
-**Resolution**: Pending
-**Notes**: This is a wording correction only — no task content needs to change. The actual AC6 verification path through task 3-4 is correctly scoped. Resolves a small fidelity gap in how Phase 2 acceptance frames its relationship to AC6.
+**Resolution**: Fixed
+**Notes**: planning.md Phase 2 acceptance bullet rewritten to frame the change as a behavioural prerequisite for AC6 with the observational verification gate explicitly owned by task 3-4.
 
 ---

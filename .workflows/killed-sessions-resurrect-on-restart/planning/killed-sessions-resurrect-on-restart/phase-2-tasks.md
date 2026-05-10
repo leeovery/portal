@@ -1,7 +1,7 @@
 ---
 phase: 2
 phase_name: Timeout-Path Recovery Corrections
-total: 7
+total: 6
 ---
 
 ## killed-sessions-resurrect-on-restart-2-1 | approved
@@ -277,55 +277,4 @@ total: 7
 
 **Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Acceptance Criteria → AC2" and § "Test Plan → Integration → End-to-end hook firing on cold-start"
 
----
-
-## killed-sessions-resurrect-on-restart-2-7 | approved
-
-### Task killed-sessions-resurrect-on-restart-2-7: Record spec supersession of built-in-session-resurrection lines 838 and 873 in this work unit's planning notes (no in-place edit of the original spec)
-
-**Problem**: This phase's behavioural changes (marker unset on timeout; hooks fire on timeout) deliberately supersede two invariants from `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`. The original spec must NOT be edited in place (per spec § "Fix 2 → Spec Supersession": "The original session-resurrection spec is not modified in place; the supersession is recorded here as the canonical updated semantic for the timeout path"). A small markdown note in this work unit's planning directory makes the supersession discoverable to future readers of the original spec without rewriting history.
-
-**Solution**: Author a single markdown file `phase-2-supersession.md` under `.workflows/killed-sessions-resurrect-on-restart/planning/killed-sessions-resurrect-on-restart/` that quotes the two original-spec lines verbatim, states the replaced semantic alongside each, and links the supersession back to AC2 and AC6 of this work unit's spec. The file is implementation deliverable for this task — task description specifies its content shape; the implementer writes it.
-
-**Outcome**: A discoverable supersession record exists in the planning directory. Anyone reading the original built-in-session-resurrection spec who searches the repo for the quoted invariants finds this note and learns that the post-Phase-2 semantics differ. The original spec file is byte-identical pre/post this task.
-
-**Do**:
-- Create `.workflows/killed-sessions-resurrect-on-restart/planning/killed-sessions-resurrect-on-restart/phase-2-supersession.md` with the following content shape:
-  - **Title**: `# Spec Supersession: built-in-session-resurrection (Phase 2)`.
-  - **One-paragraph preamble**: state that this work unit (`killed-sessions-resurrect-on-restart`) supersedes two invariants from the original `built-in-session-resurrection` specification, that the original file is intentionally not edited, and link the original path: `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`.
-  - **Section "Superseded Invariant 1 (Original line 838)"**:
-    - Quote the original verbatim: `"Helper does NOT unset marker on FIFO timeout — next attach re-signals, retry happens naturally."`
-    - State the replaced semantic: `Helper unsets the @portal-skeleton-<paneKey> marker on FIFO timeout via unsetSkeletonMarkerOrLog. The original "next attach re-signals" promise was non-deliverable: the FIFO is unlinked at the same site, leaving no reader for any subsequent signal. Leaving the marker set fed Symptom C (stuck markers suppress scrollback save indefinitely).`
-    - Reference: link to AC2 and AC6 of the killed-sessions-resurrect-on-restart spec (`.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Acceptance Criteria → AC2 / AC6") and to phase-2-tasks.md tasks 2-1 (marker unset) and 2-3 (hook fires).
-  - **Section "Superseded Invariant 2 (Original line 873)"**:
-    - Quote the original verbatim: `"Resume hooks fire only from inside the hydrate helper's exec chain, at the end of successful hydration."`
-    - State the refined semantic: `Resume hooks fire from inside the hydrate helper's exec chain on any non-fatal terminal path — successful hydration, file-missing recovery, and timeout recovery. The original phrasing reflected an assumption that timeout was an exceptional condition; in practice (pre-Fix 1) it was the steady state, which made the "hooks unsafe on timeout" rationale incoherent. With Fix 1 (eager signaling) in place, timeout is genuinely rare; when it fires, the recovery path matches file-missing's already-tested behaviour.`
-    - Reference: same AC2/AC6 and tasks-2-3/2-4 links as above.
-  - **Section "Verification Trail"**:
-    - One-line entries linking to the unit tests that pin the new semantics: `cmd/state_hydrate_test.go::TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU` (task 2-1), `TestHydrate_Timeout_FiresHookWhenRegistered` (task 2-3), and the integration test `cmd/bootstrap/phase2_hook_fire_integration_test.go::TestPhase2_HookFiresOnNonAttachedSession_AC2` (task 2-6).
-- Do NOT touch `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`. Verify with `git diff` that the only file added by this task is `phase-2-supersession.md`.
-
-**Acceptance Criteria**:
-- [ ] `phase-2-supersession.md` exists at `.workflows/killed-sessions-resurrect-on-restart/planning/killed-sessions-resurrect-on-restart/phase-2-supersession.md`.
-- [ ] Both original-spec lines (838 and 873) are quoted verbatim in fenced quote blocks.
-- [ ] Each superseded invariant has its replaced semantic stated alongside.
-- [ ] Each invariant's section links back to AC2 and AC6 of this work unit's specification.
-- [ ] The original file `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` is byte-identical pre/post this task — verified via `git diff`.
-- [ ] The Verification Trail section links to the three tests added by tasks 2-1, 2-3, and 2-6.
-
-**Tests**:
-- No new test cases — this task is documentation-only. The acceptance criteria above pin the substantive checks (file exists at canonical path, both invariants quoted verbatim, AC2/AC6 referenced explicitly, original spec file byte-identical).
-
-**Edge Cases**:
-- Original spec file untouched — verify with `git diff` that the only file added by this task is `phase-2-supersession.md`.
-- Supersession note links Phase 2 acceptance back to AC2 and AC6 — both must appear as explicit substrings in the note (not transitively via the spec link).
-- Lines 838 and 873 quoted verbatim — copy from the file, do not paraphrase. The replaced semantic is stated alongside each quote, not embedded in the quote block.
-
-**Context**:
-> Spec § "Fix 2 → Spec Supersession (Original Resurrection Spec)": "This change deliberately supersedes two invariants from `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md`: ... The original session-resurrection spec is not modified in place; the supersession is recorded here as the canonical updated semantic for the timeout path."
-
-> Spec § "Acceptance Criteria → Spec Conformance": Phase 2's behavioural change deliberately deviates from line 873 of the original spec; this supersession note is the discoverable record of that deviation for future readers.
-
-> `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` lines 838 and 873 — the two invariants quoted verbatim in the new supersession note.
-
-**Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Fix 2 → Spec Supersession (Original Resurrection Spec)"
+[Removed in cycle 2 traceability review: task killed-sessions-resurrect-on-restart-2-7 (planning-side supersession artifact) — the spec already records the supersession at lines 156–163 of the killed-sessions spec; no additional planning-side deliverable is required.]
