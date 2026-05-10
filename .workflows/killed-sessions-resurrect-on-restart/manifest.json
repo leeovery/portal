@@ -61,7 +61,15 @@
             "killed-sessions-resurrect-on-restart-3-2": "tick-6ef57a",
             "killed-sessions-resurrect-on-restart-3-3": "tick-adbcc0",
             "killed-sessions-resurrect-on-restart-1-8": "tick-58db96",
-            "killed-sessions-resurrect-on-restart-3-4": "tick-f7d01d"
+            "killed-sessions-resurrect-on-restart-3-4": "tick-f7d01d",
+            "killed-sessions-resurrect-on-restart-4": "tick-531dd1",
+            "killed-sessions-resurrect-on-restart-4-1": "tick-d274be",
+            "killed-sessions-resurrect-on-restart-4-2": "tick-88848d",
+            "killed-sessions-resurrect-on-restart-4-3": "tick-cab144",
+            "killed-sessions-resurrect-on-restart-4-4": "tick-401560",
+            "killed-sessions-resurrect-on-restart-4-5": "tick-51d2d5",
+            "killed-sessions-resurrect-on-restart-4-6": "tick-ba6300",
+            "killed-sessions-resurrect-on-restart-4-7": "tick-c096b5"
           },
           "external_id": "tick-5782dd"
         }
@@ -73,7 +81,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

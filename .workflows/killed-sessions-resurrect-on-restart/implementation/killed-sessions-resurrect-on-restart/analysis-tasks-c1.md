@@ -8,7 +8,7 @@ Frontmatter:
 ---
 
 ## Task 1: Collapse EagerHydrateSignaler adapter via typed FIFO-signal seam and no-seam production helper
-status: pending
+status: approved
 severity: medium
 sources: architecture, duplication
 
@@ -50,7 +50,7 @@ sources: architecture, duplication
 ---
 
 ## Task 2: Flip integration-orchestrator builder default for EagerSignaler from NoOp to a real adapter
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -82,7 +82,7 @@ sources: architecture
 ---
 
 ## Task 3: Promote NoOp-defaulted orchestrator builder helper to non-test location to eliminate dual builders
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -118,7 +118,7 @@ sources: architecture
 ---
 
 ## Task 4: Promote sessions.json seeding helpers into shared package consumed by both cmd and cmd/bootstrap tests
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -152,7 +152,7 @@ sources: duplication
 ---
 
 ## Task 5: Extract signalFIFOAsync goroutine helper in cmd/state_hydrate_test.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -184,7 +184,7 @@ sources: duplication
 ---
 
 ## Task 6: Promote shared WaitForFileExists sentinel-poll helper into internal/restoretest
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -218,7 +218,7 @@ sources: duplication
 ---
 
 ## Task 7: Replace stale `sh -c` wrapper documentation in three integration-test comments
-status: pending
+status: approved
 severity: low
 sources: standards
 

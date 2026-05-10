@@ -115,6 +115,22 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-3-3 | Add integration test (real-tmux fixture): typed `exit` once in a restored pane closes the pane — `tmux list-panes` shows pane gone, not respawned with a fresh shell (AC5) | restored pane with on-resume hook registered (inner `sh -c '<HOOK>; exec $SHELL'` exec chain unaffected — exit still closes the pane); restored pane without a hook (bare `$SHELL` exec — exit closes the pane); no parked `sh -c .*portal state hydrate` parent process under tmux post-restore |
 | killed-sessions-resurrect-on-restart-3-4 | Execute Manual Verification Protocol on a real machine and record pre/post observations in the PR description (DoD item 3, AC6) | N>=2 saved sessions required for pre-fix repro; observational only (no automated test); deferrable to a reviewer with a real machine but DoD-blocking before merge |
 
+### Phase 4: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-4-1 | Collapse EagerHydrateSignaler adapter via typed FIFO-signal seam and no-seam production helper | avoid nil-receiver panic for zero-value EagerSignalCore in tests, confirm cmd/state_signal_hydrate.go retry orchestration retains its cmd-local seam |
+| killed-sessions-resurrect-on-restart-4-2 | Flip integration-orchestrator builder default for EagerSignaler from NoOp to a real adapter | manual signal-hydrate harness goroutines may race destructively, tests passing only because EagerSignaler was NoOp must surface as explicit opt-outs |
+| killed-sessions-resurrect-on-restart-4-3 | Promote NoOp-defaulted orchestrator builder helper to non-test location to eliminate dual builders | helper must not leak NoOp types into production callers, mandatory seams are positional arguments not options |
+| killed-sessions-resurrect-on-restart-4-4 | Promote sessions.json seeding helpers into shared package consumed by both cmd and cmd/bootstrap tests | preserve SeedSessionsJSONWithSavedAt for distinct SavedAt sites, helper imports testing deliberately |
+| killed-sessions-resurrect-on-restart-4-5 | Extract signalFIFOAsync goroutine helper in cmd/state_hydrate_test.go | sites with multi-byte writes/delays keep inline goroutines, preserve t.Helper()/t.Cleanup() semantics |
+| killed-sessions-resurrect-on-restart-4-6 | Promote shared WaitForFileExists sentinel-poll helper into internal/restoretest | choose 50ms canonical tick or make tick mandatory, diagnostic must include absolute path + elapsed time |
+| killed-sessions-resurrect-on-restart-4-7 | Replace stale sh -c wrapper documentation in three integration-test comments | only update comments describing live behaviour, preserve historical-context notes |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":
