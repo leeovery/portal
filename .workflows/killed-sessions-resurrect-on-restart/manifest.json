@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "killed-sessions-resurrect-on-restart-3-2",
+          "task": "killed-sessions-resurrect-on-restart-3-3",
           "task_map": {
             "killed-sessions-resurrect-on-restart": "tick-5782dd",
             "killed-sessions-resurrect-on-restart-1": "tick-a0fe00",
@@ -58,7 +58,8 @@
             "killed-sessions-resurrect-on-restart-2-6": "tick-c0a8c9",
             "killed-sessions-resurrect-on-restart-2-7": "tick-c9dbd7",
             "killed-sessions-resurrect-on-restart-3": "tick-5d7638",
-            "killed-sessions-resurrect-on-restart-3-1": "tick-4a8274"
+            "killed-sessions-resurrect-on-restart-3-1": "tick-4a8274",
+            "killed-sessions-resurrect-on-restart-3-2": "tick-6ef57a"
           },
           "external_id": "tick-5782dd"
         }
