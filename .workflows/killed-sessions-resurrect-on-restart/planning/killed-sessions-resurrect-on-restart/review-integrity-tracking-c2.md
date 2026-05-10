@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-10
 cycle: 2
 phase: Plan Integrity Review
@@ -10,7 +10,7 @@ topic: Killed Sessions Resurrect on Restart
 
 ## Findings
 
-### 1. Planning.md task-table Edge Cases for tasks 2-2 and 2-5 are stale relative to phase detail
+### 1. Planning.md task-table Edge Cases for tasks 2-2 and 2-5 are stale relative to phase detail [Fixed]
 
 **Severity**: Important
 **Plan Reference**: `planning.md` Phase 2 task table — rows for `killed-sessions-resurrect-on-restart-2-2` (line 83) and `killed-sessions-resurrect-on-restart-2-5` (line 86)
@@ -42,12 +42,12 @@ This is an Important-severity finding rather than Critical because phase detail 
 
 > | killed-sessions-resurrect-on-restart-2-5 | Unit test: runHydrate timeout fall-through preserves the 100 ms settle-sleep, marker-unset ordering, and FIFO-unlink tolerance | elapsed time on timeout handler stays well under hydrateSettleSleep (handler does not own the sleep), os.Remove(cfg.FIFO) still tolerates missing FIFO silently, marker-unset call ordered before exec fall-through |
 
-**Resolution**: Pending
-**Notes**: Affects only the planning.md task-table summary rows. Phase-2 task detail file (phase-2-tasks.md) is already correct.
+**Resolution**: Fixed
+**Notes**: Both planning.md task-table rows for tasks 2-2 and 2-5 updated to match the corrected phase-2-tasks.md task names and edge-cases. The summary now matches the detail.
 
 ---
 
-### 2. Phase 2 acceptance line on supersession is now under-specified after task 2-7 removal
+### 2. Phase 2 acceptance line on supersession is now under-specified after task 2-7 removal [Fixed]
 
 **Severity**: Minor
 **Plan Reference**: `planning.md` Phase 2 Acceptance, line 74
@@ -70,7 +70,7 @@ This is Minor because the implementer working through phase-2-tasks.md tasks 2-1
 
 > - [ ] Spec supersession is recorded in the killed-sessions spec (lines 156–163) and is satisfied by Phase 2's behavioural changes — task 2-1 supersedes "Helper does NOT unset marker on FIFO timeout" (built-in-session-resurrection spec line 838) and task 2-3 supersedes "Resume hooks fire only at the end of successful hydration" (line 873). No in-place edit of the original spec; no separate planning-side artifact required.
 
-**Resolution**: Pending
-**Notes**: The replacement makes the satisfaction path explicit (spec records exist; Phase 2 task behaviours close the loop) and removes the ambiguity that survived task 2-7's removal. The cycle-2 traceability tracking file already contains the rationale for why no separate artifact is created.
+**Resolution**: Fixed
+**Notes**: planning.md Phase 2 acceptance bullet rewritten to make explicit (a) the supersession record lives in the killed-sessions spec at lines 156–163, (b) tasks 2-1 and 2-3 are the behavioural deliveries that supersede lines 838 and 873 respectively, and (c) no planning-side artifact is required.
 
 ---
