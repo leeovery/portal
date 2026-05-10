@@ -1264,6 +1264,58 @@ func TestHydrate_TimeoutToleratesMissingFIFOSilently(t *testing.T) {
 	}
 }
 
+// TestHydrate_TimeoutHandler_OrderingAndTimingInvariants pins the
+// handler-boundary invariants of handleHydrateTimeout directly (no runHydrate
+// wrapping): the handler tolerates a missing FIFO silently and unsets the
+// @portal-skeleton-<paneKey> marker before returning.
+//
+// The 100ms settle-sleep is intentionally NOT asserted here — per spec § Fix 2
+// → Specific Changes → 4 it lives in runHydrate, not the handler. The
+// runHydrate-boundary timing is gated by
+// TestHydrate_Timeout_PreservesSettleSleepBeforeExec.
+func TestHydrate_TimeoutHandler_OrderingAndTimingInvariants(t *testing.T) {
+	dir := t.TempDir()
+	// FIFO path that does not exist — handler must tolerate the missing file
+	// without surfacing an error (defense-in-depth: bootstrap also sweeps
+	// orphan FIFOs).
+	fifo := filepath.Join(dir, "hydrate-ord__0.0.fifo")
+
+	cmder := &recordingCommander{}
+	cfg := hydrateConfig{
+		FIFO:    fifo,
+		HookKey: "ord:0.0",
+		Stdout:  io.Discard,
+		Client:  tmux.NewClient(cmder),
+	}
+
+	if err := handleHydrateTimeout(cfg); err != nil {
+		t.Fatalf("handleHydrateTimeout: %v (must tolerate missing FIFO)", err)
+	}
+
+	// FIFO-unlink tolerance: the FIFO never existed and the handler returned
+	// nil — confirm the file is still absent (i.e., os.Remove's ENOENT was
+	// swallowed, not promoted).
+	if _, statErr := os.Stat(fifo); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("FIFO unexpectedly present after handler; stat err = %v", statErr)
+	}
+
+	// Marker-unset ordering: the handler must invoke
+	// `tmux set-option -su @portal-skeleton-<paneKey>` before returning. The
+	// paneKey derives from the FIFO basename via state.PaneKeyFromFIFOPath:
+	// hydrate-ord__0.0.fifo → ord__0.0.
+	want := []string{"set-option", "-su", "@portal-skeleton-ord__0.0"}
+	matched := false
+	for _, c := range cmder.Calls {
+		if reflect.DeepEqual(c, want) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Errorf("expected tmux call %v before handler returned; calls: %v", want, cmder.Calls)
+	}
+}
+
 // seedHookStore writes a hooks.json containing the given map and returns a
 // *hooks.Store pointing at it. Used by hook-firing tests to drive
 // LookupOnResume against a real on-disk store.
