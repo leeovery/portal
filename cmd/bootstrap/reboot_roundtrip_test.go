@@ -404,7 +404,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// post-dump and post-settle (step 8 of "Helper Behavior on
 	// Startup"). Polling the marker set is a reliable barrier without
 	// having to introspect helper subprocesses.
-	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second, 50*time.Millisecond)
 
 	// ANSI scrollback bytes survive: capture-pane -e -p -S - against
 	// the hook-owning pane should contain the red SGR sequence and
@@ -1018,7 +1018,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	// Both sessions must now have all skeleton markers cleared — the
 	// two-step pipeline drove every restored pane to hydration
 	// completion.
-	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second, 50*time.Millisecond)
 
 	// Live structure must still be intact under the production-binary
 	// drive path: alpha + beta both live, each with a single pane at
@@ -1238,7 +1238,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// clear. A timeout means the helper either crashed before unsetting
 	// its marker, or never reached its open(O_RDONLY) — both regressions
 	// we want to catch.
-	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second, 50*time.Millisecond)
 
 	// portal.log must contain ZERO `hydrate timeout` WARN lines for any
 	// pane in the leading-dash session. A regression of Task 1-1 or 1-2

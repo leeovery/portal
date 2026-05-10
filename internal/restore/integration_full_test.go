@@ -247,7 +247,7 @@ func TestPhase3Integration_FullRoundTrip(t *testing.T) {
 	// settle-sleep step. A stuck marker means the helper crashed
 	// pre-unset; downstream assertions would be flaky if we proceeded
 	// blindly.
-	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second, 50*time.Millisecond)
 
 	// Acceptance: ANSI scrollback survives. capture-pane -e on each
 	// hydrated pane should contain the seeded SGR + payload + reset

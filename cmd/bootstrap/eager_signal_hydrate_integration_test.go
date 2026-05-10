@@ -237,7 +237,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	// CPU-pressure failure (helper fork+exec slow under load), not an
 	// AC1 regression; the diagnostic dump distinguishes the two.
 	defer dumpPortalLogOnFailure(t, stateDir)
-	pollUntilMarkersCleared(t, client, 2*time.Second, 50*time.Millisecond)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 2*time.Second, 50*time.Millisecond)
 }
 
 // dumpPortalLogOnFailure prints <stateDir>/portal.log via t.Logf when the
@@ -352,7 +352,7 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 	// suppress the very write we are asserting on. The 2s budget is the
 	// AC1 contract; AC4 strictly requires AC1 to have passed first.
 	defer dumpPortalLogOnFailure(t, stateDir)
-	pollUntilMarkersCleared(t, client, 2*time.Second, 50*time.Millisecond)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 2*time.Second, 50*time.Millisecond)
 
 	// Force a deterministic terminated record into beta's pane buffer so
 	// state.TailScrollback has at least one '\n'-terminated line to
@@ -415,37 +415,4 @@ func waitForPaneText(t *testing.T, client *tmux.Client, target, needle string, b
 		time.Sleep(tick)
 	}
 	t.Fatalf("pane %s did not echo %q within %s", target, needle, budget)
-}
-
-// pollUntilMarkersCleared is the AC1-specific 2-second / 50ms poll loop.
-//
-// Distinct from restoretest.WaitForSkeletonMarkersCleared (which uses a
-// 10-second budget for the full reboot round-trip): AC1 mandates a
-// strict 2-second bound, so a longer budget would silently mask a
-// regression where the eager-signal step ran but took N seconds. The
-// 2-second value is the spec's published contract — see
-// specification.md § Acceptance Criteria → AC1.
-//
-// On expiry the test fails with a sorted list of stuck paneKeys for
-// stable diagnostics. A stuck marker after the eager-signal step
-// indicates either: (a) the helper crashed before unsetting it, (b) the
-// FIFO write never reached the helper (signal byte lost), or (c) the
-// eager-signal step itself was skipped or no-op'd.
-func pollUntilMarkersCleared(t *testing.T, client *tmux.Client, budget, tick time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		markers, err := state.ListSkeletonMarkers(client)
-		if err != nil {
-			t.Fatalf("ListSkeletonMarkers: %v", err)
-		}
-		if len(markers) == 0 {
-			return
-		}
-		time.Sleep(tick)
-	}
-	markers, _ := state.ListSkeletonMarkers(client)
-	t.Fatalf("AC1 violation: skeleton markers still set after %s; "+
-		"want empty set within budget. stuck markers=%v",
-		budget, restoretest.SortedKeySet(markers))
 }

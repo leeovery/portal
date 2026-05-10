@@ -285,10 +285,16 @@ func openAndSignalFIFO(path string, delay, budget time.Duration) error {
 // server option has been unset. Each helper unsets its own marker after
 // scrollback dump + 100ms settle (or after the file-missing recovery
 // path), so an empty marker set means every helper has reached the
-// hook-or-shell exec step. timeout is the deadline; on expiry the test
-// fails with a sorted list of stuck keys for stable diagnostics — a
-// stuck marker indicates the helper crashed before unsetting it.
-func WaitForSkeletonMarkersCleared(t *testing.T, client *tmux.Client, timeout time.Duration) {
+// hook-or-shell exec step. timeout is the deadline; tick is the poll
+// cadence. On expiry the test fails with a sorted list of stuck keys
+// for stable diagnostics — a stuck marker indicates the helper crashed
+// before unsetting it.
+//
+// tick is mandatory — call sites historically disagreed on cadence
+// (AC1's 2s-budget poll used 50ms; the reboot round-trip's 10s-budget
+// poll also used 50ms internally), so the consolidated helper requires
+// the caller to be explicit.
+func WaitForSkeletonMarkersCleared(t *testing.T, client *tmux.Client, timeout, tick time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -299,7 +305,7 @@ func WaitForSkeletonMarkersCleared(t *testing.T, client *tmux.Client, timeout ti
 		if len(markers) == 0 {
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(tick)
 	}
 	markers, _ := state.ListSkeletonMarkers(client)
 	t.Fatalf("skeleton markers still set after %s: %v", timeout, SortedKeySet(markers))

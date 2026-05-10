@@ -407,7 +407,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 func driveAndAwaitMarkerClear(t *testing.T, client *tmux.Client, stateDir, sessionName string) {
 	t.Helper()
 	restoretest.DriveSignalHydrate(t, client, stateDir, []string{sessionName})
-	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second)
+	restoretest.WaitForSkeletonMarkersCleared(t, client, 10*time.Second, 50*time.Millisecond)
 }
 
 // awaitPaneGone polls list-panes for the target session until the
