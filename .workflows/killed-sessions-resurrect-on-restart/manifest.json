@@ -94,7 +94,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 3,
-          "current_task": "killed-sessions-resurrect-on-restart-3-2",
+          "current_task": "killed-sessions-resurrect-on-restart-3-3",
           "completed_tasks": [
             "killed-sessions-resurrect-on-restart-1-1",
             "killed-sessions-resurrect-on-restart-1-2",
@@ -110,7 +110,8 @@
             "killed-sessions-resurrect-on-restart-2-4",
             "killed-sessions-resurrect-on-restart-2-5",
             "killed-sessions-resurrect-on-restart-2-6",
-            "killed-sessions-resurrect-on-restart-3-1"
+            "killed-sessions-resurrect-on-restart-3-1",
+            "killed-sessions-resurrect-on-restart-3-2"
           ],
           "completed_phases": [
             1,
