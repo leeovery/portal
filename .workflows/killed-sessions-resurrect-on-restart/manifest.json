@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "killed-sessions-resurrect-on-restart": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "d91da2b5d4eaf6e9674a72d7cbf483664f1c4573",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
