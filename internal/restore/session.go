@@ -422,8 +422,9 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 //
 // Inputs containing literal `'` would break shell parsing under the bare
 // form (no outer single-quoted envelope exists to anchor the canonical
-// `'\''` close-escape-reopen idiom). Portal's sanitization (sanitizeSessionName
-// in internal/state/panekey.go) does not currently produce such inputs —
+// close-escape-reopen idiom for embedding a single quote inside a
+// single-quoted string). Portal's sanitization (sanitizeSessionName in
+// internal/state/panekey.go) does not currently produce such inputs —
 // session names with `/`, `\`, or `\0` are filtered, and pane keys derive
 // from the sanitized session name plus integer indices — so the bare form
 // is safe in practice.
