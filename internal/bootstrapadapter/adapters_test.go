@@ -56,49 +56,6 @@ func TestFIFOSweeper_PropagatesListSkeletonMarkersError(t *testing.T) {
 	}
 }
 
-// TestEagerHydrateSignaler_PropagatesListSkeletonMarkersError proves that a
-// ShowAllServerOptions failure surfaces from EagerHydrateSignaler.EagerSignalHydrate
-// wrapped (via state.ListSkeletonMarkers) so the orchestrator's step-6
-// Warn-and-swallow site can log it uniformly with siblings (FIFOSweeper.Sweep,
-// CleanStaleMarkers). Without this propagation, transient tmux failures during
-// eager-signal would be silently lost from portal.log.
-func TestEagerHydrateSignaler_PropagatesListSkeletonMarkersError(t *testing.T) {
-	sentinel := errors.New("show-options boom")
-	s := &bootstrapadapter.EagerHydrateSignaler{
-		Client:   &listerStub{err: sentinel},
-		StateDir: t.TempDir(),
-		Logger:   nil, // *state.Logger is nil-safe; the path under test never reaches it.
-	}
-
-	err := s.EagerSignalHydrate()
-	if err == nil {
-		t.Fatal("EagerSignalHydrate returned nil; want error wrapping the sentinel")
-	}
-	if !errors.Is(err, sentinel) {
-		t.Errorf("EagerSignalHydrate err = %v; want errors.Is(err, sentinel)=true", err)
-	}
-}
-
-// TestEagerHydrateSignaler_ZeroMarkersIsNoOp proves the zero-marker fast path:
-// when the ServerOptionLister returns no skeleton markers, EagerSignalHydrate
-// short-circuits inside EagerSignalCore before any FIFO-write attempt, returns
-// nil, and never touches the StateDir on disk. The empty StateDir asserts the
-// no-FIFO-touch contract: an attempted WriteFIFOSignal would surface as a
-// non-existent-path error and propagate via the per-FIFO log path; here we
-// observe success + no side effects. This guards the post-Restore steady
-// state on a fresh bootstrap with no saved sessions.
-func TestEagerHydrateSignaler_ZeroMarkersIsNoOp(t *testing.T) {
-	s := &bootstrapadapter.EagerHydrateSignaler{
-		Client:   &listerStub{out: ""}, // empty = no skeleton markers
-		StateDir: t.TempDir(),
-		Logger:   nil,
-	}
-
-	if err := s.EagerSignalHydrate(); err != nil {
-		t.Fatalf("EagerSignalHydrate returned %v; want nil under zero markers", err)
-	}
-}
-
 // TestRestoringMarker_SetClearsTogglesServerOption proves that Set writes
 // @portal-restoring="1" and Clear removes it, both observable on the live
 // tmux server. The literal name comes from state.RestoringMarkerName so the

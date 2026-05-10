@@ -12,26 +12,29 @@ import (
 // out, leaking @portal-skeleton-* markers and silently degrading scrollback
 // save and on-resume hooks.
 //
-// Each dependency is a small interface / function value so each can be
-// mocked independently in tests, mirroring the dependency-shape pattern
-// established by MarkerCleanupCore and FIFOSweeper:
+// Each dependency is a small interface so each can be mocked independently
+// in tests, mirroring the dependency-shape pattern established by
+// MarkerCleanupCore and FIFOSweeper:
 //
 //   - Markers enumerates the marker map via state.ListSkeletonMarkers; the
 //     production adapter is *tmux.Client (satisfies state.ServerOptionLister
 //     directly via ShowAllServerOptions).
 //   - StateDir is the resolved Portal state directory used to derive each
 //     pane's FIFO path via state.FIFOPath(StateDir, paneKey).
-//   - WriteFIFOSignal performs the per-FIFO non-blocking write; the
-//     production wiring delegates to the helper introduced in task 1-2.
+//   - Signaler performs the per-FIFO non-blocking write. The production
+//     adapter is state.DefaultFIFOSignaler{} (zero value), whose SendSignal
+//     delegates to state.SendHydrateSignal — the no-seam production entry
+//     point that bundles state.OpenFIFOForSignal + time.Sleep + the bounded
+//     retry ladder. Tests inject recordingFIFOSignaler.
 //   - Logger is optional. When non-nil, per-FIFO write failures are emitted
 //     via Logger.Warn under ComponentHydrate. A nil Logger is tolerated —
 //     EagerSignalHydrate substitutes a no-op default at entry so call sites
 //     can dispatch unconditionally, mirroring MarkerCleanupCore's contract.
 type EagerSignalCore struct {
-	Markers         state.ServerOptionLister
-	StateDir        string
-	WriteFIFOSignal func(path string) error
-	Logger          Logger
+	Markers  state.ServerOptionLister
+	StateDir string
+	Signaler state.FIFOSignaler
+	Logger   Logger
 }
 
 var _ EagerHydrateSignaler = (*EagerSignalCore)(nil)
@@ -48,7 +51,7 @@ var _ EagerHydrateSignaler = (*EagerSignalCore)(nil)
 //  3. If zero markers exist, return nil immediately — zero-marker no-op,
 //     no FIFO writes attempted.
 //  4. For each paneKey, derive fifoPath := state.FIFOPath(c.StateDir,
-//     paneKey) and call c.WriteFIFOSignal(fifoPath). On error, log via
+//     paneKey) and call c.Signaler.SendSignal(fifoPath). On error, log via
 //     logger.Warn(state.ComponentHydrate, "eager-signal: write fifo %s:
 //     %v", fifoPath, err) and continue to the next pane — a single failing
 //     FIFO must NEVER abort the loop, otherwise the helpers in the
@@ -79,7 +82,7 @@ func (c *EagerSignalCore) EagerSignalHydrate() error {
 
 	for paneKey := range markers {
 		fifoPath := state.FIFOPath(c.StateDir, paneKey)
-		if err := c.WriteFIFOSignal(fifoPath); err != nil {
+		if err := c.Signaler.SendSignal(fifoPath); err != nil {
 			// Per-FIFO failures are soft — log and continue so the
 			// remaining markers still get their signal. The loop body's
 			// last statement is the warn call, so the implicit fallthrough

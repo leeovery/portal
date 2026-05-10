@@ -74,3 +74,45 @@ func WriteFIFOSignal(path string, openFIFO func(string) (*os.File, error), sleep
 func isRetryableFIFOError(err error) bool {
 	return errors.Is(err, syscall.ENXIO) || errors.Is(err, syscall.EAGAIN)
 }
+
+// SendHydrateSignal is the production no-seam entry point that callers in
+// cmd/state_signal_hydrate (the run-shell handler) and cmd/bootstrap_production
+// (via DefaultFIFOSignaler) use to write the hydrate signal byte to a single
+// FIFO. It pins the production seams (OpenFIFOForSignal + time.Sleep) so call
+// sites stay closure-free and signature-uniform with sibling primitives.
+//
+// Test code that needs to substitute its own openFIFO/sleep seams (e.g. for
+// retry-ladder coverage) should call WriteFIFOSignal directly — that lower-
+// level entry point exposes both seams and remains the layer where the retry
+// ladder is exercised.
+func SendHydrateSignal(path string) error {
+	return WriteFIFOSignal(path, OpenFIFOForSignal, time.Sleep)
+}
+
+// FIFOSignaler is the production-shape seam the bootstrap orchestrator's
+// EagerSignalCore depends on for per-pane FIFO writes. The single-method
+// shape mirrors the rest of the orchestrator's seam vocabulary
+// (HookRegistrar.RegisterPortalHooks, FIFOSweeper.Sweep,
+// MarkerCleaner.CleanStaleMarkers) so a future step that writes a FIFO byte
+// can re-use the same seam without inventing a parallel closure-typed field.
+//
+// SendSignal must be safe to invoke from a tmux-hook context: the production
+// implementation (DefaultFIFOSignaler) inherits WriteFIFOSignal's bounded
+// retry ladder (~500ms total budget, see SignalHydrateRetryDelays) and
+// non-blocking O_WRONLY|O_NONBLOCK open semantics, so it cannot hang the
+// tmux server even when the helper has not yet reached its O_RDONLY call.
+type FIFOSignaler interface {
+	SendSignal(path string) error
+}
+
+// DefaultFIFOSignaler is the production FIFOSignaler. SendSignal delegates to
+// SendHydrateSignal so the retry ladder + production seam wiring stay in one
+// place. cmd/bootstrap_production.go drops a zero-value DefaultFIFOSignaler{}
+// straight into the EagerSignalCore literal — there is no closure adapter
+// glue at the wiring site (mirroring MarkerCleanupCore's pattern where
+// *tmux.Client satisfies the Markers/Panes/Unsetter seams directly).
+type DefaultFIFOSignaler struct{}
+
+// SendSignal delegates to SendHydrateSignal verbatim so DefaultFIFOSignaler
+// cannot drift from the no-seam production entry point.
+func (DefaultFIFOSignaler) SendSignal(path string) error { return SendHydrateSignal(path) }

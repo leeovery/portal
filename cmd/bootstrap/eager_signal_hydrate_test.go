@@ -9,10 +9,13 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// recordingFIFOWriter records each fifoPath EagerSignalCore writes to and
-// (optionally) returns a per-path or global error so tests can simulate
-// per-FIFO write failures and assert loop-continuation behaviour.
-type recordingFIFOWriter struct {
+// recordingFIFOSignaler records each fifoPath EagerSignalCore signals via the
+// new typed FIFOSignaler seam and (optionally) returns a per-path or global
+// error so tests can simulate per-FIFO write failures and assert
+// loop-continuation behaviour. Replaces the pre-task-4-1 recordingFIFOWriter
+// (which satisfied a closure-typed `WriteFIFOSignal func(path) error` field);
+// the typed seam removes the need for closure adapter glue.
+type recordingFIFOSignaler struct {
 	calls []string
 	// errOn returns the configured error on the first call whose path equals
 	// the key. Used for "second pane fails" style scenarios.
@@ -22,16 +25,22 @@ type recordingFIFOWriter struct {
 	err error
 }
 
-func (w *recordingFIFOWriter) Write(path string) error {
-	w.calls = append(w.calls, path)
-	if w.err != nil {
-		return w.err
+// SendSignal satisfies state.FIFOSignaler. It records path verbatim and
+// returns the configured per-path or global error, otherwise nil.
+func (s *recordingFIFOSignaler) SendSignal(path string) error {
+	s.calls = append(s.calls, path)
+	if s.err != nil {
+		return s.err
 	}
-	if e, ok := w.errOn[path]; ok {
+	if e, ok := s.errOn[path]; ok {
 		return e
 	}
 	return nil
 }
+
+// Compile-time assertion: the recording fake must satisfy state.FIFOSignaler.
+// A drift in the production interface signature surfaces here.
+var _ state.FIFOSignaler = (*recordingFIFOSignaler)(nil)
 
 // TestEagerHydrateSignalerInterfaceContract pins the seam shape: the
 // orchestrator step relies on a single-method interface so adding a new
@@ -53,7 +62,7 @@ func TestNoOpEagerHydrateSignaler_ReturnsNil(t *testing.T) {
 }
 
 // TestEagerSignalHydrate_WritesSignalToEveryMarkerFIFO pins the N-marker
-// happy path: every marker paneKey gets one WriteFIFOSignal call at
+// happy path: every marker paneKey gets one Signaler.SendSignal call at
 // state.FIFOPath(stateDir, paneKey), the loop visits every entry, and the
 // method returns nil.
 func TestEagerSignalHydrate_WritesSignalToEveryMarkerFIFO(t *testing.T) {
@@ -63,12 +72,12 @@ func TestEagerSignalHydrate_WritesSignalToEveryMarkerFIFO(t *testing.T) {
 		"beta__1.2":  {},
 		"gamma__2.0": {},
 	}}
-	writer := &recordingFIFOWriter{}
+	signaler := &recordingFIFOSignaler{}
 
 	c := &EagerSignalCore{
-		Markers:         lister,
-		StateDir:        stateDir,
-		WriteFIFOSignal: writer.Write,
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
@@ -82,15 +91,15 @@ func TestEagerSignalHydrate_WritesSignalToEveryMarkerFIFO(t *testing.T) {
 		state.FIFOPath(stateDir, "beta__1.2"),
 		state.FIFOPath(stateDir, "gamma__2.0"),
 	}
-	got := append([]string{}, writer.calls...)
+	got := append([]string{}, signaler.calls...)
 	sort.Strings(want)
 	sort.Strings(got)
 	if len(got) != len(want) {
-		t.Fatalf("WriteFIFOSignal call count = %d (%v); want %d (%v)", len(got), got, len(want), want)
+		t.Fatalf("Signaler.SendSignal call count = %d (%v); want %d (%v)", len(got), got, len(want), want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("WriteFIFOSignal call[%d] = %q; want %q", i, got[i], want[i])
+			t.Errorf("Signaler.SendSignal call[%d] = %q; want %q", i, got[i], want[i])
 		}
 	}
 }
@@ -98,22 +107,22 @@ func TestEagerSignalHydrate_WritesSignalToEveryMarkerFIFO(t *testing.T) {
 // TestEagerSignalHydrate_ZeroMarkersIsNoOp pins the zero-marker case: the
 // step short-circuits before any FIFO write attempt and returns nil. This is
 // the post-Restore steady state on a fresh bootstrap with no saved sessions
-// and must not produce a spurious WriteFIFOSignal call.
+// and must not produce a spurious Signaler.SendSignal call.
 func TestEagerSignalHydrate_ZeroMarkersIsNoOp(t *testing.T) {
 	lister := &fakeMarkerLister{markers: map[string]struct{}{}}
-	writer := &recordingFIFOWriter{}
+	signaler := &recordingFIFOSignaler{}
 
 	c := &EagerSignalCore{
-		Markers:         lister,
-		StateDir:        "/var/state",
-		WriteFIFOSignal: writer.Write,
+		Markers:  lister,
+		StateDir: "/var/state",
+		Signaler: signaler,
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
 		t.Fatalf("EagerSignalHydrate returned error: %v", err)
 	}
-	if len(writer.calls) != 0 {
-		t.Errorf("WriteFIFOSignal called %d times under zero-marker no-op; want 0 (calls=%v)", len(writer.calls), writer.calls)
+	if len(signaler.calls) != 0 {
+		t.Errorf("Signaler.SendSignal called %d times under zero-marker no-op; want 0 (calls=%v)", len(signaler.calls), signaler.calls)
 	}
 }
 
@@ -132,23 +141,23 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 		"healthy__1.0":  {},
 		"healthy2__2.0": {},
 	}}
-	writer := &recordingFIFOWriter{
+	signaler := &recordingFIFOSignaler{
 		errOn: map[string]error{failPath: sentinel},
 	}
 	logger := &recordingLogger{}
 
 	c := &EagerSignalCore{
-		Markers:         lister,
-		StateDir:        stateDir,
-		WriteFIFOSignal: writer.Write,
-		Logger:          logger,
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
+		Logger:   logger,
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
 		t.Fatalf("EagerSignalHydrate must return nil after per-FIFO write failure; got %v", err)
 	}
-	if len(writer.calls) != 3 {
-		t.Errorf("WriteFIFOSignal call count = %d; want 3 (loop must continue past the failing write); calls=%v", len(writer.calls), writer.calls)
+	if len(signaler.calls) != 3 {
+		t.Errorf("Signaler.SendSignal call count = %d; want 3 (loop must continue past the failing write); calls=%v", len(signaler.calls), signaler.calls)
 	}
 
 	// Locate the warning entry and pin its component routing (ComponentHydrate)
@@ -177,12 +186,12 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 func TestEagerSignalHydrate_ReturnsErrorWhenListSkeletonMarkersFails(t *testing.T) {
 	sentinel := errors.New("show-options boom")
 	lister := &fakeMarkerLister{err: sentinel}
-	writer := &recordingFIFOWriter{}
+	signaler := &recordingFIFOSignaler{}
 
 	c := &EagerSignalCore{
-		Markers:         lister,
-		StateDir:        "/var/state",
-		WriteFIFOSignal: writer.Write,
+		Markers:  lister,
+		StateDir: "/var/state",
+		Signaler: signaler,
 	}
 
 	err := c.EagerSignalHydrate()
@@ -192,8 +201,8 @@ func TestEagerSignalHydrate_ReturnsErrorWhenListSkeletonMarkersFails(t *testing.
 	if !errors.Is(err, sentinel) {
 		t.Errorf("EagerSignalHydrate err = %v; want errors.Is(err, sentinel)=true", err)
 	}
-	if len(writer.calls) != 0 {
-		t.Errorf("WriteFIFOSignal called %d times after enumeration failure; want 0", len(writer.calls))
+	if len(signaler.calls) != 0 {
+		t.Errorf("Signaler.SendSignal called %d times after enumeration failure; want 0", len(signaler.calls))
 	}
 }
 
@@ -208,22 +217,22 @@ func TestEagerSignalHydrate_NilLoggerTolerated(t *testing.T) {
 		"broken__0.0":  {},
 		"healthy__1.0": {},
 	}}
-	writer := &recordingFIFOWriter{
+	signaler := &recordingFIFOSignaler{
 		errOn: map[string]error{failPath: errors.New("boom")},
 	}
 
 	c := &EagerSignalCore{
-		Markers:         lister,
-		StateDir:        stateDir,
-		WriteFIFOSignal: writer.Write,
-		Logger:          nil, // contract: must not panic when Logger.Warn fires.
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
+		Logger:   nil, // contract: must not panic when Logger.Warn fires.
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
 		t.Fatalf("EagerSignalHydrate with nil Logger returned error: %v", err)
 	}
-	if len(writer.calls) != 2 {
-		t.Errorf("WriteFIFOSignal call count = %d; want 2 (loop must continue past failing write under nil Logger); calls=%v", len(writer.calls), writer.calls)
+	if len(signaler.calls) != 2 {
+		t.Errorf("Signaler.SendSignal call count = %d; want 2 (loop must continue past failing write under nil Logger); calls=%v", len(signaler.calls), signaler.calls)
 	}
 }
 

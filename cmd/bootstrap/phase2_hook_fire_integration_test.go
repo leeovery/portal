@@ -74,6 +74,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
@@ -202,9 +203,10 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	// tmux's `client-attached` hook — no client ever attaches.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrapadapter.EagerHydrateSignaler{
-			Client:   client,
+		EagerSignaler: &bootstrap.EagerSignalCore{
+			Markers:  client,
 			StateDir: stateDir,
+			Signaler: state.DefaultFIFOSignaler{},
 			Logger:   logger,
 		},
 		Logger: logger,

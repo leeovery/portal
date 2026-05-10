@@ -13,17 +13,8 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/statetest"
 )
-
-// fakeSleep records every duration WriteFIFOSignal hands to its sleep seam so
-// tests can assert the retry-ladder shape without timing-dependent waits.
-type fakeSleep struct {
-	Durations []time.Duration
-}
-
-func (s *fakeSleep) fn() func(time.Duration) {
-	return func(d time.Duration) { s.Durations = append(s.Durations, d) }
-}
 
 func TestSignalHydrateRetryDelays_MatchesSpecLadder(t *testing.T) {
 	want := []time.Duration{
@@ -65,9 +56,9 @@ func TestWriteFIFOSignal_WritesOneByteOnFirstTrySuccess(t *testing.T) {
 		openCalls++
 		return w, nil
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
-	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.fn()); err != nil {
+	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.Fn()); err != nil {
 		t.Fatalf("WriteFIFOSignal: %v", err)
 	}
 	if openCalls != 1 {
@@ -106,9 +97,9 @@ func TestWriteFIFOSignal_RetriesOnENXIOPerLadder(t *testing.T) {
 			return w, nil
 		}
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
-	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.fn()); err != nil {
+	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.Fn()); err != nil {
 		t.Fatalf("WriteFIFOSignal: %v", err)
 	}
 	if openCalls != 3 {
@@ -141,9 +132,9 @@ func TestWriteFIFOSignal_RetriesOnEAGAINPerLadder(t *testing.T) {
 		}
 		return w, nil
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
-	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.fn()); err != nil {
+	if err := state.WriteFIFOSignal("/tmp/example.fifo", open, sleep.Fn()); err != nil {
 		t.Fatalf("WriteFIFOSignal: %v", err)
 	}
 	if openCalls != 2 {
@@ -161,10 +152,10 @@ func TestWriteFIFOSignal_ENOENTReturnsImmediatelyWithOpenFifoWrap(t *testing.T) 
 		openCalls++
 		return nil, syscall.ENOENT
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
 	const path = "/tmp/missing.fifo"
-	err := state.WriteFIFOSignal(path, open, sleep.fn())
+	err := state.WriteFIFOSignal(path, open, sleep.Fn())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -192,10 +183,10 @@ func TestWriteFIFOSignal_NonRetryableErrorReturnsImmediately(t *testing.T) {
 		openCalls++
 		return nil, sentinel
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
 	const path = "/tmp/forbidden.fifo"
-	err := state.WriteFIFOSignal(path, open, sleep.fn())
+	err := state.WriteFIFOSignal(path, open, sleep.Fn())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -220,10 +211,10 @@ func TestWriteFIFOSignal_RetryExhaustionWrapsLastErrWithRetriesExhausted(t *test
 		openCalls++
 		return nil, syscall.ENXIO
 	}
-	sleep := &fakeSleep{}
+	sleep := &statetest.RecordingSleep{}
 
 	const path = "/tmp/never-ready.fifo"
-	err := state.WriteFIFOSignal(path, open, sleep.fn())
+	err := state.WriteFIFOSignal(path, open, sleep.Fn())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -279,5 +270,117 @@ func TestOpenFIFOForSignal_NonBlockingFlags(t *testing.T) {
 	// for a reader. 100ms is a generous upper bound.
 	if elapsed >= 100*time.Millisecond {
 		t.Errorf("OpenFIFOForSignal blocked for %v; expected ~immediate return (O_NONBLOCK missing?)", elapsed)
+	}
+}
+
+// TestSendHydrateSignal_WritesOneByteToReadyFIFO pins the production no-seam
+// entry point: SendHydrateSignal opens the supplied FIFO via the production
+// OpenFIFOForSignal seam, writes one byte, returns nil. This guards the
+// caller-facing contract that production sites (cmd/state_signal_hydrate and
+// cmd/bootstrap_production) rely on — neither passes a custom seam.
+func TestSendHydrateSignal_WritesOneByteToReadyFIFO(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ready.fifo")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("mkfifo: %v", err)
+	}
+
+	// Stand up a blocking O_RDONLY reader in a goroutine so the FIFO has a
+	// reader present by the time SendHydrateSignal calls its O_WRONLY|O_NONBLOCK
+	// open. The reader's blocking Read returns once SendHydrateSignal writes
+	// the byte; the goroutine forwards (n, err) on a buffered channel that
+	// the main goroutine drains with a 1s timeout. FIFOs do not support
+	// SetReadDeadline (file type does not support deadline) so a goroutine +
+	// channel timeout is the portable shape.
+	type readResult struct {
+		n   int
+		err error
+	}
+	readDone := make(chan readResult, 1)
+	go func() {
+		reader, openErr := os.OpenFile(path, os.O_RDONLY, 0)
+		if openErr != nil {
+			readDone <- readResult{err: openErr}
+			return
+		}
+		defer func() { _ = reader.Close() }()
+		buf := make([]byte, 8)
+		n, err := reader.Read(buf)
+		readDone <- readResult{n: n, err: err}
+	}()
+
+	if err := state.SendHydrateSignal(path); err != nil {
+		t.Fatalf("SendHydrateSignal: %v", err)
+	}
+
+	select {
+	case r := <-readDone:
+		if r.err != nil {
+			t.Fatalf("reader goroutine: %v", r.err)
+		}
+		if r.n != 1 {
+			t.Errorf("read %d bytes, want 1", r.n)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reader goroutine did not receive byte within 1s")
+	}
+}
+
+// TestSendHydrateSignal_PropagatesNonRetryableError pins the error contract
+// against a missing FIFO: ENOENT must surface immediately wrapped with the
+// production "open fifo" prefix because SendHydrateSignal delegates to
+// WriteFIFOSignal, which surfaces non-ENXIO/non-EAGAIN errors on the first
+// iteration. A regression that altered the wrapping (or accidentally swapped
+// the production seams) would surface here.
+func TestSendHydrateSignal_PropagatesNonRetryableError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing.fifo")
+	// NOTE: deliberately do NOT mkfifo — the open MUST surface ENOENT.
+
+	err := state.SendHydrateSignal(path)
+	if err == nil {
+		t.Fatal("SendHydrateSignal returned nil; want ENOENT-wrapped error")
+	}
+	if !errors.Is(err, syscall.ENOENT) {
+		t.Errorf("SendHydrateSignal err = %v; want errors.Is(err, syscall.ENOENT)=true", err)
+	}
+	wantPrefix := fmt.Sprintf("open fifo %s:", path)
+	if !strings.HasPrefix(err.Error(), wantPrefix) {
+		t.Errorf("err %q does not start with %q", err.Error(), wantPrefix)
+	}
+}
+
+// TestDefaultFIFOSignaler_SendSignalDelegatesToSendHydrateSignal pins the
+// adapter contract: DefaultFIFOSignaler{}.SendSignal(path) returns whatever
+// state.SendHydrateSignal(path) returns. Since DefaultFIFOSignaler is the
+// production wiring at cmd/bootstrap_production.go, a regression that broke
+// this delegation would silently drop the FIFO byte for every restored pane.
+func TestDefaultFIFOSignaler_SendSignalDelegatesToSendHydrateSignal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing.fifo")
+	// No mkfifo — both SendSignal and SendHydrateSignal must surface ENOENT
+	// wrapped with the same "open fifo" prefix.
+
+	directErr := state.SendHydrateSignal(path)
+	adapterErr := state.DefaultFIFOSignaler{}.SendSignal(path)
+
+	if directErr == nil || adapterErr == nil {
+		t.Fatalf("expected non-nil errors; directErr=%v adapterErr=%v", directErr, adapterErr)
+	}
+	if !errors.Is(adapterErr, syscall.ENOENT) {
+		t.Errorf("adapterErr = %v; want errors.Is(adapterErr, syscall.ENOENT)=true", adapterErr)
+	}
+	if directErr.Error() != adapterErr.Error() {
+		t.Errorf("DefaultFIFOSignaler.SendSignal err %q diverges from state.SendHydrateSignal err %q",
+			adapterErr.Error(), directErr.Error())
 	}
 }

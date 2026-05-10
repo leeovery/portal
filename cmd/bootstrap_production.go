@@ -120,15 +120,18 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		// EagerSignaler wires *bootstrap.EagerSignalCore via the
-		// internal/bootstrapadapter shim so FIFOPath derivation +
-		// state.WriteFIFOSignal's retry ladder both stay inside their
-		// owning packages. The orchestrator-scope stateDir resolved above
-		// is reused (Restore, FIFOSweeper, EagerHydrateSignaler) so all
-		// three steps observe the same state directory.
-		EagerSignaler: &bootstrapadapter.EagerHydrateSignaler{
-			Client:   client,
+		// EagerSignaler is constructed inline (mirroring MarkerCleanupCore)
+		// because every seam field is satisfiable directly: *tmux.Client
+		// implements state.ServerOptionLister via ShowAllServerOptions, and
+		// state.DefaultFIFOSignaler{} (the production no-seam wrapper around
+		// state.SendHydrateSignal) drops in as a zero value. The
+		// orchestrator-scope stateDir resolved above is reused (Restore,
+		// FIFOSweeper, EagerSignalCore) so all three steps observe the same
+		// state directory.
+		EagerSignaler: &bootstrap.EagerSignalCore{
+			Markers:  client,
 			StateDir: stateDir,
+			Signaler: state.DefaultFIFOSignaler{},
 			Logger:   logger,
 		},
 		StaleMarkers: &bootstrap.MarkerCleanupCore{

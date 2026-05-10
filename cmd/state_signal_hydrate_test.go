@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
@@ -18,14 +17,39 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// fakeSleep records every duration the production code passes to time.Sleep.
-type fakeSleep struct {
-	Durations []time.Duration
+// recordingSignaler records each fifoPath runSignalHydrate signals via the
+// state.FIFOSignaler seam. Tests use it to assert which paneKey FIFO paths
+// were opened and (when needed) inject per-path or global errors. The retry
+// ladder + non-blocking open semantics are exhaustively tested at the
+// state-package layer (internal/state/signal_hydrate_test.go); cmd-layer
+// tests focus on orchestration concerns (which paneKeys get signaled,
+// marker-unset is never called, idempotency, soft-fail discipline).
+type recordingSignaler struct {
+	calls []string
+	// errOn returns the configured error on calls whose path equals the
+	// key. Useful for "this pane fails, others succeed" scenarios.
+	errOn map[string]error
+	// err, when non-nil, is returned for every call. Useful for "every
+	// signal fails" scenarios (e.g. retry-exhaustion soft-fail).
+	err error
 }
 
-func (s *fakeSleep) fn() func(time.Duration) {
-	return func(d time.Duration) { s.Durations = append(s.Durations, d) }
+// SendSignal satisfies state.FIFOSignaler. It records path verbatim and
+// returns the configured per-path or global error, otherwise nil.
+func (s *recordingSignaler) SendSignal(path string) error {
+	s.calls = append(s.calls, path)
+	if s.err != nil {
+		return s.err
+	}
+	if e, ok := s.errOn[path]; ok {
+		return e
+	}
+	return nil
 }
+
+// Compile-time assertion: the recording fake must satisfy state.FIFOSignaler.
+// A drift in the production interface signature surfaces here.
+var _ state.FIFOSignaler = (*recordingSignaler)(nil)
 
 // markersOption renders a `show-options -sv` line for a given paneKey set so
 // tests can drive ListSkeletonMarkers via recordingCommander.RunFunc.
@@ -79,7 +103,7 @@ func signalHydrateClient(t *testing.T, markersRaw string, panes [][2]int) (*tmux
 	return tmux.NewClient(cmder), cmder
 }
 
-func TestSignalHydrate_WritesOneByteToEachSkeletonMarkedPane(t *testing.T) {
+func TestSignalHydrate_SignalsEverySkeletonMarkedPane(t *testing.T) {
 	dir := t.TempDir()
 	session := "foo"
 	panes := [][2]int{{0, 0}, {0, 1}}
@@ -89,53 +113,30 @@ func TestSignalHydrate_WritesOneByteToEachSkeletonMarkedPane(t *testing.T) {
 	}
 
 	client, _ := signalHydrateClient(t, markersOption(keys...), panes)
-
-	// Build a real reader-writer pipe per FIFO so the writer's Write succeeds
-	// and the byte is observable on the reader side.
-	type pipePair struct {
-		r, w *os.File
-	}
-	pipes := map[string]pipePair{}
-	for _, k := range keys {
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatalf("os.Pipe: %v", err)
-		}
-		pipes[state.FIFOPath(dir, k)] = pipePair{r: r, w: w}
-	}
-	t.Cleanup(func() {
-		for _, p := range pipes {
-			_ = p.r.Close()
-			_ = p.w.Close()
-		}
-	})
-
-	open := func(path string) (*os.File, error) {
-		p, ok := pipes[path]
-		if !ok {
-			t.Fatalf("unexpected FIFO path: %s", path)
-		}
-		return p.w, nil
-	}
+	signaler := &recordingSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: open,
-		Sleep:    func(time.Duration) {},
+		Signaler: signaler,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
 	}
 
-	// Verify each reader saw exactly one byte.
-	for path, pp := range pipes {
-		_ = pp.w.Close()
-		buf := make([]byte, 8)
-		n, _ := pp.r.Read(buf)
-		if n != 1 {
-			t.Errorf("pane %s read %d bytes, want 1", path, n)
+	// Every marked paneKey must receive exactly one SendSignal call at its
+	// canonical FIFO path.
+	wantPaths := map[string]struct{}{
+		state.FIFOPath(dir, keys[0]): {},
+		state.FIFOPath(dir, keys[1]): {},
+	}
+	if len(signaler.calls) != len(wantPaths) {
+		t.Fatalf("SendSignal call count = %d, want %d (calls=%v)", len(signaler.calls), len(wantPaths), signaler.calls)
+	}
+	for _, path := range signaler.calls {
+		if _, ok := wantPaths[path]; !ok {
+			t.Errorf("unexpected SendSignal path %q; wanted set %v", path, wantPaths)
 		}
 	}
 }
@@ -148,233 +149,75 @@ func TestSignalHydrate_SkipsPanesWithoutSkeletonMarker(t *testing.T) {
 	markedKey := state.SanitizePaneKey(session, 0, 1)
 
 	client, _ := signalHydrateClient(t, markersOption(markedKey), panes)
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-
-	openCalls := 0
-	open := func(path string) (*os.File, error) {
-		openCalls++
-		want := state.FIFOPath(dir, markedKey)
-		if path != want {
-			t.Errorf("opened FIFO %s, want %s", path, want)
-		}
-		return w, nil
-	}
+	signaler := &recordingSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: open,
-		Sleep:    func(time.Duration) {},
+		Signaler: signaler,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
 	}
-	if openCalls != 1 {
-		t.Errorf("OpenFIFO called %d times, want 1 (only marked pane)", openCalls)
+
+	wantPath := state.FIFOPath(dir, markedKey)
+	if len(signaler.calls) != 1 {
+		t.Fatalf("SendSignal call count = %d, want 1 (only marked pane); calls=%v", len(signaler.calls), signaler.calls)
+	}
+	if signaler.calls[0] != wantPath {
+		t.Errorf("SendSignal[0] = %q, want %q", signaler.calls[0], wantPath)
 	}
 }
 
-func TestSignalHydrate_ZeroMarkersOpensNoFIFO(t *testing.T) {
+func TestSignalHydrate_ZeroMarkersIsNoOp(t *testing.T) {
 	dir := t.TempDir()
 	session := "foo"
 	panes := [][2]int{{0, 0}, {0, 1}}
 
 	// markersRaw is empty — no skeleton markers anywhere on the server.
 	client, _ := signalHydrateClient(t, "", panes)
+	signaler := &recordingSignaler{}
 
-	openCalls := 0
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: func(_ string) (*os.File, error) {
-			openCalls++
-			return nil, nil
-		},
-		Sleep: func(time.Duration) {},
+		Signaler: signaler,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
 	}
-	if openCalls != 0 {
-		t.Errorf("OpenFIFO called %d times, want 0", openCalls)
+	if len(signaler.calls) != 0 {
+		t.Errorf("SendSignal called %d times under zero markers, want 0", len(signaler.calls))
 	}
 }
 
-func TestSignalHydrate_RetriesOnENXIOWithFullDelayLadder(t *testing.T) {
-	dir := t.TempDir()
-	session := "foo"
-	key := state.SanitizePaneKey(session, 0, 0)
-	panes := [][2]int{{0, 0}}
-
-	client, _ := signalHydrateClient(t, markersOption(key), panes)
-
-	// Open returns ENXIO twice, then a writable pipe end on the third call.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-
-	openCalls := 0
-	open := func(path string) (*os.File, error) {
-		openCalls++
-		switch openCalls {
-		case 1, 2:
-			return nil, syscall.ENXIO
-		default:
-			return w, nil
-		}
-	}
-
-	sleep := &fakeSleep{}
-	cfg := signalHydrateConfig{
-		Session:  session,
-		StateDir: dir,
-		Client:   client,
-		OpenFIFO: open,
-		Sleep:    sleep.fn(),
-	}
-	if err := runSignalHydrate(cfg); err != nil {
-		t.Fatalf("runSignalHydrate: %v", err)
-	}
-
-	if openCalls != 3 {
-		t.Errorf("OpenFIFO calls = %d, want 3", openCalls)
-	}
-	want := []time.Duration{
-		state.SignalHydrateRetryDelays[0], // 10ms
-		state.SignalHydrateRetryDelays[1], // 20ms
-	}
-	if !reflect.DeepEqual(sleep.Durations, want) {
-		t.Errorf("Sleep durations = %v, want %v", sleep.Durations, want)
-	}
-}
-
-func TestSignalHydrate_RetriesOnEAGAINSameAsENXIO(t *testing.T) {
-	dir := t.TempDir()
-	session := "foo"
-	key := state.SanitizePaneKey(session, 0, 0)
-	panes := [][2]int{{0, 0}}
-
-	client, _ := signalHydrateClient(t, markersOption(key), panes)
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-
-	openCalls := 0
-	open := func(_ string) (*os.File, error) {
-		openCalls++
-		if openCalls == 1 {
-			return nil, syscall.EAGAIN
-		}
-		return w, nil
-	}
-
-	sleep := &fakeSleep{}
-	cfg := signalHydrateConfig{
-		Session:  session,
-		StateDir: dir,
-		Client:   client,
-		OpenFIFO: open,
-		Sleep:    sleep.fn(),
-	}
-	if err := runSignalHydrate(cfg); err != nil {
-		t.Fatalf("runSignalHydrate: %v", err)
-	}
-	if openCalls != 2 {
-		t.Errorf("OpenFIFO calls = %d, want 2", openCalls)
-	}
-	want := []time.Duration{state.SignalHydrateRetryDelays[0]}
-	if !reflect.DeepEqual(sleep.Durations, want) {
-		t.Errorf("Sleep durations = %v, want %v", sleep.Durations, want)
-	}
-}
-
-func TestSignalHydrate_DoesNotRetryOnENOENT(t *testing.T) {
-	dir := t.TempDir()
-	session := "foo"
-	key := state.SanitizePaneKey(session, 0, 0)
-	panes := [][2]int{{0, 0}}
-
-	client, _ := signalHydrateClient(t, markersOption(key), panes)
-
-	openCalls := 0
-	open := func(_ string) (*os.File, error) {
-		openCalls++
-		return nil, syscall.ENOENT
-	}
-
-	sleep := &fakeSleep{}
-	cfg := signalHydrateConfig{
-		Session:  session,
-		StateDir: dir,
-		Client:   client,
-		OpenFIFO: open,
-		Sleep:    sleep.fn(),
-	}
-	if err := runSignalHydrate(cfg); err != nil {
-		t.Fatalf("runSignalHydrate: %v (must be soft-fail on ENOENT)", err)
-	}
-	if openCalls != 1 {
-		t.Errorf("OpenFIFO calls = %d, want 1 (no retry on ENOENT)", openCalls)
-	}
-	if len(sleep.Durations) != 0 {
-		t.Errorf("Sleep called %v times on ENOENT, want 0", len(sleep.Durations))
-	}
-}
-
-func TestSignalHydrate_RetryExhaustionDoesNotUnsetMarker(t *testing.T) {
+// TestSignalHydrate_PerFIFOFailureDoesNotUnsetMarker pins the soft-fail
+// posture: a SendSignal failure (e.g. ENOENT or retry-exhaustion bubbled up
+// through the production state.FIFOSignaler) must NEVER cause runSignalHydrate
+// to unset the @portal-skeleton-* marker. Marker ownership belongs to the
+// hydrate helper (spec → "The 100ms Settle Sleep") — signal-hydrate must
+// remain marker-read-only.
+func TestSignalHydrate_PerFIFOFailureDoesNotUnsetMarker(t *testing.T) {
 	dir := t.TempDir()
 	session := "foo"
 	key := state.SanitizePaneKey(session, 0, 0)
 	panes := [][2]int{{0, 0}}
 
 	client, cmder := signalHydrateClient(t, markersOption(key), panes)
-
-	openCalls := 0
-	open := func(_ string) (*os.File, error) {
-		openCalls++
-		return nil, syscall.ENXIO
+	signaler := &recordingSignaler{
+		err: errors.New("retry exhausted (sentinel)"),
 	}
-	sleep := &fakeSleep{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: open,
-		Sleep:    sleep.fn(),
+		Signaler: signaler,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
-		t.Fatalf("runSignalHydrate must soft-fail on retry exhaustion, got %v", err)
-	}
-
-	// 7 attempts: initial + 6 retries.
-	if openCalls != 7 {
-		t.Errorf("OpenFIFO calls = %d, want 7 (initial + 6 retries)", openCalls)
-	}
-	// 6 sleeps, one before each retry.
-	if len(sleep.Durations) != 6 {
-		t.Errorf("Sleep called %d times, want 6", len(sleep.Durations))
+		t.Fatalf("runSignalHydrate must soft-fail on signal failure, got %v", err)
 	}
 
 	// Verify NO `set-option -su <marker>` was issued — signal-hydrate
@@ -397,21 +240,11 @@ func TestSignalHydrate_NeverCallsSetOptionSU(t *testing.T) {
 
 	client, cmder := signalHydrateClient(t, markersOption(keys...), panes)
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: func(_ string) (*os.File, error) { return w, nil },
-		Sleep:    func(time.Duration) {},
+		Signaler: &recordingSignaler{},
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
@@ -441,23 +274,19 @@ func TestSignalHydrate_SoftFailsWhenSessionDoesNotExist(t *testing.T) {
 		},
 	}
 	client := tmux.NewClient(cmder)
+	signaler := &recordingSignaler{}
 
-	openCalls := 0
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: func(_ string) (*os.File, error) {
-			openCalls++
-			return nil, nil
-		},
-		Sleep: func(time.Duration) {},
+		Signaler: signaler,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate must soft-fail on missing session, got %v", err)
 	}
-	if openCalls != 0 {
-		t.Errorf("OpenFIFO called %d times when session missing, want 0", openCalls)
+	if len(signaler.calls) != 0 {
+		t.Errorf("SendSignal called %d times when session missing, want 0", len(signaler.calls))
 	}
 }
 
@@ -486,61 +315,46 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	}
 	client := tmux.NewClient(cmder)
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = r.Close()
-		_ = w.Close()
-	})
-
-	firstOpens := 0
+	first := &recordingSignaler{}
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: func(_ string) (*os.File, error) {
-			firstOpens++
-			return w, nil
-		},
-		Sleep: func(time.Duration) {},
+		Signaler: first,
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("first invocation: %v", err)
 	}
-	if firstOpens != 1 {
-		t.Errorf("first invocation opens = %d, want 1", firstOpens)
+	if len(first.calls) != 1 {
+		t.Errorf("first invocation SendSignal calls = %d, want 1", len(first.calls))
 	}
 
 	// Second invocation: helper has already cleared its marker.
 	markerSet = false
-	secondOpens := 0
+	second := &recordingSignaler{}
 	cfg2 := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		OpenFIFO: func(_ string) (*os.File, error) {
-			secondOpens++
-			return w, nil
-		},
-		Sleep: func(time.Duration) {},
+		Signaler: second,
 	}
 	if err := runSignalHydrate(cfg2); err != nil {
 		t.Fatalf("second invocation: %v", err)
 	}
-	if secondOpens != 0 {
-		t.Errorf("second invocation opens = %d, want 0 (idempotent)", secondOpens)
+	if len(second.calls) != 0 {
+		t.Errorf("second invocation SendSignal calls = %d, want 0 (idempotent)", len(second.calls))
 	}
 }
 
+// TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags pins the
+// production seam's non-blocking flag contract end-to-end through the
+// state package. Validates that state.OpenFIFOForSignal — the production
+// opener bundled inside state.SendHydrateSignal / state.DefaultFIFOSignaler
+// — opens a real FIFO with no reader and returns ENXIO immediately rather
+// than blocking. Only O_WRONLY|O_NONBLOCK produces this result on POSIX.
+// The retry ladder above this layer is exercised at the state-package
+// level; this test pins only the open-flag contract.
 func TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags(t *testing.T) {
-	// Validate the production seam by inspecting its observable behavior:
-	// open a real FIFO with no reader and verify state.OpenFIFOForSignal
-	// returns ENXIO immediately rather than blocking. Only O_WRONLY|O_NONBLOCK
-	// produces this result on POSIX. The primitive lives in internal/state;
-	// this test pins the cobra-init wiring (which passes the production
-	// opener through to runSignalHydrate via cfg.OpenFIFO).
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFOs are not supported on Windows")
 	}
@@ -622,49 +436,31 @@ func TestSignalHydrate_RunEDefersLoggerClose(t *testing.T) {
 // the command exits non-zero before runSignalHydrate is reached, so no FIFO
 // byte is written and the hydrate helper times out.
 func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.T) {
-	t.Run("with -- separator, leading-dash session name parses, reaches RunE, and writes FIFO byte", func(t *testing.T) {
+	t.Run("with -- separator, leading-dash session name parses, reaches RunE, and signals FIFO", func(t *testing.T) {
 		// AC #2: drive cobra Execute() against a leading-dash positional and
-		// assert exit 0 + FIFO byte written. We install a signalHydrateRunFunc
-		// seam that swaps cfg.Client / cfg.OpenFIFO for in-memory test doubles
-		// then calls the real runSignalHydrate so the full enumeration → open
-		// → write pipeline executes against the captured cobra-parsed session.
+		// assert exit 0 + Signaler.SendSignal invoked. We install a
+		// signalHydrateRunFunc seam that swaps cfg.Client / cfg.Signaler for
+		// in-memory test doubles then calls the real runSignalHydrate so the
+		// full enumeration → signal pipeline executes against the captured
+		// cobra-parsed session.
 		const sessionName = "-dotfiles-HM9Zhw"
 		paneKey := state.SanitizePaneKey(sessionName, 0, 0)
 
 		stateDir := t.TempDir()
 		t.Setenv("PORTAL_STATE_DIR", stateDir)
 
-		// Stub FIFO: hand back the writable end of an os.Pipe so the byte
-		// runSignalHydrate writes is observable on the read end.
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatalf("os.Pipe: %v", err)
-		}
-		t.Cleanup(func() {
-			_ = r.Close()
-			_ = w.Close()
-		})
-
-		var openedPath string
-		openedCalls := 0
-		stubOpen := func(path string) (*os.File, error) {
-			openedCalls++
-			openedPath = path
-			return w, nil
-		}
-
 		stubClient, _ := signalHydrateClient(t, markersOption(paneKey), [][2]int{{0, 0}})
+		stubSignaler := &recordingSignaler{}
 
 		var captured string
 		prev := signalHydrateRunFunc
 		signalHydrateRunFunc = func(cfg signalHydrateConfig) error {
 			captured = cfg.Session
 			// Replace external dependencies with test doubles, then invoke
-			// the real runSignalHydrate so the FIFO-write clause is exercised
+			// the real runSignalHydrate so the SendSignal clause is exercised
 			// end-to-end through the cobra Execute() entry point.
 			cfg.Client = stubClient
-			cfg.OpenFIFO = stubOpen
-			cfg.Sleep = func(time.Duration) {}
+			cfg.Signaler = stubSignaler
 			return runSignalHydrate(cfg)
 		}
 		t.Cleanup(func() { signalHydrateRunFunc = prev })
@@ -683,20 +479,11 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 		if captured != sessionName {
 			t.Errorf("captured session = %q, want %q", captured, sessionName)
 		}
-		if openedCalls != 1 {
-			t.Errorf("OpenFIFO calls = %d, want 1", openedCalls)
+		if len(stubSignaler.calls) != 1 {
+			t.Fatalf("Signaler.SendSignal calls = %d, want 1; calls=%v", len(stubSignaler.calls), stubSignaler.calls)
 		}
-		if wantPath := state.FIFOPath(stateDir, paneKey); openedPath != wantPath {
-			t.Errorf("OpenFIFO path = %q, want %q", openedPath, wantPath)
-		}
-
-		// Verify the FIFO seam received exactly the production payload (one
-		// byte). Close the writer so Read sees EOF after draining the byte.
-		_ = w.Close()
-		buf := make([]byte, 8)
-		n, _ := r.Read(buf)
-		if n != 1 {
-			t.Errorf("FIFO read %d bytes, want 1", n)
+		if wantPath := state.FIFOPath(stateDir, paneKey); stubSignaler.calls[0] != wantPath {
+			t.Errorf("Signaler.SendSignal[0] = %q, want %q", stubSignaler.calls[0], wantPath)
 		}
 	})
 
@@ -732,38 +519,4 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 			t.Errorf("seam should not have been invoked; captured = %q", captured)
 		}
 	})
-}
-
-func TestSignalHydrate_CompletesWithin500msCumulativeBudget(t *testing.T) {
-	dir := t.TempDir()
-	session := "foo"
-	key := state.SanitizePaneKey(session, 0, 0)
-	panes := [][2]int{{0, 0}}
-
-	client, _ := signalHydrateClient(t, markersOption(key), panes)
-
-	open := func(_ string) (*os.File, error) {
-		return nil, syscall.ENXIO
-	}
-	sleep := &fakeSleep{}
-
-	cfg := signalHydrateConfig{
-		Session:  session,
-		StateDir: dir,
-		Client:   client,
-		OpenFIFO: open,
-		Sleep:    sleep.fn(),
-	}
-	if err := runSignalHydrate(cfg); err != nil {
-		t.Fatalf("runSignalHydrate: %v", err)
-	}
-
-	var total time.Duration
-	for _, d := range sleep.Durations {
-		total += d
-	}
-	const budget = 500 * time.Millisecond
-	if total > budget {
-		t.Errorf("cumulative Sleep budget exceeded: %v > %v (durations: %v)", total, budget, sleep.Durations)
-	}
 }

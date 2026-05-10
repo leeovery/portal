@@ -84,6 +84,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
@@ -220,16 +221,19 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 		Logger:   logger,
 	}
 
-	// Wire the production EagerHydrateSignaler adapter: it iterates the
+	// Wire production *bootstrap.EagerSignalCore inline: it iterates the
 	// post-Restore @portal-skeleton-* marker set and writes the FIFO byte
-	// to each pane's hydration FIFO. This is the step under test — a
-	// regression that swaps in NoOpEagerHydrateSignaler{} would leave
-	// markers stuck and the 2-second poll would expire.
+	// to each pane's hydration FIFO via state.DefaultFIFOSignaler{} (the
+	// production no-seam wrapper around state.SendHydrateSignal). This is
+	// the step under test — a regression that swaps in
+	// NoOpEagerHydrateSignaler{} would leave markers stuck and the 2-second
+	// poll would expire.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrapadapter.EagerHydrateSignaler{
-			Client:   client,
+		EagerSignaler: &bootstrap.EagerSignalCore{
+			Markers:  client,
 			StateDir: stateDir,
+			Signaler: state.DefaultFIFOSignaler{},
 			Logger:   logger,
 		},
 		Logger: logger,
@@ -385,9 +389,10 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrapadapter.EagerHydrateSignaler{
-			Client:   client,
+		EagerSignaler: &bootstrap.EagerSignalCore{
+			Markers:  client,
 			StateDir: stateDir,
+			Signaler: state.DefaultFIFOSignaler{},
 			Logger:   logger,
 		},
 		Logger: logger,

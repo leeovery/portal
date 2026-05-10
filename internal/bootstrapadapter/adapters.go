@@ -17,9 +17,7 @@ package bootstrapadapter
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -137,50 +135,4 @@ func (s *FIFOSweeper) Sweep() error {
 		return fmt.Errorf("list skeleton markers: %w", err)
 	}
 	return state.SweepOrphanFIFOs(s.StateDir, markers, s.Logger)
-}
-
-// EagerHydrateSignaler satisfies bootstrap.EagerHydrateSignaler. Step 6 of
-// the bootstrap sequence — runs after Restore (so the @portal-skeleton-*
-// marker map is populated) and before Clear @portal-restoring (so the
-// daemon's suppression window still covers the per-FIFO writes).
-//
-// The adapter is the production wiring around *bootstrap.EagerSignalCore:
-// it pins the writer closure to state.WriteFIFOSignal(state.OpenFIFOForSignal,
-// time.Sleep) so FIFOPath derivation and the open/retry ladder both stay
-// inside their owning packages — the adapter contributes no enumeration or
-// path-construction logic of its own. Marker-enumeration failures travel up
-// via the EagerSignalCore return; per-FIFO write failures are isolated and
-// logged inside the core (see eager_signal_hydrate.go).
-//
-// Client is typed as state.ServerOptionLister rather than *tmux.Client so
-// unit tests can inject a stub that simulates a tmux failure without
-// standing up a real server. Production wiring still passes *tmux.Client,
-// which satisfies the interface via its ShowAllServerOptions method.
-//
-// Logger is forwarded verbatim. *state.Logger satisfies bootstrap.Logger
-// structurally (Debug/Warn/Error with matching signatures) and is internally
-// nil-safe; nil is also tolerated by EagerSignalCore which substitutes a
-// no-op default at entry.
-type EagerHydrateSignaler struct {
-	Client   state.ServerOptionLister
-	StateDir string
-	Logger   *state.Logger // nil tolerated; *state.Logger is nil-safe.
-}
-
-// EagerSignalHydrate delegates to *bootstrap.EagerSignalCore. The core owns
-// marker enumeration, per-pane FIFOPath derivation, the soft-warn loop, and
-// the noopLogger substitution; the adapter's only job is to bind the
-// production WriteFIFOSignal closure (state.WriteFIFOSignal +
-// state.OpenFIFOForSignal + time.Sleep) so the retry ladder lives in the
-// state package rather than in cmd-layer wiring.
-func (s *EagerHydrateSignaler) EagerSignalHydrate() error {
-	core := &bootstrap.EagerSignalCore{
-		Markers:  s.Client,
-		StateDir: s.StateDir,
-		WriteFIFOSignal: func(path string) error {
-			return state.WriteFIFOSignal(path, state.OpenFIFOForSignal, time.Sleep)
-		},
-		Logger: s.Logger,
-	}
-	return core.EagerSignalHydrate()
 }
