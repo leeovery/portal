@@ -19,11 +19,11 @@ package bootstrap_test
 // every Run path.
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -110,17 +110,13 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 }
 
 // openTestLogger opens a state.Logger writing to <stateDir>/portal.log and
-// registers t.Cleanup to close it. Tests that wire a real Logger or any
-// adapter that needs one (FIFOSweeper, HookRegistrar) share this helper to
-// avoid duplicating the OpenLogger + Cleanup pattern.
+// registers t.Cleanup to close it. Now a one-line delegate to
+// restoretest.OpenTestLogger — promoted from this file so the same helper
+// is shared with cmd/reattach_integration_test.go's buildReattachOrchestrator.
+// The 12 in-package call sites are preserved; the helper signature is
+// unchanged.
 func openTestLogger(t *testing.T, stateDir string) *state.Logger {
-	t.Helper()
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-	return logger
+	return restoretest.OpenTestLogger(t, stateDir)
 }
 
 // newIntegrationStateDir builds an isolated portal state directory rooted at

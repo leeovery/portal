@@ -104,7 +104,6 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/resolver"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -164,23 +163,13 @@ func ensurePortalOnPATH(t *testing.T) {
 // isolated test socket via tmuxtest.Socket.Client.
 func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir string) *bootstrap.Orchestrator {
 	t.Helper()
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
+	logger := restoretest.OpenTestLogger(t, stateDir)
 	return bootstrap.NewWithDefaults(
 		client,
 		stateDir,
 		logger,
 		&bootstrapadapter.RestoringMarker{Client: client},
-		bootstrap.WithRestore(&bootstrapadapter.RestoreAdapter{Inner: restoreInner}),
+		bootstrap.WithRestore(bootstrapadapter.NewRestoreAdapter(client, stateDir, logger)),
 	)
 }
 
