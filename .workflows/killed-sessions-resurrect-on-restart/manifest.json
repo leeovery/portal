@@ -34,12 +34,17 @@
           "format": "tick",
           "spec_commit": "6fa133bbf4e420a6a9d393f4a9767bb3e441e838",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "killed-sessions-resurrect-on-restart-1-1",
-          "task_map": {}
+          "task": "killed-sessions-resurrect-on-restart-1-2",
+          "task_map": {
+            "killed-sessions-resurrect-on-restart": "tick-5782dd",
+            "killed-sessions-resurrect-on-restart-1": "tick-a0fe00",
+            "killed-sessions-resurrect-on-restart-1-1": "tick-d90425"
+          },
+          "external_id": "tick-5782dd"
         }
       }
     }
