@@ -177,6 +177,17 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-8-1 | Delete shellQuoteSingle and emit bare hydrate invocation | apostrophe-bearing inputs are not sanitized out and would break shell parsing in the bare form (acknowledged in docstring, not currently produced by Portal); strings import becomes unused after deletion and must be removed; negative-assertion test sub-case for no sh -c envelope must remain as wrapper-reintroduction guard |
 | killed-sessions-resurrect-on-restart-8-2 | Migrate buildReattachOrchestrator to NewRestoreAdapter and shared OpenTestLogger helper | helper must remain importable from both cmd and cmd/bootstrap test packages; delegate path preferred to minimize churn across twelve existing call sites; unused imports (restore, path/filepath, state) must be pruned from cmd/reattach_integration_test.go after migration |
 
+### Phase 9: Analysis (Cycle 6)
+
+**Goal**: Address findings from Analysis (Cycle 6).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-9-1 | Collapse open-coded RestoreAdapter preamble and openTestLogger shim across cmd/bootstrap tests | do not touch orchestrator_builder_eager_default_test.go zero-value sentinels; production wiring at cmd/bootstrap_production.go remains exempt; drop newly-orphaned restore/state imports verified by build |
+| killed-sessions-resurrect-on-restart-9-2 | Delete duplicate TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags in cmd-package | preserve canonical state-package test; drop runtime/syscall imports only if no other cmd-package consumers remain; cobra-Execute integration test at line 405 retained as legitimate cmd-layer coverage |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":

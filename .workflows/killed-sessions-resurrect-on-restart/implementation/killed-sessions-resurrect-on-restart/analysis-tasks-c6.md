@@ -7,7 +7,7 @@
 ---
 
 ## Task 1: Collapse open-coded RestoreAdapter preamble and openTestLogger shim across cmd/bootstrap tests
-status: pending
+status: approved
 severity: low
 sources: duplication, architecture
 
@@ -43,7 +43,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Delete duplicate TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags in cmd-package
-status: pending
+status: approved
 severity: low
 sources: duplication
 
