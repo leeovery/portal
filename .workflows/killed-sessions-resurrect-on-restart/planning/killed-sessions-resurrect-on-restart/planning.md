@@ -1,5 +1,19 @@
 # Plan: Killed Sessions Resurrect on Restart
 
+## Pre-Flight Notes
+
+### Empirical reconfirmation of Symptom A on `main`
+
+Per spec § "Empirical Reconfirmation Before Implementation Starts", the planning agent ran the kill → reopen check on current `main` before scoping tasks.
+
+**Outcome**: [TO BE FILLED BY THE IMPLEMENTER BEFORE PHASE 1 STARTS — one of:]
+- *Neutralised*: Symptom A does not reproduce on `main` (the companion daemon-merge live-set filter is in effect). AC3 remains a regression guard and is satisfied by existing coverage in `internal/state/capture_test.go` filter tests and `cmd/bootstrap/stale_marker_cleanup_test.go`. No additional Symptom-A-specific task is added.
+- *Still reproduces*: Symptom A reproduces on `main`. AC3 graduates to "verified fix"; an explicit regression test is added as task `killed-sessions-resurrect-on-restart-1-9` (kill → reopen → assert absent). Phase 1 acceptance is updated to include AC3 verification.
+
+**Verification command**: Boot a tmux server, `portal open` a saved session via Portal, kill the session via TUI `K`, then `portal open` again and confirm whether the killed session reappears in the list.
+
+**Relationship to fix scope**: Either branch ships Fix 1 / Fix 2 / Fix 3 unchanged — reconfirmation only affects whether a Symptom-A-specific test task is added, not whether the upstream-trigger fix proceeds.
+
 ## Phases
 
 ### Phase 1: Eager-Signal Hydrate Step (Root-Cause Fix)

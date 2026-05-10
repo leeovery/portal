@@ -140,7 +140,7 @@ Add this line before "AC8 invariant preserved":
 
 ---
 
-### 3. AC3 verification path (kill → no resurrect) is missing from plan
+### 3. AC3 verification path (kill → no resurrect) is missing from plan [Fixed]
 
 **Type**: Missing from plan
 **Spec Reference**: § "Acceptance Criteria → Behavioural" AC3 (line 226): "A pane killed via `portal` TUI `K` (or `tmux kill-session` from inside) does not reappear on the next `portal open`. (Already neutralised on `main` by the daemon-merge live-set filter; verified post-fix as a regression guard rather than a new behaviour.)" Also referenced in § "Empirical Reconfirmation Before Implementation Starts" (lines 326-336) — explicit branch behaviour: "If reconfirmation shows Symptom A still reproduces on `main`, plan scope adds an explicit Symptom A regression test (kill → reopen → assert absent) and AC3 graduates from 'regression guard' to 'verified fix'. If reconfirmation shows Symptom A is already neutralised, AC3 remains a regression guard and no additional task is added."
@@ -176,8 +176,8 @@ Per spec § "Empirical Reconfirmation Before Implementation Starts", the plannin
 **Relationship to fix scope**: Either branch ships Fix 1 / Fix 2 / Fix 3 unchanged — reconfirmation only affects whether a Symptom-A-specific test task is added, not whether the upstream-trigger fix proceeds.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Pre-Flight Notes section added at the top of planning.md with the empirical reconfirmation of Symptom A on `main`. Outcome placeholder remains for the implementer to fill at Phase 1 kickoff (cannot be done from this planning environment — no tmux available). Either branch (neutralised vs. still-reproduces) does not block Fix 1/2/3.
 
 ---
 
