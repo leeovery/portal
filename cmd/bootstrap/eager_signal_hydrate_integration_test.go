@@ -85,7 +85,6 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -190,12 +189,6 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 
 	logger := openTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
-
 	// The production *bootstrap.EagerSignalCore — which iterates the
 	// post-Restore @portal-skeleton-* marker set and writes the FIFO byte
 	// to each pane's hydration FIFO via state.DefaultFIFOSignaler{} (the
@@ -207,7 +200,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	// regression that swaps in NoOpEagerHydrateSignaler{} would leave
 	// markers stuck and the 2-second poll would expire.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Logger:  logger,
 	})
 
@@ -329,17 +322,11 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 
 	logger := openTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
-
 	// EagerSignaler is left to buildIntegrationOrchestrator's auto-default
 	// (real EagerSignalCore when Restore is real) — see the AC1 sub-test
 	// above for the rationale.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Logger:  logger,
 	})
 

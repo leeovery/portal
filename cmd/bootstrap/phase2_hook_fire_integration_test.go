@@ -75,7 +75,6 @@ import (
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -159,12 +158,6 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 
 	logger := openTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
-
 	// Wire production adapters for the steps under test:
 	//   - RestoreAdapter: skeleton-creates sessions, arms FIFOs, sets
 	//     @portal-skeleton-* markers, spawns the in-pane helper.
@@ -178,7 +171,7 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	// optionally the helper's own 3s timeout fall-through), not through
 	// tmux's `client-attached` hook — no client ever attaches.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Logger:  logger,
 	})
 

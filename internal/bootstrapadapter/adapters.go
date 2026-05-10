@@ -90,6 +90,27 @@ type RestoreAdapter struct {
 // contract.
 func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 
+// NewRestoreAdapter constructs a *RestoreAdapter wrapping a freshly-built
+// inner *restore.Orchestrator. It is the single canonical constructor for
+// integration-test sites that previously open-coded the
+// `restoreInner := &restore.Orchestrator{...}` /
+// `&RestoreAdapter{Inner: restoreInner}` two-step preamble. Production
+// wiring at cmd/bootstrap_production.go retains its open-coded form by
+// design (that site reuses the inner Orchestrator beyond the adapter).
+//
+// Logger is forwarded into the inner Orchestrator unchanged; *state.Logger
+// is itself nil-safe so a nil logger is tolerated and produces a no-op
+// logging path inside Restore.
+func NewRestoreAdapter(client *tmux.Client, stateDir string, logger *state.Logger) *RestoreAdapter {
+	return &RestoreAdapter{
+		Inner: &restore.Orchestrator{
+			Client:   client,
+			StateDir: stateDir,
+			Logger:   logger,
+		},
+	}
+}
+
 // FIFOSweeper satisfies bootstrap.FIFOSweeper. Step 9 of the bootstrap
 // sequence — runs after step 7 clears @portal-restoring (so the daemon's
 // suppression window has closed) and after step 8 (CleanStaleMarkers) so

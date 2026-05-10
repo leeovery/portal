@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -115,14 +114,8 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 
 	logger := openTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
-
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
