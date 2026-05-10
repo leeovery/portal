@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Eager-Signal Hydrate Step (Root-Cause Fix)
-status: draft
+status: approved
+approved_at: 2026-05-10
 
 **Goal**: Insert a new bootstrap orchestrator step between Restore and Clear `@portal-restoring` that writes the hydrate signal byte to every freshly-armed skeleton pane's FIFO, eliminating the per-session signaling gap that leaves N−1 sessions' helpers waiting for a signal that never arrives.
 
@@ -21,7 +22,8 @@ status: draft
 - [ ] All existing happy-path resurrection integration tests and companion daemon-merge fix tests remain green.
 
 ### Phase 2: Timeout-Path Recovery Corrections
-status: draft
+status: approved
+approved_at: 2026-05-10
 
 **Goal**: Rewrite `handleHydrateTimeout` in `cmd/state_hydrate.go` from a leaky bypass into a correct recovery path — unset the `@portal-skeleton-<paneKey>` marker and route the fall-through through `execShellOrHookAndExit` so hooks fire on the timeout path.
 
@@ -40,7 +42,8 @@ status: draft
 - [ ] Spec supersession recorded: original `built-in-session-resurrection` invariants at lines 838 and 873 are explicitly superseded by this phase's behaviour (no in-place edit of the original spec).
 
 ### Phase 3: Drop Outer sh -c Wrapper in buildHydrateCommand
-status: draft
+status: approved
+approved_at: 2026-05-10
 
 **Goal**: Change `buildHydrateCommand` in `internal/restore/session.go` from emitting `sh -c 'portal state hydrate …; exec $SHELL'` to emitting the bare `portal state hydrate …` form, eliminating the unreachable trailer, the parked `sh` parent on every restored pane, and the double-`exit` bug.
 
