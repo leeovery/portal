@@ -269,10 +269,8 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	// the entry with the affected pane in the saved sessions.json.
 	cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
 
-	// 4. Unset the skeleton marker via the canonical primitive. Failure is
-	// non-fatal — the call logs a single WARN line and returns; subsequent
-	// exec fall-through still proceeds. Mirrors handleHydrateFileMissing.
 	unsetSkeletonMarkerOrLog(cfg)
+	// Recovery path matches handleHydrateFileMissing: marker unset above; runHydrate's exec fall-through still pays the 100ms settle sleep before exec (preserved per spec — same posture as the success path).
 	return nil
 }
 
