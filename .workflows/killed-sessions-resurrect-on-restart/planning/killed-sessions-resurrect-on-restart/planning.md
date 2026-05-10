@@ -21,6 +21,19 @@ approved_at: 2026-05-10
 - [ ] `CLAUDE.md` "Server bootstrap" section updated in the same change with renumbered step list and one-paragraph `EagerSignalHydrate` description.
 - [ ] All existing happy-path resurrection integration tests and companion daemon-merge fix tests remain green.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-1-1 | Relocate writeFIFOSignal and signalHydrateRetryDelays into internal/state | ENXIO/EAGAIN retry ladder preserved verbatim, ENOENT surfaces immediately, retries-exhausted wrapping unchanged |
+| killed-sessions-resurrect-on-restart-1-2 | Repoint cmd/state_signal_hydrate.go at the shared internal/state writer | nil logger no-op, list-markers failure soft-warns and returns nil, per-pane write failure does not abort sibling panes |
+| killed-sessions-resurrect-on-restart-1-3 | Define EagerHydrateSignaler seam and EagerSignalHydrate step in cmd/bootstrap | zero-marker no-op returns nil with no FIFO writes, per-FIFO write failure logs WARN and continues, step never escalates to fatal |
+| killed-sessions-resurrect-on-restart-1-4 | Insert EagerSignalHydrate into Orchestrator between Restore and Clear @portal-restoring | runs while @portal-restoring still set (AC8), runs after Restore populates marker set, ordering test asserts position 6 |
+| killed-sessions-resurrect-on-restart-1-5 | Wire production EagerHydrateSignaler adapter in internal/bootstrapadapter | stateDir resolved once at orchestrator construction, FIFOPath derivation per paneKey, no new public API surface |
+| killed-sessions-resurrect-on-restart-1-6 | Multi-session cold-start integration test asserting empty marker set within 2s (AC1) | N>=2 saved sessions, polls state.ListSkeletonMarkers, no client attach required to drive unset |
+| killed-sessions-resurrect-on-restart-1-7 | Update CLAUDE.md Server bootstrap section with renumbered 10-step list and EagerSignalHydrate paragraph | preserve "Return is the post-step boundary" framing, renumber subsequent steps, one-paragraph step description |
+
 ### Phase 2: Timeout-Path Recovery Corrections
 status: approved
 approved_at: 2026-05-10
