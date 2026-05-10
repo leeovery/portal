@@ -229,6 +229,45 @@ The fix is complete when all of the following hold:
 - All existing happy-path skeleton + signal + dump + hook + shell integration tests in the `built-in-session-resurrection` test surface remain green.
 - Companion daemon-merge fix's tests (`internal/state/capture_test.go` filter tests, `cmd/bootstrap/stale_marker_cleanup_test.go`) remain green.
 
+## Risks & Rollout
+
+### Regression Risk
+
+Low.
+
+- **Eager signaling is additive.** It does not change the per-session signaling semantics on `client-attached` / `client-session-changed`; it fires the same primitive earlier. Existing hook-driven signaling stays in place as a fallback.
+- **Timeout-path corrections converge two recovery paths** (timeout + file-missing) onto the same exec contract, removing a divergence rather than adding one. The file-missing path is already exercised by existing tests; timeout follows the same shape.
+- **Wrapper drop is a respawn-pane invocation simplification.** The helper's behaviour is unchanged; only the outer process tree shape changes (no parked `sh` parent).
+
+### Behavioural Changes for Users
+
+- **On-resume hooks fire end-to-end across multi-session cold-start** (previously only fired for the attached session).
+- **Scrollback save resumes** for previously-stuck-marker panes (previously silently skipped indefinitely; users would notice empty scrollback on the *next* cold-start).
+- **`exit` closes the pane on the first invocation** (previously needed two `exit`s because of the wrapper's trailing `; exec $SHELL`).
+- **Reduced `WARN` log volume on every bootstrap** — `write fifo … no such file or directory` and `timeout waiting for signal on …` no longer appear in the steady state.
+
+### Non-User-Visible Changes
+
+- Bootstrap step list grows by one; the orchestrator's step ordering is updated in `CLAUDE.md`.
+- `internal/bootstrapadapter` gains a thin wiring layer for the new step's seam interface.
+- The `built-in-session-resurrection` spec's timeout-path semantics are explicitly superseded by Section "Fix 2 → Spec Supersession" of this specification.
+
+### Rollout
+
+- **Regular release.** No hotfix required:
+  - Symptom A is already neutralised on `main` by the companion daemon-merge fix; this work hardens the upstream cause but does not address an active data-integrity bug.
+  - Symptoms B, C and Defect D are quality-of-feature regressions, not data-integrity issues.
+- **No feature flag.** The fix changes default behaviour for all users; flagging would add complexity without proportional value (the new behaviour is strictly better for every user).
+- **No migration step required.** Stuck markers from before the fix are cleaned up by the existing post-restore `CleanStaleMarkers` step on the next cold-start once their panes die naturally; eager signaling additionally clears them on every subsequent cold-start. Users with currently-stuck markers can manually clear them via `tmux set-option -us @portal-skeleton-<key>` or by restarting the tmux server, but this is not required.
+
+### Manual Workaround for Affected Users on Pre-Fix Builds
+
+Users encountering Symptoms B/C in a current `portal` build can clear stuck markers with `tmux show-options -s | grep '@portal-skeleton-'` to identify them, then `tmux set-option -us @portal-skeleton-<paneKey>` per stuck marker. Or restart the tmux server (kills all sessions; bootstrap rebuilds from saved state with no markers carried forward). Documented here for completeness; not required after the fix.
+
+### Empirical Reconfirmation Before Implementation Starts
+
+The investigation flagged that Symptom A's user-visible behaviour (kill → reappear on next `portal open`) should be empirically re-checked against current `main` before implementation begins. The expectation is that the daemon-merge fix already neutralises it, but reconfirming closes the loop. This is a one-time check, not an ongoing acceptance criterion.
+
 ---
 
 ## Working Notes
