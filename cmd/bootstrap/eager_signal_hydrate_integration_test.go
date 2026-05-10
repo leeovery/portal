@@ -288,6 +288,198 @@ func dumpPortalLogOnFailure(t *testing.T, stateDir string) {
 	t.Logf("portal.log contents on failure:\n%s", data)
 }
 
+// TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4 gates AC4:
+// "Scrollback save resumes for previously-stuck-marker panes — daemon
+// captureAndCommit no longer indefinitely skips any live pane." See
+// specification.md § Acceptance Criteria → AC4 and § AC ↔ Fix Traceability
+// (AC4 satisfied by Fix 1: eager signaling unsets markers, daemon resumes
+// capturing those panes).
+//
+// Pre-fix shape: only the user's first attached session's helper received
+// its FIFO byte; the second session's helper timed out, leaving its
+// @portal-skeleton-* marker set. The daemon's per-pane skip-save guard
+// (cmd/state_daemon.go:131-133) then suppressed scrollback save for that
+// pane indefinitely — until something else attached to (or otherwise
+// signaled) the helper, which never happens for sessions the user does not
+// attach to. This test reproduces that bug-scope at the AC4 level: the
+// non-attached "beta" session is the deterministic-bug-scope item.
+//
+// Post-fix shape: the eager-signal step in bootstrap drives every helper's
+// FIFO byte, every marker is cleared, and the next daemon tick captures
+// scrollback for beta — including beta, which under the pre-fix shape would
+// have stayed in the skip-save set forever.
+//
+// Why this is distinct from the AC1 sub-test in this file:
+//
+//   - AC1 asserts marker clearance within 2s (fast eager-signal contract).
+//   - AC4 asserts the *downstream daemon-side consequence* of that
+//     clearance: a daemon tick after marker clearance writes a non-empty
+//     scrollback file for the previously-stuck pane.
+//
+// A regression that wires NoOpEagerHydrateSignaler{} would surface here as
+// a stuck beta marker → daemon skip-save → empty/missing scrollback file
+// for beta. A regression that wires eager signaling but breaks the daemon's
+// post-marker-clear capture loop would also surface here, distinguishing
+// AC4 from AC1 even though both share the same Fix 1 chain.
+func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	// Reuse the same N=2 fixture shape as the AC1 sub-test: alpha + beta,
+	// each single-window/single-pane. beta is the "non-attached" session
+	// — under the pre-fix shape its marker would stay stuck and the
+	// daemon would indefinitely skip its scrollback save.
+	binDir := restoretest.BuildPortalBinaryDir(t)
+	restoretest.PrependPATH(t, binDir)
+
+	stateDir := newIntegrationStateDir(t)
+
+	sessions := []string{"alpha", "beta"}
+	idx := state.Index{
+		Sessions: make([]state.Session, 0, len(sessions)),
+	}
+	for _, name := range sessions {
+		idx.Sessions = append(idx.Sessions, state.Session{
+			Name: name,
+			Windows: []state.Window{{
+				Index:  0,
+				Layout: "tiled",
+				Active: true,
+				Panes: []state.Pane{{
+					Index:          0,
+					Active:         true,
+					ScrollbackFile: "scrollback/" + name + "-w0-p0.bin",
+				}},
+			}},
+		})
+	}
+	data, err := state.EncodeIndex(idx)
+	if err != nil {
+		t.Fatalf("EncodeIndex: %v", err)
+	}
+	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
+		t.Fatalf("write sessions.json: %v", err)
+	}
+
+	ts := tmuxtest.New(t, "ptl-eager-ac4-")
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	for _, name := range sessions {
+		if _, err := ts.TryRun("has-session", "-t", name); err == nil {
+			t.Fatalf("session %q unexpectedly live before Run", name)
+		}
+	}
+
+	logger := openTestLogger(t, stateDir)
+
+	restoreInner := &restore.Orchestrator{
+		Client:   client,
+		StateDir: stateDir,
+		Logger:   logger,
+	}
+
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		EagerSignaler: &bootstrapadapter.EagerHydrateSignaler{
+			Client:   client,
+			StateDir: stateDir,
+			Logger:   logger,
+		},
+		Logger: logger,
+	})
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Orchestrator.Run: %v", err)
+	}
+
+	// Sanity: every saved session must now be live (Restore step 5
+	// skeleton-created them). If beta were missing, the daemon-tick
+	// capture below would be vacuously skip-save-free for beta — a
+	// false-positive AC4 pass.
+	liveOut := ts.Run(t, "list-sessions", "-F", "#{session_name}")
+	for _, name := range sessions {
+		if !strings.Contains(liveOut, name) {
+			t.Fatalf("session %q not live after Run; list-sessions=%q",
+				name, liveOut)
+		}
+	}
+
+	// Wait for marker clearance — the daemon-tick capture below requires
+	// beta's marker to be unset, otherwise the per-pane skip-save guard
+	// in runDaemonTick (mirroring cmd/state_daemon.go:131-133) would
+	// suppress the very write we are asserting on. The 2s budget is the
+	// AC1 contract; AC4 strictly requires AC1 to have passed first.
+	defer dumpPortalLogOnFailure(t, stateDir)
+	pollUntilMarkersCleared(t, client, 2*time.Second, 50*time.Millisecond)
+
+	// Force a deterministic terminated record into beta's pane buffer so
+	// state.TailScrollback has at least one '\n'-terminated line to
+	// return. capture-pane on a freshly-exec'd shell can otherwise yield
+	// content with no terminating newline (only a partial prompt line),
+	// in which case TailScrollback would return (nil, nil) per its
+	// no-content-available contract — masking AC4 with a tooling-level
+	// flake. send-keys + a brief settle window guarantees the record
+	// lands in the pane buffer before the daemon tick captures.
+	betaPaneKey := state.SanitizePaneKey("beta", 0, 0)
+	betaTarget := tmux.PaneTarget("beta", 0, 0)
+	if err := client.SendKeys(betaTarget, "echo ac4-marker"); err != nil {
+		t.Fatalf("SendKeys to %s: %v", betaTarget, err)
+	}
+	waitForPaneText(t, client, betaTarget, "ac4-marker", 2*time.Second, 50*time.Millisecond)
+
+	// Drive one daemon-equivalent capture-and-commit pass. runDaemonTick
+	// mirrors cmd/state_daemon.go captureAndCommit: it lists skeleton
+	// markers, captures structure, and per-pane invokes
+	// CaptureAndHashPane → WriteScrollbackIfChanged → Commit. Because
+	// beta's marker was cleared by the eager-signal step, the per-pane
+	// skip-save guard does NOT fire for beta, and its scrollback bytes
+	// land at state.ScrollbackFile(stateDir, "beta__0.0").
+	runDaemonTick(t, client, stateDir)
+
+	// AC4 assertion: the previously-non-attached pane's scrollback file
+	// holds at least one terminated record. TailScrollback returns
+	// (nil, nil) for missing/empty/unterminated content; under the
+	// pre-fix shape beta's marker would still be set, the daemon's
+	// skip-save guard would have fired, and the .bin file would not
+	// exist on disk at all — converging on (nil, nil) here. Non-nil
+	// bytes are the post-fix outcome.
+	scrollbackPath := state.ScrollbackFile(stateDir, betaPaneKey)
+	tail, err := state.TailScrollback(scrollbackPath, 10)
+	if err != nil {
+		t.Fatalf("TailScrollback %s: %v", scrollbackPath, err)
+	}
+	if tail == nil {
+		t.Fatalf("AC4 violation: scrollback for non-attached pane %s "+
+			"holds no terminated records after daemon tick; want "+
+			"non-empty (Fix 1: eager-signal unset beta's marker → "+
+			"daemon resumed capturing beta). scrollback path=%s",
+			betaPaneKey, scrollbackPath)
+	}
+}
+
+// waitForPaneText polls capture-pane on target until needle appears in the
+// captured bytes or the deadline elapses. Used by AC4 to confirm that a
+// send-keys command has been processed by the in-pane shell — without this
+// the subsequent daemon tick may capture the pane buffer before the keys
+// have been echoed to the screen, producing a flaky empty-content path.
+func waitForPaneText(t *testing.T, client *tmux.Client, target, needle string, budget, tick time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		out, err := client.CapturePane(target)
+		if err == nil && strings.Contains(out, needle) {
+			return
+		}
+		time.Sleep(tick)
+	}
+	t.Fatalf("pane %s did not echo %q within %s", target, needle, budget)
+}
+
 // pollUntilMarkersCleared is the AC1-specific 2-second / 50ms poll loop.
 //
 // Distinct from restoretest.WaitForSkeletonMarkersCleared (which uses a
