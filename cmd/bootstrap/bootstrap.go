@@ -1,4 +1,4 @@
-// Package bootstrap composes the nine-step PersistentPreRunE sequence
+// Package bootstrap composes the ten-step PersistentPreRunE sequence
 // pinned by the resurrection spec. Step ordering is load-bearing;
 // "Return" is the post-step boundary, not a numbered step:
 //
@@ -7,17 +7,24 @@
 //  3. Set @portal-restoring (MUST precede step 4)
 //  4. EnsureSaver (best-effort; SaverDownWarning on failure)
 //  5. Restore
-//  6. Clear @portal-restoring
-//  7. CleanStaleMarkers (best-effort; diffs `@portal-skeleton-*` markers
+//  6. EagerSignalHydrate (best-effort; iterates the freshly-armed
+//     `@portal-skeleton-*` marker map and writes the hydrate signal byte
+//     to each pane's FIFO so every helper — not just the user's attached
+//     session's helper — proceeds to scrollback replay rather than
+//     timing out and leaking markers; runs after Restore (markers must
+//     exist) and before Clear so the daemon's restoring-marker
+//     suppression window still covers the writes)
+//  7. Clear @portal-restoring
+//  8. CleanStaleMarkers (best-effort; diffs `@portal-skeleton-*` markers
 //     against the live-pane set and unsets markers whose paneKey is no
 //     longer represented by a live pane — runs after Clear so it observes
 //     post-restore tmux state, and before Sweep so any stale markers
 //     protecting orphan FIFOs are unset first, allowing those FIFOs to be
 //     reclaimed in the same bootstrap)
-//  8. SweepOrphanFIFOs (best-effort; observes still-set per-pane
+//  9. SweepOrphanFIFOs (best-effort; observes still-set per-pane
 //     @portal-skeleton-* markers from step 5 — those outlive
 //     @portal-restoring and are cleared per-pane on hydration)
-//  9. CleanStale (best-effort)
+//  10. CleanStale (best-effort)
 //
 // Return is the post-step boundary that collects accumulated warnings.
 package bootstrap
@@ -83,6 +90,27 @@ type SaverBootstrapper interface {
 // the "degrade locally, log, continue" principle against silent drift.
 type Restorer interface {
 	Restore() (corrupt bool, err error)
+}
+
+// EagerHydrateSignaler writes the hydrate signal byte to every freshly-armed
+// `@portal-skeleton-*` pane's FIFO so every helper proceeds to scrollback
+// replay rather than waiting on the per-pane client-attached hook (which only
+// fires for the user's currently attached session, leaving N-1 helpers to time
+// out and leak markers).
+//
+// Best-effort: a non-nil return is logged via Logger.Warn and swallowed by the
+// orchestrator — eager-signal failures must never block PersistentPreRunE.
+// Per-FIFO write failures are isolated inside the implementation (logged and
+// continued); only marker-enumeration failures propagate via the return value.
+//
+// The concrete *EagerSignalCore in eager_signal_hydrate.go satisfies this
+// interface and is the production implementation.
+//
+// Step 6 of the bootstrap sequence: runs strictly after Restore (step 5) so
+// the marker map is populated, and strictly before Clear (step 7) so the
+// daemon's @portal-restoring suppression window still covers the writes.
+type EagerHydrateSignaler interface {
+	EagerSignalHydrate() error
 }
 
 // MarkerCleaner diffs the live `@portal-skeleton-*` server-option marker
@@ -158,20 +186,21 @@ func (noopLogger) Warn(component, format string, args ...any) {}
 // Error is a no-op.
 func (noopLogger) Error(component, format string, args ...any) {}
 
-// Orchestrator runs the nine-step bootstrap sequence. Wiring of
+// Orchestrator runs the ten-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
 // package stays pure (interfaces + Run) so the ordering contract is
 // independently testable.
 type Orchestrator struct {
-	Server       ServerBootstrapper
-	Hooks        HookRegistrar
-	Restoring    RestoringMarker
-	Saver        SaverBootstrapper
-	Restore      Restorer
-	StaleMarkers MarkerCleaner
-	Sweeper      FIFOSweeper
-	Clean        StaleCleaner
-	Logger       Logger // nil tolerated; Run substitutes a no-op default
+	Server        ServerBootstrapper
+	Hooks         HookRegistrar
+	Restoring     RestoringMarker
+	Saver         SaverBootstrapper
+	Restore       Restorer
+	EagerSignaler EagerHydrateSignaler
+	StaleMarkers  MarkerCleaner
+	Sweeper       FIFOSweeper
+	Clean         StaleCleaner
+	Logger        Logger // nil tolerated; Run substitutes a no-op default
 }
 
 // Run executes the nine bootstrap steps in spec order. It returns the

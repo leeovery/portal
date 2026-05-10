@@ -1,11 +1,11 @@
 package bootstrap
 
-// Canonical no-op implementations exist only for the four Orchestrator
-// steps the spec permits to degrade-and-continue: Hooks, Saver, Restore,
-// FIFOSweeper, and StaleCleaner. Server and RestoringMarker are
-// fatal-on-failure (steps 1, 3, and 6); they intentionally have no NoOp
-// because reaching for a "default" would silently violate the bootstrap
-// contract.
+// Canonical no-op implementations exist only for the Orchestrator steps the
+// spec permits to degrade-and-continue: Hooks, Saver, Restore,
+// EagerHydrateSignaler, MarkerCleaner, FIFOSweeper, and StaleCleaner. Server
+// and RestoringMarker are fatal-on-failure (steps 1, 3, and 7); they
+// intentionally have no NoOp because reaching for a "default" would silently
+// violate the bootstrap contract.
 //
 // These exist so tests across packages and production-side fallbacks
 // share one source of truth — adding a new degradable step interface to
@@ -42,6 +42,16 @@ type NoOpRestorer struct{}
 
 // Restore always returns (false, nil).
 func (NoOpRestorer) Restore() (bool, error) { return false, nil }
+
+// NoOpEagerHydrateSignaler satisfies EagerHydrateSignaler. EagerSignalHydrate
+// always reports success. The eager-signal step is best-effort and degradable
+// per spec, so a no-op is the natural fallback when the production wiring
+// cannot resolve dependencies (e.g. the state directory) — matching the NoOp
+// policy: "only steps that may degrade get a NoOp."
+type NoOpEagerHydrateSignaler struct{}
+
+// EagerSignalHydrate always returns nil.
+func (NoOpEagerHydrateSignaler) EagerSignalHydrate() error { return nil }
 
 // NoOpMarkerCleaner satisfies MarkerCleaner. CleanStaleMarkers always
 // reports success. Stale-marker cleanup is best-effort and degradable per
