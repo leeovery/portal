@@ -88,7 +88,7 @@
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "fix_attempts": 1,
-          "analysis_cycle": 2,
+          "analysis_cycle": 3,
           "linters": [
             {
               "name": "go vet",
