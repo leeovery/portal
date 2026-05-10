@@ -70,14 +70,14 @@
 //     RestoringMarker + RestoreAdapter so step 5 actually runs.
 //
 // Why we build the portal binary on PATH:
-//   - Restore arms each created pane via `respawn-pane -k 'sh -c
-//     portal state hydrate ...'`. If `portal` is not on PATH the
-//     helper exits immediately, the pane closes (default tmux
-//     remain-on-exit=off), the window closes, and the session itself
-//     dies — has-session would then return false even though Restore
-//     ran successfully. Building the binary keeps the helper blocked
-//     on its FIFO open(O_RDONLY) so the pane (and its session) stays
-//     alive long enough for the cmd-layer assertions.
+//   - Restore arms each created pane via `respawn-pane -k 'portal
+//     state hydrate --fifo X --file Y --hook-key Z'`. If `portal` is
+//     not on PATH the helper exits immediately, the pane closes
+//     (default tmux remain-on-exit=off), the window closes, and the
+//     session itself dies — has-session would then return false even
+//     though Restore ran successfully. Building the binary keeps the
+//     helper blocked on its FIFO open(O_RDONLY) so the pane (and its
+//     session) stays alive long enough for the cmd-layer assertions.
 //
 // Build & run:
 //

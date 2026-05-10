@@ -115,8 +115,8 @@ func TestPhase1Integration_EagerSignalHydrate_MultiSessionMarkersClearedWithin2s
 	tmuxtest.SkipIfNoTmux(t)
 
 	// Build & PATH-prepend portal once at the parent level so each restored
-	// pane's hydrate helper (spawned by restore via `respawn-pane -k 'sh -c
-	// portal state hydrate ...; exec $SHELL'`) can resolve the binary. Hoisted
+	// pane's hydrate helper (spawned by restore via `respawn-pane -k 'portal
+	// state hydrate --fifo X --file Y --hook-key Z'`) can resolve the binary. Hoisted
 	// out of the per-sub-test path because `go build` is the heaviest single
 	// operation in the test (~1-2s under load) and rebuilding for each sub-test
 	// would amplify CPU pressure that already squeezes the eager-signal
@@ -156,8 +156,8 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	t.Helper()
 
 	// PATH-prepend the pre-built portal binary directory so each restored
-	// pane's hydrate helper (spawned by restore via `respawn-pane -k 'sh -c
-	// portal state hydrate ...; exec $SHELL'`) can resolve the binary.
+	// pane's hydrate helper (spawned by restore via `respawn-pane -k 'portal
+	// state hydrate --fifo X --file Y --hook-key Z'`) can resolve the binary.
 	// Without this the helper exits before open(O_RDONLY), no marker is
 	// unset, and the 2-second window expires for reasons unrelated to AC1.
 	restoretest.PrependPATH(t, binDir)
