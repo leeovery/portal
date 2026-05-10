@@ -8,7 +8,7 @@ frontmatter:
 ---
 
 ## Task 1: Promote duplicated state.FIFOSignaler recording fakes into internal/statetest
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -38,7 +38,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Drop redundant explicit EagerSignaler wiring in three integration tests
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -67,7 +67,7 @@ sources: duplication
 ---
 
 ## Task 3: Update CLAUDE.md step-6 to reference post-Task-1 production primitive
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -94,7 +94,7 @@ sources: standards
 ---
 
 ## Task 4: Reconcile internal/restoretest package doc with current build-tag reality
-status: pending
+status: approved
 severity: low
 sources: architecture
 

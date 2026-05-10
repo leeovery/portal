@@ -131,6 +131,19 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-4-6 | Promote shared WaitForFileExists sentinel-poll helper into internal/restoretest | choose 50ms canonical tick or make tick mandatory, diagnostic must include absolute path + elapsed time |
 | killed-sessions-resurrect-on-restart-4-7 | Replace stale sh -c wrapper documentation in three integration-test comments | only update comments describing live behaviour, preserve historical-context notes |
 
+### Phase 5: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-5-1 | Promote duplicated state.FIFOSignaler recording fakes into internal/statetest | priority order (global Err -> per-path ErrOn -> nil) must be preserved verbatim; field-access casing flips lowercase -> Exported at both consumer sites; new statetest helper carries its own compile-time `var _ state.FIFOSignaler` assertion |
+| killed-sessions-resurrect-on-restart-5-2 | Drop redundant explicit EagerSignaler wiring in three integration tests | every modified site must still pass WithRestore with a non-nil RestoreAdapter (precondition for the auto-default branch); remove any newly unused imports (state.DefaultFIFOSignaler, bootstrap.EagerSignalCore) |
+| killed-sessions-resurrect-on-restart-5-3 | Update CLAUDE.md step-6 to reference post-Task-1 production primitive | only the production-wiring reference is replaced; any retained mention of state.WriteFIFOSignal must explicitly note it is the seam-bearing variant used only for retry-ladder unit tests |
+| killed-sessions-resurrect-on-restart-5-4 | Reconcile internal/restoretest package doc with current build-tag reality | package doc must enumerate which symbols are integration-only and which are always-built; ensure the doc-comment host file's own build tag does not contradict the package-level claim |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":
