@@ -186,55 +186,6 @@ func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir strin
 	}
 }
 
-// seedSessionsJSON writes a minimal sessions.json containing one
-// single-window/single-pane session per supplied name. The pane's
-// ScrollbackFile points at a placeholder path under
-// stateDir/scrollback/ — the file does not have to exist for skeleton
-// restoration to succeed (Restore only reads the index; the helper
-// reads the file).
-//
-// SavedAt is left zero — callers that need to assert SavedAt is
-// preserved across a Run window should use seedSessionsJSONWithSavedAt
-// to plant a known-good timestamp.
-func seedSessionsJSON(t *testing.T, stateDir string, names ...string) {
-	t.Helper()
-	seedSessionsJSONWithSavedAt(t, stateDir, time.Time{}, names...)
-}
-
-// seedSessionsJSONWithSavedAt is the savedAt-aware variant of
-// seedSessionsJSON. The supplied savedAt is encoded verbatim into the
-// Index so the caller can capture it pre-Run and assert that it is not
-// advanced by anything in the orchestrator's pipeline (the suppression
-// invariant from spec "Save-Side Architecture → Triggers & Serialization
-// → Properties → Restoration guard").
-func seedSessionsJSONWithSavedAt(t *testing.T, stateDir string, savedAt time.Time, names ...string) {
-	t.Helper()
-	sessions := make([]state.Session, 0, len(names))
-	for _, name := range names {
-		sessions = append(sessions, state.Session{
-			Name: name,
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: filepath.Join("scrollback", name+"-w0-p0.bin"),
-				}},
-			}},
-		})
-	}
-	idx := state.Index{SavedAt: savedAt, Sessions: sessions}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
-}
-
 // setupReattachEnv builds the per-test scaffolding shared by every
 // case: isolated tmux socket, state dir wired via PORTAL_STATE_DIR,
 // portal binary on PATH, the test's bootstrap orchestrator wired into
@@ -355,7 +306,7 @@ func TestReattachIntegration_SteadyStateReattachZeroStructuralRewrites(t *testin
 	// future timestamp as "newer than this run" and the suppression
 	// test could pass for the wrong reason.
 	preRunSavedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
-	seedSessionsJSONWithSavedAt(t, stateDir, preRunSavedAt, "alpha")
+	restoretest.SeedSessionsJSONWithSavedAt(t, stateDir, preRunSavedAt, "alpha")
 
 	// Wire orchestrator + cmd-layer mocks. attachDeps validator points
 	// at the real socket-backed client so HasSession queries traverse
@@ -443,7 +394,7 @@ func TestReattachIntegration_HasSessionPostBootstrapForSavedNames(t *testing.T) 
 	ts, client, stateDir := setupReattachEnv(t)
 
 	// Two saved-only names; nothing live yet.
-	seedSessionsJSON(t, stateDir, "ghost-foo", "ghost-bar")
+	restoretest.SeedSessionsJSON(t, stateDir, "ghost-foo", "ghost-bar")
 
 	// Pre-condition: neither name is live.
 	for _, name := range []string{"ghost-foo", "ghost-bar"} {
@@ -510,7 +461,7 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 
 	ts, client, stateDir := setupReattachEnv(t)
 
-	seedSessionsJSON(t, stateDir, "switched-foo")
+	restoretest.SeedSessionsJSON(t, stateDir, "switched-foo")
 
 	// Pre-condition: switched-foo is not yet live.
 	if _, err := ts.TryRun("has-session", "-t", "switched-foo"); err == nil {
@@ -576,7 +527,7 @@ func TestReattachIntegration_AttachOutsideTmuxAttachSessionPath(t *testing.T) {
 
 	ts, client, stateDir := setupReattachEnv(t)
 
-	seedSessionsJSON(t, stateDir, "attached-foo")
+	restoretest.SeedSessionsJSON(t, stateDir, "attached-foo")
 
 	// Pre-condition: attached-foo is not yet live.
 	if _, err := ts.TryRun("has-session", "-t", "attached-foo"); err == nil {
@@ -690,7 +641,7 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 
 	ts, client, stateDir := setupReattachEnv(t)
 
-	seedSessionsJSON(t, stateDir, "tui-ghost")
+	restoretest.SeedSessionsJSON(t, stateDir, "tui-ghost")
 
 	bootstrapDeps = &BootstrapDeps{
 		Orchestrator: buildReattachOrchestrator(t, client, stateDir),
@@ -783,7 +734,7 @@ func TestReattachIntegration_OpenPathResolvesSavedOnlySession(t *testing.T) {
 	// (which would require contriving the {project}-{nanoid} naming
 	// dance).
 	const savedSession = "open-ghost"
-	seedSessionsJSON(t, stateDir, savedSession)
+	restoretest.SeedSessionsJSON(t, stateDir, savedSession)
 
 	// Pre-condition: the saved-only session is not yet live.
 	if _, err := ts.TryRun("has-session", "-t", savedSession); err == nil {

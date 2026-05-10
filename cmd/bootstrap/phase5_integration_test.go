@@ -26,6 +26,7 @@ import (
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -150,28 +151,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	// inside the encoded hydrate command but is not read by Restore itself —
 	// only by the in-pane `portal state hydrate` helper, which is
 	// out-of-scope here.
-	idx := state.Index{
-		Sessions: []state.Session{{
-			Name: "missing-foo",
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/missing-foo-w0-p0.bin",
-				}},
-			}},
-		}},
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSON(t, stateDir, "missing-foo")
 
 	client := ts.Client()
 	if _, err := client.EnsureServer(); err != nil {
@@ -243,28 +223,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 
 	// sessions.json describing one session — Restore will skeleton-create
 	// it and set the @portal-skeleton-<paneKey> marker for its single pane.
-	idx := state.Index{
-		Sessions: []state.Session{{
-			Name: "swept-foo",
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/swept-foo-w0-p0.bin",
-				}},
-			}},
-		}},
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSON(t, stateDir, "swept-foo")
 
 	// Pre-create two FIFOs in stateDir:
 	//   - liveKey matches the paneKey Restore will mark live.

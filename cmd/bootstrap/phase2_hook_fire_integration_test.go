@@ -130,31 +130,7 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	// Saved sessions: alpha (no hook — control) and beta (hook registered
 	// — the deterministic Symptom B pane).
 	sessions := []string{"alpha", "beta"}
-	idx := state.Index{
-		Sessions: make([]state.Session, 0, len(sessions)),
-	}
-	for _, name := range sessions {
-		idx.Sessions = append(idx.Sessions, state.Session{
-			Name: name,
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/" + name + "-w0-p0.bin",
-				}},
-			}},
-		})
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSON(t, stateDir, sessions...)
 
 	// Register the on-resume hook against beta's saved structural key.
 	// Hook-store keys are in tmux's "session:window.pane" form (see

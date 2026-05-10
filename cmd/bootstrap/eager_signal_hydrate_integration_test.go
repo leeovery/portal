@@ -171,31 +171,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	// whose bytes-on-disk we don't seed here (the helper handles a
 	// missing file gracefully via its file-missing recovery path, still
 	// unsetting its marker).
-	idx := state.Index{
-		Sessions: make([]state.Session, 0, len(sessions)),
-	}
-	for _, name := range sessions {
-		idx.Sessions = append(idx.Sessions, state.Session{
-			Name: name,
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/" + name + "-w0-p0.bin",
-				}},
-			}},
-		})
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSON(t, stateDir, sessions...)
 
 	ts := tmuxtest.New(t, "ptl-eager-")
 	client := ts.Client()
@@ -341,31 +317,7 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 	stateDir := newIntegrationStateDir(t)
 
 	sessions := []string{"alpha", "beta"}
-	idx := state.Index{
-		Sessions: make([]state.Session, 0, len(sessions)),
-	}
-	for _, name := range sessions {
-		idx.Sessions = append(idx.Sessions, state.Session{
-			Name: name,
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/" + name + "-w0-p0.bin",
-				}},
-			}},
-		})
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSON(t, stateDir, sessions...)
 
 	ts := tmuxtest.New(t, "ptl-eager-ac4-")
 	client := ts.Client()

@@ -42,6 +42,7 @@ import (
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -87,29 +88,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	// @portal-restoring window. The pre-run saved_at is captured below so
 	// assertion (b) can compare timestamps after Run.
 	preRunSavedAt := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
-	idx := state.Index{
-		SavedAt: preRunSavedAt,
-		Sessions: []state.Session{{
-			Name: "probe-target",
-			Windows: []state.Window{{
-				Index:  0,
-				Layout: "tiled",
-				Active: true,
-				Panes: []state.Pane{{
-					Index:          0,
-					Active:         true,
-					ScrollbackFile: "scrollback/probe-target-w0-p0.bin",
-				}},
-			}},
-		}},
-	}
-	data, err := state.EncodeIndex(idx)
-	if err != nil {
-		t.Fatalf("EncodeIndex: %v", err)
-	}
-	if err := os.WriteFile(state.SessionsJSON(stateDir), data, 0o600); err != nil {
-		t.Fatalf("write sessions.json: %v", err)
-	}
+	restoretest.SeedSessionsJSONWithSavedAt(t, stateDir, preRunSavedAt, "probe-target")
 
 	client := ts.Client()
 	if _, err := client.EnsureServer(); err != nil {
