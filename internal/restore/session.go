@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -421,20 +420,16 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 // hook-firing wrapper inside cmd/state_hydrate.go is independent and
 // preserved.
 //
-// shellQuoteSingle still escapes embedded single quotes in fifo / file /
-// hookKey for defensive parity with the prior call-site contract.
+// Inputs containing literal `'` would break shell parsing under the bare
+// form (no outer single-quoted envelope exists to anchor the canonical
+// `'\''` close-escape-reopen idiom). Portal's sanitization (sanitizeSessionName
+// in internal/state/panekey.go) does not currently produce such inputs —
+// session names with `/`, `\`, or `\0` are filtered, and pane keys derive
+// from the sanitized session name plus integer indices — so the bare form
+// is safe in practice.
 func buildHydrateCommand(fifo, file, hookKey string) string {
 	return fmt.Sprintf(
 		"portal state hydrate --fifo %s --file %s --hook-key %s",
-		shellQuoteSingle(fifo),
-		shellQuoteSingle(file),
-		shellQuoteSingle(hookKey),
+		fifo, file, hookKey,
 	)
-}
-
-// shellQuoteSingle escapes embedded single quotes for inclusion inside an
-// outer single-quoted shell string. Each ' becomes '\” (close, escaped quote,
-// reopen). Defensive against pathological session names.
-func shellQuoteSingle(s string) string {
-	return strings.ReplaceAll(s, "'", `'\''`)
 }

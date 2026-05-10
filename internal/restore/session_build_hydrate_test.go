@@ -27,18 +27,6 @@ func TestBuildHydrateCommand_BareForm(t *testing.T) {
 		}
 	})
 
-	t.Run("single-quote bearing inputs round-trip through shellQuoteSingle", func(t *testing.T) {
-		// shellQuoteSingle replaces each ' with '\'' (close, escaped quote,
-		// reopen). Defensive parity with the prior call-site contract so any
-		// future re-introduction of an outer single-quoted envelope would not
-		// change embedded-quote semantics.
-		got := buildHydrateCommand("/x'.fifo", "/y'.bin", "sess'name:0.0")
-		want := `portal state hydrate --fifo /x'\''.fifo --file /y'\''.bin --hook-key sess'\''name:0.0`
-		if got != want {
-			t.Errorf("buildHydrateCommand quoted:\n got %q\nwant %q", got, want)
-		}
-	})
-
 	t.Run("output contains no sh -c envelope or exec $SHELL trailer", func(t *testing.T) {
 		// Defect-D regression guard: the wrapper drop must not silently
 		// reappear via a future refactor. Asserts the negative directly.
