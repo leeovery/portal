@@ -95,8 +95,11 @@ func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 // integration-test sites that previously open-coded the
 // `restoreInner := &restore.Orchestrator{...}` /
 // `&RestoreAdapter{Inner: restoreInner}` two-step preamble. Production
-// wiring at cmd/bootstrap_production.go retains its open-coded form by
-// design (that site reuses the inner Orchestrator beyond the adapter).
+// wiring at cmd/bootstrap_production.go retains its open-coded form for
+// parity with the surrounding inline-struct adapters at that site
+// (HookRegistrar, RestoringMarker, EagerSignalCore, MarkerCleanupCore);
+// migrating it is mechanical and out of scope for the constructor's
+// introduction.
 //
 // Logger is forwarded into the inner Orchestrator unchanged; *state.Logger
 // is itself nil-safe so a nil logger is tolerated and produces a no-op
