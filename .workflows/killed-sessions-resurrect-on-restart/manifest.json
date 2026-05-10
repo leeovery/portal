@@ -32,7 +32,7 @@
         "killed-sessions-resurrect-on-restart": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "d91da2b5d4eaf6e9674a72d7cbf483664f1c4573",
+          "spec_commit": "6fa133bbf4e420a6a9d393f4a9767bb3e441e838",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
