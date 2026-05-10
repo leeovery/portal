@@ -12,8 +12,8 @@ This bug fixes the upstream signaling contract and corrects two compounding defe
 
 - **Symptom A — killed sessions resurrect on next `portal open`** (driven by stuck `@portal-skeleton-<paneKey>` markers feeding the daemon-merge re-injection path).
 - **Symptom B — on-resume hooks never fire** for panes that hit the timeout path; the pane gets a bare interactive shell.
-- **Symptom C — scrollback save silently skipped** for any pane whose marker is stuck (the daemon's capture loop skips marked panes indefinitely).
-- **Defect D — orphan `sh -c` wrapper** parked on every restored pane: the wrapper's trailing `; exec $SHELL` is unreachable on success, breaks pane-close-on-`exit`, and leaves a parked `sh` parent under tmux for the lifetime of the pane.
+- **Symptom C — scrollback save silently skipped** for any pane whose marker is stuck (the daemon's capture loop skips marked panes indefinitely). The existing post-restore `CleanStaleMarkers` step does **not** close this gap — its predicate is "marker without a live pane", but timeout-stuck markers sit on live panes (the helper has exec'd a shell, so the pane is alive even though hydration failed). Eager signaling closes the gap at the marker-production layer rather than the cleanup layer.
+- **Defect D — orphan `sh -c` wrapper** parked on every restored pane regardless of hydration outcome (success, file-missing, timeout): the wrapper's trailing `; exec $SHELL` is unreachable on success, breaks pane-close-on-`exit`, and leaves a parked `sh` parent under tmux for the lifetime of the pane. Both `execShellAndExit` and `execShellOrHookAndExit` `syscall.Exec` the user's shell from inside the wrapper, so the parked parent appears on every restored pane — not only after timeout.
 
 ### Root Cause
 
@@ -26,6 +26,8 @@ The `handleHydrateTimeout` handler then compounds the missing-signal condition i
 ### Scope Boundary
 
 The bug surfaces only on **cold-start** bootstrap (first `portal` invocation after the tmux server starts), because `internal/restore/restore.go` skips already-live sessions on subsequent invocations. The cardinality is "once per tmux-server lifetime, affecting all-saved-sessions-minus-one" — not "once per `portal open`".
+
+Single-saved-session users are unaffected (one session = one attach = one signal; no panes left unsignaled). Hot-path `portal open <existing-session>` after the cold-start bootstrap completes is also unaffected — Restore skips live sessions, so no skeleton is built and no helpers run.
 
 Symptom A's user-visible behaviour was structurally fixed on `main` by the companion daemon-merge live-set filter (`.workflows/completed/daemon-merge-reintroduces-dead-sessions/`). Markers still leak under the bug pre-fix, but the merge no longer turns the leak into a resurrection. This work additionally hardens the upstream cause so the marker stops leaking in the first place.
 
@@ -50,6 +52,8 @@ The three changes are bundled because (a) the eager-signaling step resolves the 
 - **Panic-resilience wrapping for `portal state hydrate`.** If a real-world panic in the helper surfaces, address with a `defer recover` inside `runHydrate`, not with a respawn-pane-level fallback.
 - **The transient `daemon | capture pane … exit status 1` warnings** noted in the investigation — sporadic, same panes capture cleanly on later ticks. Tracked separately if it persists.
 - **Any change to the daemon's merge logic** — the companion fix on `main` already neutralises Symptom A's user-visible resurrection.
+- **Wrapper redesign that keeps the outer `sh -c` envelope** (e.g. `sh -c 'exec portal state hydrate ...'`) — same correctness as dropping the wrapper, no upside, more complex.
+- **Status-quo per-session signaling with timeout-path-only corrections** — Symptom C cannot be fixed from the timeout side because the marker has to outlive the timeout to suppress scrollback save; the production-layer fix (eager signaling) is required to close that gap.
 
 ## Fix 1: Bootstrap Eager-Signaling Step
 
@@ -222,7 +226,7 @@ The fix is complete when all of the following hold:
 ### Integration (real tmux fixture)
 
 - **Bootstrap orchestrator ordering**: New step runs at the correct position (after step 5 Restore, before step 6 Clear `@portal-restoring`). Sequence test asserts ordering by injecting a recording orchestrator deps fake.
-- **Multi-session cold-start**: Boot with N≥2 saved sessions. Assert all `@portal-skeleton-*` markers are unset within reasonable time post-bootstrap (no client attach required).
+- **Multi-session cold-start**: Boot with N≥2 saved sessions. Assert all `@portal-skeleton-*` markers are unset within reasonable time post-bootstrap (no client attach required). This test closes a specific gap in existing coverage — prior integration tests for the resurrection feature verified the signal-arrived flow only for the attached session, never modelling the N≥2 case where the bug's deterministic behaviour surfaces.
 - **End-to-end hook firing on cold-start**: Register an on-resume hook for a non-attached saved session. Cold-start. Assert the hook ran in the restored pane.
 - **Pane close on `exit`**: Restored pane runs `exit` once; tmux `list-panes` shows the pane is gone (not respawned with a fresh shell).
 
@@ -269,6 +273,21 @@ Users encountering Symptoms B/C in a current `portal` build can clear stuck mark
 ### Empirical Reconfirmation Before Implementation Starts
 
 The investigation flagged that Symptom A's user-visible behaviour (kill → reappear on next `portal open`) should be empirically re-checked against current `main` before implementation begins. The expectation is that the daemon-merge fix already neutralises it, but reconfirming closes the loop. This is a one-time check, not an ongoing acceptance criterion.
+
+### Manual Verification Protocol
+
+A canonical 6-step reproduction protocol for verifying state on a real machine. Pre-fix: each step reproduces the documented symptom. Post-fix: every step's failure mode is absent.
+
+1. **Boot Portal** so that bootstrap step 5 reconstructs the saved sessions (cold-start scenario; tmux server not previously running, or kill the server first).
+2. **Inspect `~/.config/portal/state/portal.log`** for `WARN | hydrate | write fifo …` and `WARN | hydrate | timeout waiting for signal on …` entries against specific paneKeys. *Pre-fix: present for non-attached sessions. Post-fix: absent in steady state.*
+3. **Inspect server options:** `tmux show-options -s | grep '@portal-skeleton-'`. *Pre-fix: stuck markers for affected paneKeys. Post-fix: empty (or only freshly-armed markers in the brief window before eager signaling unsets them).*
+4. **Kill an affected session** via Portal TUI `K` or `tmux kill-session` from inside it. Confirm the session disappears from the Portal list.
+5. **Run `portal open` again.** *Pre-fix (with companion-fix not yet on main): the killed session reappears. Post-fix: stays gone.*
+6. **Inspect any registered on-resume hook** for an affected pane. *Pre-fix: hook has not run; pane is a bare interactive shell. Post-fix: hook has run before the user's shell.*
+
+Additional post-fix checks (Defect D / wrapper drop):
+- `pgrep -fa "sh -c.*portal state hydrate"` returns no rows for any restored pane (no parked wrapper parents).
+- `exit` typed once in a restored pane closes the pane (no second `exit` required).
 
 ---
 
