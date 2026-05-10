@@ -1469,6 +1469,127 @@ func TestHydrate_Timeout_FiresHookWhenRegistered(t *testing.T) {
 	}
 }
 
+func TestHydrate_Timeout_NoHookStore_ExecsBareShell(t *testing.T) {
+	// On the timeout fall-through with cfg.HookStore = nil,
+	// execShellOrHookAndExit must short-circuit to bare $SHELL — no log line
+	// from the lookup-error branch, no hook-chain argv. Mirrors the
+	// file-missing analogue (TestHydrate_FileMissing_ExecsBareShellWhenNoHookRegistered)
+	// but exercises the timeout branch via timeoutCfg.
+	// Spec § Fix 2 → Specific Changes → 2.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tnh__0.0.fifo")
+
+	t.Setenv("SHELL", "/bin/zsh")
+
+	exec := &stubExecShell{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tnh:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
+	// HookStore left nil — execShellOrHookAndExit must short-circuit.
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
+	}
+}
+
+func TestHydrate_Timeout_LookupNotFound_ExecsBareShell(t *testing.T) {
+	// On the timeout fall-through with a HookStore present but no entry under
+	// cfg.HookKey, hooks.LookupOnResume returns ('', false, nil) and
+	// execShellOrHookAndExit must exec bare $SHELL. Mirrors the file-missing
+	// analogue but exercises the timeout branch via timeoutCfg.
+	// Spec § Fix 2 → Specific Changes → 2.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tlnf__0.0.fifo")
+
+	t.Setenv("SHELL", "/bin/zsh")
+	store := seedHookStore(t, dir, map[string]map[string]string{})
+
+	exec := &stubExecShell{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tlnf:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
+	cfg.HookStore = store
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !exec.called {
+		t.Fatal("ExecShell not called")
+	}
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh]", exec.args)
+	}
+}
+
+func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) {
+	// On the timeout fall-through with a HookStore that yields an I/O error
+	// on lookup, execShellOrHookAndExit must (a) exec bare $SHELL — no
+	// hook-chain — and (b) emit exactly one "lookup on-resume hook for" WARN
+	// log line. Mirrors TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning
+	// but exercises the timeout branch via timeoutCfg. Drive the LookupOnResume
+	// I/O failure by pointing the store at a directory rather than a regular
+	// file → os.ReadFile returns EISDIR.
+	// Spec § Fix 2 → Specific Changes → 2.
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-tle__0.0.fifo")
+
+	// hooks.json is a directory, not a file — forces EISDIR on read.
+	hooksDir := filepath.Join(dir, "hooks.json")
+	if err := os.Mkdir(hooksDir, 0o700); err != nil {
+		t.Fatalf("mkdir hooks.json: %v", err)
+	}
+	store := hooks.NewStore(hooksDir)
+
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "")
+	logger, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	t.Setenv("SHELL", "/bin/zsh")
+	exec := &stubExecShell{}
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tle:0.0", io.Discard, &recordingCommander{}, exec.fn(), logger)
+	cfg.HookStore = store
+
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	_ = logger.Close()
+
+	if exec.target != "/bin/zsh" {
+		t.Errorf("ExecShell prog = %q, want /bin/zsh on lookup error", exec.target)
+	}
+	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
+		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
+	}
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	contents := string(data)
+	// Exactly one WARN line from the lookup-error branch — count, not just
+	// presence. (The timeout handler logs its own WARN line; the lookup-error
+	// branch contributes the canonical "lookup on-resume hook for" entry.)
+	got := strings.Count(contents, "lookup on-resume hook for")
+	if got != 1 {
+		t.Errorf("log has %d %q lines, want exactly 1: %q", got, "lookup on-resume hook for", contents)
+	}
+	if !strings.Contains(contents, "tle:0.0") {
+		t.Errorf("log missing hook-key in lookup-error warning: %q", contents)
+	}
+}
+
 func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 	// Drive a LookupOnResume I/O failure by pointing the store at a path that
 	// is a directory rather than a regular file → os.ReadFile returns EISDIR.
