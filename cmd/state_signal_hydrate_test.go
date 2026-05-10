@@ -14,42 +14,9 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/statetest"
 	"github.com/leeovery/portal/internal/tmux"
 )
-
-// recordingSignaler records each fifoPath runSignalHydrate signals via the
-// state.FIFOSignaler seam. Tests use it to assert which paneKey FIFO paths
-// were opened and (when needed) inject per-path or global errors. The retry
-// ladder + non-blocking open semantics are exhaustively tested at the
-// state-package layer (internal/state/signal_hydrate_test.go); cmd-layer
-// tests focus on orchestration concerns (which paneKeys get signaled,
-// marker-unset is never called, idempotency, soft-fail discipline).
-type recordingSignaler struct {
-	calls []string
-	// errOn returns the configured error on calls whose path equals the
-	// key. Useful for "this pane fails, others succeed" scenarios.
-	errOn map[string]error
-	// err, when non-nil, is returned for every call. Useful for "every
-	// signal fails" scenarios (e.g. retry-exhaustion soft-fail).
-	err error
-}
-
-// SendSignal satisfies state.FIFOSignaler. It records path verbatim and
-// returns the configured per-path or global error, otherwise nil.
-func (s *recordingSignaler) SendSignal(path string) error {
-	s.calls = append(s.calls, path)
-	if s.err != nil {
-		return s.err
-	}
-	if e, ok := s.errOn[path]; ok {
-		return e
-	}
-	return nil
-}
-
-// Compile-time assertion: the recording fake must satisfy state.FIFOSignaler.
-// A drift in the production interface signature surfaces here.
-var _ state.FIFOSignaler = (*recordingSignaler)(nil)
 
 // markersOption renders a `show-options -sv` line for a given paneKey set so
 // tests can drive ListSkeletonMarkers via recordingCommander.RunFunc.
@@ -113,7 +80,7 @@ func TestSignalHydrate_SignalsEverySkeletonMarkedPane(t *testing.T) {
 	}
 
 	client, _ := signalHydrateClient(t, markersOption(keys...), panes)
-	signaler := &recordingSignaler{}
+	signaler := &statetest.RecordingFIFOSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
@@ -131,10 +98,10 @@ func TestSignalHydrate_SignalsEverySkeletonMarkedPane(t *testing.T) {
 		state.FIFOPath(dir, keys[0]): {},
 		state.FIFOPath(dir, keys[1]): {},
 	}
-	if len(signaler.calls) != len(wantPaths) {
-		t.Fatalf("SendSignal call count = %d, want %d (calls=%v)", len(signaler.calls), len(wantPaths), signaler.calls)
+	if len(signaler.Calls) != len(wantPaths) {
+		t.Fatalf("SendSignal call count = %d, want %d (calls=%v)", len(signaler.Calls), len(wantPaths), signaler.Calls)
 	}
-	for _, path := range signaler.calls {
+	for _, path := range signaler.Calls {
 		if _, ok := wantPaths[path]; !ok {
 			t.Errorf("unexpected SendSignal path %q; wanted set %v", path, wantPaths)
 		}
@@ -149,7 +116,7 @@ func TestSignalHydrate_SkipsPanesWithoutSkeletonMarker(t *testing.T) {
 	markedKey := state.SanitizePaneKey(session, 0, 1)
 
 	client, _ := signalHydrateClient(t, markersOption(markedKey), panes)
-	signaler := &recordingSignaler{}
+	signaler := &statetest.RecordingFIFOSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
@@ -162,11 +129,11 @@ func TestSignalHydrate_SkipsPanesWithoutSkeletonMarker(t *testing.T) {
 	}
 
 	wantPath := state.FIFOPath(dir, markedKey)
-	if len(signaler.calls) != 1 {
-		t.Fatalf("SendSignal call count = %d, want 1 (only marked pane); calls=%v", len(signaler.calls), signaler.calls)
+	if len(signaler.Calls) != 1 {
+		t.Fatalf("SendSignal call count = %d, want 1 (only marked pane); calls=%v", len(signaler.Calls), signaler.Calls)
 	}
-	if signaler.calls[0] != wantPath {
-		t.Errorf("SendSignal[0] = %q, want %q", signaler.calls[0], wantPath)
+	if signaler.Calls[0] != wantPath {
+		t.Errorf("SendSignal[0] = %q, want %q", signaler.Calls[0], wantPath)
 	}
 }
 
@@ -177,7 +144,7 @@ func TestSignalHydrate_ZeroMarkersIsNoOp(t *testing.T) {
 
 	// markersRaw is empty — no skeleton markers anywhere on the server.
 	client, _ := signalHydrateClient(t, "", panes)
-	signaler := &recordingSignaler{}
+	signaler := &statetest.RecordingFIFOSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
@@ -188,8 +155,8 @@ func TestSignalHydrate_ZeroMarkersIsNoOp(t *testing.T) {
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
 	}
-	if len(signaler.calls) != 0 {
-		t.Errorf("SendSignal called %d times under zero markers, want 0", len(signaler.calls))
+	if len(signaler.Calls) != 0 {
+		t.Errorf("SendSignal called %d times under zero markers, want 0", len(signaler.Calls))
 	}
 }
 
@@ -206,8 +173,8 @@ func TestSignalHydrate_PerFIFOFailureDoesNotUnsetMarker(t *testing.T) {
 	panes := [][2]int{{0, 0}}
 
 	client, cmder := signalHydrateClient(t, markersOption(key), panes)
-	signaler := &recordingSignaler{
-		err: errors.New("retry exhausted (sentinel)"),
+	signaler := &statetest.RecordingFIFOSignaler{
+		Err: errors.New("retry exhausted (sentinel)"),
 	}
 
 	cfg := signalHydrateConfig{
@@ -244,7 +211,7 @@ func TestSignalHydrate_NeverCallsSetOptionSU(t *testing.T) {
 		Session:  session,
 		StateDir: dir,
 		Client:   client,
-		Signaler: &recordingSignaler{},
+		Signaler: &statetest.RecordingFIFOSignaler{},
 	}
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate: %v", err)
@@ -274,7 +241,7 @@ func TestSignalHydrate_SoftFailsWhenSessionDoesNotExist(t *testing.T) {
 		},
 	}
 	client := tmux.NewClient(cmder)
-	signaler := &recordingSignaler{}
+	signaler := &statetest.RecordingFIFOSignaler{}
 
 	cfg := signalHydrateConfig{
 		Session:  session,
@@ -285,8 +252,8 @@ func TestSignalHydrate_SoftFailsWhenSessionDoesNotExist(t *testing.T) {
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("runSignalHydrate must soft-fail on missing session, got %v", err)
 	}
-	if len(signaler.calls) != 0 {
-		t.Errorf("SendSignal called %d times when session missing, want 0", len(signaler.calls))
+	if len(signaler.Calls) != 0 {
+		t.Errorf("SendSignal called %d times when session missing, want 0", len(signaler.Calls))
 	}
 }
 
@@ -315,7 +282,7 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	}
 	client := tmux.NewClient(cmder)
 
-	first := &recordingSignaler{}
+	first := &statetest.RecordingFIFOSignaler{}
 	cfg := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
@@ -325,13 +292,13 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	if err := runSignalHydrate(cfg); err != nil {
 		t.Fatalf("first invocation: %v", err)
 	}
-	if len(first.calls) != 1 {
-		t.Errorf("first invocation SendSignal calls = %d, want 1", len(first.calls))
+	if len(first.Calls) != 1 {
+		t.Errorf("first invocation SendSignal calls = %d, want 1", len(first.Calls))
 	}
 
 	// Second invocation: helper has already cleared its marker.
 	markerSet = false
-	second := &recordingSignaler{}
+	second := &statetest.RecordingFIFOSignaler{}
 	cfg2 := signalHydrateConfig{
 		Session:  session,
 		StateDir: dir,
@@ -341,8 +308,8 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	if err := runSignalHydrate(cfg2); err != nil {
 		t.Fatalf("second invocation: %v", err)
 	}
-	if len(second.calls) != 0 {
-		t.Errorf("second invocation SendSignal calls = %d, want 0 (idempotent)", len(second.calls))
+	if len(second.Calls) != 0 {
+		t.Errorf("second invocation SendSignal calls = %d, want 0 (idempotent)", len(second.Calls))
 	}
 }
 
@@ -450,7 +417,7 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 		t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 		stubClient, _ := signalHydrateClient(t, markersOption(paneKey), [][2]int{{0, 0}})
-		stubSignaler := &recordingSignaler{}
+		stubSignaler := &statetest.RecordingFIFOSignaler{}
 
 		var captured string
 		prev := signalHydrateRunFunc
@@ -479,11 +446,11 @@ func TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute(t *testing.
 		if captured != sessionName {
 			t.Errorf("captured session = %q, want %q", captured, sessionName)
 		}
-		if len(stubSignaler.calls) != 1 {
-			t.Fatalf("Signaler.SendSignal calls = %d, want 1; calls=%v", len(stubSignaler.calls), stubSignaler.calls)
+		if len(stubSignaler.Calls) != 1 {
+			t.Fatalf("Signaler.SendSignal calls = %d, want 1; calls=%v", len(stubSignaler.Calls), stubSignaler.Calls)
 		}
-		if wantPath := state.FIFOPath(stateDir, paneKey); stubSignaler.calls[0] != wantPath {
-			t.Errorf("Signaler.SendSignal[0] = %q, want %q", stubSignaler.calls[0], wantPath)
+		if wantPath := state.FIFOPath(stateDir, paneKey); stubSignaler.Calls[0] != wantPath {
+			t.Errorf("Signaler.SendSignal[0] = %q, want %q", stubSignaler.Calls[0], wantPath)
 		}
 	})
 
