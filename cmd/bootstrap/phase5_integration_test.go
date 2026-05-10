@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
@@ -173,6 +174,18 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		// Opt out of the integration builder's real-EagerSignaler default
+		// (task 4-2): this test asserts the post-Run skeleton marker is
+		// still present as evidence that ApplySkeletonMarkers ran during
+		// step 5. With the real eager signaler firing in step 6, the
+		// in-pane helper would race to unset the marker (and even if
+		// the helper fails for lack of `portal` on PATH, the 500ms FIFO
+		// retry budget is enough for tmux to reap the dead pane and for
+		// step 8's CleanStaleMarkers to unset the now-paneless marker).
+		// The eager pipeline is covered end-to-end by
+		// TestPhase1Integration_EagerSignalHydrate_*; here we only
+		// verify the step-5 marker-setting contract.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -260,6 +273,17 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 			StateDir: stateDir,
 			Logger:   logger,
 		},
+		// Opt out of the integration builder's real-EagerSignaler default
+		// (task 4-2): the assertion below is that the live FIFO survives
+		// step 9 because step 5's skeleton marker still pins it. With
+		// the real eager signaler firing in step 6, its 500ms FIFO retry
+		// budget gives tmux time to reap the helper-less pane (no
+		// `portal` binary on PATH here), step 8 unsets the now-paneless
+		// marker, and step 9 sweeps the live FIFO as orphan — defeating
+		// the test's structural assertion. The eager pipeline is covered
+		// end-to-end by TestPhase1Integration_EagerSignalHydrate_*; here
+		// we only verify the Restore → Sweep marker-handoff contract.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {

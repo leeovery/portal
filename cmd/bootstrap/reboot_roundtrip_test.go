@@ -62,6 +62,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
@@ -336,6 +337,17 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 			StateDir: stateDir,
 			Logger:   logger,
 		},
+		// Opt out of the integration builder's real-EagerSignaler default
+		// (task 4-2): this round-trip drives signal-hydrate explicitly
+		// via DriveSignalHydrate / DriveSignalHydrateBinary AFTER Run
+		// returns, so the test owns the FIFO-write timing. With the real
+		// eager signaler firing during Run, the helpers would already
+		// have consumed their FIFO byte and exec'd $SHELL by the time
+		// the manual driver runs — the manual write would then either
+		// no-op against a closed FIFO or race against the helper's
+		// post-replay teardown. The eager pipeline is covered
+		// end-to-end by TestPhase1Integration_EagerSignalHydrate_*.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -936,6 +948,16 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 			StateDir: stateDir,
 			Logger:   logger,
 		},
+		// Opt out of the integration builder's real-EagerSignaler default
+		// (task 4-2): this test simulates `client-attached` then
+		// `client-session-changed` by exec'ing `portal state
+		// signal-hydrate <session>` for alpha and beta in sequence —
+		// the test's distinct contribution is the per-session sequencing
+		// (alpha clears first, beta stays pending until step 2). A real
+		// eager signaler firing during Run would clear BOTH markers
+		// before the manual driver runs, defeating the per-session
+		// sequencing assertion below.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)
@@ -1184,6 +1206,15 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 			StateDir: stateDir,
 			Logger:   logger,
 		},
+		// Opt out of the integration builder's real-EagerSignaler default
+		// (task 4-2): this round-trip drives signal-hydrate via the
+		// production binary (DriveSignalHydrateBinary) AFTER Run returns
+		// — the same manual-harness pattern as runRebootRoundTrip's
+		// alpha/beta variant. With the real eager signaler firing during
+		// Run, the helper would already have consumed its FIFO byte
+		// before the binary-driven driver runs, defeating the test's
+		// goal of exercising the registered hook → binary argv path.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Orchestrator.Run: %v", err)

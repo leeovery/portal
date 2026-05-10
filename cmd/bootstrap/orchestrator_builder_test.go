@@ -34,6 +34,17 @@ import (
 // integration sites. Unset (nil) fields default to their NoOp form per the
 // "spec permits to degrade-and-continue" policy. Logger is optional — when
 // nil, the Orchestrator substitutes its internal noopLogger at Run time.
+//
+// EagerSignaler default has one branch: when the caller has wired a real
+// Restore adapter, leaving EagerSignaler nil yields a real
+// *bootstrap.EagerSignalCore (mirroring buildProductionOrchestrator) so
+// the eager-signal step actually fires in the integration scenario the
+// caller is exercising. If the caller did not provide a Restore adapter
+// (Restore stays NoOp → no skeleton markers will be set), the eager step
+// would be vacuous and the builder retains the NoOp default. Tests that
+// drive signal-hydrate via their own manual harness (notably the reboot
+// round-trips) explicitly opt out by setting EagerSignaler to
+// bootstrap.NoOpEagerHydrateSignaler{}.
 type orchestratorOpts struct {
 	Hooks         bootstrap.HookRegistrar
 	Saver         bootstrap.SaverBootstrapper
@@ -57,11 +68,39 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 	if opts.Saver == nil {
 		opts.Saver = bootstrap.NoOpSaver{}
 	}
+	// Track whether the caller wired a real Restore adapter BEFORE the
+	// NoOp defaulting below — the EagerSignaler default-selection branch
+	// keys off the original caller intent, not the post-defaulting field
+	// value. Without this latch, a NoOp Restore (from defaulting) would
+	// be indistinguishable from a real RestoreAdapter and the eager step
+	// would always default to real, losing the "vacuous when no
+	// skeletons are armed" guard.
+	restoreWired := opts.Restore != nil
 	if opts.Restore == nil {
 		opts.Restore = bootstrap.NoOpRestorer{}
 	}
 	if opts.EagerSignaler == nil {
-		opts.EagerSignaler = bootstrap.NoOpEagerHydrateSignaler{}
+		if restoreWired {
+			// Mirror buildProductionOrchestrator's wiring shape: the
+			// production *tmux.Client satisfies state.ServerOptionLister
+			// directly, stateDir is resolved via state.Dir() (which the
+			// integration sites pre-set via newIntegrationStateDir →
+			// PORTAL_STATE_DIR), and state.DefaultFIFOSignaler{} is the
+			// production no-seam wrapper around state.SendHydrateSignal.
+			// A stateDir resolution failure is tolerated: state.Dir
+			// returns the resolved path even when the directory does not
+			// exist on disk; EagerSignalCore only consults stateDir to
+			// derive per-FIFO paths inside its loop.
+			stateDir, _ := state.Dir()
+			opts.EagerSignaler = &bootstrap.EagerSignalCore{
+				Markers:  client,
+				StateDir: stateDir,
+				Signaler: state.DefaultFIFOSignaler{},
+				Logger:   opts.Logger,
+			}
+		} else {
+			opts.EagerSignaler = bootstrap.NoOpEagerHydrateSignaler{}
+		}
 	}
 	if opts.StaleMarkers == nil {
 		opts.StaleMarkers = bootstrap.NoOpMarkerCleaner{}

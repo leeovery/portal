@@ -173,16 +173,32 @@ func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir strin
 		StateDir: stateDir,
 		Logger:   logger,
 	}
+	// EagerSignaler defaults to a real *bootstrap.EagerSignalCore mirroring
+	// buildProductionOrchestrator's wiring shape: a real RestoreAdapter is
+	// always wired here, so leaving the eager step as a NoOp would silently
+	// degrade the integration scenario the reattach tests are supposed to
+	// exercise. *tmux.Client satisfies state.ServerOptionLister directly,
+	// stateDir is the same one wired into RestoreAdapter so all per-FIFO
+	// path derivations agree, and state.DefaultFIFOSignaler{} is the
+	// production no-seam wrapper around state.SendHydrateSignal. Reattach
+	// tests that need to suppress the eager step (e.g. a hypothetical
+	// manual-drive harness) would have to either bypass this builder or
+	// extend it with an opt-out hook — none of the current sites do.
 	return &bootstrap.Orchestrator{
-		Server:        client,
-		Hooks:         bootstrap.NoOpHooks{},
-		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:         bootstrap.NoOpSaver{},
-		Restore:       &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
-		StaleMarkers:  bootstrap.NoOpMarkerCleaner{},
-		Sweeper:       bootstrap.NoOpFIFOSweeper{},
-		Clean:         bootstrap.NoOpStaleCleaner{},
+		Server:    client,
+		Hooks:     bootstrap.NoOpHooks{},
+		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:     bootstrap.NoOpSaver{},
+		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		EagerSignaler: &bootstrap.EagerSignalCore{
+			Markers:  client,
+			StateDir: stateDir,
+			Signaler: state.DefaultFIFOSignaler{},
+			Logger:   logger,
+		},
+		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
+		Sweeper:      bootstrap.NoOpFIFOSweeper{},
+		Clean:        bootstrap.NoOpStaleCleaner{},
 	}
 }
 
