@@ -30,6 +30,22 @@ func makeFIFO(t *testing.T, dir, name string) string {
 	return path
 }
 
+// signalFIFOAsync spawns the canonical "best effort" writer goroutine: open
+// the FIFO O_WRONLY, write a single byte ("X"), close. Errors are ignored —
+// the read side is what's under test. Used to unblock runHydrate's blocking
+// FIFO open in tests that don't care about timing or write payload.
+func signalFIFOAsync(t *testing.T, fifo string) {
+	t.Helper()
+	go func() {
+		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		if err != nil {
+			return
+		}
+		_, _ = f.Write([]byte("X"))
+		_ = f.Close()
+	}()
+}
+
 // stubExecShell records the prog and argv passed to ExecShell. Production
 // implementation calls syscall.Exec; the stub just captures. The signature
 // `func(prog string, args []string)` mirrors syscall.Exec's prog+argv shape so
@@ -66,7 +82,9 @@ func TestHydrate_BlocksOnFIFOUntilSignalArrives(t *testing.T) {
 	exec := &stubExecShell{}
 	cmder := &recordingCommander{}
 
-	// Goroutine writes to the FIFO after a 50ms delay.
+	// Inline (not signalFIFOAsync) — this test asserts elapsed-time bounds, so
+	// the goroutine needs an embedded 50ms delay and a signalSent channel the
+	// test waits on after runHydrate returns.
 	signalSent := make(chan struct{})
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -115,7 +133,8 @@ func TestHydrate_ReadsSingleByteFromFIFOOnSignal(t *testing.T) {
 		t.Fatalf("seed scrollback: %v", err)
 	}
 
-	// Pre-write more than one byte to FIFO; runHydrate should consume only one.
+	// Inline (not signalFIFOAsync) — this test deliberately writes a multi-byte
+	// payload ("ABCDE") to assert runHydrate consumes only one byte.
 	go func() {
 		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
 		if err != nil {
@@ -150,14 +169,7 @@ func TestHydrate_RemovesFIFOAfterReading(t *testing.T) {
 	scrollback := filepath.Join(dir, "scrollback")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, err := os.OpenFile(fifo, os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cfg := hydrateConfig{
 		FIFO:      fifo,
@@ -183,11 +195,7 @@ func TestHydrate_EmitsResetPreambleBeforeDump(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte("CONTENT"), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	cfg := hydrateConfig{
@@ -219,11 +227,7 @@ func TestHydrate_StreamsScrollbackBytesVerbatim(t *testing.T) {
 	body := "line1\nline2\r\nline3\x00\xff\x1b[31mred\x1b[0m"
 	_ = os.WriteFile(scrollback, []byte(body), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	cfg := hydrateConfig{
@@ -248,11 +252,7 @@ func TestHydrate_EmitsResetPostambleWithCRLFAfterDump(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte("DUMP"), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	cfg := hydrateConfig{
@@ -286,11 +286,7 @@ func TestHydrate_Sleeps100msBeforeUnsettingMarker(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cmder := &recordingCommander{
 		RunFunc: func(args ...string) (string, error) {
@@ -325,11 +321,7 @@ func TestHydrate_UnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cmder := &recordingCommander{}
 	cfg := hydrateConfig{
@@ -372,11 +364,7 @@ func TestHydrate_PreservesANSISequencesInDump(t *testing.T) {
 	body := "\x1b[31mred\x1b[0m\x1b[1mbold\x1b[0m"
 	_ = os.WriteFile(scrollback, []byte(body), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	cfg := hydrateConfig{
@@ -409,11 +397,7 @@ func TestHydrate_StreamsLargeScrollbackFile(t *testing.T) {
 		t.Fatalf("seed scrollback: %v", err)
 	}
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	cfg := hydrateConfig{
@@ -446,11 +430,7 @@ func TestHydrate_ExecsShellWhenNoHookApplies(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/usr/local/bin/myshell")
 
@@ -479,11 +459,7 @@ func TestHydrate_DefaultsShellToBinSh(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "")
 
@@ -512,11 +488,7 @@ func TestHydrate_DoesNotReadHooksFileInThisPhase(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "h:0.0",
@@ -590,11 +562,7 @@ func TestHydrate_FileMissingPathInvokesHandleFileMissing(t *testing.T) {
 	scrollback := filepath.Join(dir, "missing-sb")
 	// Do NOT create scrollback file.
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	called := false
 	cfg := hydrateConfig{
@@ -621,11 +589,7 @@ func TestHydrate_FileMissing_ENOENT_EmitsPreambleAndExecsShell(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fm__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	exec := &stubExecShell{}
@@ -661,11 +625,7 @@ func TestHydrate_FileMissing_PermissionDenied_EmitsPreambleAndExecsShell(t *test
 	}
 	t.Cleanup(func() { _ = os.Chmod(scrollback, 0o600) })
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	stdout := new(bytes.Buffer)
 	exec := &stubExecShell{}
@@ -740,11 +700,7 @@ func TestHydrate_FileMissing_LogsENOENTDistinctly(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-le__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	logPath := filepath.Join(dir, "portal.log")
 	t.Setenv("PORTAL_LOG_LEVEL", "")
@@ -790,11 +746,7 @@ func TestHydrate_FileMissing_LogsPermissionDistinctly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(scrollback, 0o600) })
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	logPath := filepath.Join(dir, "portal.log")
 	t.Setenv("PORTAL_LOG_LEVEL", "")
@@ -872,11 +824,7 @@ func TestHydrate_FileMissing_LogIncludesHookKeyAndFile(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-li__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	logPath := filepath.Join(dir, "portal.log")
 	t.Setenv("PORTAL_LOG_LEVEL", "")
@@ -915,11 +863,7 @@ func TestHydrate_FileMissing_UnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fu__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cmder := &recordingCommander{}
 	cfg := hydrateConfig{
@@ -961,11 +905,7 @@ func TestHydrate_FileMissing_SkipsSettleSleep(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fs__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "fs:0.0",
@@ -994,11 +934,7 @@ func TestHydrate_FileMissing_DoesNotReadHooksFile(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fh__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "fh:0.0",
@@ -1338,11 +1274,7 @@ func TestHydrate_SignalArrived_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	store := seedHookStore(t, dir, map[string]map[string]string{
@@ -1379,11 +1311,7 @@ func TestHydrate_SignalArrived_ExecsBareShellWhenNoHookRegistered(t *testing.T) 
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	// Empty hooks file: no entries.
@@ -1418,11 +1346,7 @@ func TestHydrate_FileMissing_ExecsHookChainWhenHookRegistered(t *testing.T) {
 	scrollback := filepath.Join(dir, "missing-sb")
 	// Do NOT create scrollback file — drives the file-missing branch.
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	store := seedHookStore(t, dir, map[string]map[string]string{
@@ -1459,11 +1383,7 @@ func TestHydrate_FileMissing_ExecsBareShellWhenNoHookRegistered(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fmn__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	store := seedHookStore(t, dir, map[string]map[string]string{})
@@ -1650,11 +1570,7 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	// hooks.json is a directory, not a file.
 	hooksDir := filepath.Join(dir, "hooks.json")
@@ -1717,11 +1633,7 @@ func TestHydrate_LooksUpHooksByHookKeyVerbatimNotByLivePaneKey(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	store := seedHookStore(t, dir, map[string]map[string]string{
@@ -1759,11 +1671,7 @@ func TestHydrate_PassesHookCommandAsSingleArgvElementToShDashC(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	rawCmd := "echo 'it works' && echo \"\\$x\""
@@ -1815,11 +1723,7 @@ func TestHydrate_SignalArrived_LookupHappensAfterSleepAndMarkerUnset(t *testing.
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	store := seedHookStore(t, dir, map[string]map[string]string{
 		"ord:0.0": {"on-resume": "echo ord"},
@@ -1880,11 +1784,7 @@ func TestHydrate_FileMissing_LookupHappensAfterMarkerUnset(t *testing.T) {
 	fifo := makeFIFO(t, dir, "hydrate-fmo__0.0.fifo")
 	scrollback := filepath.Join(dir, "missing-sb")
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	store := seedHookStore(t, dir, map[string]map[string]string{
 		"fmo:0.0": {"on-resume": "echo fmo"},
@@ -1942,11 +1842,7 @@ func TestHydrate_NilHookStoreDegradesToBareShellOnSignalArrived(t *testing.T) {
 	scrollback := filepath.Join(dir, "sb")
 	_ = os.WriteFile(scrollback, []byte(""), 0o600)
 
-	go func() {
-		f, _ := os.OpenFile(fifo, os.O_WRONLY, 0)
-		_, _ = f.Write([]byte("X"))
-		_ = f.Close()
-	}()
+	signalFIFOAsync(t, fifo)
 
 	t.Setenv("SHELL", "/bin/zsh")
 	exec := &stubExecShell{}
