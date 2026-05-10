@@ -109,9 +109,10 @@ func runHydrate(cfg hydrateConfig) error {
 				// exec so tmux's PTY parser settles after the post-handler
 				// reset/marker-unset sequence.
 				time.Sleep(hydrateSettleSleep)
-				// Timeout path falls through to a bare-shell exec — pane
-				// gets an empty $SHELL prompt; no hook firing on this path.
-				execShellAndExit(cfg)
+				// Timeout path fires on-resume hooks per the timeout-recovery
+				// contract (spec § Fix 2 → Specific Changes → 2). The handler
+				// has already cleared the marker; lookup happens here, then exec.
+				execShellOrHookAndExit(cfg)
 				return nil
 			}
 			return err
@@ -209,10 +210,11 @@ func resolveShell() string {
 	return shell
 }
 
-// execShellOrHookAndExit is the post-hydration terminal exec for the
-// signal-arrived and file-missing paths (NOT the timeout path — see spec
-// "Helper Behavior on Startup", step 3e: "exec $SHELL (bare shell; no hook
-// firing on this path)").
+// execShellOrHookAndExit is the post-hydration terminal exec used by all
+// three non-fatal helper paths: signal-arrived (success), file-missing
+// recovery, and timeout recovery. The unified exec contract is mandated by
+// spec § Fix 2 → Specific Changes → 2 — every recovery path that falls
+// through to a shell fires the on-resume hook if one is registered.
 //
 // On any of: nil HookStore, lookup error, or no hook registered → exec bare
 // $SHELL via execShellAndExit. On a registered non-empty on-resume command,

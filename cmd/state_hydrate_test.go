@@ -1437,20 +1437,21 @@ func TestHydrate_FileMissing_ExecsBareShellWhenNoHookRegistered(t *testing.T) {
 	}
 }
 
-func TestHydrate_Timeout_NeverFiresHookEvenIfRegistered(t *testing.T) {
-	// On the timeout path, hooks must NOT fire even when one is registered for
-	// the pane's hook-key. The de-facto verification is that ExecShell receives
-	// bare-shell argv ([shell]), NOT a hook-chained argv.
+func TestHydrate_Timeout_FiresHookWhenRegistered(t *testing.T) {
+	// On the timeout path, hooks MUST fire when one is registered for the
+	// pane's hook-key — same exec contract as the file-missing recovery path
+	// per spec § Fix 2 → Specific Changes → 2. The de-facto verification is
+	// that ExecShell receives the hook-chained argv (sh -c '<HOOK>; exec $SHELL').
 	dir := t.TempDir()
-	fifo := makeFIFO(t, dir, "hydrate-tnf__0.0.fifo")
+	fifo := makeFIFO(t, dir, "hydrate-tfh__0.0.fifo")
 
 	t.Setenv("SHELL", "/bin/zsh")
 	store := seedHookStore(t, dir, map[string]map[string]string{
-		"tnf:0.0": {"on-resume": "should-not-fire"},
+		"tfh:0.0": {"on-resume": "echo hi"},
 	})
 
 	exec := &stubExecShell{}
-	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tnf:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
+	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tfh:0.0", io.Discard, &recordingCommander{}, exec.fn(), nil)
 	cfg.HookStore = store
 
 	if err := runHydrate(cfg); err != nil {
@@ -1459,17 +1460,12 @@ func TestHydrate_Timeout_NeverFiresHookEvenIfRegistered(t *testing.T) {
 	if !exec.called {
 		t.Fatal("ExecShell not called")
 	}
-	if exec.target != "/bin/zsh" {
-		t.Errorf("ExecShell prog = %q, want /bin/zsh (bare shell on timeout)", exec.target)
+	if exec.target != "/bin/sh" {
+		t.Errorf("ExecShell prog = %q, want /bin/sh", exec.target)
 	}
-	if !reflect.DeepEqual(exec.args, []string{"/bin/zsh"}) {
-		t.Errorf("ExecShell args = %#v, want [/bin/zsh] (no hook chain on timeout)", exec.args)
-	}
-	// Defensive: the hook command string must not appear anywhere in the argv.
-	for _, a := range exec.args {
-		if strings.Contains(a, "should-not-fire") {
-			t.Errorf("hook command leaked into timeout-path argv: %q", a)
-		}
+	want := []string{"sh", "-c", "echo hi; exec /bin/zsh"}
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Errorf("ExecShell args = %#v, want %#v", exec.args, want)
 	}
 }
 
