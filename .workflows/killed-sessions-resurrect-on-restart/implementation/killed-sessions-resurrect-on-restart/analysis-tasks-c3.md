@@ -7,7 +7,7 @@
 ---
 
 ## Task 1: Refresh stale doc-comment cross-references to renamed/relocated primitives
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
@@ -39,7 +39,7 @@ sources: standards, architecture
 ---
 
 ## Task 2: Extract `bootstrapadapter.NewRestoreAdapter` constructor and adopt at four new integration-test sites
-status: pending
+status: approved
 severity: low
 sources: duplication
 

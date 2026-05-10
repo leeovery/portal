@@ -144,6 +144,17 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-5-3 | Update CLAUDE.md step-6 to reference post-Task-1 production primitive | only the production-wiring reference is replaced; any retained mention of state.WriteFIFOSignal must explicitly note it is the seam-bearing variant used only for retry-ladder unit tests |
 | killed-sessions-resurrect-on-restart-5-4 | Reconcile internal/restoretest package doc with current build-tag reality | package doc must enumerate which symbols are integration-only and which are always-built; ensure the doc-comment host file's own build tag does not contradict the package-level claim |
 
+### Phase 6: Analysis (Cycle 3)
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-6-1 | Refresh stale doc-comment cross-references to renamed/relocated primitives | doc-comment-only edits with no behavioural change; verify each grep returns zero source-file hits (analysis docs in .workflows/ excluded by --include="*.go" filter) |
+| killed-sessions-resurrect-on-restart-6-2 | Extract bootstrapadapter.NewRestoreAdapter constructor and adopt at four new integration-test sites | constructor signature must match actual *state.Logger type used at open-coded sites; seven pre-existing sites stay untouched (scope discipline); no new test coverage required as constructor is logic-free |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":
