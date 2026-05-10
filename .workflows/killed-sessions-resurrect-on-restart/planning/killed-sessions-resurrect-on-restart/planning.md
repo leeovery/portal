@@ -17,6 +17,7 @@ approved_at: 2026-05-10
 - [ ] Per-FIFO write failures log a soft warning of shape `WARN | hydrate | eager-signal: write fifo <path>: <error>` and continue; the step never escalates to a fatal bootstrap error.
 - [ ] Zero-marker post-Restore is a no-op — no FIFO writes attempted, step returns nil.
 - [ ] Multi-session integration test (real tmux, N≥2 saved sessions): `state.ListSkeletonMarkers` returns empty within a 2-second poll window after bootstrap (AC1).
+- [ ] AC4 verified end-to-end: a daemon capture tick post-eager-signal produces a non-empty scrollback dump for a previously-non-attached session's pane (task 1-8).
 - [ ] AC8 invariant preserved: daemon `captureAndCommit` suppression during the `@portal-restoring` window is intact; no race introduced between the eager step and helper-driven scrollback replay.
 - [ ] `CLAUDE.md` "Server bootstrap" section updated in the same change with renumbered step list and one-paragraph `EagerSignalHydrate` description.
 - [ ] All existing happy-path resurrection integration tests and companion daemon-merge fix tests remain green.
@@ -34,6 +35,7 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-1-5 | Wire production EagerHydrateSignaler adapter in internal/bootstrapadapter | stateDir resolved once at orchestrator construction, FIFOPath derivation per paneKey, no new public API surface |
 | killed-sessions-resurrect-on-restart-1-6 | Multi-session cold-start integration test asserting empty marker set within 2s (AC1) | N>=2 saved sessions, polls state.ListSkeletonMarkers, no client attach required to drive unset |
 | killed-sessions-resurrect-on-restart-1-7 | Update CLAUDE.md Server bootstrap section with renumbered 10-step list and EagerSignalHydrate paragraph | preserve "Return is the post-step boundary" framing, renumber subsequent steps, one-paragraph step description |
+| killed-sessions-resurrect-on-restart-1-8 | Integration test asserting daemon captureAndCommit resumes for previously-stuck-marker panes (AC4) | sub-test extends task 1-6's file under //go:build integration, capture tick must run post-Clear @portal-restoring, expose state.RunCaptureOnce as a test seam if not present |
 
 ### Phase 2: Timeout-Path Recovery Corrections
 status: approved

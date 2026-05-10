@@ -1,7 +1,7 @@
 ---
 phase: 1
 phase_name: Eager-Signal Hydrate Step (Root-Cause Fix)
-total: 7
+total: 8
 ---
 
 ## killed-sessions-resurrect-on-restart-1-1 | approved
@@ -464,3 +464,40 @@ Then update `buildProductionOrchestrator` in `cmd/bootstrap_production.go` to re
 > Existing CLAUDE.md "Server bootstrap" section is at `/Users/leeovery/Code/portal/CLAUDE.md` lines 69–85.
 
 **Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Fix 1: Bootstrap Eager-Signaling Step" → "Bootstrap Step Numbering Update".
+
+## killed-sessions-resurrect-on-restart-1-8 | approved
+
+### Task killed-sessions-resurrect-on-restart-1-8: Integration test asserting daemon captureAndCommit resumes for previously-stuck-marker panes (AC4)
+
+**Problem**: AC4 ("Scrollback save resumes for previously-stuck-marker panes — daemon `captureAndCommit` no longer indefinitely skips any live pane") is the user-visible verification that Symptom C is closed. AC1's marker-cleared assertion (task 1-6) implies AC4 transitively, but does not directly observe the daemon producing a scrollback dump for a previously-stuck pane. Without an explicit AC4 test, a future regression that clears markers but breaks daemon resumption (e.g. daemon caches the suppression flag) would silently re-introduce empty-scrollback-on-next-cold-start.
+
+**Solution**: Extend the Phase 1 multi-session integration test scaffold (task 1-6) with an additional assertion phase that, after markers transition to empty, drives one daemon capture tick (via `state.RunCaptureOnce` or equivalent test seam) and asserts a non-empty scrollback `.bin` file exists for the previously-non-attached session's pane. Use the existing `state.TailScrollback` helper to read the dump and assert at least one record was captured.
+
+**Outcome**: AC4 is verified end-to-end. Test fails on regression of: daemon refuses to capture a pane whose marker was stuck-then-cleared, or scrollback file remains empty post-eager-signal.
+
+**Do**:
+- Extend `cmd/bootstrap/eager_signal_hydrate_integration_test.go` (added in task 1-6) with a second sub-test `TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4`.
+- Reuse the same N=2 saved-sessions fixture and orchestrator wiring from task 1-6.
+- After the marker-cleared poll completes (markers empty within 2 s), drive one daemon capture-tick by directly invoking the daemon's capture-once primitive (e.g. `state.RunCaptureOnce(client, stateDir, logger)`; if no such primitive exists, expose one as a test seam in `internal/state` for this purpose, mirroring the existing capture-loop body).
+- Assert via `state.TailScrollback(state.ScrollbackPath(stateDir, betaPaneKey), 10)` that at least one record exists for the non-attached session's pane.
+- The test gates on `tmuxtest.SkipIfNoTmux(t)` and the `//go:build integration` tag, consistent with task 1-6.
+
+**Acceptance Criteria**:
+- [ ] Sub-test `TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4` exists in `cmd/bootstrap/eager_signal_hydrate_integration_test.go`.
+- [ ] Sub-test passes against a build with eager signaling wired; fails if the daemon refuses to capture a previously-stuck pane.
+- [ ] No `t.Parallel()` usage.
+- [ ] Skips cleanly under `-short` and when tmux is unavailable.
+
+**Tests**:
+- `"TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4"` — drives one capture tick post-eager-signal and asserts non-empty scrollback dump for the previously-non-attached session's pane.
+
+**Edge Cases**:
+- The capture tick must run after the `@portal-restoring` window has closed (post step 7 Clear). The orchestrator's full Run handles this — the test does not need to manually toggle the marker.
+- If the daemon's capture-once primitive does not yet exist, this task adds it as a thin test seam in `internal/state` (no public API beyond the seam needed for production).
+
+**Context**:
+> Spec § "Acceptance Criteria → Behavioural" AC4: "Scrollback save resumes for previously-stuck-marker panes — daemon `captureAndCommit` no longer indefinitely skips any live pane."
+>
+> Spec § "AC ↔ Fix Traceability": AC4 → Fix 1 (eager signaling unsets markers, daemon resumes capturing those panes).
+
+**Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Acceptance Criteria → Behavioural → AC4" and "AC ↔ Fix Traceability".

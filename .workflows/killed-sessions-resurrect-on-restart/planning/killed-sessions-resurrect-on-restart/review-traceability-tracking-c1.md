@@ -59,7 +59,7 @@ Task 2-1 "Do" — adjust the second bullet to remove the "100 ms sleep deliberat
 
 ---
 
-### 2. AC4 has no explicit verification task
+### 2. AC4 has no explicit verification task [Fixed]
 
 **Type**: Incomplete coverage
 **Spec Reference**: § "Acceptance Criteria → Behavioural" AC4 (line 227): "Scrollback save resumes for previously-stuck-marker panes — daemon `captureAndCommit` no longer indefinitely skips any live pane." Also referenced in § "AC ↔ Fix Traceability" (AC4 → Fix 1).
@@ -135,8 +135,8 @@ Add this line before "AC8 invariant preserved":
 - [ ] AC4 verified end-to-end: a daemon capture tick post-eager-signal produces a non-empty scrollback dump for a previously-non-attached session's pane (task 1-8).
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Added task 1-8 to phase-1-tasks.md and the Phase 1 task table in planning.md. New tick task tick-58db96 maps the internal id. Phase 1 acceptance criteria updated with the AC4 verification line.
 
 ---
 
