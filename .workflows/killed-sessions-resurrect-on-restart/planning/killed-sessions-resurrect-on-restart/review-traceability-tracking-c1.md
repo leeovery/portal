@@ -10,7 +10,7 @@ topic: killed-sessions-resurrect-on-restart
 
 ## Findings
 
-### 1. 100 ms settle-sleep on timeout path: plan contradicts spec
+### 1. 100 ms settle-sleep on timeout path: plan contradicts spec [Fixed]
 
 **Type**: Hallucinated content (plan asserts behaviour that contradicts spec)
 **Spec Reference**: § "Fix 2: Timeout-Path Corrections in `handleHydrateTimeout`" → "Specific Changes" → item 4 (line 154): "The 100 ms settle-sleep is preserved before exec — same posture as the success path, gives tmux time to settle the post-restore state before respawn-pane chains take over."
@@ -54,8 +54,8 @@ Task 2-5 "Edge Cases" — replace the `Elapsed handler time on missing-FIFO must
 
 Task 2-1 "Do" — adjust the second bullet to remove the "100 ms sleep deliberately absent" framing and replace with a one-line note that the timeout fall-through inherits the same 100 ms settle posture as the success and file-missing paths.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Tasks 2-1, 2-2, and 2-5 in `phase-2-tasks.md` updated to reflect that the 100 ms settle-sleep is preserved on the timeout fall-through (per spec § Fix 2 → Specific Changes → 4). Task 2-5 elapsed-time assertion moved from handler boundary (`< 50 ms`) to runHydrate boundary (`>= hydrateSettleSleep`); sibling test `TestHydrate_Timeout_PreservesSettleSleepBeforeExec` added to acceptance/tests sections.
 
 ---
 

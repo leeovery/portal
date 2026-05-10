@@ -52,18 +52,18 @@ total: 7
 
 **Problem**: After task 2-1, the comment block at `cmd/state_hydrate.go:262-264` ("Deliberately NO UnsetServerOption — marker stays set so the next attach re-signals. / Deliberately NO 100ms sleep — nothing was dumped to settle.") encodes a non-deliverable invariant that has now been deliberately reversed (the marker is unset). Leaving the comment intact would mislead the next reader of the file.
 
-**Solution**: Replace the multi-line "deliberately NO UnsetServerOption" comment with a single-line note that documents the post-task-2-1 recovery contract: "Marker unset above (recovery path matches handleHydrateFileMissing); the 100 ms settle sleep is still skipped — no scrollback was dumped, so there is no PTY-parser settle to wait on." The adjacent comments documenting the FIFO unlink (line 252-255) and the warn-log (line 258-259) stay verbatim — they describe behaviour that is unchanged.
+**Solution**: Replace the "deliberately NO UnsetServerOption — marker stays set so the next attach re-signals" comment block with a single-line recovery-contract note immediately after the `unsetSkeletonMarkerOrLog(cfg)` call inserted by task 2-1, e.g. `// Recovery path matches handleHydrateFileMissing: marker unset above, then runHydrate execs through execShellOrHookAndExit with the 100 ms settle sleep preserved (same posture as the success path — gives tmux time to settle the post-restore state before respawn-pane chains take over).` The adjacent comments documenting the FIFO unlink (line 252-255) and the warn-log (line 258-259) stay verbatim — they describe behaviour that is unchanged.
 
-**Outcome**: The handler's comment block reads coherently against the new behaviour. The 100 ms settle-sleep absence is still explicitly documented as deliberate so a future reader does not "fix" the absence by adding a sleep that has no scrollback to settle.
+**Outcome**: The handler's comment block reads coherently against the new behaviour. The 100 ms settle-sleep is preserved on the exec fall-through (per spec § "Fix 2 → Specific Changes → 4") — same posture as the success path; the comment documents that the recovery contract matches `handleHydrateFileMissing`, with the sleep paid before exec by `runHydrate`'s shared post-handler block.
 
 **Do**:
-- Edit `cmd/state_hydrate.go` lines 262-264 (the two-line "Deliberately NO UnsetServerOption" / "Deliberately NO 100ms sleep" block). Replace with a single-line comment placed immediately after the `unsetSkeletonMarkerOrLog(cfg)` call inserted by task 2-1, of approximately this shape: `// 100 ms settle sleep is deliberately skipped — nothing was dumped to settle, so there is no PTY-parser ingestion window to wait on.`
+- Edit `cmd/state_hydrate.go` lines 262-264 (the two-line "Deliberately NO UnsetServerOption" / "Deliberately NO 100ms sleep" block). Replace with a single-line comment placed immediately after the `unsetSkeletonMarkerOrLog(cfg)` call inserted by task 2-1, of approximately this shape: `// Recovery path matches handleHydrateFileMissing: marker unset above; runHydrate's exec fall-through still pays the 100 ms settle sleep before exec (preserved per spec — same posture as the success path).` This task also restores the 100 ms `time.Sleep(hydrateSettleSleep)` before the exec fall-through if it is currently absent on the timeout path; if the existing code already pays the sleep elsewhere (e.g. inside `runHydrate`'s shared post-handler block), this task only updates the comment and leaves the sleep call untouched.
 - Preserve verbatim the comments at lines 252-255 (FIFO unlink rationale) and lines 258-259 (warn-log purpose). Diff should touch only the deleted "Deliberately NO UnsetServerOption …" wording.
 - This task is comment-only — no behavioural change. All existing tests must still pass without any test-file edit (the behavioural assertions are owned by tasks 2-1, 2-3, 2-4, 2-5).
 
 **Acceptance Criteria**:
 - [ ] The exact substring "marker stays set so the next attach re-signals" no longer appears anywhere in `cmd/state_hydrate.go`.
-- [ ] The single-line replacement comment documents the 100 ms settle-sleep absence as deliberate.
+- [ ] The single-line replacement comment documents that the recovery contract matches `handleHydrateFileMissing` and that the 100 ms settle-sleep is preserved before exec by `runHydrate`'s shared post-handler block (same posture as the success path).
 - [ ] The FIFO-unlink comment at lines 252-255 is preserved verbatim.
 - [ ] The warn-log comment at lines 258-259 is preserved verbatim.
 - [ ] `go build ./...` succeeds and `go test ./cmd -run TestHydrate_Timeout` passes without any test-file edits in this task.
@@ -74,13 +74,13 @@ total: 7
 
 **Edge Cases**:
 - No behavioural change in this task — any test failure indicates the comment edit accidentally touched a code line; revert and re-edit.
-- The 100 ms settle-sleep absence must remain documented as deliberate so a future drive-by edit does not introduce a sleep symmetrically with the success path.
+- The 100 ms settle-sleep is preserved on the exec fall-through per spec § "Fix 2 → Specific Changes → 4" — same posture as the success path; `runHydrate`'s shared post-handler block owns the sleep call.
 - Adjacent FIFO-unlink and warn-log comments must be byte-identical post-edit (use `git diff` to verify only the deletion site is touched).
 
 **Context**:
 > Spec § "Fix 2 → Specific Changes → 3": "Remove the 'marker stays set so the next attach re-signals' comment at line 262. That comment encoded a non-deliverable invariant: the FIFO is unlinked at line 256 of the same handler before any subsequent attach could write to it, so 'next attach re-signals' was a no-op that just re-fired ENOENT. The comment is replaced with a one-line note explaining the recovery contract."
 
-> Spec § "Fix 2 → Specific Changes → 4": "The 100 ms settle-sleep is preserved before exec — same posture as the success path, gives tmux time to settle the post-restore state before respawn-pane chains take over." (Note: applies to the success path's settle-sleep, not the timeout path's — the timeout path still skips the sleep because no scrollback was dumped. The replacement comment documents that distinction explicitly.)
+> Spec § "Fix 2 → Specific Changes → 4": "The 100 ms settle-sleep is preserved before exec — same posture as the success path, gives tmux time to settle the post-restore state before respawn-pane chains take over." This applies to **all** post-handler exec fall-throughs (success, file-missing, and timeout). The replacement comment documents the unified recovery contract.
 
 **Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Fix 2 → Specific Changes → 3 and 4"
 
@@ -173,13 +173,13 @@ total: 7
 
 ## killed-sessions-resurrect-on-restart-2-5 | approved
 
-### Task killed-sessions-resurrect-on-restart-2-5: Unit test: handleHydrateTimeout preserves the 100 ms settle-sleep absence and FIFO-unlink ordering
+### Task killed-sessions-resurrect-on-restart-2-5: Unit test: runHydrate timeout fall-through preserves the 100 ms settle-sleep, marker-unset ordering, and FIFO-unlink tolerance
 
-**Problem**: Task 2-1 inserts an `unsetSkeletonMarkerOrLog` call into `handleHydrateTimeout`, and task 2-2 rewrites the comment block. Two pre-existing invariants of the timeout handler must remain intact post-edit: (a) no 100 ms settle sleep — nothing was dumped, so there is no PTY-parser settle to wait on, and (b) `os.Remove(cfg.FIFO)` tolerates a missing FIFO silently. A future drive-by edit could accidentally re-introduce a sleep symmetric with the success path, or replace `os.Remove` with a stricter primitive. Existing test `TestHydrate_TimeoutDoesNotSleep100ms` (line 1114) covers (a) at the `runHydrate` boundary; existing test `TestHydrate_TimeoutToleratesMissingFIFOSilently` (line 1237) covers (b) loosely. Neither asserts the relative ordering of the unset call vs. the FIFO unlink and exec fall-through.
+**Problem**: Task 2-1 inserts an `unsetSkeletonMarkerOrLog` call into `handleHydrateTimeout`, and task 2-2 rewrites the comment block. Two invariants must hold post-edit: (a) the 100 ms settle-sleep is preserved on the exec fall-through (per spec § "Fix 2 → Specific Changes → 4" — same posture as the success path; `runHydrate` owns the sleep), and (b) `os.Remove(cfg.FIFO)` tolerates a missing FIFO silently. A future drive-by edit could accidentally remove the sleep, or replace `os.Remove` with a stricter primitive. Existing test `TestHydrate_TimeoutToleratesMissingFIFOSilently` (line 1237) covers (b) loosely. Neither covers the post-fix relative ordering of the unset call vs. the FIFO unlink, nor pins the preserved-sleep invariant on the timeout-recovery boundary.
 
-**Solution**: Add one new unit test `TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` that exercises `handleHydrateTimeout` directly (not through `runHydrate`) and asserts: (a) handler elapsed time is well under `hydrateSettleSleep` (100 ms); (b) `os.Remove(cfg.FIFO)` on a non-existent FIFO returns nil from the handler; (c) the marker-unset call (`set-option -su`) is observed in the recording commander's call log before the handler returns (i.e. before `runHydrate` would issue the exec fall-through). Combined with the existing `TestHydrate_TimeoutPathInvokesHandleTimeout` (which asserts handler is called before the exec), this establishes the full ordering invariant.
+**Solution**: Add one new unit test `TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` that exercises `handleHydrateTimeout` directly (not through `runHydrate`) and asserts: (a) `os.Remove(cfg.FIFO)` on a non-existent FIFO returns nil from the handler; (b) the marker-unset call (`set-option -su`) is observed in the recording commander's call log before the handler returns (i.e. before `runHydrate` would issue the exec fall-through). Add a sibling test at the `runHydrate` boundary that asserts the timeout fall-through pays the 100 ms settle-sleep before exec (`elapsed >= hydrateSettleSleep`). Combined with the existing `TestHydrate_TimeoutPathInvokesHandleTimeout` (which asserts handler is called before the exec), this establishes the full ordering and preserved-sleep invariants.
 
-**Outcome**: The 100 ms-absence and ordering invariants are pinned by an explicit test that fails if a future change introduces a sleep, swaps `os.Remove` for an erroring primitive, or reorders the unset call after the exec fall-through.
+**Outcome**: The preserved-sleep and ordering invariants are pinned by explicit tests that fail if a future change removes the 100 ms sleep on the timeout fall-through, swaps `os.Remove` for an erroring primitive, or reorders the unset call after the exec fall-through.
 
 **Do**:
 - Add `TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` in `cmd/state_hydrate_test.go`. Construct a minimal `hydrateConfig` directly (not via `timeoutCfg` — this test calls the handler in isolation, not through `runHydrate`):
@@ -187,30 +187,30 @@ total: 7
   - `cmder := &recordingCommander{}`; `cfg := hydrateConfig{FIFO: fifo, HookKey: "ord:0.0", Stdout: io.Discard, Client: tmux.NewClient(cmder)}`.
 - Time the handler call: `start := time.Now(); err := handleHydrateTimeout(cfg); elapsed := time.Since(start)`.
 - Assert `err == nil`.
-- Assert `elapsed < 50*time.Millisecond` (well under `hydrateSettleSleep = 100*time.Millisecond`). Use 50 ms not 100 ms so a sleep regression cannot squeak past with timing jitter.
+- Assert the marker-unset call ordered before the handler returns (recording-commander check). Do NOT assert handler `elapsed < 50 ms` — the 100 ms settle-sleep must be preserved per spec § "Fix 2 → Specific Changes → 4". If the sleep lives inside `runHydrate` (post-handler) rather than inside `handleHydrateTimeout`, replace the elapsed-time assertion at the handler boundary with one at the `runHydrate` boundary that asserts `elapsed >= 100 ms`.
 - Assert `_, statErr := os.Stat(fifo); errors.Is(statErr, os.ErrNotExist)` — handler tolerated the absent FIFO and did not return an error.
 - Assert the marker-unset argv `["set-option", "-su", "@portal-skeleton-ord__0.0"]` is present in `cmder.Calls`. The handler returns nil before the exec fall-through is reached, so the call log captures only the marker-unset.
 
 **Acceptance Criteria**:
 - [ ] `TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` passes.
-- [ ] Handler elapsed time on a missing-FIFO input is `< 50 ms`.
+- [ ] runHydrate timeout fall-through preserves the 100 ms settle-sleep before exec — recorded elapsed time at the runHydrate boundary is at least `hydrateSettleSleep`.
 - [ ] `os.Remove` on a non-existent FIFO is silent — handler returns nil.
 - [ ] `set-option -su @portal-skeleton-<paneKey>` appears in the recording commander's calls before the handler returns.
 - [ ] Test does not use `t.Parallel()`.
 
 **Tests**:
-- `"TestHydrate_TimeoutHandler_OrderingAndTimingInvariants"` — combined timing + ordering + FIFO-tolerance assertion.
-- `"elapsed time on timeout handler stays well under hydrateSettleSleep"` — sub-50 ms bound, defensive against any sleep introduction.
+- `"TestHydrate_TimeoutHandler_OrderingAndTimingInvariants"` — direct-handler ordering + FIFO-tolerance assertion.
+- `"TestHydrate_Timeout_PreservesSettleSleepBeforeExec"` (sibling test at the `runHydrate` boundary) — asserts `elapsed >= hydrateSettleSleep` on the timeout fall-through, defensive against any future drive-by removal of the sleep.
 - `"os.Remove(cfg.FIFO) tolerates missing FIFO silently"` — pre-existing in `TestHydrate_TimeoutToleratesMissingFIFOSilently` (line 1237) at the `runHydrate` boundary; this task adds the handler-level direct assertion.
 - `"marker-unset call ordered before exec fall-through"` — the handler must issue `set-option -su` and return; only then does `runHydrate` invoke `execShellOrHookAndExit`. Verified by absence of any exec-related calls in the handler's recording commander log.
 
 **Edge Cases**:
-- Elapsed handler time on missing-FIFO must stay well under `hydrateSettleSleep` (100 ms) — bound at 50 ms in the assertion.
+- 100 ms settle sleep on the timeout path is preserved per spec — same posture as the success path. The assertion is at the `runHydrate` boundary, not the handler boundary, since `runHydrate` owns the sleep regardless of whether `handleHydrateTimeout` or `handleHydrateFileMissing` returned.
 - `os.Remove(cfg.FIFO)` on a path that does not exist must return silently — already true (line 256 uses `_ = os.Remove(...)`).
 - Marker-unset call ordering: `unsetSkeletonMarkerOrLog` must execute before the handler returns. The handler does not invoke any exec primitive — that is `runHydrate`'s responsibility post-handler-return.
 
 **Context**:
-> `cmd/state_hydrate.go:248-266` — pre-task-2-1 `handleHydrateTimeout` body. The post-task-2-1 ordering is: (1) reset preamble → (2) `os.Remove(cfg.FIFO)` → (3) warn-log → (4) `unsetSkeletonMarkerOrLog(cfg)` → return nil. The 100 ms sleep is deliberately absent per `cmd/state_hydrate.go:264` (post-edit, the absence is documented by the single-line replacement comment from task 2-2).
+> `cmd/state_hydrate.go:248-266` — pre-task-2-1 `handleHydrateTimeout` body. The post-task-2-1 ordering is: (1) reset preamble → (2) `os.Remove(cfg.FIFO)` → (3) warn-log → (4) `unsetSkeletonMarkerOrLog(cfg)` → return nil. The 100 ms settle sleep is preserved on the exec fall-through per spec § "Fix 2 → Specific Changes → 4" (same posture as the success path); `runHydrate` owns the sleep regardless of whether `handleHydrateTimeout` or `handleHydrateFileMissing` returned.
 
 > `cmd/state_hydrate_test.go:1114-1132` — `TestHydrate_TimeoutDoesNotSleep100ms` is the canonical no-sleep timing assertion at the `runHydrate` boundary. This task adds a handler-direct equivalent so the invariant is pinned even if a future change moves the sleep call into the handler itself.
 
