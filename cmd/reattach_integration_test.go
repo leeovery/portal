@@ -149,13 +149,15 @@ func ensurePortalOnPATH(t *testing.T) {
 // TestPhase5_RestoreCreatesMissingSession in
 // cmd/bootstrap/phase5_integration_test.go.
 //
-// This file's package (cmd) cannot import the shared
-// buildIntegrationOrchestrator helper in
-// cmd/bootstrap/orchestrator_builder_test.go because Go test-file
-// symbols are not visible across packages. Adding a new step interface
-// therefore requires editing two places: that helper (covering the ten
-// cmd/bootstrap sites) and this builder. Keep the field set in lock
-// step with bootstrap.Orchestrator's struct literal there.
+// Delegates to bootstrap.NewWithDefaults (cmd/bootstrap/defaults.go) so
+// the NoOp defaulting policy lives in one place. The conditional
+// EagerSignaler default-to-real semantics (T4-2) is also computed
+// inside the helper: passing WithRestore with a non-nil Restorer
+// produces a real *bootstrap.EagerSignalCore wired with the same
+// client / stateDir / logger triple. Reattach tests that need to
+// suppress the eager step would pass an explicit
+// bootstrap.WithEagerSignaler(bootstrap.NoOpEagerHydrateSignaler{}) —
+// none of the current sites do.
 //
 // stateDir holds the seeded sessions.json and the per-pane scrollback
 // files (written by the helper after hydration). client points at the
@@ -173,33 +175,13 @@ func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir strin
 		StateDir: stateDir,
 		Logger:   logger,
 	}
-	// EagerSignaler defaults to a real *bootstrap.EagerSignalCore mirroring
-	// buildProductionOrchestrator's wiring shape: a real RestoreAdapter is
-	// always wired here, so leaving the eager step as a NoOp would silently
-	// degrade the integration scenario the reattach tests are supposed to
-	// exercise. *tmux.Client satisfies state.ServerOptionLister directly,
-	// stateDir is the same one wired into RestoreAdapter so all per-FIFO
-	// path derivations agree, and state.DefaultFIFOSignaler{} is the
-	// production no-seam wrapper around state.SendHydrateSignal. Reattach
-	// tests that need to suppress the eager step (e.g. a hypothetical
-	// manual-drive harness) would have to either bypass this builder or
-	// extend it with an opt-out hook — none of the current sites do.
-	return &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     bootstrap.NoOpHooks{},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     bootstrap.NoOpSaver{},
-		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrap.EagerSignalCore{
-			Markers:  client,
-			StateDir: stateDir,
-			Signaler: state.DefaultFIFOSignaler{},
-			Logger:   logger,
-		},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
-	}
+	return bootstrap.NewWithDefaults(
+		client,
+		stateDir,
+		logger,
+		&bootstrapadapter.RestoringMarker{Client: client},
+		bootstrap.WithRestore(&bootstrapadapter.RestoreAdapter{Inner: restoreInner}),
+	)
 }
 
 // setupReattachEnv builds the per-test scaffolding shared by every

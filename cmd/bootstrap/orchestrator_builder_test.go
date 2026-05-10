@@ -5,20 +5,18 @@ package bootstrap_test
 // Eleven test sites across cmd/bootstrap (and one sibling in cmd/) used to
 // rebuild the same multi-step Orchestrator literal — adding a new step
 // interface (e.g. StaleMarkers, EagerSignaler) meant touching every literal.
-// This helper centralises the wiring so a future step addition is a
-// one-file change in orchestratorOpts + buildIntegrationOrchestrator.
+// The defaulting policy is now centralised in bootstrap.NewWithDefaults
+// (cmd/bootstrap/defaults.go) — a non-test helper both this file and the
+// cmd-package sibling buildReattachOrchestrator delegate to. A future
+// eleventh step requires only a new bootstrap.With* option constructor
+// plus one default wire-up at the helper site; no edits in either test
+// file (they pass through any unhandled options via the same With* shape).
 //
 // Defaults policy: every step that the spec permits to degrade-and-continue
 // defaults to its NoOp form (Hooks, Saver, Restore, EagerSignaler,
 // StaleMarkers, Sweeper, Clean). RestoringMarker is always real because step
 // 3 / step 7 are fatal-on-failure and the marker contract is exercised in
 // every Run path.
-//
-// The sibling builder in cmd/reattach_integration_test.go (package cmd)
-// cannot delegate to this helper because Go test-file symbols are not
-// visible across packages — that file keeps its own thin builder. Adding a
-// new step interface therefore requires editing two files: this one, and
-// reattach_integration_test.go's buildReattachOrchestrator.
 
 import (
 	"path/filepath"
@@ -59,70 +57,56 @@ type orchestratorOpts struct {
 // buildIntegrationOrchestrator returns a *bootstrap.Orchestrator wired with
 // the supplied client as Server, a real bootstrapadapter.RestoringMarker, and
 // every other field defaulted to its NoOp form unless the caller supplied a
-// real adapter via opts.
+// real adapter via opts. Delegates to bootstrap.NewWithDefaults so the
+// defaulting policy lives in one place — see cmd/bootstrap/defaults.go.
+//
+// stateDir is resolved via state.Dir() (which the integration sites pre-set
+// via newIntegrationStateDir → PORTAL_STATE_DIR). A stateDir resolution
+// failure is tolerated: state.Dir returns the resolved path even when the
+// directory does not exist on disk; EagerSignalCore only consults stateDir
+// to derive per-FIFO paths inside its loop, so an empty / unresolved
+// stateDir still produces a well-formed orchestrator.
 func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orchestratorOpts) *bootstrap.Orchestrator {
 	t.Helper()
-	if opts.Hooks == nil {
-		opts.Hooks = bootstrap.NoOpHooks{}
+
+	stateDir, _ := state.Dir()
+
+	// Translate orchestratorOpts → variadic With* options. Only fields the
+	// caller explicitly set are forwarded; unset fields fall through to
+	// NewWithDefaults' NoOp policy. The EagerSignaler conditional default
+	// (real when Restore is real, NoOp otherwise, explicit opt-out wins)
+	// is implemented inside NewWithDefaults — this builder threads the
+	// caller's intent verbatim and lets the helper compute the default.
+	var withOpts []bootstrap.Option
+	if opts.Hooks != nil {
+		withOpts = append(withOpts, bootstrap.WithHooks(opts.Hooks))
 	}
-	if opts.Saver == nil {
-		opts.Saver = bootstrap.NoOpSaver{}
+	if opts.Saver != nil {
+		withOpts = append(withOpts, bootstrap.WithSaver(opts.Saver))
 	}
-	// Track whether the caller wired a real Restore adapter BEFORE the
-	// NoOp defaulting below — the EagerSignaler default-selection branch
-	// keys off the original caller intent, not the post-defaulting field
-	// value. Without this latch, a NoOp Restore (from defaulting) would
-	// be indistinguishable from a real RestoreAdapter and the eager step
-	// would always default to real, losing the "vacuous when no
-	// skeletons are armed" guard.
-	restoreWired := opts.Restore != nil
-	if opts.Restore == nil {
-		opts.Restore = bootstrap.NoOpRestorer{}
+	if opts.Restore != nil {
+		withOpts = append(withOpts, bootstrap.WithRestore(opts.Restore))
 	}
-	if opts.EagerSignaler == nil {
-		if restoreWired {
-			// Mirror buildProductionOrchestrator's wiring shape: the
-			// production *tmux.Client satisfies state.ServerOptionLister
-			// directly, stateDir is resolved via state.Dir() (which the
-			// integration sites pre-set via newIntegrationStateDir →
-			// PORTAL_STATE_DIR), and state.DefaultFIFOSignaler{} is the
-			// production no-seam wrapper around state.SendHydrateSignal.
-			// A stateDir resolution failure is tolerated: state.Dir
-			// returns the resolved path even when the directory does not
-			// exist on disk; EagerSignalCore only consults stateDir to
-			// derive per-FIFO paths inside its loop.
-			stateDir, _ := state.Dir()
-			opts.EagerSignaler = &bootstrap.EagerSignalCore{
-				Markers:  client,
-				StateDir: stateDir,
-				Signaler: state.DefaultFIFOSignaler{},
-				Logger:   opts.Logger,
-			}
-		} else {
-			opts.EagerSignaler = bootstrap.NoOpEagerHydrateSignaler{}
-		}
+	if opts.EagerSignaler != nil {
+		withOpts = append(withOpts, bootstrap.WithEagerSignaler(opts.EagerSignaler))
 	}
-	if opts.StaleMarkers == nil {
-		opts.StaleMarkers = bootstrap.NoOpMarkerCleaner{}
+	if opts.StaleMarkers != nil {
+		withOpts = append(withOpts, bootstrap.WithStaleMarkers(opts.StaleMarkers))
 	}
-	if opts.Sweeper == nil {
-		opts.Sweeper = bootstrap.NoOpFIFOSweeper{}
+	if opts.Sweeper != nil {
+		withOpts = append(withOpts, bootstrap.WithSweeper(opts.Sweeper))
 	}
-	if opts.Clean == nil {
-		opts.Clean = bootstrap.NoOpStaleCleaner{}
+	if opts.Clean != nil {
+		withOpts = append(withOpts, bootstrap.WithClean(opts.Clean))
 	}
-	return &bootstrap.Orchestrator{
-		Server:        client,
-		Hooks:         opts.Hooks,
-		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:         opts.Saver,
-		Restore:       opts.Restore,
-		EagerSignaler: opts.EagerSignaler,
-		StaleMarkers:  opts.StaleMarkers,
-		Sweeper:       opts.Sweeper,
-		Clean:         opts.Clean,
-		Logger:        opts.Logger,
-	}
+
+	return bootstrap.NewWithDefaults(
+		client,
+		stateDir,
+		opts.Logger,
+		&bootstrapadapter.RestoringMarker{Client: client},
+		withOpts...,
+	)
 }
 
 // openTestLogger opens a state.Logger writing to <stateDir>/portal.log and
