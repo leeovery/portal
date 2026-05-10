@@ -68,7 +68,6 @@ package bootstrap_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -210,31 +209,11 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	// 2 seconds. Pass condition is sentinel present within the window.
 	// On failure, dump portal.log so the diagnostic includes any helper
 	// WARN lines (e.g. hook lookup error, FIFO retry exhaustion).
+	//
+	// A failure here means: (a) the eager-signal step did not deliver
+	// beta's FIFO byte AND the 3s timeout fall-through did not fire
+	// within the window, OR (b) the hook lookup failed inside the
+	// helper, OR (c) the helper crashed before reaching its exec.
 	defer dumpPortalLogOnFailure(t, stateDir)
-	pollUntilSentinelPresent(t, sentinelFile, 2*time.Second, 50*time.Millisecond)
-}
-
-// pollUntilSentinelPresent polls os.Stat(path) every tick until the
-// sentinel file exists or the deadline elapses. The 2-second budget
-// matches the AC2 contract's expected fast-path timing (eager-signal +
-// helper exec + touch should complete well inside this window). A
-// failure here means: (a) the eager-signal step did not deliver beta's
-// FIFO byte AND the 3s timeout fall-through did not fire within the
-// window, OR (b) the hook lookup failed inside the helper, OR (c) the
-// helper crashed before reaching its exec.
-//
-// Distinct from pollUntilMarkersCleared (the AC1 helper) — that polls
-// tmux server-option state, this polls a filesystem side-effect.
-func pollUntilSentinelPresent(t *testing.T, path string, budget, tick time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(tick)
-	}
-	t.Fatalf("AC2 violation: sentinel file %s not created within %s; "+
-		"on-resume hook for non-attached session did not fire end-to-end",
-		path, budget)
+	restoretest.WaitForFileExists(t, sentinelFile, 2*time.Second, 50*time.Millisecond)
 }

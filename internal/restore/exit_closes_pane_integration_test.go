@@ -172,7 +172,12 @@ func TestExitClosesRestoredPane_WithHook(t *testing.T) {
 	// barrier passes the hook command has been kicked off via
 	// `sh -c '<HOOK>; exec $SHELL'`, but the sentinel write may take
 	// a brief settle to hit disk. Poll up to the same 2s budget.
-	awaitSentinelExists(t, sentinel, exitClosesPaneBudget)
+	// A missing sentinel after the budget means the hook did NOT fire
+	// — that is the original Symptom B (AC2) shape, but it also blocks
+	// AC5 because if the inner `sh -c '<HOOK>; exec $SHELL'` never
+	// reached `exec $SHELL`, the pane is stuck running the hook
+	// forever and `exit` would not close it.
+	restoretest.WaitForFileExists(t, sentinel, exitClosesPaneBudget, 50*time.Millisecond)
 
 	target := tmux.PaneTarget(sessionName, 0, 0)
 	if err := ts.Client().SendKeys(target, "exit"); err != nil {
@@ -448,31 +453,6 @@ func awaitPaneGone(t *testing.T, ts *tmuxtest.Socket, sessionName string, window
 		"(spec AC5: pane closes on first invocation). last "+
 		"list-panes output=%q err=%v",
 		sessionName, wantPane, budget, lastOut, lastErr)
-}
-
-// awaitSentinelExists polls for the existence of path until it
-// appears or the budget elapses. Used by the with-hook sub-test to
-// confirm the on-resume hook command actually ran inside the
-// helper's exec chain. A missing sentinel after the budget means
-// the hook did NOT fire — that is the original Symptom B (AC2)
-// shape, but it also blocks AC5 because if the inner `sh -c
-// '<HOOK>; exec $SHELL'` never reached `exec $SHELL`, the pane is
-// stuck running the hook forever and `exit` would not close it.
-func awaitSentinelExists(t *testing.T, path string, budget time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(budget)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("on-resume hook sentinel %q did not appear within %s; "+
-		"hook command did not run (or did not flush to disk). "+
-		"This blocks AC5 because the helper's exec chain has not "+
-		"reached `exec $SHELL` yet — `exit` cannot close the pane "+
-		"if the user's shell never replaced the hook wrapper.",
-		path, budget)
 }
 
 // sanitizeSessionForTmux strips characters tmux's session-name
