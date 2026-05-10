@@ -84,7 +84,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
@@ -197,22 +196,19 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 		Logger:   logger,
 	}
 
-	// Wire production *bootstrap.EagerSignalCore inline: it iterates the
+	// The production *bootstrap.EagerSignalCore — which iterates the
 	// post-Restore @portal-skeleton-* marker set and writes the FIFO byte
 	// to each pane's hydration FIFO via state.DefaultFIFOSignaler{} (the
-	// production no-seam wrapper around state.SendHydrateSignal). This is
-	// the step under test — a regression that swaps in
-	// NoOpEagerHydrateSignaler{} would leave markers stuck and the 2-second
-	// poll would expire.
+	// production no-seam wrapper around state.SendHydrateSignal) — is the
+	// step under test. We rely on buildIntegrationOrchestrator's
+	// "Restore real → EagerSignaler defaults to real EagerSignalCore"
+	// auto-default (see orchestrator_builder_test.go and defaults.go) to
+	// produce identical wiring without restating the literal here. A
+	// regression that swaps in NoOpEagerHydrateSignaler{} would leave
+	// markers stuck and the 2-second poll would expire.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrap.EagerSignalCore{
-			Markers:  client,
-			StateDir: stateDir,
-			Signaler: state.DefaultFIFOSignaler{},
-			Logger:   logger,
-		},
-		Logger: logger,
+		Logger:  logger,
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -339,15 +335,12 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 		Logger:   logger,
 	}
 
+	// EagerSignaler is left to buildIntegrationOrchestrator's auto-default
+	// (real EagerSignalCore when Restore is real) — see the AC1 sub-test
+	// above for the rationale.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrap.EagerSignalCore{
-			Markers:  client,
-			StateDir: stateDir,
-			Signaler: state.DefaultFIFOSignaler{},
-			Logger:   logger,
-		},
-		Logger: logger,
+		Logger:  logger,
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {

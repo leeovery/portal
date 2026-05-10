@@ -73,12 +73,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -171,20 +169,17 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	//   - RestoreAdapter: skeleton-creates sessions, arms FIFOs, sets
 	//     @portal-skeleton-* markers, spawns the in-pane helper.
 	//   - EagerHydrateSignaler: writes the FIFO byte to every armed pane
-	//     during step 6 — the success path that AC2 mostly observes.
+	//     during step 6 — the success path that AC2 mostly observes. We
+	//     rely on buildIntegrationOrchestrator's auto-default (real
+	//     EagerSignalCore when Restore is real) instead of restating the
+	//     literal here.
 	// HookRegistrar is left as the default NoOp since the test drives
 	// hydration through the orchestrator's eager-signal step (and
 	// optionally the helper's own 3s timeout fall-through), not through
 	// tmux's `client-attached` hook — no client ever attaches.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		EagerSignaler: &bootstrap.EagerSignalCore{
-			Markers:  client,
-			StateDir: stateDir,
-			Signaler: state.DefaultFIFOSignaler{},
-			Logger:   logger,
-		},
-		Logger: logger,
+		Logger:  logger,
 	})
 
 	if _, _, err := o.Run(context.Background()); err != nil {
