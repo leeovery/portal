@@ -104,6 +104,11 @@ func runHydrate(cfg hydrateConfig) error {
 				if err := cfg.HandleTimeout(cfg); err != nil {
 					return err
 				}
+				// Settle sleep — same posture as the success path (step 7).
+				// Spec § Fix 2 → Specific Changes → 4: 100ms preserved before
+				// exec so tmux's PTY parser settles after the post-handler
+				// reset/marker-unset sequence.
+				time.Sleep(hydrateSettleSleep)
 				// Timeout path falls through to a bare-shell exec — pane
 				// gets an empty $SHELL prompt; no hook firing on this path.
 				execShellAndExit(cfg)
@@ -239,12 +244,17 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 }
 
 // handleHydrateTimeout is invoked when openFIFOWithTimeout returns
-// ErrHydrateTimeout. Spec ("Helper Behavior on Startup", step 3): emit the
-// reset preamble only, unlink the FIFO, log a warning naming the hook-key,
-// do NOT unset the @portal-skeleton marker (the marker stays set so the next
-// attach re-signals and retries hydration), and do NOT sleep 100ms — nothing
-// was dumped, so there is no PTY parser settle to wait on. After this returns
-// nil, runHydrate falls through to exec the user's $SHELL.
+// ErrHydrateTimeout. Per spec § Fix 2 → Specific Changes → 1, the handler
+// emits the reset preamble, unlinks the FIFO, logs a warning naming the
+// hook-key, and unsets the @portal-skeleton marker via the canonical
+// unsetSkeletonMarkerOrLog primitive (mirroring handleHydrateFileMissing).
+// runHydrate's timeout branch pays the 100ms settle sleep before exec; this
+// handler does not sleep itself.
+//
+// The marker-unset spec supersession (original line 838 of
+// built-in-session-resurrection): leaving the marker set with the FIFO already
+// unlinked at the os.Remove above provides no retry — the next attach would
+// just re-fire ENOENT. Clearing the marker is the correct recovery contract.
 func handleHydrateTimeout(cfg hydrateConfig) error {
 	// 1. Reset preamble only — no scrollback dump, no postamble.
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
@@ -259,9 +269,10 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	// the entry with the affected pane in the saved sessions.json.
 	cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
 
-	// 4. Deliberately NO UnsetServerOption — marker stays set so the next
-	// attach re-signals.
-	// 5. Deliberately NO 100ms sleep — nothing was dumped to settle.
+	// 4. Unset the skeleton marker via the canonical primitive. Failure is
+	// non-fatal — the call logs a single WARN line and returns; subsequent
+	// exec fall-through still proceeds. Mirrors handleHydrateFileMissing.
+	unsetSkeletonMarkerOrLog(cfg)
 	return nil
 }
 

@@ -1111,7 +1111,7 @@ func TestHydrate_TimeoutWritesNoScrollbackOrPostamble(t *testing.T) {
 	}
 }
 
-func TestHydrate_TimeoutDoesNotSleep100ms(t *testing.T) {
+func TestHydrate_Timeout_PreservesSettleSleepBeforeExec(t *testing.T) {
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-ts__0.0.fifo")
 
@@ -1123,11 +1123,10 @@ func TestHydrate_TimeoutDoesNotSleep100ms(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	// Generous upper bound to avoid flakes; the real spec says no 100ms sleep
-	// on timeout, so elapsed should be well under 100ms when ExecShell is a
-	// synchronous no-op stub.
-	if elapsed >= 100*time.Millisecond {
-		t.Errorf("runHydrate elapsed %v on timeout path; expected << 100ms (no settle sleep)", elapsed)
+	// Spec § Fix 2 → Specific Changes → 4: 100ms settle-sleep is preserved
+	// before exec on the timeout path — same posture as the success path.
+	if elapsed < hydrateSettleSleep {
+		t.Errorf("runHydrate elapsed %v on timeout path; expected >= %v (settle sleep preserved)", elapsed, hydrateSettleSleep)
 	}
 }
 
@@ -1145,7 +1144,7 @@ func TestHydrate_TimeoutRemovesFIFO(t *testing.T) {
 	}
 }
 
-func TestHydrate_TimeoutDoesNotUnsetSkeletonMarker(t *testing.T) {
+func TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-tu__0.0.fifo")
 
@@ -1156,11 +1155,29 @@ func TestHydrate_TimeoutDoesNotUnsetSkeletonMarker(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	// Marker stays set -> no `set-option -su @portal-skeleton-...` argv.
+	// Spec § Fix 2 → Specific Changes → 1: timeout handler must unset the
+	// @portal-skeleton-<paneKey> marker via `set-option -su <name>`.
+	// paneKey derives from the FIFO basename via state.PaneKeyFromFIFOPath:
+	// hydrate-tu__0.0.fifo → tu__0.0.
+	want := []string{"set-option", "-su", "@portal-skeleton-tu__0.0"}
+	matches := 0
 	for _, c := range cmder.Calls {
-		if len(c) >= 2 && c[0] == "set-option" && c[1] == "-su" {
-			t.Errorf("timeout path issued set-option -su (marker should stay set): %v", c)
+		if len(c) != len(want) {
+			continue
 		}
+		match := true
+		for i := range c {
+			if c[i] != want[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Errorf("expected tmux call %v exactly once, got %d matches; calls: %v", want, matches, cmder.Calls)
 	}
 }
 
