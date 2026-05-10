@@ -26,7 +26,6 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -164,16 +163,10 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Fatal("missing-foo unexpectedly live before Run")
 	}
 
-	logger := openTestLogger(t, stateDir)
-
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		// Opt out of the integration builder's real-EagerSignaler default
 		// (task 4-2): this test asserts the post-Run skeleton marker is
 		// still present as evidence that ApplySkeletonMarkers ran during
@@ -258,16 +251,10 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	logger := openTestLogger(t, stateDir)
-
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,

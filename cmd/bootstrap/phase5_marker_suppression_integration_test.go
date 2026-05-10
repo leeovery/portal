@@ -112,7 +112,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 		_, _ = ts.TryRun("set-hook", "-gu", "session-created")
 	})
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),

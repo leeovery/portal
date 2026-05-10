@@ -187,7 +187,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 		}
 	}
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	// The production *bootstrap.EagerSignalCore — which iterates the
 	// post-Restore @portal-skeleton-* marker set and writes the FIFO byte
@@ -320,7 +320,7 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 		}
 	}
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	// EagerSignaler is left to buildIntegrationOrchestrator's auto-default
 	// (real EagerSignalCore when Restore is real) — see the AC1 sub-test

@@ -156,7 +156,7 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 		}
 	}
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	// Wire production adapters for the steps under test:
 	//   - RestoreAdapter: skeleton-creates sessions, arms FIFOs, sets

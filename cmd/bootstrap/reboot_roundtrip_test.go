@@ -65,7 +65,6 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -323,15 +322,10 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// the rest (Hooks registration, EnsureSaver, CleanStale) — the
 	// step under test is Restore + the marker discipline around it,
 	// not hook registration or saver bootstrap.
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
@@ -934,15 +928,10 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 		t.Fatalf("list-sessions succeeded after kill-server; expected error")
 	}
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,
@@ -1186,13 +1175,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	ts.WaitForSession(t, "_seed", 2*time.Second)
 	tmuxtest.ApplyBaseIndices(t, ts, restoreBase, restorePaneBase)
 
-	logger := openTestLogger(t, stateDir)
-
-	restoreInner := &restore.Orchestrator{
-		Client:   client,
-		StateDir: stateDir,
-		Logger:   logger,
-	}
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	// Wire PRODUCTION hook-registration adapters this time — this is the
 	// load-bearing difference vs the existing alpha/beta round-trips.
@@ -1200,7 +1183,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// the new `--`-separated signalHydrateCommand (Task 1-1) end-to-end.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Hooks:   &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
-		Restore: &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Sweeper: &bootstrapadapter.FIFOSweeper{
 			Client:   client,
 			StateDir: stateDir,

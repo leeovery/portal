@@ -23,7 +23,6 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
-	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -109,27 +108,18 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 	)
 }
 
-// openTestLogger opens a state.Logger writing to <stateDir>/portal.log and
-// registers t.Cleanup to close it. Now a one-line delegate to
-// restoretest.OpenTestLogger — promoted from this file so the same helper
-// is shared with cmd/reattach_integration_test.go's buildReattachOrchestrator.
-// The 12 in-package call sites are preserved; the helper signature is
-// unchanged.
-func openTestLogger(t *testing.T, stateDir string) *state.Logger {
-	return restoretest.OpenTestLogger(t, stateDir)
-}
-
 // newIntegrationStateDir builds an isolated portal state directory rooted at
 // t.TempDir(), wires it via PORTAL_STATE_DIR (auto-restored by t.Setenv on
 // test teardown), and runs state.EnsureDir so callers can immediately write
 // sessions.json / scrollback / FIFOs into the returned path.
 //
-// Paired with openTestLogger (which writes to <stateDir>/portal.log) the two
-// helpers replace the nine-site stateDir + EnsureDir + OpenLogger preamble
-// previously copy-pasted across the cmd/bootstrap integration tests. They
-// remain split because not every site that needs the stateDir half also
-// needs a real logger (e.g. the orchestrator end-to-end smoke test wires no
-// logger at all and lets the orchestrator substitute its noopLogger).
+// Paired with restoretest.OpenTestLogger (which writes to
+// <stateDir>/portal.log) the two helpers replace the nine-site stateDir +
+// EnsureDir + OpenLogger preamble previously copy-pasted across the
+// cmd/bootstrap integration tests. They remain split because not every site
+// that needs the stateDir half also needs a real logger (e.g. the
+// orchestrator end-to-end smoke test wires no logger at all and lets the
+// orchestrator substitute its noopLogger).
 func newIntegrationStateDir(t *testing.T) string {
 	t.Helper()
 	stateDir := t.TempDir()

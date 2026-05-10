@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -120,7 +121,7 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 	// MarkerCleanupCore wired; every other step is stubbed to a NoOp so
 	// a regression in this test's failure pinpoints the cleanup step
 	// rather than incidental orchestrator wiring.
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		StaleMarkers: newProductionMarkerCleaner(client, logger),
 		Logger:       logger,
@@ -197,7 +198,7 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	seedKeepAlivePane(t, ts)
 	paneKey, markerName := seedLeakedMarker(t, ts, client, "foo")
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	// The only difference from the primary positive: NoOpMarkerCleaner
 	// in StaleMarkers (the default). Step 8 is effectively disabled. The
@@ -277,7 +278,7 @@ func TestScrollbackResumption_LiveHydrateInProgressMarkerPreserved(t *testing.T)
 		t.Fatalf("SetServerOption live marker: %v", err)
 	}
 
-	logger := openTestLogger(t, stateDir)
+	logger := restoretest.OpenTestLogger(t, stateDir)
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		StaleMarkers: newProductionMarkerCleaner(client, logger),
 		Logger:       logger,
