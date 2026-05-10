@@ -22,7 +22,8 @@ approved_at: 2026-05-10
 - [ ] All existing happy-path resurrection integration tests and companion daemon-merge fix tests remain green.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-10
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
