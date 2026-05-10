@@ -372,11 +372,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 	}
 
 	// RESTORE against the freshly-started server.
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := &restore.Orchestrator{
 		Client:   client,
