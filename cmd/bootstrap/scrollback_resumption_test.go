@@ -18,7 +18,7 @@
 // and asserts the scrollback file lands on disk only when the cleanup
 // step has actually unset the leaked marker. A negative-control sub-test
 // swaps in bootstrap.NoOpMarkerCleaner{} to prove the assertion would fail
-// if step 7 were disabled — closing the regression-guard contract from
+// if step 8 were disabled — closing the regression-guard contract from
 // spec § Acceptance Criteria #8.
 //
 // Build & run:
@@ -179,7 +179,7 @@ func TestScrollbackResumption_DaemonTickSavesScrollbackAfterCleanup(t *testing.T
 // NEVER written.
 //
 // This sub-test is the spec § Acceptance Criteria #8 regression guard:
-// if a future change disables step 7, the primary positive above would
+// if a future change disables step 8, the primary positive above would
 // silently turn into this negative control's outcome, but neither the
 // resurrection symptom nor any user-facing surface would alert. The
 // negative control fails loudly in that scenario.
@@ -200,7 +200,7 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	logger := openTestLogger(t, stateDir)
 
 	// The only difference from the primary positive: NoOpMarkerCleaner
-	// in StaleMarkers (the default). Step 7 is effectively disabled. The
+	// in StaleMarkers (the default). Step 8 is effectively disabled. The
 	// whole point of this sub-test is to prove the primary positive's
 	// assertions would fail under this configuration — i.e. the
 	// regression guard is sharp.
@@ -212,7 +212,7 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	}
 
 	// Marker MUST still be present — NoOpMarkerCleaner.CleanStaleMarkers
-	// is a no-op, so step 7 leaves the seeded marker untouched.
+	// is a no-op, so step 8 leaves the seeded marker untouched.
 	_, found, err := client.TryGetServerOption(markerName)
 	if err != nil {
 		t.Fatalf("TryGetServerOption %s: %v", markerName, err)
@@ -220,7 +220,7 @@ func TestScrollbackResumption_WithoutCleanupScrollbackNotSaved(t *testing.T) {
 	if !found {
 		t.Fatalf("marker %s absent after no-op cleanup; want present "+
 			"(regression-guard contract requires the marker to "+
-			"survive when step 7 is disabled)", markerName)
+			"survive when step 8 is disabled)", markerName)
 	}
 
 	// Re-create the pane at the same paneKey. With the marker still

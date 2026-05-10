@@ -123,9 +123,9 @@ type EagerHydrateSignaler interface {
 // this interface and is the production implementation; cmd/bootstrap_production.go
 // constructs it inline at the wiring site.
 //
-// Step 7 of the bootstrap sequence: runs strictly after Clear (step 6)
-// so it observes the post-restore tmux state, and strictly before Sweep
-// (step 8) so any stale markers protecting orphan FIFOs are unset first,
+// Step 8 of the bootstrap sequence: runs strictly after Clear (step 7) so
+// it observes the post-restore tmux state, and strictly before Sweep
+// (step 9) so any stale markers protecting orphan FIFOs are unset first,
 // allowing those FIFOs to be reclaimed in the same bootstrap.
 type MarkerCleaner interface {
 	CleanStaleMarkers() error
@@ -138,9 +138,9 @@ type MarkerCleaner interface {
 // itself fails. The orchestrator treats a non-nil err as a soft warning
 // and continues — a stuck FIFO must never block PersistentPreRunE.
 //
-// Step 8 of the bootstrap sequence: runs after CleanStaleMarkers (step 7)
+// Step 9 of the bootstrap sequence: runs after CleanStaleMarkers (step 8)
 // so any stale markers protecting orphan FIFOs are unset first, but
-// before CleanStale (step 9) so the per-pane skeleton markers it
+// before CleanStale (step 10) so the per-pane skeleton markers it
 // observes via state.ListSkeletonMarkers are still set on the live tmux
 // server.
 type FIFOSweeper interface {
@@ -203,7 +203,7 @@ type Orchestrator struct {
 	Logger        Logger // nil tolerated; Run substitutes a no-op default
 }
 
-// Run executes the nine bootstrap steps in spec order. It returns the
+// Run executes the ten bootstrap steps in spec order. It returns the
 // serverStarted flag from step 1 (EnsureServer) verbatim, the slice of
 // soft Warnings accumulated across steps 4-5 (in step order), and any
 // fatal error. The ctx parameter is reserved for Phase 6 timeout/cancel
@@ -218,10 +218,14 @@ type Orchestrator struct {
 //     the Restorer contract — is treated defensively as soft: logged and
 //     swallowed. Step 5 NEVER escalates to a fatal abort, so a future
 //     Restorer implementation cannot silently break PersistentPreRunE.
-//   - Step 7 (CleanStaleMarkers) returns non-nil → logged via Warn and
+//   - Step 6 (EagerSignalHydrate) returns non-nil → logged via Warn and
+//     swallowed. Eager signaling failures must never block
+//     PersistentPreRunE; the helper-driven recovery path remains available
+//     via the per-pane client-attached hook for the user's attached session.
+//   - Step 8 (CleanStaleMarkers) returns non-nil → logged via Warn and
 //     swallowed.
-//   - Step 8 (Sweep) returns non-nil → logged via Warn and swallowed.
-//   - Step 9 (CleanStale) returns non-nil → logged via Warn and swallowed.
+//   - Step 9 (Sweep) returns non-nil → logged via Warn and swallowed.
+//   - Step 10 (CleanStale) returns non-nil → logged via Warn and swallowed.
 func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	_ = ctx // reserved for Phase 6 timeout/cancel
 
@@ -282,41 +286,54 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn(state.ComponentBootstrap, "step 5 (Restore) returned non-corrupt error (treated as soft per Restorer contract): %v", restoreErr)
 	}
 
-	// Step 6 — Clear @portal-restoring (fatal on failure).
-	o.Logger.Debug(state.ComponentBootstrap, "step 6 (Clear @portal-restoring): entering")
+	// Step 6 — EagerSignalHydrate (best-effort). Runs while
+	// @portal-restoring is still set so daemon captureAndCommit
+	// suppression remains in force during helper-driven scrollback
+	// replay (AC8). Iterates the freshly-set @portal-skeleton-* marker
+	// map and writes the hydrate signal byte to each pane's FIFO. A
+	// non-nil err is logged and swallowed — eager signaling failures
+	// must never block PersistentPreRunE.
+	o.Logger.Debug(state.ComponentBootstrap, "step 6 (EagerSignalHydrate): entering")
+	if err := o.EagerSignaler.EagerSignalHydrate(); err != nil {
+		o.Logger.Warn(state.ComponentBootstrap, "step 6 (EagerSignalHydrate) failed: %v", err)
+		// Continue per spec.
+	}
+
+	// Step 7 — Clear @portal-restoring (fatal on failure).
+	o.Logger.Debug(state.ComponentBootstrap, "step 7 (Clear @portal-restoring): entering")
 	if err := o.Restoring.Clear(); err != nil {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
 
-	// Step 7 — CleanStaleMarkers (best-effort). Runs strictly after Clear
-	// (step 6) so it observes the post-restore tmux state, and strictly
-	// before Sweep (step 8) so any stale markers protecting orphan FIFOs
+	// Step 8 — CleanStaleMarkers (best-effort). Runs strictly after Clear
+	// (step 7) so it observes the post-restore tmux state, and strictly
+	// before Sweep (step 9) so any stale markers protecting orphan FIFOs
 	// are unset first, allowing those FIFOs to be reclaimed in the same
 	// bootstrap. A non-nil err is logged and swallowed — a stale-marker
 	// cleanup failure must never block PersistentPreRunE.
-	o.Logger.Debug(state.ComponentBootstrap, "step 7 (CleanStaleMarkers): entering")
+	o.Logger.Debug(state.ComponentBootstrap, "step 8 (CleanStaleMarkers): entering")
 	if err := o.StaleMarkers.CleanStaleMarkers(); err != nil {
-		o.Logger.Warn(state.ComponentBootstrap, "step 7 (CleanStaleMarkers) failed: %v", err)
+		o.Logger.Warn(state.ComponentBootstrap, "step 8 (CleanStaleMarkers) failed: %v", err)
 		// Continue per spec.
 	}
 
-	// Step 8 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
+	// Step 9 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
 	// daemon's suppression window has closed and after CleanStaleMarkers
 	// so any stale markers protecting orphan FIFOs are unset first, but
 	// before CleanStale so the per-pane @portal-skeleton-* markers from
 	// step 5 are still observable (those outlive @portal-restoring and
 	// are cleared per-pane on hydration). A non-nil err is logged and
 	// swallowed — a stuck FIFO must never block PersistentPreRunE.
-	o.Logger.Debug(state.ComponentBootstrap, "step 8 (SweepOrphanFIFOs): entering")
+	o.Logger.Debug(state.ComponentBootstrap, "step 9 (SweepOrphanFIFOs): entering")
 	if err := o.Sweeper.Sweep(); err != nil {
-		o.Logger.Warn(state.ComponentBootstrap, "step 8 (SweepOrphanFIFOs) failed: %v", err)
+		o.Logger.Warn(state.ComponentBootstrap, "step 9 (SweepOrphanFIFOs) failed: %v", err)
 		// Continue per spec.
 	}
 
-	// Step 9 — CleanStale (best-effort).
-	o.Logger.Debug(state.ComponentBootstrap, "step 9 (CleanStale): entering")
+	// Step 10 — CleanStale (best-effort).
+	o.Logger.Debug(state.ComponentBootstrap, "step 10 (CleanStale): entering")
 	if err := o.Clean.CleanStale(); err != nil {
-		o.Logger.Warn(state.ComponentBootstrap, "step 9 (CleanStale) failed: %v", err)
+		o.Logger.Warn(state.ComponentBootstrap, "step 10 (CleanStale) failed: %v", err)
 		// Continue per spec.
 	}
 

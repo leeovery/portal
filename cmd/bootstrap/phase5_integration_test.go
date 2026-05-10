@@ -1,6 +1,6 @@
 package bootstrap_test
 
-// Phase 5 integration tests exercise the nine-step bootstrap.Orchestrator
+// Phase 5 integration tests exercise the ten-step bootstrap.Orchestrator
 // against a real tmux server using the same isolated-socket pattern as
 // internal/restore/integration_test.go (Phase 3, task 3-13). Each test runs an
 // isolated tmux instance via `tmux -S <abs-socket-path>` rooted in a per-test
@@ -138,7 +138,7 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // the capture→persist→kill→restore round-trip. The unique coverage here is
 // that the bootstrap.Orchestrator (not just restore.Orchestrator) wires the
 // Restore step correctly — i.e. step 5 actually creates the missing session
-// when invoked through the nine-step sequence.
+// when invoked through the ten-step sequence.
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
@@ -205,7 +205,7 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Errorf("expected missing-foo in list-sessions; got %q", out)
 	}
 
-	// @portal-restoring must be cleared by step 6.
+	// @portal-restoring must be cleared by step 7.
 	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {
 		t.Fatalf("TryGetServerOption: %v", err)
 	} else if found {
@@ -222,13 +222,13 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 }
 
-// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 8
+// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 9
 // (FIFOSweeper) removes orphan hydrate-*.fifo files whose paneKey is not
 // represented by a live `@portal-skeleton-*` marker, while preserving
 // FIFOs whose paneKey corresponds to a marker freshly set by step 5
 // (Restore). This is the integration-level guarantee that the sweep
 // observes the post-Restore marker set, not the pre-Restore one — i.e.
-// step 8 runs strictly after step 5.
+// step 9 runs strictly after step 5.
 //
 // Wiring: real RestoringMarker, real restore.Orchestrator wrapped in
 // bootstrapadapter.RestoreAdapter (so Restore actually creates the
@@ -269,7 +269,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	// Pre-create two FIFOs in stateDir:
 	//   - liveKey matches the paneKey Restore will mark live.
 	//   - orphanKey is not represented in sessions.json, so no skeleton
-	//     marker will be set for it; step 8 must remove it.
+	//     marker will be set for it; step 9 must remove it.
 	liveKey := state.SanitizePaneKey("swept-foo", 0, 0)
 	orphanKey := state.SanitizePaneKey("ghost-bar", 0, 0)
 	livePath := state.FIFOPath(stateDir, liveKey)
@@ -314,7 +314,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	}
 
 	// Orphan FIFO MUST be removed — no skeleton marker exists for its
-	// paneKey, so step 8 swept it.
+	// paneKey, so step 9 swept it.
 	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {
 		t.Errorf("orphan FIFO not removed (paneKey=%q): lstat err = %v", orphanKey, err)
 	}

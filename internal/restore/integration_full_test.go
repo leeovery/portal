@@ -5,7 +5,7 @@
 //
 // This file holds the lower-level round-trip companion to
 // cmd/bootstrap/reboot_roundtrip_test.go (Phase 5 task 5-9). Where the
-// reboot test exercises the full nine-step bootstrap.Orchestrator wiring,
+// reboot test exercises the full ten-step bootstrap.Orchestrator wiring,
 // this test pins down the state↔restore primitive directly: capture →
 // commit → kill → restore → drive signal-hydrate → assert.
 //

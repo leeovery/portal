@@ -174,14 +174,15 @@ func buildReattachOrchestrator(t *testing.T, client *tmux.Client, stateDir strin
 		Logger:   logger,
 	}
 	return &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        bootstrap.NoOpHooks{},
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        bootstrap.NoOpSaver{},
-		Restore:      &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
-		StaleMarkers: bootstrap.NoOpMarkerCleaner{},
-		Sweeper:      bootstrap.NoOpFIFOSweeper{},
-		Clean:        bootstrap.NoOpStaleCleaner{},
+		Server:        client,
+		Hooks:         bootstrap.NoOpHooks{},
+		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:         bootstrap.NoOpSaver{},
+		Restore:       &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
+		StaleMarkers:  bootstrap.NoOpMarkerCleaner{},
+		Sweeper:       bootstrap.NoOpFIFOSweeper{},
+		Clean:         bootstrap.NoOpStaleCleaner{},
 	}
 }
 

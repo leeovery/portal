@@ -89,7 +89,7 @@ var (
 // set (test mode), uses the injected Orchestrator verbatim — runBootstrap
 // short-circuits a nil runner to (false, nil, nil) for tests indifferent
 // to bootstrap. In production, builds a fully-wired
-// *bootstrap.Orchestrator that runs the canonical nine-step sequence
+// *bootstrap.Orchestrator that runs the canonical ten-step sequence
 // (see cmd/bootstrap_production.go).
 //
 // In production the returned hook-registration callback is nil: hook

@@ -193,7 +193,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 			preRunSavedAt, postIdx.SavedAt)
 	}
 
-	// @portal-restoring must be cleared by step 6 — same guarantee the
+	// @portal-restoring must be cleared by step 7 — same guarantee the
 	// original test made; preserved here so this file fully replaces
 	// the marker-lifecycle coverage.
 	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {

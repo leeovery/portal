@@ -16,17 +16,18 @@ import (
 type stepRecorder struct {
 	calls []string
 
-	EnsureServerErr      error
-	RegisterErr          error
-	SetErr               error
-	EnsureSaverErr       error
-	RestoreCorrupt       bool
-	RestoreErr           error
-	ClearErr             error
-	CleanStaleMarkersErr error
-	SweepErr             error
-	CleanStaleErr        error
-	ServerStarted        bool
+	EnsureServerErr       error
+	RegisterErr           error
+	SetErr                error
+	EnsureSaverErr        error
+	RestoreCorrupt        bool
+	RestoreErr            error
+	EagerSignalHydrateErr error
+	ClearErr              error
+	CleanStaleMarkersErr  error
+	SweepErr              error
+	CleanStaleErr         error
+	ServerStarted         bool
 }
 
 func (r *stepRecorder) EnsureServer() (bool, error) {
@@ -57,6 +58,11 @@ func (r *stepRecorder) EnsureSaver() error {
 func (r *stepRecorder) Restore() (bool, error) {
 	r.calls = append(r.calls, "Restore")
 	return r.RestoreCorrupt, r.RestoreErr
+}
+
+func (r *stepRecorder) EagerSignalHydrate() error {
+	r.calls = append(r.calls, "EagerSignalHydrate")
+	return r.EagerSignalHydrateErr
 }
 
 func (r *stepRecorder) CleanStaleMarkers() error {
@@ -108,18 +114,19 @@ func (l *recordingLogger) Error(component, format string, args ...any) {
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
-// recorded call slice reflects the canonical nine-step ordering.
+// recorded call slice reflects the canonical ten-step ordering.
 func newOrchestrator(r *stepRecorder, logger Logger) *Orchestrator {
 	return &Orchestrator{
-		Server:       r,
-		Hooks:        r,
-		Restoring:    r,
-		Saver:        r,
-		Restore:      r,
-		StaleMarkers: r,
-		Sweeper:      r,
-		Clean:        r,
-		Logger:       logger,
+		Server:        r,
+		Hooks:         r,
+		Restoring:     r,
+		Saver:         r,
+		Restore:       r,
+		EagerSignaler: r,
+		StaleMarkers:  r,
+		Sweeper:       r,
+		Clean:         r,
+		Logger:        logger,
 	}
 }
 
@@ -150,6 +157,7 @@ func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
 		"Set",
 		"EnsureSaver",
 		"Restore",
+		"EagerSignalHydrate",
 		"Clear",
 		"CleanStaleMarkers",
 		"Sweep",
@@ -302,6 +310,7 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *tes
 		"Set",
 		"EnsureSaver",
 		"Restore",
+		"EagerSignalHydrate",
 		"Clear",
 		"CleanStaleMarkers",
 		"Sweep",
@@ -315,9 +324,69 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *tes
 	}
 }
 
+// TestOrchestratorRun_continuesPastEagerSignalHydrateFailure proves the
+// eager-signal step is best-effort, mirroring the soft-warning posture of
+// CleanStaleMarkers (step 8), Sweep (step 9), and CleanStale (step 10):
+// an EagerSignalHydrate error MUST NOT short-circuit Run, MUST NOT produce
+// a *FatalError, and MUST log via Warn so the failure is observable in
+// portal.log. The Warn message MUST embed the canonical step label
+// "step 6 (EagerSignalHydrate) failed" so adapter-wrapped errors travel
+// through to portal.log unchanged. Clear, CleanStaleMarkers, Sweep, and
+// CleanStale MUST still run after an eager-signal failure.
+func TestOrchestratorRun_continuesPastEagerSignalHydrateFailure(t *testing.T) {
+	sentinel := errors.New("eager-signal boom")
+	r := &stepRecorder{EagerSignalHydrateErr: sentinel}
+	logger := &recordingLogger{}
+	o := newOrchestrator(r, logger)
+
+	_, _, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("EagerSignalHydrate failure must not propagate; got %v", err)
+	}
+
+	var fatal *FatalError
+	if errors.As(err, &fatal) {
+		t.Errorf("Run unexpectedly returned *FatalError on soft EagerSignalHydrate failure: %v", err)
+	}
+	if len(logger.warnings) == 0 {
+		t.Fatal("expected logger.Warn to record the soft EagerSignalHydrate failure")
+	}
+
+	// The Warn message MUST embed the canonical step label and the
+	// underlying cause so adapter-wrapped errors are preserved verbatim
+	// in portal.log.
+	foundCause := false
+	for _, msg := range logger.warnings {
+		if strings.Contains(msg, "step 6 (EagerSignalHydrate) failed") && strings.Contains(msg, sentinel.Error()) {
+			foundCause = true
+			break
+		}
+	}
+	if !foundCause {
+		t.Errorf("expected a step-6 (EagerSignalHydrate) Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
+	}
+
+	// All downstream steps must still run after an eager-signal failure.
+	want := []string{
+		"EnsureServer",
+		"RegisterPortalHooks",
+		"Set",
+		"EnsureSaver",
+		"Restore",
+		"EagerSignalHydrate",
+		"Clear",
+		"CleanStaleMarkers",
+		"Sweep",
+		"CleanStale",
+	}
+	if !equalCalls(r.calls, want) {
+		t.Errorf("calls = %v, want %v", r.calls, want)
+	}
+}
+
 func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
 	// Restore reports a corrupt-index failure; per spec the orchestrator
-	// treats it as soft and continues, but step 6 (Clear) MUST still run
+	// treats it as soft and continues, but step 7 (Clear) MUST still run
 	// before Run returns so the @portal-restoring window does not leak.
 	corruptErr := fmt.Errorf("restore: %w", state.ErrCorruptIndex)
 	r := &stepRecorder{RestoreCorrupt: true, RestoreErr: corruptErr}
@@ -406,6 +475,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 		"Set",
 		"EnsureSaver",
 		"Restore",
+		"EagerSignalHydrate",
 		"Clear",
 		"CleanStaleMarkers",
 		"Sweep",
@@ -421,6 +491,7 @@ func TestOrchestratorRun_isIdempotentAcrossInvocations(t *testing.T) {
 	o.Restoring = r2
 	o.Saver = r2
 	o.Restore = r2
+	o.EagerSignaler = r2
 	o.StaleMarkers = r2
 	o.Sweeper = r2
 	o.Clean = r2
@@ -642,10 +713,10 @@ func TestOrchestratorRun_emptyWarningsOnHappyPath(t *testing.T) {
 }
 
 // TestOrchestratorRun_runsSweepBetweenClearAndCleanStale pins the FIFO
-// sweep step at position 8 of the nine-step sequence: after Clear (step 6)
-// and CleanStaleMarkers (step 7) so the @portal-restoring suppression
+// sweep step at position 9 of the ten-step sequence: after Clear (step 7)
+// and CleanStaleMarkers (step 8) so the @portal-restoring suppression
 // window has closed and stale markers protecting orphan FIFOs have been
-// unset, but before CleanStale (step 9). The CleanStaleMarkers step MUST
+// unset, but before CleanStale (step 10). The CleanStaleMarkers step MUST
 // also fall between Clear and Sweep so any stale markers protecting
 // orphan FIFOs are unset before SweepOrphanFIFOs reclaims those FIFOs.
 func TestOrchestratorRun_runsSweepBetweenClearAndCleanStale(t *testing.T) {
@@ -708,13 +779,13 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	// <cause>") is preserved verbatim in portal.log.
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 8") {
+		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 9") {
 			foundCause = true
 			break
 		}
 	}
 	if !foundCause {
-		t.Errorf("expected a step-8 Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
+		t.Errorf("expected a step-9 Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
 	}
 
 	// CleanStale must still run after a sweep failure.
@@ -731,11 +802,11 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 }
 
 // TestOrchestratorRun_runsCleanStaleMarkersBetweenClearAndSweep pins the
-// stale-marker cleanup step at position 7 of the nine-step sequence:
-// strictly after Clear (step 6) so it observes the post-restore tmux
-// state, and strictly before Sweep (step 8) so any stale markers
+// stale-marker cleanup step at position 8 of the ten-step sequence:
+// strictly after Clear (step 7) so it observes the post-restore tmux
+// state, and strictly before Sweep (step 9) so any stale markers
 // protecting orphan FIFOs are unset first, allowing those FIFOs to be
-// reclaimed in the same bootstrap. CleanStale (step 9) follows.
+// reclaimed in the same bootstrap. CleanStale (step 10) follows.
 func TestOrchestratorRun_runsCleanStaleMarkersBetweenClearAndSweep(t *testing.T) {
 	r := &stepRecorder{}
 	o := newOrchestrator(r, nil)
@@ -768,10 +839,10 @@ func TestOrchestratorRun_runsCleanStaleMarkersBetweenClearAndSweep(t *testing.T)
 
 // TestOrchestratorRun_continuesPastCleanStaleMarkersFailure proves the
 // stale-marker cleanup step is best-effort, mirroring the soft-warning
-// posture of CleanStale (step 9) and Sweep (step 8): a CleanStaleMarkers
+// posture of CleanStale (step 10) and Sweep (step 9): a CleanStaleMarkers
 // error MUST NOT short-circuit Run, MUST NOT produce a *FatalError, and
 // MUST log via Warn so the failure is observable in portal.log. The Warn
-// message MUST embed the canonical step label "step 7 (CleanStaleMarkers)"
+// message MUST embed the canonical step label "step 8 (CleanStaleMarkers)"
 // and the underlying cause so adapter-wrapped errors travel through to
 // portal.log unchanged. Sweep and CleanStale MUST still run after a
 // stale-marker cleanup failure.
@@ -799,13 +870,13 @@ func TestOrchestratorRun_continuesPastCleanStaleMarkersFailure(t *testing.T) {
 	// in portal.log.
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 7") && strings.Contains(msg, "CleanStaleMarkers") {
+		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 8") && strings.Contains(msg, "CleanStaleMarkers") {
 			foundCause = true
 			break
 		}
 	}
 	if !foundCause {
-		t.Errorf("expected a step-7 (CleanStaleMarkers) Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
+		t.Errorf("expected a step-8 (CleanStaleMarkers) Warn message containing %q; got %v", sentinel.Error(), logger.warnings)
 	}
 
 	// Sweep and CleanStale must still run after a CleanStaleMarkers failure.
@@ -855,6 +926,7 @@ func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
 		"Set",
 		"EnsureSaver",
 		"Restore",
+		"EagerSignalHydrate",
 		"Clear",
 		"CleanStaleMarkers",
 		"Sweep",

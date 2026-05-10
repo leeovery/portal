@@ -71,10 +71,10 @@ func (r *HookRegistrar) RegisterPortalHooks() error {
 
 // RestoreAdapter wraps a *restore.Orchestrator so its Restore method
 // satisfies bootstrap.Restorer. The bootstrap orchestrator owns the
-// @portal-restoring marker lifecycle separately (steps 3 and 6), so the
+// @portal-restoring marker lifecycle separately (steps 3 and 7), so the
 // inner Restore must not bundle marker management. The orphan-FIFO
 // sweep that historically lived inside this adapter has been promoted
-// to its own bootstrap step (FIFOSweeper / step 8) — keeping this
+// to its own bootstrap step (FIFOSweeper / step 9) — keeping this
 // adapter a pure pass-through means the same wrapper is usable from
 // integration tests without dragging in state-dir / logger arguments.
 //
@@ -90,11 +90,11 @@ type RestoreAdapter struct {
 // contract.
 func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 
-// FIFOSweeper satisfies bootstrap.FIFOSweeper. Step 8 of the bootstrap
-// sequence — runs after step 6 clears @portal-restoring (so the daemon's
-// suppression window has closed) and after step 7 (CleanStaleMarkers) so
+// FIFOSweeper satisfies bootstrap.FIFOSweeper. Step 9 of the bootstrap
+// sequence — runs after step 7 clears @portal-restoring (so the daemon's
+// suppression window has closed) and after step 8 (CleanStaleMarkers) so
 // any stale markers protecting orphan FIFOs are unset first, but before
-// step 9 (CleanStale), so the per-pane @portal-skeleton-* markers from
+// step 10 (CleanStale), so the per-pane @portal-skeleton-* markers from
 // step 5 are still set on the live tmux server. Those markers outlive
 // @portal-restoring and are cleared per-pane on hydration;
 // ListSkeletonMarkers is the source of truth for "which paneKeys deserve
@@ -103,9 +103,9 @@ func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 // Sweep is best-effort, but visibility-preserving:
 //
 //   - A ShowAllServerOptions failure (the seam ListSkeletonMarkers uses)
-//     is wrapped and returned so the orchestrator's step-8 Warn-and-swallow
+//     is wrapped and returned so the orchestrator's step-9 Warn-and-swallow
 //     path logs it uniformly with the per-FIFO Warn lines below. Bootstrap
-//     does not abort — the orchestrator continues to step 9 (CleanStale).
+//     does not abort — the orchestrator continues to step 10 (CleanStale).
 //   - Per-FIFO removal errors are logged via Logger and skipped inside
 //     state.SweepOrphanFIFOs.
 //

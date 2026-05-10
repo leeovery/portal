@@ -3,15 +3,16 @@ package bootstrap_test
 // Shared bootstrap.Orchestrator builder for tests in this package.
 //
 // Eleven test sites across cmd/bootstrap (and one sibling in cmd/) used to
-// rebuild the same eight-step Orchestrator literal — adding a new step
-// interface (e.g. StaleMarkers) meant touching every literal. This helper
-// centralises the wiring so a future step addition is a one-file change in
-// orchestratorOpts + buildIntegrationOrchestrator.
+// rebuild the same multi-step Orchestrator literal — adding a new step
+// interface (e.g. StaleMarkers, EagerSignaler) meant touching every literal.
+// This helper centralises the wiring so a future step addition is a
+// one-file change in orchestratorOpts + buildIntegrationOrchestrator.
 //
 // Defaults policy: every step that the spec permits to degrade-and-continue
-// defaults to its NoOp form (Hooks, Saver, Restore, StaleMarkers, Sweeper,
-// Clean). RestoringMarker is always real because step 3 / step 6 are
-// fatal-on-failure and the marker contract is exercised in every Run path.
+// defaults to its NoOp form (Hooks, Saver, Restore, EagerSignaler,
+// StaleMarkers, Sweeper, Clean). RestoringMarker is always real because step
+// 3 / step 7 are fatal-on-failure and the marker contract is exercised in
+// every Run path.
 //
 // The sibling builder in cmd/reattach_integration_test.go (package cmd)
 // cannot delegate to this helper because Go test-file symbols are not
@@ -34,13 +35,14 @@ import (
 // "spec permits to degrade-and-continue" policy. Logger is optional — when
 // nil, the Orchestrator substitutes its internal noopLogger at Run time.
 type orchestratorOpts struct {
-	Hooks        bootstrap.HookRegistrar
-	Saver        bootstrap.SaverBootstrapper
-	Restore      bootstrap.Restorer
-	StaleMarkers bootstrap.MarkerCleaner
-	Sweeper      bootstrap.FIFOSweeper
-	Clean        bootstrap.StaleCleaner
-	Logger       bootstrap.Logger
+	Hooks         bootstrap.HookRegistrar
+	Saver         bootstrap.SaverBootstrapper
+	Restore       bootstrap.Restorer
+	EagerSignaler bootstrap.EagerHydrateSignaler
+	StaleMarkers  bootstrap.MarkerCleaner
+	Sweeper       bootstrap.FIFOSweeper
+	Clean         bootstrap.StaleCleaner
+	Logger        bootstrap.Logger
 }
 
 // buildIntegrationOrchestrator returns a *bootstrap.Orchestrator wired with
@@ -58,6 +60,9 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 	if opts.Restore == nil {
 		opts.Restore = bootstrap.NoOpRestorer{}
 	}
+	if opts.EagerSignaler == nil {
+		opts.EagerSignaler = bootstrap.NoOpEagerHydrateSignaler{}
+	}
 	if opts.StaleMarkers == nil {
 		opts.StaleMarkers = bootstrap.NoOpMarkerCleaner{}
 	}
@@ -68,15 +73,16 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 		opts.Clean = bootstrap.NoOpStaleCleaner{}
 	}
 	return &bootstrap.Orchestrator{
-		Server:       client,
-		Hooks:        opts.Hooks,
-		Restoring:    &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:        opts.Saver,
-		Restore:      opts.Restore,
-		StaleMarkers: opts.StaleMarkers,
-		Sweeper:      opts.Sweeper,
-		Clean:        opts.Clean,
-		Logger:       opts.Logger,
+		Server:        client,
+		Hooks:         opts.Hooks,
+		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
+		Saver:         opts.Saver,
+		Restore:       opts.Restore,
+		EagerSignaler: opts.EagerSignaler,
+		StaleMarkers:  opts.StaleMarkers,
+		Sweeper:       opts.Sweeper,
+		Clean:         opts.Clean,
+		Logger:        opts.Logger,
 	}
 }
 

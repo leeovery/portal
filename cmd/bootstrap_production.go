@@ -52,7 +52,7 @@ func (a *saverAdapter) EnsureSaver() error {
 }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
-// structural key no longer matches a live tmux pane. Step 9 of the
+// structural key no longer matches a live tmux pane. Step 10 of the
 // bootstrap sequence; best-effort per spec.
 type cleanStaleAdapter struct {
 	client *tmux.Client
@@ -120,6 +120,12 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
 		Saver:     &saverAdapter{client: client, stateDir: stateDir},
 		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		// EagerSignaler placeholder: task 1-5 replaces this with the
+		// production *bootstrap.EagerSignalCore wiring (state.ListSkeletonMarkers
+		// + state.WriteFIFOSignal + the resolved stateDir). Until then a
+		// NoOp keeps the orchestrator wiring complete without changing
+		// observable behaviour — eager signaling is best-effort per spec.
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 		StaleMarkers: &bootstrap.MarkerCleanupCore{
 			Markers:  client,
 			Panes:    client,
