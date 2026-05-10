@@ -181,7 +181,7 @@ Per spec § "Empirical Reconfirmation Before Implementation Starts", the plannin
 
 ---
 
-### 4. Definition of Done — Manual Verification Protocol step is not surfaced in the plan
+### 4. Definition of Done — Manual Verification Protocol step is not surfaced in the plan [Fixed]
 
 **Type**: Missing from plan
 **Spec Reference**: § "Definition of Done" (line 254): item 3 "The Manual Verification Protocol has been executed once on a real machine; pre-fix and post-fix observations recorded in the PR description (or linked)." Also § "Manual Verification Protocol" (lines 338-351) defines the 6-step protocol. AC6 (line 232) explicitly says: "Verification is via the Manual Verification Protocol step 2 — observational, not a gated automated test."
@@ -259,8 +259,8 @@ Add this line at the end:
 - [ ] Manual Verification Protocol executed on a real machine; pre-fix and post-fix observations recorded in the PR description (DoD item 3, AC6 observational gate via protocol step 2).
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Added task 3-4 to phase-3-tasks.md and the Phase 3 task table in planning.md. New tick task tick-f7d01d maps the internal id. Phase 3 acceptance criteria updated with the Manual Verification Protocol line.
 
 ---
 

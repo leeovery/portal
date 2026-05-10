@@ -1,7 +1,7 @@
 ---
 phase: 3
 phase_name: Drop Outer sh -c Wrapper in buildHydrateCommand
-total: 3
+total: 4
 ---
 
 ## killed-sessions-resurrect-on-restart-3-1 | approved
@@ -140,3 +140,41 @@ total: 3
 > Scaffolding precedent: `internal/restore/integration_full_test.go` is the canonical pattern for `restoretest.BuildPortalBinaryDir` + `tmuxtest.New` + `t.Setenv("PORTAL_STATE_DIR", …)` + capture/restore round-trips with direct FIFO byte-writes. Mirror its top-of-test setup verbatim where applicable.
 
 **Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` — section "Fix 3: Wrapper Drop in `buildHydrateCommand`" → "Side Effects" (lines 204-206); "Manual Verification Protocol" additional checks (lines 349-351); AC5 (line 228).
+
+## killed-sessions-resurrect-on-restart-3-4 | approved
+
+### Task killed-sessions-resurrect-on-restart-3-4: Execute Manual Verification Protocol on a real machine and record pre/post observations in the PR description (DoD item 3, AC6)
+
+**Problem**: Spec § "Definition of Done" item 3 mandates the Manual Verification Protocol be executed once on a real machine with pre-fix and post-fix observations recorded in the PR description (or linked). AC6 ("WARN log volume drops to zero in the steady state") is also explicitly an observational gate verified via protocol step 2 — not a gated automated test. Without a deliverable task, the DoD is unsatisfied even if all automated tests pass.
+
+**Solution**: Execute the 6-step Manual Verification Protocol from spec § "Manual Verification Protocol" on a real machine: (1) cold-start Portal so bootstrap step 5 reconstructs saved sessions; (2) inspect `~/.config/portal/state/portal.log` for the two WARN substrings; (3) inspect server options for stuck `@portal-skeleton-*` markers; (4) kill an affected session; (5) `portal open` again and confirm session stays gone; (6) verify on-resume hook ran in an affected pane. Plus the two additional Defect-D checks: `pgrep -fa "sh -c.*portal state hydrate"` returns no rows, and `exit` typed once closes a restored pane. Record each step's observation (pre-fix and post-fix) in the PR description.
+
+**Outcome**: PR description contains a Manual Verification section with each protocol step's pre-fix and post-fix observation. AC6 is gated by the absence of the two named WARN substrings in `~/.config/portal/state/portal.log` after a clean cold-start with N≥2 saved sessions.
+
+**Do**:
+- Set up two side-by-side environments: one on `main` pre-fix, one on the integration branch post-fix. (Or run pre-fix observations once before merging Phase 1, and post-fix observations once after Phase 3 lands.)
+- For each environment, walk through the 6 protocol steps and the two additional Defect-D checks. Record observations verbatim.
+- Paste a structured Markdown table into the PR description with columns: `Step`, `Pre-fix observation`, `Post-fix observation`, `Pass/Fail`.
+- AC6 specifically: confirm `~/.config/portal/state/portal.log` does **not** contain the substrings `WARN | hydrate | write fifo` or `WARN | hydrate | timeout waiting for signal` after a clean cold-start with N≥2 saved sessions.
+
+**Acceptance Criteria**:
+- [ ] PR description contains a "Manual Verification" section with all 6 protocol steps and the 2 additional Defect-D checks.
+- [ ] Each step has a pre-fix and post-fix observation recorded.
+- [ ] AC6 step 2: post-fix log contains zero occurrences of `WARN | hydrate | write fifo` and `WARN | hydrate | timeout waiting for signal`.
+- [ ] AC5 additional check: post-fix `pgrep` returns zero rows; `exit` typed once closes the pane.
+- [ ] Pre-fix observations were taken on a build that does not yet include Fixes 1/2/3 (e.g. `main` immediately before this work unit's branch was merged, or the integration branch with all three fixes reverted locally).
+
+**Tests**: None — this task is observational verification per spec.
+
+**Edge Cases**:
+- N≥2 saved sessions are required to reproduce the multi-session bug behaviour pre-fix (single-saved-session users are unaffected).
+- If a real machine is not available, the task can be deferred to a reviewer who has one — but DoD item 3 still requires it before merge.
+
+**Context**:
+> Spec § "Manual Verification Protocol" lines 338-351: the canonical 6-step protocol plus the two Defect-D checks.
+>
+> Spec § "Acceptance Criteria → Logging → AC6": "Verification is via the Manual Verification Protocol step 2 — observational, not a gated automated test."
+>
+> Spec § "Definition of Done" item 3: "The Manual Verification Protocol has been executed once on a real machine; pre-fix and post-fix observations recorded in the PR description (or linked)."
+
+**Spec Reference**: `.workflows/killed-sessions-resurrect-on-restart/specification/killed-sessions-resurrect-on-restart/specification.md` § "Manual Verification Protocol", "Acceptance Criteria → AC6", "Definition of Done → item 3".
