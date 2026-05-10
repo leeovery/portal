@@ -188,6 +188,17 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-9-1 | Collapse open-coded RestoreAdapter preamble and openTestLogger shim across cmd/bootstrap tests | do not touch orchestrator_builder_eager_default_test.go zero-value sentinels; production wiring at cmd/bootstrap_production.go remains exempt; drop newly-orphaned restore/state imports verified by build |
 | killed-sessions-resurrect-on-restart-9-2 | Delete duplicate TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags in cmd-package | preserve canonical state-package test; drop runtime/syscall imports only if no other cmd-package consumers remain; cobra-Execute integration test at line 405 retained as legitimate cmd-layer coverage |
 
+### Phase 10: Analysis (Cycle 7)
+
+**Goal**: Address findings from Analysis (Cycle 7).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-10-1 | Fix gofmt drift on internal/restore/session.go docstring | docstring-only edit with no behavioural change; sanitization rationale + reference to sanitizeSessionName preserved; lint gate verified by `gofmt -l internal/restore/session.go` returning empty and the repo-root flagged set matching the pre-fix list minus this file |
+| killed-sessions-resurrect-on-restart-10-2 | Migrate the last inline OpenLogger preamble in exit_closes_pane_integration_test.go to restoretest.OpenTestLogger | restoretest import already present; preserve path/filepath and internal/state imports for other call sites; mechanical refactor verified by existing setupExitClosesPane-exercising tests |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":

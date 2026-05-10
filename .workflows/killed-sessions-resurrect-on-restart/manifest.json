@@ -86,7 +86,10 @@
             "killed-sessions-resurrect-on-restart-8-2": "tick-09c1f4",
             "killed-sessions-resurrect-on-restart-9": "tick-55d8f5",
             "killed-sessions-resurrect-on-restart-9-1": "tick-567681",
-            "killed-sessions-resurrect-on-restart-9-2": "tick-5984f0"
+            "killed-sessions-resurrect-on-restart-9-2": "tick-5984f0",
+            "killed-sessions-resurrect-on-restart-10": "tick-f73743",
+            "killed-sessions-resurrect-on-restart-10-1": "tick-863b70",
+            "killed-sessions-resurrect-on-restart-10-2": "tick-134a6c"
           },
           "external_id": "tick-5782dd"
         }

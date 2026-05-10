@@ -10,7 +10,7 @@
 ---
 
 ## Task 1: Fix gofmt drift on internal/restore/session.go docstring
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -40,7 +40,7 @@ sources: standards
 ---
 
 ## Task 2: Migrate the last inline OpenLogger preamble in exit_closes_pane_integration_test.go to restoretest.OpenTestLogger
-status: pending
+status: approved
 severity: low
 sources: duplication
 
