@@ -55,6 +55,20 @@ approved_at: 2026-05-10
 - [ ] Combined with Phase 1, the two `timeout waiting for signal` and `write fifo … no such file or directory` `WARN` lines are absent in steady-state cold-start logs (AC6 fully satisfied).
 - [ ] Spec supersession recorded: original `built-in-session-resurrection` invariants at lines 838 and 873 are explicitly superseded by this phase's behaviour (no in-place edit of the original spec).
 
+#### Tasks
+status: approved
+approved_at: 2026-05-10
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-2-1 | Flip TestHydrate_TimeoutDoesNotUnsetSkeletonMarker to assert marker-unset on timeout, then make handleHydrateTimeout call unsetSkeletonMarkerOrLog | UnsetSkeletonMarkerForFIFO failure logs soft warning and does not block subsequent exec, paneKey derived from FIFO basename via existing seam, set-option -su argv observed exactly once per timeout |
+| killed-sessions-resurrect-on-restart-2-2 | Replace line-262 "marker stays set so the next attach re-signals" comment with one-line recovery-contract note | preserve adjacent FIFO-unlink and warn-log comments verbatim, no behavioural change in this task, 100 ms settle-sleep absence still documented as deliberate |
+| killed-sessions-resurrect-on-restart-2-3 | Flip TestHydrate_Timeout_NeverFiresHookEvenIfRegistered into TestHydrate_Timeout_FiresHookWhenRegistered, then route runHydrate timeout fall-through through execShellOrHookAndExit | exec target is sh -c '<HOOK>; exec $SHELL' when hook registered, no new --hook-key plumbing added to runHydrate, cfg.HookKey threaded as-is from existing scope |
+| killed-sessions-resurrect-on-restart-2-4 | Unit test: runHydrate timeout fall-through with no registered hook still execs bare $SHELL via execShellOrHookAndExit | nil HookStore degrades to bare shell, lookup-not-found degrades to bare shell, lookup-error degrades to bare shell with single WARN |
+| killed-sessions-resurrect-on-restart-2-5 | Unit test: handleHydrateTimeout preserves the 100 ms settle-sleep absence and FIFO-unlink ordering | elapsed time on timeout handler stays well under hydrateSettleSleep, os.Remove(cfg.FIFO) still tolerates missing FIFO silently, marker-unset call ordered before exec fall-through |
+| killed-sessions-resurrect-on-restart-2-6 | Integration test (real tmux): cold-start with non-attached saved session + registered on-resume hook fires end-to-end (AC2) | N>=2 saved sessions where hook is on the non-attached session, hook stdout/effect observable in restored pane, test still passes when eager-signaling (Phase 1) has already cleared markers pre-timeout |
+| killed-sessions-resurrect-on-restart-2-7 | Record spec supersession of built-in-session-resurrection lines 838 and 873 in this work unit's planning notes (no in-place edit of the original spec) | original spec file untouched, supersession note links Phase 2 acceptance back to AC2 and AC6, lines 838/873 quoted verbatim with the replaced semantic stated alongside |
+
 ### Phase 3: Drop Outer sh -c Wrapper in buildHydrateCommand
 status: approved
 approved_at: 2026-05-10
