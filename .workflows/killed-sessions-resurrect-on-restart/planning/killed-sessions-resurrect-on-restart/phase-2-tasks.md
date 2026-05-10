@@ -17,6 +17,7 @@ total: 7
 **Do**:
 - Edit `cmd/state_hydrate_test.go` line 1148: rename `TestHydrate_TimeoutDoesNotUnsetSkeletonMarker` to `TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU`. Replace the negative assertion (loop searching for `set-option -su` and erroring if found) with the positive shape used at line 937: `want := []string{"set-option", "-su", "@portal-skeleton-tu__0.0"}` and a `found` loop that errors if absent.
 - Edit `cmd/state_hydrate.go` `handleHydrateTimeout`: insert `unsetSkeletonMarkerOrLog(cfg)` between the existing warn-log call and the `return nil`. Place it at the position where the deleted comment 4 lives — it is the new step 4, replacing the "deliberately NO UnsetServerOption" stub. Do not touch the FIFO unlink (`os.Remove`) or the `cfg.Logger.Warn(...)` lines; they keep their current ordering.
+- Edit `cmd/state_hydrate.go` `runHydrate`'s timeout branch (currently lines 103-110): insert `time.Sleep(hydrateSettleSleep)` between the `cfg.HandleTimeout(cfg)` call and the `execShellAndExit(cfg)` call (i.e. after the handler returns nil, before the exec fall-through). Per spec § "Fix 2 → Specific Changes → 4" the timeout fall-through must pay the same 100 ms settle sleep as the success path. The sleep lives in `runHydrate`, not in the handler, because `runHydrate` is the single owner of the post-handler exec sequence (mirrors how the success path's `time.Sleep(hydrateSettleSleep)` at line 171 lives in `runHydrate`'s straight-line body, not in a handler).
 - Confirm that `cfg.Client` is non-nil on every code path that reaches `handleHydrateTimeout` — it is, because `runHydrate` is constructed in `stateHydrateCmd.RunE` with `tmux.DefaultClient()`, and tests construct it via `tmux.NewClient(&recordingCommander{})`. No nil-guard is required at the handler.
 
 **Acceptance Criteria**:
@@ -25,6 +26,8 @@ total: 7
 - [ ] `TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU` passes; the old `TestHydrate_TimeoutDoesNotUnsetSkeletonMarker` no longer exists.
 - [ ] `state.UnsetSkeletonMarkerForFIFO` failure is non-fatal: `unsetSkeletonMarkerOrLog`'s existing soft-warn-and-return contract is preserved (the wrapper logs via `cfg.Logger.Warn` and does not propagate the error). Subsequent exec fall-through still proceeds.
 - [ ] paneKey derivation is via the existing seam (`state.PaneKeyFromFIFOPath`) — no new derivation logic added at the handler call-site.
+- [ ] `runHydrate`'s timeout branch pays `time.Sleep(hydrateSettleSleep)` between `cfg.HandleTimeout` returning nil and `execShellAndExit(cfg)` — same posture as the success-path settle sleep at line 171. Verified by a recorded elapsed time of at least `hydrateSettleSleep` at the `runHydrate` boundary on the timeout path.
+- [ ] The pre-existing `TestHydrate_TimeoutDoesNotSleep100ms` (cmd/state_hydrate_test.go:1114) is renamed/flipped in this same task to `TestHydrate_Timeout_PreservesSettleSleepBeforeExec` and asserts `elapsed >= hydrateSettleSleep` instead of the previous `elapsed < 50 ms`. This is the first task that changes the timeout-path elapsed-time invariant; no later task can ship green while the old assertion still pins the opposite invariant.
 
 **Tests**:
 - `"TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU"` — flipped assertion; verifies argv shape `["set-option", "-su", "@portal-skeleton-tu__0.0"]` appears in the recording commander's `Calls` slice exactly once.
@@ -57,7 +60,7 @@ total: 7
 **Outcome**: The handler's comment block reads coherently against the new behaviour. The 100 ms settle-sleep is preserved on the exec fall-through (per spec § "Fix 2 → Specific Changes → 4") — same posture as the success path; the comment documents that the recovery contract matches `handleHydrateFileMissing`, with the sleep paid before exec by `runHydrate`'s shared post-handler block.
 
 **Do**:
-- Edit `cmd/state_hydrate.go` lines 262-264 (the two-line "Deliberately NO UnsetServerOption" / "Deliberately NO 100ms sleep" block). Replace with a single-line comment placed immediately after the `unsetSkeletonMarkerOrLog(cfg)` call inserted by task 2-1, of approximately this shape: `// Recovery path matches handleHydrateFileMissing: marker unset above; runHydrate's exec fall-through still pays the 100 ms settle sleep before exec (preserved per spec — same posture as the success path).` This task also restores the 100 ms `time.Sleep(hydrateSettleSleep)` before the exec fall-through if it is currently absent on the timeout path; if the existing code already pays the sleep elsewhere (e.g. inside `runHydrate`'s shared post-handler block), this task only updates the comment and leaves the sleep call untouched.
+- Edit `cmd/state_hydrate.go` lines 262-264 (the two-line "Deliberately NO UnsetServerOption" / "Deliberately NO 100ms sleep" block). Replace with a single-line comment placed immediately after the `unsetSkeletonMarkerOrLog(cfg)` call inserted by task 2-1, of approximately this shape: `// Recovery path matches handleHydrateFileMissing: marker unset above; the 100 ms settle sleep is paid by runHydrate before exec (inserted in task 2-1, mirrors the success-path sleep posture).` This task is comment-only — task 2-1 already inserted the sleep call in `runHydrate`'s timeout branch, so this task does not touch any code lines.
 - Preserve verbatim the comments at lines 252-255 (FIFO unlink rationale) and lines 258-259 (warn-log purpose). Diff should touch only the deleted "Deliberately NO UnsetServerOption …" wording.
 - This task is comment-only — no behavioural change. All existing tests must still pass without any test-file edit (the behavioural assertions are owned by tasks 2-1, 2-3, 2-4, 2-5).
 
@@ -187,15 +190,17 @@ total: 7
   - `cmder := &recordingCommander{}`; `cfg := hydrateConfig{FIFO: fifo, HookKey: "ord:0.0", Stdout: io.Discard, Client: tmux.NewClient(cmder)}`.
 - Time the handler call: `start := time.Now(); err := handleHydrateTimeout(cfg); elapsed := time.Since(start)`.
 - Assert `err == nil`.
-- Assert the marker-unset call ordered before the handler returns (recording-commander check). Do NOT assert handler `elapsed < 50 ms` — the 100 ms settle-sleep must be preserved per spec § "Fix 2 → Specific Changes → 4". If the sleep lives inside `runHydrate` (post-handler) rather than inside `handleHydrateTimeout`, replace the elapsed-time assertion at the handler boundary with one at the `runHydrate` boundary that asserts `elapsed >= 100 ms`.
+- Assert the marker-unset call ordered before the handler returns (recording-commander check). The handler itself does NOT pay the 100 ms sleep — task 2-1 places the sleep inside `runHydrate` (post-handler, pre-exec). Therefore at the handler boundary, assert `elapsed < 50 ms` (the handler is fast — no sleep, no I/O beyond the FIFO unlink and the single `set-option -su` call).
 - Assert `_, statErr := os.Stat(fifo); errors.Is(statErr, os.ErrNotExist)` — handler tolerated the absent FIFO and did not return an error.
 - Assert the marker-unset argv `["set-option", "-su", "@portal-skeleton-ord__0.0"]` is present in `cmder.Calls`. The handler returns nil before the exec fall-through is reached, so the call log captures only the marker-unset.
+- The `runHydrate`-boundary elapsed-time assertion (`elapsed >= hydrateSettleSleep`) is owned by task 2-1's renamed `TestHydrate_Timeout_PreservesSettleSleepBeforeExec`; this task's handler-direct test is intentionally complementary, pinning the handler's *no-sleep* posture so a future drive-by edit does not accidentally move the sleep from `runHydrate` into the handler (which would break ordering with marker-unset).
 
 **Acceptance Criteria**:
 - [ ] `TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` passes.
-- [ ] runHydrate timeout fall-through preserves the 100 ms settle-sleep before exec — recorded elapsed time at the runHydrate boundary is at least `hydrateSettleSleep`.
+- [ ] Handler-boundary elapsed time is well under `hydrateSettleSleep` (e.g. `elapsed < 50 ms`) — the handler does not own the sleep; `runHydrate` does (per task 2-1).
 - [ ] `os.Remove` on a non-existent FIFO is silent — handler returns nil.
 - [ ] `set-option -su @portal-skeleton-<paneKey>` appears in the recording commander's calls before the handler returns.
+- [ ] No exec-related calls appear in the handler's recording commander log — the handler returns nil and `runHydrate` (not the handler) issues the exec fall-through.
 - [ ] Test does not use `t.Parallel()`.
 
 **Tests**:

@@ -10,7 +10,7 @@ topic: Killed Sessions Resurrect on Restart
 
 ## Findings
 
-### 1. 100 ms settle-sleep ownership unresolved across Phase 2 tasks
+### 1. 100 ms settle-sleep ownership unresolved across Phase 2 tasks [Fixed]
 
 **Severity**: Critical
 **Plan Reference**: Phase 2, tasks 2-2 and 2-5
@@ -114,8 +114,8 @@ The fix consolidates sleep ownership into Task 2-1 (the same task that already c
 > - [ ] No exec-related calls appear in the handler's recording commander log — the handler returns nil and `runHydrate` (not the handler) issues the exec fall-through.
 > - [ ] Test does not use `t.Parallel()`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Sleep ownership consolidated into task 2-1 (handler unset + runHydrate sleep insertion + flip TestHydrate_TimeoutDoesNotSleep100ms). Task 2-2 de-hedged to comment-only. Task 2-5 re-anchored to handler boundary (`elapsed < 50 ms`) with a complementary assertion that the runHydrate-boundary check is owned by task 2-1's flipped test. Tick task 2-1 description updated; tick tasks 2-2 and 2-5 already updated by Finding 1 of the traceability cycle.
 
 ---
 
