@@ -7,7 +7,7 @@
 ---
 
 ## Task 1: Collapse pollUntilMarkersCleared into restoretest.WaitForSkeletonMarkersCleared via parameterised tick
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -45,7 +45,7 @@ sources: duplication
 ---
 
 ## Task 2: Correct NewRestoreAdapter docstring to remove inaccurate production-site reuse claim
-status: pending
+status: approved
 severity: low
 sources: architecture
 

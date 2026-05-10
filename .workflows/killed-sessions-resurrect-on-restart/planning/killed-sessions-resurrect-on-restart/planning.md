@@ -155,6 +155,17 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-6-1 | Refresh stale doc-comment cross-references to renamed/relocated primitives | doc-comment-only edits with no behavioural change; verify each grep returns zero source-file hits (analysis docs in .workflows/ excluded by --include="*.go" filter) |
 | killed-sessions-resurrect-on-restart-6-2 | Extract bootstrapadapter.NewRestoreAdapter constructor and adopt at four new integration-test sites | constructor signature must match actual *state.Logger type used at open-coded sites; seven pre-existing sites stay untouched (scope discipline); no new test coverage required as constructor is logic-free |
 
+### Phase 7: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-7-1 | Collapse pollUntilMarkersCleared into restoretest.WaitForSkeletonMarkersCleared via parameterised tick | integration build tag preserved on all touched files; AC1 "AC1 violation:" diagnostic prefix intentionally dropped (relies on test-name + dumpPortalLogOnFailure for context); migrated call sites must continue to compile against renamed signature with no stray hardcoded 50ms imports needed at the call-site |
+| killed-sessions-resurrect-on-restart-7-2 | Correct NewRestoreAdapter docstring to remove inaccurate production-site reuse claim | doc-only edit with no behavioural surface; production wiring at cmd/bootstrap_production.go explicitly out of scope (no migration); replacement rationale must accurately name all four sibling inline-struct adapters at the production call site |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":
