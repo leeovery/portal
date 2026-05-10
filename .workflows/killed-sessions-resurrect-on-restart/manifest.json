@@ -16,12 +16,12 @@
       "items": {
         "killed-sessions-resurrect-on-restart": {
           "status": "in-progress",
-          "review_cycle": 0,
+          "review_cycle": 1,
           "finding_gate_mode": "gated",
           "date": "2026-05-09",
           "sources": {
             "killed-sessions-resurrect-on-restart": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }
