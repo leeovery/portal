@@ -19,7 +19,7 @@ total: 8
   - Exported `var SignalHydrateRetryDelays = []time.Duration{10ms, 20ms, 40ms, 80ms, 160ms, 190ms}` with the same documented 500ms cumulative-budget commentary.
   - Exported `func WriteFIFOSignal(path string, openFIFO func(string) (*os.File, error), sleep func(time.Duration)) error` — the same body as the cmd-level `writeFIFOSignal` but parameterised by the test seams (`OpenFIFO`, `Sleep`) directly rather than via a `signalHydrateConfig` struct, so callers in two packages can pass their own seams without a circular type dependency.
   - A package-private `isRetryableFIFOError(err error) bool` (move the existing helper verbatim).
-  - A package-private `OpenFIFOForSignal(path string) (*os.File, error)` exported helper that wraps `os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)` so cmd-side and bootstrap-side callers can share the production FIFO opener.
+  - An exported `OpenFIFOForSignal(path string) (*os.File, error)` helper that wraps `os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)` so cmd-side and bootstrap-side callers can share the production FIFO opener. (Exported — both `cmd/state_signal_hydrate.go` (task 1-2) and `internal/bootstrapadapter/adapters.go` (task 1-5) reference it as `state.OpenFIFOForSignal`.)
 - Move the `// signalHydrateRetryDelays …` and `// writeFIFOSignal …` doc comments verbatim, updating only the symbol names to their exported forms.
 - Add a `internal/state/signal_hydrate_test.go` (or fold tests into `fifo_test.go`) that asserts the retry ladder element-equality, the ENXIO/EAGAIN retry behaviour, the immediate ENOENT surface, and the `retries exhausted opening fifo %s: %w` error wrap on exhaustion. Mirror the existing `cmd/state_signal_hydrate_test.go` table where helpful.
 - Do NOT delete `cmd.writeFIFOSignal` / `cmd.signalHydrateRetryDelays` in this task — task 1-2 repoints `cmd/state_signal_hydrate.go` to call the shared package and removes the cmd-side copies.
@@ -370,12 +370,11 @@ Then update `buildProductionOrchestrator` in `cmd/bootstrap_production.go` to re
 - Use `newIntegrationStateDir(t)` and `openTestLogger(t, stateDir)` (already in `orchestrator_builder_test.go`) to set up `PORTAL_STATE_DIR` and a real logger.
 - Seed `sessions.json` via the existing `restoretest` package's helpers (see `internal/restoretest` and the way `phase5_integration_test.go` builds sessions). Construct N=2 saved sessions (e.g. `alpha` with 1 window/1 pane and `beta` with 1 window/1 pane). Each session's pane has a structural paneKey that corresponds to the `@portal-skeleton-*` marker the restore step will set.
 - Build the orchestrator via `buildIntegrationOrchestrator` with the real `RestoreAdapter` (wrapping `*restore.Orchestrator`), the real `EagerHydrateSignaler` adapter (`bootstrapadapter.EagerHydrateSignaler{Client: client, StateDir: stateDir, Logger: logger}`), and the real `RestoringMarker`. Saver/Hooks/StaleMarkers/Sweeper/Clean default to NoOp.
-- The hydrate helper inside each restored pane will exec `portal state hydrate` (via the existing `buildHydrateCommand` path); the test does NOT exec the full helper — it relies on `state.WriteFIFOSignal` reaching the FIFO and the helper, on signal receipt, unsetting its marker.
-  - Ensure the test's `portal` binary path is wired so the hydrate helper can actually run. The simplest shape is to reuse the `runRebootRoundTrip`-style `useBinary` fixture if it is straightforward; if not, the test can directly assert that `state.WriteFIFOSignal` was invoked for each marker (use a recording shim around the adapter's WriteFIFOSignal closure) and that **`@portal-skeleton-*` markers transition to empty within 2s** by polling.
-  - Acceptable test shape: the integration goal is "eager-signal step writes the byte to every marker's FIFO inside the bootstrap window". Validate via:
-    1. `runOrchestrator` returns nil within bootstrap.
+- The hydrate helper inside each restored pane execs `portal state hydrate` via the existing `buildHydrateCommand` path. The test must wire the `portal` binary path (via `restoretest.BuildPortalBinaryDir` + `restoretest.PrependPATH`, mirroring `internal/restore/integration_full_test.go`) so the helper actually runs end-to-end — the eager-signal step writes the byte, the helper consumes it, runs its scrollback dump, and unsets the marker. Anything less (e.g. a recording shim around `WriteFIFOSignal`) does not exercise the helper's marker-unset and therefore cannot validate AC1's pass condition.
+- Validation:
+    1. `o.Run(context.Background())` returns nil within bootstrap.
     2. Poll `state.ListSkeletonMarkers(client)` every 50ms for up to 2s.
-    3. Assert empty marker set within the window.
+    3. Assert the marker set transitions to empty within the window — this transition is owned by the helper unsetting the marker after the eager-signal byte arrives, so an empty marker set proves the full eager-signal → FIFO → helper → marker-unset chain.
 - Run `o.Run(context.Background())` and immediately begin polling with a 2-second deadline (`time.After(2*time.Second)`).
 - Assert no `attach-session` or `switch-client` was invoked (recording-commander style or just don't issue any).
 - Sub-tests / variants:
@@ -450,8 +449,7 @@ Then update `buildProductionOrchestrator` in `cmd/bootstrap_production.go` to re
 - [ ] The EagerSignalHydrate paragraph mentions: best-effort, runs while `@portal-restoring` set, daemon `captureAndCommit` suppression, eliminates per-session signaling gap, never fatal.
 
 **Tests**:
-- Manual review: open CLAUDE.md and verify the section reads correctly end-to-end.
-- `"git diff CLAUDE.md shows only the Server bootstrap section was modified"` — pre-commit visual check.
+- No new test cases — this task is documentation-only. The post-edit verification is a manual read of the section and a `git diff` check that no other CLAUDE.md sections were modified; the acceptance criteria above pin the substantive checks.
 
 **Edge Cases**:
 - "Return is the post-step boundary, not a numbered step" framing must be preserved exactly — the spec explicitly calls this out.
@@ -478,13 +476,15 @@ Then update `buildProductionOrchestrator` in `cmd/bootstrap_production.go` to re
 **Do**:
 - Extend `cmd/bootstrap/eager_signal_hydrate_integration_test.go` (added in task 1-6) with a second sub-test `TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4`.
 - Reuse the same N=2 saved-sessions fixture and orchestrator wiring from task 1-6.
-- After the marker-cleared poll completes (markers empty within 2 s), drive one daemon capture-tick by directly invoking the daemon's capture-once primitive (e.g. `state.RunCaptureOnce(client, stateDir, logger)`; if no such primitive exists, expose one as a test seam in `internal/state` for this purpose, mirroring the existing capture-loop body).
+- Verify whether `internal/state` exposes a capture-once primitive callable from outside the daemon's main loop (search for `RunCaptureOnce`, `CaptureOnce`, or equivalents in `internal/state/*.go`). If none exists, add a thin exported test seam `state.RunCaptureOnce(client state.ServerOptionLister, stateDir string, logger *state.Logger) error` that runs exactly one iteration of the daemon's `captureAndCommit` loop body (no goroutine, no ticker — straight-line invocation of the existing capture step). This seam is the single permitted addition to `internal/state`'s export surface for this phase beyond what task 1-1 already added.
+- After the marker-cleared poll completes (markers empty within 2 s), drive one daemon capture-tick by invoking `state.RunCaptureOnce(client, stateDir, logger)`. The capture tick must run after `@portal-restoring` is cleared by step 7 of the orchestrator's run — by the time the polling loop in this test exits with `markers empty`, the orchestrator has already returned, so the marker is already cleared.
 - Assert via `state.TailScrollback(state.ScrollbackPath(stateDir, betaPaneKey), 10)` that at least one record exists for the non-attached session's pane.
 - The test gates on `tmuxtest.SkipIfNoTmux(t)` and the `//go:build integration` tag, consistent with task 1-6.
 
 **Acceptance Criteria**:
 - [ ] Sub-test `TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4` exists in `cmd/bootstrap/eager_signal_hydrate_integration_test.go`.
 - [ ] Sub-test passes against a build with eager signaling wired; fails if the daemon refuses to capture a previously-stuck pane.
+- [ ] If `state.RunCaptureOnce` did not exist before this task, it is added as a thin test seam exporting exactly one function with the signature `RunCaptureOnce(client state.ServerOptionLister, stateDir string, logger *state.Logger) error`. The seam runs exactly one iteration of the existing daemon capture-step body. No other new exports are introduced into `internal/state`.
 - [ ] No `t.Parallel()` usage.
 - [ ] Skips cleanly under `-short` and when tmux is unavailable.
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-10
 cycle: 1
 phase: Plan Integrity Review
@@ -119,7 +119,7 @@ The fix consolidates sleep ownership into Task 2-1 (the same task that already c
 
 ---
 
-### 2. Task 1-1 contradicts itself on `OpenFIFOForSignal`'s export status
+### 2. Task 1-1 contradicts itself on `OpenFIFOForSignal`'s export status [Fixed]
 
 **Severity**: Important
 **Plan Reference**: Phase 1, task 1-1 (`Do` block, fourth sub-bullet)
@@ -138,12 +138,12 @@ Task 1-1 line 22 says: "A package-private `OpenFIFOForSignal(path string) (*os.F
 
 > - An exported `OpenFIFOForSignal(path string) (*os.File, error)` helper that wraps `os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)` so cmd-side and bootstrap-side callers can share the production FIFO opener. (Exported — both `cmd/state_signal_hydrate.go` (task 1-2) and `internal/bootstrapadapter/adapters.go` (task 1-5) reference it as `state.OpenFIFOForSignal`.)
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: phase-1-tasks.md task 1-1 fourth sub-bullet under "Add a new file `internal/state/signal_hydrate.go`" rewritten to be unambiguously exported.
 
 ---
 
-### 3. Task 1-6 leaves the implementer to choose between two divergent test shapes
+### 3. Task 1-6 leaves the implementer to choose between two divergent test shapes [Fixed]
 
 **Severity**: Important
 **Plan Reference**: Phase 1, task 1-6 (`Do` block, sixth and seventh sub-bullets)
@@ -176,12 +176,12 @@ If the implementer takes the recording-shim path, AC1 (which mandates the marker
 >     2. Poll `state.ListSkeletonMarkers(client)` every 50ms for up to 2s.
 >     3. Assert the marker set transitions to empty within the window — this transition is owned by the helper unsetting the marker after the eager-signal byte arrives, so an empty marker set proves the full eager-signal → FIFO → helper → marker-unset chain.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Task 1-6 sixth bullet rewritten to mandate the binary-fixture path; recording-shim option removed. AC1 is now genuinely verified end-to-end.
 
 ---
 
-### 4. Task 1-8 hedges on whether `state.RunCaptureOnce` is added in this task
+### 4. Task 1-8 hedges on whether `state.RunCaptureOnce` is added in this task [Fixed]
 
 **Severity**: Important
 **Plan Reference**: Phase 1, task 1-8 (`Do` block third bullet, `Edge Cases` second bullet)
@@ -224,12 +224,12 @@ The plan should either confirm `RunCaptureOnce` already exists (via a quick veri
 > - [ ] No `t.Parallel()` usage.
 > - [ ] Skips cleanly under `-short` and when tmux is unavailable.
 
-**Resolution**: Pending
-**Notes**: The Phase 1 acceptance criterion line 28 "`writeFIFOSignal` and `signalHydrateRetryDelays` are relocated from `cmd` into `internal/state` with no public API surface added" reads as scoped to those specific symbols — adding `RunCaptureOnce` is a separate matter and does not contradict that bullet. No phase-acceptance edit required.
+**Resolution**: Fixed
+**Notes**: Task 1-8 third bullet split into two: a verify-or-add-seam step plus the capture-tick invocation. Acceptance criteria gain an explicit "if seam was missing, it is added with exactly this signature" bullet. The Phase 1 acceptance criterion #1 (no public API beyond writeFIFOSignal / signalHydrateRetryDelays) is scoped to those specific symbols and does not contradict adding RunCaptureOnce as a separate test seam.
 
 ---
 
-### 5. Task 1-7 Tests block lists non-test items as tests
+### 5. Task 1-7 Tests block lists non-test items as tests [Fixed]
 
 **Severity**: Minor
 **Plan Reference**: Phase 1, task 1-7 (`Tests` block)
@@ -256,12 +256,12 @@ Per task-design.md, `Tests` lists test names. Manual reviews and pre-commit visu
 > **Tests**:
 > - No new test cases — this task is documentation-only. The post-edit verification is a manual read of the section and a `git diff` check that no other CLAUDE.md sections were modified; the acceptance criteria above pin the substantive checks.
 
-**Resolution**: Pending
-**Notes**: Same wording shape as task 3-2's `Tests` block (line 76) for consistency across documentation-only tasks.
+**Resolution**: Fixed
+**Notes**: Tests block in phase-1-tasks.md task 1-7 replaced with the documentation-only convention.
 
 ---
 
-### 6. Task 2-7 Tests block lists non-test items as tests
+### 6. Task 2-7 Tests block lists non-test items as tests [Fixed]
 
 **Severity**: Minor
 **Plan Reference**: Phase 2, task 2-7 (`Tests` block)
@@ -285,7 +285,7 @@ Task 2-7 (supersession note) is a documentation-only task with the same anti-pat
 > **Tests**:
 > - No new test cases — this task is documentation-only. The acceptance criteria above pin the substantive checks (file exists at canonical path, both invariants quoted verbatim, AC2/AC6 referenced explicitly, original spec file byte-identical).
 
-**Resolution**: Pending
-**Notes**: Same wording shape as task 3-2's `Tests` block for consistency.
+**Resolution**: Fixed
+**Notes**: Tests block in phase-2-tasks.md task 2-7 replaced with the documentation-only convention.
 
 ---

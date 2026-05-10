@@ -314,10 +314,7 @@ total: 7
 - [ ] The Verification Trail section links to the three tests added by tasks 2-1, 2-3, and 2-6.
 
 **Tests**:
-- `"phase-2-supersession.md exists at the canonical path"` — manual verification; this task is documentation, not code.
-- `"original built-in-session-resurrection spec is byte-identical post-task"` — `git diff .workflows/built-in-session-resurrection/specification/` shows no changes.
-- `"both quoted invariants appear verbatim in the supersession note"` — `grep -F "Helper does NOT unset marker on FIFO timeout"` and `grep -F "Resume hooks fire only from inside the hydrate helper's exec chain"` against the new file return matches.
-- `"supersession note links AC2 and AC6"` — search the file for substrings `AC2` and `AC6`.
+- No new test cases — this task is documentation-only. The acceptance criteria above pin the substantive checks (file exists at canonical path, both invariants quoted verbatim, AC2/AC6 referenced explicitly, original spec file byte-identical).
 
 **Edge Cases**:
 - Original spec file untouched — verify with `git diff` that the only file added by this task is `phase-2-supersession.md`.
