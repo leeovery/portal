@@ -7,7 +7,7 @@
 ---
 
 ## Task 1: Delete shellQuoteSingle and emit bare hydrate invocation
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -50,7 +50,7 @@ sources: architecture
 ---
 
 ## Task 2: Migrate buildReattachOrchestrator to NewRestoreAdapter and shared OpenTestLogger helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 

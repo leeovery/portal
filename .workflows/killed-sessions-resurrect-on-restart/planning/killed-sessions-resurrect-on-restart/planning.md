@@ -166,6 +166,17 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-7-1 | Collapse pollUntilMarkersCleared into restoretest.WaitForSkeletonMarkersCleared via parameterised tick | integration build tag preserved on all touched files; AC1 "AC1 violation:" diagnostic prefix intentionally dropped (relies on test-name + dumpPortalLogOnFailure for context); migrated call sites must continue to compile against renamed signature with no stray hardcoded 50ms imports needed at the call-site |
 | killed-sessions-resurrect-on-restart-7-2 | Correct NewRestoreAdapter docstring to remove inaccurate production-site reuse claim | doc-only edit with no behavioural surface; production wiring at cmd/bootstrap_production.go explicitly out of scope (no migration); replacement rationale must accurately name all four sibling inline-struct adapters at the production call site |
 
+### Phase 8: Analysis (Cycle 5)
+
+**Goal**: Address findings from Analysis (Cycle 5).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-8-1 | Delete shellQuoteSingle and emit bare hydrate invocation | apostrophe-bearing inputs are not sanitized out and would break shell parsing in the bare form (acknowledged in docstring, not currently produced by Portal); strings import becomes unused after deletion and must be removed; negative-assertion test sub-case for no sh -c envelope must remain as wrapper-reintroduction guard |
+| killed-sessions-resurrect-on-restart-8-2 | Migrate buildReattachOrchestrator to NewRestoreAdapter and shared OpenTestLogger helper | helper must remain importable from both cmd and cmd/bootstrap test packages; delegate path preferred to minimize churn across twelve existing call sites; unused imports (restore, path/filepath, state) must be pruned from cmd/reattach_integration_test.go after migration |
+
 ## Definition of Done
 
 Per spec § "Definition of Done":
