@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-10
 cycle: 1
 phase: Traceability Review
@@ -264,7 +264,7 @@ Add this line at the end:
 
 ---
 
-### 5. CLAUDE.md update is a Definition of Done item but is only listed as Phase 1 acceptance
+### 5. CLAUDE.md update is a Definition of Done item but is only listed as Phase 1 acceptance [Fixed]
 
 **Type**: Incomplete coverage
 **Spec Reference**: § "Definition of Done" item 4 (line 259): "`CLAUDE.md` 'Server bootstrap' section is updated with the new step list." Also § "Bootstrap Step Numbering Update" (line 121): "The `CLAUDE.md` 'Server bootstrap' section is updated **as part of the same PR**."
@@ -292,7 +292,7 @@ Per spec § "Definition of Done":
 - [ ] PR is reviewed and merged to `main` — out of scope for the planning artifact; tracked on the PR itself.
 ```
 
-**Resolution**: Pending
-**Notes**: Optional / informational only. If the user prefers minimal additions, this finding can be marked rejected with no change.
+**Resolution**: Fixed
+**Notes**: Added a Definition of Done section at the bottom of planning.md listing each DoD item with its satisfying task/phase. Optional polish applied per auto-approve.
 
 ---

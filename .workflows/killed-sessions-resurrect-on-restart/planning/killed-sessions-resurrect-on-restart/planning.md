@@ -113,3 +113,13 @@ approved_at: 2026-05-10
 | killed-sessions-resurrect-on-restart-3-2 | Refresh `buildHydrateCommand` doc comment and confirm `RespawnPane` interface signature is unchanged (still single command-string) | none |
 | killed-sessions-resurrect-on-restart-3-3 | Add integration test (real-tmux fixture): typed `exit` once in a restored pane closes the pane — `tmux list-panes` shows pane gone, not respawned with a fresh shell (AC5) | restored pane with on-resume hook registered (inner `sh -c '<HOOK>; exec $SHELL'` exec chain unaffected — exit still closes the pane); restored pane without a hook (bare `$SHELL` exec — exit closes the pane); no parked `sh -c .*portal state hydrate` parent process under tmux post-restore |
 | killed-sessions-resurrect-on-restart-3-4 | Execute Manual Verification Protocol on a real machine and record pre/post observations in the PR description (DoD item 3, AC6) | N>=2 saved sessions required for pre-fix repro; observational only (no automated test); deferrable to a reviewer with a real machine but DoD-blocking before merge |
+
+## Definition of Done
+
+Per spec § "Definition of Done":
+
+- [ ] All unit and integration tests in the Test Plan pass in CI — covered by Phase 1/2/3 task acceptance criteria.
+- [ ] Existing tests under "Regression Coverage to Preserve" remain green — Phase 1 final acceptance criterion.
+- [ ] Manual Verification Protocol has been executed once on a real machine; pre-fix and post-fix observations recorded in the PR description — task 3-4.
+- [ ] `CLAUDE.md` "Server bootstrap" section is updated with the new step list — task 1-7.
+- [ ] PR is reviewed and merged to `main` — out of scope for the planning artifact; tracked on the PR itself.
