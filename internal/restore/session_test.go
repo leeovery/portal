@@ -585,7 +585,7 @@ func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
 	wantFIFO := state.FIFOPath(dir, liveKey)
 	wantFile := filepath.Join(dir, "scrollback/work__0.0.bin")
 	wantCmd := fmt.Sprintf(
-		"sh -c 'portal state hydrate --fifo %s --file %s --hook-key %s; exec $SHELL'",
+		"portal state hydrate --fifo %s --file %s --hook-key %s",
 		wantFIFO, wantFile, "work:0.0",
 	)
 	if hydrate != wantCmd {

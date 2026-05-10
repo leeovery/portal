@@ -406,19 +406,26 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 	}
 }
 
-// buildHydrateCommand returns the spec-canonical `sh -c '...; exec $SHELL'`
-// form delivered to a freshly-created pane via respawn-pane -k. respawn-pane
-// kills the default shell and replaces the pane's process with this command
-// in a single atomic call, so no leading `exec` prefix is needed (and would
-// be redundant — tmux's respawn already replaces, not stacks).
+// buildHydrateCommand returns the bare `portal state hydrate ...` invocation
+// delivered to a freshly-created pane via respawn-pane -k. respawn-pane kills
+// the default shell and replaces the pane's process with this command in a
+// single atomic call, so no leading `exec` prefix is needed (and would be
+// redundant — tmux's respawn already replaces, not stacks).
 //
-// The trailing `exec $SHELL` inside sh -c lets the helper hand off to the
-// user's shell without spawning a further process so the shell never sees
-// the helper's command line and exiting the shell ends the pane (rather than
-// dropping back into a parent sh).
+// Per spec Fix 3 (Defect D), the previous outer shell envelope around this
+// invocation was dropped: the trailing shell-replacement trailer it contained
+// was unreachable on every observed exit path (the helper always
+// syscall.Exec's its replacement), and the envelope left a parked parent
+// process under tmux for the lifetime of the pane and forced the user to
+// type the exit command twice to close the pane. The helper's own internal
+// hook-firing wrapper inside cmd/state_hydrate.go is independent and
+// preserved.
+//
+// shellQuoteSingle still escapes embedded single quotes in fifo / file /
+// hookKey for defensive parity with the prior call-site contract.
 func buildHydrateCommand(fifo, file, hookKey string) string {
 	return fmt.Sprintf(
-		"sh -c 'portal state hydrate --fifo %s --file %s --hook-key %s; exec $SHELL'",
+		"portal state hydrate --fifo %s --file %s --hook-key %s",
 		shellQuoteSingle(fifo),
 		shellQuoteSingle(file),
 		shellQuoteSingle(hookKey),
