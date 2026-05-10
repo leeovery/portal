@@ -85,3 +85,13 @@ approved_at: 2026-05-10
 - [ ] Integration test: `exit` typed once in a restored pane closes the pane (tmux `list-panes` shows the pane gone, not respawned with a fresh shell) — AC5.
 - [ ] Integration / manual check: `pgrep -fa "sh -c.*portal state hydrate"` returns no rows for any restored pane.
 - [ ] All existing happy-path resurrection integration tests remain green.
+
+#### Tasks
+status: approved
+approved_at: 2026-05-10
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-sessions-resurrect-on-restart-3-1 | Update buildHydrateCommand snapshot test to assert bare-command shape, then drop the outer `sh -c '…; exec $SHELL'` wrapper in `internal/restore/session.go` | paths/hook-keys containing single quotes still escaped correctly via existing single-quote helper; empty / unset hook-key value still produces a valid bare invocation |
+| killed-sessions-resurrect-on-restart-3-2 | Refresh `buildHydrateCommand` doc comment and confirm `RespawnPane` interface signature is unchanged (still single command-string) | none |
+| killed-sessions-resurrect-on-restart-3-3 | Add integration test (real-tmux fixture): typed `exit` once in a restored pane closes the pane — `tmux list-panes` shows pane gone, not respawned with a fresh shell (AC5) | restored pane with on-resume hook registered (inner `sh -c '<HOOK>; exec $SHELL'` exec chain unaffected — exit still closes the pane); restored pane without a hook (bare `$SHELL` exec — exit closes the pane); no parked `sh -c .*portal state hydrate` parent process under tmux post-restore |
