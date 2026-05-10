@@ -71,13 +71,26 @@ The placement also runs the step **after** restore has populated the skeleton-ma
 
 The step does not require an additional tmux round-trip beyond `state.ListSkeletonMarkers`. The pane-target list is the marker map itself; the corresponding FIFO path is deterministic via `state.FIFOPath(stateDir, paneKey)`. No `list-panes` enumeration is needed at this layer.
 
+`stateDir` is plumbed through the orchestrator construction — same source as Restore and EnsureSaver. The orchestrator resolves `state.Paths().StateDir` once at startup and passes it into each step that needs it.
+
 ### Write Primitive
 
 The step uses the existing `writeFIFOSignal` helper and `signalHydrateRetryDelays` retry schedule from `cmd/state_signal_hydrate.go`, mirroring the per-session signaling posture so failure semantics remain identical between the eager step and the existing `client-attached` / `client-session-changed` paths.
 
+**Sharing mechanism**: Both `writeFIFOSignal` and `signalHydrateRetryDelays` are currently package-private inside `cmd`. The fix moves them into a shared internal package (`internal/state`, alongside the existing FIFO/marker helpers). `cmd/state_signal_hydrate.go` and the new `cmd/bootstrap` step both call into the shared package. No public API is exposed.
+
+### Race-Free Ordering vs. Client-Attached
+
+The eager step always runs **before** any `client-attached` event for the bootstrap-time skeleton. The bootstrap orchestrator runs in `PersistentPreRunE` and returns before any tmux attach occurs:
+
+- **Bare-CLI path** (`portal open`): bootstrap returns, then `syscall.Exec`s `tmux attach-session`. The `client-attached` event fires only after bootstrap completion.
+- **Inside-tmux path**: bootstrap returns, then `tmux switch-client` is invoked. Same ordering.
+
+There is therefore no race where the eager step writes to a FIFO whose helper has already self-hydrated via `client-attached`. The "second-fire is a no-op" property describes the **subsequent** client-attached firing, not concurrent firing.
+
 ### Failure Posture
 
-- **Per-FIFO write failures are soft warnings.** The step logs a `WARN | hydrate | …` entry mirroring `runSignalHydrate`'s posture and continues to the next pane. A failed write does not abort the step.
+- **Per-FIFO write failures are soft warnings.** Log shape: `WARN | hydrate | eager-signal: write fifo <fifoPath>: <error>`. paneKey is derivable from the FIFO basename (`hydrate-<paneKey>.fifo`); no separate paneKey field is added. The step continues to the next pane on failure. A failed write does not abort the step.
 - **The step itself never escalates to a fatal bootstrap error.** Mirrors steps 7 (CleanStaleMarkers), 8 (SweepOrphanFIFOs), and 9 (CleanStale) — best-effort cleanup classed alongside other non-fatal post-restore steps.
 - **Zero markers post-Restore is a no-op.** No FIFO writes attempted; step returns nil.
 
@@ -102,11 +115,24 @@ After this insertion the orchestrator's step list becomes:
 9. SweepOrphanFIFOs
 10. CleanStale
 
-The `CLAUDE.md` "Server bootstrap" section will be updated to reflect the new ordering as part of the fix.
+`EagerSignalHydrate` is the canonical identifier across the orchestrator method, the step's logged label, the seam interface name (suffix), and test assertions.
+
+The `CLAUDE.md` "Server bootstrap" section is updated **as part of the same PR**. The update only renumbers steps and inserts a one-paragraph EagerSignalHydrate description; the existing "Return is the post-step boundary, not a numbered step" framing is preserved.
 
 ### Adapter Wiring
 
-The new step's seam interface is wired through `internal/bootstrapadapter` in the same shape as the existing post-restore steps (concrete `*tmux.Client`, `state` package functions). No new package-level dependencies introduced.
+The new step's seam interface lives alongside the existing post-restore-step seams in `cmd/bootstrap/`. Suggested shape:
+
+```go
+type EagerHydrateSignaler interface {
+    ListSkeletonMarkers() (map[string]string, error) // paneKey → liveTarget
+    WriteFIFOSignal(path string) error
+}
+```
+
+The production adapter in `internal/bootstrapadapter` wires `state.ListSkeletonMarkers` (with the orchestrator's `*tmux.Client`) for the marker enumeration and the shared `internal/state` package's `WriteFIFOSignal` for the writer. The orchestrator owns `stateDir` and resolves `state.FIFOPath(stateDir, paneKey)` per marker before calling `WriteFIFOSignal`.
+
+No new public API surface is exposed. Test fakes implement the same interface to assert per-FIFO write counts, error propagation, and zero-marker no-op behaviour.
 
 ## Fix 2: Timeout-Path Corrections in `handleHydrateTimeout`
 
@@ -116,9 +142,11 @@ The new step's seam interface is wired through `internal/bootstrapadapter` in th
 
 ### Specific Changes
 
-1. **Unset `@portal-skeleton-<paneKey>` on timeout.** The handler calls the same marker-unset primitive used by `handleHydrateFileMissing` (`state.UnsetSkeletonMarkerForFIFO` / `unsetSkeletonMarkerOrLog`) before returning. Failure to unset is logged as a soft warning (mirrors the file-missing path); does not block the shell exec.
+1. **Unset `@portal-skeleton-<paneKey>` on timeout.** The handler calls `unsetSkeletonMarkerOrLog` — the cmd-layer wrapper that internally invokes the `state.UnsetSkeletonMarkerForFIFO` primitive and logs a soft warning on failure. This is the canonical primitive used by `handleHydrateFileMissing`; tests reuse the same mock pattern by overriding the `state.UnsetSkeletonMarkerForFIFO` seam. Failure to unset is logged as a soft warning; does not block the shell exec.
 
 2. **Route timeout fall-through through `execShellOrHookAndExit`** (the hook-firing exec) instead of `execShellAndExit` (bare shell). The timeout and file-missing recovery paths now share the same exec contract: both unset the marker, both fire hooks if registered, both exec `$SHELL` if not. The current divergence between them is eliminated.
+
+   **No new `--hook-key` plumbing is required.** `runHydrate` already holds the hook key in scope as `cfg.HookKey`; both `handleHydrateTimeout` and `handleHydrateFileMissing` recovery paths can call `execShellOrHookAndExit(cfg.HookKey)` symmetrically. The hook lookup happens inside `execShellOrHookAndExit` against `hooks.json`; no parameter shape changes.
 
 3. **Remove the "marker stays set so the next attach re-signals" comment** at line 262. That comment encoded a non-deliverable invariant: the FIFO is unlinked at line 256 of the same handler before any subsequent attach could write to it, so "next attach re-signals" was a no-op that just re-fired ENOENT. The comment is replaced with a one-line note explaining the recovery contract.
 
@@ -179,7 +207,9 @@ This change drops the **outer** wrapper at the `respawn-pane` site. The **inner*
 
 ### Argument Quoting
 
-The bare form must be passed through the same tmux argument-construction helpers as other multi-arg pane commands. The existing `RespawnPane` interface in `internal/tmux` accepts a single command-string argument; the call-site already constructs a properly-quoted string. The change is in `buildHydrateCommand`'s output, not in the `RespawnPane` interface.
+`buildHydrateCommand` returns a single shell-safe command string (no `[]string` argv split). `RespawnPane`'s interface signature is unchanged — it continues to accept a single command-string argument. The change is purely the omission of the `sh -c '…; exec $SHELL'` envelope around the helper invocation.
+
+The bare form is `portal state hydrate --fifo <fifo> --file <file> --hook-key <hookKey>`, where each value-arg is shell-escaped using the existing internal/tmux quoting helper used for non-shell pane commands. The helper invocation itself is `portal` (PATH-resolved); not absolute. The unit test snapshot asserts the exact resulting string format produced by the helper on representative inputs.
 
 ### Defect-D Closure
 
@@ -191,20 +221,43 @@ The fix is complete when all of the following hold:
 
 ### Behavioural
 
-- **AC1**: After a tmux server cold-start with N≥2 saved sessions, all `@portal-skeleton-<paneKey>` markers are unset within reasonable time post-bootstrap (no client attach required to drive the unset).
-- **AC2**: On-resume hooks registered via `portal hooks set --on-resume "<cmd>"` fire end-to-end on cold-start for **every** restored pane that has a hook registered, regardless of which session the user attached to.
+- **AC1**: After a tmux server cold-start with N≥2 saved sessions, all `@portal-skeleton-<paneKey>` markers are unset within **2 seconds** post-bootstrap (no client attach required to drive the unset). The integration test polls `state.ListSkeletonMarkers` with a 2-second timeout; pass condition is empty marker set within the window. The 2-second bound is generous: the helper writes its scrollback dump and unsets the marker after a 100 ms settle sleep, so 2s gives ~10× slack for tmux command latency at any plausible N.
+- **AC2**: On-resume hooks registered via `portal hooks set --on-resume "<cmd>"` fire end-to-end on cold-start for **every** restored pane that has a hook registered, regardless of which session the user attached to. The attached-session case is already covered by existing happy-path resurrection integration tests (preserved under "Regression Coverage to Preserve"); the new multi-session integration test specifically covers the previously-broken non-attached case.
 - **AC3**: A pane killed via `portal` TUI `K` (or `tmux kill-session` from inside) does not reappear on the next `portal open`. (Already neutralised on `main` by the daemon-merge live-set filter; verified post-fix as a regression guard rather than a new behaviour.)
 - **AC4**: Scrollback save resumes for previously-stuck-marker panes — daemon `captureAndCommit` no longer indefinitely skips any live pane.
 - **AC5**: `exit` typed in a restored pane closes the pane on the first invocation. No orphan `sh` parent process under tmux for any restored pane.
 
 ### Logging
 
-- **AC6**: `WARN | hydrate | write fifo … no such file or directory` and `WARN | hydrate | timeout waiting for signal on …` log volume on every cold-start drops to zero in the steady state. These warnings appear only when a genuine signal-flow bug occurs.
+- **AC6**: `WARN | hydrate | write fifo … no such file or directory` and `WARN | hydrate | timeout waiting for signal on …` log volume on every cold-start drops to zero in the steady state. These warnings appear only when a genuine signal-flow bug occurs. **Verification is via the Manual Verification Protocol step 2** — observational, not a gated automated test. Inspect `~/.config/portal/state/portal.log` after a clean cold-start with N≥2 saved sessions; the two warning lines must be absent.
 
 ### Spec Conformance (Original Resurrection Spec)
 
 - **AC7**: All happy-path resurrection invariants stated in `.workflows/built-in-session-resurrection/specification/built-in-session-resurrection/specification.md` continue to hold for the success path: scrollback dumped, marker unset by helper, on-resume hook fires once at end of successful hydration, `exec $SHELL`.
 - **AC8**: Daemon suppression during the `@portal-restoring` window remains intact — the new eager-signaling step does not introduce any race between the daemon's capture loop and helper-driven scrollback replay.
+
+### AC ↔ Fix Traceability
+
+| AC | Satisfied by |
+|----|--------------|
+| AC1 | Fix 1 (eager signaling unsets markers without waiting for client attach) |
+| AC2 | Fix 1 (eager signaling drives hydration for non-attached sessions) + Fix 2 (timeout fall-through fires hooks if registered) |
+| AC3 | Companion daemon-merge fix on `main` (regression guard); Fix 1 hardens upstream by preventing marker leak |
+| AC4 | Fix 1 (eager signaling unsets markers, daemon resumes capturing those panes) |
+| AC5 | Fix 3 (wrapper drop — pane closes on first `exit`; no parked `sh` parent) |
+| AC6 | Fix 1 (markers cleared before client-attached fires; eliminates ENOENT writes) + Fix 2 (timeout no longer the steady-state path) |
+| AC7 | Invariant: existing happy-path tests preserved under "Regression Coverage to Preserve" |
+| AC8 | Invariant: eager step runs inside `@portal-restoring` window (Fix 1 → Placement and Ordering Invariant) |
+
+### Definition of Done
+
+The work unit is complete when **all** of the following hold:
+
+1. All unit and integration tests in the Test Plan pass in CI.
+2. Existing tests under "Regression Coverage to Preserve" remain green.
+3. The Manual Verification Protocol has been executed once on a real machine; pre-fix and post-fix observations recorded in the PR description (or linked).
+4. `CLAUDE.md` "Server bootstrap" section is updated with the new step list.
+5. PR is reviewed and merged to `main`.
 
 ## Test Plan
 
@@ -226,7 +279,7 @@ The fix is complete when all of the following hold:
 ### Integration (real tmux fixture)
 
 - **Bootstrap orchestrator ordering**: New step runs at the correct position (after step 5 Restore, before step 6 Clear `@portal-restoring`). Sequence test asserts ordering by injecting a recording orchestrator deps fake.
-- **Multi-session cold-start**: Boot with N≥2 saved sessions. Assert all `@portal-skeleton-*` markers are unset within reasonable time post-bootstrap (no client attach required). This test closes a specific gap in existing coverage — prior integration tests for the resurrection feature verified the signal-arrived flow only for the attached session, never modelling the N≥2 case where the bug's deterministic behaviour surfaces.
+- **Multi-session cold-start**: Boot with N≥2 saved sessions. Poll `state.ListSkeletonMarkers` with a 2-second timeout; pass condition is empty marker set within the window. This test closes a specific gap in existing coverage — prior integration tests for the resurrection feature verified the signal-arrived flow only for the attached session, never modelling the N≥2 case where the bug's deterministic behaviour surfaces.
 - **End-to-end hook firing on cold-start**: Register an on-resume hook for a non-attached saved session. Cold-start. Assert the hook ran in the restored pane.
 - **Pane close on `exit`**: Restored pane runs `exit` once; tmux `list-panes` shows the pane is gone (not respawned with a fresh shell).
 
@@ -273,6 +326,14 @@ Users encountering Symptoms B/C in a current `portal` build can clear stuck mark
 ### Empirical Reconfirmation Before Implementation Starts
 
 The investigation flagged that Symptom A's user-visible behaviour (kill → reappear on next `portal open`) should be empirically re-checked against current `main` before implementation begins. The expectation is that the daemon-merge fix already neutralises it, but reconfirming closes the loop. This is a one-time check, not an ongoing acceptance criterion.
+
+**Owner**: planning agent runs the check before scoping tasks. **Result recording**: outcome is logged in the plan's pre-flight notes (or PR description for a one-PR plan).
+
+**Branch behaviour**:
+- If reconfirmation shows Symptom A still reproduces on `main`, plan scope adds an explicit Symptom A regression test (kill → reopen → assert absent) and AC3 graduates from "regression guard" to "verified fix".
+- If reconfirmation shows Symptom A is already neutralised, AC3 remains a regression guard and no additional task is added.
+
+Either way, Fix 1 / Fix 2 / Fix 3 still ship — reconfirmation only affects whether a Symptom-A-specific test is added, not whether the upstream-trigger fix proceeds.
 
 ### Manual Verification Protocol
 
