@@ -1,0 +1,18 @@
+# Architecture Findings — killed-sessions-resurrect-on-restart (cycle 3)
+
+```
+AGENT: architecture
+FINDINGS:
+- FINDING: Three doc-comment cross-references still name primitives that were moved/renamed in earlier cycles, presenting a misleading architectural picture to future readers
+  SEVERITY: low
+  FILES: /Users/leeovery/Code/portal/cmd/bootstrap/eager_signal_hydrate.go:28, /Users/leeovery/Code/portal/internal/restoretest/restoretest.go:152, /Users/leeovery/Code/portal/internal/restoretest/restoretest.go:256
+  DESCRIPTION: Cycle 3's T5-3 paid down one stale primitive reference in CLAUDE.md ("via `state.WriteFIFOSignal`" -> "via `state.DefaultFIFOSignaler` / `state.SendHydrateSignal`"). Three byte-identical drift cases survive in source-file doc-comments and were not in T5-3's scope.
+    1. `cmd/bootstrap/eager_signal_hydrate.go:28` documents `EagerSignalCore.Signaler` as "Tests inject `recordingFIFOSignaler`" — but T5-1 just promoted that fake into `internal/statetest` and renamed it `statetest.RecordingFIFOSignaler`; the private `recordingFIFOSignaler` symbol the doc names no longer exists in the repo (verified by `grep -rn "recordingFIFOSignaler" /Users/leeovery/Code/portal --include="*.go"` returning only this single doc-comment hit).
+    2. `internal/restoretest/restoretest.go:152` describes `DriveSignalHydrate` as "byte-equivalent to `writeFIFOSignal` in `cmd/state_signal_hydrate.go`".
+    3. `internal/restoretest/restoretest.go:256` describes the internal `openAndSignalFIFO` as "Byte-equivalent to `cmd/state_signal_hydrate.writeFIFOSignal`".
+    But T1-1 relocated that helper into `internal/state` (now `state.WriteFIFOSignal` and its no-seam wrapper `state.SendHydrateSignal`) seven cycles ago; the cmd-side primitive named in both docstrings has not existed for the entire visible commit history of this work unit.
+    The architectural concern: all three references describe load-bearing seam relationships — "which test fake satisfies this interface" / "which production primitive is this fallback equivalent to" — exactly the bridges a maintainer follows to understand seam quality. When those bridges name dead symbols, the reader either trusts the doc and arrives nowhere, or grep-fails and concludes the doc is stale (and therefore probably the surrounding logic is too). This is the same drift T5-3 fixed for CLAUDE.md, propagated to the three remaining surfaces.
+  RECOMMENDATION: One-line edits per file. (1) `eager_signal_hydrate.go:28`: "Tests inject recordingFIFOSignaler" -> "Tests inject `statetest.RecordingFIFOSignaler`". (2) `restoretest.go:152`: "byte-equivalent to `writeFIFOSignal` in `cmd/state_signal_hydrate.go`" -> "byte-equivalent to `state.WriteFIFOSignal` / `state.SendHydrateSignal` in `internal/state`". (3) `restoretest.go:256`: "Byte-equivalent to `cmd/state_signal_hydrate.writeFIFOSignal`" -> "Byte-equivalent to `state.WriteFIFOSignal` in `internal/state`". Same shape of fix CLAUDE.md got in T5-3 — propagate it to the three remaining surfaces so the post-T1-1 + post-T5-1 layout is self-describing across every doc-comment that names the affected primitives.
+
+SUMMARY: Cycle 3's four cleanup tasks (RecordingFIFOSignaler promotion to `statetest`, redundant explicit `EagerSignaler` wiring removed, CLAUDE.md primitive update, restoretest doc reconciliation) all landed cleanly and resolved both cycle-2 architecture findings. One residual low-severity item remains: three source-file doc-comments still name the old primitives (`recordingFIFOSignaler`, `writeFIFOSignal`) that were moved/renamed in T1-1 and T5-1 — the same drift CLAUDE.md got fixed for, propagated to the three remaining surfaces. Nothing blocks behavioural correctness or acceptance criteria.
+```
