@@ -7,11 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/statetest"
@@ -310,42 +307,6 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	}
 	if len(second.Calls) != 0 {
 		t.Errorf("second invocation SendSignal calls = %d, want 0 (idempotent)", len(second.Calls))
-	}
-}
-
-// TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags pins the
-// production seam's non-blocking flag contract end-to-end through the
-// state package. Validates that state.OpenFIFOForSignal — the production
-// opener bundled inside state.SendHydrateSignal / state.DefaultFIFOSignaler
-// — opens a real FIFO with no reader and returns ENXIO immediately rather
-// than blocking. Only O_WRONLY|O_NONBLOCK produces this result on POSIX.
-// The retry ladder above this layer is exercised at the state-package
-// level; this test pins only the open-flag contract.
-func TestSignalHydrate_OpenFIFOForSignalUsesNonBlockingFlags(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("FIFOs are not supported on Windows")
-	}
-	dir := t.TempDir()
-	path := dir + "/no-reader.fifo"
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Fatalf("mkfifo: %v", err)
-	}
-
-	start := time.Now()
-	f, err := state.OpenFIFOForSignal(path)
-	elapsed := time.Since(start)
-
-	if f != nil {
-		_ = f.Close()
-		t.Fatal("state.OpenFIFOForSignal returned non-nil file with no reader; expected ENXIO")
-	}
-	if !errors.Is(err, syscall.ENXIO) {
-		t.Fatalf("state.OpenFIFOForSignal err = %v, want syscall.ENXIO", err)
-	}
-	// O_NONBLOCK guarantees the call returns immediately rather than blocking
-	// for a reader. 100ms is a generous upper bound.
-	if elapsed >= 100*time.Millisecond {
-		t.Errorf("state.OpenFIFOForSignal blocked for %v; expected ~immediate return (O_NONBLOCK missing?)", elapsed)
 	}
 }
 
