@@ -44,6 +44,120 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
 
+// killBarrierReadPID is the function used to read the prior daemon's PID from
+// the state directory before a kill-respawn cycle. It is a package-level seam
+// so kill-barrier unit tests can simulate "no PID file", "corrupted PID file",
+// or "unreadable PID file" cases without touching the filesystem. Defaults to
+// state.ReadPIDFile.
+var killBarrierReadPID = state.ReadPIDFile
+
+// killBarrierIsAlive is the function used by the kill barrier to probe whether
+// the prior daemon is still running. It is a package-level seam so tests can
+// simulate "alive then dead after N ticks" / "alive forever" / "already dead"
+// without spawning real processes. Defaults to state.IsProcessAlive.
+var killBarrierIsAlive = state.IsProcessAlive
+
+// killBarrierPollInterval is the cadence at which the kill barrier re-probes
+// killBarrierIsAlive after issuing kill-session. Exported as a var so tests
+// can shrink it. Defaults to 50ms — chosen alongside killBarrierTimeout so
+// the median recycle path completes in well under a second.
+var killBarrierPollInterval = 50 * time.Millisecond
+
+// killBarrierTimeout is the upper bound on the kill barrier's wait for the
+// prior daemon to exit. Sized to sit above the daemon's cold-sweep ceiling
+// (3.9s on the affected user's scrollback profile) with margin, so the WARN
+// path is reserved for genuinely stuck daemons rather than ordinary cold
+// sweeps. Exported as a var so tests can shrink it.
+var killBarrierTimeout = 5 * time.Second
+
+// BarrierLogger is the minimal logging seam killSaverAndWaitForDaemon needs.
+// A single Warn method is the smallest surface that conveys the spec's
+// observable shape: one WARN-level event on barrier timeout.
+//
+// *state.Logger satisfies this interface structurally; defining a local
+// interface mirrors the MigrationLogger precedent in hooks_register.go,
+// avoiding the import cycle that would otherwise force callers to depend on
+// internal/state directly.
+type BarrierLogger interface {
+	Warn(component, format string, args ...any)
+}
+
+// noopBarrierLogger satisfies BarrierLogger with a no-op Warn so the kill
+// barrier always has a safe sink when production wiring has not installed a
+// real logger.
+type noopBarrierLogger struct{}
+
+func (noopBarrierLogger) Warn(component, format string, args ...any) {}
+
+// killBarrierLogger is the package-level sink for kill-barrier WARN
+// emissions. Production wiring (added in Task 2.2) replaces this with a real
+// *state.Logger via init() or the bootstrap-adapter path. Tests install a
+// recording fake via the seam and reset it through t.Cleanup.
+var killBarrierLogger BarrierLogger = noopBarrierLogger{}
+
+// killSaverAndWaitForDaemon issues kill-session against _portal-saver and
+// blocks until the prior daemon has actually exited or a timeout fires. The
+// barrier is the "common-case quiet" half of the multi-daemon fix: without
+// it, every recycle would produce a "lock held; exiting" WARN from the new
+// daemon while the prior daemon finishes its synchronous tick. The daemon's
+// lock acquisition remains the structural safety net — the barrier just
+// makes the recycle path silent on the happy path.
+//
+// Flow:
+//
+//  1. Read the prior PID via killBarrierReadPID. On any error (file absent,
+//     unreadable, corrupted) → tolerant kill, return nil immediately. Polling
+//     is skipped because there is no prior PID to wait for.
+//  2. If the prior PID is already dead (killBarrierIsAlive returns false on
+//     the first probe) → tolerant kill, return nil immediately. Zero polling.
+//  3. Otherwise issue kill-session exactly once, tolerating kill errors
+//     (the session may have auto-destroyed between probe and kill — that is
+//     equivalent to "already absent" for our purposes). Then enter the poll
+//     loop: re-probe killBarrierIsAlive every killBarrierPollInterval until
+//     it returns false or killBarrierTimeout elapses.
+//  4. On timeout → emit exactly one WARN via killBarrierLogger and return
+//     nil. The new daemon's lock acquisition is the safety net for the
+//     genuinely-stuck case.
+//
+// The helper never writes to the state directory.
+func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
+	priorPID, readErr := killBarrierReadPID(stateDir)
+	if readErr != nil {
+		// No usable prior PID. Tolerant kill, no polling.
+		_ = c.KillSession(PortalSaverName)
+		return nil
+	}
+
+	if !killBarrierIsAlive(priorPID) {
+		// Prior daemon already dead. Tolerant kill, no polling.
+		_ = c.KillSession(PortalSaverName)
+		return nil
+	}
+
+	// Prior daemon alive — issue kill-session once and wait for exit.
+	_ = c.KillSession(PortalSaverName)
+
+	ticker := time.NewTicker(killBarrierPollInterval)
+	defer ticker.Stop()
+
+	deadline := time.Now().Add(killBarrierTimeout)
+	for range ticker.C {
+		if !killBarrierIsAlive(priorPID) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			killBarrierLogger.Warn(
+				"bootstrap",
+				"prior daemon (pid=%d) did not exit within %v",
+				priorPID,
+				killBarrierTimeout,
+			)
+			return nil
+		}
+	}
+	return nil
+}
+
 // BootstrapPortalSaver ensures the _portal-saver session exists and is hosting
 // a live daemon, idempotently. The flow:
 //

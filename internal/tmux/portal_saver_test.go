@@ -3,6 +3,7 @@ package tmux_test
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -912,4 +913,366 @@ func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionItself(t *testing.T) 
 	}
 
 	assertNoDaemonVersionFile(t, dir)
+}
+
+// ----------------------------------------------------------------------------
+// killSaverAndWaitForDaemon tests
+// ----------------------------------------------------------------------------
+
+// recordingBarrierLogger captures Warn calls so assertions can verify emission
+// counts and ordering. Satisfies tmux.BarrierLogger.
+type recordingBarrierLogger struct {
+	warns []string
+}
+
+func (r *recordingBarrierLogger) Warn(component, format string, args ...any) {
+	r.warns = append(r.warns, component+" | "+format)
+}
+
+// installBarrierReadPID swaps the killBarrierReadPID seam for the duration of
+// the test and restores it via t.Cleanup.
+func installBarrierReadPID(t *testing.T, fn func(string) (int, error)) {
+	t.Helper()
+	seam := tmux.BarrierReadPIDSeam()
+	prev := *seam
+	*seam = fn
+	t.Cleanup(func() { *seam = prev })
+}
+
+// installBarrierIsAlive swaps the killBarrierIsAlive seam for the test.
+func installBarrierIsAlive(t *testing.T, fn func(int) bool) {
+	t.Helper()
+	seam := tmux.BarrierIsAliveSeam()
+	prev := *seam
+	*seam = fn
+	t.Cleanup(func() { *seam = prev })
+}
+
+// installBarrierPollInterval shrinks the poll cadence for tests.
+func installBarrierPollInterval(t *testing.T, d time.Duration) {
+	t.Helper()
+	seam := tmux.BarrierPollIntervalSeam()
+	prev := *seam
+	*seam = d
+	t.Cleanup(func() { *seam = prev })
+}
+
+// installBarrierTimeout shrinks the total timeout for tests.
+func installBarrierTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	seam := tmux.BarrierTimeoutSeam()
+	prev := *seam
+	*seam = d
+	t.Cleanup(func() { *seam = prev })
+}
+
+// installBarrierLogger swaps the WARN-emission seam for a recorder.
+func installBarrierLogger(t *testing.T, log tmux.BarrierLogger) {
+	t.Helper()
+	seam := tmux.BarrierLoggerSeam()
+	prev := *seam
+	*seam = log
+	t.Cleanup(func() { *seam = prev })
+}
+
+// snapshotDir returns a map of every regular file in dir keyed by relative
+// path with values "<mtime-unix-nano>|<size>|<content-hash>". Used to assert
+// no state-directory mutation across a barrier invocation.
+func snapshotDir(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q): %v", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			t.Fatalf("Info(%q): %v", e.Name(), err)
+		}
+		// We don't hash content — mtime+size is sufficient for the helper's
+		// "must not write" guarantee, and it side-steps reading PID files that
+		// the test itself seeded.
+		out[e.Name()] = info.ModTime().UTC().Format(time.RFC3339Nano) + "|" + strconv.FormatInt(info.Size(), 10)
+	}
+	return out
+}
+
+func TestKillSaverAndWaitForDaemon_ReturnsNilWithNoWarnWhenPriorPIDDiesBeforeTimeout(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 500*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	// Alive for the first two probes (initial check + first tick), then dead.
+	calls := 0
+	installBarrierIsAlive(t, func(pid int) bool {
+		calls++
+		if pid != 4321 {
+			t.Errorf("IsProcessAlive called with pid=%d; want 4321", pid)
+		}
+		return calls < 3
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on clean exit, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_EmitsOneWarnAndReturnsNilWhenPriorPIDNeverDies(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 20*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true })
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	start := time.Now()
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", got)
+	}
+	if len(log.warns) != 1 {
+		t.Errorf("expected exactly 1 WARN line on timeout, got %d: %v", len(log.warns), log.warns)
+	}
+	// Wall time should be bounded by the timeout plus reasonable slack.
+	if elapsed > 1*time.Second {
+		t.Errorf("barrier exceeded wall-time budget: elapsed=%v (timeout=20ms)", elapsed)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_SkipsPollingWhenPIDFileAbsent(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 0, state.ErrPIDFileAbsent })
+
+	aliveCalls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		aliveCalls++
+		return true
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", got)
+	}
+	if aliveCalls != 0 {
+		t.Errorf("expected 0 IsProcessAlive probes when PID file absent, got %d", aliveCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines when PID file absent, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_SkipsPollingWhenPIDFileCorrupted(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) {
+		return 0, errors.New("parse daemon.pid: strconv.Atoi: parsing \"abc\": invalid syntax")
+	})
+
+	aliveCalls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		aliveCalls++
+		return true
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", got)
+	}
+	if aliveCalls != 0 {
+		t.Errorf("expected 0 IsProcessAlive probes on parse error, got %d", aliveCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on parse error, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_SkipsPollingWhenPIDFileUnreadable(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) {
+		return 0, errors.New("read daemon.pid: permission denied")
+	})
+
+	aliveCalls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		aliveCalls++
+		return true
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", got)
+	}
+	if aliveCalls != 0 {
+		t.Errorf("expected 0 IsProcessAlive probes on read error, got %d", aliveCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on read error, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_SkipsPollingWhenPriorPIDAlreadyDead(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	aliveCalls := 0
+	installBarrierIsAlive(t, func(pid int) bool {
+		aliveCalls++
+		return false // already dead on the first probe
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d", got)
+	}
+	if aliveCalls != 1 {
+		t.Errorf("expected exactly 1 IsProcessAlive probe (then short-circuit), got %d", aliveCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines when prior PID already dead, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_ToleratesFailingKillSession(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return false }) // already dead → fast path
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) {
+			return "", errors.New("session vanished mid-flight")
+		},
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon must tolerate kill-session error, got: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call even when it errors, got %d", got)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on tolerated kill error, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_DoesNotMutateStateDirectory(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 20*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true }) // force timeout path — exercises full code path
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	dir := t.TempDir()
+	// Seed a sentinel file so any spurious truncation/recreation is visible.
+	sentinel := dir + "/sentinel"
+	if err := os.WriteFile(sentinel, []byte("untouched\n"), 0o600); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+
+	before := snapshotDir(t, dir)
+
+	script := &portalSaverScript{
+		killSession: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, dir); err != nil {
+		t.Fatalf("killSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	after := snapshotDir(t, dir)
+	if len(before) != len(after) {
+		t.Errorf("state directory file count changed: before=%v after=%v", before, after)
+	}
+	for name, sigBefore := range before {
+		if sigAfter, ok := after[name]; !ok {
+			t.Errorf("file %q removed from state directory", name)
+		} else if sigBefore != sigAfter {
+			t.Errorf("file %q mutated: before=%q after=%q", name, sigBefore, sigAfter)
+		}
+	}
 }
