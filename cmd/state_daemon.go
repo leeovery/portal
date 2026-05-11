@@ -43,6 +43,23 @@ var (
 	daemonShutdownFunc = defaultShutdownFlush
 )
 
+// acquireDaemonLock is the test seam over state.AcquireDaemonLock. Tests in
+// this package swap it to simulate the contention path (ErrDaemonLockHeld)
+// and the non-EWOULDBLOCK error path without contending for a real OS lock.
+// Production callers leave it at the default.
+var acquireDaemonLock = state.AcquireDaemonLock
+
+// daemonLockFile retains the daemon's advisory-lock fd for the entire lifetime
+// of the process. Storing the *os.File in a package-level var prevents Go's
+// finalizer from closing the fd (which would silently release the kernel-side
+// flock and re-introduce the very race the lock exists to close). See spec
+// § Fix Part 1: "Fd retention is load-bearing."
+//
+// MUST NOT be wrapped in any value with a finalizer that closes the fd.
+// MUST NOT have runtime.SetFinalizer attached. The lock is released by the
+// kernel on process exit; no explicit close is required or desired.
+var daemonLockFile *os.File
+
 // defaultDaemonRun is the production daemon body: a 1-second ticker that fires
 // captures when the dirty flag is set or the 30-second max-gap has elapsed,
 // returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
@@ -222,6 +239,29 @@ var stateDaemonCmd = &cobra.Command{
 		// during the restore window. See spec § Defensive Dirty-Flag Clear on
 		// Daemon Startup.
 		_ = os.Remove(state.SaveRequested(dir))
+
+		// Singleton-lock acquisition MUST precede any state-directory write.
+		// Order matters: EnsureDir → save.requested clear → acquire lock →
+		// WritePIDFile / WriteVersionFile / tick loop. See spec § Fix Part 1:
+		// Daemon-Side Singleton Lock.
+		//
+		//  - Success: retain the *os.File in daemonLockFile so the kernel-held
+		//    flock survives the lifetime of the process.
+		//  - ErrDaemonLockHeld: another daemon won; log one WARN line and exit
+		//    status 0 by returning nil. No pidfile / version write, no tick
+		//    loop. Quiet co-existence with the winner.
+		//  - Other errors (open(2) failure, unexpected flock error): log ERROR
+		//    and return a wrapped error so the daemon exits non-zero.
+		lockFile, err := acquireDaemonLock(dir)
+		if err != nil {
+			if errors.Is(err, state.ErrDaemonLockHeld) {
+				logger.Warn(state.ComponentDaemon, "another daemon holds the lock; exiting")
+				return nil
+			}
+			logger.Error(state.ComponentDaemon, "acquire daemon lock: %v", err)
+			return fmt.Errorf("acquire daemon lock: %w", err)
+		}
+		daemonLockFile = lockFile
 
 		if err := state.WritePIDFile(dir, os.Getpid()); err != nil {
 			return fmt.Errorf("write PID file: %w", err)

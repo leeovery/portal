@@ -395,3 +395,266 @@ func TestStateDaemon_RunFuncErrorPropagates(t *testing.T) {
 		t.Errorf("expected sentinel error, got %v", err)
 	}
 }
+
+// withAcquireDaemonLockFake swaps the package-level acquireDaemonLock seam for
+// the duration of the test and restores it via t.Cleanup. Tests must not use
+// t.Parallel — the seam is package-level mutable state shared across tests.
+func withAcquireDaemonLockFake(t *testing.T, fake func(string) (*os.File, error)) {
+	t.Helper()
+	prev := acquireDaemonLock
+	acquireDaemonLock = fake
+	t.Cleanup(func() { acquireDaemonLock = prev })
+}
+
+// withDaemonLockFileReset clears the package-level daemonLockFile var around
+// the test so a prior test's successful acquisition does not bleed into the
+// post-condition assertions of the test under run.
+func withDaemonLockFileReset(t *testing.T) {
+	t.Helper()
+	prev := daemonLockFile
+	daemonLockFile = nil
+	t.Cleanup(func() { daemonLockFile = prev })
+}
+
+func TestStateDaemon_AcquiresLockBeforeWritePIDFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
+
+	// Order is asserted by recording whether daemon.pid existed at the moment
+	// acquireDaemonLock was invoked. The contract is: pidfile MUST NOT exist
+	// when the lock is being acquired, because WritePIDFile runs only after a
+	// successful lock acquisition.
+	var pidFileExistsAtLockAcquire bool
+	withAcquireDaemonLockFake(t, func(d string) (*os.File, error) {
+		if _, err := os.Stat(filepath.Join(d, "daemon.pid")); err == nil {
+			pidFileExistsAtLockAcquire = true
+		}
+		// Return the real lock-file fd so the rest of startup proceeds normally.
+		return state.AcquireDaemonLock(d)
+	})
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if pidFileExistsAtLockAcquire {
+		t.Error("daemon.pid existed before acquireDaemonLock was called; lock must precede WritePIDFile")
+	}
+	// Sanity: pidfile is written on the success path.
+	if _, err := state.ReadPIDFile(dir); err != nil {
+		t.Errorf("ReadPIDFile after success: %v", err)
+	}
+}
+
+func TestStateDaemon_AcquireLockCalledAfterEnsureDir(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "fresh-state")
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
+
+	var dirExistedAtAcquire bool
+	withAcquireDaemonLockFake(t, func(d string) (*os.File, error) {
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			dirExistedAtAcquire = true
+		}
+		return state.AcquireDaemonLock(d)
+	})
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !dirExistedAtAcquire {
+		t.Error("state directory did not exist at lock-acquire time; EnsureDir must precede AcquireDaemonLock")
+	}
+}
+
+func TestStateDaemon_ExitsCleanlyWhenLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
+
+	// Seam returns ErrDaemonLockHeld → daemon must return nil (exit 0).
+	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
+		return nil, state.ErrDaemonLockHeld
+	})
+
+	// daemonRunFunc must NOT be invoked on contention.
+	called := false
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("expected nil error on lock-held; got: %v", err)
+	}
+	if called {
+		t.Error("daemonRunFunc must not be called when lock is held")
+	}
+}
+
+func TestStateDaemon_DoesNotWritePIDFileWhenLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
+
+	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
+		return nil, state.ErrDaemonLockHeld
+	})
+
+	// No prior runFunc seam set: assert RunE returns before reaching it.
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// daemon.pid must NOT have been written.
+	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
+		t.Errorf("daemon.pid must not exist when lock is held; stat err = %v", err)
+	}
+	// daemon.version must NOT have been written.
+	if _, err := os.Stat(filepath.Join(dir, "daemon.version")); !os.IsNotExist(err) {
+		t.Errorf("daemon.version must not exist when lock is held; stat err = %v", err)
+	}
+}
+
+func TestStateDaemon_DoesNotOverwritePIDFileWhenLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
+
+	// Pre-seed daemon.pid with a known stale value the loser must NOT overwrite.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	if err := state.WritePIDFile(dir, 9999); err != nil {
+		t.Fatalf("seed pid: %v", err)
+	}
+
+	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
+		return nil, state.ErrDaemonLockHeld
+	})
+
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := state.ReadPIDFile(dir)
+	if err != nil {
+		t.Fatalf("ReadPIDFile: %v", err)
+	}
+	if got != 9999 {
+		t.Errorf("daemon.pid = %d; want 9999 (must not be overwritten by loser)", got)
+	}
+}
+
+func TestStateDaemon_ReturnsErrorOnNonContentionLockFailure(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
+
+	sentinel := errors.New("flock: permission denied")
+	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
+		return nil, sentinel
+	})
+
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonRunFunc must not be reached when lock acquire fails")
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	_, _, err := runStateDaemon(t)
+	if err == nil {
+		t.Fatal("expected error on non-EWOULDBLOCK lock failure, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected wrapped sentinel error; got %v", err)
+	}
+
+	// State files must not be written on the fatal error path.
+	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
+		t.Errorf("daemon.pid must not exist on lock-error path; stat err = %v", err)
+	}
+}
+
+func TestStateDaemon_RetainsLockFdAcrossDaemonLifetime(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if daemonLockFile == nil {
+		t.Fatal("daemonLockFile package-level var must be non-nil after a successful daemon RunE")
+	}
+	// The retained fd must still be open — closing it would release the
+	// flock. Probe Fd() returns a positive integer; calling Stat on the
+	// underlying file should not error on an open fd.
+	if _, err := daemonLockFile.Stat(); err != nil {
+		t.Errorf("retained lock fd appears closed: %v", err)
+	}
+}
+
+func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
+	// WARN is above the default INFO threshold, but we set the level
+	// explicitly so we are not depending on the env default.
+	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
+
+	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {
+		return nil, state.ErrDaemonLockHeld
+	})
+
+	prev := daemonRunFunc
+	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+		return nil
+	}
+	t.Cleanup(func() { daemonRunFunc = prev })
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "WARN") {
+		t.Errorf("expected a WARN log line; got:\n%s", got)
+	}
+	if !strings.Contains(got, "another daemon holds the lock") {
+		t.Errorf("expected contention log content; got:\n%s", got)
+	}
+	// Exactly one such line — the loser path must not be noisy.
+	if n := strings.Count(got, "another daemon holds the lock"); n != 1 {
+		t.Errorf("expected exactly one contention WARN line; got %d in:\n%s", n, got)
+	}
+}
