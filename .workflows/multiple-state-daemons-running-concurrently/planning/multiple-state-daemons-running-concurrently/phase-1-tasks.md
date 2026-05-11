@@ -98,6 +98,7 @@ total: 4
 - [ ] On other lock errors (e.g. `fs.ErrNotExist`, `syscall.EACCES`): exactly one ERROR-level log line is emitted, `RunE` returns a non-nil error (cobra exit non-zero).
 - [ ] The existing test `TestStateDaemon_WritesPIDFileOnStartup` and friends continue to pass — the lock seam defaults to a real `unix.Flock` that will succeed against a fresh `t.TempDir()`, so non-contention tests are unaffected.
 - [ ] Tests use `t.TempDir()` via `PORTAL_STATE_DIR` for isolation; tests do not use `t.Parallel()`.
+- [ ] Project `CLAUDE.md` `state` package row updated to note the `daemon.lock` singleton invariant — one short sentence in the existing row format, surfaced alongside the existing `BootstrapPortalSaver` / `IsRestoringSet` references. This addresses the spec's "to be evaluated during planning" disposition and keeps the doc + behaviour in a single commit.
 
 **Tests**: (in `cmd/state_daemon_test.go`)
 - `"it acquires the lock before WritePIDFile on the happy path"` — install a `lockAcquire` fake that records call order and returns success; install `withImmediateRun` so `daemonRunFunc` returns nil; run `runStateDaemon(t)`; assert no error, pidfile present and equals `os.Getpid()`, and (via the recorded call sequence) lockAcquire is called before any filesystem write to `daemon.pid` — alternatively assert by ordering of an injected `daemonRunFunc` callback that the file exists at that point.

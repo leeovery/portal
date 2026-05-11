@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 1
 phase: Traceability Review
@@ -135,7 +135,7 @@ Given that other rows in `CLAUDE.md` (e.g. the `state` row already documents `Is
 - [ ] Project `CLAUDE.md` `state` package row updated to note the `daemon.lock` singleton invariant — one short sentence in the existing row format, surfaced alongside the existing `BootstrapPortalSaver` / `IsRestoringSet` references. This addresses the spec's "to be evaluated during planning" disposition and keeps the doc + behaviour in a single commit.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
