@@ -59,6 +59,8 @@ The kill arrives but the old daemon does not exit promptly:
 
 Sweep cost is the cost driver. `internal/tmux/tmux.go:625` uses `capture-pane -e -p -S -` (unbounded scrollback). Measured 24-pane sweep: **3.9 s cold / 1.5 s warm** at the observed scrollback profile (~28 MB rendered text). The Go ticker drops missed fires, so when a sweep overruns the 1 s tick interval the next tick fires immediately on completion — daemons in this regime **never reach `ctx.Done()` between sweeps**, extending the orphan-eligibility window indefinitely after a kill.
 
+**Recycle-induced sweep pressure.** The kill-respawn event itself generates `session-closed` and `session-created` tmux hooks. Both fire `save.requested`, which keeps the daemon's dirty flag set and forces the surviving daemon's sweep into the back-to-back regime described above. The cancel-to-exit window is therefore widest precisely on the recycle path that the fix must defend — the worst-case kill-barrier latency is structural to the recycle event, not a tail-case observation.
+
 ### How the defects compose
 
 - (1) alone: a benign condition — at N=1 the informational pidfile is sufficient.

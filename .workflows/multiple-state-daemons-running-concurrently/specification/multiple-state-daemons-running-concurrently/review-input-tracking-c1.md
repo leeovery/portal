@@ -25,10 +25,11 @@ The investigation calls out a positive-feedback element of the bug: the recycle 
 > Sweep cost is the cost driver. `internal/tmux/tmux.go:625` uses `capture-pane -e -p -S -` (unbounded scrollback). Measured 24-pane sweep: **3.9 s cold / 1.5 s warm** at the observed scrollback profile (~28 MB rendered text). The Go ticker drops missed fires, so when a sweep overruns the 1 s tick interval the next tick fires immediately on completion — daemons in this regime **never reach `ctx.Done()` between sweeps**, extending the orphan-eligibility window indefinitely after a kill.
 
 **Proposed Addition**:
-{leave blank — discuss whether this belongs in Root Cause as an additional paragraph or in Risk and Rollout as part of the worst-case latency analysis}
+Appended after the sweep-cost paragraph in Root Cause → "Why the old daemon survives the kill signal":
+> **Recycle-induced sweep pressure.** The kill-respawn event itself generates `session-closed` and `session-created` tmux hooks. Both fire `save.requested`, which keeps the daemon's dirty flag set and forces the surviving daemon's sweep into the back-to-back regime described above. The cancel-to-exit window is therefore widest precisely on the recycle path that the fix must defend — the worst-case kill-barrier latency is structural to the recycle event, not a tail-case observation.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added as standalone paragraph in Root Cause section.
 
 ---
 
