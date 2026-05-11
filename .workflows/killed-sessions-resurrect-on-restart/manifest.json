@@ -181,7 +181,7 @@
     "review": {
       "items": {
         "killed-sessions-resurrect-on-restart": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "killed-sessions-resurrect-on-restart-1-1",
             "killed-sessions-resurrect-on-restart-1-2",
