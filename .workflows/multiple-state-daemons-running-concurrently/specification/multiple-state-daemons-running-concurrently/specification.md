@@ -12,15 +12,21 @@ Expected behaviour: **exactly one** `portal state daemon` process per tmux serve
 
 ### Impact
 
-- **Severity: High.** When 2+ daemons run concurrently the tmux server pegs at 75–98% CPU. The cost is in `capture-pane -e -p -S -` (unbounded scrollback) called by each daemon's per-pane sweep — `sample` shows all time in `cmd_capture_pane_exec` → `grid_string_cells` → `grid_string_cells_add_code`.
+- **Severity: High.** When 2+ daemons run concurrently the tmux server pegs at 75–98% CPU. The cost is in `capture-pane -e -p -S -` (unbounded scrollback) called by each daemon's per-pane sweep — `sample` shows all time in `cmd_capture_pane_exec` → `grid_string_cells` → `grid_string_cells_add_code`. Observational confirmation: 1 s-resolution `ps` snapshots showed 4–7 concurrent `tmux capture-pane -e -p -S -` child processes (one per running daemon mid-sweep) and a one-to-one correlation between daemon count and the CPU peg. With zero daemons running, server CPU dropped to 0–22% and capture-pane processes dropped to zero — confirming daemons are the workload, not some other process.
 - **Scope: server-wide.** All tmux operations on the affected server become sluggish — not just portal-managed sessions. TUI redraws, prefix keystrokes, and `tmux ls` itself become multi-second-slow. Load average sustained 5–10 during the observation window.
 - **Shared-state corruption.** Multiple daemons writing the same state directory: `sessions.json` (atomic per-commit but two daemons race the read-then-commit window, producing flip-flop content across consecutive ticks), per-pane scrollback `.bin` files (`AtomicWrite` is per-call atomic but the two writers can interleave content versions), and `daemon.pid`/`daemon.version` markers become incoherent — `BootstrapAliveCheck` becomes meaningless once N > 1. The `save.requested` flag is a notable exception — both daemons race to remove it on successful sweep, but the loser's remove is a benign no-op via `errors.Is(err, fs.ErrNotExist)`.
+
+### Potentially affected (to confirm during planning)
+
+- **FIFO sweep paths.** Two daemons could in principle both call into `state` cleanup helpers concurrently. `FIFOSweeper` itself runs only in bootstrap (single-shot per process), so daemon-side FIFO interaction is read-only — investigation assessed this as "likely safe" but flagged that the fix design should explicitly confirm there is no daemon-side write path that two concurrent daemons could race on.
 
 ### Trigger frequency
 
 Trigger frequency is **incidental to the bug.** The observed accumulation (~7 orphans over 10 days uptime) is consistent with low-frequency events compounding — stale pidfile recovery, manual session kills, brew upgrades, daemon crashes mid-tick. The version-mismatch path is dormant on a normal user with matching real semver on both `portal version` and `daemon.version`.
 
 The structural defects (covered in Root Cause) make any kill-respawn trigger — high or low frequency — capable of producing an orphan. The fix closes the race regardless of how often the trigger fires.
+
+**Reproducibility caveat.** The whole observation is a **single snapshot** from one user (2026-05-09). The fix is justified by structural inevitability (the bootstrap race + missing singleton lock), not by repeated observation. Any future occurrence of any kill-respawn trigger reproduces the accumulation mechanism; the spec's confidence in the fix shape derives from the code trace, not from N>1 field reports.
 
 ### Recovery for affected users
 
@@ -156,6 +162,10 @@ This trade is acceptable because (a) the recycle path is rare per `EnsurePortalS
 
 Rejected during investigation discussion: bootstrap is on the critical path of every `portal` command and must stay fast. A 1.5–4 second hold to wait for lock release would make every command sluggish whether or not a recycle was happening. The barrier scopes the wait to **only the recycle path**.
 
+### Why not treat `_portal-saver` session presence as the singleton signal
+
+Considered and rejected during investigation. The idea: skip the kill+respawn entirely on dev-build mismatch and let the daemon detect version-mismatch internally and self-exit. Rejected because it would require teaching the daemon to introspect and manage its own version lifecycle — significantly larger surgery than the kill barrier + lock. The kill-respawn protocol is otherwise sound; it needs a synchronisation barrier, not a redesign.
+
 ## Acceptance Criteria
 
 The fix is correct when **all** of the following hold:
@@ -165,6 +175,7 @@ The fix is correct when **all** of the following hold:
 - At most one `portal state daemon` process exists per state directory at any time, regardless of how many bootstrap invocations have run during the tmux server lifetime.
 - Verified by: an integration test (real-tmux fixture) that runs two back-to-back `EnsurePortalSaverVersion` calls — one must trigger a recycle via version mismatch — and asserts exactly one live `portal state daemon` process when both calls complete.
 - Verified manually by: running `pgrep -P <tmux-server-pid> -f 'portal state daemon'` after repeated bootstrap invocations and observing a count of exactly 1.
+- **Forward-compatibility rationale.** Singleton-ness is a structural property that future seams may depend on (e.g. a centralised hook queue, a single-writer log channel). Once 2+ daemons are possible, any such seam silently breaks. The lock (Part 1) is the floor that holds this property even under code paths not yet written.
 
 ### Clean handover on the common case
 
@@ -200,6 +211,7 @@ The fix is correct when **all** of the following hold:
   1. *"another daemon holds the lock; exiting"* — from the loser daemon in the contention path.
   2. *"prior daemon did not exit within timeout"* (or equivalent) — from the kill barrier on timeout.
 - No new logs are emitted on the common-case (clean handover) path. Silent success is the expected behaviour.
+- **Recycle-path silence is preserved (and acknowledged as a trade-off).** The investigation's "Why It Wasn't Caught" called out the existing kill-respawn path's total silence — operators have no signal that a recycle happened or how often. The spec does **not** add a diagnostic/info-level log at the recycle decision point. The two WARN paths above are sufficient to surface the abnormal cases (loser contention, barrier timeout). If recurrence diagnostics become a need, that is a follow-up observability work unit, not part of this fix.
 
 ## Out of Scope
 
@@ -235,7 +247,7 @@ Disposition: defer; potentially folded into a broader daemon-cost work unit.
 
 ### Out: Stale `; exec $SHELL` wrappers from hydrate helper
 
-Companion observation in the investigation: 3 stale `sh -c 'portal state hydrate …; exec $SHELL'` processes were observed from an older bootstrap. The trailing `; exec $SHELL` is unreachable because the wrapper is parked on the child shell after hydrate exits. PaneKeys overlap with `killed-sessions-resurrect-on-restart`.
+Companion observation in the investigation: 3 stale `sh -c 'portal state hydrate …; exec $SHELL'` processes were observed, traced to a ~20-hour-old bootstrap (i.e. long-stale, not recent). The trailing `; exec $SHELL` is unreachable because the wrapper is parked on the child shell after hydrate exits. PaneKeys overlap with `.workflows/killed-sessions-resurrect-on-restart/` (active, in implementation).
 
 Why deferred: not load-causing for this bug. The wrappers are idle and do not contribute to the CPU pegging. Logged as a separate observation in the investigation Notes section.
 
@@ -297,7 +309,7 @@ Required case:
 
 - **Back-to-back recycle produces N=1** — set up a real tmux server, run `EnsurePortalSaverVersion` to create the saver, then run it again with a forced version mismatch to trigger the recycle, then assert `pgrep -P <tmux-server-pid> -f 'portal state daemon' | wc -l == 1` after both calls return.
 
-This is the **load-bearing test** for the bug — it would have caught the issue in CI had it existed before.
+This is the **load-bearing test** for the bug — it would have caught the issue in CI had it existed before. Crucially, the existing `BootstrapAliveCheck` seam-level unit tests cannot model the failure mode here: they fix a pidfile and probe it, but cannot model "what happens when the pidfile is overwritten while the prior daemon still runs." That asymmetry is the reason the integration test is required and is not redundant with seam-level coverage.
 
 ### Regression test — flock-loser recovery
 
@@ -338,7 +350,7 @@ No orchestrator surgery. No changes to `cmd/bootstrap/` step ordering. No new pu
 
 - **Lock acquisition adding ~ms to daemon startup.** Negligible — `flock` is a syscall, sub-millisecond on a contended-free state directory. Acquisition runs before `WritePIDFile` so it does not move existing work; it adds itself before existing work.
 
-- **Risk surface: timeout too short for heavier scrollback than observed.** Users with even larger scrollback than the affected user's 24-pane / 28 MB profile could see the 5 s timeout fire on legitimate cold sweeps. The lock catches this: timeout firing produces a WARN line, and if the prior daemon does still hold the lock when the new one starts, the new one fails-fast and the next `portal` command recovers via tolerant-kill-and-recreate. No corruption; no user intervention required.
+- **Risk surface: timeout too short for heavier scrollback than observed.** Users with even larger scrollback than the affected user's 24-pane / ~28 MB rendered-text aggregate (top-pane `history_bytes` of 82 MB) could see the 5 s timeout fire on legitimate cold sweeps. The lock catches this: timeout firing produces a WARN line, and if the prior daemon does still hold the lock when the new one starts, the new one fails-fast and the next `portal` command recovers via tolerant-kill-and-recreate. No corruption; no user intervention required.
 
 - **Risk surface: cross-platform `flock` semantics.** `unix.Flock(LOCK_EX|LOCK_NB)` is BSD/Linux POSIX advisory locking; it works on darwin (the affected platform) and Linux (CI). Windows is not a supported portal platform, so no consideration.
 
