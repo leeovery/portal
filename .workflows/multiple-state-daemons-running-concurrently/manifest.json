@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "multiple-state-daemons-running-concurrently": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 2,
           "finding_gate_mode": "auto",
           "date": "2026-05-11",
