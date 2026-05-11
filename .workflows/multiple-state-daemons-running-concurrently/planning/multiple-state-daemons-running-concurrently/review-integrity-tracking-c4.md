@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 4
 phase: Plan Integrity Review
@@ -38,5 +38,5 @@ The acceptance criteria (line 113), Edge Cases prose, and Tests (lines 128–135
 **Solution**: Replace the bare `_ = c.KillSession(PortalSaverName)` call at `internal/tmux/portal_saver.go:111` (inside `EnsurePortalSaverVersion`'s mismatch branch) and the bare `_ = c.KillSession(PortalSaverName)` call at `internal/tmux/portal_saver.go:68` (inside `BootstrapPortalSaver`'s stale-daemon branch) with `_ = killSaverAndWaitForDaemonFn(c, stateDir)` — routed through the test-only injection recorder seam `var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon` introduced in the Do section below. Both call sites now route through the same synchronisation helper. `BootstrapPortalSaver`'s signature already accepts `stateDir` (line 63), and `EnsurePortalSaverVersion` already has `stateDir` in scope (line 106), so no signature changes are required. Verify by injection-recorder unit tests that **both** sites invoke the helper, and that the steady-state path (saver alive, version matches) does **not** invoke it.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
