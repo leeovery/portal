@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "multiple-state-daemons-running-concurrently": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
