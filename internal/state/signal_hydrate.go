@@ -96,6 +96,12 @@ func SendHydrateSignal(path string) error {
 // MarkerCleaner.CleanStaleMarkers) so a future step that writes a FIFO byte
 // can re-use the same seam without inventing a parallel closure-typed field.
 //
+// The interface lives in internal/state (not cmd/bootstrap) by design: both
+// the bootstrap eager-signal step and the cmd-layer client-attached signal-
+// hydrate handler need a FIFO-write seam, and locating it alongside the
+// underlying WriteFIFOSignal primitive lets both consumers depend on the
+// same type without forcing cmd/bootstrap to be a shared dependency.
+//
 // SendSignal must be safe to invoke from a tmux-hook context: the production
 // implementation (DefaultFIFOSignaler) inherits WriteFIFOSignal's bounded
 // retry ladder (~500ms total budget, see SignalHydrateRetryDelays) and

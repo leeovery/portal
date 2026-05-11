@@ -1098,17 +1098,7 @@ func TestHydrate_TimeoutUnsetsSkeletonMarkerWithSetOptionSU(t *testing.T) {
 	want := []string{"set-option", "-su", "@portal-skeleton-tu__0.0"}
 	matches := 0
 	for _, c := range cmder.Calls {
-		if len(c) != len(want) {
-			continue
-		}
-		match := true
-		for i := range c {
-			if c[i] != want[i] {
-				match = false
-				break
-			}
-		}
-		if match {
+		if reflect.DeepEqual(c, want) {
 			matches++
 		}
 	}
@@ -1224,8 +1214,18 @@ func TestHydrate_TimeoutHandler_OrderingAndTimingInvariants(t *testing.T) {
 		Client:  tmux.NewClient(cmder),
 	}
 
+	start := time.Now()
 	if err := handleHydrateTimeout(cfg); err != nil {
 		t.Fatalf("handleHydrateTimeout: %v (must tolerate missing FIFO)", err)
+	}
+	elapsed := time.Since(start)
+
+	// Sleep ownership: per spec § Fix 2 → Specific Changes → 4, the 100ms
+	// settle sleep lives in runHydrate, not the handler. Regression guard:
+	// relocating time.Sleep(hydrateSettleSleep) into handleHydrateTimeout would
+	// trip this assertion. Symmetric with handleHydrateFileMissing's check.
+	if elapsed >= hydrateSettleSleep {
+		t.Errorf("handleHydrateTimeout elapsed %v; expected << %v (handler must not own settle sleep)", elapsed, hydrateSettleSleep)
 	}
 
 	// FIFO-unlink tolerance: the FIFO never existed and the handler returned

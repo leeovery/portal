@@ -409,7 +409,10 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 // delivered to a freshly-created pane via respawn-pane -k. respawn-pane kills
 // the default shell and replaces the pane's process with this command in a
 // single atomic call, so no leading `exec` prefix is needed (and would be
-// redundant — tmux's respawn already replaces, not stacks).
+// redundant — tmux's respawn already replaces, not stacks). Under this bare
+// form `portal state hydrate` is the pane's initial process directly under
+// tmux and syscall.Exec's the user's shell as its replacement, so no parked
+// shell parent exists for the lifetime of the pane.
 //
 // Per spec Fix 3 (Defect D), the previous outer shell envelope around this
 // invocation was dropped: the trailing shell-replacement trailer it contained

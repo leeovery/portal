@@ -28,20 +28,10 @@ import (
 )
 
 // orchestratorOpts captures every step that varies across the eleven
-// integration sites. Unset (nil) fields default to their NoOp form per the
-// "spec permits to degrade-and-continue" policy. Logger is optional — when
-// nil, the Orchestrator substitutes its internal noopLogger at Run time.
-//
-// EagerSignaler default has one branch: when the caller has wired a real
-// Restore adapter, leaving EagerSignaler nil yields a real
-// *bootstrap.EagerSignalCore (mirroring buildProductionOrchestrator) so
-// the eager-signal step actually fires in the integration scenario the
-// caller is exercising. If the caller did not provide a Restore adapter
-// (Restore stays NoOp → no skeleton markers will be set), the eager step
-// would be vacuous and the builder retains the NoOp default. Tests that
-// drive signal-hydrate via their own manual harness (notably the reboot
-// round-trips) explicitly opt out by setting EagerSignaler to
-// bootstrap.NoOpEagerHydrateSignaler{}.
+// integration sites. Unset (nil) fields default per bootstrap.NewWithDefaults
+// — see cmd/bootstrap/defaults.go for the full defaulting policy (NoOp for
+// degrade-and-continue steps; EagerSignaler resolves to a real
+// *bootstrap.EagerSignalCore when Restore is wired real).
 type orchestratorOpts struct {
 	Hooks         bootstrap.HookRegistrar
 	Saver         bootstrap.SaverBootstrapper

@@ -10,6 +10,8 @@
 //	    fixture builders, defined in sessions_json.go.
 //	  - WaitForFileExists — sentinel-file polling helper, defined in
 //	    waitfor_file_exists.go.
+//	  - OpenTestLogger — *state.Logger opener that registers t.Cleanup,
+//	    defined in logger.go.
 //	  These run under default `go test ./...` and have no dependency on
 //	  tmux fixtures or the portal binary.
 //

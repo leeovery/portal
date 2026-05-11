@@ -30,6 +30,12 @@ import (
 //     via Logger.Warn under ComponentHydrate. A nil Logger is tolerated —
 //     EagerSignalHydrate substitutes a no-op default at entry so call sites
 //     can dispatch unconditionally, mirroring MarkerCleanupCore's contract.
+//
+// Markers and Signaler are mandatory: behaviour with either nil is undefined
+// and will panic at first dereference inside EagerSignalHydrate. Only Logger
+// is nil-tolerant. The orchestrator's production wiring at
+// cmd/bootstrap_production.go and the integration-test builder's auto-default
+// branch in cmd/bootstrap/defaults.go both supply non-nil values for both.
 type EagerSignalCore struct {
 	Markers  state.ServerOptionLister
 	StateDir string
