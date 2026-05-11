@@ -154,6 +154,218 @@ This trade is acceptable because (a) the recycle path is rare per `EnsurePortalS
 
 Rejected during investigation discussion: bootstrap is on the critical path of every `portal` command and must stay fast. A 1.5–4 second hold to wait for lock release would make every command sluggish whether or not a recycle was happening. The barrier scopes the wait to **only the recycle path**.
 
+## Acceptance Criteria
+
+The fix is correct when **all** of the following hold:
+
+### Singleton invariant
+
+- At most one `portal state daemon` process exists per state directory at any time, regardless of how many bootstrap invocations have run during the tmux server lifetime.
+- Verified by: an integration test (real-tmux fixture) that runs two back-to-back `EnsurePortalSaverVersion` calls — one must trigger a recycle via version mismatch — and asserts exactly one live `portal state daemon` process when both calls complete.
+- Verified manually by: running `pgrep -P <tmux-server-pid> -f 'portal state daemon'` after repeated bootstrap invocations and observing a count of exactly 1.
+
+### Clean handover on the common case
+
+- When a saver recycle is triggered (version mismatch, stale pidfile, manual session kill), the prior daemon's process has exited before the new daemon begins its first tick.
+- No WARN line about lock contention is emitted on the common-case recycle path.
+- Verified by: barrier unit tests (prior PID dies within timeout → returns cleanly, no log) and a manual recycle test against the affected scrollback profile.
+
+### Graceful degradation under timeout
+
+- If the prior daemon does not exit within the 5-second timeout, the bootstrap proceeds to respawn — it does not block indefinitely.
+- The new daemon's `flock` acquisition either succeeds (prior daemon released between timeout and respawn) or fails cleanly (prior daemon still holds the lock), with the loser exiting status 0 after a single WARN line.
+- The next `portal` invocation recovers via the tolerant-kill-and-recreate branch in `BootstrapPortalSaver`. No manual user intervention is required.
+
+### No regression on the steady-state critical path
+
+- When the saver already exists and the version matches (no recycle needed), `EnsurePortalSaverVersion` does not invoke the kill barrier. Latency on this path is unchanged from current behaviour.
+- Verified by: barrier unit tests confirming the barrier is only entered from the kill call sites; no broad timing test required.
+
+### Pidfile remains coherent
+
+- After every successful bootstrap, `daemon.pid` reflects the PID of the currently-running daemon (the lock-holder).
+- `BootstrapAliveCheck` reads `daemon.pid` and finds the lock-holding process alive.
+- Verified by: the existing pidfile/`BootstrapAliveCheck` unit tests continue to pass; the new lock acquisition occurs **before** `WritePIDFile` so the file is never written by a daemon that loses the lock.
+
+### Lock cleanup on crash
+
+- A daemon that crashes (panic, SIGKILL, OS reboot) releases the lock via kernel fd cleanup. The next daemon startup acquires cleanly without a stale-lockfile dance.
+- Verified by: a regression test that simulates abrupt exit and confirms the next acquisition succeeds.
+
+### Observability
+
+- The fix emits at most **two new WARN-class log lines** across the bug surface:
+  1. *"another daemon holds the lock; exiting"* — from the loser daemon in the contention path.
+  2. *"prior daemon did not exit within timeout"* (or equivalent) — from the kill barrier on timeout.
+- No new logs are emitted on the common-case (clean handover) path. Silent success is the expected behaviour.
+
+## Out of Scope
+
+The investigation identified adjacent defects in the same surface area. Each is a real issue but is **not required** to fix the multiplication symptom. Bundling them would expand the change surface, increase regression risk, and conflate distinct decisions. They are flagged here so planning does not pick them up by accident, and so future work units can reference them.
+
+### Out: Bounding `capture-pane -S -<N>` scrollback depth
+
+Location: `internal/tmux/tmux.go:625` uses `capture-pane -e -p -S -` (unbounded).
+
+Measured impact: switching to `-S -100` produced **13× faster** sweeps (293 ms vs 3.9 s) and **130× less data** at the affected user's profile.
+
+Why deferred: this is a perf lever and a **feature decision** — how much scrollback history portal preserves for `_portal-saver`-driven restore. The current bug's root cause is structural (the kill race + missing lock), and the fix closes it regardless of sweep duration. Bundling a scrollback-depth change would entangle a behavioural decision (how much history to keep) with the bugfix.
+
+Disposition: candidate for a separate work unit on *"bound scrollback capture cost."*
+
+### Out: Tightening `portalSaverVersionMismatch`
+
+Location: `internal/tmux/portal_saver.go:124-127`, the `dev`-string special case.
+
+Current behaviour: `portalSaverVersionMismatch(stored, current, readErr)` returns true on any of `readErr != nil`, `current ∈ {"", "dev"}`, `stored ∈ {"", "dev"}`, or `stored != current`. The `dev` clauses trigger a recycle on every command for dev-build users.
+
+Why deferred: once Parts 1+2 of this fix make the recycle path safe, dev-build recycles are harmless — they happen, but they no longer accumulate daemons. The mismatch logic could be relaxed to "treat `dev` as a normal version string," but that's a separate design call about how dev builds interact with the saver.
+
+Disposition: lower priority; revisit only if dev-user feedback indicates the per-command recycle is itself a problem.
+
+### Out: Cheaper change-detection before `capture-pane`
+
+Idea: a per-pane "did anything change since last tick" probe before the expensive `capture-pane` call — for example, `display-message -p '#{cursor_x},#{cursor_y},#{history_size}'` keyed per pane. Today the hash dedup at `WriteScrollbackIfChanged` only avoids the **file write**, not the capture. A pre-capture probe would let the dedup avoid the cost driver itself.
+
+Why deferred: larger refactor across the daemon's per-pane loop. Orthogonal to multiplication. Worth doing eventually for steady-state cost, but not load-bearing for this bug.
+
+Disposition: defer; potentially folded into a broader daemon-cost work unit.
+
+### Out: Stale `; exec $SHELL` wrappers from hydrate helper
+
+Companion observation in the investigation: 3 stale `sh -c 'portal state hydrate …; exec $SHELL'` processes were observed from an older bootstrap. The trailing `; exec $SHELL` is unreachable because the wrapper is parked on the child shell after hydrate exits. PaneKeys overlap with `killed-sessions-resurrect-on-restart`.
+
+Why deferred: not load-causing for this bug. The wrappers are idle and do not contribute to the CPU pegging. Logged as a separate observation in the investigation Notes section.
+
+Disposition: track as a standalone observation. May surface in the `killed-sessions-resurrect-on-restart` work unit since PaneKeys recur there.
+
+### Out: Daemon tick loop restructure for prompt cancellation
+
+The daemon's `tick()` running synchronously inside the `select` arm — preventing `ctx.Done()` from being observed mid-sweep — is a structural property contributing to the bug. A restructure (e.g. checking `ctx.Done()` between per-pane sweeps within a tick, or making `tick()` itself cancellable) would shorten the cancel-to-exit window from "rest of tick" to "rest of pane."
+
+Why deferred: the kill barrier + singleton lock close the bug without this. Restructuring the tick loop is a larger surgery and changes daemon liveness semantics in ways that need their own design review. The 5 s barrier timeout is sized to absorb the current tick duration; tightening cancellation would let the barrier be reduced but does not eliminate the need for the lock.
+
+Disposition: out of scope. Note for future work if daemon cost / liveness becomes a separate concern.
+
+## Test Strategy
+
+Tests are required across three tiers. Tests **must not** use `t.Parallel()` — the cmd package injects mocks via package-level mutable state and cleans up via `t.Cleanup()` (per project convention).
+
+### Unit tests — daemon singleton lock
+
+Location: `cmd/state_daemon_test.go` (new tests adjacent to existing daemon tests).
+
+Mock seam: a package-level `var lockAcquire = unix.Flock` (or equivalent name in whichever package the helper lives in), matching the existing `daemonRunFunc` / `daemonShutdownFunc` test-seam pattern.
+
+Required cases:
+
+- **Acquire succeeds** → daemon proceeds past lock acquisition, calls `WritePIDFile`, enters the tick loop.
+- **Acquire fails with EWOULDBLOCK** → daemon emits one WARN line, returns exit status 0, does **not** write the pidfile, does **not** enter the tick loop.
+- **Lock fd has FD_CLOEXEC set** → asserted via fd flag inspection or via injecting a recorder that captures the fd-flag operations.
+- **Acquire ordering** → `lockAcquire` is called before `WritePIDFile`; reverse order would allow a loser daemon to overwrite the pidfile before exiting.
+
+### Unit tests — synchronous kill barrier
+
+Location: `internal/tmux/portal_saver_test.go` (extending existing test file).
+
+Mock seams needed:
+- `ReadPIDFile` (or a wrapper `var`)
+- `IsProcessAlive` — injectable so tests simulate "alive then dead at T=200ms" / "alive forever" / "already dead" / "no PID" without spawning real processes.
+- Time source (`time.Sleep` / `time.After` or an injected clock) — tests must complete without real waits.
+
+Required cases:
+
+- **Prior PID dies within timeout** → barrier returns nil, no WARN log emitted.
+- **Prior PID does not die within timeout** → barrier returns (cleanly, non-fatally), single WARN log emitted, total wall time ≈ timeout (assert via injected clock).
+- **No prior PID file** → barrier skips polling, returns immediately, no log.
+- **Prior PID file points to dead process** (signal-0 already false) → barrier returns immediately, no log.
+- **Prior PID file unreadable/corrupted** → barrier skips polling, returns immediately, no log (defensive — equivalent to no PID).
+- **Barrier exercised through both call sites:**
+  - Version-mismatch branch in `EnsurePortalSaverVersion`
+  - Stale-pidfile branch in `BootstrapPortalSaver`
+  - Both paths must invoke the shared helper. Asserted by triggering each path independently and recording barrier invocation.
+
+### Integration test — singleton invariant under real tmux
+
+Location: new `internal/tmux/portal_saver_integration_test.go` using `restoretest`/`tmuxtest` conventions (real-tmux socket fixture).
+
+Skip behaviour: skip on CI when tmux is not available, matching existing patterns in `internal/tmux` integration tests.
+
+Required case:
+
+- **Back-to-back recycle produces N=1** — set up a real tmux server, run `EnsurePortalSaverVersion` to create the saver, then run it again with a forced version mismatch to trigger the recycle, then assert `pgrep -P <tmux-server-pid> -f 'portal state daemon' | wc -l == 1` after both calls return.
+
+This is the **load-bearing test** for the bug — it would have caught the issue in CI had it existed before.
+
+### Regression test — flock-loser recovery
+
+Location: alongside the singleton-lock unit tests in `cmd/state_daemon_test.go`, or as a small integration test if real-process simulation is needed.
+
+Required case:
+
+- **Flock loser exits cleanly, leaving empty `_portal-saver` session** — simulate two daemon startup attempts where the second loses the lock and exits status 0. Verify the next bootstrap call recovers via the tolerant-kill-and-recreate branch in `BootstrapPortalSaver` (the empty session is detected as having no live daemon, gets killed via the barrier, and is recreated).
+
+### Test independence
+
+Each test isolates its state directory (per-test `t.TempDir()`) so concurrent test runs do not contend for the same `daemon.lock` file. The lock helper must accept a state directory parameter (not a hardcoded path) for this to work.
+
+### What is NOT tested here
+
+- **Sweep duration at realistic scrollback scale.** The bug is latent at N=1 with sub-second sweeps and only manifests when sweep overrun combines with recycle frequency. Reproducing this in CI would require fabricating ~28 MB of scrollback per pane across 24 panes. The barrier's 5 s timeout is sized for this profile based on the investigation's field measurements; this is captured in the spec, not in a CI test.
+- **Long-uptime accumulation.** The 7-orphan snapshot accumulated over 10 days; no CI test can reproduce that timescale. The singleton invariant test plus the kill-barrier unit tests collectively cover the structural mechanism that would otherwise drive accumulation.
+
+## Risk and Rollout
+
+### Fix complexity
+
+**Low.** Both changes are localised and contained within two files:
+
+- Daemon-side lock: ~15 lines in `cmd/state_daemon.go` (or split across `cmd/state_daemon.go` and a small helper in `internal/state`) plus a test seam.
+- Kill barrier: ~20 lines in `internal/tmux/portal_saver.go` (shared helper + two call sites updated) plus test seams.
+
+No orchestrator surgery. No changes to `cmd/bootstrap/` step ordering. No new public API. No test-pattern departures — the existing `daemonRunFunc` / `BootstrapAliveCheck` seam style applies directly.
+
+### Regression risk
+
+**Low–Medium.**
+
+- **New latency surface.** The kill barrier introduces a bounded wait on the bootstrap critical path **only when a kill actually fires**. The steady-state path (saver exists, version matches) is unchanged.
+  - **Worst case:** 5 s timeout, single occurrence per recycle.
+  - **Median case:** prior daemon exits in under 100 ms.
+  - **Mitigation:** the lock is the actual structural invariant; the timeout firing surfaces a single WARN line, not a corrupt state.
+
+- **Lock acquisition adding ~ms to daemon startup.** Negligible — `flock` is a syscall, sub-millisecond on a contended-free state directory. Acquisition runs before `WritePIDFile` so it does not move existing work; it adds itself before existing work.
+
+- **Risk surface: timeout too short for heavier scrollback than observed.** Users with even larger scrollback than the affected user's 24-pane / 28 MB profile could see the 5 s timeout fire on legitimate cold sweeps. The lock catches this: timeout firing produces a WARN line, and if the prior daemon does still hold the lock when the new one starts, the new one fails-fast and the next `portal` command recovers via tolerant-kill-and-recreate. No corruption; no user intervention required.
+
+- **Risk surface: cross-platform `flock` semantics.** `unix.Flock(LOCK_EX|LOCK_NB)` is BSD/Linux POSIX advisory locking; it works on darwin (the affected platform) and Linux (CI). Windows is not a supported portal platform, so no consideration.
+
+### Rollout
+
+**Regular release.** No hotfix needed.
+
+- Affected user count is small — the observed accumulation rate is one orphan per ~34 hours of tmux server uptime, requiring long-lived servers to manifest.
+- Existing workaround is well-defined: `tmux kill-session -t _portal-saver && pkill portal` (or `tmux kill-server` for the heaviest impact).
+- Goreleaser path is standard. Version ldflag injection (`-X github.com/leeovery/portal/cmd.version`) interacts with the version-mismatch trigger frequency but does not interact with the fix mechanism.
+
+### Upgrade behaviour
+
+First post-fix bootstrap on an affected server:
+1. Bootstrap reads `daemon.version` — version mismatch (old → new) triggers `EnsurePortalSaverVersion` kill path.
+2. The new kill barrier reads the prior PID (the one daemon that has the pidfile), kills the session, waits up to 5 s for that prior daemon to exit.
+3. Any **orphan daemons** (the ones whose PIDs were overwritten and are not in `daemon.pid`) are children of the tmux server. They will be SIGHUP'd when the prior `_portal-saver` session is killed — but the barrier only waits for the **one** PID it captured. The orphans may still be running when the new daemon starts.
+4. The new daemon's `flock` acquisition fails because **at least one** orphan still holds the lock. The new daemon exits cleanly with the WARN.
+5. The next `portal` command observes an empty (or dead-daemon) `_portal-saver` session and re-enters the tolerant-kill-and-recreate branch. Each pass drains one orphan via the barrier + lock contention.
+6. Eventually all orphans drain (their sweeps complete and they exit on the cancelled context), and a fresh daemon acquires the lock successfully.
+
+**This means the first post-upgrade bootstrap on an affected server may produce several WARN lines and may require multiple `portal` invocations to settle.** This is acceptable — it is the correct convergence behaviour and no worse than the existing workaround.
+
+For users not currently in the multi-daemon state, the upgrade is silent: one kill, prior daemon exits cleanly within 100 ms, new daemon acquires the lock, no logs.
+
+### Documentation
+
+No user-facing documentation changes required. The fix is internal to the saver-bootstrap subsystem. The internal `CLAUDE.md` may want a brief note added to the `state` package row noting the `daemon.lock` invariant — to be evaluated during planning.
+
 ---
 
 ## Working Notes
