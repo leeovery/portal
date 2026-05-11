@@ -26,3 +26,10 @@ func BarrierTimeoutSeam() *time.Duration { return &killBarrierTimeout }
 // BarrierLoggerSeam returns a pointer to the killBarrierLogger seam so tests
 // can install a recording fake satisfying the BarrierLogger interface.
 func BarrierLoggerSeam() *BarrierLogger { return &killBarrierLogger }
+
+// KillSaverAndWaitForDaemonFnSeam returns a pointer to the
+// killSaverAndWaitForDaemonFn seam so tests can stub the helper invoked from
+// the production call sites without exercising the full barrier flow.
+func KillSaverAndWaitForDaemonFnSeam() *func(*Client, string) error {
+	return &killSaverAndWaitForDaemonFn
+}

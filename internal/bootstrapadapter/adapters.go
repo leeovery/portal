@@ -65,7 +65,15 @@ type HookRegistrar struct {
 // RegisterPortalHooks delegates to tmux.RegisterPortalHooks so the
 // migration logger seam is wired through. *state.Logger satisfies
 // tmux.MigrationLogger structurally.
+//
+// As a side-effect, the same *state.Logger is installed as the
+// tmux.BarrierLogger sink used by the kill-barrier helper's
+// WARN-on-timeout path. *state.Logger structurally satisfies
+// BarrierLogger via its Warn(component, format string, args ...any)
+// method. SetBarrierLogger is idempotent and tolerates a nil argument,
+// so calling it on every RegisterPortalHooks invocation is safe.
 func (r *HookRegistrar) RegisterPortalHooks() error {
+	tmux.SetBarrierLogger(r.Logger)
 	return tmux.RegisterPortalHooks(r.Client, r.Logger)
 }
 

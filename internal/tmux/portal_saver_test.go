@@ -1276,3 +1276,352 @@ func TestKillSaverAndWaitForDaemon_DoesNotMutateStateDirectory(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Task 2.2: wire the kill-barrier helper into both production call sites.
+// ----------------------------------------------------------------------------
+
+// barrierCall records one invocation of the killSaverAndWaitForDaemonFn seam.
+type barrierCall struct {
+	client   *tmux.Client
+	stateDir string
+}
+
+// installKillSaverFn swaps killSaverAndWaitForDaemonFn for the supplied
+// function and restores the original via t.Cleanup.
+func installKillSaverFn(t *testing.T, fn func(*tmux.Client, string) error) {
+	t.Helper()
+	seam := tmux.KillSaverAndWaitForDaemonFnSeam()
+	prev := *seam
+	*seam = fn
+	t.Cleanup(func() { *seam = prev })
+}
+
+func TestEnsurePortalSaverVersion_InvokesBarrierHelperOnVersionMismatch(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1")
+
+	var calls []barrierCall
+	installKillSaverFn(t, func(c *tmux.Client, sd string) error {
+		calls = append(calls, barrierCall{client: c, stateDir: sd})
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 barrier invocation on version mismatch, got %d", len(calls))
+	}
+	if calls[0].client != client {
+		t.Errorf("barrier invoked with unexpected client: %p (want %p)", calls[0].client, client)
+	}
+	if calls[0].stateDir != dir {
+		t.Errorf("barrier invoked with stateDir=%q, want %q", calls[0].stateDir, dir)
+	}
+	// With the helper stubbed the underlying KillSession on the mock must not
+	// fire — only set-option (for destroy-unattached) is allowed.
+	if got := countCalls(mock.Calls, "kill-session"); got != 0 {
+		t.Errorf("expected 0 direct kill-session calls when helper is stubbed, got %d (calls: %v)", got, mock.Calls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_DoesNotInvokeBarrierHelperOnVersionMatch(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	calls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		calls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if calls != 0 {
+		t.Errorf("expected 0 barrier invocations on version match, got %d", calls)
+	}
+}
+
+func TestBootstrapPortalSaver_InvokesBarrierHelperOnStaleDaemon(t *testing.T) {
+	stubAliveCheck(t, false) // session present but daemon dead
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+
+	var calls []barrierCall
+	installKillSaverFn(t, func(c *tmux.Client, sd string) error {
+		calls = append(calls, barrierCall{client: c, stateDir: sd})
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) { return "", nil }, // present
+		newSession: func(int) (string, error) { return "", nil },
+		setOption:  func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly 1 barrier invocation on stale daemon, got %d", len(calls))
+	}
+	if calls[0].client != client {
+		t.Errorf("barrier invoked with unexpected client: %p (want %p)", calls[0].client, client)
+	}
+	if calls[0].stateDir != dir {
+		t.Errorf("barrier invoked with stateDir=%q, want %q", calls[0].stateDir, dir)
+	}
+	// Helper stubbed — KillSession must not be invoked through the mock.
+	if got := countCalls(mock.Calls, "kill-session"); got != 0 {
+		t.Errorf("expected 0 direct kill-session calls when helper is stubbed, got %d (calls: %v)", got, mock.Calls)
+	}
+}
+
+func TestBootstrapPortalSaver_DoesNotInvokeBarrierHelperWhenSessionAbsent(t *testing.T) {
+	stubAliveCheck(t, false) // irrelevant when absent
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+
+	calls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		calls++
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession: func(int) (string, error) { return "", nil },
+		setOption:  func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if calls != 0 {
+		t.Errorf("expected 0 barrier invocations when session absent, got %d", calls)
+	}
+}
+
+func TestBootstrapPortalSaver_DoesNotInvokeBarrierHelperWhenDaemonAlive(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+
+	calls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		calls++
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) { return "", nil }, // present
+		setOption:  func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if calls != 0 {
+		t.Errorf("expected 0 barrier invocations when daemon alive, got %d", calls)
+	}
+}
+
+// TestBootstrapPortalSaver_PreservesKillSessionWhenRealHelperRuns confirms that
+// when killSaverAndWaitForDaemonFn is left as the production helper and inner
+// barrier seams put it on the fast path (no PID file), it still issues
+// exactly one underlying KillSession on the stale-daemon branch.
+func TestBootstrapPortalSaver_PreservesKillSessionWhenRealHelperRuns(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	// Fast-path the helper: pretend no PID file exists. The helper will call
+	// KillSession once and return without polling.
+	installBarrierReadPID(t, func(string) (int, error) { return 0, state.ErrPIDFileAbsent })
+
+	dir := t.TempDir()
+
+	script := &portalSaverScript{
+		hasSession:  func(int) (string, error) { return "", nil }, // present
+		killSession: func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session via real helper fast path, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "new-session"); got != 1 {
+		t.Errorf("expected 1 new-session call, got %d", got)
+	}
+}
+
+// TestBootstrapPortalSaver_PreservesKillBeforeNewSessionOrderThroughBarrier
+// confirms the helper-issued KillSession still precedes new-session on the
+// stale-daemon branch.
+func TestBootstrapPortalSaver_PreservesKillBeforeNewSessionOrderThroughBarrier(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+	installBarrierReadPID(t, func(string) (int, error) { return 0, state.ErrPIDFileAbsent })
+
+	dir := t.TempDir()
+
+	script := &portalSaverScript{
+		hasSession:  func(int) (string, error) { return "", nil }, // present
+		killSession: func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	killIdx, newIdx := -1, -1
+	for i, c := range mock.Calls {
+		switch c[0] {
+		case "kill-session":
+			if killIdx == -1 {
+				killIdx = i
+			}
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		}
+	}
+	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
+		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
+	}
+}
+
+// TestBootstrapPortalSaver_ToleratesBarrierWarnOnTimeoutPath confirms that
+// when the real helper hits its WARN-on-timeout branch, BootstrapPortalSaver
+// still returns nil and continues to recreate the saver session.
+func TestBootstrapPortalSaver_ToleratesBarrierWarnOnTimeoutPath(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true }) // never dies → timeout
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 10*time.Millisecond)
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	dir := t.TempDir()
+
+	script := &portalSaverScript{
+		hasSession:  func(int) (string, error) { return "", nil }, // present
+		killSession: func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, dir); err != nil {
+		t.Fatalf("BootstrapPortalSaver must tolerate barrier WARN-on-timeout, got: %v", err)
+	}
+
+	if len(log.warns) != 1 {
+		t.Errorf("expected exactly 1 WARN on timeout, got %d: %v", len(log.warns), log.warns)
+	}
+	if got := countCalls(mock.Calls, "new-session"); got != 1 {
+		t.Errorf("expected new-session to proceed after barrier timeout, got %d new-session calls", got)
+	}
+}
+
+// TestSetBarrierLogger_RoutesWarnOnTimeoutThroughInstalledLogger asserts that
+// the exported SetBarrierLogger setter installs the supplied logger such that
+// barrier WARN emissions reach it. Guards against the no-op default
+// persisting after production wiring runs.
+func TestSetBarrierLogger_RoutesWarnOnTimeoutThroughInstalledLogger(t *testing.T) {
+	// Capture and restore the package-level seam directly so SetBarrierLogger
+	// is exercised as the install path.
+	loggerSeam := tmux.BarrierLoggerSeam()
+	prevLogger := *loggerSeam
+	t.Cleanup(func() { *loggerSeam = prevLogger })
+
+	recorder := &recordingBarrierLogger{}
+	tmux.SetBarrierLogger(recorder)
+
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 10*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true }) // never dies → timeout
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if len(recorder.warns) != 1 {
+		t.Fatalf("expected exactly 1 WARN routed through SetBarrierLogger, got %d: %v", len(recorder.warns), recorder.warns)
+	}
+	// WARN must land under ComponentBootstrap. recordingBarrierLogger encodes
+	// the component as the prefix before " | " in each captured warn.
+	if !strings.HasPrefix(recorder.warns[0], state.ComponentBootstrap+" | ") {
+		t.Errorf("WARN component prefix = %q, want %q", recorder.warns[0], state.ComponentBootstrap+" | ")
+	}
+}
+
+// TestSetBarrierLogger_IgnoresNilLogger asserts that calling
+// SetBarrierLogger(nil) leaves the previously-installed logger in place.
+// Guards against an accidental nil-overwrite stripping the production sink.
+func TestSetBarrierLogger_IgnoresNilLogger(t *testing.T) {
+	loggerSeam := tmux.BarrierLoggerSeam()
+	prevLogger := *loggerSeam
+	t.Cleanup(func() { *loggerSeam = prevLogger })
+
+	recorder := &recordingBarrierLogger{}
+	tmux.SetBarrierLogger(recorder)
+	tmux.SetBarrierLogger(nil) // must be a no-op
+
+	if *loggerSeam != tmux.BarrierLogger(recorder) {
+		t.Errorf("SetBarrierLogger(nil) overwrote the previously installed logger")
+	}
+}

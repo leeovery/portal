@@ -90,10 +90,37 @@ type noopBarrierLogger struct{}
 func (noopBarrierLogger) Warn(component, format string, args ...any) {}
 
 // killBarrierLogger is the package-level sink for kill-barrier WARN
-// emissions. Production wiring (added in Task 2.2) replaces this with a real
-// *state.Logger via init() or the bootstrap-adapter path. Tests install a
-// recording fake via the seam and reset it through t.Cleanup.
+// emissions. Production wiring (Task 2.2) replaces this with a real
+// *state.Logger via SetBarrierLogger, invoked from internal/bootstrapadapter
+// at the same site that constructs the HookRegistrar's *state.Logger. Tests
+// install a recording fake via the seam and reset it through t.Cleanup.
 var killBarrierLogger BarrierLogger = noopBarrierLogger{}
+
+// SetBarrierLogger installs a BarrierLogger as the sink for kill-barrier
+// WARN-on-timeout emissions. A nil argument is ignored so the package never
+// loses its sink to a programming error in the wiring layer; the default is
+// noopBarrierLogger which already swallows all calls safely.
+//
+// Production wiring calls this once from internal/bootstrapadapter as part
+// of constructing the HookRegistrar, threading the same *state.Logger that
+// the rest of bootstrap uses. *state.Logger structurally satisfies
+// BarrierLogger via its Warn(component, format string, args ...any) method.
+func SetBarrierLogger(l BarrierLogger) {
+	if l == nil {
+		return
+	}
+	killBarrierLogger = l
+}
+
+// killSaverAndWaitForDaemonFn is the package-level seam that both
+// production kill call sites route through. It defaults to the production
+// helper; unit tests swap it with a recorder or a no-op via the
+// KillSaverAndWaitForDaemonFnSeam test export. Routing both call sites
+// through this single var keeps the wiring symmetric and lets a single
+// stub disable barrier semantics for tests that only care about call-site
+// behaviour, while leaving the real helper available for tests that want
+// the full kill+poll flow (with the inner seams stubbed).
+var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 
 // killSaverAndWaitForDaemon issues kill-session against _portal-saver and
 // blocks until the prior daemon has actually exited or a timeout fires. The
@@ -178,8 +205,10 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 	sessionPresent := c.HasSession(PortalSaverName)
 
 	if sessionPresent && !BootstrapAliveCheck(stateDir) {
-		// Session lingering with a dead daemon — kill tolerantly and recreate.
-		_ = c.KillSession(PortalSaverName)
+		// Session lingering with a dead daemon — kill via the synchronous
+		// barrier so the prior daemon's exit precedes the respawn, then
+		// fall through to recreate.
+		_ = killSaverAndWaitForDaemonFn(c, stateDir)
 		sessionPresent = false
 	}
 
@@ -220,9 +249,11 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error {
 	stored, readErr := state.ReadVersionFile(stateDir)
 	if portalSaverVersionMismatch(stored, currentVersion, readErr) && c.HasSession(PortalSaverName) {
-		// Tolerant: kill may fail if the session vanished mid-flight; that is
-		// equivalent to "already absent" for our purposes.
-		_ = c.KillSession(PortalSaverName)
+		// Tolerant: the synchronous kill barrier handles the kill itself and
+		// waits for the prior daemon's exit before we fall through to
+		// BootstrapPortalSaver. Errors are swallowed because the session may
+		// have auto-destroyed between has-session and kill-session.
+		_ = killSaverAndWaitForDaemonFn(c, stateDir)
 	}
 	return BootstrapPortalSaver(c, stateDir)
 }
