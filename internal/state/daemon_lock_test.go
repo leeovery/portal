@@ -140,6 +140,58 @@ func TestAcquireDaemonLock_DoesNotCreateStateDirIfMissing(t *testing.T) {
 	}
 }
 
+// TestAcquireDaemonLock_KernelReleasesOnFDClose is the regression guard for
+// the lock-cleanup-on-crash invariant: a daemon that exits abruptly (panic,
+// SIGKILL, OS reboot) releases the advisory lock via kernel fd cleanup, and
+// the next daemon acquires cleanly with no stale-lockfile dance. That
+// property is structural to unix.Flock semantics — closing the holding fd
+// (which the kernel does for every fd of an exiting process, regardless of
+// cause) drops the lock. This test exercises the real unix.Flock syscall (no
+// lockAcquire seam) on a real lockfile so a future refactor that installs a
+// premature-close finalizer, or swaps to a lockfile-based primitive whose
+// semantics leak on abrupt exit, fails here instead of leaking into prod.
+func TestAcquireDaemonLock_KernelReleasesOnFDClose(t *testing.T) {
+	stateDir := t.TempDir()
+
+	f1, err := AcquireDaemonLock(stateDir)
+	if err != nil {
+		t.Fatalf("first AcquireDaemonLock: %v", err)
+	}
+	if f1 == nil {
+		t.Fatal("first AcquireDaemonLock returned nil *os.File")
+	}
+
+	// While f1 is held, contention must surface as ErrDaemonLockHeld against
+	// the real flock syscall — not a wrapped error, not a successful acquire.
+	f2, err := AcquireDaemonLock(stateDir)
+	if f2 != nil {
+		_ = f2.Close()
+		t.Fatalf("second AcquireDaemonLock returned non-nil *os.File while lock held")
+	}
+	if !errors.Is(err, ErrDaemonLockHeld) {
+		t.Fatalf("second AcquireDaemonLock err = %v; want errors.Is ErrDaemonLockHeld", err)
+	}
+
+	// Close f1 to simulate kernel-level fd cleanup on abrupt process exit.
+	// The kernel maps process exit to "close all fds", so Close() is a
+	// faithful simulation of the SIGKILL / panic / reboot path.
+	if err := f1.Close(); err != nil {
+		t.Fatalf("close f1: %v", err)
+	}
+
+	// Re-acquire against the same lockfile — no os.Remove, no manual unlink,
+	// no recreation. The kernel must have released the lock when f1's fd was
+	// closed.
+	f3, err := AcquireDaemonLock(stateDir)
+	if err != nil {
+		t.Fatalf("third AcquireDaemonLock after f1.Close: %v", err)
+	}
+	if f3 == nil {
+		t.Fatal("third AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f3.Close() })
+}
+
 func TestAcquireDaemonLock_AcceptsArbitraryStateDirParameter(t *testing.T) {
 	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
 
