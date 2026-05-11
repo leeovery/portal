@@ -63,43 +63,83 @@ To validate against current code.
 
 ### Code Trace
 
-To be filled in during Step 5 (Code Analysis). Initial entry points to trace:
+**Trigger path** — every `portal` command goes through bootstrap step 4 (`EnsureSaver`):
 
-- `portal_saver.go` — `BootstrapPortalSaver`, `EnsurePortalSaverVersion`, `BootstrapAliveCheck`, `portalSaverVersionMismatch`.
-- `cmd/state_daemon.go` — daemon main loop (`defaultDaemonRun`, `tick`, signal handler, pidfile write).
-- `internal/state/capture.go` (or equivalent) — `captureAndCommit`, `CaptureAndHashPane`, `WriteScrollbackIfChanged`.
-- `internal/tmux/tmux.go` — `CapturePane` to confirm the `-S -` unbounded scrollback call site.
+1. `cmd/bootstrap/bootstrap.go:260-266` — Step 4 calls `o.Saver.EnsureSaver()`. Best-effort; failure becomes `SaverDownWarning`, success continues silently.
+2. `cmd/bootstrap_production.go:58-60` — `saverAdapter.EnsureSaver()` delegates to `tmux.EnsurePortalSaverVersion(client, stateDir, version)`, passing the binary's ldflags-injected version.
+3. `internal/tmux/portal_saver.go:106-114` — `EnsurePortalSaverVersion`:
+   - Reads stored version: `state.ReadVersionFile(stateDir)`.
+   - `portalSaverVersionMismatch(stored, currentVersion, readErr)` (lines 120-131) returns true if **any** of: read error, `currentVersion ∈ {"", "dev"}`, `stored ∈ {"", "dev"}`, or `stored != currentVersion`.
+   - If mismatch AND `HasSession(_portal-saver)` → tolerant `KillSession(_portal-saver)`.
+   - Unconditionally calls `BootstrapPortalSaver` next.
+4. `internal/tmux/portal_saver.go:63-83` — `BootstrapPortalSaver`:
+   - `HasSession(PortalSaverName)` — observes the kill just took effect → false.
+   - Falls through to `createPortalSaverWithRetry`.
+5. `internal/tmux/portal_saver.go:138-158` — `createPortalSaverWithRetry`:
+   - `c.NewDetachedSessionNoCwd(PortalSaverName, "portal state daemon")` creates a fresh detached tmux session whose initial process is `portal state daemon`. **New daemon process A2 forks-execs as soon as tmux returns from new-session.**
+   - On error, retries up to 3 attempts with `HasSession` race-resolution.
+
+**Race window inside the old daemon (A1):**
+
+6. `cmd/state_daemon.go:54-63` — `defaultDaemonRun` is a `for { select { ticker.C / ctx.Done() } }` loop. `tick()` runs synchronously inside the same select arm; `ctx.Done()` is only reachable **between** ticks, never during one. So if SIGHUP arrives at A1 mid-sweep, A1 keeps running for the remainder of the current `tick()` (measured 1.5–4 s on the observed scrollback profile).
+7. `cmd/state_daemon.go:265-270` — `signal.Notify(sigCh, SIGHUP, SIGTERM)` then `go func() { <-sigCh; cancel() }()`. The goroutine flips ctx, but ctx.Done() is gated by tick completion (point 6).
+8. `cmd/state_daemon.go:115-158` — `captureAndCommit` runs sequentially: marker list → `CaptureStructure` → per-pane `CaptureAndHashPane` (line 135) + `WriteScrollbackIfChanged` (line 140) → `state.Commit`. `CaptureAndHashPane` always invokes `capture-pane` to compute the hash; the dedup at `WriteScrollbackIfChanged` only saves the file write.
+
+**PID file overwrite (no singleton enforcement):**
+
+9. `cmd/state_daemon.go:226` — `state.WritePIDFile(dir, os.Getpid())` is called by A2 early in startup, **before** the tick loop begins.
+10. `internal/state/daemon_state.go:33-36` — `WritePIDFile` is `fileutil.AtomicWrite` (temp + rename). No locking; last writer wins.
+11. `internal/state/daemon_state.go:82-88` — `DaemonAlive` reads `daemon.pid` then `IsProcessAlive` (signal-0 probe). After A2 overwrites, `DaemonAlive` sees A2's PID and reports alive — **A1's PID is no longer recorded anywhere** and is invisible to `BootstrapAliveCheck`. A1 is now an unreachable orphan.
+
+**Scrollback-cost backing data** — confirms `internal/tmux/tmux.go:625` `capture-pane -e -p -S -` (unbounded scrollback) is the cost driver. Inbox measurements showed a 24-pane sweep at 3.9 s cold / 1.5 s warm; same sweep with `-S -100` measured 293 ms (13× faster, 130× less data).
+
+### Trigger frequency (resolved)
+
+The inbox file blamed mixed release/dev binaries on PATH. The user has confirmed they don't. The actual trigger is almost certainly:
+
+- The user's binary is built without `-X github.com/leeovery/portal/cmd.version=<release>` ldflags, so `version` is `""` or `"dev"`.
+- `portalSaverVersionMismatch` returns true on the `currentVersion == "" || currentVersion == "dev"` branch (`portal_saver.go:124`).
+- **Every `portal` command therefore triggers a kill-respawn** of `_portal-saver`. No mixed-binary alternation needed.
+
+The user reportedly runs many `portal` commands per minute (Claude-driven tmux automation). Combine that frequency with sweep durations > tick interval, and 7+ orphan daemons accumulating over hours is unsurprising. The bootstrap race (no sync wait on the killed daemon) is the structural defect; the dev-build version-mismatch path is the high-frequency producer that makes the race exploitable.
 
 ### Root Cause
 
-To be confirmed after Step 5. Working hypothesis is the conjunction of:
+The bug is the conjunction of two structural defects in the saver-bootstrap and daemon-startup pair:
 
-- **(a)** Bootstrap's non-synchronous kill+respawn allows the old daemon to live for the rest of its current `tick()` while a new daemon is already running.
-- **(b)** No singleton lock — nothing prevents N daemons from coexisting once (a) has happened.
-- **(c)** Topology-churn regime caused by bootstrap itself drives back-to-back sweeps because the cold full-scrollback sweep duration (3.9 s) exceeds the 1 s tick interval, so daemons in this regime never reach the `ctx.Done()` check between sweeps.
-- **(d)** Unbounded `capture-pane -S -` makes each sweep expensive in proportion to total cell-grid size, multiplying the cost of (b)+(c).
+1. **No singleton enforcement.** `state.WritePIDFile` and `BootstrapAliveCheck` cooperate as an informational pidfile, not as a singleton lock. Once two daemons coexist (for any reason), nothing in the system prevents both from running concurrent capture loops over the same state directory.
+2. **Bootstrap does not synchronise with the killed daemon's exit.** `EnsurePortalSaverVersion` issues `KillSession`, then `BootstrapPortalSaver` immediately observes "no session" and creates a fresh one. The new daemon (A2) starts and writes its PID before the old daemon (A1) — currently mid-sweep — observes the cancelled context. A1 finishes its sweep with its PID overwritten and becomes invisible to any future `BootstrapAliveCheck`.
+
+These two defects compose: (1) means N daemons can coexist; (2) is the recurring mechanism that pushes N from 1 to 2+ on every saver recycle.
+
+**Why this happens:** The original design (per the `portalSaverCommand` comment at `internal/tmux/portal_saver.go:28-33`) was: *"tmux owns the daemon's lifecycle: when this session is killed (or the server dies), the kernel delivers SIGHUP to the daemon for graceful shutdown."* True in principle, but graceful ≠ instant — the daemon shuts down at the end of its current sweep, not on signal receipt. The lifecycle promise is honoured eventually, but the bootstrap path treats it as synchronous.
 
 ### Contributing Factors
 
-- Mixed release/dev `portal` binaries on PATH trip the version-mismatch path frequently.
-- Long-running tmux server with many large-scrollback panes (cumulative ~28 MB rendered text across 24 panes; top pane `history_bytes` 82 MB).
-- Ticker drops missed ticks (Go semantics) so the daemon fires back-to-back when a sweep overruns the interval, never returning to the fast-path idle check.
+- **Dev-build version-mismatch path** fires on every `portal` invocation when the binary has `version == "" | "dev"` — the high-frequency producer that exploits the bootstrap race.
+- **Unbounded scrollback capture** (`tmux.go:625` `capture-pane -S -`) makes each sweep 1.5–4 s at the user's scrollback profile. The Go ticker drops missed fires, so when a sweep overruns the 1 s tick interval the next tick fires immediately on completion — daemons in this regime never reach `ctx.Done()` between sweeps, extending the orphan-eligibility window indefinitely.
+- **Long-running tmux server with high scrollback** (24 panes, ~28 MB rendered text, top `history_bytes` 82 MB) — the conditions under which sweep overrun becomes the dominant regime.
+- **Topology-churn from bootstrap itself.** Bootstrap step 1 (`EnsureServer`) and step 4 (`EnsureSaver`) can fire `session-created`/`session-closed` hooks (via the recycle) that write `save.requested`, keeping the daemon's dirty flag set and pushing it into the back-to-back-sweep regime exactly when the user is most actively running `portal` commands.
 
 ### Why It Wasn't Caught
 
-To investigate — likely:
-- No integration test that runs two bootstrap cycles back-to-back and asserts a single live daemon.
-- No load test against a realistic scrollback profile (24 panes, tens of MB rendered).
-- Singleton invariant exists only as documentation comment (`portal_saver.go:32`), not as a runtime invariant.
+- **No singleton invariant test.** The comment at `portal_saver.go:31-32` documents the desired property but no integration test asserts it. A test that runs two `EnsurePortalSaverVersion` calls back-to-back in a real-tmux fixture and asserts a single live daemon would catch this in CI.
+- **Unit-level seam tests** (`BootstrapAliveCheck` is a `var` for test override) verify the alive-check **for a given pidfile** but cannot model "what happens when the pidfile is overwritten while the prior daemon still runs."
+- **Sweep-duration unrealistic in CI.** The bug is latent at N=1 with sub-second sweeps; it only manifests when sweep overrun + saver-recycle frequency combine. No load test exists at realistic scrollback scale.
+- **Dev-build trigger is silent.** A `dev` daemon happily writes daemon.version="dev", then `dev != dev` is technically not a mismatch — but the early-return `currentVersion == "dev" → true` short-circuits before the equality check, so every dev-build run trips the mismatch path unconditionally without any logged signal that this is happening.
 
 ### Blast Radius
 
 **Directly affected:**
-- All tmux operations on any session running on the same tmux server (not just portal-managed sessions).
+- All tmux operations on the affected tmux server (not just portal-managed sessions): TUI redraws, prefix keystrokes, `tmux ls` itself.
 - `_portal-saver` session lifecycle and the resurrection capture loop.
+- Shared state files written by the daemon: `sessions.json` (atomic, but two daemons can race the `_, _ = cancel()` between read and commit, producing flip-flop sessions across consecutive ticks), per-pane scrollback `.bin` files (`fileutil.AtomicWrite` is per-call atomic, but two daemons writing the same pane key can interleave content versions across ticks).
+- `daemon.pid` and `daemon.version` markers — incoherent under multiplication; `BootstrapAliveCheck` becomes meaningless once N > 1.
+- `save.requested` flag — both daemons race to remove it on successful sweep; remove on the loser's side is a benign no-op via `errors.Is(err, fs.ErrNotExist)`.
 
 **Potentially affected:**
-- Anything that shares the daemon's write path: scrollback `.bin` files, `state.json` atomic commits, FIFO sweep. Concurrent daemons writing the same files could race on atomic-rename semantics (to verify in Step 5).
+- FIFO sweep paths: two daemons could both call into `state` cleanup helpers concurrently. The `FIFOSweeper` runs only in bootstrap (single-shot per process), so daemon-side FIFO interaction is read-only — likely safe but worth confirming during fix design.
+- Any future seam expecting daemon-singleton semantics (e.g. a centralised hook queue) would silently break.
 
 ---
 
