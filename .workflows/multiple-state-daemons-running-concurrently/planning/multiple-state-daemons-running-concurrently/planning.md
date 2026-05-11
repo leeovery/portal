@@ -4,7 +4,8 @@
 
 ### Phase 1: Daemon-Side Singleton Lock
 
-status: draft
+status: approved
+approved_at: 2026-05-11
 
 **Goal**: Establish a structural N ≤ 1 invariant on the daemon-startup path. Acquire an exclusive non-blocking `flock` on `<stateDir>/daemon.lock` before any state-directory write, so no two `portal state daemon` processes can ever write the same state directory concurrently — regardless of how they were started or whether the bootstrap synchronisation in Phase 2 is in place.
 
@@ -25,7 +26,8 @@ status: draft
 
 ### Phase 2: Synchronous Kill Barrier and Singleton Invariant Verification
 
-status: draft
+status: approved
+approved_at: 2026-05-11
 
 **Goal**: Eliminate the bootstrap kill-respawn race by making the common-case recycle synchronous — the prior daemon's process is observed dead (or a bounded 5 s timeout elapses) before the new daemon is forked. Wire the shared barrier helper into both kill sites (`EnsurePortalSaverVersion` and `BootstrapPortalSaver`) and validate the composed system (lock + barrier) with the load-bearing real-tmux integration test asserting `pgrep` count == 1 after a back-to-back recycle.
 
