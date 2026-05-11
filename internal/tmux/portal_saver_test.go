@@ -213,6 +213,100 @@ func TestBootstrapPortalSaver_KillsAndRecreatesWhenSessionExistsButDaemonDead(t 
 	}
 }
 
+// TestBootstrapPortalSaver_RecoversFromFlockLoserEmptySession exercises the
+// convergence path a flock-loser leaves behind when default tmux behaviour
+// (no remain-on-exit) closes the session after the loser daemon exits status 0
+// as the session's initial process. The next bootstrap observes
+// HasSession(_portal-saver) == false and falls through directly to
+// createPortalSaverWithRetry — no prior session to kill.
+//
+// Regression guard for § Fix Part 1: Loser-daemon session aftermath and
+// § Test Strategy → Regression test — flock-loser recovery.
+func TestBootstrapPortalSaver_RecoversFromFlockLoserEmptySession(t *testing.T) {
+	stubAliveCheck(t, false) // irrelevant when session absent (short-circuits)
+	shrinkRetryDelay(t)
+
+	script := &portalSaverScript{
+		hasSession: func(call int) (string, error) {
+			// Loser closed the session on exit; bootstrap observes it absent.
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession: func(call int) (string, error) { return "", nil },
+		setOption:  func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "new-session"); got != 1 {
+		t.Errorf("expected exactly 1 new-session call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "set-option"); got != 1 {
+		t.Errorf("expected exactly 1 set-option call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "kill-session"); got != 0 {
+		t.Errorf("expected 0 kill-session calls (no prior session to kill), got %d (calls: %v)", got, mock.Calls)
+	}
+}
+
+// TestBootstrapPortalSaver_RecoversFromFlockLoserDeadPaneSession exercises the
+// convergence path a flock-loser leaves behind when remain-on-exit kept the
+// session alive but the daemon pane is dead. The next bootstrap observes
+// HasSession(_portal-saver) == true, BootstrapAliveCheck returns false, and
+// the stale-pidfile recovery branch fires: tolerant kill followed by
+// recreate.
+//
+// Regression guard for § Fix Part 1: Loser-daemon session aftermath and
+// § Test Strategy → Regression test — flock-loser recovery.
+func TestBootstrapPortalSaver_RecoversFromFlockLoserDeadPaneSession(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	script := &portalSaverScript{
+		hasSession:  func(call int) (string, error) { return "", nil }, // present
+		killSession: func(call int) (string, error) { return "", nil },
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected 1 kill-session call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "new-session"); got != 1 {
+		t.Errorf("expected 1 new-session call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "set-option"); got != 1 {
+		t.Errorf("expected 1 set-option call, got %d (calls: %v)", got, mock.Calls)
+	}
+
+	// Order check: kill-session must precede new-session.
+	killIdx, newIdx := -1, -1
+	for i, c := range mock.Calls {
+		switch c[0] {
+		case "kill-session":
+			if killIdx == -1 {
+				killIdx = i
+			}
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		}
+	}
+	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
+		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
+	}
+}
+
 func TestBootstrapPortalSaver_AlwaysSetsDestroyUnattachedOff(t *testing.T) {
 	stubAliveCheck(t, true)
 	shrinkRetryDelay(t)
