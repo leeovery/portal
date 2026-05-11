@@ -40,6 +40,7 @@ total: 4
 - [ ] `unix.Flock` call is dispatched via the package-level `lockAcquire` seam so tests inject a fake.
 - [ ] No new test pattern departures — seam style matches existing `daemonRunFunc` / `BootstrapAliveCheck`.
 - [ ] Daemon-side FIFO-sweep paths reviewed and confirmed read-only — there is no daemon-side write path into the FIFO surface that two concurrent daemons could race on. `FIFOSweeper` is single-shot per process during bootstrap; daemon-side FIFO interaction is read-only. Confirmation recorded as a code-trace assertion in the task's implementation notes / commit message, not as a runtime test (matching spec § "Potentially affected" which framed this as a confirmation requirement, not a verification requirement).
+- [ ] Tests do not use `t.Parallel()`.
 
 **Tests**: (in a new file `internal/state/daemon_lock_test.go`)
 - `"it returns ErrDaemonLockHeld when lockAcquire fake returns EWOULDBLOCK"` — install a fake `lockAcquire` returning `unix.EWOULDBLOCK`; assert `errors.Is(err, state.ErrDaemonLockHeld)` and that no `*os.File` is leaked (use a temp dir + verify only the lockfile remains on disk).

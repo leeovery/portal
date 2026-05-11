@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 1
 phase: Plan Integrity Review
@@ -53,7 +53,7 @@ Every other task in the plan (1.2, 1.3, 1.4, 2.1, 2.2, 2.3) carries an explicit 
 - [ ] Tests do not use `t.Parallel()`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -84,5 +84,5 @@ Recommendation: pick the `MigrationLogger`-pattern interface seam (precedent alr
 - Declare a logger seam matching the existing `MigrationLogger` precedent in `internal/tmux/hooks_register.go:137`: define a minimal local interface `BarrierLogger { Warn(component, format string, args ...any) }` and a package-level `var killBarrierLogger BarrierLogger = noopBarrierLogger{}` initialised to a no-op default. Production wiring at the Task 2-2 call sites replaces the no-op via a top-level `init()` (or via the existing bootstrap-adapter path that injects a real `*state.Logger`, which structurally satisfies the interface). Tests install a recording fake via the package var with `t.Cleanup` reset. The load-bearing requirement is that the timeout produces **exactly one** WARN-level event observable by tests through the recorder seam; log content is illustrative per spec §"Acceptance Criteria → Observability".
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
