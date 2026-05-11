@@ -38,11 +38,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "multiple-state-daemons-running-concurrently-1-2",
+          "task": "multiple-state-daemons-running-concurrently-1-3",
           "task_map": {
             "multiple-state-daemons-running-concurrently": "tick-e65ae6",
             "multiple-state-daemons-running-concurrently-1": "tick-8d4a6a",
-            "multiple-state-daemons-running-concurrently-1-1": "tick-5d4401"
+            "multiple-state-daemons-running-concurrently-1-1": "tick-5d4401",
+            "multiple-state-daemons-running-concurrently-1-2": "tick-0fb7fe"
           },
           "external_id": "tick-e65ae6"
         }
