@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 2
 phase: Plan Integrity Review
@@ -77,7 +77,7 @@ And append the following test to the Tests block (before the closing item):
 - `"it routes WARN-on-timeout through the logger installed via SetBarrierLogger"` — install a recording `BarrierLogger` via `tmux.SetBarrierLogger(recorder)` with `t.Cleanup` resetting to the no-op default; seed the helper for the timeout path (PID never dies, shrunk clock); invoke `EnsurePortalSaverVersion` against a version-mismatch scenario; assert the recorder captured exactly one WARN entry under `ComponentBootstrap`. Guards against the no-op default persisting into production.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -124,5 +124,5 @@ Impact is low — both forms unambiguously identify their tasks — but the inco
 
 In addition, replace every in-prose self-reference inside `phase-2-tasks.md` of the form `Task 2-1`, `Task 2-2`, `Task 2-3` with `Task 2.1`, `Task 2.2`, `Task 2.3` respectively (the internal-ID strings of the form `multiple-state-daemons-running-concurrently-2-1` are unchanged — only the human-facing display names are aligned).
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
