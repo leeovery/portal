@@ -53,7 +53,7 @@ Because the fix's correctness argument leans on "the lock catches everything els
 - [ ] Daemon-side FIFO-sweep paths reviewed and confirmed read-only — there is no daemon-side write path into the FIFO surface that two concurrent daemons could race on. `FIFOSweeper` is single-shot per process during bootstrap; daemon-side FIFO interaction is read-only. Confirmation recorded as a code-trace assertion in the task's implementation notes / commit message, not as a runtime test (matching spec § "Potentially affected" which framed this as a confirmation requirement, not a verification requirement).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
