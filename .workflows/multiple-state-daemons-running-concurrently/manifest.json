@@ -32,7 +32,7 @@
         "multiple-state-daemons-running-concurrently": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "0f32d879c61f9a75bb526c1dd5d1bc12696839d8",
+          "spec_commit": "ffbfa0e4401acd02b6e99001d1966799bad17907",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
