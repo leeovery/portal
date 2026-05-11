@@ -95,13 +95,23 @@ To validate against current code.
 
 ### Trigger frequency (resolved)
 
-The inbox file blamed mixed release/dev binaries on PATH. The user has confirmed they don't. The actual trigger is almost certainly:
+The inbox file blamed mixed release/dev binaries on PATH. The user has confirmed they don't have them. The follow-up hypothesis was that the user's binary was a dev build (`version == "dev"`) so every command would trip the mismatch path. **Also wrong** — verified with the user:
 
-- The user's binary is built without `-X github.com/leeovery/portal/cmd.version=<release>` ldflags, so `version` is `""` or `"dev"`.
-- `portalSaverVersionMismatch` returns true on the `currentVersion == "" || currentVersion == "dev"` branch (`portal_saver.go:124`).
-- **Every `portal` command therefore triggers a kill-respawn** of `_portal-saver`. No mixed-binary alternation needed.
+```
+$ portal version
+portal version 0.3.1
+$ cat ~/.config/portal/state/daemon.version
+0.3.1
+```
 
-The user reportedly runs many `portal` commands per minute (Claude-driven tmux automation). Combine that frequency with sweep durations > tick interval, and 7+ orphan daemons accumulating over hours is unsurprising. The bootstrap race (no sync wait on the killed daemon) is the structural defect; the dev-build version-mismatch path is the high-frequency producer that makes the race exploitable.
+With matching real semver on both sides, `portalSaverVersionMismatch` returns `false` and the version-mismatch kill path is dormant on this user's normal commands. The 7-daemon accumulation therefore came from low-frequency triggers compounding over the 10-day uptime, not from a high-frequency recycle source. Candidate paths consistent with the observation:
+
+- **Stale `daemon.pid`** — file missing, unreadable, or PID points to a dead process. `BootstrapPortalSaver:66-70` kills the (live) tmux session and recreates. If the actual daemon was still running but the pidfile was lost, this races a fresh respawn against the mid-sweep window.
+- **Manual interventions** — `tmux kill-session -t _portal-saver`, `pkill portal`, or anything else that signals the daemon between bootstraps.
+- **Brew upgrades** — any version bump trips `stored != currentVersion` for one recycle.
+- **Daemon crash mid-tick** — pidfile lingers pointing to dead PID; next bootstrap triggers a recovery cycle while a successor sweep is starting up.
+
+Accumulating 7 orphans from low-frequency events (~one every 34 hours) over a 10-day uptime is consistent with the observed snapshot. **The trigger frequency is incidental to the bug.** The bootstrap race + no-singleton-lock structural defects make any trigger — high or low frequency — capable of producing an orphan; the fix closes the race regardless of how often it fires.
 
 ### Root Cause
 
@@ -116,17 +126,17 @@ These two defects compose: (1) means N daemons can coexist; (2) is the recurring
 
 ### Contributing Factors
 
-- **Dev-build version-mismatch path** fires on every `portal` invocation when the binary has `version == "" | "dev"` — the high-frequency producer that exploits the bootstrap race.
-- **Unbounded scrollback capture** (`tmux.go:625` `capture-pane -S -`) makes each sweep 1.5–4 s at the user's scrollback profile. The Go ticker drops missed fires, so when a sweep overruns the 1 s tick interval the next tick fires immediately on completion — daemons in this regime never reach `ctx.Done()` between sweeps, extending the orphan-eligibility window indefinitely.
+- **Unbounded scrollback capture** (`tmux.go:625` `capture-pane -S -`) makes each sweep 1.5–4 s at the user's scrollback profile. The Go ticker drops missed fires, so when a sweep overruns the 1 s tick interval the next tick fires immediately on completion — daemons in this regime never reach `ctx.Done()` between sweeps, extending the orphan-eligibility window indefinitely after a kill.
 - **Long-running tmux server with high scrollback** (24 panes, ~28 MB rendered text, top `history_bytes` 82 MB) — the conditions under which sweep overrun becomes the dominant regime.
-- **Topology-churn from bootstrap itself.** Bootstrap step 1 (`EnsureServer`) and step 4 (`EnsureSaver`) can fire `session-created`/`session-closed` hooks (via the recycle) that write `save.requested`, keeping the daemon's dirty flag set and pushing it into the back-to-back-sweep regime exactly when the user is most actively running `portal` commands.
+- **Low-frequency recycle triggers compound over long uptime.** Stale-pidfile recovery, manual session kills, brew upgrades, and mid-tick crashes are all rare individually but accumulate over a 10-day server uptime to produce the observed 7-daemon snapshot.
+- **Topology-churn from any saver recycle.** When the kill-respawn path does fire, the resulting `session-closed`/`session-created` hooks write `save.requested`, keeping the daemon's dirty flag set and pushing surviving daemons into the back-to-back-sweep regime exactly when the kill race is most live.
 
 ### Why It Wasn't Caught
 
 - **No singleton invariant test.** The comment at `portal_saver.go:31-32` documents the desired property but no integration test asserts it. A test that runs two `EnsurePortalSaverVersion` calls back-to-back in a real-tmux fixture and asserts a single live daemon would catch this in CI.
 - **Unit-level seam tests** (`BootstrapAliveCheck` is a `var` for test override) verify the alive-check **for a given pidfile** but cannot model "what happens when the pidfile is overwritten while the prior daemon still runs."
 - **Sweep-duration unrealistic in CI.** The bug is latent at N=1 with sub-second sweeps; it only manifests when sweep overrun + saver-recycle frequency combine. No load test exists at realistic scrollback scale.
-- **Dev-build trigger is silent.** A `dev` daemon happily writes daemon.version="dev", then `dev != dev` is technically not a mismatch — but the early-return `currentVersion == "dev" → true` short-circuits before the equality check, so every dev-build run trips the mismatch path unconditionally without any logged signal that this is happening.
+- **Saver recycle is silent.** The kill-respawn path in `EnsurePortalSaverVersion` and `BootstrapPortalSaver` logs nothing at the moment it decides to recycle, so an operator has no signal that a kill happened or how often. Even if multiplication were happening continuously, the visibility surface for "daemon was killed; replacement is starting" is zero.
 
 ### Blast Radius
 
