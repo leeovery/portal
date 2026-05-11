@@ -16,9 +16,11 @@ type fakeFataller struct {
 	helperCalls int
 	fatalMsg    string
 	fatalCalled bool
+	name        string
 }
 
-func (f *fakeFataller) Helper() { f.helperCalls++ }
+func (f *fakeFataller) Helper()      { f.helperCalls++ }
+func (f *fakeFataller) Name() string { return f.name }
 
 func (f *fakeFataller) Fatalf(format string, args ...any) {
 	f.fatalCalled = true

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -487,11 +488,7 @@ func TestSessionRestorer_LogsAndContinuesOnSetEnvironmentFailure(t *testing.T) {
 	}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("open logger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work",
@@ -602,11 +599,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyPairedPanesWhenLiveCountExceeds
 	mock := &mockCommander{RunFunc: restoreRunFunc("0:0\n0:1")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work", nil,
@@ -658,11 +651,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyFirstWhenLiveCountIsLessThanSav
 	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work", nil,
@@ -719,11 +708,7 @@ func TestSessionRestorer_ArmPanesReturnsWrappedErrorOnRespawnPaneFailure(t *test
 	}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work", nil,

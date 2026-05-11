@@ -26,6 +26,14 @@ package cmd
 //     inline at the wiring site below — *tmux.Client satisfies every one
 //     of its seam fields (Markers, Panes, Unsetter) directly, so no
 //     adapter glue is needed.
+//
+//     The bootstrap.EagerSignalCore is deliberately NOT in
+//     internal/bootstrapadapter for the same reason: its production
+//     wiring is a zero-value seam composition (Markers=*tmux.Client,
+//     Signaler=state.DefaultFIFOSignaler{}) with no method wrapping,
+//     so it is constructed inline at the wiring site below — mirroring
+//     MarkerCleanupCore. Tests build their own EagerSignalCore literal
+//     when they need it.
 
 import (
 	"github.com/leeovery/portal/cmd/bootstrap"

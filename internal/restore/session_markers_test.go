@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -126,11 +127,7 @@ func TestApplySkeletonMarkers_UsesLivePaneKey(t *testing.T) {
 	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
@@ -154,11 +151,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
@@ -225,11 +218,7 @@ func TestApplySkeletonMarkers_ContinuesWhenOneSetOptionFails(t *testing.T) {
 	}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
 	sess := markersSession("work",
@@ -347,11 +336,7 @@ func TestApplySkeletonMarkers_MarksExtraLivePanesWhenLiveCountExceedsSaved(t *te
 	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger, err := state.OpenLogger(filepath.Join(dir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
 	sess := markersSession("work",

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -88,14 +89,13 @@ func newOrchestrator(t *testing.T, mock *mockCommander, dir string, logger *stat
 	}
 }
 
+// openTestLogger delegates to restoretest.OpenTestLogger and additionally
+// returns the canonical log path so call sites can ReadFile against it after
+// closing the logger. The shared helper registers t.Cleanup itself; callers
+// that explicitly Close mid-test are unaffected (double-close is a no-op).
 func openTestLogger(t *testing.T, dir string) (*state.Logger, string) {
 	t.Helper()
-	path := filepath.Join(dir, "portal.log")
-	logger, err := state.OpenLogger(path, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	return logger, path
+	return restoretest.OpenTestLogger(t, dir), filepath.Join(dir, "portal.log")
 }
 
 func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {

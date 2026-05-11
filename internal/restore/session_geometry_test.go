@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -209,11 +210,7 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("open logger: %v", err)
-	}
-	defer func() { _ = logger.Close() }()
+	logger := restoretest.OpenTestLogger(t, dir)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
 	sess := geometrySession("work",

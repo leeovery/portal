@@ -18,12 +18,12 @@ package restore_test
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/restore"
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -118,11 +118,7 @@ func TestPhase3Integration_SaveRestoreRoundTrip(t *testing.T) {
 	}
 
 	// RESTORE against the freshly-started server.
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := &restore.Orchestrator{
 		Client:   client,
@@ -224,11 +220,7 @@ func TestPhase3Integration_CorruptSessionsJSON(t *testing.T) {
 	if _, err := client.EnsureServer(); err != nil {
 		t.Fatalf("EnsureServer: %v", err)
 	}
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := &restore.Orchestrator{
 		Client:   client,
@@ -325,11 +317,7 @@ func TestPhase3Integration_RestoreUsesLiveIndicesUnderBaseIndexDrift(t *testing.
 	tmuxtest.ApplyBaseIndices(t, ts, 1, 1)
 
 	// RESTORE.
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := &restore.Orchestrator{
 		Client:   client,

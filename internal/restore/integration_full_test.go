@@ -194,11 +194,7 @@ func TestPhase3Integration_FullRoundTrip(t *testing.T) {
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger := restoretest.OpenTestLogger(t, stateDir)
 
 	o := &restore.Orchestrator{
 		Client:   client,

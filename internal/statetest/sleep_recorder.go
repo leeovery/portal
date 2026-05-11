@@ -9,6 +9,11 @@
 // strictly for test code. Production code MUST NOT import this package; the
 // package name suffix and the file-name convention follow the precedent set
 // by internal/restoretest and internal/tmuxtest.
+//
+// Concurrency: every recording helper in this package is single-goroutine only.
+// Production callers drive the recorded seam serially (single-threaded retry
+// loop / per-pane iteration), so the helpers omit synchronization to keep
+// their internals trivially inspectable from test assertions.
 package statetest
 
 import "time"
@@ -24,8 +29,7 @@ import "time"
 //	state.WriteFIFOSignal(path, openFIFO, r.Fn())
 //	// r.Durations now holds every Sleep duration the production code passed.
 //
-// Concurrent invocation from multiple goroutines is NOT supported; the
-// production callers are single-threaded under their lock-free retry loop.
+// See the package doc for the single-goroutine concurrency posture.
 type RecordingSleep struct {
 	// Durations is the ordered list of every duration the production code
 	// passed to the Fn() closure. Tests inspect this slice directly to assert

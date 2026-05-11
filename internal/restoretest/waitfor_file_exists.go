@@ -11,6 +11,7 @@ import (
 // to exercise the timeout branch without aborting the test process.
 type fataller interface {
 	Helper()
+	Name() string
 	Fatalf(format string, args ...any)
 }
 
@@ -44,5 +45,5 @@ func waitForFileExists(t fataller, path string, budget, tick time.Duration) {
 		}
 		time.Sleep(tick)
 	}
-	t.Fatalf("WaitForFileExists: %s did not appear within %v", path, budget)
+	t.Fatalf("WaitForFileExists(%s): %s did not appear within %v", t.Name(), path, budget)
 }

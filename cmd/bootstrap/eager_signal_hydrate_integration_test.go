@@ -189,16 +189,11 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 
 	logger := restoretest.OpenTestLogger(t, stateDir)
 
-	// The production *bootstrap.EagerSignalCore — which iterates the
-	// post-Restore @portal-skeleton-* marker set and writes the FIFO byte
-	// to each pane's hydration FIFO via state.DefaultFIFOSignaler{} (the
-	// production no-seam wrapper around state.SendHydrateSignal) — is the
-	// step under test. We rely on buildIntegrationOrchestrator's
-	// "Restore real → EagerSignaler defaults to real EagerSignalCore"
-	// auto-default (see orchestrator_builder_test.go and defaults.go) to
-	// produce identical wiring without restating the literal here. A
-	// regression that swaps in NoOpEagerHydrateSignaler{} would leave
-	// markers stuck and the 2-second poll would expire.
+	// Step under test is the production *bootstrap.EagerSignalCore. We rely
+	// on buildIntegrationOrchestrator's "Restore real → EagerSignaler defaults
+	// to real EagerSignalCore" auto-default (see defaults.go, task 4-2). A
+	// regression flipping that default to NoOp would leave markers stuck and
+	// the 2-second poll would expire.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
 		Logger:  logger,

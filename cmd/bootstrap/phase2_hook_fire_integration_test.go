@@ -165,7 +165,9 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	//     during step 6 — the success path that AC2 mostly observes. We
 	//     rely on buildIntegrationOrchestrator's auto-default (real
 	//     EagerSignalCore when Restore is real) instead of restating the
-	//     literal here.
+	//     literal here — see task 4-2 (defaults.go default-selection
+	//     branch). A regression that flips that auto-default back to NoOp
+	//     would surface here as a 3-second timeout / hook-not-fired.
 	// HookRegistrar is left as the default NoOp since the test drives
 	// hydration through the orchestrator's eager-signal step (and
 	// optionally the helper's own 3s timeout fall-through), not through

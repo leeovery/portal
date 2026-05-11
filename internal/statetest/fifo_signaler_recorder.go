@@ -10,8 +10,7 @@ import "github.com/leeovery/portal/internal/state"
 // recording fake before this helper was promoted; the shared definition keeps
 // the recording semantics uniform across both call sites.
 //
-// Concurrent invocation from multiple goroutines is NOT supported; the
-// production callers drive SendSignal serially under a single-goroutine loop.
+// See the package doc for the single-goroutine concurrency posture.
 type RecordingFIFOSignaler struct {
 	// Calls is the ordered list of every path the production code passed to
 	// SendSignal. Tests inspect this slice directly to assert which paneKey
