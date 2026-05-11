@@ -145,17 +145,65 @@ These two defects compose: (1) means N daemons can coexist; (2) is the recurring
 
 ## Fix Direction
 
-To be filled in during Step 6 (Root Cause Synthesis) and Step 8 (Findings Review).
+### Chosen Approach
 
-Initial fix surface candidates (from inbox file, to validate):
+**Proposed scope (pre-discussion):** close the structural multiplication via a coordinated pair of changes:
 
-1. **Singleton flock** at daemon startup; bootstrap acquires-or-fails-fast.
-2. **Synchronous KillSession** — poll `BootstrapAliveCheck` against the prior `daemon.pid` until dead, bounded timeout.
-3. **Bound `capture-pane -S -<N>`** to cap per-tick cost (measured 13× speedup, 130× less data with `-S -100`).
-4. **Tighten `portalSaverVersionMismatch`** so dev/dev and empty/empty cases don't always re-spawn.
-5. **Cheaper change-detection** before `capture-pane` (e.g. `display-message -p '#{cursor_x},#{cursor_y},#{history_size}'`) so the hash dedup avoids the expensive call, not just the file write.
+1. **Daemon-side singleton lock** in `cmd/state_daemon.go`. At daemon startup — before `WritePIDFile`, before the tick loop — acquire an advisory file lock on `<stateDir>/daemon.lock` via `unix.Flock(fd, LOCK_EX|LOCK_NB)`. On failure (another daemon holds the lock), log a single WARN line *"another daemon holds the lock; exiting"* and exit 0. The lock is held for the lifetime of the process and released by kernel on exit. This is the **structural invariant**: even if every other guard fails, the lock guarantees N ≤ 1 daemons writing to the same state directory.
 
-(1)+(2) close the structural multiplication. (3) is the high-leverage performance lever even at N=1. (4) reduces frequency. (5) helps further.
+2. **Synchronous kill in `EnsurePortalSaverVersion`** (`internal/tmux/portal_saver.go`). Before issuing `KillSession`, read the prior `daemon.pid` via `state.ReadPIDFile(stateDir)` and capture it. After `KillSession`, poll `state.IsProcessAlive(prior_pid)` until it returns false, bounded by a small timeout (e.g. 3 seconds — covers cold-sweep duration at the observed scrollback profile with headroom). On timeout, log a WARN and proceed — the new daemon's lock acquisition is the safety net. This is the **graceful upgrade path**: most recycles will see the old daemon exit cleanly and the new one start with no lock contention or log noise.
+
+Both changes compose:
+- (1) alone closes the bug but produces noisy WARN lines on every saver recycle (because the new daemon races the old one and loses the lock until the old one releases). Functionally correct but undignified.
+- (2) alone reduces the race window but does not eliminate it (a sweep can outlast the timeout) and provides no defence against any other path that might double-spawn the daemon.
+- (1)+(2) together: (2) makes the common case quiet, (1) makes every edge case safe.
+
+**Deciding factor (proposed):** the user reported wanting a structural fix. The pidfile-as-singleton design is the gap the inbox identified — closing it as a proper `flock` is the cleanest answer. Synchronous kill is the smallest additional change to keep upgrade transitions clean. Both live entirely within `cmd/state_daemon.go` and `internal/tmux/portal_saver.go` — no orchestrator surgery, no test-pattern departures.
+
+### Out-of-Scope Candidates (Flagged for Discussion)
+
+These are real defects in adjacent layers but are not strictly required to fix the multiplication symptom. Bundling them adds risk and surface area. Each is a defensible separate work unit.
+
+- **(C) Bound `capture-pane -S -<N>`** in `internal/tmux/tmux.go:625`. Measured 13× speedup, 130× less data with `-S -100`. **High-leverage perf lever, even at N=1.** Trades off how much scrollback history is preserved in `_portal-saver`-driven restore — that's a feature decision, not a bug fix. Worth flagging to the user for a separate work unit on "bound scrollback capture cost."
+
+- **(D) Tighten `portalSaverVersionMismatch`**. The `dev`-string special case (`portal_saver.go:124-127`) is the high-frequency trigger for dev-build users. Could plausibly be relaxed to "treat `dev` as a normal version string and only recycle when `stored != currentVersion`." Lower priority once (1)+(2) make the recycle path safe — the recycles still happen, but they're now harmless.
+
+- **(E) Cheaper change-detection before `capture-pane`** (e.g. `display-message -p '#{cursor_x},#{cursor_y},#{history_size}'`). Today the hash dedup at `WriteScrollbackIfChanged` only avoids the **file write**, not the `capture-pane` call (which is the cost driver). A per-pane "did anything change since last tick" probe before capture would let the dedup avoid the expensive call. Larger refactor; defer.
+
+### Options Explored
+
+- **Singleton flock alone (no synchronous kill).** Rejected for noise reasons — every saver recycle would produce a "lock held; exiting" WARN line and (briefly) an empty `_portal-saver` session until the next bootstrap retries. Functionally correct but a poor user experience for an upgrade path that should be silent.
+
+- **Synchronous kill alone (no flock).** Rejected — closes the common-case race but provides no defence against double-spawn through any future code path. The lock is the structural invariant; without it, "no two daemons can coexist" remains a comment, not an enforced property.
+
+- **Spin-wait inside `BootstrapPortalSaver` until lock is acquirable.** Rejected — bootstrap is on the critical path of every `portal` command and must stay fast. A 1.5–4 second hold for lock acquisition would make every command sluggish. Synchronous kill in `EnsurePortalSaverVersion` is the targeted alternative: only happens on the recycle path, bounded timeout, doesn't punish the steady state.
+
+- **PID-file-as-lock via `O_EXCL` create.** Rejected — `O_EXCL` is a one-shot atomic-create primitive, not a held lock. It leaks on crash (file lingers) and would need its own cleanup-on-startup dance. `flock` is the right primitive for "held while process is alive."
+
+- **Treat `_portal-saver` session presence as the singleton signal** (don't kill at all on dev-build mismatch). Rejected — would require teaching the daemon to handle version-mismatch internally and self-exit. Larger surgery; the kill-respawn protocol is otherwise sound, just needs a synchronisation barrier.
+
+### Discussion
+
+To be filled in during Step 8 (Findings Review).
+
+Open questions for the review:
+
+- Should this work unit also bound the `-S` flag (option C)? It's the highest-impact perf lever and even at N=1 the daemon spends 1.5–4 s mid-sweep, which is a smell.
+- Is there value in tightening `portalSaverVersionMismatch` (option D) once the lock makes the recycle safe? Or is the recycle frequency irrelevant once it's harmless?
+- Should the lock be `LOCK_EX|LOCK_NB` (fail-fast, what's proposed) or `LOCK_EX` blocking (the new daemon waits for the old)? Fail-fast is simpler and the bootstrap retry path covers the case where the loser exits before the winner releases.
+
+### Testing Recommendations
+
+- **Unit:** `cmd/state_daemon_test.go` — new tests for the singleton lock seam. Mock the `flock` call via a package-level `var lockAcquire = unix.Flock` seam. Test cases: lock acquired successfully → daemon proceeds; lock acquisition fails (EWOULDBLOCK) → daemon logs and exits 0; lock fd is closed on shutdown.
+- **Unit:** `internal/tmux/portal_saver_test.go` — new tests for synchronous kill barrier. Use the existing `BootstrapAliveCheck` seam (`var`) plus a new seam for `ReadPIDFile` and the polling clock. Test cases: prior PID dies within timeout → barrier returns cleanly; prior PID does not die within timeout → barrier logs WARN and proceeds; no prior PID file → barrier skips.
+- **Integration (real-tmux fixture):** `internal/tmux/portal_saver_integration_test.go` (using `restoretest`/`tmuxtest`). Two back-to-back `EnsurePortalSaverVersion` calls in the same test → assert exactly one live `portal state daemon` process under the test's tmux server. Skip on CI without tmux available.
+- **Regression:** add a "two-bootstrap-races-one-tmux-server" test for any new test added under `cmd/bootstrap` that uses the saver step. Today's tests use `NoOpSaver` — for this fix, the real-saver integration test above is the canonical guard.
+
+### Risk Assessment
+
+- **Fix complexity:** Low. Both changes are localised. Singleton lock is ~10 lines in `state_daemon.go` plus a small seam for testing. Synchronous kill is ~15 lines in `portal_saver.go` plus a seam.
+- **Regression risk:** Low–Medium. The kill barrier introduces a new (bounded) wait on the bootstrap critical path. Worst-case latency = bounded timeout (3 s). Median case: prior daemon exits in under 100 ms (mid-tick window for sub-second sweeps). Risk surface: timeout is too short for cold sweeps, leading to spurious WARN noise — mitigated by the lock being the actual structural invariant.
+- **Recommended approach:** Regular release. No hotfix needed — workaround for affected users is `tmux kill-session -t _portal-saver` followed by `pkill portal` then restart their tmux server (drastic but works). Likely few users are affected (mostly dev-build users with heavy Claude-driven tmux automation).
 
 ---
 
