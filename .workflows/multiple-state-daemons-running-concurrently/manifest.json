@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "multiple-state-daemons-running-concurrently": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "0f32d879c61f9a75bb526c1dd5d1bc12696839d8",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
