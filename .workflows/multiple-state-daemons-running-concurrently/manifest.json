@@ -34,12 +34,17 @@
           "format": "tick",
           "spec_commit": "ffbfa0e4401acd02b6e99001d1966799bad17907",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "multiple-state-daemons-running-concurrently-1-1",
-          "task_map": {}
+          "task": "multiple-state-daemons-running-concurrently-1-2",
+          "task_map": {
+            "multiple-state-daemons-running-concurrently": "tick-e65ae6",
+            "multiple-state-daemons-running-concurrently-1": "tick-8d4a6a",
+            "multiple-state-daemons-running-concurrently-1-1": "tick-5d4401"
+          },
+          "external_id": "tick-e65ae6"
         }
       }
     }
