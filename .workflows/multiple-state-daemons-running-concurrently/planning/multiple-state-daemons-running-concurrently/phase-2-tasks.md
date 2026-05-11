@@ -96,11 +96,11 @@ Location: `internal/tmux/portal_saver_test.go` (extend existing file; reuse `stu
 
 **Do**:
 - In `internal/tmux/portal_saver.go`, modify `EnsurePortalSaverVersion` at the mismatch branch (currently line 108-112):
-  - Replace `_ = c.KillSession(PortalSaverName)` (line 111) with `_ = killSaverAndWaitForDaemon(c, stateDir)`.
+  - Replace `_ = c.KillSession(PortalSaverName)` (line 111) with `_ = killSaverAndWaitForDaemonFn(c, stateDir)`.
   - The helper itself issues the kill, so the surrounding `if portalSaverVersionMismatch(...) && c.HasSession(PortalSaverName)` guard is preserved unchanged — the barrier is only entered when both the mismatch and presence conditions hold (steady-state path with matching version OR absent session does not enter).
   - The error return is intentionally ignored: the helper returns nil even on timeout per Task 2.1, and the spec mandates the caller proceeds to `BootstrapPortalSaver` regardless.
 - In `internal/tmux/portal_saver.go`, modify `BootstrapPortalSaver`'s stale-daemon branch (currently line 66-70):
-  - Replace `_ = c.KillSession(PortalSaverName)` (line 68) with `_ = killSaverAndWaitForDaemon(c, stateDir)`.
+  - Replace `_ = c.KillSession(PortalSaverName)` (line 68) with `_ = killSaverAndWaitForDaemonFn(c, stateDir)`.
   - The surrounding `if sessionPresent && !BootstrapAliveCheck(stateDir)` guard is preserved unchanged.
   - `stateDir` is already a parameter to `BootstrapPortalSaver` (line 63), so no signature change required.
 - Introduce a test-only injection recorder via a package-level `var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon` at package scope and route both call sites through this `var` so tests can swap in a recorder. This is a minimal seam — the function body itself was already seamed inside Task 2.1. Both call-site replacements above use `killSaverAndWaitForDaemonFn(c, stateDir)`, not the helper directly.
@@ -187,7 +187,7 @@ Location: `internal/tmux/portal_saver_test.go` (extend existing file).
   7. Capture the tmux server PID by parsing `sock.Run(t, "display-message", "-p", "#{pid}")` (or equivalent — `tmux display-message -p '#{pid}'` returns the server PID).
   8. Wait briefly (poll with bounded timeout, e.g. up to 2 s) for `daemon.pid` to exist at `state.DaemonPID(dir)` — the daemon must have started, won the lock (Phase 1), and written its pidfile. If `daemon.pid` is not present within the bound, t.Fatalf with a diagnostic listing the contents of `dir`.
   9. **Directly write a differing value** into `<stateDir>/daemon.version`: `if err := state.WriteVersionFile(dir, "v-test-0-old"); err != nil { t.Fatalf(...) }`. This is the load-bearing step — no new test seam is introduced; the test relies on `portalSaverVersionMismatch` comparing `"v-test-0-old"` (stored) vs `"v-test-1"` (current passed to the second call) and returning true.
-  10. Second invocation: `if err := tmux.EnsurePortalSaverVersion(client, dir, "v-test-1"); err != nil { t.Fatalf(...) }`. This must trigger the recycle: kill the old saver, run the barrier (Task 2.1/2-2), wait for the prior daemon to exit, then create a fresh saver.
+  10. Second invocation: `if err := tmux.EnsurePortalSaverVersion(client, dir, "v-test-1"); err != nil { t.Fatalf(...) }`. This must trigger the recycle: kill the old saver, run the barrier (Task 2.1/2.2), wait for the prior daemon to exit, then create a fresh saver.
   11. `sock.WaitForSession(t, tmux.PortalSaverName, 5*time.Second)` — confirm the recycled session is back.
   12. Wait briefly (poll with bounded timeout, e.g. up to 3 s — slightly above the 1 s tick + 100 ms barrier-poll cadence) for the prior daemon to actually exit. The probe: `pgrep -P <server_pid> -f 'portal state daemon'` count should converge to 1.
   13. **Assert singleton**: invoke `pgrep -P <server_pid> -f 'portal state daemon'` via `os/exec`, count the lines of output, assert exactly 1 (or t.Fatalf with diagnostic: full pgrep output, `daemon.pid` contents, `daemon.version` contents, and the recorded `server_pid`).
@@ -220,7 +220,7 @@ This task **is** the test. The deliverable is the integration test itself plus t
 **Edge Cases**:
 - `tmux` not on PATH → skipped via `tmuxtest.SkipIfNoTmux(t)`.
 - `portal` binary not on PATH → skipped via `exec.LookPath("portal")` check + `t.Skip`. Note: the daemon launched inside the tmux session is `portalSaverCommand = "portal state daemon"`, so the test requires the user-installed `portal` binary to be on PATH. CI configurations that build `portal` into a temp dir must add that dir to PATH for this test to run.
-- The first daemon's tick is mid-flight when the kill arrives → the barrier (Task 2.1/2-2) waits for it; the integration test allows up to a 3 s settle window after the second `EnsurePortalSaverVersion` returns to absorb this without flakiness.
+- The first daemon's tick is mid-flight when the kill arrives → the barrier (Task 2.1/2.2) waits for it; the integration test allows up to a 3 s settle window after the second `EnsurePortalSaverVersion` returns to absorb this without flakiness.
 - Race between the second `new-session` and the first daemon's `flock` release → if the new daemon loses the lock, it exits status 0; the (empty or dead-pane) saver session converges on the next bootstrap. For this test, the singleton invariant is "exactly one live `portal state daemon` process," not "exactly one healthy saver session" — the assertion is on `pgrep` count, not on session state. This is the correct shape per spec §"Acceptance Criteria → Singleton invariant".
 - The pgrep count converges asynchronously after `EnsurePortalSaverVersion` returns (the prior daemon's tick must complete and `ctx.Done()` must be observed). The bounded polling window (up to 3 s) absorbs this; if it does not converge within the window the test fails with diagnostics — this would indicate the barrier is not waiting (regression) or the daemon is not exiting (separate bug, also worth catching).
 - Stray daemons from prior failed test runs → mitigated by `tmuxtest`'s isolated socket (the daemon is parented to a per-test tmux server PID, not the user's tmux server, and `pgrep -P <test_server_pid>` scopes the count to that server only).

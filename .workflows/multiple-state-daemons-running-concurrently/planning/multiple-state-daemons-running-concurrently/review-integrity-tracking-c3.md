@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 3
 phase: Plan Integrity Review
@@ -42,7 +42,7 @@ Impact is purely cosmetic — an implementer can still resolve which tasks are b
 - The first daemon's tick is mid-flight when the kill arrives → the barrier (Task 2.1/2.2) waits for it; the integration test allows up to a 3 s settle window after the second `EnsurePortalSaverVersion` returns to absorb this without flakiness.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -98,5 +98,5 @@ Aligning both bullets to the `Fn` form removes the contradiction and matches the
   - `stateDir` is already a parameter to `BootstrapPortalSaver` (line 63), so no signature change required.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
