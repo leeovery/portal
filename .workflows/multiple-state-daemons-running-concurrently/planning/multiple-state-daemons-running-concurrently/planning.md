@@ -56,3 +56,12 @@ approved_at: 2026-05-11
 - [ ] No new logs are emitted on the common-case clean-handover path; the only WARN-class additions across the full fix surface are the two specified (lock contention, barrier timeout).
 - [ ] `go test ./...` is green; the singleton invariant test passes; pidfile / `BootstrapAliveCheck` regression tests still pass.
 - [ ] Tests do not use `t.Parallel()`.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| multiple-state-daemons-running-concurrently-2-1 | Add seam-injectable killSaverAndWaitForDaemon helper | Prior PID dies within timeout (no WARN), prior PID never dies (one WARN + bounded wall time via injected clock), missing PID file, dead prior PID, unreadable/empty/malformed PID file, polling clock + IsProcessAlive + ReadPIDFile all seamed for injection, 5 s timeout sized above 3.9 s cold-sweep ceiling, helper returns non-fatally on timeout |
+| multiple-state-daemons-running-concurrently-2-2 | Wire barrier into both kill call sites (EnsurePortalSaverVersion + BootstrapPortalSaver) | Steady-state path untouched when version matches and saver alive (helper not invoked), both call sites verified to invoke shared helper via injection recorder, kill failures still tolerated as today, no behaviour change beyond barrier wait |
+| multiple-state-daemons-running-concurrently-2-3 | Real-tmux integration test asserts singleton invariant after recycle | Skipped when tmux unavailable, exercises real portalSaverVersionMismatch (no new seam), daemon.version written directly between two EnsurePortalSaverVersion calls, pgrep -P <tmux-server-pid> -f 'portal state daemon' count == 1 asserted after both calls return, per-test t.TempDir() isolation, no t.Parallel() |
