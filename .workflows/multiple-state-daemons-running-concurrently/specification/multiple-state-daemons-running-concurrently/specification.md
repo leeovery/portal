@@ -8,7 +8,7 @@
 
 Up to seven `portal state daemon` processes were observed running concurrently against the same tmux server, all parented to the tmux server PID. Only one was the daemon hosted inside the `_portal-saver` session; the other six were past-lifecycle orphans — their owning session had been killed, but their in-flight `tick()` had not yet observed the cancelled context.
 
-Expected behaviour: **exactly one** `portal state daemon` process per tmux server lifetime. Bootstrap-driven kill+respawn cycles (e.g. version-mismatch upgrades) should produce a clean handover — the old daemon exits before the replacement starts writing to shared state.
+Expected behaviour: **exactly one** `portal state daemon` process per **state directory** at any time. In practice `stateDir` resolves per-user (via XDG config path resolution), so this is equivalent to "one daemon per user" — a single user running two tmux servers against the same `stateDir` will see one daemon shared between them, and the second-started tmux server's bootstrap will hit the lock and recover via the standard contention path. Multi-tmux-server-per-user is an unusual configuration; isolating daemons per tmux server is **not** in scope for this fix. Bootstrap-driven kill+respawn cycles (e.g. version-mismatch upgrades) should produce a clean handover — the old daemon exits before the replacement starts writing to shared state.
 
 ### Impact
 
@@ -89,8 +89,15 @@ At daemon startup — **before** `WritePIDFile`, **before** the tick loop begins
 
 - Use `unix.Flock(fd, LOCK_EX|LOCK_NB)` (exclusive, non-blocking).
 - **Success path:** lock acquired → daemon proceeds normally (writes pidfile, enters tick loop). Lock is held for the lifetime of the process and released by the kernel on exit (`exit(0)`, `exit(N)`, signal-kill, crash — all release the fd).
+- **Fd retention is load-bearing.** The lock fd MUST be held in a variable that lives for the lifetime of the daemon process — for example, a package-level `var` in the daemon command, or a field on a struct kept alive by the run loop. The fd MUST NOT be allowed to go out of scope while the daemon is running; Go's finalizer mechanism could otherwise close the fd, releasing the lock while the daemon is still active and silently re-introducing the very race the lock is meant to close. If a future refactor wraps the fd in a value with a finalizer, the finalizer must not close the fd.
 - **Contention path:** lock acquisition fails (EWOULDBLOCK) → daemon logs a single WARN line *"another daemon holds the lock; exiting"* (or equivalent — log content not load-bearing, presence of the log line is) and exits with status 0. Exit 0 ensures tmux does not treat this as an abnormal session termination.
 - The lock fd must be set `FD_CLOEXEC` so it does not leak into any child process the daemon forks.
+
+### Lock-file create / open semantics
+
+- The lock file is opened with mode `0600` (matching the file mode of other portal state files).
+- The lock helper does **not** create `<stateDir>` itself. State-directory existence is a pre-existing responsibility of the caller (the daemon-startup path already writes other state files; whichever step ensures the directory exists today still does so).
+- `open(2)` failures **other than** `EWOULDBLOCK` (which comes from `flock`, not `open`) — e.g. `EACCES`, `ENOSPC`, `ENOENT`, `EMFILE`, `ENFILE` — are treated as fatal: the daemon logs an ERROR-level line describing the failure and exits **non-zero**. This is distinct from the contention path (lock held → WARN + exit 0): an `open` failure indicates a genuine misconfiguration or system problem that should be surfaced loudly, not absorbed silently.
 
 ### Placement and structure
 
@@ -101,6 +108,10 @@ The lock acquire call should be **seamed for testing** via a package-level `var 
 ### Why fail-fast (`LOCK_EX|LOCK_NB`) and not blocking (`LOCK_EX`)
 
 A blocking acquire would cause the loser daemon to sit waiting on the lock until the winner exited — but the loser was launched as the initial process of a tmux session, so a long block holds tmux's `new-session` synchronously. Fail-fast keeps the contention path bounded (one log line, immediate exit). The bootstrap retry path covers the rare case where a loser exits and the next `portal` command needs to recover by recreating `_portal-saver` (the tolerant-kill-and-recreate branch in `BootstrapPortalSaver`).
+
+### Loser-daemon session aftermath
+
+When the loser exits status 0 as the initial process of `_portal-saver`, default tmux behaviour (no `remain-on-exit`) closes the window — and since the session has only that one window, the **session itself closes**. The next bootstrap therefore typically observes `HasSession(_portal-saver) == false` and falls through to `createPortalSaverWithRetry` (no kill barrier invoked — there is no prior session to kill). If `remain-on-exit` is in effect for any reason, the next bootstrap observes the session with a dead pane, hits the stale-pidfile recovery branch, runs the barrier (which returns immediately because the prior PID is already dead), and recreates. Both convergence paths are recoverable.
 
 ### Why a lock and not `O_EXCL` pidfile create
 
@@ -125,7 +136,7 @@ The barrier wraps the kill operation:
 3. **After** the kill, poll `state.IsProcessAlive(prior_pid)` until it returns false. Polling cadence is a planning detail (50–100 ms is a reasonable starting point); bound the total wait by a **5-second timeout**.
 4. **On clean exit within timeout** → proceed silently to `BootstrapPortalSaver`. This is the expected path.
 5. **On timeout** → log a single WARN line and proceed to `BootstrapPortalSaver`. The new daemon's lock acquisition (Part 1) is the safety net — either the prior daemon has already released the lock and the new one succeeds, or the new one will fail-fast and the next bootstrap recovers.
-6. **No prior PID file** (file missing, unreadable, or empty) → barrier is skipped, proceed directly to respawn. There is no prior daemon to wait for.
+6. **No usable prior PID** (file missing, unreadable, empty, or malformed — e.g. non-numeric content from a partial write) → barrier is skipped, proceed directly to respawn. There is no prior daemon to wait for.
 7. **Prior PID file points to a dead process** (signal-0 already returns false) → barrier completes immediately, proceed.
 
 ### Timeout rationale
@@ -158,6 +169,10 @@ The barrier executes on the bootstrap critical path only when a recycle actually
 
 This trade is acceptable because (a) the recycle path is rare per `EnsurePortalSaver` invocation and (b) the alternative is silent corruption from N > 1 daemons.
 
+### Interaction with `@portal-restoring` marker
+
+Bootstrap step 3 sets `@portal-restoring`; step 4 (EnsureSaver) is where the kill barrier fires; step 7 clears `@portal-restoring`. On the barrier-timeout path, the marker remains set for up to 5 s longer than in current behaviour. This is **explicitly acceptable**: the marker is designed to bracket the whole bootstrap window, daemon `captureAndCommit` suppression is the intended behaviour while it is set, and a 5 s extension does not affect the correctness of steps 5 (Restore), 6 (EagerSignalHydrate), or downstream warning surfacing. The "Critical-path latency budget" caveat above applies to the overall bootstrap, not specifically to the marker.
+
 ### Why not spin-wait inside `BootstrapPortalSaver` until the lock is acquirable
 
 Rejected during investigation discussion: bootstrap is on the critical path of every `portal` command and must stay fast. A 1.5–4 second hold to wait for lock release would make every command sluggish whether or not a recycle was happening. The barrier scopes the wait to **only the recycle path**.
@@ -179,8 +194,9 @@ The fix is correct when **all** of the following hold:
 
 ### Clean handover on the common case
 
-- When a saver recycle is triggered (version mismatch, stale pidfile, manual session kill), the prior daemon's process has exited before the new daemon begins its first tick.
-- No WARN line about lock contention is emitted on the common-case recycle path.
+- "Common case" = a **single** bootstrap invocation triggering a recycle (e.g. one `portal` command on an upgraded binary). Concurrent bootstrap invocations (two `portal` commands started in close succession) are not the common case and may produce one WARN line on whichever loses the lock — this is accepted behaviour, with Part 1 guaranteeing safety.
+- When a single-invocation saver recycle is triggered (version mismatch, stale pidfile, manual session kill), the prior daemon's process has exited before the new daemon begins its first tick.
+- No WARN line about lock contention is emitted on the single-invocation recycle path.
 - Verified by: barrier unit tests (prior PID dies within timeout → returns cleanly, no log) and a manual recycle test against the affected scrollback profile.
 
 ### Graceful degradation under timeout
@@ -196,8 +212,8 @@ The fix is correct when **all** of the following hold:
 
 ### Pidfile remains coherent
 
-- After every successful bootstrap, `daemon.pid` reflects the PID of the currently-running daemon (the lock-holder).
-- `BootstrapAliveCheck` reads `daemon.pid` and finds the lock-holding process alive.
+- After every successful bootstrap, `daemon.pid` reflects the PID of the daemon that won the lock — **while that daemon is running**. The pidfile is informational and is not required to be cleaned up on graceful shutdown (`BootstrapAliveCheck` already tolerates stale-after-exit content via its signal-0 probe).
+- `BootstrapAliveCheck` reads `daemon.pid` and finds the lock-holding process alive (while running) or detects the dead PID and proceeds to the stale-pidfile recovery branch (after exit).
 - Verified by: the existing pidfile/`BootstrapAliveCheck` unit tests continue to pass; the new lock acquisition occurs **before** `WritePIDFile` so the file is never written by a daemon that loses the lock.
 
 ### Lock cleanup on crash
@@ -207,9 +223,10 @@ The fix is correct when **all** of the following hold:
 
 ### Observability
 
-- The fix emits at most **two new WARN-class log lines** across the bug surface:
-  1. *"another daemon holds the lock; exiting"* — from the loser daemon in the contention path.
-  2. *"prior daemon did not exit within timeout"* (or equivalent) — from the kill barrier on timeout.
+- The fix emits at most **two new WARN-class log lines** across the bug surface, one per logical event:
+  1. The lock-contention event (loser daemon) — example text *"another daemon holds the lock; exiting"*.
+  2. The barrier-timeout event — example text *"prior daemon did not exit within timeout"*.
+- **Log content is illustrative, not load-bearing.** Tests assert the **presence and WARN level** of one log line per event — not the literal text. Implementers may adjust wording without breaking tests; reviewers should not consider rewording a regression.
 - No new logs are emitted on the common-case (clean handover) path. Silent success is the expected behaviour.
 - **Recycle-path silence is preserved (and acknowledged as a trade-off).** The investigation's "Why It Wasn't Caught" called out the existing kill-respawn path's total silence — operators have no signal that a recycle happened or how often. The spec does **not** add a diagnostic/info-level log at the recycle decision point. The two WARN paths above are sufficient to surface the abnormal cases (loser contention, barrier timeout). If recurrence diagnostics become a need, that is a follow-up observability work unit, not part of this fix.
 
@@ -276,7 +293,7 @@ Required cases:
 - **Acquire succeeds** → daemon proceeds past lock acquisition, calls `WritePIDFile`, enters the tick loop.
 - **Acquire fails with EWOULDBLOCK** → daemon emits one WARN line, returns exit status 0, does **not** write the pidfile, does **not** enter the tick loop.
 - **Lock fd has FD_CLOEXEC set** → asserted via fd flag inspection or via injecting a recorder that captures the fd-flag operations.
-- **Acquire ordering** → `lockAcquire` is called before `WritePIDFile`; reverse order would allow a loser daemon to overwrite the pidfile before exiting.
+- **Acquire ordering** → `lockAcquire` is called before `WritePIDFile`; reverse order would allow a loser daemon to overwrite the pidfile before exiting. Asserted via **observable filesystem state**: after a failed-acquire test, the pidfile must remain at its previous value (or absent on a fresh state directory) — do not introduce a `WritePIDFile` seam solely for this assertion.
 
 ### Unit tests — synchronous kill barrier
 
@@ -307,7 +324,7 @@ Skip behaviour: skip on CI when tmux is not available, matching existing pattern
 
 Required case:
 
-- **Back-to-back recycle produces N=1** — set up a real tmux server, run `EnsurePortalSaverVersion` to create the saver, then run it again with a forced version mismatch to trigger the recycle, then assert `pgrep -P <tmux-server-pid> -f 'portal state daemon' | wc -l == 1` after both calls return.
+- **Back-to-back recycle produces N=1** — set up a real tmux server, run `EnsurePortalSaverVersion` to create the saver, then **directly write a different value into `<stateDir>/daemon.version`** between calls (no new test seam, exercises real `portalSaverVersionMismatch` comparison logic), then run `EnsurePortalSaverVersion` again to trigger the recycle, then assert `pgrep -P <tmux-server-pid> -f 'portal state daemon' | wc -l == 1` after both calls return.
 
 This is the **load-bearing test** for the bug — it would have caught the issue in CI had it existed before. Crucially, the existing `BootstrapAliveCheck` seam-level unit tests cannot model the failure mode here: they fix a pidfile and probe it, but cannot model "what happens when the pidfile is overwritten while the prior daemon still runs." That asymmetry is the reason the integration test is required and is not redundant with seam-level coverage.
 
@@ -366,10 +383,10 @@ No orchestrator surgery. No changes to `cmd/bootstrap/` step ordering. No new pu
 
 First post-fix bootstrap on an affected server:
 1. Bootstrap reads `daemon.version` — version mismatch (old → new) triggers `EnsurePortalSaverVersion` kill path.
-2. The new kill barrier reads the prior PID (the one daemon that has the pidfile), kills the session, waits up to 5 s for that prior daemon to exit.
-3. Any **orphan daemons** (the ones whose PIDs were overwritten and are not in `daemon.pid`) are children of the tmux server. They will be SIGHUP'd when the prior `_portal-saver` session is killed — but the barrier only waits for the **one** PID it captured. The orphans may still be running when the new daemon starts.
-4. The new daemon's `flock` acquisition fails because **at least one** orphan still holds the lock. The new daemon exits cleanly with the WARN.
-5. The next `portal` command observes an empty (or dead-daemon) `_portal-saver` session and re-enters the tolerant-kill-and-recreate branch. Each pass drains one orphan via the barrier + lock contention.
+2. The new kill barrier reads the prior PID (the one daemon currently recorded in `daemon.pid`), kills the current `_portal-saver` session (which SIGHUPs the daemon attached to it — the most recent one), and waits up to 5 s for that prior daemon to exit.
+3. The **orphan daemons** are children of the tmux server but are no longer attached to any current session — their original `_portal-saver` sessions were killed during prior bootstraps. Killing the current `_portal-saver` therefore does **not** SIGHUP them; they remain running until their already-cancelled tick loops complete their current sweep and exit naturally on `ctx.Done()`. They hold their `flock`s until they exit.
+4. The new daemon's `flock` acquisition fails because **at least one** orphan still holds the lock. The new daemon exits cleanly with the WARN; the (empty or dead-pane) `_portal-saver` session is left for the next bootstrap to recover.
+5. The next `portal` command observes the missing/dead `_portal-saver` session and re-enters the tolerant-kill-and-recreate branch. Each pass closes the recovery loop one more time as more orphans finish their final sweep and release their locks.
 6. Eventually all orphans drain (their sweeps complete and they exit on the cancelled context), and a fresh daemon acquires the lock successfully.
 
 **This means the first post-upgrade bootstrap on an affected server may produce several WARN lines and may require multiple `portal` invocations to settle.** This is acceptable — it is the correct convergence behaviour and no worse than the existing workaround.

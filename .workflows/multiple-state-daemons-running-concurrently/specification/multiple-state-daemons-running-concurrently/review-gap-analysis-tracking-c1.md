@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-11
 cycle: 1
 phase: Gap Analysis
@@ -14,17 +14,18 @@ topic: multiple-state-daemons-running-concurrently
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 1 — Behaviour, Placement and structure
+**Priority**: Critical
+**Affects**: Fix Part 1 — Behaviour
 
 **Details**:
-The spec states "Lock is held for the lifetime of the process and released by the kernel on exit." For this guarantee to hold, the fd must be retained in a long-lived variable — if the helper returns and the fd goes out of scope without `runtime.KeepAlive` or similar, Go's runtime is free to finalize/close it, which would release the lock while the daemon is still running. The spec does not state where the fd lives (package-level var? returned and stored on a daemon struct? stored in a closure captured by the run loop?). An implementer could plausibly write a helper that opens, flocks, and returns — and silently introduce the very race the lock is meant to close.
-
-This is Critical: getting it wrong would defeat Part 1 entirely while passing unit tests that mock `lockAcquire`.
+The spec states "Lock is held for the lifetime of the process and released by the kernel on exit." For this guarantee to hold, the fd must be retained in a long-lived variable — if the helper returns and the fd goes out of scope without `runtime.KeepAlive` or similar, Go's runtime is free to finalize/close it, which would release the lock while the daemon is still running.
 
 **Proposed Addition**:
+New bullet in Fix Part 1 Behaviour:
+> **Fd retention is load-bearing.** The lock fd MUST be held in a variable that lives for the lifetime of the daemon process — for example, a package-level `var` in the daemon command, or a field on a struct kept alive by the run loop. The fd MUST NOT be allowed to go out of scope while the daemon is running; Go's finalizer mechanism could otherwise close the fd, releasing the lock while the daemon is still active and silently re-introducing the very race the lock is meant to close. If a future refactor wraps the fd in a value with a finalizer, the finalizer must not close the fd.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added as fourth bullet under Fix Part 1 → Behaviour.
 
 ---
 
@@ -32,21 +33,20 @@ This is Critical: getting it wrong would defeat Part 1 entirely while passing un
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
+**Priority**: Important
 **Affects**: Fix Part 1 — Behaviour
 
 **Details**:
-The lock helper opens `<stateDir>/daemon.lock` before any other state-dir write. The spec covers two outcomes of `unix.Flock`: success and `EWOULDBLOCK`. It does not address:
-
-- What happens if `<stateDir>` does not yet exist (first ever daemon startup on a fresh install). Today `WritePIDFile` happens later via `fileutil.AtomicWrite` — does the lock helper need to `MkdirAll` first, or does it rely on something earlier in the path?
-- The `open(2)` syscall preceding `flock(2)` can fail for reasons other than contention: EACCES (permissions), ENOSPC (disk full), ENOENT (parent missing), EMFILE/ENFILE (fd exhaustion). Spec does not state daemon behaviour on these — should the daemon exit non-zero with a fatal log? Exit zero to avoid abnormal-termination from tmux's view? Fall back to running without a lock?
-- The file mode for create — `0600` matches portal's other state files but is not stated.
-
-An implementer would pick a default, and that default could mask future bugs (e.g. silent fall-back without the lock invariant).
+The spec covers `flock` success and EWOULDBLOCK but not `open(2)` failure modes (EACCES, ENOSPC, ENOENT, EMFILE, ENFILE), nor the file mode, nor whether the helper creates `<stateDir>` itself.
 
 **Proposed Addition**:
+New "Lock-file create / open semantics" sub-section after the CLOEXEC bullet:
+> - The lock file is opened with mode `0600` (matching the file mode of other portal state files).
+> - The lock helper does **not** create `<stateDir>` itself. State-directory existence is a pre-existing responsibility of the caller.
+> - `open(2)` failures **other than** `EWOULDBLOCK` (which comes from `flock`, not `open`) — e.g. `EACCES`, `ENOSPC`, `ENOENT`, `EMFILE`, `ENFILE` — are treated as fatal: the daemon logs an ERROR-level line describing the failure and exits **non-zero**. Distinct from the contention path (lock held → WARN + exit 0).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added as new "Lock-file create / open semantics" sub-section.
 
 ---
 
@@ -54,19 +54,17 @@ An implementer would pick a default, and that default could mask future bugs (e.
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 1 — Compatibility with the existing pidfile; Acceptance Criteria — Pidfile remains coherent
+**Priority**: Important
+**Affects**: Fix Part 1 — Pidfile compatibility; Acceptance Criteria — Pidfile remains coherent
 
 **Details**:
-The acceptance section says "After every successful bootstrap, `daemon.pid` reflects the PID of the currently-running daemon (the lock-holder)." But if a lock-holding daemon receives SIGHUP/SIGTERM and exits gracefully (no successor yet), the pidfile is left pointing to a now-dead PID until the next bootstrap. The spec does not state whether graceful shutdown deletes the pidfile.
-
-Current behaviour (pre-fix): pidfile is informational and is checked via `BootstrapAliveCheck` which signal-0 probes — stale-after-exit is tolerated. With the lock as the authoritative invariant, this is probably still fine. But the spec asserts "always reflects the single daemon that won the lock" — strictly, "always" is only true while that daemon runs. Worth either weakening the claim or specifying explicit cleanup on graceful exit.
-
-This also matters for the kill barrier: between barrier-completed-the-prior-daemon-is-dead and new-daemon-writes-pidfile, the stale PID is still in the file. Whether that intermediate-window read matters depends on `BootstrapAliveCheck` semantics, which the spec assumes are unchanged.
+"Always reflects the single daemon that won the lock" is strictly only true while the daemon runs. Need to either weaken the claim or specify explicit cleanup on graceful exit.
 
 **Proposed Addition**:
+Weaken acceptance criterion to "while that daemon is running" and note that `BootstrapAliveCheck` already tolerates stale-after-exit content via signal-0 probe. No pidfile cleanup required on graceful exit.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Weakened "always reflects" claim; clarified no cleanup required on exit.
 
 ---
 
@@ -74,22 +72,18 @@ This also matters for the kill barrier: between barrier-completed-the-prior-daem
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Risk and Rollout — Upgrade behaviour step 5; Fix Part 1 — Behaviour (contention path)
+**Priority**: Important
+**Affects**: Risk and Rollout — Upgrade behaviour; Fix Part 1 — Contention path
 
 **Details**:
-When a daemon loses the lock and exits status 0 immediately, it was launched as the initial process of `_portal-saver` via `NewDetachedSessionNoCwd(name, "portal state daemon")`. With default tmux `remain-on-exit` behaviour, an exiting initial process causes tmux to close the window and (if the only window) the session.
-
-The Upgrade behaviour section describes step 5 as "the next `portal` command observes an empty (or dead-daemon) `_portal-saver` session" — but it's unclear whether the loser-daemon path produces (a) a closed session, (b) a session with a dead pane that remain-on-exit kept around, or (c) something else. Each has different recovery semantics:
-
-- (a) `HasSession(_portal-saver)` returns false → `BootstrapPortalSaver` falls through to `createPortalSaverWithRetry` — no kill needed, barrier not invoked.
-- (b) Session exists but has no live daemon → stale-pidfile branch fires → barrier runs against the loser's (now dead) PID → returns immediately → recreates.
-
-Both are recoverable, but the convergence test in Test Strategy ("flock loser exits cleanly, leaving empty `_portal-saver` session") presumes path (b). If real tmux defaults produce (a), the test's setup is wrong.
+When daemon exits status 0, default tmux behaviour closes the window/session. Recovery semantics differ between "session closed" (HasSession returns false) and "session with dead pane" (stale-pidfile branch). Spec needs explicit treatment.
 
 **Proposed Addition**:
+New "Loser-daemon session aftermath" sub-section in Fix Part 1:
+> When the loser exits status 0 as the initial process of `_portal-saver`, default tmux behaviour (no `remain-on-exit`) closes the window — and since the session has only that one window, the **session itself closes**. The next bootstrap therefore typically observes `HasSession(_portal-saver) == false` and falls through to `createPortalSaverWithRetry` (no kill barrier invoked — there is no prior session to kill). If `remain-on-exit` is in effect for any reason, the next bootstrap observes the session with a dead pane, hits the stale-pidfile recovery branch, runs the barrier (which returns immediately because the prior PID is already dead), and recreates. Both convergence paths are recoverable.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added new sub-section covering both default and remain-on-exit paths.
 
 ---
 
@@ -97,19 +91,17 @@ Both are recoverable, but the convergence test in Test Strategy ("flock loser ex
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 2 — Behaviour; Acceptance Criteria — Singleton invariant
+**Priority**: Important
+**Affects**: Fix Part 2 — Behaviour; Acceptance Criteria — Clean handover
 
 **Details**:
-The barrier protects a single bootstrap invocation against the prior daemon, but two `portal` commands started in close succession (e.g. user fires `portal open` twice in different terminals, or scripts/automation invokes portal) both enter their own `EnsurePortalSaverVersion`. They both read the same prior PID, both call KillSession (idempotent / tolerant), both poll the same dying PID, and both then call `BootstrapPortalSaver` → `createPortalSaverWithRetry` → start a new daemon.
-
-Two new daemons race the lock. The lock catches it (one wins, one exits with WARN). But this is now a routine occurrence, not a rare contention. The "no WARN on common case" acceptance criterion may not hold for users who routinely run multiple portal commands concurrently.
-
-The spec acknowledges Part 1 is "the floor that holds even if every other guard fails" — so functionally safe. But the acceptance criterion "No WARN line about lock contention is emitted on the common-case recycle path" is ambiguous about whether concurrent-bootstrap is considered "common case" or not.
+Two `portal` commands started in close succession both enter their own `EnsurePortalSaverVersion`, both call KillSession, both poll, both start a new daemon. The lock catches it but produces a WARN. The acceptance criterion "No WARN on common case" needs clarification on whether concurrent-bootstrap is "common case."
 
 **Proposed Addition**:
+Clarify acceptance criterion: "common case" means a single bootstrap invocation. Concurrent invocations may produce one WARN line on the loser — accepted behaviour, Part 1 guarantees safety.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Re-worded "Clean handover on the common case" acceptance criterion to distinguish single-invocation from concurrent paths.
 
 ---
 
@@ -117,21 +109,17 @@ The spec acknowledges Part 1 is "the floor that holds even if every other guard 
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
+**Priority**: Minor
 **Affects**: Test Strategy — Integration test
 
 **Details**:
-The integration test reads: "run `EnsurePortalSaverVersion` to create the saver, then run it again with a forced version mismatch to trigger the recycle." But the mechanism for forcing the mismatch is not specified. Options visible from the codebase:
-
-- Manually write a different value to `<stateDir>/daemon.version` between calls.
-- Override the `PortalSaverVersion` / `version` constant via build flag or test seam.
-- Add a new test seam in `EnsurePortalSaverVersion` to inject the comparison.
-
-Each has different implications (the first is closest to no-new-seam; the second drags in ldflag/test-build infrastructure; the third adds API surface). An implementer would need to make this call — and the choice affects what is being asserted (real comparison logic vs forced branch).
+Spec says "forced version mismatch" but does not specify the mechanism. Three options have different implications; spec should pick.
 
 **Proposed Addition**:
+Specify the mechanism: directly write a different value into `<stateDir>/daemon.version` between calls. No new test seam needed; exercises real `portalSaverVersionMismatch` comparison logic.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Integration test case updated to specify the file-write mechanism.
 
 ---
 
@@ -139,19 +127,18 @@ Each has different implications (the first is closest to no-new-seam; the second
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 2 — Behaviour; Risk and Rollout
+**Priority**: Minor
+**Affects**: Fix Part 2 — Critical-path latency budget; Risk and Rollout
 
 **Details**:
-Bootstrap step 3 sets `@portal-restoring`; step 4 (EnsureSaver) is where the new kill barrier fires; step 7 clears `@portal-restoring`. The barrier can hold step 4 for up to 5 s on timeout, extending the total `@portal-restoring` window by up to 5 s.
-
-CLAUDE.md states the daemon's `captureAndCommit` is suppressed while `@portal-restoring` is set, and step 6 (EagerSignalHydrate) "runs while `@portal-restoring` is still set so daemon `captureAndCommit` suppression remains in force." Whether a 5 s extension affects step 5 (Restore), step 6 (EagerSignalHydrate), or downstream warning surfacing is not addressed. Likely benign — the marker is meant to be set for the whole bootstrap — but the spec's "Critical-path latency budget" section ignores the marker window entirely.
-
-Minor — but planners reading both this spec and the bootstrap step ordering in CLAUDE.md would benefit from an explicit confirmation that 5 s under `@portal-restoring` is acceptable.
+Bootstrap step 3 sets `@portal-restoring`; step 7 clears it. Barrier can extend that window by up to 5 s. Not addressed in spec.
 
 **Proposed Addition**:
+New "Interaction with `@portal-restoring` marker" sub-section in Fix Part 2:
+> Bootstrap step 3 sets `@portal-restoring`; step 4 (EnsureSaver) is where the kill barrier fires; step 7 clears `@portal-restoring`. On the barrier-timeout path, the marker remains set for up to 5 s longer than in current behaviour. This is **explicitly acceptable**: the marker is designed to bracket the whole bootstrap window, daemon `captureAndCommit` suppression is the intended behaviour while it is set, and a 5 s extension does not affect the correctness of downstream bootstrap steps.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added explicit-acceptability sub-section.
 
 ---
 
@@ -159,19 +146,17 @@ Minor — but planners reading both this spec and the bootstrap step ordering in
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
+**Priority**: Important
 **Affects**: Risk and Rollout — Upgrade behaviour
 
 **Details**:
-Step 3 reads: "Any **orphan daemons** (the ones whose PIDs were overwritten and are not in `daemon.pid`) are children of the tmux server. They will be SIGHUP'd when the prior `_portal-saver` session is killed — but the barrier only waits for the **one** PID it captured."
-
-This implies the orphans receive SIGHUP from killing the current `_portal-saver`. That is incorrect as written: orphans are children of the tmux server (post-double-fork from tmux's `new-session`), but they are no longer attached to any current session — their original `_portal-saver` session was already killed and recycled at some prior bootstrap. Killing the **current** `_portal-saver` session sends SIGHUP only to processes attached to **that** session, i.e. the most recent daemon, not the orphans.
-
-The convergence story in steps 4–6 still works (orphans drain naturally as their sweeps finish on the already-cancelled context), but the mechanism described in step 3 is wrong. An implementer or reviewer relying on this could form an incorrect mental model.
+Spec says orphans "will be SIGHUP'd when the prior `_portal-saver` session is killed." Incorrect — orphans are children of the tmux server but no longer attached to any current session. Killing the current `_portal-saver` does not SIGHUP them; they drain naturally as their already-cancelled tick loops finish.
 
 **Proposed Addition**:
+Correct steps 3–5 of Upgrade behaviour to reflect the accurate mechanism.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Steps 2–5 reworded for accuracy. Convergence story preserved.
 
 ---
 
@@ -179,19 +164,17 @@ The convergence story in steps 4–6 still works (orphans drain naturally as the
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 1 — Behaviour; Acceptance Criteria — Observability
+**Priority**: Important
+**Affects**: Fix Part 1; Acceptance Criteria — Observability
 
 **Details**:
-Fix Part 1 says: *"another daemon holds the lock; exiting"* (or equivalent — log content not load-bearing, presence of the log line is).
-
-Acceptance Criteria — Observability says: "The fix emits at most **two new WARN-class log lines** across the bug surface: 1. *"another daemon holds the lock; exiting"* 2. *"prior daemon did not exit within timeout"* (or equivalent)."
-
-The first quotes the exact text; the body of Part 1 says content isn't load-bearing. Tests in Test Strategy say "single WARN log emitted" without asserting content. An implementer asks: do tests assert the literal string, a substring, or just presence? Pick wrong and either tests break on minor wording changes, or the acceptance section is unenforceable.
+Fix Part 1 says content not load-bearing; Acceptance Criteria quotes specific text; Test Strategy doesn't specify whether tests assert content. Tension needs resolution.
 
 **Proposed Addition**:
+Explicit clarification in Acceptance → Observability: log content is illustrative, not load-bearing. Tests assert presence and WARN level only.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Observability AC reworked to make this explicit.
 
 ---
 
@@ -199,19 +182,17 @@ The first quotes the exact text; the body of Part 1 says content isn't load-bear
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Test Strategy — Unit tests, daemon singleton lock
+**Priority**: Minor
+**Affects**: Test Strategy — Unit tests
 
 **Details**:
-Test case: "Acquire ordering — `lockAcquire` is called before `WritePIDFile`; reverse order would allow a loser daemon to overwrite the pidfile before exiting."
-
-The assertion mechanism is implied but not specified: would the test inject both `lockAcquire` and a `WritePIDFile`-equivalent seam, both recording into a shared call-order log? Or would it observe filesystem state (pidfile absence after a failed acquire)? The existing daemon code calls `state.WritePIDFile` directly, not through a seam — so the test either needs a new seam for WritePIDFile (adding API surface), or asserts the negative (pidfile not present after the failure path).
-
-Minor — but the implementer needs to decide whether to add a `WritePIDFile` seam just for this assertion.
+Test would either need a new `WritePIDFile` seam (added API surface) or observe filesystem state. Spec should pick.
 
 **Proposed Addition**:
+Specify: assert via observable filesystem state (pidfile unchanged after failed acquire). Do not add a WritePIDFile seam.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Acquire-ordering test case extended with assertion mechanism.
 
 ---
 
@@ -219,17 +200,17 @@ Minor — but the implementer needs to decide whether to add a `WritePIDFile` se
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 2 — Behaviour (step 6); Test Strategy
+**Priority**: Minor
+**Affects**: Fix Part 2 — Behaviour
 
 **Details**:
-Behaviour step 6 lists "file missing, unreadable, or empty" as the skip-barrier path. The test case lists "Prior PID file unreadable/corrupted". The behaviour section does not include "corrupted" / "contains non-numeric content" — only "unreadable, or empty". `ReadPIDFile` behaviour on garbage content (e.g. partial-write, non-numeric chars) determines whether the barrier sees a parse error (covered by "unreadable") or a successful read of value 0 (not covered).
-
-An implementer reading only the Behaviour section may miss the malformed-content path. Aligning the two lists removes the ambiguity.
+Behaviour step 6 lists "missing, unreadable, or empty" — but not "malformed (non-numeric)". Test Strategy lists "unreadable/corrupted". Aligning the two removes ambiguity.
 
 **Proposed Addition**:
+Extend step 6 to include "malformed — e.g. non-numeric content from a partial write."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Step 6 of Behaviour updated.
 
 ---
 
@@ -237,23 +218,16 @@ An implementer reading only the Behaviour section may miss the malformed-content
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Part 1 — Behaviour; Test Strategy — Test independence
+**Priority**: Important
+**Affects**: Problem Statement — Expected behaviour; Acceptance Criteria — Singleton invariant
 
 **Details**:
-The lock file is `<stateDir>/daemon.lock` and "the singleton invariant" is stated as "exactly one `portal state daemon` process per tmux server lifetime" (Problem Statement) and "per state directory at any time" (Acceptance Criteria).
-
-These two scopes differ. `stateDir` is determined by config path resolution (XDG / env / fallback) and is **per-user**, not per-tmux-server. A single user running two tmux servers (e.g. one on default socket, one on a named socket) would share one `stateDir` and therefore one `daemon.lock`. The second tmux server's daemon would fail-fast on the lock.
-
-Is this the intended behaviour? It is consistent with the Acceptance Criteria's "per state directory" framing, but inconsistent with the Problem Statement's "per tmux server lifetime" framing. Either:
-
-- The spec should reconcile the two phrasings, or
-- The state directory should be keyed per tmux server (e.g. include socket path or server PID) — which is a larger change.
-
-This affects users who run multiple tmux servers (uncommon but supported by tmux). An implementer would default to whatever stateDir resolves to today, which means one-lock-per-user — possibly correct, but the spec doesn't say "and we accept that two tmux servers share a daemon."
+Problem Statement says "one daemon per tmux server lifetime"; Acceptance says "per state directory." These differ — `stateDir` is per-user, not per-tmux-server. A user running two tmux servers would share one daemon. Spec needs to reconcile and explicitly accept (or reject) the multi-server scenario.
 
 **Proposed Addition**:
+Reconcile by amending Problem Statement: invariant is per state directory (per-user in practice); multi-tmux-server-per-user is an unusual configuration; isolating daemons per tmux server is not in scope.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Problem Statement "Expected behaviour" paragraph rewritten to be explicit about per-stateDir scope.
 
 ---
