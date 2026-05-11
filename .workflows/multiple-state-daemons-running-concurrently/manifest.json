@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "~",
+          "task": "multiple-state-daemons-running-concurrently-2-1",
           "task_map": {
             "multiple-state-daemons-running-concurrently": "tick-e65ae6",
             "multiple-state-daemons-running-concurrently-1": "tick-8d4a6a",
