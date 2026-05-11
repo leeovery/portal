@@ -16,6 +16,7 @@ const (
 	saveRequestedName = "save.requested"
 	daemonPIDName     = "daemon.pid"
 	daemonVersionName = "daemon.version"
+	daemonLockName    = "daemon.lock"
 	portalLogName     = "portal.log"
 	portalLogOldName  = "portal.log.old"
 	scrollbackSubdir  = "scrollback"
@@ -76,6 +77,11 @@ func DaemonPID(dir string) string { return filepath.Join(dir, daemonPIDName) }
 
 // DaemonVersion returns the path to the daemon's version-marker file.
 func DaemonVersion(dir string) string { return filepath.Join(dir, daemonVersionName) }
+
+// DaemonLock returns the path to the daemon's advisory-lock file. The file
+// itself is created and flocked by AcquireDaemonLock; this accessor only
+// composes the path so the layout stays in one place.
+func DaemonLock(dir string) string { return filepath.Join(dir, daemonLockName) }
 
 // PortalLog returns the path to the current portal log file.
 func PortalLog(dir string) string { return filepath.Join(dir, portalLogName) }

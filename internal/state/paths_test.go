@@ -126,6 +126,7 @@ func TestAccessors(t *testing.T) {
 			{"save.requested", state.SaveRequested(dir), filepath.Join(dir, "save.requested")},
 			{"daemon.pid", state.DaemonPID(dir), filepath.Join(dir, "daemon.pid")},
 			{"daemon.version", state.DaemonVersion(dir), filepath.Join(dir, "daemon.version")},
+			{"daemon.lock", state.DaemonLock(dir), filepath.Join(dir, "daemon.lock")},
 			{"portal.log", state.PortalLog(dir), filepath.Join(dir, "portal.log")},
 			{"portal.log.old", state.PortalLogOld(dir), filepath.Join(dir, "portal.log.old")},
 			{"scrollback dir", state.ScrollbackDir(dir), filepath.Join(dir, "scrollback")},
