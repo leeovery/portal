@@ -14,7 +14,7 @@ Expected behaviour: **exactly one** `portal state daemon` process per tmux serve
 
 - **Severity: High.** When 2+ daemons run concurrently the tmux server pegs at 75–98% CPU. The cost is in `capture-pane -e -p -S -` (unbounded scrollback) called by each daemon's per-pane sweep — `sample` shows all time in `cmd_capture_pane_exec` → `grid_string_cells` → `grid_string_cells_add_code`.
 - **Scope: server-wide.** All tmux operations on the affected server become sluggish — not just portal-managed sessions. TUI redraws, prefix keystrokes, and `tmux ls` itself become multi-second-slow. Load average sustained 5–10 during the observation window.
-- **Shared-state corruption.** Multiple daemons writing the same state directory: `sessions.json` (atomic per-commit but two daemons race the read-then-commit window, producing flip-flop content across consecutive ticks), per-pane scrollback `.bin` files (`AtomicWrite` is per-call atomic but the two writers can interleave content versions), and `daemon.pid`/`daemon.version` markers become incoherent — `BootstrapAliveCheck` becomes meaningless once N > 1.
+- **Shared-state corruption.** Multiple daemons writing the same state directory: `sessions.json` (atomic per-commit but two daemons race the read-then-commit window, producing flip-flop content across consecutive ticks), per-pane scrollback `.bin` files (`AtomicWrite` is per-call atomic but the two writers can interleave content versions), and `daemon.pid`/`daemon.version` markers become incoherent — `BootstrapAliveCheck` becomes meaningless once N > 1. The `save.requested` flag is a notable exception — both daemons race to remove it on successful sweep, but the loser's remove is a benign no-op via `errors.Is(err, fs.ErrNotExist)`.
 
 ### Trigger frequency
 
