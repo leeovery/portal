@@ -50,6 +50,9 @@
     },
     "killed-sessions-resurrect-on-restart": {
       "work_type": "bugfix"
+    },
+    "multiple-state-daemons-running-concurrently": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {

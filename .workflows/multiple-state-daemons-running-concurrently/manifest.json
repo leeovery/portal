@@ -1,0 +1,16 @@
+{
+  "name": "multiple-state-daemons-running-concurrently",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-05-11",
+  "description": "Multiple portal state daemons run concurrently, pinning tmux server CPU; root causes: no singleton lock and bootstrap doesn't wait for old daemon to exit before spawning a new one",
+  "phases": {
+    "investigation": {
+      "items": {
+        "multiple-state-daemons-running-concurrently": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}
