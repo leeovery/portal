@@ -19,14 +19,15 @@ Up to **seven** `portal state daemon` processes were observed simultaneously, al
 
 ### Reproduction Steps
 
-Indirectly reproducible — requires the version-mismatch trigger to fire repeatedly during a busy window. Concrete trigger:
+**Trigger mechanism still to be confirmed by code analysis.** The inbox report attributed the kill-respawn cycle to a mixed `release/dev` `portal` binary alternation, but the user has clarified they do **not** have two binaries on PATH. So the version-mismatch trigger (if that is even the trigger) fires for a different reason — possibly the `dev/dev` or empty-stored cases in `portalSaverVersionMismatch`, or via a path unrelated to version mismatch entirely.
 
-1. Have both `/opt/homebrew/bin/portal` (released, e.g. v0.3.1) and `/Users/leeovery/Code/portal/portal` (dev build) on PATH.
-2. Run `portal` commands that alternate between the two binaries (shell aliases, completions, hooks, manual invocations).
-3. Each alternation triggers `EnsurePortalSaverVersion` → `KillSession(_portal-saver)` → immediate `BootstrapPortalSaver` → new daemon spawn while the killed daemon is still mid-sweep (1.5–4 s window).
-4. Over a 10-day uptime with frequent invocations and large scrollbacks, daemons stack.
+What is reproducible regardless of trigger:
 
-**Reproducibility:** Reliably reproducible in conditions matching (1)+(2); the 7-daemon snapshot was the natural outcome of those conditions over real usage.
+1. Whenever `EnsurePortalSaverVersion` decides to recycle the saver, it calls `KillSession(_portal-saver)` then immediately `BootstrapPortalSaver` — no aliveness barrier.
+2. If the killed daemon is mid-`tick()` (1.5–4 s on the observed scrollback profile), the old daemon stays alive while the new one is already running.
+3. Over enough invocations, daemons accumulate.
+
+**Reproducibility:** Single observation so far (2026-05-09). Conditions for accumulation are structural (the bootstrap race), so any repeat of the trigger reproduces.
 
 ### Environment
 
@@ -54,7 +55,9 @@ Indirectly reproducible — requires the version-mismatch trigger to fire repeat
 
 1. **Bootstrap does not wait for the killed daemon to exit before spawning a replacement.** Read from `portal_saver.go:106-114` — `KillSession` then immediate `BootstrapPortalSaver` with no aliveness barrier.
 2. **No singleton lock.** `state_daemon.go:226` writes `daemon.pid` informationally only; `BootstrapAliveCheck` (`portal_saver.go:37`) signal-0-probes only the *current* `daemon.pid` and cannot see prior orphans whose PID has been overwritten.
-3. **Version-mismatch trigger fires too readily.** `portalSaverVersionMismatch` (`portal_saver.go:120-131`) returns true for any of: read error, empty stored, empty current, `dev` on either side, or any string mismatch. Mixed release/dev binaries on PATH cause every alternation to trip the kill-respawn cycle.
+3. **Some path is firing the saver-recycle cycle frequently enough that orphans accumulate.** The inbox file blamed mixed release/dev binaries on PATH but the user has none — so we need to identify what actually triggers the kill-respawn cycle. Candidates: empty stored version on disk, `dev`/empty current version embedded in the binary, parallel `portal` invocations stomping each other, or non-version-mismatch code paths that also call `KillSession(_portal-saver)`.
+
+(1) and (2) are the structural defects — they make accumulation possible. (3) determines frequency. The fix focuses on (1)+(2); (3) is diagnostic context.
 
 To validate against current code.
 
