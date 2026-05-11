@@ -25,7 +25,8 @@ approved_at: 2026-05-11
 - [ ] Tests do not use `t.Parallel()`.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-11
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
