@@ -37,8 +37,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 2,
-          "task": "multiple-state-daemons-running-concurrently-2-3",
+          "phase": 3,
+          "task": "~",
           "task_map": {
             "multiple-state-daemons-running-concurrently": "tick-e65ae6",
             "multiple-state-daemons-running-concurrently-1": "tick-8d4a6a",
@@ -48,7 +48,8 @@
             "multiple-state-daemons-running-concurrently-1-4": "tick-59eb14",
             "multiple-state-daemons-running-concurrently-2": "tick-972c55",
             "multiple-state-daemons-running-concurrently-2-1": "tick-dea514",
-            "multiple-state-daemons-running-concurrently-2-2": "tick-d4c184"
+            "multiple-state-daemons-running-concurrently-2-2": "tick-d4c184",
+            "multiple-state-daemons-running-concurrently-2-3": "tick-b1a379"
           },
           "external_id": "tick-e65ae6"
         }
