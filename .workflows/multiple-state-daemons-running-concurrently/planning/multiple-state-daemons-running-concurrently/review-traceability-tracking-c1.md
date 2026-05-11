@@ -91,7 +91,7 @@ The cheapest place to record this is in Task 2-2's Edge Cases or Context (the ca
 - `@portal-restoring` marker lifetime under barrier timeout: bootstrap step 3 sets the marker and step 7 clears it; the barrier (executed inside step 4, EnsureSaver) extends the in-bracket window by up to 5 s on the timeout path. The spec explicitly accepts this — daemon `captureAndCommit` suppression remains in force throughout the bootstrap window, and the 5 s extension does not affect the correctness of steps 5 (Restore), 6 (EagerSignalHydrate), or downstream warning surfacing. **Do not** tighten the timeout, narrow the marker lifetime, or add a diagnostic for "marker still set while barrier running" — all three would regress against an explicitly accepted spec property.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
