@@ -24,6 +24,16 @@ approved_at: 2026-05-11
 - [ ] `go test ./...` is green; no regressions in existing `BootstrapAliveCheck` / pidfile tests.
 - [ ] Tests do not use `t.Parallel()`.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| multiple-state-daemons-running-concurrently-1-1 | Add seam-injectable flock helper for daemon.lock | EWOULDBLOCK surfaces as distinct sentinel, open(2) errors (EACCES/ENOSPC/ENOENT/EMFILE/ENFILE) wrapped, FD_CLOEXEC asserted on returned fd, lock file mode 0600, helper does not create stateDir, accepts stateDir parameter |
+| multiple-state-daemons-running-concurrently-1-2 | Wire lock acquisition into daemon startup before WritePIDFile | Ordering asserted via observable filesystem state (no new WritePIDFile seam), EWOULDBLOCK → one WARN log + exit 0 + pidfile unchanged, open errors → ERROR log + non-zero exit, fd retained for daemon lifetime with no finaliser closure |
+| multiple-state-daemons-running-concurrently-1-3 | Regression test: kernel releases lock fd on abrupt daemon exit | Abrupt-exit / SIGKILL simulation, no stale-lockfile dance required, next acquisition succeeds cleanly against real unix.Flock |
+| multiple-state-daemons-running-concurrently-1-4 | Flock-loser recovery via tolerant-kill-and-recreate | Loser exits status 0 as initial process of _portal-saver, empty-session aftermath when tmux closes the window, dead-pane aftermath under remain-on-exit, next bootstrap converges via BootstrapPortalSaver |
+
 ### Phase 2: Synchronous Kill Barrier and Singleton Invariant Verification
 
 status: approved
