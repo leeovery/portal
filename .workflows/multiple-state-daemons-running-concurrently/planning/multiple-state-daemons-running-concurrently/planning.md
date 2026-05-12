@@ -66,3 +66,17 @@ approved_at: 2026-05-11
 | multiple-state-daemons-running-concurrently-2-1 | Add seam-injectable killSaverAndWaitForDaemon helper | Prior PID dies within timeout (no WARN), prior PID never dies (one WARN + bounded wall time via injected clock), missing PID file, dead prior PID, unreadable/empty/malformed PID file, polling clock + IsProcessAlive + ReadPIDFile all seamed for injection, 5 s timeout sized above 3.9 s cold-sweep ceiling, helper returns non-fatally on timeout |
 | multiple-state-daemons-running-concurrently-2-2 | Wire barrier into both kill call sites (EnsurePortalSaverVersion + BootstrapPortalSaver) | Steady-state path untouched when version matches and saver alive (helper not invoked), both call sites verified to invoke shared helper via injection recorder, kill failures still tolerated as today, no behaviour change beyond barrier wait |
 | multiple-state-daemons-running-concurrently-2-3 | Real-tmux integration test asserts singleton invariant after recycle | Skipped when tmux unavailable, exercises real portalSaverVersionMismatch (no new seam), daemon.version written directly between two EnsurePortalSaverVersion calls, pgrep -P <tmux-server-pid> -f 'portal state daemon' count == 1 asserted after both calls return, per-test t.TempDir() isolation, no t.Parallel() |
+
+### Phase 3: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| multiple-state-daemons-running-concurrently-3-1 | Restore spec-mandated pgrep server-children assertion in singleton integration test | pgrep -P <serverPID> -f 'portal state daemon' returns exactly 1, existing alive/dead assertions retained, diagnostic message includes raw pgrep output on mismatch, hand-mutated kill-barrier skip confirms new assertion fails |
+| multiple-state-daemons-running-concurrently-3-2 | Replace literal "bootstrap" string with state.ComponentBootstrap constant at kill-barrier WARN site | No literal "bootstrap" remains as log component arg in portal_saver.go or hooks_register.go, all three call sites reference state.ComponentBootstrap, internal/state already imported, constant value unchanged so log-matching tests still pass |
+| multiple-state-daemons-running-concurrently-3-3 | Extract ProjectRoot + buildPortalBinary helpers from restoretest into an untagged file for default-lane test reuse | New build.go has no build tag and exports ProjectRoot + BuildPortalBinary, restoretest.go retains only integration-tagged surface, inlined helpers removed from portal_saver_integration_test.go, both default and integration lanes build, ~30 line net deletion |
+| multiple-state-daemons-running-concurrently-3-4 | Cover the ERROR-level log assertion for non-contention lock-acquire failure | PORTAL_LOG_LEVEL=error set via t.Setenv, portal.log read post-run, exactly one line contains both "ERROR" and "acquire daemon lock", non-zero exit + no state writes still asserted, hand-mutated removal of ERROR log call confirms the new assertion fails |
+| multiple-state-daemons-running-concurrently-3-5 | Reset daemonLockFile package var in every cmd-package test that runs the real lock path | Tests at lines 47, 65, 88, 112, 151, 174, 196, 355 add withDaemonLockFileReset(t), tests at 419/451/601 already correct (no change), daemonLockFile reset between tests, go test ./cmd/... passes, future tests would not observe leaked package-var state |

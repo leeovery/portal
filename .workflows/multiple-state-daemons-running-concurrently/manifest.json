@@ -49,7 +49,13 @@
             "multiple-state-daemons-running-concurrently-2": "tick-972c55",
             "multiple-state-daemons-running-concurrently-2-1": "tick-dea514",
             "multiple-state-daemons-running-concurrently-2-2": "tick-d4c184",
-            "multiple-state-daemons-running-concurrently-2-3": "tick-b1a379"
+            "multiple-state-daemons-running-concurrently-2-3": "tick-b1a379",
+            "multiple-state-daemons-running-concurrently-3": "tick-7cedf9",
+            "multiple-state-daemons-running-concurrently-3-1": "tick-1ad721",
+            "multiple-state-daemons-running-concurrently-3-2": "tick-591460",
+            "multiple-state-daemons-running-concurrently-3-3": "tick-becebd",
+            "multiple-state-daemons-running-concurrently-3-4": "tick-d9c4c7",
+            "multiple-state-daemons-running-concurrently-3-5": "tick-f94ceb"
           },
           "external_id": "tick-e65ae6"
         }
@@ -61,7 +67,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

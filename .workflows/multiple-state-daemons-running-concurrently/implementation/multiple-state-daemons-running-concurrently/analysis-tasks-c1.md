@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: multiple-state-daemons-running-concurrently (Cycle 1)
 
 ## Task 1: Restore spec-mandated pgrep server-children assertion in singleton integration test
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -33,7 +33,7 @@ sources: standards
 - Hand-mutate the implementation to skip the kill-barrier and confirm the new pgrep assertion fails, demonstrating the new assertion's added regression value.
 
 ## Task 2: Replace literal "bootstrap" string with state.ComponentBootstrap constant at kill-barrier WARN site
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
@@ -59,7 +59,7 @@ sources: standards, architecture
 - No new tests required — purely a consistency refactor.
 
 ## Task 3: Extract ProjectRoot + buildPortalBinary helpers from restoretest into an untagged file for default-lane test reuse
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -87,7 +87,7 @@ sources: duplication
 - Existing integration-tagged tests in `internal/restoretest/` continue to pass.
 
 ## Task 4: Cover the ERROR-level log assertion for non-contention lock-acquire failure
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -115,7 +115,7 @@ sources: standards
 - Hand-mutate `cmd/state_daemon.go:261` to remove the ERROR log call and confirm the test fails.
 
 ## Task 5: Reset daemonLockFile package var in every cmd-package test that runs the real lock path
-status: pending
+status: approved
 severity: low
 sources: architecture
 
