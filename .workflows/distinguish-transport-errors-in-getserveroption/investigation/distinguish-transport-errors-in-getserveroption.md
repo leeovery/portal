@@ -54,13 +54,162 @@ Direct reproduction in production is not realistic — local tmux socket failure
 
 ## Analysis
 
-*To be filled during Step 5.*
+### Initial Hypotheses
+
+- The conflation lives in `GetServerOption`; `TryGetServerOption`'s "dead branch" claim from the symptoms is mechanically true.
+- Only the `@portal-restoring` marker read at `markers.go:140` is meaningfully impacted; other server-option reads either don't exist or use the bulk path (`ShowAllServerOptions`).
+
+### Code Trace
+
+**Entry point — the conflation site:** `internal/tmux/tmux.go:304-310` (`GetServerOption`).
+
+```go
+func (c *Client) GetServerOption(name string) (string, error) {
+    output, err := c.cmd.Run("show-option", "-sv", name)
+    if err != nil {
+        return "", ErrOptionNotFound          // ← every error becomes this sentinel
+    }
+    return strings.TrimSpace(output), nil
+}
+```
+
+**Mechanical confirmation of the dead-branch claim** (`internal/tmux/tmux.go:317-326`):
+
+```go
+func (c *Client) TryGetServerOption(name string) (string, bool, error) {
+    val, err := c.GetServerOption(name)
+    if errors.Is(err, ErrOptionNotFound) {     // matches every non-nil err
+        return "", false, nil
+    }
+    if err != nil {                            // unreachable
+        return "", false, err
+    }
+    return val, true, nil
+}
+```
+
+The `if err != nil` branch at line 322 is unreachable: `GetServerOption` returns either `nil` (success) or `ErrOptionNotFound` (any failure). `errors.Is(err, ErrOptionNotFound)` matches every non-nil case.
+
+**tmux's actual error surface** (probed against tmux on Darwin 25.3.0):
+
+| Trigger                         | stderr                                                   | exit |
+|---------------------------------|----------------------------------------------------------|------|
+| Unknown `@` option              | `invalid option: @nonexistent-test-option-xyz`           | 1    |
+| Unknown non-prefixed option     | `invalid option: foo-bar-baz`                            | 1    |
+| Empty option name               | `ambiguous option: ` *(treated as ambiguous match)*      | 1    |
+| Wrong / nonexistent socket (`-L`) | `error connecting to /private/tmp/tmux-501//<sock> (No such file or directory)` | 1 |
+
+All exit code 1. The discriminator is **stderr content**, not the exit code. `RealCommander.Run` (`internal/tmux/tmux.go:39-46`) uses `cmd.Output()`, which populates `(*exec.ExitError).Stderr` automatically when `cmd.Stderr` is nil — so the stderr text is available on the returned error, just not surfaced through the `Commander` interface today.
+
+**Production consumers — direct callers of `GetServerOption`:**
+
+- None outside `internal/tmux/tmux.go` itself (`TryGetServerOption` is the only internal caller).
+
+**Production consumers — direct callers of `TryGetServerOption`:**
+
+- `internal/state/markers.go:140` — `IsRestoringSet(c RestoringChecker) (bool, error)`. The wrapper around the `@portal-restoring` marker read. Two production callers:
+  - `cmd/state_daemon.go:95-99` — `tick()` reads `@portal-restoring` once per second. On `err != nil`, logs warn and returns (skips the tick — conservative).
+  - `cmd/state_daemon.go:187-201` — `defaultShutdownFlush()` reads `@portal-restoring` at SIGHUP/SIGTERM. On `err != nil`, logs warn and returns nil (skips the final flush — conservative).
+
+Both downstream consumers want **conservative** behaviour on read failure: if we can't tell whether restoration is in progress, assume it is and skip. The bug inverts this — transport errors are converted to `(false, nil)` upstream, so the consumers proceed as if restoration is NOT in progress and commit potentially-corrupt state.
+
+**Production callers of `TryGetServerOption` outside `IsRestoringSet`:** none. Every other reference is in test code (assertion-only).
+
+### Adjacent Patterns Audited (Wide Scope)
+
+- **`ShowAllServerOptions`** (`internal/tmux/tmux.go:337-343`) propagates errors correctly: `return "", fmt.Errorf("failed to show server options: %w", err)`. No conflation.
+- **`ListSkeletonMarkers`** (`internal/state/markers.go:61-93`) consumes `ShowAllServerOptions`, returns `(nil, err)` on failure — clean. The skeleton-marker enumeration path used by the daemon's per-tick capture cycle is unaffected by this bug.
+- **`SetServerOption` / `UnsetServerOption`** (paths used by the marker writers) propagate errors normally — write-side is not affected.
+
+The bug is **isolated to `GetServerOption`** and its single wrapper `TryGetServerOption`. The wide-scope audit confirms no other surface in `internal/tmux` exhibits the same shape.
+
+### Documented Contract Violations
+
+Three production sites assert distinguishability that is not delivered:
+
+1. `internal/tmux/tmux.go:312-316` — `TryGetServerOption` docstring: *"distinguishing absence from a real tmux failure (which surfaces as a non-nil error)."*
+2. `internal/state/markers.go:34-35` — `RestoringChecker` interface docstring: *"absence vs. real failure is distinguishable."*
+3. `internal/state/markers.go:136-138` — `IsRestoringSet` docstring: *"Any underlying tmux error is propagated so a real failure does not silently masquerade as 'not restoring'."*
+
+A fourth site documents the bug explicitly as a known gap awaiting this fix:
+
+4. `cmd/state_daemon_run_test.go:557-565` — comment block explaining that a test for *"conservatively skips the final flush when @portal-restoring read errors"* cannot be exercised through the public Client surface today because of the conflation, and that *"the defensive code is preserved for future refactors that distinguish 'real failure' from 'not found'."*
+
+### Root Cause
+
+`GetServerOption` discards the underlying tmux error and substitutes a sentinel that downstream callers interpret as "option absent." Three documented promises of distinguishability are violated; a known-defensive code branch in the SIGHUP/SIGTERM flush handler is unreachable; the daemon's two restoration-gate read sites (per-tick and at shutdown) silently flip from conservative-on-error to permissive-on-error in the presence of any transient tmux failure.
+
+**Why this happens:**
+
+`RealCommander.Run` uses `cmd.Output()`, which returns a typed `*exec.ExitError` whose `.Stderr` field holds tmux's actual diagnostic message (`invalid option: ...`, `error connecting to ...`, etc.). The `Commander` interface erases this distinction by returning a bare `error`, and `GetServerOption` does not type-assert to recover the stderr text. The simplest assumption — "any error means option absent" — is wrong, but worked well enough that the bug stayed latent until the wrapper was added with a docstring asserting otherwise.
+
+### Contributing Factors
+
+- The `Commander` interface signature `(string, error)` discards the stderr distinction. Callers cannot route on stderr content without type-asserting on `*exec.ExitError`, which couples them to `os/exec` and breaks the mock surface.
+- The "default to ErrOptionNotFound" pattern is tempting because the legitimate "not found" case is by far the most common — every other use of `GetServerOption` was for an existence check that happily treats failure as absence.
+- The first wrapper (`TryGetServerOption`) was added with a contract the underlying primitive could not deliver. The dead branch was retained as defensive code "for future refactors" — the test-file comment block (`state_daemon_run_test.go:557-565`) documents this anticipation explicitly.
+
+### Why It Wasn't Caught
+
+- No test exercises the transport-error path through `GetServerOption` with a real `*exec.ExitError`. Existing tests at `internal/tmux/tmux_test.go:924-934` use `errors.New("unknown option: @portal-active-%3")` — a synthetic error string that never gets inspected. Under the current behaviour, any error becomes `ErrOptionNotFound`, so the test passes without exercising stderr inspection.
+- The `defaultShutdownFlush` `if err != nil` branch is unreachable through the public `Client` surface and is documented as such — *"verified by inspection,"* not by test.
+- Production has not surfaced the bug because tmux runs against a local socket; transient transport failures are vanishingly rare. The bug is structural, not observed.
+
+### Blast Radius
+
+**Directly affected:**
+
+- `internal/tmux/tmux.go` — `GetServerOption`, `TryGetServerOption`, and `ErrOptionNotFound` semantics.
+- `internal/state/markers.go` — `IsRestoringSet` and the `RestoringChecker` seam docstring.
+- `cmd/state_daemon.go` — `tick()` and `defaultShutdownFlush()` are the impacted *consumers*, but their code is already correct. They will start receiving the errors they were always expecting.
+
+**Potentially affected:**
+
+- `internal/tmux/tmux_test.go` — `TestGetServerOption` and `TestTryGetServerOption` cases will need to be reshaped: the existing "unknown option:" string-based test must construct an error whose stderr matches the "option not found" pattern, and a new transport-error case must be added.
+- `cmd/state_daemon_run_test.go:557-565` — the documented-gap test for `defaultShutdownFlush`'s err branch becomes writable once the wrapper propagates errors.
+- `internal/state/markers_test.go:206` — `TestIsRestoringSet`'s "tmux exploded" case already covers the err-propagation behaviour against a mock, so it continues to pass; the test is currently testing a property the production code couldn't reach.
 
 ---
 
 ## Fix Direction
 
-*To be filled during Steps 6–8.*
+### Chosen Approach
+
+*To be confirmed during Step 8 findings review.*
+
+Working hypothesis: introduce stderr inspection inside `GetServerOption` to distinguish "option not found" (stderr matches tmux's `invalid option:` / `unknown option:` / `ambiguous option:` family) from "any other failure" (propagated as a wrapped error). `TryGetServerOption`'s dead branch becomes live; `IsRestoringSet` finally delivers on its docstring; the two daemon consumers' existing conservative-on-error paths start firing on transport blips.
+
+Mechanical sketch:
+
+1. **At the `Commander` layer**: have `RealCommander.Run` capture stderr alongside stdout, exposing the underlying tmux diagnostic via a typed error (`type CommandError struct { Stderr string; Underlying error }`). Mock commanders gain a parallel `Stderr` field on synthetic errors.
+2. **At the `GetServerOption` layer**: type-assert (or `errors.As`) on the typed error; if `Stderr` matches the "option not found" pattern family, return `ErrOptionNotFound`; otherwise propagate the wrapped error.
+3. **Update docstrings/tests** at the three contract-assertion sites + the unreachable test-comment site. The known-gap test for `defaultShutdownFlush` can now be written.
+
+### Options Explored
+
+- **Inline type-assert against `*exec.ExitError` inside `GetServerOption`.** Rejected as primary path: couples `internal/tmux` directly to `os/exec` semantics through a public API, and the `Commander` interface mocks would need to construct synthetic `*exec.ExitError` instances (awkward; the struct is partially internal-zone-of-control).
+- **String-match against `err.Error()` at the `GetServerOption` layer.** Rejected: `(*exec.ExitError).Error()` returns something like `"exit status 1"` — the stderr is on `.Stderr`, not in the error string. So this approach doesn't work without first wrapping the error to embed stderr in its text.
+- **Wrap stderr into the error string at the `RealCommander.Run` layer** (e.g., `fmt.Errorf("%w: %s", err, stderr)`). Workable but brittle — couples the discriminator to formatting choices and forces string-match in `GetServerOption`. Less testable than a typed-error approach.
+- **Typed error at the `Commander` layer** (working approach in *Chosen Approach* above). Preferred: explicit, mockable via a struct-literal in tests, type-safe at the discriminator site.
+
+### Discussion
+
+*To be filled during Step 8 findings review.*
+
+### Testing Recommendations
+
+- Add `TestGetServerOption_TransportError` exercising a synthetic stderr that does NOT match the "option not found" pattern family — expect non-nil error, not `ErrOptionNotFound`.
+- Reshape `TestGetServerOption :: returns ErrOptionNotFound when option does not exist` to construct an error with stderr matching `invalid option: ...` (or whichever pattern family the fix codifies).
+- Add `TestTryGetServerOption_PropagatesTransportError` covering the previously-unreachable `if err != nil { return "", false, err }` branch.
+- Write the documented-gap test in `cmd/state_daemon_run_test.go` for `defaultShutdownFlush`'s `if err != nil { return nil }` branch — the comment block at lines 557-565 can be removed and replaced with the actual test.
+- Confirm `TestIsRestoringSet :: tmux exploded` (markers_test.go:206) continues to pass — it asserts the contract that the production code is finally able to deliver on.
+
+### Risk Assessment
+
+- **Fix complexity:** Medium. Touches `Commander` interface (or its underlying primitive), `GetServerOption`, `TryGetServerOption`, plus test reshapes at 3 sites. Daemon consumer code is unchanged.
+- **Regression risk:** Low. The behavioural change is "transport errors now propagate," which downstream consumers already had defensive handling for (they just couldn't reach those branches). No new failure mode introduced — only previously-suppressed failure modes surfaced into the existing error-handling paths.
+- **Recommended approach:** Regular release. No incident pressure; no hotfix justification.
+
 
 ---
 
