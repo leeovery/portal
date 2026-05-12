@@ -579,7 +579,7 @@ func TestStateDaemon_DoesNotOverwritePIDFileWhenLockHeld(t *testing.T) {
 }
 
 func TestStateDaemon_ReturnsErrorOnNonContentionLockFailure(t *testing.T) {
-	// ERROR is above the default INFO threshold, but we set the level
+	// ERROR is above the default WARN threshold, but we set the level
 	// explicitly so we are not depending on the env default.
 	t.Setenv("PORTAL_LOG_LEVEL", "error")
 	dir := t.TempDir()
