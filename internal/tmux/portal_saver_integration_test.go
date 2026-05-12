@@ -166,14 +166,8 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	}
 	sock.WaitForSession(t, tmux.PortalSaverName, singletonRecycleTimeout)
 
-	// Capture tmux server PID for the on-failure diagnostic dump.
-	// display-message -p '#{pid}' returns the server PID followed by
-	// a trailing newline.
-	serverPIDOut := sock.Run(t, "display-message", "-p", "#{pid}")
-	serverPID, err := strconv.Atoi(strings.TrimSpace(serverPIDOut))
-	if err != nil {
-		t.Fatalf("parse tmux server PID %q: %v", serverPIDOut, err)
-	}
+	// Capture pre-recycle server PID for the on-failure diagnostic dump.
+	serverPID := captureTmuxServerPID(t, sock)
 
 	// Poll for daemon.pid to exist and point at a live process. The
 	// daemon's startup is async wrt the tmux new-session return: the
