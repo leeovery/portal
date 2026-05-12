@@ -46,6 +46,7 @@ package tmux_test
 // too — t.Parallel is forbidden across the portal test suite.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -219,6 +220,80 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 		dumpDiagnostics(t, dir, serverPID, priorPID, currentPID,
 			"current daemon (pid=%d) is not alive after recycle — recycle failed to spawn replacement", currentPID)
 	}
+
+	// Spec-mandated structural assertion (specification.md § Acceptance
+	// Criteria → Singleton invariant; § Test Strategy → Integration test
+	// — singleton invariant under real tmux): count children of the tmux
+	// server matching the `portal state daemon` argv and assert exactly
+	// one. This is the load-bearing assertion shape from the spec — the
+	// alive/dead pair above is necessary but not sufficient (it cannot
+	// observe orphans that are not pointed at by daemon.pid). pgrep -P
+	// over the tmux server PID catches any extra daemon process the
+	// tmux server has parented, whether the pidfile knows about it or
+	// not.
+	//
+	// Note on serverPID: the `serverPID` captured at line ~170 is the
+	// PID of the *pre-recycle* tmux server. Because the test's second
+	// EnsurePortalSaverVersion call kills the `_portal-saver` session,
+	// and that session is the only session on the isolated socket, the
+	// tmux server itself exits and is respawned by the subsequent
+	// BootstrapPortalSaver call. We re-capture the post-recycle server
+	// PID here so the pgrep parent filter is keyed on the *currently
+	// live* server. Verified by direct probing on darwin/tmux 3.6a:
+	// using the pre-recycle serverPID gives `pgrep -P <stalePID>` an
+	// exit-1 ("no match") because the PID no longer exists, which would
+	// over-fail this assertion in a way unrelated to the singleton
+	// invariant under test.
+	postRecycleServerPID := captureTmuxServerPID(t, sock)
+	count, raw := countDaemonChildren(t, postRecycleServerPID)
+	if count != 1 {
+		dumpDiagnostics(t, dir, postRecycleServerPID, priorPID, currentPID,
+			"expected exactly 1 `portal state daemon` child of tmux server (pid=%d), got %d\npgrep raw output:\n%s",
+			postRecycleServerPID, count, raw)
+	}
+}
+
+// captureTmuxServerPID reads the post-recycle tmux server PID via
+// `display-message -p '#{pid}'`. Extracted as a helper because the test
+// captures the server PID twice: once early (for the pre-recycle
+// diagnostic surface) and once after the recycle (for the pgrep
+// parent-filter assertion). Fatals the test if the value cannot be
+// parsed as an integer.
+func captureTmuxServerPID(t *testing.T, sock *tmuxtest.Socket) int {
+	t.Helper()
+	out := sock.Run(t, "display-message", "-p", "#{pid}")
+	pid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		t.Fatalf("parse tmux server PID %q: %v", out, err)
+	}
+	return pid
+}
+
+// countDaemonChildren executes `pgrep -P <serverPID> -f 'portal state
+// daemon'` and returns the number of matched PIDs along with the raw
+// output for diagnostic dumps. pgrep exit semantics: 0 = match, 1 = no
+// match (empty stdout, not an error here), 2+ = pgrep error. Empty
+// stdout (the no-match case) returns count 0, not an error; non-empty
+// stdout counts newline-terminated PID lines.
+func countDaemonChildren(t *testing.T, serverPID int) (int, string) {
+	t.Helper()
+	out, err := exec.Command("pgrep", "-P", strconv.Itoa(serverPID), "-f", "portal state daemon").Output()
+	if err != nil {
+		// pgrep exit 1 means "no matches" — surface as count 0 with
+		// empty raw output. Any other exit is a pgrep-side problem;
+		// surface the error in the raw string so the diagnostic dump
+		// makes the cause obvious.
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return 0, ""
+		}
+		return 0, fmt.Sprintf("pgrep error: %v\nstderr/stdout: %s", err, string(out))
+	}
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return 0, ""
+	}
+	return len(strings.Split(trimmed, "\n")), string(out)
 }
 
 // waitForLiveDaemon polls daemon.pid until the file exists, parses to
