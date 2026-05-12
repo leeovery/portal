@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/leeovery/portal/internal/state"
 )
 
 // saveTriggerEvents lists every tmux event on which Portal registers a
@@ -218,7 +220,7 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 
 		for _, idx := range staleIndices {
 			if err := c.UnsetGlobalHookAt(event, idx); err != nil {
-				log.Warn("bootstrap", "failed to evict stale signal-hydrate hook on %s at index %d: %v", event, idx, err)
+				log.Warn(state.ComponentBootstrap, "failed to evict stale signal-hydrate hook on %s at index %d: %v", event, idx, err)
 				continue
 			}
 			evicted++
@@ -226,7 +228,7 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	}
 
 	if evicted > 0 {
-		log.Info("bootstrap", "evicted %d stale signal-hydrate hook(s) lacking '--' separator", evicted)
+		log.Info(state.ComponentBootstrap, "evicted %d stale signal-hydrate hook(s) lacking '--' separator", evicted)
 	}
 
 	return evicted, nil

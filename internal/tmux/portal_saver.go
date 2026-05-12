@@ -174,7 +174,7 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 		}
 		if !time.Now().Before(deadline) {
 			killBarrierLogger.Warn(
-				"bootstrap",
+				state.ComponentBootstrap,
 				"prior daemon (pid=%d) did not exit within %v",
 				priorPID,
 				killBarrierTimeout,
