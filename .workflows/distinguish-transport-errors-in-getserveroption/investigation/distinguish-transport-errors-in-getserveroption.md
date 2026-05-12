@@ -175,26 +175,31 @@ A fourth site documents the bug explicitly as a known gap awaiting this fix:
 
 ### Chosen Approach
 
-*To be confirmed during Step 8 findings review.*
+**Typed `CommandError` at the `Commander` layer.**
 
-Working hypothesis: introduce stderr inspection inside `GetServerOption` to distinguish "option not found" (stderr matches tmux's `invalid option:` / `unknown option:` / `ambiguous option:` family) from "any other failure" (propagated as a wrapped error). `TryGetServerOption`'s dead branch becomes live; `IsRestoringSet` finally delivers on its docstring; the two daemon consumers' existing conservative-on-error paths start firing on transport blips.
+1. **At the `Commander` layer**: introduce `type CommandError struct { Stderr string; Err error }` in `internal/tmux`. `RealCommander.Run` and `RealCommander.RunRaw` wrap `*exec.ExitError` into `CommandError`, capturing `(*exec.ExitError).Stderr`. Non-`ExitError` failures (executable not found, etc.) are wrapped with an empty `Stderr` so discriminators that examine `Stderr` see "no signal" rather than a misleading match.
+2. **At the `GetServerOption` layer**: use `errors.As(err, &cmdErr)` to extract `Stderr`, substring-match against the "option not found" pattern family (`invalid option:`, `unknown option:`, `ambiguous option:`), and return `ErrOptionNotFound` only on match; otherwise propagate the wrapped `CommandError` to the caller. The pattern set is a small package-level slice — cross-tmux-version tolerant, not a single literal.
+3. **At `TryGetServerOption`**: the existing `errors.Is(err, ErrOptionNotFound)` branch keeps doing the right thing; the `if err != nil { return "", false, err }` branch becomes live for the first time.
+4. **Docstrings/tests**: update the three contract-assertion sites (tmux.go:312-316, markers.go:34-35, markers.go:136-138) to match what the code now delivers. Write the previously-blocked test for `defaultShutdownFlush`'s err branch in `cmd/state_daemon_run_test.go` and remove the documenting-gap comment block at lines 557-565.
 
-Mechanical sketch:
-
-1. **At the `Commander` layer**: have `RealCommander.Run` capture stderr alongside stdout, exposing the underlying tmux diagnostic via a typed error (`type CommandError struct { Stderr string; Underlying error }`). Mock commanders gain a parallel `Stderr` field on synthetic errors.
-2. **At the `GetServerOption` layer**: type-assert (or `errors.As`) on the typed error; if `Stderr` matches the "option not found" pattern family, return `ErrOptionNotFound`; otherwise propagate the wrapped error.
-3. **Update docstrings/tests** at the three contract-assertion sites + the unreachable test-comment site. The known-gap test for `defaultShutdownFlush` can now be written.
+**Deciding factor:** puts the diagnostic shape in the type system where the existing docstrings already pretend it lives; mocks remain trivial (struct-literal `CommandError{Stderr: "invalid option: @foo"}`); future discriminators (e.g., "tmux server crashed" vs "tmux not installed") get the same channel without API drift; daemon consumer code is untouched.
 
 ### Options Explored
 
-- **Inline type-assert against `*exec.ExitError` inside `GetServerOption`.** Rejected as primary path: couples `internal/tmux` directly to `os/exec` semantics through a public API, and the `Commander` interface mocks would need to construct synthetic `*exec.ExitError` instances (awkward; the struct is partially internal-zone-of-control).
-- **String-match against `err.Error()` at the `GetServerOption` layer.** Rejected: `(*exec.ExitError).Error()` returns something like `"exit status 1"` — the stderr is on `.Stderr`, not in the error string. So this approach doesn't work without first wrapping the error to embed stderr in its text.
-- **Wrap stderr into the error string at the `RealCommander.Run` layer** (e.g., `fmt.Errorf("%w: %s", err, stderr)`). Workable but brittle — couples the discriminator to formatting choices and forces string-match in `GetServerOption`. Less testable than a typed-error approach.
-- **Typed error at the `Commander` layer** (working approach in *Chosen Approach* above). Preferred: explicit, mockable via a struct-literal in tests, type-safe at the discriminator site.
+- **A. Typed `CommandError` at the `Commander` layer.** *(Chosen — see above.)*
+- **B. Stderr-embedded error string via `fmt.Errorf("%w: %s", err, stderr)` at the `Commander` layer.** Rejected: discriminator becomes a substring-match against a formatted error string; brittle if the wrap format ever changes; harder to test the boundary cleanly.
+- **C. New `Commander.RunWithStderr(args...) (out, stderr string, err error)` method.** Rejected: parallel API surface forces every mock to stub a second method; doesn't fix similar latent conflations if added later; smaller upfront diff but worse shape long-term.
+- **D. Inline type-assert against `*exec.ExitError` inside `GetServerOption`.** Rejected as a primary path: couples `internal/tmux` directly to `os/exec` semantics through the public discriminator site; `Commander` mocks would need to construct synthetic `*exec.ExitError` instances, which is awkward because the struct's fields are partly outside our zone of control.
+- **E. String-match against `err.Error()` at the `GetServerOption` layer (no wrap).** Rejected on examination: `(*exec.ExitError).Error()` returns `"exit status 1"` — the stderr is on `.Stderr`, not in the error string. The approach is mechanically broken without first wrapping the error to embed stderr in its text.
 
 ### Discussion
 
-*To be filled during Step 8 findings review.*
+Findings review with the user was brief and confirmatory. The user agreed with the structural choice on first pass; no alternatives were challenged and no edge cases were raised. The wide-scope audit had already de-risked the structural assumptions: only `GetServerOption` exhibits the conflation, `ShowAllServerOptions` and `ListSkeletonMarkers` are clean, the production consumer count is exactly two (both already conservative-on-error), and a fourth contract-violation site (the test comment at `cmd/state_daemon_run_test.go:557-565`) explicitly documents the bug and anticipates this fix.
+
+Two implementation-time decisions were intentionally left for the specification / planning phases rather than pinned here:
+
+- **Exact `CommandError` placement and exported-ness**: package-level type in `internal/tmux`, or a more constrained location. Either is workable; the spec will pin.
+- **Pattern-family literal**: the working set is `invalid option:`, `unknown option:`, `ambiguous option:`. Spec phase confirms against tmux's source (or a documented compatibility floor) whether to widen or narrow.
 
 ### Testing Recommendations
 
