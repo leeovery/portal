@@ -149,6 +149,7 @@ func TestVersionGuard_NotInvokedForExemptCommands(t *testing.T) {
 				prev := daemonRunFunc
 				daemonRunFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
 				t.Cleanup(func() { daemonRunFunc = prev })
+				withDaemonLockFileReset(t)
 			}
 
 			// state status now renders a real diagnostic; an empty state

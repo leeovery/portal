@@ -66,9 +66,9 @@
         "multiple-state-daemons-running-concurrently": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
-          "fix_attempts": 0,
+          "fix_attempts": 2,
           "analysis_cycle": 1,
           "linters": [
             {
@@ -88,7 +88,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 3,
-          "current_task": "tick-f94ceb",
+          "current_task": "~",
           "completed_tasks": [
             "multiple-state-daemons-running-concurrently-1-1",
             "multiple-state-daemons-running-concurrently-1-2",
@@ -100,11 +100,13 @@
             "multiple-state-daemons-running-concurrently-3-1",
             "multiple-state-daemons-running-concurrently-3-2",
             "multiple-state-daemons-running-concurrently-3-3",
-            "multiple-state-daemons-running-concurrently-3-4"
+            "multiple-state-daemons-running-concurrently-3-4",
+            "multiple-state-daemons-running-concurrently-3-5"
           ],
           "completed_phases": [
             1,
-            2
+            2,
+            3
           ]
         }
       }

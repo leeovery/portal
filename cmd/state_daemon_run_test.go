@@ -591,6 +591,7 @@ func TestDaemonStartup_SeedsHashMapFromDisk(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { daemonRunFunc = prev })
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("runStateDaemon: %v", err)
@@ -638,6 +639,7 @@ func TestDaemonStartup_LoadsPrevIndexFromSessionsJSON(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { daemonRunFunc = prev })
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("runStateDaemon: %v", err)
@@ -665,6 +667,7 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { daemonRunFunc = prev })
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("runStateDaemon: %v", err)
@@ -703,6 +706,7 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { daemonRunFunc = prev })
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("runStateDaemon: %v", err)

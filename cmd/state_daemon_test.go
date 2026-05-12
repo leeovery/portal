@@ -48,6 +48,7 @@ func TestStateDaemon_WritesPIDFileOnStartup(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,6 +72,7 @@ func TestStateDaemon_WritesVersionFileOnStartup(t *testing.T) {
 	t.Cleanup(func() { version = prev })
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -99,6 +101,7 @@ func TestStateDaemon_ClearsStaleSaveRequestedOnStartup(t *testing.T) {
 	}
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -126,6 +129,7 @@ func TestStateDaemon_OverwritesPIDAndVersionAcrossInvocations(t *testing.T) {
 	t.Cleanup(func() { version = prev })
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,6 +158,7 @@ func TestStateDaemon_CreatesStateDirectoryIfMissing(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -178,6 +183,7 @@ func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -196,6 +202,7 @@ func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
 func TestStateDaemon_PassesPreparedDepsToRunFunc(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
 	holder := new(*daemonDeps)
 	prev := daemonRunFunc
@@ -253,6 +260,7 @@ func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
 	fc := &fakeCommander{getValue: "1"}
 	client := tmux.NewClient(fc)
@@ -287,6 +295,7 @@ func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
 	fc := &fakeCommander{getErr: tmux.ErrOptionNotFound}
 	client := tmux.NewClient(fc)
@@ -363,6 +372,7 @@ func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
 	t.Cleanup(func() { version = prev })
 
 	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -384,6 +394,7 @@ func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
 func TestStateDaemon_RunFuncErrorPropagates(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
 	sentinel := errors.New("boom")
 	prev := daemonRunFunc

@@ -179,6 +179,7 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 				prev := daemonRunFunc
 				daemonRunFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
 				t.Cleanup(func() { daemonRunFunc = prev })
+				withDaemonLockFileReset(t)
 			}
 
 			// state hydrate's RunE blocks on a real FIFO; stub the run-func so
