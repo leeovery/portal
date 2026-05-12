@@ -31,34 +31,6 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// ProjectRoot walks up from the current working directory until it finds
-// a directory containing go.mod. Returns the absolute path of that
-// directory. Used to anchor `go build` invocations regardless of the
-// caller test binary's runtime CWD (cmd/, internal/restore/, etc.).
-//
-// Returns an error rather than fatalling so it can be reused by helpers
-// that also return error (BuildPortalBinaryStable) without dragging
-// *testing.T into pure plumbing.
-//
-// Exported because internal/restoretest/restoretest_test.go (external
-// _test package) exercises this helper's contract directly.
-func ProjectRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("getwd: %w", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("go.mod not found above %s", dir)
-		}
-		dir = parent
-	}
-}
-
 // BuildPortalBinaryDir compiles `portal` into a fresh t.TempDir and
 // returns the directory containing the binary. The caller typically
 // follows up with PrependPATH(t, dir) so the in-pane hydrate helper
@@ -96,23 +68,6 @@ func BuildPortalBinaryStable() (string, error) {
 		return "", err
 	}
 	return dir, nil
-}
-
-// buildPortalBinaryInto compiles the portal CLI into dir/portal. Shared
-// by BuildPortalBinaryDir and BuildPortalBinaryStable so the underlying
-// `go build` invocation lives in one place.
-func buildPortalBinaryInto(dir string) error {
-	binary := filepath.Join(dir, "portal")
-	root, err := ProjectRoot()
-	if err != nil {
-		return fmt.Errorf("locate project root: %w", err)
-	}
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go build: %v\n%s", err, out)
-	}
-	return nil
 }
 
 // PrependPATH prefixes dir to the test process's PATH using t.Setenv,

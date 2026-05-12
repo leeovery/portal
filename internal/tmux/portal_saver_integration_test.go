@@ -56,6 +56,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -129,8 +130,8 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// machine without `go` on PATH (or a broken build) should skip
 	// cleanly rather than fail with a noisy build error — the
 	// invariant under test is structural, not "go build works".
-	binDir, err := buildPortalBinaryForSingletonTest(t)
-	if err != nil {
+	binDir := t.TempDir()
+	if err := restoretest.BuildPortalBinary(binDir); err != nil {
 		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
 	}
 	// PATH inheritance: t.Setenv guarantees PATH is restored on test
@@ -381,56 +382,4 @@ func dumpDiagnostics(t *testing.T, dir string, serverPID, priorPID, currentPID i
 	fmt.Fprintf(&b, "pgrep -fl 'portal state daemon':\n%s", string(out))
 
 	t.Fatalf(format+"\n\nDiagnostics:\n%s", append(args, b.String())...)
-}
-
-// buildPortalBinaryForSingletonTest compiles the portal CLI into a
-// t.TempDir and returns the directory containing the binary. Inlined
-// here (rather than imported from internal/restoretest) because that
-// package is `//go:build integration` and this test file is not
-// behind that tag — the singleton-invariant integration test runs
-// under the default `go test ./...` lane where any developer (or CI
-// without the integration tag) can catch a regression.
-//
-// Returns an error rather than fatalling so the caller can decide
-// whether a build failure is a hard fail or a clean skip — the
-// singleton-invariant test treats it as a skip because the test
-// exercises a real subprocess and is meaningful only when the binary
-// can actually be spawned.
-func buildPortalBinaryForSingletonTest(t *testing.T) (string, error) {
-	t.Helper()
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "portal")
-
-	root, err := projectRootForSingletonTest()
-	if err != nil {
-		return "", fmt.Errorf("locate project root: %w", err)
-	}
-	cmd := exec.Command("go", "build", "-o", binary, ".")
-	cmd.Dir = root
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("go build: %v\n%s", err, out)
-	}
-	return dir, nil
-}
-
-// projectRootForSingletonTest walks up from the test's working
-// directory until it finds a directory containing go.mod, returning
-// the absolute path. Inlined for the same reason as
-// buildPortalBinaryForSingletonTest above — restoretest.ProjectRoot
-// lives under `//go:build integration`.
-func projectRootForSingletonTest() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("getwd: %w", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("go.mod not found above %s", dir)
-		}
-		dir = parent
-	}
 }

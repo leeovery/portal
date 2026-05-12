@@ -12,13 +12,18 @@
 //	    waitfor_file_exists.go.
 //	  - OpenTestLogger — *state.Logger opener that registers t.Cleanup,
 //	    defined in logger.go.
+//	  - ProjectRoot — repo-root resolver shared by the build helpers,
+//	    defined in build.go.
+//	  - BuildPortalBinary — pure error-returning `go build .` wrapper
+//	    for default-lane callers (e.g. the singleton-invariant test in
+//	    internal/tmux/), defined in build.go.
 //	  These run under default `go test ./...` and have no dependency on
-//	  tmux fixtures or the portal binary.
+//	  tmux fixtures.
 //
 //	Integration-only (`//go:build integration`):
 //	  - BuildPortalBinaryDir / BuildPortalBinaryStable — `go build` the
 //	    portal CLI for the in-pane hydrate helper to resolve on PATH.
-//	  - ProjectRoot — repo-root resolver shared by the build helpers.
+//	    Thin wrappers over the untagged buildPortalBinaryInto helper.
 //	  - PrependPATH — t.Setenv-based PATH manipulation.
 //	  - DriveSignalHydrate / DriveSignalHydrateBinary — direct FIFO-byte
 //	    writer (DriveSignalHydrate) and its `portal state signal-hydrate`
