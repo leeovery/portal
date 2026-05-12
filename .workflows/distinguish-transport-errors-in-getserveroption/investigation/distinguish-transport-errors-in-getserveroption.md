@@ -67,3 +67,4 @@ Direct reproduction in production is not realistic — local tmux socket failure
 ## Notes
 
 - The original motivation (a hook-executor "two-condition check") no longer exists — hook firing migrated into the hydrate helper's exec chain. The original symptom site is gone; the architectural concern moved to marker-state reads in the daemon's restoration-window logic.
+- **Investigation scope (user-confirmed):** wide. Verify the dead-branch claim, confirm `markers.go:140` consumer impact, enumerate *every* caller of `GetServerOption` / `TryGetServerOption` and assess each, and audit adjacent error-mapping patterns in `internal/tmux` (e.g., `ShowAllServerOptions`, `ListSkeletonMarkers`) for the same shape of bug.
