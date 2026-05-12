@@ -568,6 +568,9 @@ func TestStateDaemon_DoesNotOverwritePIDFileWhenLockHeld(t *testing.T) {
 }
 
 func TestStateDaemon_ReturnsErrorOnNonContentionLockFailure(t *testing.T) {
+	// ERROR is above the default INFO threshold, but we set the level
+	// explicitly so we are not depending on the env default.
+	t.Setenv("PORTAL_LOG_LEVEL", "error")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	withDaemonLockFileReset(t)
@@ -595,6 +598,33 @@ func TestStateDaemon_ReturnsErrorOnNonContentionLockFailure(t *testing.T) {
 	// State files must not be written on the fatal error path.
 	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
 		t.Errorf("daemon.pid must not exist on lock-error path; stat err = %v", err)
+	}
+
+	// Spec § Fix Part 1 → Lock-file create/open semantics requires
+	// non-EWOULDBLOCK open(2)/flock failures to emit an ERROR-level log
+	// line. Mirror the WARN-on-contention sibling test: assert exactly one
+	// such line is present so this fatal path is not silent and not noisy.
+	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "ERROR") {
+		t.Errorf("expected an ERROR log line; got:\n%s", got)
+	}
+	if !strings.Contains(got, "acquire daemon lock") {
+		t.Errorf("expected lock-acquire error log content; got:\n%s", got)
+	}
+	// Exactly one matching line — the fatal path must not be noisy.
+	var matches int
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "ERROR") && strings.Contains(line, "acquire daemon lock") {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Errorf("expected exactly one ERROR line containing %q; got %d in:\n%s",
+			"acquire daemon lock", matches, got)
 	}
 }
 
