@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "distinguish-transport-errors-in-getserveroption": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-05-12",
+          "sources": {
+            "distinguish-transport-errors-in-getserveroption": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
