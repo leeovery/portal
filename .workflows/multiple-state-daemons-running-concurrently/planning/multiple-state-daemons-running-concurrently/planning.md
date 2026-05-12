@@ -80,3 +80,13 @@ approved_at: 2026-05-11
 | multiple-state-daemons-running-concurrently-3-3 | Extract ProjectRoot + buildPortalBinary helpers from restoretest into an untagged file for default-lane test reuse | New build.go has no build tag and exports ProjectRoot + BuildPortalBinary, restoretest.go retains only integration-tagged surface, inlined helpers removed from portal_saver_integration_test.go, both default and integration lanes build, ~30 line net deletion |
 | multiple-state-daemons-running-concurrently-3-4 | Cover the ERROR-level log assertion for non-contention lock-acquire failure | PORTAL_LOG_LEVEL=error set via t.Setenv, portal.log read post-run, exactly one line contains both "ERROR" and "acquire daemon lock", non-zero exit + no state writes still asserted, hand-mutated removal of ERROR log call confirms the new assertion fails |
 | multiple-state-daemons-running-concurrently-3-5 | Reset daemonLockFile package var in every cmd-package test that runs the real lock path | Tests at lines 47, 65, 88, 112, 151, 174, 196, 355 add withDaemonLockFileReset(t), tests at 419/451/601 already correct (no change), daemonLockFile reset between tests, go test ./cmd/... passes, future tests would not observe leaked package-var state |
+
+### Phase 4: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| multiple-state-daemons-running-concurrently-4-1 | Route pre-recycle tmux server PID capture through captureTmuxServerPID helper | Pre-recycle capture site routes through captureTmuxServerPID helper, serverPID variable name preserved for dumpDiagnostics call sites, no unused strconv/strings imports left behind, helper doc comment rationale becomes truthful, no behavioural change to test |
