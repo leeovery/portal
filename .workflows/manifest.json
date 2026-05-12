@@ -53,6 +53,9 @@
     },
     "multiple-state-daemons-running-concurrently": {
       "work_type": "bugfix"
+    },
+    "distinguish-transport-errors-in-getserveroption": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
