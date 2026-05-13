@@ -34,12 +34,16 @@
           "format": "tick",
           "spec_commit": "936b4ff473935ae2a4975b4af31e0a0a40e173e9",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "distinguish-transport-errors-in-getserveroption-1-1",
-          "task_map": {}
+          "task": "distinguish-transport-errors-in-getserveroption-1-2",
+          "task_map": {
+            "distinguish-transport-errors-in-getserveroption-1": "tick-40b5f7",
+            "distinguish-transport-errors-in-getserveroption-1-1": "tick-955a68"
+          },
+          "external_id": "tick-899e13"
         }
       }
     }
