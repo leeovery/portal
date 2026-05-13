@@ -82,7 +82,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 2,
-          "current_task": "distinguish-transport-errors-in-getserveroption-2-3",
+          "current_task": "~",
           "completed_tasks": [
             "distinguish-transport-errors-in-getserveroption-1-1",
             "distinguish-transport-errors-in-getserveroption-1-2",
@@ -90,10 +90,12 @@
             "distinguish-transport-errors-in-getserveroption-1-4",
             "distinguish-transport-errors-in-getserveroption-1-5",
             "distinguish-transport-errors-in-getserveroption-2-1",
-            "distinguish-transport-errors-in-getserveroption-2-2"
+            "distinguish-transport-errors-in-getserveroption-2-2",
+            "distinguish-transport-errors-in-getserveroption-2-3"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }

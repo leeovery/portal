@@ -198,6 +198,17 @@ func oneSession() (sessionsOut, panesOut string) {
 	return
 }
 
+// transportErrCommandError returns the canonical *tmux.CommandError used by
+// transport-error fault-injection tests. The Stderr does NOT match the
+// option-absent pattern family, so GetServerOption propagates it as a
+// non-ErrOptionNotFound error through TryGetServerOption to IsRestoringSet.
+func transportErrCommandError() *tmux.CommandError {
+	return &tmux.CommandError{
+		Stderr: "lost server",
+		Err:    errors.New("exit status 1"),
+	}
+}
+
 func TestDaemonTick_NoOpWhenNeitherDirtyNorGap(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -580,10 +591,7 @@ func TestDefaultShutdownFlush_SkipsOnTransportError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
-		optionErr: &tmux.CommandError{
-			Stderr: "lost server",
-			Err:    errors.New("exit status 1"),
-		},
+		optionErr: transportErrCommandError(),
 		// Seed sessions output so any leak through to captureAndCommit would
 		// surface as a list-sessions call we can assert against.
 		sessionsOut: "work|1|0",
@@ -618,10 +626,7 @@ func TestTick_SkipsOnTransportError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
-		optionErr: &tmux.CommandError{
-			Stderr: "lost server",
-			Err:    errors.New("exit status 1"),
-		},
+		optionErr:   transportErrCommandError(),
 		sessionsOut: "work|1|0",
 	}
 	deps := makeDeps(t, dir, fc)
