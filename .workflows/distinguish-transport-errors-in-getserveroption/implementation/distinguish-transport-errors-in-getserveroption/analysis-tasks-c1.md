@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: distinguish-transport-errors-in-getserveroption (Cycle 1)
 
 ## Task 1: Extract CommandError wrap recipe into shared helper
-status: pending
+status: approved
 severity: high
 sources: duplication, architecture
 
@@ -35,7 +35,7 @@ sources: duplication, architecture
 - Confirm any tmuxtest-driven integration tests still produce the same `*CommandError` shape.
 
 ## Task 2: Make daemonFakeCommander exercise the production discriminator path
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -62,7 +62,7 @@ sources: architecture
 - The new fake path is implicitly covered by every existing daemon test that hits a missing option — those tests now exercise the discriminator end-to-end through the fake.
 
 ## Task 3: Extract transport-error fault-injection literal into a same-file helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 
