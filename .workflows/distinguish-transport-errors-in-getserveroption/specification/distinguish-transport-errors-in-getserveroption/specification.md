@@ -20,6 +20,8 @@ A fourth site (`cmd/state_daemon_run_test.go:557-565`) documents the bug as a kn
 
 The bug is latent — no user-visible incident has been reported. The two production consumers (`cmd/state_daemon.go` `tick()` at L95-99 and `defaultShutdownFlush()` at L187-201) read `@portal-restoring` defensively and already want conservative-on-error behaviour ("skip the tick / skip the flush"). The conflation silently flips them from conservative-on-error to permissive-on-error in the presence of any transient tmux failure during the restoration window.
 
+**Historical note:** the original bug report (archived inbox entry at `.workflows/.inbox/.archived/bugs/2026-03-28--distinguish-transport-errors-in-getserveroption.md`) was framed around a hook-executor "two-condition check" that no longer exists — hook firing migrated into the hydrate helper's exec chain. The original symptom site is gone; the architectural concern moved to the marker-state reads in the daemon's restoration-window logic, which is what this specification addresses.
+
 ### Goal
 
 `GetServerOption` and `TryGetServerOption` deliver on their documented contracts:
@@ -35,6 +37,10 @@ The bug is latent — no user-visible incident has been reported. The two produc
 ---
 
 ## Design: `CommandError` at the Commander Layer
+
+### Why this layer
+
+The bug exists because the `Commander` interface signature `(string, error)` erases tmux's stderr distinction. Callers cannot route on stderr content without type-asserting on `*exec.ExitError`, which couples them to `os/exec` and breaks the mock surface. Wrapping at the `Commander` layer (rather than inside `GetServerOption`) restores the diagnostic shape in a type the interface can carry, lets every future caller discriminate failures through the same channel, and keeps mocks construct-by-struct-literal without involving `os/exec` types.
 
 ### Type
 
@@ -59,7 +65,7 @@ func (e *CommandError) Unwrap() error { return e.Err }
 
 Both `RealCommander.Run` and `RealCommander.RunRaw` (`internal/tmux/tmux.go:39-46`) wrap their non-nil errors before returning:
 
-- If the error is `*exec.ExitError`, populate `Stderr` from `(*exec.ExitError).Stderr` (already captured automatically by `cmd.Output()`).
+- If the error is `*exec.ExitError`, populate `Stderr` from `(*exec.ExitError).Stderr`. This field is auto-populated by `cmd.Output()` only when `cmd.Stderr == nil` — a precondition of the current `RealCommander` implementation. Future changes that assign `cmd.Stderr` (e.g., to tee stderr elsewhere) would silently break the wrapping; the wiring is responsible for preserving this invariant or capturing stderr explicitly via `cmd.StderrPipe()` if `cmd.Stderr` is repurposed.
 - If the error is any other type (e.g., `exec.Command(...)` failed to find the binary), wrap with `Stderr: ""`. An empty `Stderr` means "no signal" — discriminators that examine `Stderr` will see no pattern match and treat the error as non-absence, which is the correct conservative behaviour.
 
 In both cases the original error is preserved via `Unwrap()` so existing `errors.Is` / `errors.As` checks against sentinel errors continue to work.
@@ -98,14 +104,16 @@ Tmux signals option absence via stderr containing one of these substrings:
 
 - `invalid option:` — unknown `@`-prefixed user option or unknown non-prefixed option name.
 - `unknown option:` — alternate form emitted by some tmux versions.
-- `ambiguous option:` — option name is an ambiguous prefix match (including the empty string case observed during investigation).
+- `ambiguous option:` — option name is an ambiguous prefix match. Empirically surfaced during investigation by probing `show-option -sv ""` on tmux against Darwin 25.3.0 (the empty name is treated as an ambiguous match and produces `ambiguous option: ` with a trailing space).
 
 The pattern set is exported as a small, package-level slice in `internal/tmux` (not inlined in `GetServerOption`) so that:
 
 - The discrimination set is reviewable and testable in isolation.
 - Future tmux versions or platforms that emit additional absence phrasings can be added in one place.
 
-Matching is **case-sensitive substring** against `cmdErr.Stderr`. Tmux's source uses these literals consistently across versions in the project's compatibility window; no normalisation (lowercasing, regex) is required.
+Matching is **case-sensitive substring** against `cmdErr.Stderr`. No normalisation (lowercasing, regex) is required.
+
+**Compatibility floor:** the project does not pin a tmux minimum version anywhere. The pattern set is therefore treated as empirically derived from the tmux baseline available during investigation (probed against tmux on Darwin 25.3.0) and is best-effort across the tmux versions users are likely to run. The discriminator-set unit tests (see Testing) lock the contract behaviourally — a future tmux release that emits a new option-absent phrasing surfaces as a fast test failure rather than a silent drift, at which point the pattern slice can be extended in one place.
 
 ### Failure modes that do NOT match the absent family
 
@@ -190,8 +198,8 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 
 ### `internal/tmux/tmux_test.go`
 
-- **Reshape existing `TestGetServerOption` "option does not exist" case** (currently uses `errors.New("unknown option: @portal-active-%3")`): the mock must now return a `*CommandError` whose `Stderr` matches the option-absent pattern family. The test asserts `errors.Is(err, ErrOptionNotFound)` continues to hold.
-- **Add `TestGetServerOption_TransportError`**: mock returns a `*CommandError` with stderr that does NOT match the absent family (e.g., `"error connecting to /tmp/tmux-501//default (No such file or directory)"`). Assert `!errors.Is(err, ErrOptionNotFound)` and that the returned error unwraps to a `*CommandError` carrying the original stderr.
+- **Reshape existing `TestGetServerOption` "option does not exist" case** (currently uses `errors.New("unknown option: @portal-active-%3")`): the existing error string is decorative — it is never inspected because today every error from `cmd.Run` becomes `ErrOptionNotFound` regardless of content. Replace the bare `errors.New(...)` with a `*CommandError` whose `Stderr` matches the option-absent pattern family so the test actually exercises stderr-pattern matching. The test continues to assert `errors.Is(err, ErrOptionNotFound)`.
+- **Add `TestGetServerOption_TransportError`**: parametrised over a small set of representative non-absent stderr shapes — at minimum the socket-connect failure (`"error connecting to /tmp/tmux-501//default (No such file or directory)"`) and a server-crash shape (`"lost server"`). Mock returns a `*CommandError` with each stderr; assert `!errors.Is(err, ErrOptionNotFound)` and that the returned error unwraps to a `*CommandError` carrying the original stderr. The fault-injection harness is the existing `Commander` mock returning a synthetic exit-1 + stderr — no real `os/exec` interaction required for the discriminator tests.
 - **Add `TestGetServerOption_NonExitErrorPropagates`**: mock returns a `*CommandError{Stderr: "", Err: errors.New("exec: \"tmux\": not found")}`. Assert `!errors.Is(err, ErrOptionNotFound)` and that the error propagates.
 - **Add `TestTryGetServerOption_PropagatesTransportError`**: covers the previously-unreachable `if err != nil { return "", false, err }` branch. Assert `(value, found, err) == ("", false, non-nil)` with `errors.As` recovering the `*CommandError`.
 - **Add discriminator-set unit tests**: each entry in the option-absent pattern slice is exercised against a synthetic stderr containing it, asserting `ErrOptionNotFound` is returned. A negative case asserts an unrelated stderr does not match.
@@ -233,7 +241,12 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 ### Out of scope
 
 - Changes to the `Commander` interface signature. `Run` and `RunRaw` keep `(string, error)`.
-- Changes to any other `internal/tmux` method (`ShowAllServerOptions`, `SetServerOption`, etc.). Their error-propagation paths are already correct per the wide-scope audit.
+- Changes to any other `internal/tmux` method. The wide-scope audit performed during investigation verified the following surfaces propagate errors correctly today and are unaffected by this fix:
+  - `ShowAllServerOptions` — returns `fmt.Errorf("failed to show server options: %w", err)`.
+  - `ListSkeletonMarkers` (the daemon's per-tick enumeration path) — consumes `ShowAllServerOptions` and returns `(nil, err)`.
+  - `SetServerOption` / `UnsetServerOption` (the marker-writer paths) — propagate errors normally.
+
+  The bug is **isolated to `GetServerOption`** and its single wrapper `TryGetServerOption`. No other surface in `internal/tmux` exhibits the same shape.
 - Changes to daemon consumer logic in `cmd/state_daemon.go`. The fix surfaces errors into branches the consumers already wrote correctly.
 - Migration of other callers to the `*CommandError` discriminator. No other production caller of `internal/tmux` currently distinguishes failure modes; this fix does not introduce new discrimination sites.
 - Re-architecting `ErrOptionNotFound` (e.g., turning it into a struct error type). It remains a sentinel `var`.
@@ -259,6 +272,7 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 - **Regression risk:** Low. The behavioural change is "transport errors now propagate into branches consumers already wrote." No new failure mode is introduced — only previously-suppressed failure modes are surfaced into existing handling.
 - **Rollout:** Regular release. No incident pressure, no hotfix.
 - **Compatibility:** No external API changes. The `Commander` interface signature is unchanged; consumers of `tmux.ErrOptionNotFound` continue to work with semantics that now match their intent.
+- **Platform applicability:** Darwin and Linux. The conflation is in pure Go logic with no platform branching, and the pattern-family discrimination relies on tmux's stderr emissions which are consistent across the two platforms. No platform-conditional code is introduced by the fix.
 
 ---
 

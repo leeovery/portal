@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-13
 cycle: 1
 phase: Input Review
@@ -23,10 +23,8 @@ The investigation enumerates four rejected approaches with concrete rejection re
 - **D.** Inline type-assert against `*exec.ExitError` inside `GetServerOption` — rejected: couples `internal/tmux` to `os/exec` semantics through the public discriminator site; mocks would need synthetic `*exec.ExitError` instances.
 - **E.** String-match against `err.Error()` (no wrap) — rejected on examination: `(*exec.ExitError).Error()` returns `"exit status 1"`; stderr is on `.Stderr`, not in the error string. Mechanically broken without first wrapping.
 
-The spec records only the chosen approach. Without these alternatives, future readers can't tell why this shape was chosen over the obvious cheaper options (especially D, which is the smallest diff).
-
 **Proposed Addition**:
-Add a new "Alternatives Considered" section after "Risk & Rollout" enumerating B/C/D/E with rejection reasoning, plus a closing line on why the chosen approach was preferred.
+Added a new "Alternatives Considered" section after "Risk & Rollout" enumerating B/C/D/E with rejection reasoning, plus a closing line on why the chosen approach was preferred.
 
 **Resolution**: Approved
 **Notes**: Added as new section after Risk & Rollout.
@@ -40,16 +38,13 @@ Add a new "Alternatives Considered" section after "Risk & Rollout" enumerating B
 **Affects**: Design: Discrimination in `GetServerOption` → "Option-absent pattern family"
 
 **Details**:
-The investigation's probing table documents that `tmux show-option -sv ""` (empty option name) returns `ambiguous option: ` (with trailing space, treated as ambiguous match). The spec lists `ambiguous option:` as a pattern but parenthetically says "(including the empty string case observed during investigation)" without specifying it as the exact probe result that produced the entry. This is the empirical origin of the third pattern; without it, a reader might assume `ambiguous option:` is speculative rather than observed.
-
-**Current**:
-> - `ambiguous option:` — option name is an ambiguous prefix match (including the empty string case observed during investigation).
+The investigation's probing table documents that `tmux show-option -sv ""` (empty option name) returns `ambiguous option: ` (with trailing space, treated as ambiguous match). Tightening the bullet to capture this empirical origin.
 
 **Proposed Addition**:
-Tighten to note the empirical probe: empty option name was the trigger that surfaced `ambiguous option:` during investigation on Darwin 25.3.0.
+Replaced the parenthetical "(including the empty string case observed during investigation)" with an explicit probe note naming `show-option -sv ""`, Darwin 25.3.0, and the trailing-space artefact.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied via in-place replacement of the third pattern-family bullet.
 
 ---
 
@@ -60,18 +55,13 @@ Tighten to note the empirical probe: empty option name was the trigger that surf
 **Affects**: Design: `CommandError` at the Commander Layer → "Wiring at `RealCommander`"
 
 **Details**:
-The investigation explicitly notes: *"`RealCommander.Run` (`internal/tmux/tmux.go:39-46`) uses `cmd.Output()`, which populates `(*exec.ExitError).Stderr` automatically when `cmd.Stderr` is nil — so the stderr text is available on the returned error, just not surfaced through the `Commander` interface today."*
-
-The spec says `(*exec.ExitError).Stderr` is "already captured automatically by `cmd.Output()`" — accurate, but does not state the precondition (`cmd.Stderr` must be nil) which is load-bearing. If a future change ever assigns `cmd.Stderr`, the wrapping silently breaks because `(*exec.ExitError).Stderr` will be empty. This precondition belongs in the spec as a constraint on the wrapping implementation.
-
-**Current**:
-> - If the error is `*exec.ExitError`, populate `Stderr` from `(*exec.ExitError).Stderr` (already captured automatically by `cmd.Output()`).
+The `cmd.Stderr == nil` precondition for `cmd.Output()` to auto-populate `(*exec.ExitError).Stderr` is load-bearing. If a future change ever assigns `cmd.Stderr`, wrapping silently breaks.
 
 **Proposed Addition**:
-Add the `cmd.Stderr == nil` precondition that makes `cmd.Output()` populate `(*exec.ExitError).Stderr`, framing it as a constraint on the wiring (assigning `cmd.Stderr` later would silently break wrapping).
+Extended the `*exec.ExitError` bullet to state the precondition explicitly and call out the invariant the wiring must preserve (or capture stderr explicitly via `StderrPipe`).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to the first wiring bullet.
 
 ---
 
@@ -82,15 +72,13 @@ Add the `cmd.Stderr == nil` precondition that makes `cmd.Output()` populate `(*e
 **Affects**: Problem & Goal (Problem section) — or could fold into Design rationale
 
 **Details**:
-The investigation explicitly states the root architectural contributor: *"The `Commander` interface signature `(string, error)` discards the stderr distinction. Callers cannot route on stderr content without type-asserting on `*exec.ExitError`, which couples them to `os/exec` and breaks the mock surface."*
-
-This is the structural justification for why the fix lives at the `Commander` layer rather than inside `GetServerOption` (it's also the implicit reason option D was rejected). The spec leans on this implicitly but never states it. A reader who hasn't read the investigation might wonder why the wrapping doesn't just happen at the `GetServerOption` boundary.
+Structural justification for fixing at the Commander layer (vs inside `GetServerOption`) was implicit. Added a "Why this layer" preamble to the CommandError design section.
 
 **Proposed Addition**:
-(leave blank — discuss whether to anchor the design choice in Problem section, or add a short "Design rationale" preamble to the CommandError design section)
+Added a "Why this layer" subsection to "Design: `CommandError` at the Commander Layer" anchoring the choice in the interface signature's stderr-erasure.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded into the Design section rather than the Problem section to keep Problem focused on the symptom.
 
 ---
 
@@ -101,18 +89,13 @@ This is the structural justification for why the fix lives at the `Commander` la
 **Affects**: Testing → "Reshape existing TestGetServerOption" entry
 
 **Details**:
-The investigation explains *why* the existing test passes despite the bug: *"Existing tests at `internal/tmux/tmux_test.go:924-934` use `errors.New("unknown option: @portal-active-%3")` — a synthetic error string that never gets inspected. Under the current behaviour, any error becomes `ErrOptionNotFound`, so the test passes without exercising stderr inspection."*
-
-The spec's Testing section references reshaping this test but doesn't capture *why* the existing form is insufficient (the string is decorative, not inspected). Without this context, a planner might preserve the existing shape and add a new test alongside, rather than reshaping the existing test to actually exercise stderr-pattern matching.
-
-**Current**:
-> - **Reshape existing `TestGetServerOption` "option does not exist" case** (currently uses `errors.New("unknown option: @portal-active-%3")`): the mock must now return a `*CommandError` whose `Stderr` matches the option-absent pattern family. The test asserts `errors.Is(err, ErrOptionNotFound)` continues to hold.
+Existing test passes because every error becomes `ErrOptionNotFound` regardless of stderr content. The reshape must replace the bare `errors.New(...)` with a `*CommandError` that actually exercises stderr inspection.
 
 **Proposed Addition**:
-Add a short note that the current synthetic error string is decorative (never inspected because every error becomes `ErrOptionNotFound` under today's code), motivating the reshape rather than an additive new test.
+Rewrote the reshape bullet to call out that the existing error string is decorative, motivating reshape (not an additive test).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to the first Testing bullet under `internal/tmux/tmux_test.go`.
 
 ---
 
@@ -123,15 +106,13 @@ Add a short note that the current synthetic error string is decorative (never in
 **Affects**: Design: Discrimination in `GetServerOption` → "Option-absent pattern family"
 
 **Details**:
-The investigation explicitly flags this as an item the spec should pin: *"Pattern-family literal: the working set is `invalid option:`, `unknown option:`, `ambiguous option:`. Spec phase confirms against tmux's source (or a documented compatibility floor) whether to widen or narrow."*
-
-The spec asserts *"Tmux's source uses these literals consistently across versions in the project's compatibility window"* — but the project's "compatibility window" / "compatibility floor" is not defined in the spec or, as far as the investigation surfaces, anywhere else. Without a stated tmux-version floor (e.g., "tmux ≥ 3.0"), the claim is unverifiable and future tmux changes can't be tested against a known baseline.
+The project does not pin a tmux minimum version anywhere. The pattern set is best-effort across versions; discriminator unit tests lock the contract behaviourally.
 
 **Proposed Addition**:
-(leave blank — needs discussion to pin a tmux compatibility floor or accept the claim as best-effort with no explicit floor)
+Added a "Compatibility floor" paragraph stating the project pins no tmux floor, the set is empirically derived from the investigation baseline (Darwin 25.3.0), and discriminator unit tests are the contract-locking mechanism.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Replaced the bare "compatibility window" claim with explicit best-effort framing.
 
 ---
 
@@ -142,15 +123,13 @@ The spec asserts *"Tmux's source uses these literals consistently across version
 **Affects**: Problem & Goal (Problem section) — historical context
 
 **Details**:
-The investigation's Notes capture a load-bearing historical observation: *"The original motivation (a hook-executor 'two-condition check') no longer exists — hook firing migrated into the hydrate helper's exec chain. The original symptom site is gone; the architectural concern moved to marker-state reads in the daemon's restoration-window logic."*
-
-This is the reason the bug is latent and why the spec frames it in terms of daemon restoration-window reads rather than the original inbox framing. Without it, a reader looking at archived discussions or the inbox entry (`.workflows/.inbox/.archived/bugs/2026-03-28--distinguish-transport-errors-in-getserveroption.md`) may be confused about why the original symptom site isn't being fixed.
+Original bug framing was about a hook-executor "two-condition check" that no longer exists; concern migrated to daemon restoration-window reads. Captured as a historical note in the Problem section.
 
 **Proposed Addition**:
-(leave blank — discuss whether to capture as a brief historical note in Problem section or treat as investigation-only context)
+Added a "Historical note" paragraph after the latency-bug paragraph in the Problem section, referencing the archived inbox entry and the migration that re-framed the bug.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to Problem section.
 
 ---
 
@@ -161,15 +140,13 @@ This is the reason the bug is latent and why the spec frames it in terms of daem
 **Affects**: Testing section
 
 **Details**:
-The investigation provides a concrete reproduction example: *"Construct a `Commander` mock that returns a non-tmux-unknown-option error from `show-option -sv @some-marker` (e.g., simulate `exit 1` with stderr `lost server`)."*
-
-The Testing section uses different example stderr strings (`"error connecting to /tmp/tmux-501//default (No such file or directory)"`, `"exec: \"tmux\": not found"`). The `lost server` case from the reproduction steps is a distinct failure shape (mid-session server crash) not represented in the test catalog. The investigation also names the harness shape (fault-injection via `Commander` mock returning a synthetic exit-1 + stderr), which the spec captures only implicitly.
+Added the `lost server` case (mid-session server crash) to the transport-error test catalog and named the fault-injection harness shape explicitly.
 
 **Proposed Addition**:
-(leave blank — discuss whether to add `lost server` as an additional transport-error test case or treat the existing two examples as sufficient coverage of the "non-absent stderr" branch)
+Reshaped `TestGetServerOption_TransportError` into a parametrised test over a set of representative non-absent stderr shapes (socket-connect failure + `lost server`), and named the harness as the existing `Commander` mock returning synthetic exit-1 + stderr.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to the TestGetServerOption_TransportError bullet.
 
 ---
 
@@ -180,18 +157,13 @@ The Testing section uses different example stderr strings (`"error connecting to
 **Affects**: Scope → "Out of scope"
 
 **Details**:
-The investigation records that the user explicitly confirmed wide investigation scope, and that the audit produced positive results: `ShowAllServerOptions` propagates `fmt.Errorf("failed to show server options: %w", err)` correctly; `ListSkeletonMarkers` returns `(nil, err)` cleanly; `SetServerOption` / `UnsetServerOption` propagate normally. *"The bug is isolated to `GetServerOption` and its single wrapper `TryGetServerOption`."*
-
-The spec's Out-of-scope bullet says "Their error-propagation paths are already correct per the wide-scope audit" — which references the audit but doesn't summarize its findings or list which surfaces were checked. A planner auditing the fix's blast radius cannot tell from the spec which sites were verified clean vs. simply not mentioned.
-
-**Current** (in Scope → Out of scope):
-> - Changes to any other `internal/tmux` method (`ShowAllServerOptions`, `SetServerOption`, etc.). Their error-propagation paths are already correct per the wide-scope audit.
+Enumerated audited-clean surfaces (`ShowAllServerOptions`, `ListSkeletonMarkers`, `SetServerOption`, `UnsetServerOption`) in Out-of-scope to document the audit findings in the spec rather than only in the investigation.
 
 **Proposed Addition**:
-Enumerate the audited-clean surfaces explicitly: `ShowAllServerOptions` (returns wrapped error), `ListSkeletonMarkers` (returns `(nil, err)`), `SetServerOption` / `UnsetServerOption` (write-side, propagate normally). This documents the audit findings in the spec rather than only in the investigation.
+Expanded the "no other internal/tmux method" bullet into a sub-list naming each audited-clean surface and its propagation shape, plus a closing "isolated to GetServerOption" statement.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to Out of scope.
 
 ---
 
@@ -202,14 +174,12 @@ Enumerate the audited-clean surfaces explicitly: `ShowAllServerOptions` (returns
 **Affects**: Scope or Risk & Rollout
 
 **Details**:
-The investigation states: *"Affected environments: All (Darwin / Linux). The conflation is in pure Go logic with no platform branching. Trigger conditions: Any `cmd.Run` failure from `show-option -sv <name>`."*
-
-The spec does not explicitly state platform applicability. For a bug whose discriminator is stderr substring-matching (which is platform-sensitive in principle — tmux's emit format could differ across builds), the "no platform branching" assertion is load-bearing for justifying a single pattern set covering Darwin + Linux.
+Added an explicit platform-applicability line to Risk & Rollout, stating Darwin + Linux and no platform-conditional code.
 
 **Proposed Addition**:
-(leave blank — discuss whether to add an environment line to Scope, or fold into the pattern-family discussion as "applies to Darwin + Linux, no platform branching needed")
+Added a "Platform applicability" bullet to Risk & Rollout.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded into Risk & Rollout rather than Scope (sits naturally with Compatibility and Rollout claims).
 
 ---
