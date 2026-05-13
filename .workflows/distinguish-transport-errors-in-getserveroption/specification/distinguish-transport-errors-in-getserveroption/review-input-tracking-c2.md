@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-13
 cycle: 2
 phase: Input Review
@@ -17,16 +17,13 @@ topic: distinguish-transport-errors-in-getserveroption
 **Affects**: Problem & Goal → Problem section
 
 **Details**:
-The investigation spells out the concrete consequence of the conservative-→-permissive flip: the daemon's two read sites "proceed as if restoration is NOT in progress and commit potentially-corrupt state." The current spec captures the mechanism ("silently flips them from conservative-on-error to permissive-on-error in the presence of any transient tmux failure during the restoration window") but stops short of naming the data-integrity outcome — that the per-tick capture / shutdown-flush would commit state derived from a half-restored skeleton. Naming the consequence sharpens why the bug matters even though it is latent.
-
-**Current**:
-> The bug is latent — no user-visible incident has been reported. The two production consumers (`cmd/state_daemon.go` `tick()` at L95-99 and `defaultShutdownFlush()` at L187-201) read `@portal-restoring` defensively and already want conservative-on-error behaviour ("skip the tick / skip the flush"). The conflation silently flips them from conservative-on-error to permissive-on-error in the presence of any transient tmux failure during the restoration window.
+Naming the concrete data-integrity outcome of the flip: both consumers proceed as if restoration is not in progress and would commit/flush state derived from a half-restored skeleton.
 
 **Proposed Addition**:
-Append a sentence to the existing paragraph naming the data-integrity consequence: under the flip, both consumers proceed as if restoration is not in progress and would commit (or flush) state derived from a half-restored skeleton.
+Appended the consequence sentence to the existing "permissive-on-error" paragraph.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded into same edit as Finding 2.
 
 ---
 
@@ -37,16 +34,13 @@ Append a sentence to the existing paragraph naming the data-integrity consequenc
 **Affects**: Problem & Goal → Problem section (latency framing) or Risk & Rollout
 
 **Details**:
-The investigation explains *why* the bug has stayed latent: "Production has not surfaced the bug because tmux runs against a local socket; transient transport failures are vanishingly rare. The bug is structural, not observed." The current spec asserts latency without explaining the underlying reason. Including the local-socket reasoning gives a future reader the rationale for why regression risk is low and why no incident has surfaced — material that anchors both the Problem framing and the Risk & Rollout "Regression risk: Low" claim.
-
-**Current**:
-> The bug is latent — no user-visible incident has been reported.
+The local-socket reason transient failures are vanishingly rare was implicit.
 
 **Proposed Addition**:
-Tighten the latency statement to include the local-socket causal reasoning (one short clause). Could equivalently appear under Risk & Rollout's regression-risk bullet — either site is reasonable.
+Inlined into the latency statement: "no user-visible incident has been reported, because tmux runs against a local Unix-domain socket where transient transport failures are vanishingly rare. The bug is structural, not observed."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded into same edit as Finding 1.
 
 ---
 
@@ -57,12 +51,12 @@ Tighten the latency statement to include the local-socket causal reasoning (one 
 **Affects**: Problem & Goal → Problem section, or a "Why it happened" subsection of Design
 
 **Details**:
-The investigation names a contributing factor: the conflation was tempting because "the legitimate 'not found' case is by far the most common — every other use of `GetServerOption` was for an existence check that happily treats failure as absence." This explains the historical introduction of the bug and reinforces the design choice (typed `CommandError`) by showing why a simpler default-to-sentinel pattern was attractive at the time. The spec currently records the "first wrapper added with a contract the underlying primitive could not deliver" angle (via the Documentation section's framing) but does not mention the existence-check usage pattern that made the original shape feel safe.
+Recorded the historical reason the original conflation felt safe.
 
 **Proposed Addition**:
-Add a short note — either to the Problem section or as a closing line in the Design "Why this layer" subsection — that the original conflation was tempting because every prior caller of `GetServerOption` was an existence check that happily mapped failure to absence; the contract drift surfaced only when the first wrapper (`TryGetServerOption`) asserted distinguishability.
+Added a paragraph after "Why this layer" naming the existence-check usage pattern that made the original shape feel safe, and noting that the fix preserves common-case ergonomics.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---

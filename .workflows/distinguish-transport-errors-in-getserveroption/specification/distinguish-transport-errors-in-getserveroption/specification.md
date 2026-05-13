@@ -18,7 +18,7 @@ This violates three documented contracts:
 
 A fourth site (`cmd/state_daemon_run_test.go:557-565`) documents the bug as a known gap: a test for the "conservatively skip the final flush on read error" branch in `defaultShutdownFlush` cannot be written through the public `Client` surface today because of the conflation.
 
-The bug is latent — no user-visible incident has been reported. The two production consumers (`cmd/state_daemon.go` `tick()` at L95-99 and `defaultShutdownFlush()` at L187-201) read `@portal-restoring` defensively and already want conservative-on-error behaviour ("skip the tick / skip the flush"). The conflation silently flips them from conservative-on-error to permissive-on-error in the presence of any transient tmux failure during the restoration window.
+The bug is latent — no user-visible incident has been reported, because tmux runs against a local Unix-domain socket where transient transport failures are vanishingly rare. The bug is structural, not observed. The two production consumers (`cmd/state_daemon.go` `tick()` at L95-99 and `defaultShutdownFlush()` at L187-201) read `@portal-restoring` defensively and already want conservative-on-error behaviour ("skip the tick / skip the flush"). The conflation silently flips them from conservative-on-error to permissive-on-error in the presence of any transient tmux failure during the restoration window — both consumers proceed as if restoration is not in progress and would commit (per-tick) or flush (at shutdown) state derived from a half-restored skeleton.
 
 **Historical note:** the original bug report (archived inbox entry at `.workflows/.inbox/.archived/bugs/2026-03-28--distinguish-transport-errors-in-getserveroption.md`) was framed around a hook-executor "two-condition check" that no longer exists — hook firing migrated into the hydrate helper's exec chain. The original symptom site is gone; the architectural concern moved to the marker-state reads in the daemon's restoration-window logic, which is what this specification addresses.
 
@@ -41,6 +41,8 @@ The bug is latent — no user-visible incident has been reported. The two produc
 ### Why this layer
 
 The bug exists because the `Commander` interface signature `(string, error)` erases tmux's stderr distinction. Callers cannot route on stderr content without type-asserting on `*exec.ExitError`, which couples them to `os/exec` and breaks the mock surface. Wrapping at the `Commander` layer (rather than inside `GetServerOption`) restores the diagnostic shape in a type the interface can carry, lets every future caller discriminate failures through the same channel, and keeps mocks construct-by-struct-literal without involving `os/exec` types.
+
+**Why the original "default to `ErrOptionNotFound`" shape felt safe:** every pre-existing caller of `GetServerOption` was an existence check that happily mapped failure to absence — the conflation produced the right answer for the common case. The contract drift only surfaced when the first wrapper (`TryGetServerOption`) was added asserting distinguishability that the underlying primitive could not deliver. The fix preserves the common-case ergonomics (callers using `errors.Is(err, ErrOptionNotFound)` continue to work unchanged) while delivering the distinguishability the wrapper has always claimed.
 
 ### Type
 
