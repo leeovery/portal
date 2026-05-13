@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-13
 cycle: 1
 phase: Plan Integrity Review
@@ -74,7 +74,7 @@ All assertions are behavioural (`errors.As`, `strings.Contains`, type assertion)
 All tests use the existing `Commander` mock surface — no new mock framework, no real `os/exec`. Mock returns the canonical `*CommandError` literal shape.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: If approved, the orchestrator should also remove Tasks 1-4 and 1-5 entirely (separate `remove-task` operations) and renumber 1-6 → 1-4 and 1-7 → 1-5 in the planning.md table, the phase-1-tasks.md headings, and the Acceptance bullets that name specific test functions. The Acceptance bullet at lines 20-21 of `planning.md` already names every test function — that list survives the merge unchanged. If the user prefers to keep the structure as-is for the explicit "single PR" landing model, this finding can be marked rejected.
 
 ---
@@ -103,7 +103,7 @@ The `` `ErrOptionNotFound" `` substring has a stray closing double-quote with no
 - [ ] A `grep` for the previous mis-leading phrasing produces no false positives (e.g., no remaining docstring claims `GetServerOption` "always" returns `ErrOptionNotFound` on any error, or similar).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -137,7 +137,7 @@ The criterion explicitly allows the implementer to perform a sweep before change
   - If the pre-implementation grep surfaces existing `tick()` err-branch coverage that the audit missed (test returning a bare `errors.New(...)`), update that test's mock to return the same `*CommandError` shape instead of adding a duplicate.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The planner should perform the audit grep before finalising this proposal — if `tick()` err-branch is already covered, the proposed bullet inverts (default to "update existing, add only if missing"). The current ambiguity is acceptable as Minor because both branches produce correct end-state coverage; it is flagged as a polish opportunity rather than a blocker.
 
 ---
@@ -166,7 +166,7 @@ The current criterion is harmless but consumes a checklist line that could eithe
 - [ ] An external-package consumer (e.g., the daemon test added in Task 1-6) can construct `&tmux.CommandError{Stderr: "...", Err: errors.New("...")}` as a literal — confirming the fields and type remain exported and constructor-free per the spec's "plain struct literal, no NewCommandError factory" rule.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This is the lowest-priority finding — feel free to reject and keep the existing wording.
 
 ---

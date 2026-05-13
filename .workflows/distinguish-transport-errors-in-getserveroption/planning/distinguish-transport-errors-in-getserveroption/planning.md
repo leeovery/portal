@@ -29,10 +29,8 @@ approved_at: 2026-05-13
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | distinguish-transport-errors-in-getserveroption-1-1 | Introduce CommandError type in internal/tmux | whitespace-only Stderr, nil Err, both empty |
-| distinguish-transport-errors-in-getserveroption-1-2 | Wire RealCommander.Run and RunRaw to wrap errors as *CommandError | non-ExitError wrapping (exec.LookPath failure), cmd.Stderr-assignment invariant preserved |
-| distinguish-transport-errors-in-getserveroption-1-3 | Add optionAbsentStderrPatterns slice and rewrite GetServerOption to discriminate via errors.As | errors.As returns false propagates original error, empty Stderr propagates as non-absence, verbatim Stderr storage tolerated by strings.Contains, ambiguous option with trailing space |
-| distinguish-transport-errors-in-getserveroption-1-4 | Reshape TestGetServerOption and add discriminator/transport/non-exit/try-wrapper tests | errors.As recovery of stderr from wrapped error, each pattern individually exercised, negative unrelated stderr does not match |
-| distinguish-transport-errors-in-getserveroption-1-5 | Add RealCommander wrap tests for exit and non-exit errors | platform applicability (sh on PATH), non-ExitError underlying type assertion |
-| distinguish-transport-errors-in-getserveroption-1-6 | Replace documented-gap comment with defaultShutdownFlush err-branch test and cover tick() err-branch | no t.Parallel (cmd package mock injection), zero-commit assertion uses existing capture/commit seam, log capture optional |
-| distinguish-transport-errors-in-getserveroption-1-7 | Tighten the four contract-violation docstrings | none |
+| distinguish-transport-errors-in-getserveroption-1-2 | Wire RealCommander.Run and RunRaw to wrap errors as *CommandError (with RealCommander wrap tests) | non-ExitError wrapping (exec.LookPath failure), cmd.Stderr-assignment invariant preserved, platform applicability (sh on PATH), non-ExitError underlying type assertion |
+| distinguish-transport-errors-in-getserveroption-1-3 | Add optionAbsentStderrPatterns slice and rewrite GetServerOption to discriminate via errors.As (with discriminator/transport/non-exit/try-wrapper tests) | errors.As returns false propagates original error, empty Stderr propagates as non-absence, verbatim Stderr storage tolerated by strings.Contains, ambiguous option with trailing space, each pattern individually exercised, negative unrelated stderr does not match |
+| distinguish-transport-errors-in-getserveroption-1-4 | Replace documented-gap comment with defaultShutdownFlush err-branch test and add tick() err-branch test | no t.Parallel (cmd package mock injection), zero-commit assertion uses existing capture/commit seam, log capture optional |
+| distinguish-transport-errors-in-getserveroption-1-5 | Tighten the four contract-violation docstrings | none |
 

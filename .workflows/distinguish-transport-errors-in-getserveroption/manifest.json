@@ -35,8 +35,8 @@
           "spec_commit": "936b4ff473935ae2a4975b4af31e0a0a40e173e9",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
-          "finding_gate_mode": "gated",
-          "review_cycle": 0,
+          "finding_gate_mode": "auto",
+          "review_cycle": 1,
           "phase": 2,
           "task": "~",
           "task_map": {
@@ -44,10 +44,8 @@
             "distinguish-transport-errors-in-getserveroption-1-1": "tick-955a68",
             "distinguish-transport-errors-in-getserveroption-1-2": "tick-fadcfc",
             "distinguish-transport-errors-in-getserveroption-1-3": "tick-e00256",
-            "distinguish-transport-errors-in-getserveroption-1-4": "tick-f24670",
-            "distinguish-transport-errors-in-getserveroption-1-5": "tick-04f9f3",
-            "distinguish-transport-errors-in-getserveroption-1-6": "tick-d4c641",
-            "distinguish-transport-errors-in-getserveroption-1-7": "tick-8e7930"
+            "distinguish-transport-errors-in-getserveroption-1-4": "tick-d4c641",
+            "distinguish-transport-errors-in-getserveroption-1-5": "tick-8e7930"
           },
           "external_id": "tick-899e13"
         }
