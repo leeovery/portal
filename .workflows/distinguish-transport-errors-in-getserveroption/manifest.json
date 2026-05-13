@@ -15,10 +15,10 @@
     "specification": {
       "items": {
         "distinguish-transport-errors-in-getserveroption": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 3,
           "finding_gate_mode": "auto",
-          "date": "2026-05-12",
+          "date": "2026-05-13",
           "sources": {
             "distinguish-transport-errors-in-getserveroption": {
               "status": "incorporated"
