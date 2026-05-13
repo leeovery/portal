@@ -21,3 +21,17 @@ approved_at: 2026-05-13
 - [ ] The documented-gap comment block at `cmd/state_daemon_run_test.go:557-565` is removed and replaced with the previously-blocked `defaultShutdownFlush` err-branch test (asserts `nil` return + zero commit calls under injected `*CommandError{Stderr: "lost server"}`); `tick()` err-handling branch is covered (new test or updated existing mock per the test-code sweep).
 - [ ] `go test ./...` passes; pre-existing tests show no behavioural change in the happy path; `internal/state/markers_test.go` `TestIsRestoringSet :: propagates underlying tmux error` continues to pass unchanged.
 - [ ] Pre-implementation sweeps (production-code grep and test-code grep per the spec's "Pre-implementation sweep" section) confirm no caller outside the audited sites depends on the old conflation; any newly-surfaced caller is audited before merge.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| distinguish-transport-errors-in-getserveroption-1-1 | Introduce CommandError type in internal/tmux | whitespace-only Stderr, nil Err, both empty |
+| distinguish-transport-errors-in-getserveroption-1-2 | Wire RealCommander.Run and RunRaw to wrap errors as *CommandError | non-ExitError wrapping (exec.LookPath failure), cmd.Stderr-assignment invariant preserved |
+| distinguish-transport-errors-in-getserveroption-1-3 | Add optionAbsentStderrPatterns slice and rewrite GetServerOption to discriminate via errors.As | errors.As returns false propagates original error, empty Stderr propagates as non-absence, verbatim Stderr storage tolerated by strings.Contains, ambiguous option with trailing space |
+| distinguish-transport-errors-in-getserveroption-1-4 | Reshape TestGetServerOption and add discriminator/transport/non-exit/try-wrapper tests | errors.As recovery of stderr from wrapped error, each pattern individually exercised, negative unrelated stderr does not match |
+| distinguish-transport-errors-in-getserveroption-1-5 | Add RealCommander wrap tests for exit and non-exit errors | platform applicability (sh on PATH), non-ExitError underlying type assertion |
+| distinguish-transport-errors-in-getserveroption-1-6 | Replace documented-gap comment with defaultShutdownFlush err-branch test and cover tick() err-branch | no t.Parallel (cmd package mock injection), zero-commit assertion uses existing capture/commit seam, log capture optional |
+| distinguish-transport-errors-in-getserveroption-1-7 | Tighten the four contract-violation docstrings | none |
+
