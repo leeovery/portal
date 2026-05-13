@@ -3,8 +3,8 @@
 ## Phases
 
 ### Phase 1: Surface transport errors through GetServerOption discriminator
-status: draft
-approved_at:
+status: approved
+approved_at: 2026-05-13
 
 **Goal**: Introduce `*tmux.CommandError` at the `Commander` layer, wire `RealCommander.Run` / `RunRaw` to wrap their non-nil errors, rewrite `GetServerOption` to discriminate option-absence via stderr pattern-family match (`invalid option:`, `unknown option:`, `ambiguous option:`), and let the previously-dead error branches in `TryGetServerOption` and its daemon consumers (`tick()`, `defaultShutdownFlush()`) become live. Tighten the four contract-violation docstrings, reshape the existing `TestGetServerOption` "option does not exist" case to use `*CommandError`, add transport-error / non-exit-error / discriminator-set / try-wrapper-propagation / RealCommander-wrap tests, remove the documented-gap comment block at `cmd/state_daemon_run_test.go:557-565`, and replace it with the previously-blocked `defaultShutdownFlush` err-branch test (plus tick err-branch coverage per the sweep).
 
