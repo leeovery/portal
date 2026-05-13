@@ -38,11 +38,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "distinguish-transport-errors-in-getserveroption-1-3",
+          "task": "distinguish-transport-errors-in-getserveroption-1-4",
           "task_map": {
             "distinguish-transport-errors-in-getserveroption-1": "tick-40b5f7",
             "distinguish-transport-errors-in-getserveroption-1-1": "tick-955a68",
-            "distinguish-transport-errors-in-getserveroption-1-2": "tick-fadcfc"
+            "distinguish-transport-errors-in-getserveroption-1-2": "tick-fadcfc",
+            "distinguish-transport-errors-in-getserveroption-1-3": "tick-e00256"
           },
           "external_id": "tick-899e13"
         }
