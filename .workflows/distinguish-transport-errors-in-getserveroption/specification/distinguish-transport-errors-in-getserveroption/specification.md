@@ -55,15 +55,23 @@ type CommandError struct {
     Err    error
 }
 
-func (e *CommandError) Error() string { /* "<Err>: <Stderr>" when Stderr non-empty, else <Err>.Error() */ }
+func (e *CommandError) Error() string { /* see formatting rules below */ }
 func (e *CommandError) Unwrap() error { return e.Err }
 ```
+
+**`Error()` formatting:**
+
+- When `Stderr` (after `strings.TrimSpace`) is non-empty: return `e.Err.Error() + ": " + strings.TrimSpace(e.Stderr)` — colon-space separator, trimmed stderr.
+- When `Stderr` is empty or whitespace-only: return `e.Err.Error()`.
+- When `e.Err == nil` (defensive — should not happen in practice): return `strings.TrimSpace(e.Stderr)`, or `"<no error>"` if that is also empty.
+
+The rendered format is **not part of the public contract**; tests assert behavioural properties (e.g., that `errors.As` extracts a `*CommandError`, that `Stderr` contains the expected substring), not the exact string. `Stderr` itself is stored verbatim — only the `Error()` rendering trims for readability.
 
 **Placement and exported-ness:** package-level exported type in `internal/tmux`. Exported so test code outside the package (and any future package-level helpers) can construct `*CommandError` literals as mock returns. The constructor is a plain struct literal — no `NewCommandError` factory.
 
 ### Wiring at `RealCommander`
 
-Both `RealCommander.Run` and `RealCommander.RunRaw` (`internal/tmux/tmux.go:39-46`) wrap their non-nil errors before returning:
+Both `RealCommander.Run` (`internal/tmux/tmux.go:39-46`) and `RealCommander.RunRaw` (`internal/tmux/tmux.go:51-58`) currently invoke the process identically via `exec.Command("tmux", args...)` + `cmd.Output()` with `cmd.Stderr` left as nil, differing only in how they post-process the stdout bytes (`TrimSpace` vs verbatim). Both methods wrap their non-nil errors before returning:
 
 - If the error is `*exec.ExitError`, populate `Stderr` from `(*exec.ExitError).Stderr`. This field is auto-populated by `cmd.Output()` only when `cmd.Stderr == nil` — a precondition of the current `RealCommander` implementation. Future changes that assign `cmd.Stderr` (e.g., to tee stderr elsewhere) would silently break the wrapping; the wiring is responsible for preserving this invariant or capturing stderr explicitly via `cmd.StderrPipe()` if `cmd.Stderr` is repurposed.
 - If the error is any other type (e.g., `exec.Command(...)` failed to find the binary), wrap with `Stderr: ""`. An empty `Stderr` means "no signal" — discriminators that examine `Stderr` will see no pattern match and treat the error as non-absence, which is the correct conservative behaviour.
@@ -98,6 +106,10 @@ Tests that don't care about stderr continue to return `errors.New(...)` — disc
 
 Extraction uses `errors.As(err, &cmdErr)` so a future error-wrapping change at the `Commander` layer does not break the discriminator.
 
+**Fallthrough when `errors.As` returns false:** if `err` is a non-nil error that is not a `*CommandError` and does not unwrap to one (e.g., a test mock returning `errors.New(...)` directly, or a future caller that wraps errors before they reach `GetServerOption`), the discriminator treats the failure as **non-absence** and returns the original `err` unchanged. This is the same outcome as "matched a `*CommandError` with empty `Stderr`": no pattern match, propagate. Callers using `errors.Is(err, ErrOptionNotFound)` correctly report `false`; callers using `errors.As(err, &cmdErr)` to recover stderr receive `false` (no `*CommandError` present) — which is correct, because none existed.
+
+**`Stderr` storage:** the `Stderr` field on `*CommandError` is stored **verbatim** as captured from `(*exec.ExitError).Stderr` — including trailing whitespace or newlines that tmux emits. Pattern matching uses `strings.Contains`, which is insensitive to trailing whitespace. Only `CommandError.Error()` trims (for readability — see Type section).
+
 ### Option-absent pattern family
 
 Tmux signals option absence via stderr containing one of these substrings:
@@ -106,10 +118,12 @@ Tmux signals option absence via stderr containing one of these substrings:
 - `unknown option:` — alternate form emitted by some tmux versions.
 - `ambiguous option:` — option name is an ambiguous prefix match. Empirically surfaced during investigation by probing `show-option -sv ""` on tmux against Darwin 25.3.0 (the empty name is treated as an ambiguous match and produces `ambiguous option: ` with a trailing space).
 
-The pattern set is exported as a small, package-level slice in `internal/tmux` (not inlined in `GetServerOption`) so that:
+The pattern set is a small, package-level slice in `internal/tmux` named `optionAbsentStderrPatterns` (unexported — `internal/tmux` already gates the surface, so package-private is sufficient and avoids adding to the package's exported API; tests live in the same `tmux` package and can read the unexported slice directly). It is not inlined in `GetServerOption` so that:
 
 - The discrimination set is reviewable and testable in isolation.
 - Future tmux versions or platforms that emit additional absence phrasings can be added in one place.
+
+Iteration form: a simple `for _, pat := range optionAbsentStderrPatterns { if strings.Contains(cmdErr.Stderr, pat) { return ErrOptionNotFound } }` — short-circuits on first match. No compiled regex, no alternation. Three patterns; iteration cost is negligible.
 
 Matching is **case-sensitive substring** against `cmdErr.Stderr`. No normalisation (lowercasing, regex) is required.
 
@@ -161,9 +175,9 @@ No daemon consumer code changes. The behavioural shift is "transport errors now 
 
 ---
 
-## Documentation Updates
+## Documentation & Test-Comment Updates
 
-Four sites currently document or anticipate the distinguishability contract. After the fix, all four must be coherent with the implementation.
+Four production-code docstring sites currently document or anticipate the distinguishability contract; after the fix, all four must be coherent with the implementation. A fifth site is a test-file comment block that documents the bug as a known gap — removed and replaced with the previously-blocked test. Items 1–4 below belong to a docs-tightening task; item 5 belongs to the test-reshape task (see Testing section).
 
 ### 1. `internal/tmux/tmux.go:312-316` — `TryGetServerOption` docstring
 
@@ -207,22 +221,38 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 ### `cmd/state_daemon_run_test.go`
 
 - **Remove the documented-gap comment block at lines 557-565.**
-- **Add the previously-blocked test** for `defaultShutdownFlush`'s `if err != nil { return nil }` branch: mock the tmux client so the `@portal-restoring` read returns a non-`ErrOptionNotFound` error; assert the flush returns nil without committing state, and that the warn log is emitted.
-- **Add a parallel test for `tick()`'s err-handling branch** (`cmd/state_daemon.go:95-99`) if not already covered: same shape — non-`ErrOptionNotFound` error on `@portal-restoring`, assert the tick logs warn and returns without performing capture.
+- **Add the previously-blocked test** for `defaultShutdownFlush`'s `if err != nil { return nil }` branch:
+  - **Fault injection**: use the existing `Deps`-style seam in `cmd/state_daemon.go` to inject a tmux-client mock whose `TryGetServerOption("@portal-restoring")` returns `("", false, &tmux.CommandError{Stderr: "lost server", Err: errors.New("exit status 1")})`.
+  - **"Returns nil"**: assert the function's return value is `nil`.
+  - **"Without committing state"**: assert via the daemon's existing capture/commit seam — the same mock-tracking pattern already used by neighbouring tests in `cmd/state_daemon_run_test.go` to verify zero commit calls. (No new seam is introduced by this fix.)
+  - **"Warn log is emitted"**: capture via the same log-capture pattern used by neighbouring tests (the `state` package's structured logger writes through a test sink already wired in the daemon test harness). If the existing harness has no log-capture seam, asserting return value + zero-commit is sufficient for acceptance — the warn-log is an observability detail, not a correctness invariant.
+- **Add a test for `tick()`'s err-handling branch** (`cmd/state_daemon.go:95-99`). The implementer must first confirm whether existing daemon tests already cover this branch through the test seam (the daemon-side `tickDeps` or equivalent). If covered, replace the existing mock that returned a bare `errors.New(...)` with one that returns a non-`ErrOptionNotFound` error (per the sweep in "Pre-implementation sweep"). If not covered, add a new test asserting the tick logs warn and returns without performing capture under the same fault-injection shape used for the flush test.
 
 ### `internal/state/markers_test.go`
 
-- **`TestIsRestoringSet :: tmux exploded` (existing, line 206) continues to pass.** No code change required — it asserts the contract the production code is finally able to deliver on. The fix vindicates the test rather than the test driving the fix.
+- **`TestIsRestoringSet :: propagates underlying tmux error` (existing, line 205-210) continues to pass.** The test uses a `checkerMock` that directly implements `RestoringChecker` and returns `errors.New("tmux exploded")` to `IsRestoringSet` — bypassing the buggy `TryGetServerOption` entirely. The test passes today because the mock surfaces the error directly, not because the production code propagated it through. After the fix, the production path (`TryGetServerOption` → `IsRestoringSet`) is finally capable of delivering this contract end-to-end; the mock-based test continues to pass unchanged and now correctly reflects production behaviour.
 
 ### `internal/tmux` — `Commander` layer
 
-- **`TestRealCommander_RunWrapsExitError`** (new): use a real `os/exec` failure (e.g., invoke a command that returns a known stderr and exit 1) and assert the returned error is `*CommandError` with `Stderr` populated.
-- **`TestRealCommander_RunWrapsNonExitError`** (new): invoke a missing binary; assert the returned error is `*CommandError` with `Stderr == ""` and `Unwrap()` returning the original (non-`*exec.ExitError`) error.
+- **`TestRealCommander_RunWrapsExitError`** (new): invoke `sh -c 'echo "synthetic stderr marker" 1>&2; exit 1'` via a temporarily-shimmed exec path or by exposing a small test-only constructor that targets `sh` instead of `tmux` (the implementer picks the lower-cost shape; if `RealCommander` is hard-coded to `tmux`, factor out a small `runner` helper that accepts the binary name and have the test target it). Assert the returned error unwraps to `*CommandError` with `Stderr` containing `"synthetic stderr marker"`. Skipped automatically on platforms where `sh` is not on `PATH`; the platform-applicability statement (Darwin + Linux) makes this acceptable.
+- **`TestRealCommander_RunWrapsNonExitError`** (new): invoke a deterministic non-existent binary name — `__portal_test_nonexistent_binary__`. Assert the returned error unwraps to `*CommandError` with `Stderr == ""` and `Unwrap()` returning a non-`*exec.ExitError` error (the underlying `*exec.Error` from `exec.LookPath` / `cmd.Start`).
 
 ### Test policy reminders
 
 - Per `CLAUDE.md`: tests in `cmd` and any package using `*Deps` injection **must not** use `t.Parallel()`. The new daemon tests inherit this constraint.
 - No new mock framework — existing `Commander` mock surface is sufficient with `*CommandError` literals.
+
+### Pre-implementation sweep
+
+Before reshaping tests, the implementer must perform a one-pass sweep of existing test code to identify any test that mocks `Commander.Run` returning a bare `errors.New(...)` and asserts `errors.Is(err, ErrOptionNotFound)` (or treats `GetServerOption`/`TryGetServerOption` failure as "option absent"). Such tests rely on the old conflation and break under the new contract — they must be updated to return a `*CommandError` whose `Stderr` matches the option-absent pattern family.
+
+Sweep surface (audited during investigation):
+
+- `internal/tmux/tmux_test.go` — `TestGetServerOption` "option does not exist" case is the only test relying on the old conflation; all other server-option tests in this file either exercise success paths or use the `ShowAllServerOptions` path which is unaffected.
+- `internal/state/markers_test.go:206` — `TestIsRestoringSet :: propagates underlying tmux error` uses a `checkerMock` (a custom `RestoringChecker` implementation, not a `Commander` mock) that returns `errors.New("tmux exploded")` directly. The mock bypasses `TryGetServerOption` entirely and surfaces the error to `IsRestoringSet` directly, so this test passes today and continues to pass — no change required.
+- `cmd/state_daemon_run_test.go` — documented-gap comment at lines 557–565 indicates no existing test reaches the err-branch through the public `Client` surface; the replacement test introduced by this fix is the first such test.
+
+If the sweep surfaces any test outside these three sites that relies on the old conflation, it is part of the test-reshape task scope.
 
 ---
 
@@ -273,6 +303,20 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 - **Rollout:** Regular release. No incident pressure, no hotfix.
 - **Compatibility:** No external API changes. The `Commander` interface signature is unchanged; consumers of `tmux.ErrOptionNotFound` continue to work with semantics that now match their intent.
 - **Platform applicability:** Darwin and Linux. The conflation is in pure Go logic with no platform branching, and the pattern-family discrimination relies on tmux's stderr emissions which are consistent across the two platforms. No platform-conditional code is introduced by the fix.
+
+---
+
+## Implementation Ordering
+
+The fix decomposes into five logical units. They must land in this order to avoid intermediate states that break existing callers:
+
+1. **`CommandError` type** — introduce the type in `internal/tmux`. No production behaviour change.
+2. **`RealCommander` wiring** — `Run` and `RunRaw` start returning `*CommandError`. Existing `errors.Is(err, ErrOptionNotFound)` checks at `TryGetServerOption` consumers continue to work only because `GetServerOption` still maps every error to `ErrOptionNotFound` — until step 3 lands, this is the load-bearing fact. Do not split (2) and (3) across PRs.
+3. **`GetServerOption` discriminator + `optionAbsentStderrPatterns` slice** — discriminator becomes contract-faithful. `TryGetServerOption`'s `if err != nil` branch becomes live. Daemon consumers start receiving transport errors. (1)+(2)+(3) must land together.
+4. **Docstring tightening at items 1–4 of "Documentation & Test-Comment Updates"** — may land alongside (3) or as a follow-up. No behaviour change.
+5. **Test reshape and additions** — including removal of the documented-gap comment block in `cmd/state_daemon_run_test.go`. Lands with or after (3).
+
+Recommendation: **single PR, single commit** is acceptable given the small surface area and the fact that (1)+(2)+(3) cannot be split safely. If split into commits within one PR, the order above is mandatory.
 
 ---
 

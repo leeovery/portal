@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-13
 cycle: 1
 phase: Gap Analysis
@@ -17,11 +17,12 @@ topic: distinguish-transport-errors-in-getserveroption
 **Affects**: `## Documentation Updates` (intro line + items 1-5)
 
 **Details**:
-The intro reads "Four sites currently document or anticipate the distinguishability contract." The numbered list then contains five entries (1-5). Item 5 is the `cmd/state_daemon_run_test.go:557-565` documented-gap comment block, which is not a contract/docstring site like items 1-4 — it is a test-file comment that is removed and replaced by an actual test. A planner reading this would not know whether "four" is wrong, whether item 5 belongs under a different sub-heading (e.g., "Test housekeeping"), or whether one of items 1-4 should be merged. Minor but creates uncertainty when slicing tasks (does item 5 belong to a docs task or a tests task?).
+Header said "Four sites" but list contained five entries. Item 5 (the test-file comment block) is not a docstring site and belongs to a different task than the docstring tightening.
 
 **Proposed Addition**:
+Renamed section to "Documentation & Test-Comment Updates"; intro now states four docstring sites + one test-comment site, with explicit task-routing guidance (docs task vs test-reshape task).
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -33,17 +34,12 @@ The intro reads "Four sites currently document or anticipate the distinguishabil
 **Affects**: `## Design: CommandError at the Commander Layer` → `### Type`
 
 **Details**:
-The `Error()` method body is given as a code comment: `/* "<Err>: <Stderr>" when Stderr non-empty, else <Err>.Error() */`. Several things are under-specified:
-
-- Separator: is it colon-space (`": "`), colon (`":"`), or something else? The comment shows `": "` but it is inside a non-executable comment.
-- Trailing whitespace handling on `Stderr` (e.g., `"ambiguous option: "` has a trailing space per the absence-pattern discussion). Should `Error()` `TrimSpace` before joining?
-- Is the rendered format part of the public contract (and therefore something tests should assert verbatim) or an internal detail subject to change?
-
-An implementer must pick a format; if a future reviewer disagrees the test churn is wasted.
+The `Error()` body was given as an in-comment placeholder. Separator, whitespace handling, and public-contract status were under-specified.
 
 **Proposed Addition**:
+Added explicit formatting rules: colon-space separator, `strings.TrimSpace(Stderr)` for the rendered output, `Stderr` itself stored verbatim, format not part of the public contract (behavioural assertions only).
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -55,14 +51,13 @@ An implementer must pick a format; if a future reviewer disagrees the test churn
 **Affects**: `## Design: Discrimination in GetServerOption` → `### Option-absent pattern family`
 
 **Details**:
-The spec says: "The pattern set is exported as a small, package-level slice in `internal/tmux`". The rationale given (reviewable + testable in isolation, future additions in one place) does not require export — package-private would satisfy it. The Testing section's "discriminator-set unit tests" can access an unexported slice because they live in the same package (`tmux_test.go` declares `package tmux` for white-box) — but the spec does not say which test package style is used.
-
-Additionally, no identifier is proposed (e.g., `optionAbsentStderrPatterns`, `OptionAbsentPatterns`). A planner cannot write a task description without naming it.
+Export status of the pattern slice and its identifier were not pinned.
 
 **Proposed Addition**:
+Pinned identifier (`optionAbsentStderrPatterns`), export status (unexported — package is `internal/tmux`), test-package style (white-box, same-package tests), and iteration form (`strings.Contains` loop, no regex).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Also addresses Finding 11 (slice iteration form).
 
 ---
 
@@ -73,11 +68,12 @@ Additionally, no identifier is proposed (e.g., `optionAbsentStderrPatterns`, `Op
 **Affects**: `## Design: CommandError at the Commander Layer` → `### Wiring at RealCommander`
 
 **Details**:
-The wiring discussion only references `cmd.Output()` populating `(*exec.ExitError).Stderr` "when `cmd.Stderr == nil`". The spec asserts both `Run` and `RunRaw` wrap their errors, but does not confirm both methods invoke the process via `cmd.Output()` (vs. e.g., `cmd.CombinedOutput()` or manual `cmd.Stdout`/`cmd.Stderr` plumbing in `RunRaw`). If `RunRaw` uses a different exec path, the "auto-populated Stderr" invariant may not hold and the wiring task is materially different. The spec assumes both methods share the same shape — but does not state this is verified.
+Spec asserted both Run and RunRaw wrap errors but did not confirm both methods invoke via `cmd.Output()` with `cmd.Stderr == nil`.
 
 **Proposed Addition**:
+Confirmed via source inspection: both methods invoke identically via `exec.Command + cmd.Output()` with `cmd.Stderr` nil, differing only in stdout post-processing. Pinned RunRaw line range (`tmux.go:51-58`).
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -89,16 +85,12 @@ The wiring discussion only references `cmd.Output()` populating `(*exec.ExitErro
 **Affects**: `## Design: Discrimination in GetServerOption` → `### Behaviour`
 
 **Details**:
-The behavior table lists three outcomes for `GetServerOption`. The third — "any other failure" — implicitly covers the case where `errors.As(err, &cmdErr)` returns `false` (i.e., a non-nil error that is not a `*CommandError` and does not unwrap to one). This could occur if:
-
-- A future caller wraps the error before it reaches `GetServerOption`.
-- A test mock returns a bare `errors.New(...)` — which the Testing section explicitly says is allowed for tests that "don't care about stderr".
-
-The spec implies the discriminator falls through to "return the original error" in this case, but does not state it. The Testing-section claim "discriminators will see an empty `Stderr` and behave conservatively" is slightly misleading — a bare error has no `Stderr` field at all (the extraction fails), distinct from a `*CommandError{Stderr: ""}`. The end behavior is the same (treat as non-absence), but the mechanism should be documented for the planner.
+Fallthrough behaviour when `errors.As` returns false was implicit.
 
 **Proposed Addition**:
+Added explicit "Fallthrough when `errors.As` returns false" paragraph describing the propagate-original semantics and noting `errors.Is(ErrOptionNotFound)` correctly returns false.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -110,34 +102,29 @@ The spec implies the discriminator falls through to "return the original error" 
 **Affects**: `## Design: Discrimination in GetServerOption` → `### Option-absent pattern family`
 
 **Details**:
-The spec states "case-sensitive substring" matching with "no normalisation (lowercasing, regex) required" — and notes that `ambiguous option: ` from tmux contains a trailing space. Substring match against the pattern `"ambiguous option:"` works whether the stderr has a trailing space or newline. However the spec does not state whether the captured `Stderr` is the raw bytes from `(*exec.ExitError).Stderr` or trimmed. This matters for:
-
-- `CommandError.Error()` rendering (see finding 2).
-- The wrapped error's payload when propagated to consumers (warn-log readability).
-
-Implicit choice: keep raw. Should be made explicit.
+Whether `Stderr` is stored raw or trimmed was implicit.
 
 **Proposed Addition**:
+Added explicit "`Stderr` storage" paragraph: verbatim storage, `strings.Contains` for matching, only `Error()` trims for rendering.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Folded into the same edit as Finding 5.
 
 ---
 
-### 7. Sweep of existing `GetServerOption` / `TryGetServerOption` call sites in tests is not scoped
+### 7. Sweep of existing call sites in tests is not scoped
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
 **Affects**: `## Testing` → `### internal/tmux/tmux_test.go`; `## Scope` → `### In scope`
 
 **Details**:
-The Testing section calls out *one* existing test to reshape ("the `TestGetServerOption` 'option does not exist' case"). It does not state whether other existing tests in `tmux_test.go`, or in any consumer package, currently rely on the old behavior (bare error from mock → `ErrOptionNotFound`). If any other test mocks `Commander.Run` returning a bare error and expects `ErrOptionNotFound` to surface from `GetServerOption` or `TryGetServerOption`, that test breaks under the new contract.
-
-The Acceptance Criteria item 5 ("All existing tests pass without behavioural change in the happy path") implies a sweep was done, but the spec does not enumerate the sweep's findings nor state the sweep is part of the implementation task. A planner cannot scope the "test reshape" task without knowing the surface area.
+Spec called out one existing test to reshape but did not enumerate sweep findings.
 
 **Proposed Addition**:
+Added a "Pre-implementation sweep" subsection to Testing enumerating the three audited surfaces (`tmux_test.go`, `markers_test.go:206`, `state_daemon_run_test.go`) with the verdict for each.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -149,11 +136,12 @@ The Acceptance Criteria item 5 ("All existing tests pass without behavioural cha
 **Affects**: `## Testing` → `### cmd/state_daemon_run_test.go`
 
 **Details**:
-Bullet reads: "**Add a parallel test for `tick()`'s err-handling branch** ... **if not already covered**". The planner is left to determine coverage. This is a small but real planning gap — the task either exists or does not. Acceptance Criterion 6 ("New tests assert each transport-error and pattern-discriminator scenario") does not clarify which tests count as "new" vs. pre-existing.
+"if not already covered" left coverage determination to the planner.
 
 **Proposed Addition**:
+Replaced conditional with explicit two-path guidance (replace existing if covered, add new if not) anchored to the sweep.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -165,17 +153,12 @@ Bullet reads: "**Add a parallel test for `tick()`'s err-handling branch** ... **
 **Affects**: `## Testing` → `### cmd/state_daemon_run_test.go`
 
 **Details**:
-The replacement test for `defaultShutdownFlush`'s err-branch must "assert the flush returns nil without committing state, and that the warn log is emitted." Three under-specifications for the planner:
-
-- "Without committing state": what observable proves no commit? (E.g., a mocked commit-side seam asserts zero calls? A filesystem absence check? An injected stateStore mock?)
-- "Warn log is emitted": how is the log asserted? The state daemon's logger is the `state` package's structured logger — does the test capture it via a test sink, or assert via a different seam?
-- Whether the existing `state_daemon_run_test.go` already exposes these seams (Deps struct? log sink?) is not stated.
-
-The planner can probably reverse-engineer this from neighboring tests, but the spec should pin the seam.
+"Without committing state" and "warn log is emitted" assertion mechanisms were unspecified.
 
 **Proposed Addition**:
+Expanded the bullet into four sub-points: fault injection seam, return-value assertion, zero-commit assertion via existing daemon mock pattern, warn-log capture (with fallback if log-capture seam doesn't exist).
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -187,13 +170,12 @@ The planner can probably reverse-engineer this from neighboring tests, but the s
 **Affects**: `## Testing` → `### internal/tmux — Commander layer`
 
 **Details**:
-The new test uses "a real `os/exec` failure (e.g., invoke a command that returns a known stderr and exit 1)". Cross-platform: on macOS and Linux, `sh -c 'echo "x" 1>&2; exit 1'` works; on Windows it does not — but the spec confines platforms to Darwin/Linux (Risk section), so this is probably fine. Worth pinning the command + expected stderr so the test is reproducible across the planner's environment.
-
-Similarly, "invoke a missing binary" for the non-`ExitError` test — any deterministic non-existent binary name (e.g., `__portal_test_nonexistent_binary__`) should be pinned.
+Test command shapes were illustrative rather than concrete.
 
 **Proposed Addition**:
+Pinned concrete invocation: `sh -c 'echo "synthetic stderr marker" 1>&2; exit 1'` for the ExitError test, `__portal_test_nonexistent_binary__` for the non-ExitError test. Also noted that `RealCommander` is hard-coded to `tmux` today, so the test may need a small refactor (small `runner` helper accepting the binary name).
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -205,12 +187,13 @@ Similarly, "invoke a missing binary" for the non-`ExitError` test — any determ
 **Affects**: `## Design: Discrimination in GetServerOption` → `### Option-absent pattern family`
 
 **Details**:
-The spec calls the pattern set a "slice". Substring matching iterates and short-circuits on first match — order matters only for performance. Three patterns is trivial; not a real concern. But the planner may ask: is the slice iteration the intended discriminator (with `strings.Contains` per element) vs. a single compiled alternation? The spec implies the former by emphasising "no regex required" but does not state the iteration form. Minor.
+Iteration form was not pinned.
 
 **Proposed Addition**:
+Addressed in Finding 3's edit — `for _, pat := range optionAbsentStderrPatterns { if strings.Contains(...) { return ErrOptionNotFound } }`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolved by the same edit as Finding 3.
 
 ---
 
@@ -221,11 +204,12 @@ The spec calls the pattern set a "slice". Substring matching iterates and short-
 **Affects**: `## Testing` → `### internal/state/markers_test.go`
 
 **Details**:
-The spec states `TestIsRestoringSet :: tmux exploded` (existing, line 206) "continues to pass" and "No code change required". For the planner this is fine, but acceptance criterion 5 ("all existing tests pass") implies this is verified — the spec should state whether the test currently passes or currently fails (perhaps it has been guarded with a known-skip or is silently asserting against the broken contract). If it currently passes by coincidence (because the mock returns something other than a bare error), the wording is accurate. If it currently fails or is skipped, the planner needs to know. Worth a one-line clarification.
+Did not explain why the test passes today despite the bug (it bypasses `TryGetServerOption` via a custom `RestoringChecker` mock).
 
 **Proposed Addition**:
+Rewrote the bullet to explain the mock topology: `checkerMock` implements `RestoringChecker` directly and surfaces the error to `IsRestoringSet` without going through `TryGetServerOption`. Test passes today and continues to pass; after the fix, the end-to-end production path is finally capable of delivering the same contract.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -237,11 +221,12 @@ The spec states `TestIsRestoringSet :: tmux exploded` (existing, line 206) "cont
 **Affects**: Whole spec (planning-readiness)
 
 **Details**:
-The spec contains five logical work units: (a) `CommandError` type, (b) `RealCommander` wiring, (c) `GetServerOption` discriminator + pattern slice, (d) docstring tightening at 4 sites, (e) test reshapes/additions including the documented-gap removal. The spec does not state whether these should land as one PR / one commit / multiple commits, nor in what order. Some ordering is load-bearing: (a) before (b) before (c) before (e). Docstrings (d) can land alongside (c). The planner can infer this, but an explicit recommendation prevents accidental partial-landing (e.g., wiring without discriminator leaves callers receiving raw `*CommandError` errors and silently breaks existing `errors.Is(err, ErrOptionNotFound)` checks at the `TryGetServerOption` consumer until (c) lands).
+No guidance on what must land atomically vs what can split.
 
 **Proposed Addition**:
+Added a new "Implementation Ordering" section (placed before "Alternatives Considered") with five numbered units, mandatory ordering, the load-bearing fact about (1)+(2)+(3) being inseparable, and a single-PR recommendation.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
