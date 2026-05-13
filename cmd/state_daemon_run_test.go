@@ -92,7 +92,22 @@ func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
 				return v, nil
 			}
 		}
-		return "", tmux.ErrOptionNotFound
+		// Mirror production: RealCommander never surfaces a bare
+		// ErrOptionNotFound through the Commander layer. tmux exits non-zero
+		// with an absence-pattern stderr and runCommand wraps that into a
+		// *CommandError; the discriminator inside GetServerOption is what
+		// maps it to ErrOptionNotFound. Returning the bare sentinel here
+		// would bypass the discriminator and let the fake diverge from
+		// production for any future test that asserts on the underlying
+		// *CommandError shape.
+		name := ""
+		if len(args) >= 3 {
+			name = args[2]
+		}
+		return "", &tmux.CommandError{
+			Stderr: "unknown option: " + name,
+			Err:    errors.New("exit status 1"),
+		}
 	case "list-sessions":
 		return c.sessionsOut, c.sessionsErr
 	case "list-panes":
