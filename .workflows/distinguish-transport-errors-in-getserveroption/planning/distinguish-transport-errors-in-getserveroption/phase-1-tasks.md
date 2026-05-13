@@ -105,11 +105,10 @@ total: 5
 All assertions are behavioural (`errors.As`, `strings.Contains`, type assertion) — never against the exact `.Error()` string. Tests run independently of any tmux server.
 
 **Edge Cases**:
-- Non-`ExitError` underlying type (e.g., `*exec.Error` from `exec.LookPath` when `tmux` binary is missing) — wrap with empty `Stderr`; do not attempt to extract stderr from it.
+- Non-`ExitError` underlying type (e.g., `*exec.Error` from `exec.LookPath` when `tmux` binary is missing) — production wrap sets `Stderr: ""` and does not attempt to extract stderr. Test assertion must use `var exitErr *exec.ExitError; !errors.As(cmdErr.Err, &exitErr)` to confirm the wrap correctly identified the non-exit case; asserting against `*exec.Error` directly is brittle if Go's exec internals change.
 - `cmd.Stderr` assignment invariant — if a future change ever assigns `cmd.Stderr` (to tee, capture, etc.), `(*exec.ExitError).Stderr` becomes empty silently. The inline comment must call this out; spec calls this a "load-bearing invariant of the current RealCommander implementation."
 - Exit error with empty stderr (process exited non-zero but emitted nothing on stderr) — `Stderr == ""` is acceptable; downstream discriminator treats empty stderr as non-match = non-absence = propagate.
 - Platform applicability — `sh` not on `PATH` → `t.Skip`. Darwin + Linux always have it; the skip is defensive.
-- Non-`ExitError` underlying type assertion — must use `var exitErr *exec.ExitError; !errors.As(cmdErr.Err, &exitErr)` to confirm the wrap correctly identified the non-exit case. Asserting against `*exec.Error` directly is brittle if Go's exec internals change.
 
 **Context**:
 > Spec "Wiring at RealCommander":
@@ -268,7 +267,9 @@ All tests use the existing `Commander` mock surface — no new mock framework, n
 - `"TestDefaultShutdownFlush_SkipsOnTransportError/returns_nil"` — under injected `*CommandError{Stderr: "lost server"}`, flush returns `nil`.
 - `"TestDefaultShutdownFlush_SkipsOnTransportError/zero_commits"` — same scenario, capture/commit seam shows zero commit calls.
 - `"TestDefaultShutdownFlush_SkipsOnTransportError/warn_log_fires"` (optional, if existing harness has a log-capture seam) — warn log is emitted via the structured logger.
-- `"TestTick_SkipsOnTransportError"` — under injected `*CommandError`, `tick` performs no capture/commit and returns without escalating.
+- `"TestTick_SkipsOnTransportError/no_capture"` — under injected `*CommandError{Stderr: "lost server"}`, `tick` performs zero capture calls via the existing capture/commit mock-tracking seam.
+- `"TestTick_SkipsOnTransportError/no_commit"` — same scenario, zero commit calls.
+- `"TestTick_SkipsOnTransportError/warn_log_fires"` (optional, if existing harness has a log-capture seam) — warn log is emitted via the structured logger.
 
 **Edge Cases**:
 - No `t.Parallel()` — cmd-package mock injection via package-level mutable state cannot be parallelised.

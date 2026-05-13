@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-13
 cycle: 2
 phase: Plan Integrity Review
@@ -42,7 +42,7 @@ Aligning the two test-name lists removes the asymmetry without adding scope — 
 - `"TestTick_SkipsOnTransportError/warn_log_fires"` (optional, if existing harness has a log-capture seam) — warn log is emitted via the structured logger.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Lowest-priority finding. The current single-name bullet is not incorrect — it just lacks the parallel structure of the flush case. Reject if the implementer should be free to choose subtest granularity.
 
 ---
@@ -78,7 +78,7 @@ The two bullets cover the same underlying concern from two angles (production wr
 - Platform applicability — `sh` not on `PATH` → `t.Skip`. Darwin + Linux always have it; the skip is defensive.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Pure tidy-up. Content is preserved verbatim; the merge only collapses two related bullets into one.
 
 ---
