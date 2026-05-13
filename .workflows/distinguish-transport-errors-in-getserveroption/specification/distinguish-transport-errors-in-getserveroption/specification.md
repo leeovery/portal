@@ -218,7 +218,7 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 - **Add `TestGetServerOption_TransportError`**: parametrised over a small set of representative non-absent stderr shapes — at minimum the socket-connect failure (`"error connecting to /tmp/tmux-501//default (No such file or directory)"`) and a server-crash shape (`"lost server"`). Mock returns a `*CommandError` with each stderr; assert `!errors.Is(err, ErrOptionNotFound)` and that the returned error unwraps to a `*CommandError` carrying the original stderr. The fault-injection harness is the existing `Commander` mock returning a synthetic exit-1 + stderr — no real `os/exec` interaction required for the discriminator tests.
 - **Add `TestGetServerOption_NonExitErrorPropagates`**: mock returns a `*CommandError{Stderr: "", Err: errors.New("exec: \"tmux\": not found")}`. Assert `!errors.Is(err, ErrOptionNotFound)` and that the error propagates.
 - **Add `TestTryGetServerOption_PropagatesTransportError`**: covers the previously-unreachable `if err != nil { return "", false, err }` branch. Assert `(value, found, err) == ("", false, non-nil)` with `errors.As` recovering the `*CommandError`.
-- **Add discriminator-set unit tests**: each entry in the option-absent pattern slice is exercised against a synthetic stderr containing it, asserting `ErrOptionNotFound` is returned. A negative case asserts an unrelated stderr does not match.
+- **Add discriminator-set unit tests** in `internal/tmux/tmux_test.go` (same-package, white-box — so the unexported `optionAbsentStderrPatterns` slice is directly addressable): each entry in the slice is exercised against a synthetic stderr containing it, asserting `ErrOptionNotFound` is returned. A negative case asserts an unrelated stderr does not match.
 
 ### `cmd/state_daemon_run_test.go`
 
@@ -246,15 +246,22 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 
 ### Pre-implementation sweep
 
-Before reshaping tests, the implementer must perform a one-pass sweep of existing test code to identify any test that mocks `Commander.Run` returning a bare `errors.New(...)` and asserts `errors.Is(err, ErrOptionNotFound)` (or treats `GetServerOption`/`TryGetServerOption` failure as "option absent"). Such tests rely on the old conflation and break under the new contract — they must be updated to return a `*CommandError` whose `Stderr` matches the option-absent pattern family.
+Before reshaping tests, the implementer must perform two short sweeps to confirm the audited surface still matches what investigation recorded.
 
-Sweep surface (audited during investigation):
+**Production-code sweep** — `grep -rn "ErrOptionNotFound\|GetServerOption\|TryGetServerOption" --include="*.go" . | grep -v _test.go` should produce the following call sites and no others:
+
+- `internal/tmux/tmux.go` — defines `ErrOptionNotFound`, `GetServerOption`, `TryGetServerOption`, and `TryGetServerOption`'s only internal caller (itself). No external caller exists for `GetServerOption`.
+- `internal/state/markers.go:140` — `IsRestoringSet` is the **only** production caller of `TryGetServerOption`. It propagates errors via the existing `(value, found, err)` shape; no `errors.Is(err, tmux.ErrOptionNotFound)` is performed at this site (or anywhere in production code outside `tmux.go` itself).
+
+No production caller treats `GetServerOption`/`TryGetServerOption` failure as a silent no-op via the conflation. The Risk & Rollout "no new failure mode introduced" claim therefore holds. If the sweep surfaces any caller not listed here, it must be audited individually before the fix lands.
+
+**Test-code sweep** — same grep including `_test.go`:
 
 - `internal/tmux/tmux_test.go` — `TestGetServerOption` "option does not exist" case is the only test relying on the old conflation; all other server-option tests in this file either exercise success paths or use the `ShowAllServerOptions` path which is unaffected.
-- `internal/state/markers_test.go:206` — `TestIsRestoringSet :: propagates underlying tmux error` uses a `checkerMock` (a custom `RestoringChecker` implementation, not a `Commander` mock) that returns `errors.New("tmux exploded")` directly. The mock bypasses `TryGetServerOption` entirely and surfaces the error to `IsRestoringSet` directly, so this test passes today and continues to pass — no change required.
+- `internal/state/markers_test.go:205-210` — `TestIsRestoringSet :: propagates underlying tmux error` uses a `checkerMock` (a custom `RestoringChecker` implementation, not a `Commander` mock) that returns `errors.New("tmux exploded")` directly. The mock bypasses `TryGetServerOption` entirely and surfaces the error to `IsRestoringSet` directly, so this test passes today and continues to pass — no change required.
 - `cmd/state_daemon_run_test.go` — documented-gap comment at lines 557–565 indicates no existing test reaches the err-branch through the public `Client` surface; the replacement test introduced by this fix is the first such test.
 
-If the sweep surfaces any test outside these three sites that relies on the old conflation, it is part of the test-reshape task scope.
+If the test sweep surfaces any test outside these three sites that relies on the old conflation, it is part of the test-reshape task scope.
 
 ---
 
@@ -290,8 +297,8 @@ If the sweep surfaces any test outside these three sites that relies on the old 
 
 ## Acceptance Criteria
 
-1. `GetServerOption("@some-marker")` returns `("", ErrOptionNotFound)` if and only if the underlying tmux call's stderr contains a substring from the option-absent pattern family (`invalid option:`, `unknown option:`, `ambiguous option:`).
-2. `GetServerOption("@some-marker")` returns a non-nil, non-`ErrOptionNotFound` error wrapping `*CommandError` for any other failure mode, including transport errors, executable-not-found, and stderr that does not match the absent family.
+1. `GetServerOption("@some-marker")` returns `("", ErrOptionNotFound)` if and only if the returned error unwraps (via `errors.As`) to a `*CommandError` whose `Stderr` contains a substring from the option-absent pattern family (`invalid option:`, `unknown option:`, `ambiguous option:`). Errors that do not carry a `*CommandError` propagate unchanged as non-`ErrOptionNotFound` errors regardless of their `.Error()` text.
+2. `GetServerOption("@some-marker")` returns a non-nil, non-`ErrOptionNotFound` error wrapping `*CommandError` for any other failure mode whose `Commander` invocation produces one — transport errors, server crashes, executable-not-found, or any stderr that does not match the absent family.
 3. `TryGetServerOption("@some-marker")` returns `("", false, non-nil-err)` for any non-absent failure — exercising the `if err != nil { return "", false, err }` branch that was previously unreachable.
 4. `IsRestoringSet`'s daemon callers (`tick()`, `defaultShutdownFlush()`) receive non-nil errors for transport failures and skip their action conservatively (warn log + early return).
 5. All existing tests pass without behavioural change in the happy path.
