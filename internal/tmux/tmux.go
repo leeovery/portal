@@ -35,24 +35,46 @@ type Commander interface {
 // RealCommander executes tmux commands via os/exec.
 type RealCommander struct{}
 
-// Run executes a tmux command with the given arguments and returns its output.
+// Run executes a tmux command with the given arguments and returns its output
+// trimmed of surrounding whitespace. Non-nil errors are wrapped in
+// *CommandError so callers can recover the child's stderr via errors.As.
 func (r *RealCommander) Run(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return runCommand("tmux", true, args...)
 }
 
 // RunRaw executes a tmux command and returns its output verbatim — no
 // whitespace trim, no transformation. Used by capture-pane where trailing
-// blank lines and ANSI escapes are content, not noise.
+// blank lines and ANSI escapes are content, not noise. Error wrapping is
+// identical to Run: non-nil errors are returned as *CommandError.
 func (r *RealCommander) RunRaw(args ...string) (string, error) {
-	cmd := exec.Command("tmux", args...)
+	return runCommand("tmux", false, args...)
+}
+
+// runCommand is the shared exec seam behind RealCommander.Run / RunRaw. The
+// trim flag selects Run's TrimSpace behaviour vs RunRaw's verbatim output.
+// Non-nil errors from cmd.Output() are wrapped in *CommandError so callers can
+// inspect the child's stderr via errors.As without coupling to os/exec.
+//
+// Invariant: cmd.Stderr is deliberately left nil. (*exec.ExitError).Stderr is
+// auto-populated by cmd.Output() only when cmd.Stderr == nil — assigning it
+// (e.g., to tee stderr elsewhere) would silently zero exitErr.Stderr and
+// defeat the wrap. Any future change that needs stderr piped elsewhere must
+// capture stderr explicitly (e.g., via cmd.StderrPipe()) and preserve this
+// wrap.
+func runCommand(binary string, trim bool, args ...string) (string, error) {
+	cmd := exec.Command(binary, args...)
+	// cmd.Stderr left nil — see invariant note on this function.
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		var stderr string
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr = string(exitErr.Stderr)
+		}
+		return "", &CommandError{Stderr: stderr, Err: err}
+	}
+	if trim {
+		return strings.TrimSpace(string(out)), nil
 	}
 	return string(out), nil
 }
