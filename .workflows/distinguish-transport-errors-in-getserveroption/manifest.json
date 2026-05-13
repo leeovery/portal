@@ -32,7 +32,7 @@
         "distinguish-transport-errors-in-getserveroption": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "72bb1e2db0d2671c26e4f21a701dbd29bba7e769",
+          "spec_commit": "936b4ff473935ae2a4975b4af31e0a0a40e173e9",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
