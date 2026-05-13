@@ -23,7 +23,8 @@ approved_at: 2026-05-13
 - [ ] Pre-implementation sweeps (production-code grep and test-code grep per the spec's "Pre-implementation sweep" section) confirm no caller outside the audited sites depends on the old conflation; any newly-surfaced caller is audited before merge.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-13
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
