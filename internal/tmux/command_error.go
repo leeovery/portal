@@ -1,6 +1,10 @@
 package tmux
 
-import "strings"
+import (
+	"errors"
+	"os/exec"
+	"strings"
+)
 
 // CommandError wraps an error returned by Commander.Run / Commander.RunRaw and
 // carries the captured stderr from the underlying process. Stderr is empty when
@@ -42,4 +46,38 @@ func (e *CommandError) Error() string {
 // through *CommandError to the underlying cause.
 func (e *CommandError) Unwrap() error {
 	return e.Err
+}
+
+// WrapCommandError converts an error returned by exec.Cmd.Output() into the
+// canonical *CommandError shape used across portal. A nil input returns nil
+// so callers can invoke it unconditionally on the exec result.
+//
+// When err unwraps to *exec.ExitError via errors.As, the returned
+// *CommandError.Stderr is populated from (*exec.ExitError).Stderr — the bytes
+// exec captures from the child's stderr. For any other error (e.g.
+// *exec.Error from a failed PATH lookup) Stderr is empty; the original error
+// is still wrapped so callers' errors.As traversal is uniform across both
+// failure modes.
+//
+// Precondition: the *exec.Cmd whose Output() produced err must have left
+// cmd.Stderr == nil. exec.Cmd auto-populates (*exec.ExitError).Stderr only
+// under that condition — assigning cmd.Stderr (e.g. to tee output) silently
+// zeroes exitErr.Stderr and defeats the wrap. Callers needing stderr piped
+// elsewhere must capture it explicitly (e.g. via cmd.StderrPipe()) and feed
+// the captured bytes into a *CommandError struct directly.
+//
+// This helper is the single source of truth for the production wrap shape.
+// Both internal/tmux.runCommand and internal/tmuxtest.socketCommander call
+// through it so production discriminators (errors.As against *CommandError)
+// behave identically against the test commander.
+func WrapCommandError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var stderr string
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr = string(exitErr.Stderr)
+	}
+	return &CommandError{Stderr: stderr, Err: err}
 }

@@ -66,26 +66,19 @@ func (r *RealCommander) RunRaw(args ...string) (string, error) {
 
 // runCommand is the shared exec seam behind RealCommander.Run / RunRaw. The
 // trim flag selects Run's TrimSpace behaviour vs RunRaw's verbatim output.
-// Non-nil errors from cmd.Output() are wrapped in *CommandError so callers can
-// inspect the child's stderr via errors.As without coupling to os/exec.
+// Non-nil errors from cmd.Output() are wrapped in *CommandError via
+// WrapCommandError so callers can inspect the child's stderr via errors.As
+// without coupling to os/exec.
 //
-// Invariant: cmd.Stderr is deliberately left nil. (*exec.ExitError).Stderr is
-// auto-populated by cmd.Output() only when cmd.Stderr == nil — assigning it
-// (e.g., to tee stderr elsewhere) would silently zero exitErr.Stderr and
-// defeat the wrap. Any future change that needs stderr piped elsewhere must
-// capture stderr explicitly (e.g., via cmd.StderrPipe()) and preserve this
-// wrap.
+// Invariant: cmd.Stderr is deliberately left nil — see WrapCommandError's
+// godoc for the full precondition (in short: assigning cmd.Stderr silently
+// zeroes (*exec.ExitError).Stderr and defeats the wrap).
 func runCommand(binary string, trim bool, args ...string) (string, error) {
 	cmd := exec.Command(binary, args...)
-	// cmd.Stderr left nil — see invariant note on this function.
+	// cmd.Stderr left nil — see WrapCommandError precondition.
 	out, err := cmd.Output()
 	if err != nil {
-		var stderr string
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			stderr = string(exitErr.Stderr)
-		}
-		return "", &CommandError{Stderr: stderr, Err: err}
+		return "", WrapCommandError(err)
 	}
 	if trim {
 		return strings.TrimSpace(string(out)), nil
