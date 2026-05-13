@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "distinguish-transport-errors-in-getserveroption": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "72bb1e2db0d2671c26e4f21a701dbd29bba7e769",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
