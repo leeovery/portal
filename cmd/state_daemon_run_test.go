@@ -554,15 +554,91 @@ func TestDaemonShutdownFlush_SkipsWhenRestoring(t *testing.T) {
 	}
 }
 
-// NOTE: A test for "conservatively skips the final flush when @portal-restoring
-// read errors" cannot be exercised via the standard daemonFakeCommander because
-// internal/tmux.Client.GetServerOption coerces every underlying tmux error to
-// tmux.ErrOptionNotFound (see internal/tmux/tmux.go GetServerOption). That
-// makes TryGetServerOption return (false, nil) — never an error — so the
-// defaultShutdownFlush err branch is unreachable through the public Client
-// surface today. The defensive code is preserved for future refactors that
-// distinguish "real failure" from "not found"; until then the case is
-// verified by inspection of defaultShutdownFlush.
+// TestDefaultShutdownFlush_SkipsOnTransportError covers the conservative-on-
+// error branch in defaultShutdownFlush: when IsRestoringSet errors (e.g.,
+// transport failure during the restoration window), the final flush is skipped
+// and nil is returned. The fault-injection shape is a *tmux.CommandError whose
+// Stderr does NOT match the option-absent pattern family, so GetServerOption
+// propagates it as a non-ErrOptionNotFound error through TryGetServerOption to
+// IsRestoringSet.
+func TestDefaultShutdownFlush_SkipsOnTransportError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		optionErr: &tmux.CommandError{
+			Stderr: "lost server",
+			Err:    errors.New("exit status 1"),
+		},
+		// Seed sessions output so any leak through to captureAndCommit would
+		// surface as a list-sessions call we can assert against.
+		sessionsOut: "work|1|0",
+	}
+	deps := makeDeps(t, dir, fc)
+
+	t.Run("returns_nil", func(t *testing.T) {
+		if err := defaultShutdownFlush(deps); err != nil {
+			t.Errorf("defaultShutdownFlush() = %v, want nil", err)
+		}
+	})
+
+	t.Run("zero_commits", func(t *testing.T) {
+		// captureAndCommit's first tmux call is list-sessions (via
+		// CaptureStructure). Zero list-sessions invocations is the structural
+		// proof that no commit cycle ran.
+		if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+			t.Errorf("list-sessions invoked despite transport error on @portal-restoring read: %v", got)
+		}
+		if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+			t.Errorf("sessions.json should not be written on transport error; stat=%v", err)
+		}
+	})
+}
+
+// TestTick_SkipsOnTransportError covers the conservative-on-error branch in
+// tick() (cmd/state_daemon.go:95-99). Same fault-injection shape as the
+// shutdown-flush test: when IsRestoringSet errors via a non-absent
+// *tmux.CommandError, tick logs at WARN and returns without performing capture
+// or commit.
+func TestTick_SkipsOnTransportError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	fc := &daemonFakeCommander{
+		optionErr: &tmux.CommandError{
+			Stderr: "lost server",
+			Err:    errors.New("exit status 1"),
+		},
+		sessionsOut: "work|1|0",
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.LastSaveAt = time.Now()
+	touchSaveRequested(t, dir)
+
+	tick(deps)
+
+	t.Run("no_capture", func(t *testing.T) {
+		// capture-pane is invoked inside captureAndCommit, only reached if the
+		// restoring-marker check did not abort the tick.
+		if got := fc.callsContaining("capture-pane"); len(got) != 0 {
+			t.Errorf("capture-pane invoked despite transport error on @portal-restoring read: %v", got)
+		}
+		// list-sessions is the first tmux call in captureAndCommit; zero
+		// invocations is independent structural proof.
+		if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+			t.Errorf("list-sessions invoked despite transport error on @portal-restoring read: %v", got)
+		}
+	})
+
+	t.Run("no_commit", func(t *testing.T) {
+		if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+			t.Errorf("sessions.json should not be written on transport error; stat=%v", err)
+		}
+		// save.requested must survive a skipped tick — the dirty flag is only
+		// cleared after a successful capture-and-commit.
+		if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+			t.Errorf("save.requested should survive transport-error skip: %v", err)
+		}
+	})
+}
 
 func TestDaemonStartup_SeedsHashMapFromDisk(t *testing.T) {
 	dir := t.TempDir()
