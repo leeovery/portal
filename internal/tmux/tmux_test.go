@@ -2603,3 +2603,105 @@ func assertWindowGroups(t *testing.T, got, want []tmux.WindowGroup) {
 		}
 	}
 }
+
+func TestCommandError_Error(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		err    error
+		want   string
+	}{
+		{
+			name:   "stderr and err both present uses colon-space separator",
+			stderr: "invalid option: @foo",
+			err:    errors.New("exit status 1"),
+			want:   "exit status 1: invalid option: @foo",
+		},
+		{
+			name:   "stderr trimmed in rendered output",
+			stderr: "  invalid option: @foo\n",
+			err:    errors.New("exit status 1"),
+			want:   "exit status 1: invalid option: @foo",
+		},
+		{
+			name:   "empty stderr falls back to bare err message",
+			stderr: "",
+			err:    errors.New("exit status 1"),
+			want:   "exit status 1",
+		},
+		{
+			name:   "whitespace-only stderr falls back to bare err message",
+			stderr: "\n   \t\n",
+			err:    errors.New("exit status 1"),
+			want:   "exit status 1",
+		},
+		{
+			name:   "nil err returns trimmed stderr",
+			stderr: "  some stderr  \n",
+			err:    nil,
+			want:   "some stderr",
+		},
+		{
+			name:   "both fields empty returns sentinel no-error string",
+			stderr: "",
+			err:    nil,
+			want:   "<no error>",
+		},
+		{
+			name:   "nil err with whitespace-only stderr returns sentinel",
+			stderr: "  \n\t",
+			err:    nil,
+			want:   "<no error>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ce := &tmux.CommandError{Stderr: tt.stderr, Err: tt.err}
+			if got := ce.Error(); got != tt.want {
+				t.Errorf("Error() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCommandError_Unwrap(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	ce := &tmux.CommandError{Stderr: "ignored", Err: sentinel}
+	if got := ce.Unwrap(); got != sentinel {
+		t.Errorf("Unwrap() = %v, want %v", got, sentinel)
+	}
+	if !errors.Is(ce, sentinel) {
+		t.Errorf("errors.Is(ce, sentinel) = false, want true")
+	}
+}
+
+func TestCommandError_UnwrapNil(t *testing.T) {
+	ce := &tmux.CommandError{Stderr: "only stderr", Err: nil}
+	if got := ce.Unwrap(); got != nil {
+		t.Errorf("Unwrap() = %v, want nil", got)
+	}
+}
+
+func TestCommandError_ErrorsAsThroughFmtWrap(t *testing.T) {
+	inner := &tmux.CommandError{Stderr: "invalid option: @foo", Err: errors.New("exit status 1")}
+	wrapped := fmt.Errorf("ctx: %w", inner)
+
+	var got *tmux.CommandError
+	if !errors.As(wrapped, &got) {
+		t.Fatalf("errors.As did not extract *CommandError from %v", wrapped)
+	}
+	if got.Stderr != "invalid option: @foo" {
+		t.Errorf("extracted Stderr = %q, want %q", got.Stderr, "invalid option: @foo")
+	}
+	if got.Err == nil || got.Err.Error() != "exit status 1" {
+		t.Errorf("extracted Err = %v, want exit status 1", got.Err)
+	}
+}
+
+func TestCommandError_StructLiteralConstruction(t *testing.T) {
+	// Confirms the type is constructable as a bare struct literal from an
+	// external package — the contract that mocks rely on (no NewCommandError
+	// factory, fields Stderr and Err remain exported).
+	var _ error = &tmux.CommandError{Stderr: "x", Err: errors.New("y")}
+}
