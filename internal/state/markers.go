@@ -32,7 +32,12 @@ type ServerOptionLister interface {
 // avoids an import cycle.
 //
 // TryGetServerOption returns (value, found, err) so absence vs. real failure
-// is distinguishable without importing tmux.ErrOptionNotFound here.
+// is distinguishable: absence is reported as (value, false, nil); real
+// failures surface as ("", false, non-nil-err). Callers can use
+// errors.Is(err, tmux.ErrOptionNotFound) on the underlying GetServerOption
+// path to identify genuine absence (TryGetServerOption already does this
+// internally on this package's behalf, so internal/state does not need to
+// import internal/tmux).
 type RestoringChecker interface {
 	TryGetServerOption(name string) (string, bool, error)
 }
@@ -135,7 +140,8 @@ func UnsetSkeletonMarkerForFIFO(w ServerOptionWriter, fifoPath string) error {
 //
 // Absent and empty-value markers both report false. Any underlying tmux error
 // is propagated so a real failure does not silently masquerade as "not
-// restoring".
+// restoring"; the propagated error wraps a *tmux.CommandError recoverable via
+// errors.As, carrying the captured stderr for diagnosis.
 func IsRestoringSet(c RestoringChecker) (bool, error) {
 	val, found, err := c.TryGetServerOption(RestoringMarkerName)
 	if err != nil {

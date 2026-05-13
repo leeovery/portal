@@ -361,10 +361,19 @@ func (c *Client) GetServerOption(name string) (string, error) {
 }
 
 // TryGetServerOption returns the value of a tmux server-level option along
-// with a found flag. When the option does not exist, it returns ("", false, nil)
-// — distinguishing absence from a real tmux failure (which surfaces as a
-// non-nil error). Callers that need to treat "not found" as a normal control-
-// flow case should prefer this over GetServerOption.
+// with a found flag, distinguishing genuine absence from real tmux failures:
+//
+//   - Option present  → (value, true, nil)
+//   - Option absent   → ("", false, nil), recognised via
+//     errors.Is(err, ErrOptionNotFound) on the underlying GetServerOption call
+//     (i.e. tmux's stderr matched the option-absent pattern family).
+//   - Any other error → ("", false, non-nil-err) — a transport or
+//     environmental failure (socket connect, lost server, exec lookup, etc.).
+//     The wrapped *CommandError is recoverable via errors.As(err, &cmdErr)
+//     so callers can inspect tmux's stderr without coupling to os/exec.
+//
+// Callers that need to treat "not found" as a normal control-flow case should
+// prefer this over GetServerOption.
 func (c *Client) TryGetServerOption(name string) (string, bool, error) {
 	val, err := c.GetServerOption(name)
 	if errors.Is(err, ErrOptionNotFound) {
