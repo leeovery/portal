@@ -26,10 +26,10 @@ The investigation enumerates four rejected approaches with concrete rejection re
 The spec records only the chosen approach. Without these alternatives, future readers can't tell why this shape was chosen over the obvious cheaper options (especially D, which is the smallest diff).
 
 **Proposed Addition**:
-(leave blank — discuss whether to include rejected alternatives in spec or treat investigation as the historical record)
+Add a new "Alternatives Considered" section after "Risk & Rollout" enumerating B/C/D/E with rejection reasoning, plus a closing line on why the chosen approach was preferred.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added as new section after Risk & Rollout.
 
 ---
 

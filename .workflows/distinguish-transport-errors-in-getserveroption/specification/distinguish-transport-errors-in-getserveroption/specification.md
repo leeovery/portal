@@ -262,4 +262,17 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 
 ---
 
+## Alternatives Considered
+
+The investigation evaluated four other shapes before settling on typed `CommandError` at the Commander layer. Each is recorded here so future readers can audit the trade-off:
+
+- **B. `fmt.Errorf("%w: %s", err, stderr)` wrap at the Commander layer.** Rejected: the discriminator becomes a substring-match against a formatted error string. Brittle if the wrap format ever changes; harder to test the boundary cleanly.
+- **C. New `Commander.RunWithStderr(args...) (out, stderr string, err error)` method.** Rejected: a parallel API surface forces every mock to stub a second method, and the addition does not protect against similar latent conflations elsewhere.
+- **D. Inline type-assert against `*exec.ExitError` inside `GetServerOption`.** Rejected: couples `internal/tmux` to `os/exec` semantics at the public discriminator site, and `Commander` mocks would need to construct synthetic `*exec.ExitError` instances (their fields are partly outside our zone of control).
+- **E. String-match against `err.Error()` (no wrap) at the `GetServerOption` layer.** Rejected on examination: `(*exec.ExitError).Error()` returns `"exit status 1"` — the stderr is on `.Stderr`, not in the error string. Mechanically broken without first wrapping the error.
+
+The chosen approach (typed `CommandError`) puts the diagnostic shape in the type system where the existing docstrings already pretend it lives; mocks remain trivial struct-literal constructions; future discriminators get the same channel without API drift; and daemon consumer code is untouched.
+
+---
+
 ## Working Notes
