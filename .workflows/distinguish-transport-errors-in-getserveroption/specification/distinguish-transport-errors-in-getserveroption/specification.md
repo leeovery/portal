@@ -218,4 +218,48 @@ The comment block explains that a test for `defaultShutdownFlush`'s err-branch c
 
 ---
 
+## Scope
+
+### In scope
+
+- New `CommandError` type in `internal/tmux` (exported, struct-literal constructable).
+- `RealCommander.Run` / `RealCommander.RunRaw` wrap their non-nil errors with `*CommandError`.
+- `GetServerOption` discriminates via `errors.As` + stderr pattern-family substring match.
+- `TryGetServerOption` body unchanged; dead branch becomes live.
+- Docstring tightening at the four cited sites.
+- Test reshapes and additions per the Testing section.
+- Removal of the documented-gap comment block in `cmd/state_daemon_run_test.go`.
+
+### Out of scope
+
+- Changes to the `Commander` interface signature. `Run` and `RunRaw` keep `(string, error)`.
+- Changes to any other `internal/tmux` method (`ShowAllServerOptions`, `SetServerOption`, etc.). Their error-propagation paths are already correct per the wide-scope audit.
+- Changes to daemon consumer logic in `cmd/state_daemon.go`. The fix surfaces errors into branches the consumers already wrote correctly.
+- Migration of other callers to the `*CommandError` discriminator. No other production caller of `internal/tmux` currently distinguishes failure modes; this fix does not introduce new discrimination sites.
+- Re-architecting `ErrOptionNotFound` (e.g., turning it into a struct error type). It remains a sentinel `var`.
+
+### Non-goals
+
+- Producing observable user-facing behaviour changes in the happy path. Under normal operation (no transient tmux failures), behaviour is identical to today.
+- Adding telemetry or metrics for transport errors. The existing `log.Warn` calls in daemon consumers are the only observable signal and they already exist.
+
+## Acceptance Criteria
+
+1. `GetServerOption("@some-marker")` returns `("", ErrOptionNotFound)` if and only if the underlying tmux call's stderr contains a substring from the option-absent pattern family (`invalid option:`, `unknown option:`, `ambiguous option:`).
+2. `GetServerOption("@some-marker")` returns a non-nil, non-`ErrOptionNotFound` error wrapping `*CommandError` for any other failure mode, including transport errors, executable-not-found, and stderr that does not match the absent family.
+3. `TryGetServerOption("@some-marker")` returns `("", false, non-nil-err)` for any non-absent failure — exercising the `if err != nil { return "", false, err }` branch that was previously unreachable.
+4. `IsRestoringSet`'s daemon callers (`tick()`, `defaultShutdownFlush()`) receive non-nil errors for transport failures and skip their action conservatively (warn log + early return).
+5. All existing tests pass without behavioural change in the happy path.
+6. New tests assert each transport-error and pattern-discriminator scenario in the Testing section.
+7. The four contract-violation docstrings now accurately describe the implementation.
+8. The documented-gap comment block at `cmd/state_daemon_run_test.go:557-565` is removed and replaced with the previously-blocked test.
+
+## Risk & Rollout
+
+- **Regression risk:** Low. The behavioural change is "transport errors now propagate into branches consumers already wrote." No new failure mode is introduced — only previously-suppressed failure modes are surfaced into existing handling.
+- **Rollout:** Regular release. No incident pressure, no hotfix.
+- **Compatibility:** No external API changes. The `Commander` interface signature is unchanged; consumers of `tmux.ErrOptionNotFound` continue to work with semantics that now match their intent.
+
+---
+
 ## Working Notes
