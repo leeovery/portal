@@ -922,7 +922,10 @@ func TestGetServerOption(t *testing.T) {
 	})
 
 	t.Run("returns ErrOptionNotFound when option does not exist", func(t *testing.T) {
-		mock := &MockCommander{Err: errors.New("unknown option: @portal-active-%3")}
+		mock := &MockCommander{Err: &tmux.CommandError{
+			Stderr: "unknown option: @portal-active-%3",
+			Err:    errors.New("exit status 1"),
+		}}
 		client := tmux.NewClient(mock)
 
 		got, err := client.GetServerOption("@portal-active-%3")
@@ -934,6 +937,83 @@ func TestGetServerOption(t *testing.T) {
 			t.Errorf("GetServerOption() error = %v, want ErrOptionNotFound", err)
 		}
 	})
+}
+
+// TestGetServerOption_TransportError covers the propagation path: failures
+// whose stderr does not match any optionAbsentStderrPatterns entry must
+// surface to the caller with the wrapped *CommandError intact, so consumers
+// (e.g. the daemon's restoring-marker check) can distinguish transport faults
+// from genuine option absence.
+func TestGetServerOption_TransportError(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+	}{
+		{
+			name:   "socket_connect_failure",
+			stderr: "error connecting to /tmp/tmux-501//default (No such file or directory)",
+		},
+		{
+			name:   "lost_server",
+			stderr: "lost server",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmdErr := &tmux.CommandError{Stderr: tc.stderr, Err: errors.New("exit status 1")}
+			mock := &MockCommander{Err: cmdErr}
+			client := tmux.NewClient(mock)
+
+			got, err := client.GetServerOption("@portal-restoring")
+
+			if got != "" {
+				t.Errorf("GetServerOption() = %q, want empty string", got)
+			}
+			if err == nil {
+				t.Fatal("GetServerOption() error = nil, want non-nil")
+			}
+			if errors.Is(err, tmux.ErrOptionNotFound) {
+				t.Errorf("GetServerOption() error = %v, must not be ErrOptionNotFound", err)
+			}
+			var recovered *tmux.CommandError
+			if !errors.As(err, &recovered) {
+				t.Fatalf("errors.As did not recover *CommandError from %v (%T)", err, err)
+			}
+			if recovered.Stderr != tc.stderr {
+				t.Errorf("recovered Stderr = %q, want %q", recovered.Stderr, tc.stderr)
+			}
+		})
+	}
+}
+
+// TestGetServerOption_NonExitErrorPropagates covers the case where the
+// underlying tmux invocation could not even produce stderr (e.g. exec lookup
+// failure). The *CommandError still wraps the underlying cause but Stderr is
+// empty; the discriminator must not treat the empty string as a match.
+func TestGetServerOption_NonExitErrorPropagates(t *testing.T) {
+	cmdErr := &tmux.CommandError{Stderr: "", Err: errors.New("exec: \"tmux\": not found")}
+	mock := &MockCommander{Err: cmdErr}
+	client := tmux.NewClient(mock)
+
+	got, err := client.GetServerOption("@portal-restoring")
+
+	if got != "" {
+		t.Errorf("GetServerOption() = %q, want empty string", got)
+	}
+	if err == nil {
+		t.Fatal("GetServerOption() error = nil, want non-nil")
+	}
+	if errors.Is(err, tmux.ErrOptionNotFound) {
+		t.Errorf("GetServerOption() error = %v, must not be ErrOptionNotFound", err)
+	}
+	var recovered *tmux.CommandError
+	if !errors.As(err, &recovered) {
+		t.Fatalf("errors.As did not recover *CommandError from %v (%T)", err, err)
+	}
+	if recovered.Stderr != "" {
+		t.Errorf("recovered Stderr = %q, want empty string", recovered.Stderr)
+	}
 }
 
 func TestUnsetServerOption(t *testing.T) {
@@ -1663,7 +1743,10 @@ func TestTryGetServerOption(t *testing.T) {
 	})
 
 	t.Run("returns found=false and no error when option not found", func(t *testing.T) {
-		mock := &MockCommander{Err: errors.New("unknown option")}
+		mock := &MockCommander{Err: &tmux.CommandError{
+			Stderr: "unknown option: @portal-restoring",
+			Err:    errors.New("exit status 1"),
+		}}
 		client := tmux.NewClient(mock)
 
 		val, found, err := client.TryGetServerOption("@portal-restoring")
@@ -1677,6 +1760,41 @@ func TestTryGetServerOption(t *testing.T) {
 			t.Errorf("value = %q, want empty", val)
 		}
 	})
+}
+
+// TestTryGetServerOption_PropagatesTransportError verifies that
+// TryGetServerOption's previously-dead transport-error branch now fires:
+// a *CommandError whose stderr does not match any absence pattern must
+// surface as ("", false, non-nil err) with the wrapped *CommandError
+// recoverable via errors.As. This is the contract the daemon's
+// restoring-marker check relies on to distinguish absence from transport
+// failure.
+func TestTryGetServerOption_PropagatesTransportError(t *testing.T) {
+	cmdErr := &tmux.CommandError{
+		Stderr: "error connecting to /tmp/tmux-501//default (No such file or directory)",
+		Err:    errors.New("exit status 1"),
+	}
+	mock := &MockCommander{Err: cmdErr}
+	client := tmux.NewClient(mock)
+
+	val, found, err := client.TryGetServerOption("@portal-restoring")
+
+	if val != "" {
+		t.Errorf("value = %q, want empty", val)
+	}
+	if found {
+		t.Errorf("found = true, want false")
+	}
+	if err == nil {
+		t.Fatal("TryGetServerOption() error = nil, want non-nil")
+	}
+	var recovered *tmux.CommandError
+	if !errors.As(err, &recovered) {
+		t.Fatalf("errors.As did not recover *CommandError from %v (%T)", err, err)
+	}
+	if recovered.Stderr != cmdErr.Stderr {
+		t.Errorf("recovered Stderr = %q, want %q", recovered.Stderr, cmdErr.Stderr)
+	}
 }
 
 func TestNewSessionWithCommand(t *testing.T) {

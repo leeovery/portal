@@ -10,6 +10,7 @@
 package tmuxtest
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,16 +115,38 @@ type socketCommander struct {
 }
 
 // runRaw executes tmux on the isolated socket and returns the raw stdout
-// bytes. Shared by Run and RunRaw so the exec/error path lives in one place.
+// bytes along with any error from exec. Errors are returned unwrapped here;
+// the Run / RunRaw shims wrap them in *tmux.CommandError so this test
+// commander mirrors production RealCommander's error-wrapping contract.
+// Without this mirror, GetServerOption's discriminator (which uses errors.As
+// to recover *CommandError stderr) cannot tell absence from transport
+// failure under integration tests driving real tmux.
 func (sc *socketCommander) runRaw(args []string) ([]byte, error) {
 	return exec.Command("tmux", socketArgs(sc.socketPath, args...)...).Output()
+}
+
+// wrapErr mirrors RealCommander's error-wrapping at internal/tmux/tmux.go:
+// non-nil errors become *tmux.CommandError with Stderr populated from
+// (*exec.ExitError).Stderr when present, otherwise empty. The shape is
+// identical to production so production discriminators (errors.As against
+// *CommandError) behave the same against this test commander.
+func wrapErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var stderr string
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr = string(exitErr.Stderr)
+	}
+	return &tmux.CommandError{Stderr: stderr, Err: err}
 }
 
 // Run executes tmux on the isolated socket and trims surrounding whitespace.
 func (sc *socketCommander) Run(args ...string) (string, error) {
 	out, err := sc.runRaw(args)
 	if err != nil {
-		return "", err
+		return "", wrapErr(err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -132,7 +155,7 @@ func (sc *socketCommander) Run(args ...string) (string, error) {
 func (sc *socketCommander) RunRaw(args ...string) (string, error) {
 	out, err := sc.runRaw(args)
 	if err != nil {
-		return "", err
+		return "", wrapErr(err)
 	}
 	return string(out), nil
 }

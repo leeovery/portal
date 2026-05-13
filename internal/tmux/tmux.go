@@ -12,6 +12,20 @@ import (
 // ErrOptionNotFound is returned when a tmux server option does not exist.
 var ErrOptionNotFound = errors.New("option not found")
 
+// optionAbsentStderrPatterns lists the stderr substrings tmux uses to signal
+// that a server option does not exist. Substring match is case-sensitive.
+//
+// Used by GetServerOption to discriminate genuine option absence from
+// transport faults (lost server, socket connect failures, etc.). Adding a
+// future tmux phrasing requires a one-line extension here; the unit tests in
+// option_discriminator_internal_test.go iterate this slice directly so the
+// coverage scales automatically.
+var optionAbsentStderrPatterns = []string{
+	"invalid option:",
+	"unknown option:",
+	"ambiguous option:",
+}
+
 // Session represents a running tmux session.
 type Session struct {
 	Name     string
@@ -322,13 +336,28 @@ func (c *Client) NewDetachedSessionNoCwd(name, shellCommand string) error {
 }
 
 // GetServerOption returns the value of a tmux server-level option.
-// Returns ErrOptionNotFound when the option does not exist.
+//
+// On success it returns the trimmed value. On failure the underlying error
+// is unwrapped via errors.As to a *CommandError and its stderr is matched
+// against optionAbsentStderrPatterns: a match returns ErrOptionNotFound;
+// everything else (transport faults, exec lookup failures, unrecognised
+// stderr phrasings) propagates the original wrapped error so callers can
+// recover the *CommandError via errors.As and distinguish absence from a
+// real tmux failure.
 func (c *Client) GetServerOption(name string) (string, error) {
 	output, err := c.cmd.Run("show-option", "-sv", name)
-	if err != nil {
-		return "", ErrOptionNotFound
+	if err == nil {
+		return strings.TrimSpace(output), nil
 	}
-	return strings.TrimSpace(output), nil
+	var cmdErr *CommandError
+	if errors.As(err, &cmdErr) {
+		for _, pat := range optionAbsentStderrPatterns {
+			if strings.Contains(cmdErr.Stderr, pat) {
+				return "", ErrOptionNotFound
+			}
+		}
+	}
+	return "", err
 }
 
 // TryGetServerOption returns the value of a tmux server-level option along
