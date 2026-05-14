@@ -59,6 +59,9 @@
     },
     "preview-keymap-discoverability": {
       "work_type": "quick-fix"
+    },
+    "enter-attaches-from-preview": {
+      "work_type": "feature"
     }
   },
   "defaults": {
