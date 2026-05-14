@@ -26,9 +26,9 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 
 ### Map
 
-  Enter target: session vs focused pane [pending]
+  Enter target: session vs focused pane [decided]
 
-  Transition mechanics: instantaneous vs two-beat dismiss-then-attach [pending]
+  Transition mechanics: instantaneous vs two-beat dismiss-then-attach [exploring]
 
   Mid-load / placeholder behaviour [pending]
 
@@ -46,6 +46,59 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 ---
 
 *Subtopics are documented below as they reach `decided` or accumulate enough exploration to capture.*
+
+---
+
+## Enter target — session vs focused pane
+
+### Context
+
+Preview already makes pane focus a real, observable concept. `]` and `[` step between windows, `Tab` cycles panes within the current window. By the time the user presses Enter, they have potentially navigated to a specific `(window, pane)` coordinate inside the previewed session. The question is whether that navigation state is *viewport chrome* (discarded on attach, tmux picks its own current pane) or *intent* (carried into the attach).
+
+### Options Considered
+
+**Option A — Attach to the session, ignore preview's pane focus.**
+
+Enter triggers the existing Sessions-page attach path. tmux's last-current pane in the session wins. Preview's pane-focus state is treated as "which scrollback am I looking at right now", not a destination.
+
+- Pros: simplest; preview stays a pure peek; pane focus is a viewport-rendering concept, not a session-state primitive.
+- Cons: ignores the user's keystrokes. They tabbed to a specific pane *for a reason*. Dropping that on attach is friction.
+
+**Option B — Attach to the session, applying preview's window AND pane focus first.**
+
+Before the existing attach/switch path runs, issue `tmux select-window -t <session>:<window>` and `tmux select-pane -t <session>:<window>.<pane>` using the indices preview captured at open and walked with `]`/`[`/`Tab`. Then the existing connector takes over.
+
+- Pros: preview's navigation has *meaning* — it's "navigate to where I want to land, then commit". Matches the user's mental model: "I previewed *this pane*, so Enter takes me to *this pane*". Implementation cost is two `tmux` calls before existing code path; no new architecture.
+- Cons: overrides "where I was last working" in the session. If the user had pane 2 active, walked away, came back, previewed, Tab'd to pane 0 just to peek, then Enter — they land on 0, not 2. Real cost, but bounded — the user just navigated to it deliberately.
+
+**Option C — Attach to the focused pane only.**
+
+Collapses into Option B at the tmux layer because tmux attaches whole sessions; `select-pane` is the only available knob. Not a separate option.
+
+### Journey
+
+Started with the framing question "session or pane?" and immediately recognised that preview's `]`/`[`/`Tab` keys already commit pane focus to a real navigational state — they are not idle. The user confirmed the desired behaviour with a concrete example: a session with two windows × four panes, after Tab to "third pane of the second window", Enter should activate *that* window and *that* pane.
+
+Pushed back on Option B with the "walked-away" scenario — does B override real session state with a casual peek? The cost is real but bounded: the user's last `Tab`/`]`/`[` press is deliberate. If they only wanted to peek, they would have used Esc.
+
+Implementation falls out cleanly: two new tmux calls (`select-window`, `select-pane`) inserted *before* the existing connector path. The attach/switch mechanics, the hooks pipeline, the resume hydration — all unchanged. Inside-tmux uses `switch-client` with `-t <session>:<window>.<pane>` already supported, but the explicit pre-select keeps the two paths uniform.
+
+### Decision
+
+**Option B — Enter attaches to the session, applying preview's captured window AND pane focus before the existing attach/switch path runs.**
+
+Deciding factor: preview's window/pane navigation state is *intent*, not chrome. The user paid keystrokes to focus a specific coordinate; ignoring that on attach turns the navigation into theatre.
+
+Mechanics:
+
+1. On `tea.KeyEnter` in preview, capture the current `(session, window_index, pane_index)` from preview's state.
+2. Issue `tmux select-window -t <session>:<window_index>` and `tmux select-pane -t <session>:<window_index>.<pane_index>` (order matters — window first, then pane within it).
+3. Dispatch the same connector message the Sessions-page Enter dispatches today (`AttachConnector` outside tmux, `SwitchConnector` inside tmux).
+4. Hooks fire exactly as on any other attach — no special-cased path.
+
+Trade-offs accepted: in the "walked-away peek" scenario, the user lands on the last-focused preview pane rather than tmux's prior current pane. Mitigation: the user's most recent `]`/`[`/`Tab` press *is* their stated intent.
+
+Confidence: high.
 
 ---
 
