@@ -32,13 +32,13 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 
   Mid-load / placeholder behaviour [decided]
 
-  Edge cases [exploring]
+  Edge cases [decided]
   ├─ Pre-select failure / stale window or pane index [decided]
   ├─ Session killed externally while previewing [decided]
-  ├─ Filter committed, zero matches [pending]
-  └─ Preview opened on a row that is no longer current [pending]
+  ├─ Filter committed, zero matches [decided]
+  └─ Preview opened on a row that is no longer current [decided]
 
-  Keymap expansion policy [pending]
+  Keymap expansion policy [exploring]
   └─ Where does the line sit for `r` rename, `k` kill, other Sessions keys [pending]
 
   Spec-amendment scope [pending]
@@ -232,6 +232,25 @@ User chose (β) for this feature and asked to log (γ) as an inbox idea. The (γ
 - The flash mechanism added here is bespoke to the Sessions page. If (γ) lands later, the bespoke chrome line is replaced or absorbed. Accepting bespoke now keeps this feature small and shippable.
 - The `has-session` call adds one tmux round-trip per Enter. Negligible — sub-millisecond locally, well within UI responsiveness.
 - The pre-select calls remain best-effort (they could *still* fail intra-session for window/pane mutations); `has-session` only catches the whole-session case. The two checks compose: `has-session` first, pre-select swallowed-on-failure, connector last.
+
+Confidence: high.
+
+---
+
+## Edge cases — filter-committed, zero matches, and stale row
+
+### Context
+
+Three remaining edge cases from the inbox and the review: (a) filter is committed and the previewed session no longer matches the filter; (b) filter would yield zero matches; (c) preview was opened on a row whose underlying session has shifted in the list (reorder, add, remove of other sessions).
+
+### Decision
+
+**All three reduce to the previously decided shape — no new behaviour is required.**
+
+- **Stale row.** Enter attaches by *captured session name*, not by list-row position. Reordering of the Sessions list (whether from external mutation or filter dynamics) is invisible to the attach path.
+- **Filter committed, previewed session no longer matches.** Same answer — Enter does not traverse the filtered list. Attach by name; after attach the TUI exits or `switch-client`s, and filter state is irrelevant.
+- **Filter committed, zero matches.** Structurally impossible to reach from preview. To open preview the user highlighted a row, which means the filter had ≥1 match at preview-open. If matches subsequently went to zero (the previewed session was killed), that collapses into the **session-killed-externally** decision and is handled by `has-session` + flash.
+- **In-flight filter input.** Cannot coexist with preview being open — preview owns the keymap once entered, so `KeyEnter` is dispatched to preview's `Update`, never to the filter input. Non-issue by construction.
 
 Confidence: high.
 
