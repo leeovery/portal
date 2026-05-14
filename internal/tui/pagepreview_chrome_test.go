@@ -105,7 +105,7 @@ func TestPreviewChromeLine_IncludesBracketAndTabAndEscAsVisibleHints(t *testing.
 
 	got := stripANSI(m.chromeLine())
 
-	for _, token := range []string{"]", "[", "Tab", "Esc"} {
+	for _, token := range []string{"]", "[", "tab", "esc"} {
 		if !strings.Contains(got, token) {
 			t.Errorf("chromeLine() = %q; want visible hint token %q", got, token)
 		}
