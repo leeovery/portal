@@ -30,9 +30,9 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 
   Transition mechanics: instantaneous vs two-beat dismiss-then-attach [decided]
 
-  Mid-load / placeholder behaviour [exploring]
+  Mid-load / placeholder behaviour [decided]
 
-  Edge cases [pending]
+  Edge cases [exploring]
   ├─ Filter committed, zero matches [pending]
   ├─ Session killed externally while previewing [pending]
   └─ Preview opened on a row that is no longer current [pending]
@@ -129,6 +129,34 @@ User framing reinforced the call: "programmatically, it doesn't make any sense" 
 **Option A — Instantaneous. Preview's `Update` returns the select-window + select-pane + connector commands as one logical sequence; no intermediate render, no Sessions-page round-trip.**
 
 Build-phase note: the three tmux calls (`select-window`, `select-pane`, `attach`/`switch-client`) should be sequenced so the selects complete before the connector hands off the terminal. Implementation detail (likely `tea.Sequence`, or wrapped into one connector function that performs all three) — not pinned by spec.
+
+Confidence: high.
+
+---
+
+## Mid-load / placeholder behaviour
+
+### Context
+
+The inbox framed this as "what if the user presses Enter while content is still loading?" Re-reading the existing preview spec clarifies that the tail-N read is synchronous (`state.TailScrollback` returns immediately; viewport renders via straight passthrough). There is no async-load UI state. The only three observable shapes are:
+
+1. Real bytes — viewport renders content.
+2. `(nil, nil)` — viewport renders the "(no saved content)" placeholder (brand-new session, no `.bin` yet, or daemon hasn't captured).
+3. OS-level read error — viewport renders an error string (EACCES, EIO).
+
+The question collapses to: **does the placeholder or error state change Enter's behaviour?**
+
+### Decision
+
+**No — Enter attaches unconditionally regardless of scrollback state.**
+
+Rationale:
+
+- Whether scrollback was *saved* is independent of whether the session is *attachable*. The live tmux session exists either way — preview wouldn't have opened on a non-existent session.
+- A "no saved content" placeholder most commonly means the daemon hasn't captured yet, or the session is fresh. Neither is a reason to block attach.
+- An OS read error is a *file-system* problem, not a session problem. Blocking attach on it would make file trouble unnecessarily block session use.
+
+No confirmation prompt, no guard. The user's keystroke is their commitment.
 
 Confidence: high.
 
