@@ -38,10 +38,10 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
   ├─ Filter committed, zero matches [decided]
   └─ Preview opened on a row that is no longer current [decided]
 
-  Keymap expansion policy [exploring]
-  └─ Where does the line sit for `r` rename, `k` kill, other Sessions keys [pending]
+  Keymap expansion policy [decided]
+  └─ Where does the line sit for `r` rename, `k` kill, other Sessions keys [decided]
 
-  Spec-amendment scope [pending]
+  Spec-amendment scope [exploring]
   └─ Update spec line 17 and lines 60-72 to reflect the new owned key [pending]
 
 ---
@@ -251,6 +251,49 @@ Three remaining edge cases from the inbox and the review: (a) filter is committe
 - **Filter committed, previewed session no longer matches.** Same answer — Enter does not traverse the filtered list. Attach by name; after attach the TUI exits or `switch-client`s, and filter state is irrelevant.
 - **Filter committed, zero matches.** Structurally impossible to reach from preview. To open preview the user highlighted a row, which means the filter had ≥1 match at preview-open. If matches subsequently went to zero (the previewed session was killed), that collapses into the **session-killed-externally** decision and is handled by `has-session` + flash.
 - **In-flight filter input.** Cannot coexist with preview being open — preview owns the keymap once entered, so `KeyEnter` is dispatched to preview's `Update`, never to the filter input. Non-issue by construction.
+
+Confidence: high.
+
+---
+
+## Keymap expansion policy
+
+### Context
+
+A stated secondary goal of this discussion. Lifting Enter from preview's "everything else is unbound/no-op" rule creates a slippery-slope question: where does the line sit for other Sessions-page keys with obvious analogues (`r` rename, `k` kill, etc.)? Defining the rule once is cheaper than re-litigating per key.
+
+### Decision
+
+**Strict view-only with Enter as the single exception. Preview is a verification surface, not a command surface.**
+
+Owned preview keys, full list:
+
+- `]` next window
+- `[` previous window
+- `Tab` next pane
+- viewport-native scroll keys (passed through to `bubbles/viewport`)
+- `Esc` dismiss back to Sessions list
+- `Enter` (new) — commit attach with captured `(window, pane)` focus
+
+Everything else is unbound or no-op. **`r`, `k`, and any future Sessions-page action keys are NOT inherited.** The user dismisses preview with `Esc` and acts from the Sessions page.
+
+The rule, stated once for future referers:
+
+> *Preview owns viewport-navigation keys and exactly one commit key (`Enter`). Every other action is "dismiss-then-act" via `Esc` + the Sessions-page binding. Proposals for new preview keys must argue the key is a verification primitive, not a convenience shortcut.*
+
+### Journey
+
+Considered B (per-session passthrough policy — inherit any Sessions-page key whose action is identity-bounded to the one previewed session). Rejected on two grounds:
+
+1. **Destructive symmetry.** Under B, `k` (kill) becomes "see content → kill" in one keystroke from a viewer. The two-step `Esc` + `k` preserves a deliberate pause where the user's intent can survive. The deletion friction is a small but real safety net.
+2. **Principle scales without re-litigation.** A's rule ("preview is verification + one commit key") is a clean test for any future key proposal. B's rule ("identity-bounded to the session") is fuzzier and invites the same per-key debate it tries to prevent.
+
+User reinforced the framing: *"We're previewing here. It's okay to have the navigation surface area reduced. In fact, it's not only expected, but preferred."* The reduced surface area is the design intent, not a constraint.
+
+### Trade-offs
+
+- Tiny ergonomic cost for the "decide-while-looking" workflow that wants `k`/`r` immediately. Mitigated by Esc → key being two keystrokes vs one, with Esc explicitly marking the cognitive transition from "viewing" to "acting".
+- Adding new preview keys later remains additive — the policy doesn't forbid expansion, only requires that proposals argue the verification-primitive test.
 
 Confidence: high.
 
