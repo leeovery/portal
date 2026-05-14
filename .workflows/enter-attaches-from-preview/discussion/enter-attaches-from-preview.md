@@ -33,6 +33,7 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
   Mid-load / placeholder behaviour [decided]
 
   Edge cases [exploring]
+  ├─ Pre-select failure / stale window or pane index [decided]
   ├─ Filter committed, zero matches [pending]
   ├─ Session killed externally while previewing [pending]
   └─ Preview opened on a row that is no longer current [pending]
@@ -157,6 +158,34 @@ Rationale:
 - An OS read error is a *file-system* problem, not a session problem. Blocking attach on it would make file trouble unnecessarily block session use.
 
 No confirmation prompt, no guard. The user's keystroke is their commitment.
+
+Confidence: high.
+
+---
+
+## Edge cases — pre-select failure / stale indices
+
+### Context
+
+The Enter-target decision inserts two new tmux calls (`select-window`, `select-pane`) before the existing connector path. Between preview open and Enter, the underlying session can be mutated by *another tmux client on the same machine* (the user's own second attach, hooks that close windows, background processes splitting/killing panes). In that case the captured window/pane index may no longer be valid and the pre-select fails.
+
+### Decision
+
+**Best-effort pre-select with graceful degradation.**
+
+- Issue `select-window -t <session>:<window>` and `select-pane -t <session>:<window>.<pane>` as before.
+- If either call returns a non-zero exit (e.g. window or pane no longer exists), **log and swallow**; do not block, do not warn the user, do not abort.
+- Proceed with the existing connector path (`AttachConnector` outside tmux, `SwitchConnector` inside tmux). tmux's last-current pane in the session wins as a natural fallback — equivalent to the pre-existing Sessions-page Enter behaviour.
+- Do NOT proactively re-enumerate the session on Enter (no extra `list-panes -F` call). Re-enumeration would cost a round-trip on every Enter for an edge case that is bounded and self-correcting.
+
+### Journey
+
+User initially dismissed the staleness concern on the grounds that portal is a personal single-machine tool and multi-client mutation is rare. They then added that "it doesn't hurt to have some type of fallback if the window or pane is missing". The best-effort shape satisfies both framings: zero design surface for the common case (selects succeed → user lands where they navigated), and a free graceful path for the rare case (selects fail → tmux's last-current wins, which is what Enter did before this feature anyway).
+
+### Trade-offs
+
+- No user-visible feedback when pre-select fails. The user expected to land on pane 3 of window 2; instead they land on whatever tmux had as current. Considered acceptable because (a) the precondition (mutation by another client mid-preview) is rare and (b) the fallback is the pre-existing Enter semantics, not a regression.
+- The "session itself was killed externally" case is a different shape — the *connector* fails, not the pre-select. Handled in a separate sub-decision below.
 
 Confidence: high.
 
