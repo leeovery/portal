@@ -28,9 +28,9 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 
   Enter target: session vs focused pane [decided]
 
-  Transition mechanics: instantaneous vs two-beat dismiss-then-attach [exploring]
+  Transition mechanics: instantaneous vs two-beat dismiss-then-attach [decided]
 
-  Mid-load / placeholder behaviour [pending]
+  Mid-load / placeholder behaviour [exploring]
 
   Edge cases [pending]
   ├─ Filter committed, zero matches [pending]
@@ -97,6 +97,38 @@ Mechanics:
 4. Hooks fire exactly as on any other attach — no special-cased path.
 
 Trade-offs accepted: in the "walked-away peek" scenario, the user lands on the last-focused preview pane rather than tmux's prior current pane. Mitigation: the user's most recent `]`/`[`/`Tab` press *is* their stated intent.
+
+Confidence: high.
+
+---
+
+## Transition mechanics
+
+### Context
+
+Once Enter attaches with preview's focus applied, *how* the handoff happens matters. The inbox raised "instantaneous vs two-beat dismiss-then-attach" — i.e. does the user see a perceptible frame of "back to Sessions list" between preview and the attached session?
+
+### Options Considered
+
+**Option A — Instantaneous: preview's `Update` returns the pre-select + connector commands directly.**
+
+`tea.KeyEnter` in preview issues `tmux select-window` + `tmux select-pane` (per the Enter target decision) and the existing `AttachConnector` / `SwitchConnector` command as one logical unit. Bubble Tea processes the cmd, tmux takes over via `syscall.Exec` (outside) or `switch-client` (inside). No intermediate render.
+
+**Option B — Two-beat: preview dismisses to Sessions page, then Sessions-page Enter fires.**
+
+Preview returns a "dismiss" message; the page state machine transitions to `pageSessions`; a synthetic Enter is dispatched. Two render passes, perceptible frame.
+
+### Journey
+
+Option B looked superficially clean (reuse Sessions-page Enter as the single attach entry point) but fails the previous decision: Sessions-page Enter does not know about preview's `(window, pane)` focus. The pre-select+attach sequence must be authored *as one unit* in the preview Update, not split across a page transition.
+
+User framing reinforced the call: "programmatically, it doesn't make any sense" to navigate back and re-attach. The connector primitives already work from any page-Update return path; preview can drive them directly.
+
+### Decision
+
+**Option A — Instantaneous. Preview's `Update` returns the select-window + select-pane + connector commands as one logical sequence; no intermediate render, no Sessions-page round-trip.**
+
+Build-phase note: the three tmux calls (`select-window`, `select-pane`, `attach`/`switch-client`) should be sequenced so the selects complete before the connector hands off the terminal. Implementation detail (likely `tea.Sequence`, or wrapped into one connector function that performs all three) — not pinned by spec.
 
 Confidence: high.
 
