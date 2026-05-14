@@ -41,8 +41,8 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
   Keymap expansion policy [decided]
   └─ Where does the line sit for `r` rename, `k` kill, other Sessions keys [decided]
 
-  Spec-amendment scope [exploring]
-  └─ Update spec line 17 and lines 60-72 to reflect the new owned key [pending]
+  New feature spec scope [decided]
+  └─ Capture additively in this feature's own spec; do not edit prior spec [decided]
 
 ---
 
@@ -299,16 +299,59 @@ Confidence: high.
 
 ---
 
+## New feature spec scope
+
+### Context
+
+The inbox phrasing "spec amendment rather than bug fix" is about *intent* (intentional behaviour extension, not a bug fix) — not about literally editing the prior `session-scrollback-preview/specification.md`. Specs from completed work are frozen historical records of what was built at the time and are not edited retroactively.
+
+### Decision
+
+**The new feature's own `specification.md` captures everything additively. The prior preview spec is not touched.**
+
+What the upcoming spec phase must capture in `.workflows/enter-attaches-from-preview/specification/`:
+
+- The new preview-page `Enter` binding and what it commits.
+- The pre-select sequence (`has-session` → `select-window` → `select-pane` → connector) and the best-effort failure semantics.
+- The session-killed-externally refresh-and-bail path with the feature-local minimal inline flash on the Sessions list.
+- The discoverability obligation: the preview chrome line (`internal/tui/pagepreview.go:163-172`) gains an `enter attach` token alongside the existing `] [` `tab` `esc` tokens. Sessions-page help bar is unaffected (already advertises Enter for Sessions-page attach).
+- The keymap expansion policy in its general form (preview is verification + one commit key; future bindings argue the verification-primitive test) so the rule is visible to anyone reading the spec.
+- A reference to the prior preview spec (`.workflows/session-scrollback-preview/specification.md`) for the un-changed surfaces — open trigger, layout, viewport, esc level tree, scrollback read pipeline.
+
+Out of scope of the spec, deferred to build phase:
+
+- Exact `tea.Cmd` sequencing shape (`tea.Sequence` vs a single combined connector wrapper) — implementation detail; constraint to spec: selects must complete before the connector hands off the terminal.
+- Inside-tmux uniformity (whether to use `switch-client -t session:win.pane` one-shot or explicit pre-select also inside-tmux) — implementation detail; default uniform pre-select unless build phase finds a reason.
+- Short-circuit when no preview navigation occurred — micro-optimisation; default always-issue.
+- Captured coordinate provenance (which struct field on `previewModel` backs the captured `(window, pane)`) — implementation detail; the data already exists for `]`/`[`/`Tab` navigation.
+
+Out of scope of this feature entirely:
+
+- General-purpose flash/toast infrastructure. Logged as inbox idea `.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md`.
+- Hooks behaviour on attach. Per `CLAUDE.md` § *Resume hooks*, hooks fire only inside the hydrate helper exec chain during bootstrap step 5, not on every attach within a server lifetime. The pre-select sequence does not trigger hooks. No spec impact.
+- `@portal-restoring` interaction. Preview is unreachable from the Loading page; by the time the user is on the Sessions page, restoration is complete. No spec impact.
+
+### Decision summary
+
+The upcoming spec phase writes one new spec under `.workflows/enter-attaches-from-preview/specification/`. The prior `session-scrollback-preview/specification.md` is referenced but not edited.
+
+Confidence: high.
+
+---
+
 ## Summary
 
 ### Key Insights
 
-*(populated as discussion progresses)*
+1. **Preview navigation is intent, not chrome.** `]`/`[`/`Tab` build up a `(window, pane)` focus that the user paid keystrokes for; Enter honours that focus on attach. This framing made every other downstream decision (transition mechanics, edge cases) fall out cleanly.
+2. **Best-effort + graceful degradation is the right shape for fault tolerance.** Pre-select failures silently fall back to tmux's last-current pane; session-killed-externally triggers an explicit `has-session` check with refresh-and-bail. No abort paths, no user-blocking errors.
+3. **Reduced surface area is the design intent of preview, not a constraint.** Preview is a *verification* surface — it owns viewport-navigation keys plus one commit key (`Enter`). Other Sessions-page actions (`r`, `k`) are deliberately not inherited; dismiss-then-act preserves intent friction for destructive operations.
+4. **Specs are frozen per-feature contracts.** Each feature writes its own spec capturing its own behaviour additively; prior specs are referenced but never edited. The codebase is the live artefact.
 
 ### Open Threads
 
-*(populated as discussion progresses)*
+- **General-purpose TUI flash / toast infrastructure** logged as a separate inbox idea (`.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md`). The feature-local minimal flash in this work unit is intentionally bespoke and may later be subsumed by the general infra.
 
 ### Current State
 
-- Discussion just started — no subtopics decided yet
+All map subtopics decided. Discussion ready to converge.
