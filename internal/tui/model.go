@@ -480,6 +480,7 @@ func sessionHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
 		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
+		key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "preview")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
