@@ -1,7 +1,7 @@
 {
   "name": "distinguish-transport-errors-in-getserveroption",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-12",
   "description": "GetServerOption conflates transport errors with missing-option, and the TryGetServerOption wrapper has a misleading docstring and dead-code branch that propagate the conflation to markers.go",
   "phases": {
@@ -103,7 +103,7 @@
     "review": {
       "items": {
         "distinguish-transport-errors-in-getserveroption": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "distinguish-transport-errors-in-getserveroption-1-1",
             "distinguish-transport-errors-in-getserveroption-1-2",
@@ -114,5 +114,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-14"
 }
