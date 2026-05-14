@@ -1,0 +1,16 @@
+{
+  "name": "preview-keymap-discoverability",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-05-14",
+  "description": "Two TUI polish gaps in the scrollback-preview keymap: Space is missing from the Sessions help bar, and the preview chrome bar shows bare key tokens plus a cryptic window name.",
+  "phases": {
+    "specification": {
+      "items": {
+        "preview-keymap-discoverability": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

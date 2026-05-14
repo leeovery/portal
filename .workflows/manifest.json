@@ -56,6 +56,9 @@
     },
     "distinguish-transport-errors-in-getserveroption": {
       "work_type": "bugfix"
+    },
+    "preview-keymap-discoverability": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
