@@ -17,9 +17,9 @@ var ErrOptionNotFound = errors.New("option not found")
 //
 // Used by GetServerOption to discriminate genuine option absence from
 // transport faults (lost server, socket connect failures, etc.). Adding a
-// future tmux phrasing requires a one-line extension here; the unit tests in
-// option_discriminator_internal_test.go iterate this slice directly so the
-// coverage scales automatically.
+// future tmux phrasing requires a one-line extension here; the same-package
+// internal test file iterates this slice directly so the coverage scales
+// automatically.
 var optionAbsentStderrPatterns = []string{
 	"invalid option:",
 	"unknown option:",
@@ -41,6 +41,9 @@ type Session struct {
 // verbatim and is reserved for callers that must preserve trailing whitespace
 // and ANSI escape sequences (notably capture-pane scrollback dumps used for
 // content-hash dedup).
+//
+// Production implementations return non-nil errors as *CommandError so callers
+// can recover the child's stderr via errors.As.
 type Commander interface {
 	Run(args ...string) (string, error)
 	RunRaw(args ...string) (string, error)
@@ -332,11 +335,12 @@ func (c *Client) NewDetachedSessionNoCwd(name, shellCommand string) error {
 //
 // On success it returns the trimmed value. On failure the underlying error
 // is unwrapped via errors.As to a *CommandError and its stderr is matched
-// against optionAbsentStderrPatterns: a match returns ErrOptionNotFound;
-// everything else (transport faults, exec lookup failures, unrecognised
-// stderr phrasings) propagates the original wrapped error so callers can
-// recover the *CommandError via errors.As and distinguish absence from a
-// real tmux failure.
+// against optionAbsentStderrPatterns (case-sensitive substrings: "invalid
+// option:", "unknown option:", "ambiguous option:"): a match returns
+// ErrOptionNotFound; everything else (transport faults, exec lookup failures,
+// unrecognised stderr phrasings) propagates the original wrapped error so
+// callers can recover the *CommandError via errors.As and distinguish absence
+// from a real tmux failure.
 func (c *Client) GetServerOption(name string) (string, error) {
 	output, err := c.cmd.Run("show-option", "-sv", name)
 	if err == nil {

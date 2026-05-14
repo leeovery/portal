@@ -8,7 +8,7 @@ import (
 
 // CommandError wraps an error returned by Commander.Run / Commander.RunRaw and
 // carries the captured stderr from the underlying process. Stderr is empty when
-// the failure was not an *exec.ExitError (e.g., executable not found).
+// no stderr was captured.
 //
 // The type is exported and constructable as a plain struct literal so test
 // mocks outside the package can return synthetic stderr without coupling to
