@@ -34,8 +34,8 @@ The goal of this discussion is to decide whether to add Enter-attaches-from-prev
 
   Edge cases [exploring]
   ├─ Pre-select failure / stale window or pane index [decided]
+  ├─ Session killed externally while previewing [decided]
   ├─ Filter committed, zero matches [pending]
-  ├─ Session killed externally while previewing [pending]
   └─ Preview opened on a row that is no longer current [pending]
 
   Keymap expansion policy [pending]
@@ -186,6 +186,52 @@ User initially dismissed the staleness concern on the grounds that portal is a p
 
 - No user-visible feedback when pre-select fails. The user expected to land on pane 3 of window 2; instead they land on whatever tmux had as current. Considered acceptable because (a) the precondition (mutation by another client mid-preview) is rare and (b) the fallback is the pre-existing Enter semantics, not a regression.
 - The "session itself was killed externally" case is a different shape — the *connector* fails, not the pre-select. Handled in a separate sub-decision below.
+
+Confidence: high.
+
+---
+
+## Edge cases — session killed externally between preview open and Enter
+
+### Context
+
+Distinct from the pre-select failure case (window/pane disappeared within a live session). Here the entire session is gone — killed by `tmux kill-session`, `portal clean`, the daemon, or another tmux client — between preview open and Enter. Pre-selects fail silently (per the previous decision), then the *connector itself* fails: `tmux attach-session -A -t <session>` or `switch-client -t <session>` returns non-zero against a non-existent session.
+
+Default behaviour without intervention:
+
+- **Outside tmux (`AttachConnector`)**: `syscall.Exec` replaces the process; tmux's error lands in the user's shell. Portal is gone — no way to recover except re-run.
+- **Inside tmux (`SwitchConnector`)**: tmux returns an error; the TUI has already exited (the connector path tears down before invoking tmux); error message location is unclear.
+
+Both outcomes are worse than the pre-existing Sessions-page Enter UX — the user thought they were attaching, but instead they're staring at a shell error or a confusing state.
+
+### Decision
+
+**Proactive existence check on Enter + minimal inline flash on the Sessions list.**
+
+1. On `tea.KeyEnter` in preview, before issuing the pre-select calls, run `tmux has-session -t <session>`.
+2. If `has-session` returns zero (session exists): proceed with the pre-select + connector sequence as previously decided.
+3. If `has-session` returns non-zero (session gone): dispatch a refresh-and-bail message that:
+   - Transitions `pagePreview → pageSessions` (same path Esc takes today).
+   - Triggers the existing sessions-list refresh on that transition (already part of `session-scrollback-preview`'s dismiss contract).
+   - Emits a flash message — one ephemeral line pinned above the Sessions list, e.g. `session "{name}" no longer exists`, auto-cleared on the next keystroke or after a short tick.
+
+The flash is **feature-local infrastructure** scoped to this edge case: a tiny piece of model state on the Sessions page (active flash text + timestamp), rendered as a single chrome line, cleared by the next `tea.KeyMsg` or a tick `tea.Cmd`. No general-purpose toast layer in this feature.
+
+### Journey
+
+Considered three shapes:
+
+- **(α) Silent refresh.** Drop the killed session from the list, no message. Cheapest. Risk: user thinks Enter "just didn't work". Confusing.
+- **(β) Minimal inline flash.** This decision. Bare minimum to close the UX loop.
+- **(γ) Full toast/flash infrastructure.** General-purpose notification surface usable from every page, with stacking, severity styling, etc. Sibling-feature scope.
+
+User chose (β) for this feature and asked to log (γ) as an inbox idea. The (γ) idea is filed at `.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md` for separate scoping; this feature does not commit to building it.
+
+### Trade-offs
+
+- The flash mechanism added here is bespoke to the Sessions page. If (γ) lands later, the bespoke chrome line is replaced or absorbed. Accepting bespoke now keeps this feature small and shippable.
+- The `has-session` call adds one tmux round-trip per Enter. Negligible — sub-millisecond locally, well within UI responsiveness.
+- The pre-select calls remain best-effort (they could *still* fail intra-session for window/pane mutations); `has-session` only catches the whole-session case. The two checks compose: `has-session` first, pre-select swallowed-on-failure, connector last.
 
 Confidence: high.
 
