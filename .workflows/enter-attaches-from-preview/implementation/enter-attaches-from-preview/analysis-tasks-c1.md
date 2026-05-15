@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: enter-attaches-from-preview (Cycle 1)
 
 ## Task 1: Restructure preview-Enter to hand off connector after TUI quit
-status: pending
+status: approved
 severity: high
 sources: architecture
 
@@ -40,7 +40,7 @@ sources: architecture
 - Regression: outside-tmux path still routes through `AttachConnector` / `syscall.Exec`.
 
 ## Task 2: Extract shared preview-teardown helper for dismiss + bail handlers
-status: pending
+status: approved
 severity: medium
 sources: architecture, duplication
 

@@ -55,7 +55,10 @@
             "enter-attaches-from-preview-2-4": "tick-e5da0f",
             "enter-attaches-from-preview-2-5": "tick-24e479",
             "enter-attaches-from-preview-2-6": "tick-698f0c",
-            "enter-attaches-from-preview-2": "tick-dc3c05"
+            "enter-attaches-from-preview-2": "tick-dc3c05",
+            "enter-attaches-from-preview-3": "tick-4411f2",
+            "enter-attaches-from-preview-3-1": "tick-45e4af",
+            "enter-attaches-from-preview-3-2": "tick-871327"
           },
           "external_id": "tick-6cea9c"
         }
@@ -67,7 +70,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

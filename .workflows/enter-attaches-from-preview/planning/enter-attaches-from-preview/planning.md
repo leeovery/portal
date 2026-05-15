@@ -74,3 +74,14 @@ approved_at: 2026-05-15
 | enter-attaches-from-preview-2-4 | Clear flash on actionable KeyMsg without swallowing keystroke | first keystroke clears flash AND lands in filter input, modifier-only key does not clear, WindowSizeMsg does not clear, focus events do not clear |
 | enter-attaches-from-preview-2-5 | Replace placeholder previewAttachBailMsg handler with refresh + exact-text flash dispatch | exact wording `session "<name>" no longer exists` (double quotes, no trailing punctuation, no paraphrase), session name with special chars preserved verbatim, dispatch issued in single Update return, flash render not gated on refresh completion |
 | enter-attaches-from-preview-2-6 | Rapid-bail replacement resets text and supersedes prior tick via generation bump | second bail replaces first text, prior in-flight tick does not clear new flash early, second bail's own tick still clears at its own deadline, N successive bails preserve only latest |
+
+### Phase 3: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| enter-attaches-from-preview-3-1 | Restructure preview-Enter to hand off connector after TUI quit | inside-tmux path leaves no orphan portal process, outside-tmux path unchanged (still terminates via syscall.Exec), pinning test for nil-cmd on success is updated, docstring reconciled with new shape |
+| enter-attaches-from-preview-3-2 | Extract shared preview-teardown helper for dismiss + bail handlers | Esc-dismiss behaviour unchanged, bail still uses msg.Session for preserveName, no behavioural change visible to tests |
