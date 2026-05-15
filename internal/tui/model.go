@@ -200,6 +200,18 @@ type Model struct {
 	previewAttacher PreviewAttacher
 	preview         previewModel
 
+	// Sessions-page inline-flash state (spec § Inline flash —
+	// feature-local infrastructure). flashText empty string means no
+	// flash is active; non-empty is rendered between the filter input
+	// and the Sessions list. flashGen is a monotonic counter bumped on
+	// every setFlash call; tick handlers capture the generation at
+	// schedule time and compare against the live value on fire so a
+	// stale tick from a replaced flash cannot early-clear the
+	// currently-displayed message (spec § Replacement on rapid
+	// successive bails).
+	flashText string
+	flashGen  uint64
+
 	// Data loading tracking
 	sessionsLoaded       bool
 	projectsLoaded       bool
@@ -745,6 +757,26 @@ func (m *Model) reanchorSessionCursor(name string) {
 	}
 	// Name no longer present — clamp to last visible index.
 	m.sessionList.Select(len(visible) - 1)
+}
+
+// setFlash records an inline-flash message on the Sessions page. It bumps
+// flashGen by one and assigns flashText. Callers that schedule a delayed
+// clear must capture the post-bump generation and compare against the
+// live flashGen on fire so a stale tick from a superseded flash cannot
+// early-clear the current one (spec § Replacement on rapid successive
+// bails). Pure state primitive — no render, no scheduling. setFlash("")
+// still bumps the generation; the caller decides what counts as a flash.
+func (m *Model) setFlash(text string) {
+	m.flashGen++
+	m.flashText = text
+}
+
+// clearFlash zeros flashText, leaving flashGen untouched. Idempotent: a
+// clear of an already-cleared state is a no-op observable to callers.
+// flashGen is preserved so any in-flight ticks scheduled before the clear
+// continue to compare against the same monotonic sequence.
+func (m *Model) clearFlash() {
+	m.flashText = ""
 }
 
 // loadProjects returns a command that cleans stale projects and loads the list.
