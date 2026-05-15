@@ -95,7 +95,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 4,
-          "current_task": "enter-attaches-from-preview-4-2",
+          "current_task": "~",
           "completed_tasks": [
             "enter-attaches-from-preview-1-1",
             "enter-attaches-from-preview-1-2",
@@ -113,12 +113,17 @@
             "enter-attaches-from-preview-2-6",
             "enter-attaches-from-preview-3-1",
             "enter-attaches-from-preview-3-2",
-            "enter-attaches-from-preview-4-1"
+            "enter-attaches-from-preview-4-1",
+            "enter-attaches-from-preview-4-2",
+            "enter-attaches-from-preview-4-3",
+            "enter-attaches-from-preview-4-3"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4,
+            4
           ]
         }
       }

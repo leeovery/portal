@@ -16,7 +16,7 @@ import (
 
 func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader)
 
@@ -33,7 +33,7 @@ func TestPreviewAttachSelected_RecordsSessionOnModel(t *testing.T) {
 
 func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader)
 
@@ -52,7 +52,7 @@ func TestPreviewAttachSelected_ReturnsTeaQuit(t *testing.T) {
 // matching the Sessions-page Enter handoff contract.
 func TestPreviewAttachSelected_ParityWithSessionsPageEnterShape(t *testing.T) {
 	sessions := []tmux.Session{{Name: "bravo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader)
 

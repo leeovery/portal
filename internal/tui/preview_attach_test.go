@@ -10,7 +10,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
+
+// newSinglePaneEnumerator returns a *stubEnumerator pre-populated with the
+// minimal single-window / single-pane topology used by preview-attach tests
+// that only need a degenerate session shape. Centralised so test files do not
+// repeat the literal across many call sites.
+func newSinglePaneEnumerator() *stubEnumerator {
+	return &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+}
 
 // recordedCall captures a single invocation against fakePreviewAttachTmux so
 // tests can assert both the relative ordering of calls and the per-call

@@ -46,7 +46,7 @@ func pressSpaceThenBail(t *testing.T, m Model, session string) (Model, tea.Cmd) 
 
 func TestPreviewAttachBailFlipsToPageSessions(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader)
 
@@ -59,7 +59,7 @@ func TestPreviewAttachBailFlipsToPageSessions(t *testing.T) {
 
 func TestPreviewAttachBailZerosPreviewModel(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader)
 
@@ -76,7 +76,7 @@ func TestPreviewAttachBailDispatchesRefreshCmd(t *testing.T) {
 		{Name: "alpha", Windows: 1, Attached: false},
 		{Name: "bravo", Windows: 1, Attached: false},
 	}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	postKill := []tmux.Session{{Name: "bravo", Windows: 1, Attached: false}}
 	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
@@ -113,7 +113,7 @@ func TestPreviewAttachBailPreservesSessionNameFromMessage(t *testing.T) {
 		{Name: "alpha", Windows: 1, Attached: false},
 		{Name: "bravo", Windows: 1, Attached: false},
 	}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -143,7 +143,7 @@ func TestPreviewAttachBailNoListerStillEmitsTickCleanly(t *testing.T) {
 	// (no BatchMsg wrapper). So the returned cmd produces a flashTickMsg
 	// directly. The page still transitions cleanly and the flash is set.
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	m := modelWithSeams(sessions, enum, reader) // no lister wired
 
@@ -171,7 +171,7 @@ func TestPreviewAttachBailToleratesListerErrorSilently(t *testing.T) {
 		{Name: "alpha", Windows: 1, Attached: false},
 		{Name: "bravo", Windows: 1, Attached: false},
 	}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{err: errors.New("boom")}
 	m := modelWithSeamsAndLister(first, enum, reader, lister)
@@ -209,7 +209,7 @@ func TestPreviewAttachBailEmptySessionNameStillTransitions(t *testing.T) {
 	// must still transition cleanly. PreserveName is forwarded empty;
 	// reanchorSessionCursor returns early on empty.
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -240,7 +240,7 @@ func TestPreviewAttachBailEmptySessionNameStillTransitions(t *testing.T) {
 // and dispatch the refresh.
 func TestEscDismissPathUnchangedAfterBailHandlerAdded(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)

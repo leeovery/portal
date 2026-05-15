@@ -63,7 +63,7 @@ func findRefreshedMsg(cmds []tea.Cmd) (previewSessionsRefreshedMsg, bool) {
 
 func TestPreviewAttachBail_SetsFlashWithExactSpecWording(t *testing.T) {
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -78,7 +78,7 @@ func TestPreviewAttachBail_SetsFlashWithExactSpecWording(t *testing.T) {
 
 func TestPreviewAttachBail_FlashUsesLiteralDoubleQuotesAroundName(t *testing.T) {
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -95,7 +95,7 @@ func TestPreviewAttachBail_FlashUsesLiteralDoubleQuotesAroundName(t *testing.T) 
 
 func TestPreviewAttachBail_FlashHasNoTrailingPunctuation(t *testing.T) {
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -114,7 +114,7 @@ func TestPreviewAttachBail_FlashHasNoTrailingPunctuation(t *testing.T) {
 
 func TestPreviewAttachBail_BumpsFlashGen(t *testing.T) {
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -132,7 +132,7 @@ func TestPreviewAttachBail_BumpsFlashGen(t *testing.T) {
 
 func TestPreviewAttachBail_ReturnsBatchWithRefreshAndTick(t *testing.T) {
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -162,7 +162,7 @@ func TestPreviewAttachBail_TickCapturesPostBumpFlashGen(t *testing.T) {
 	// scheduled with the stale gen mismatch and silently drop, defeating
 	// the auto-clear behaviour.
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -195,7 +195,7 @@ func TestPreviewAttachBail_FlashVisibleBeforeRefreshResolves(t *testing.T) {
 		{Name: "foo", Windows: 1, Attached: false},
 		{Name: "bar", Windows: 1, Attached: false},
 	}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	postKill := []tmux.Session{{Name: "bar", Windows: 1, Attached: false}}
 	lister := &stepListerStub{steps: [][]tmux.Session{postKill}}
@@ -218,7 +218,7 @@ func TestPreviewAttachBail_SpecialCharsInNamePreservedVerbatim(t *testing.T) {
 	// literal surrounding double quotes.
 	const weird = "my session-1.2 名字"
 	sessions := []tmux.Session{{Name: weird, Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -241,7 +241,7 @@ func TestPreviewAttachBail_EmptySessionNameDoesNotPanic(t *testing.T) {
 	}()
 
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
@@ -266,7 +266,7 @@ func TestPreviewAttachBail_BailHandlerNotUsingTeaSequence(t *testing.T) {
 	// differently. By asserting the returned cmd produces a tea.BatchMsg
 	// we lock the implementation to tea.Batch composition.
 	sessions := []tmux.Session{{Name: "foo", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
+	enum := newSinglePaneEnumerator()
 	reader := &recordingReader{bytes: []byte("hi")}
 	lister := &stepListerStub{steps: [][]tmux.Session{sessions}}
 	m := modelWithSeamsAndLister(sessions, enum, reader, lister)
