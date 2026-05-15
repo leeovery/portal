@@ -203,6 +203,7 @@ total: 8
 - [ ] SelectPane non-zero exit logs at WARN with `ComponentPreview` and pipeline proceeds.
 - [ ] Connector error is returned as `previewAttachErrorMsg{Err: err}`.
 - [ ] No call passes a `nil`-receiver session/window/pane combo through silently — empty session bails out before any tmux call (defensive guard).
+- [ ] The pipeline performs NO structural enumeration on Enter — no `list-panes`, no `list-windows`, no `list-sessions`, no `display-message -p`, and no other tmux call shape beyond the four spec-pinned commands (`has-session`, `select-window`, `select-pane`, and the connector's `attach-session` / `switch-client`). Verified by asserting the fake commander's recorded call list contains exactly those argv prefixes and no others.
 
 **Tests**:
 - `"pipeline runs has-session, select-window, select-pane, connector in order on success"`
@@ -213,6 +214,8 @@ total: 8
 - `"pipeline logs WARN with ComponentPreview when select-pane fails"`
 - `"pipeline returns connector error as previewAttachErrorMsg"`
 - `"pipeline forwards connector choice (Attach vs Switch) without orchestration changes"` — runs the same fixture with two connector implementations.
+- `"pipeline does not invoke list-panes, list-windows, or any other enumeration on the success path"` — fake commander records every argv; assert the recorded set is exactly `{has-session, select-window, select-pane, attach-session-or-switch-client}` with no `list-*` or `display-message` calls.
+- `"pipeline does not invoke list-panes, list-windows, or any other enumeration on the bail path"` — bail path runs only `has-session`; assert no enumeration calls follow.
 
 **Edge Cases**:
 - Logger is nil (test harness without a logger): the pipeline must not panic. Use the `state.Logger` "nil-receiver is a no-op" contract (see `internal/state/logger.go` line 58: "A nil *Logger is a valid no-op: all methods bail early").

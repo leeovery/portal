@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-15
 cycle: 2
 phase: Traceability Review
@@ -87,7 +87,7 @@ Task 1-6 has a similar surface (the Enter case body) but the natural place for t
 - `"pipeline does not invoke list-panes, list-windows, or any other enumeration on the bail path"` — bail path runs only `has-session`; assert no enumeration calls follow.
 ```
 
-**Resolution**: Pending
-**Notes**: Spec § Pre-select step 2 calls re-enumeration out by name as a MUST-NOT to protect the per-Enter cost budget. Without an explicit assertion, the constraint is invisible to future maintainers and would not surface as a test failure if a defensive enumeration were added. The Edge Cases section of task 1-4 may also benefit from a one-line addition pinning the spec rationale, but the acceptance criterion + tests are the load-bearing fix.
+**Resolution**: Fixed
+**Notes**: Applied the acceptance criterion + two enumeration-absence tests to task 1-4 in phase-1-tasks.md. Tick description left as authored snapshot — phase-1-tasks.md is the canonical task detail consumed by the implementation phase per the SKILL.md plan structure.
 
 ---
