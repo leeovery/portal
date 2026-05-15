@@ -3,6 +3,7 @@ package tmux_test
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -442,6 +443,109 @@ func TestHasSessionUsesExactMatchPrefix(t *testing.T) {
 			t.Errorf("HasSession(\"foo-2\") = false; expected true")
 		}
 	})
+}
+
+// TestHasSessionProbe pins the three-shape discriminator contract documented
+// on Client.HasSessionProbe: (true, nil) on a zero tmux exit (session
+// present); (false, err) when the underlying error unwraps to *exec.ExitError
+// (session absent — caller may bail); (true, err) when the underlying error
+// does NOT unwrap to *exec.ExitError (OS-layer fault — caller proceeds and
+// logs).
+//
+// Spec: .workflows/enter-attaches-from-preview/specification/enter-attaches-from-preview/specification.md
+// § Pre-select + attach sequence > step 1.
+func TestHasSessionProbe(t *testing.T) {
+	t.Run("returns (true, nil) when tmux exits zero", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		present, err := client.HasSessionProbe("my-session")
+
+		if !present {
+			t.Errorf("present = false, want true")
+		}
+		if err != nil {
+			t.Errorf("err = %v, want nil", err)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := "has-session -t =my-session"
+		gotArgs := strings.Join(mock.Calls[0], " ")
+		if gotArgs != wantArgs {
+			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("returns (false, err) when tmux exits non-zero", func(t *testing.T) {
+		// Synthetic *exec.ExitError simulating a real non-zero tmux exit.
+		// Construct via exec.Command of a failing process so the returned
+		// error is a genuine *exec.ExitError that errors.As can recover.
+		exitErr := syntheticExitError(t)
+		mock := &MockCommander{Err: &tmux.CommandError{Err: exitErr}}
+		client := tmux.NewClient(mock)
+
+		present, err := client.HasSessionProbe("nonexistent")
+
+		if present {
+			t.Errorf("present = true, want false")
+		}
+		if err == nil {
+			t.Fatal("err = nil, want non-nil")
+		}
+
+		// The returned err preserves *CommandError shape.
+		var cmdErr *tmux.CommandError
+		if !errors.As(err, &cmdErr) {
+			t.Errorf("errors.As(err, &cmdErr) = false; want *CommandError shape preserved")
+		}
+
+		// The underlying error unwraps to *exec.ExitError.
+		var asExit *exec.ExitError
+		if !errors.As(err, &asExit) {
+			t.Errorf("errors.As(err, &exitErr) = false; want underlying *exec.ExitError")
+		}
+	})
+
+	t.Run("returns (true, err) on OS-layer failure", func(t *testing.T) {
+		// A non-ExitError underlying cause (e.g. *exec.Error from a PATH
+		// lookup failure, or any other transport fault). The probe must
+		// treat this as 'session present' so the caller proceeds rather
+		// than falsely triggering the externally-killed bail UX.
+		osErr := errors.New("exec: \"tmux\": executable file not found in $PATH")
+		mock := &MockCommander{Err: &tmux.CommandError{Err: osErr}}
+		client := tmux.NewClient(mock)
+
+		present, err := client.HasSessionProbe("any-session")
+
+		if !present {
+			t.Errorf("present = false, want true on OS-layer failure")
+		}
+		if err == nil {
+			t.Fatal("err = nil, want non-nil")
+		}
+
+		// errors.As against *exec.ExitError must fail.
+		var asExit *exec.ExitError
+		if errors.As(err, &asExit) {
+			t.Errorf("errors.As(err, &exitErr) = true; want false for non-ExitError cause")
+		}
+	})
+}
+
+// syntheticExitError returns a real *exec.ExitError by running a process
+// guaranteed to exit non-zero. Used so errors.As discrimination is exercised
+// against a genuine exec.ExitError instance, not a synthetic stand-in.
+func syntheticExitError(t *testing.T) *exec.ExitError {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "exit 1")
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("could not synthesize *exec.ExitError; got %T: %v", err, err)
+	}
+	return exitErr
 }
 
 func TestNewSession(t *testing.T) {

@@ -128,6 +128,43 @@ func (c *Client) HasSession(name string) bool {
 	return err == nil
 }
 
+// HasSessionProbe is the discriminating variant of HasSession used by the
+// preview Enter / pre-select-and-attach pipeline. It distinguishes a genuine
+// non-zero tmux exit (session truly absent — caller bails to the externally-
+// killed UX) from an OS-layer fault (missing tmux binary, exec lookup failure,
+// transport hiccup) where the safe default is to assume the session is present
+// and proceed.
+//
+// Three observable shapes:
+//
+//  1. (true, nil) — tmux returned zero exit: session present.
+//  2. (false, err) — tmux returned a non-zero exit (underlying error unwraps
+//     to *exec.ExitError): session absent; caller bails. The returned err
+//     preserves *CommandError shape so callers can still recover stderr via
+//     errors.As.
+//  3. (true, err) — underlying error does NOT unwrap to *exec.ExitError
+//     (OS-layer fault): caller proceeds as if present; err is intended to be
+//     logged at WARN, not surfaced to the user as a missing session.
+//
+// The "=" prefix forces tmux's exact-match target resolution — see
+// HasSession's godoc for the prefix-collision rationale. The plain
+// HasSession(name) bool form is unchanged and remains available for callers
+// that don't need the discriminator.
+//
+// Spec: .workflows/enter-attaches-from-preview/specification/enter-attaches-from-preview/specification.md
+// § Pre-select + attach sequence > step 1.
+func (c *Client) HasSessionProbe(name string) (bool, error) {
+	_, err := c.cmd.Run("has-session", "-t", "="+name)
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, err
+	}
+	return true, err
+}
+
 // NewSession creates a new detached tmux session with the given name and start directory.
 // When shellCommand is non-empty, it is appended as the tmux shell-command argument.
 func (c *Client) NewSession(name, dir, shellCommand string) error {
