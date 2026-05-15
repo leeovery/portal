@@ -235,6 +235,15 @@ User chose (β) for this feature and asked to log (γ) as an inbox idea. The (γ
 
 Confidence: high.
 
+### Accepted residual — TOCTOU between has-session and connector
+
+A vanishingly small race window remains: `has-session` returns zero, then the session is killed in the microseconds before the connector fires. The locked decisions cover most of this — `select-window` and `select-pane` failures are silently swallowed per the pre-select decision. The connector itself is not specifically guarded; if it fails in those microseconds:
+
+- **Outside tmux**: `tmux attach-session -A -t <name>` auto-creates a new empty session with the killed name (the `-A` flag's existing behaviour). User lands in a fresh session, not in an error state. Weird but not destructive.
+- **Inside tmux**: `switch-client -t <name>` errors; the TUI has already torn down, so the message location is unclear.
+
+This residual is accepted as rare and intentionally not designed for. Documented here so the spec phase does not attempt a defensive guard against a window with no observable victim distinct from "session killed during the connector call itself" — which would be the same shape and equally unguarded.
+
 ---
 
 ## Edge cases — filter-committed, zero matches, and stale row
