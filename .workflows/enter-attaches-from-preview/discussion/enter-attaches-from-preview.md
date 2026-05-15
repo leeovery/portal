@@ -4,7 +4,9 @@
 
 The scrollback preview page (`Space` from Sessions) is a read-only viewport that lets the user inspect a session's recent output before committing to attach. Today the preview's `Update` handler (`internal/tui/pagepreview.go:257-317`) handles `Esc`, `Home`, `End`, `Tab`, `]`, `[` but has no `tea.KeyEnter` case — Enter falls through to the embedded viewport, which treats it as a no-op for scrolling. The user therefore has to press `Esc` to dismiss and then `Enter` on the highlighted session, when their mental model says one keystroke should do it.
 
-The current behaviour matches the existing spec, so this is a **spec amendment**, not a bug fix. `session-scrollback-preview/specification.md:60-72` lists preview's owned keymap as `]`, `[`, `Tab`, `Esc` and explicitly says "Everything else either passes through to the embedded bubbles/viewport (scroll keys) or is unbound/no-op". The user's mental model is reinforced by spec line 17 — "Attach. `Enter` continues to attach as today (unchanged)." — which reads that way in isolation even though in context it was scoped to Sessions-page behaviour.
+The current behaviour matches the existing spec, so this is an intentional behaviour extension, not a bug fix. `session-scrollback-preview/specification.md:60-72` lists preview's owned keymap as `]`, `[`, `Tab`, `Esc` and explicitly says "Everything else either passes through to the embedded bubbles/viewport (scroll keys) or is unbound/no-op". The user's mental model is reinforced by spec line 17 — "Attach. `Enter` continues to attach as today (unchanged)." — which reads that way in isolation even though in context it was scoped to Sessions-page behaviour.
+
+> *Framing note*: the inbox file used the phrase "spec amendment" to mean *intentional behaviour extension*, not *edit the prior spec file*. See the **New feature spec scope** subtopic for the resolution — this feature writes its own additive spec; the prior preview spec is never edited.
 
 The goal of this discussion is to decide whether to add Enter-attaches-from-preview, and if so, what it attaches to and how it behaves in edge cases. A secondary goal is to define the keymap-expansion policy so we are not re-litigating this per key (`r`, `k`, etc.) later.
 
@@ -129,7 +131,7 @@ User framing reinforced the call: "programmatically, it doesn't make any sense" 
 
 **Option A — Instantaneous. Preview's `Update` returns the select-window + select-pane + connector commands as one logical sequence; no intermediate render, no Sessions-page round-trip.**
 
-Build-phase note: the three tmux calls (`select-window`, `select-pane`, `attach`/`switch-client`) should be sequenced so the selects complete before the connector hands off the terminal. Implementation detail (likely `tea.Sequence`, or wrapped into one connector function that performs all three) — not pinned by spec.
+Build-phase note: the full sequence is `has-session` → `select-window` → `select-pane` → `attach`/`switch-client` (the session-killed-externally decision added the `has-session` guard at the front). All four calls must complete in order, so the guard precedes the selects and the selects precede the connector handoff. Implementation detail (likely `tea.Sequence`, or wrapped into one connector function that performs all four) — not pinned by spec.
 
 Confidence: high.
 
