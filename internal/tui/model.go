@@ -924,6 +924,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activePage = PageSessions
 		m.preview = previewModel{}
 		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
+	case previewAttachBailMsg:
+		// Session-killed-externally bail path (spec § Session-killed-externally
+		// bail path). Mirrors previewDismissedMsg: transition pagePreview →
+		// PageSessions, zero m.preview, dispatch the sessions-list refresh so
+		// the externally-killed session disappears from the post-bail view.
+		// Reads from msg.Session (not m.preview.session) for robustness — the
+		// pipeline owns the source of truth for the captured session name.
+		//
+		// Phase 1 (this handler): transition + refresh only.
+		// Phase 2: extend with inline flash emission so the user sees why
+		// Enter did not attach.
+		preserveName := msg.Session
+		m.activePage = PageSessions
+		m.preview = previewModel{}
+		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
+	case previewAttachErrorMsg:
+		// Connector-terminal envelope. Nil Err is a no-op (inside-tmux
+		// switch-client success — surrounding tmux client repaints on its
+		// own; outside tmux the connector's syscall.Exec replaces the
+		// process and this branch is unreachable). Non-nil Err is a
+		// connector failure: surface it by quitting, matching the
+		// Sessions-page Enter path's existing processTUIResult flow.
+		if msg.Err != nil {
+			return m, tea.Quit
+		}
+		return m, nil
 	case previewSessionsRefreshedMsg:
 		// Lister errors are non-fatal here: the user just dismissed
 		// preview and expects to land on the Sessions list. A tea.Quit
