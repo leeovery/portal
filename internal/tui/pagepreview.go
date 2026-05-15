@@ -49,6 +49,7 @@ type previewModel struct {
 	session    string
 	enumerator TmuxEnumerator
 	reader     ScrollbackReader
+	attacher   PreviewAttacher
 	groups     []tmux.WindowGroup
 	windowIdx  int
 	paneIdx    int
@@ -70,7 +71,7 @@ type previewModel struct {
 // The (nil, err) error-string branch is owned by Phase 4 task 4-2; this
 // constructor does not encode error wording itself — it delegates to the
 // shared helper.
-func NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, width, height int) (previewModel, bool) {
+func NewPreviewModel(session string, enumerator TmuxEnumerator, reader ScrollbackReader, attacher PreviewAttacher, width, height int) (previewModel, bool) {
 	groups, err := enumerator.ListWindowsAndPanesInSession(session)
 	if err != nil {
 		return previewModel{}, false
@@ -83,6 +84,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		session:    session,
 		enumerator: enumerator,
 		reader:     reader,
+		attacher:   attacher,
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,

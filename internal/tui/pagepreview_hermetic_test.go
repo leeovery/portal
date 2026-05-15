@@ -73,7 +73,7 @@ func TestPreviewHermetic_FullLifecycleProducesOnlyOpenEnumerationAndPerFocusRead
 	enum := &hermeticEnumerator{}
 	reader := &hermeticReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}

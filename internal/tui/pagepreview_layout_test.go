@@ -20,7 +20,7 @@ func TestPreviewView_RendersChromeLineAboveViewportContent(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("alpha\nbeta\ngamma\n")}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}
@@ -66,7 +66,7 @@ func TestPreviewView_ChromeRowCountConstantAcrossTabAndBracketCycles(t *testing.
 		},
 	}
 	reader := &recordingReader{bytes: []byte("content\n")}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true, got false")
 	}
@@ -120,7 +120,7 @@ func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: []byte("x\n")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, initialHeight)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, initialHeight)
 	if !ok {
 		t.Fatalf("setup: expected ok=true, got false")
 	}

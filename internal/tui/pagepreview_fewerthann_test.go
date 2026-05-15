@@ -38,7 +38,7 @@ func newFewerThanNModel(t *testing.T, lineCount int) (previewModel, *recordingRe
 		},
 	}
 	reader := &recordingReader{bytes: buildLines(lineCount)}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}

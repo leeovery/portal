@@ -308,20 +308,21 @@ func (o *osDirLister) ListDirectories(path string, showHidden bool) ([]browser.D
 
 // tuiConfig holds injectable dependencies for building the TUI model.
 type tuiConfig struct {
-	lister         tui.SessionLister
-	killer         tui.SessionKiller
-	renamer        tui.SessionRenamer
-	projectStore   tui.ProjectStore
-	projectEditor  tui.ProjectEditor
-	aliasEditor    tui.AliasEditor
-	sessionCreator tui.SessionCreator
-	dirLister      tui.DirLister
-	enumerator     tui.TmuxEnumerator
-	reader         tui.ScrollbackReader
-	cwd            string
-	insideTmux     bool
-	currentSession string
-	serverStarted  bool
+	lister          tui.SessionLister
+	killer          tui.SessionKiller
+	renamer         tui.SessionRenamer
+	projectStore    tui.ProjectStore
+	projectEditor   tui.ProjectEditor
+	aliasEditor     tui.AliasEditor
+	sessionCreator  tui.SessionCreator
+	dirLister       tui.DirLister
+	enumerator      tui.TmuxEnumerator
+	reader          tui.ScrollbackReader
+	previewAttacher tui.PreviewAttacher
+	cwd             string
+	insideTmux      bool
+	currentSession  string
+	serverStarted   bool
 }
 
 // buildTUIModel constructs a tui.Model from the given config and parameters.
@@ -348,6 +349,9 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 	}
 	if cfg.reader != nil {
 		opts = append(opts, tui.WithScrollbackReader(cfg.reader))
+	}
+	if cfg.previewAttacher != nil {
+		opts = append(opts, tui.WithPreviewAttachPipeline(cfg.previewAttacher))
 	}
 	m := tui.New(cfg.lister, opts...)
 	if len(command) > 0 {
@@ -405,19 +409,38 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	}
 	previewReader := tui.NewProductionScrollbackReader(stateDir)
 
+	// Resolve the connector once and share it with both the preview-page
+	// Enter pipeline and the post-TUI Sessions-page handoff. Both
+	// *AttachConnector and *SwitchConnector are safe to reuse across
+	// calls — neither holds per-attach state — so a single instance per
+	// openTUI invocation is sufficient.
+	connector := buildSessionConnector(client)
+
+	// Open a best-effort logger so the pre-select pipeline can WARN on
+	// select-window / select-pane failures (spec § Pre-select + attach
+	// sequence > step 2/3). Log opening is non-fatal: the pipeline
+	// honours *state.Logger's nil-receiver no-op contract, so a failed
+	// open passes nil through and the rest of openTUI proceeds.
+	previewLogger, err := state.OpenLogger(state.PortalLog(stateDir), false)
+	if err != nil {
+		previewLogger = nil
+	}
+	previewAttacher := tui.NewPreviewAttachPipeline(client, connector, previewLogger)
+
 	cfg := tuiConfig{
-		lister:         client,
-		killer:         client,
-		renamer:        client,
-		projectStore:   store,
-		projectEditor:  store,
-		aliasEditor:    aliasStore,
-		sessionCreator: session.NewSessionCreator(gitResolver, store, client, gen),
-		dirLister:      &osDirLister{},
-		enumerator:     client,
-		reader:         previewReader,
-		cwd:            cwd,
-		serverStarted:  serverStarted,
+		lister:          client,
+		killer:          client,
+		renamer:         client,
+		projectStore:    store,
+		projectEditor:   store,
+		aliasEditor:     aliasStore,
+		sessionCreator:  session.NewSessionCreator(gitResolver, store, client, gen),
+		dirLister:       &osDirLister{},
+		enumerator:      client,
+		reader:          previewReader,
+		previewAttacher: previewAttacher,
+		cwd:             cwd,
+		serverStarted:   serverStarted,
 	}
 
 	if tmux.InsideTmux() {
@@ -452,7 +475,6 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		return fmt.Errorf("unexpected model type: %T", finalModel)
 	}
 
-	connector := buildSessionConnector(client)
 	return processTUIResult(model, connector)
 }
 

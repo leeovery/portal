@@ -88,7 +88,7 @@ func TestPreviewChromeStability_FullCycleSequenceProducesExactlyOneEnumerationCa
 	enum := newChromeStabilityFixture()
 	reader := &recordingReader{bytes: []byte("content")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -104,7 +104,7 @@ func TestPreviewChromeStability_ChromeLineAfterEachCycleReflectsOpenTimeCachedGr
 	enum := newChromeStabilityFixture()
 	reader := &recordingReader{bytes: []byte("content")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -171,7 +171,7 @@ func TestPreviewChromeStability_ChromeLineNeverReflectsPostOpenEnumeratorStateCh
 	enum.secondErr = errors.New("session vanished")
 	reader := &recordingReader{bytes: []byte("content")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -196,7 +196,7 @@ func TestPreviewChromeStability_TailCallsPerCycleEqualOnePlusSeven(t *testing.T)
 	enum := newChromeStabilityFixture()
 	reader := &recordingReader{bytes: []byte("content")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}

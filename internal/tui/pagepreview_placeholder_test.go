@@ -36,7 +36,7 @@ func TestPreviewPlaceholder_RendersAtInitialOpenWhenTailReturnsNilNil(t *testing
 	}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true when Tail returns (nil, nil), got false")
@@ -92,7 +92,7 @@ func TestPreviewPlaceholder_ChromeCountsRemainCorrectWhenPlaceholderShown(t *tes
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
@@ -155,7 +155,7 @@ func TestPreviewPlaceholder_ENOENTZeroByteAndZeroLineProduceIdenticalViewportCon
 	views := make([]string, len(readers))
 	for i, r := range readers {
 		enum := &stubEnumerator{groups: groups}
-		m, ok := NewPreviewModel("work", enum, r, 80, 24)
+		m, ok := NewPreviewModel("work", enum, r, nil, 80, 24)
 		if !ok {
 			t.Fatalf("reader %d: expected ok=true, got false", i)
 		}

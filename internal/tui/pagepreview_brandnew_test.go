@@ -47,7 +47,7 @@ func TestPreviewBrandNew_EveryPaneRendersPlaceholder(t *testing.T) {
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on (nil, nil) initial open, got false")
 	}
@@ -99,7 +99,7 @@ func TestPreviewBrandNew_ChromeCountsAccurateAcrossAllPlaceholderCycles(t *testi
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
@@ -152,7 +152,7 @@ func TestPreviewBrandNew_NextWindowAdvancesAndTabCyclesWithinWindowUnderAllPlace
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
@@ -192,7 +192,7 @@ func TestPreviewBrandNew_CycleKeysDoNotSkipPlaceholderPanes(t *testing.T) {
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilNilReader{}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
@@ -241,7 +241,7 @@ func TestPreviewMixed_BytesPaneAndPlaceholderPanesCoexist(t *testing.T) {
 	}
 	enum := &stubEnumerator{groups: groups}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
@@ -302,7 +302,7 @@ func TestPreviewMixed_FocusFromBytesPaneToPlaceholderAndBackIssuesFreshTailCalls
 	}
 	enum := &stubEnumerator{groups: groups}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}

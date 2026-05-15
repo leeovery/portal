@@ -74,6 +74,25 @@ type previewAttachPipeline struct {
 	logger    *state.Logger
 }
 
+// NewPreviewAttachPipeline is the production constructor for the Enter
+// pre-select + attach pipeline. The seam interfaces (previewAttachTmux,
+// previewSessionConnector) stay unexported so the pipeline's internals
+// are not part of the package's exported surface; production callers pass
+// concrete types that satisfy them structurally (*tmux.Client satisfies
+// previewAttachTmux; the cmd-layer SessionConnector — *AttachConnector or
+// *SwitchConnector — satisfies previewSessionConnector via its
+// Connect(name string) error method).
+//
+// logger may be nil — every Warn call inside Run honours *state.Logger's
+// nil-receiver no-op contract. Passing nil from production sites where a
+// logger could not be opened is intentional and tolerated.
+//
+// The returned PreviewAttacher is the exported seam consumed by tui.Model
+// via WithPreviewAttachPipeline.
+func NewPreviewAttachPipeline(t previewAttachTmux, c previewSessionConnector, logger *state.Logger) PreviewAttacher {
+	return &previewAttachPipeline{tmux: t, connector: c, logger: logger}
+}
+
 // Run returns a tea.Cmd that executes the four-call sequence end-to-end and
 // resolves to exactly one of two terminal message types: previewAttachBailMsg
 // for the externally-killed bail path, or previewAttachErrorMsg for the

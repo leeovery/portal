@@ -38,7 +38,7 @@ func newPreviewModelForPrecedence(t *testing.T) (previewModel, *recordingReader)
 		},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 10)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 10)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}

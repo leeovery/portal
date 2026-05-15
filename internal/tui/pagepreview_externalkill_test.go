@@ -184,7 +184,7 @@ func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *test
 	// any leak via mid-preview re-enumeration would be observable.
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -244,7 +244,7 @@ func TestPreviewExternalKill_PlaceholdersAppearProgressivelyAsContentVanishes(t 
 	//   read 9: step 7 (Tab)       coord (1,0)
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -302,7 +302,7 @@ func TestPreviewExternalKill_NoLiveReEnumerationMidPreviewWhenSessionIsKilled(t 
 	// after the reader has fully degraded to (nil, nil) on every paneKey.
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -321,7 +321,7 @@ func TestPreviewExternalKill_CycleKeysContinueToTraverseAfterContentVanishes(t *
 	// driving structural traversal regardless of placeholder progression.
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -371,7 +371,7 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 		}
 	}()
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}
@@ -399,7 +399,7 @@ func TestPreviewExternalKill_EscDismissesCleanlyFromFullyDegradedPreview(t *test
 	// pins only the dismiss-msg emission.
 	enum, reader, _ := progressivePlaceholderFixture(t)
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true on construction, got false")
 	}

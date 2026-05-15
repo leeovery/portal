@@ -41,7 +41,7 @@ func TestNewPreviewModel_ReturnsFalseWhenEnumerationErrors(t *testing.T) {
 	enum := &stubEnumerator{err: errors.New("boom")}
 	reader := &recordingReader{}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if ok {
 		t.Errorf("expected ok=false on enumeration error, got true")
@@ -55,7 +55,7 @@ func TestNewPreviewModel_ReturnsFalseOnEmptyEnumeration(t *testing.T) {
 	enum := &stubEnumerator{groups: nil}
 	reader := &recordingReader{}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if ok {
 		t.Errorf("expected ok=false on empty enumeration, got true")
@@ -73,7 +73,7 @@ func TestNewPreviewModel_ReturnsFalseWhenFirstWindowHasZeroPanes(t *testing.T) {
 	}
 	reader := &recordingReader{}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if ok {
 		t.Errorf("expected ok=false when first window has zero panes, got true")
@@ -92,7 +92,7 @@ func TestNewPreviewModel_SetsFocusToZeroZeroOnSuccess(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: []byte("hi")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true on success, got false")
@@ -113,7 +113,7 @@ func TestNewPreviewModel_ReadsTailForZeroZeroPaneSynchronously(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: []byte("hello")}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
@@ -136,7 +136,7 @@ func TestNewPreviewModel_PassesRawANSIBytesVerbatimToSetContent(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: raw}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
@@ -161,7 +161,7 @@ func TestNewPreviewModel_PositionsViewportAtScrollTailOnInitialOpen(t *testing.T
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
@@ -179,7 +179,7 @@ func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilNil(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: nil, err: nil}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Errorf("expected ok=true when Tail returns (nil, nil), got false")
@@ -194,7 +194,7 @@ func TestNewPreviewModel_ReturnsTrueWhenTailReturnsNilError(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: nil, err: errors.New("EACCES")}
 
-	_, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Errorf("expected ok=true when Tail returns (nil, err), got false")
@@ -209,7 +209,7 @@ func TestNewPreviewModel_ConstructsFreshModelPerCallWithNoCarriedState(t *testin
 	}
 	reader := &recordingReader{bytes: []byte("first")}
 
-	_, ok1 := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok1 := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok1 {
 		t.Fatalf("first call: expected ok=true, got false")
 	}
@@ -218,7 +218,7 @@ func TestNewPreviewModel_ConstructsFreshModelPerCallWithNoCarriedState(t *testin
 	// new bytes, proving a fresh Tail occurred and no caching is in play.
 	reader.bytes = []byte("second")
 
-	_, ok2 := NewPreviewModel("work", enum, reader, 80, 24)
+	_, ok2 := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok2 {
 		t.Fatalf("second call: expected ok=true, got false")
 	}

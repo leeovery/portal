@@ -23,7 +23,7 @@ func newPreviewModelWithLines(t *testing.T, lineCount int) (previewModel, *recor
 		},
 	}
 	reader := &recordingReader{bytes: []byte(b.String())}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 10)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 10)
 	if !ok {
 		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
 	}
@@ -186,7 +186,7 @@ func TestPreviewEmptyContentDownIsNoOp(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: nil, err: nil}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true on (nil, nil) Tail, got false")
 	}
@@ -213,7 +213,7 @@ func TestPreviewSingleLineContentDownIsNoOp(t *testing.T) {
 		},
 	}
 	reader := &recordingReader{bytes: []byte("only one line\n")}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("setup: expected ok=true, got false")
 	}

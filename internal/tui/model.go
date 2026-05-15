@@ -37,6 +37,17 @@ type SessionLister interface {
 	ListSessions() ([]tmux.Session, error)
 }
 
+// PreviewAttacher is the exported seam through which the preview page's
+// Enter handler dispatches the pre-select + attach pipeline (spec
+// § Pre-select + attach sequence). Run returns a tea.Cmd that executes the
+// four-call sequence end-to-end and resolves to one of the pipeline's
+// terminal messages. Production wiring is the previewAttachPipeline
+// constructed via NewPreviewAttachPipeline in cmd/open.go; tests that do
+// not exercise Enter pass nil.
+type PreviewAttacher interface {
+	Run(session string, window, pane int) tea.Cmd
+}
+
 // ProjectStore abstracts project storage for testability.
 type ProjectStore interface {
 	List() ([]project.Project, error)
@@ -180,9 +191,14 @@ type Model struct {
 	// here so the page state machine can compile against the preview
 	// arm. preview holds the live previewModel between pagePreview entry
 	// (via Space on PageSessions) and dismissal back to PageSessions.
-	enumerator TmuxEnumerator
-	reader     ScrollbackReader
-	preview    previewModel
+	// previewAttacher is the Enter pre-select + attach pipeline, wired
+	// via WithPreviewAttachPipeline and propagated onto previewModel at
+	// Space-handler construction so the preview page's Enter binding
+	// dispatches without re-resolving the connector.
+	enumerator      TmuxEnumerator
+	reader          ScrollbackReader
+	previewAttacher PreviewAttacher
+	preview         previewModel
 
 	// Data loading tracking
 	sessionsLoaded       bool
@@ -469,6 +485,18 @@ func WithEnumerator(e TmuxEnumerator) Option {
 func WithScrollbackReader(r ScrollbackReader) Option {
 	return func(m *Model) {
 		m.reader = r
+	}
+}
+
+// WithPreviewAttachPipeline wires the PreviewAttacher seam used by the
+// preview page's Enter binding. Production callers pass the pipeline
+// constructed via NewPreviewAttachPipeline (closing over *tmux.Client +
+// the resolved SessionConnector + a nullable *state.Logger); tests that
+// do not exercise Enter can omit this option, leaving previewAttacher
+// nil.
+func WithPreviewAttachPipeline(p PreviewAttacher) Option {
+	return func(m *Model) {
+		m.previewAttacher = p
 	}
 }
 
@@ -1279,7 +1307,7 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !ok {
 				return m, nil
 			}
-			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.termWidth, m.termHeight)
+			pmodel, ok := NewPreviewModel(si.Session.Name, m.enumerator, m.reader, m.previewAttacher, m.termWidth, m.termHeight)
 			if !ok {
 				return m, nil
 			}

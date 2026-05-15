@@ -72,7 +72,7 @@ func TestPreviewError_RendersAtInitialOpenWhenTailReturnsNilErr(t *testing.T) {
 	}
 	reader := &nilErrReader{err: errors.New("EACCES")}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 
 	if !ok {
 		t.Fatalf("expected ok=true on (nil, err) initial open, got false")
@@ -98,7 +98,7 @@ func TestPreviewError_StringIsUniformAcrossErrnoTypes(t *testing.T) {
 	for i, e := range errs {
 		enum := &stubEnumerator{groups: groups}
 		reader := &nilErrReader{err: e}
-		m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+		m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 		if !ok {
 			t.Fatalf("err %d (%v): expected ok=true, got false", i, e)
 		}
@@ -144,7 +144,7 @@ func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaTab(t *testing.T) {
 	}
 
 	enum := &stubEnumerator{groups: groups}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("constructor: expected ok=true, got false")
 	}
@@ -190,7 +190,7 @@ func TestPreviewError_RefocusAfterErrorIssuesFreshTailViaBracket(t *testing.T) {
 	}
 
 	enum := &stubEnumerator{groups: groups}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("constructor: expected ok=true, got false")
 	}
@@ -241,7 +241,7 @@ func TestPreviewError_SecondTailCallAfterErrorSeesNewOutcome(t *testing.T) {
 	}
 
 	enum := &stubEnumerator{groups: groups}
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("constructor: expected ok=true, got false")
 	}
@@ -308,7 +308,7 @@ func TestPreviewError_ChromeCountsUnaffectedByErrorBranch(t *testing.T) {
 	enum := &stubEnumerator{groups: groups}
 	reader := &nilErrReader{err: syscall.EACCES}
 
-	m, ok := NewPreviewModel("work", enum, reader, 80, 24)
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
 	if !ok {
 		t.Fatalf("expected ok=true, got false")
 	}
