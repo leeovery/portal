@@ -429,6 +429,7 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	// honours *state.Logger's nil-receiver no-op contract, so a failed
 	// open passes nil through and the rest of openTUI proceeds.
 	previewLogger, err := state.OpenLogger(state.PortalLog(stateDir), false)
+	defer previewLogger.Close()
 	if err != nil {
 		previewLogger = nil
 	}
