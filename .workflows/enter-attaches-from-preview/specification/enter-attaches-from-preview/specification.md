@@ -215,4 +215,42 @@ The Sessions-page help bar is **unaffected**. It already advertises `Enter` for 
 
 ---
 
+## Keymap expansion policy
+
+Lifting `Enter` out of preview's "everything else is unbound/no-op" rule creates a slippery-slope question for other Sessions-page keys with obvious analogues (`r` rename, `k` kill, etc.). This section pins the policy once so the rule is visible to anyone reading the spec.
+
+### Policy
+
+**Preview is a verification surface, not a command surface. Strict view-only with `Enter` as the single exception.**
+
+The rule, stated for future referrers:
+
+> Preview owns viewport-navigation keys and exactly one commit key (`Enter`). Every other action is "dismiss-then-act" via `Esc` + the Sessions-page binding. Proposals for new preview keys must argue the key is a *verification primitive*, not a *convenience shortcut*.
+
+### Owned preview keys — full list after this feature
+
+- `]` — next window
+- `[` — previous window
+- `Tab` — next pane
+- viewport-native scroll keys (passed through to `bubbles/viewport`)
+- `Esc` — dismiss back to Sessions list
+- `Enter` (new) — commit attach with captured `(window, pane)` focus
+
+Everything else is unbound or no-op. **`r`, `k`, and any future Sessions-page action keys are NOT inherited.** The user dismisses preview with `Esc` and acts from the Sessions page.
+
+### Rationale
+
+Two grounds for the strict policy over a per-key passthrough policy:
+
+1. **Destructive symmetry.** Under a passthrough policy, `k` (kill) would become "see content → kill" in one keystroke from a viewer. The two-step `Esc` + `k` preserves a deliberate pause where the user's intent can survive. The deletion friction is a small but real safety net.
+2. **Principle scales without re-litigation.** The verification-primitive rule is a clean test for any future key proposal. A passthrough rule ("identity-bounded to the session") is fuzzier and invites the same per-key debate it tries to prevent.
+
+The reduced surface area of preview is the **design intent**, not a constraint. The ergonomic cost of `Esc` + key vs one keystroke is mitigated by the explicit cognitive transition from "viewing" to "acting" that `Esc` marks.
+
+### Future expansion
+
+The policy does not forbid expansion — it requires that proposals argue the verification-primitive test. A new preview key may be added if it can be argued as a verification primitive (i.e. something the user does *while viewing*, not *as a shortcut to act*). The current set (`]`, `[`, `Tab`, viewport scroll, `Esc`, `Enter`) is the baseline.
+
+---
+
 ## Working Notes
