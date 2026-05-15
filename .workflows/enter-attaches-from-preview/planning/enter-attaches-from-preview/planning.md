@@ -26,7 +26,8 @@ approved_at: 2026-05-15
 
 #### Tasks
 
-status: draft
+status: approved
+approved_at: 2026-05-15
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
