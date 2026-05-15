@@ -187,4 +187,32 @@ Future signal/no-signal decisions in this area should land consistently with thi
 
 ---
 
+## Discoverability
+
+The preview chrome line (`internal/tui/pagepreview.go:163-173`) gains an `enter attach` token alongside the existing keymap tokens.
+
+### Current chrome line
+
+```
+Window {w} of {wN} · Pane {p} of {pN} · win: {name}    ] next win · [ prev win · tab next pane · esc back
+```
+
+### New chrome line
+
+```
+Window {w} of {wN} · Pane {p} of {pN} · win: {name}    ] next win · [ prev win · tab next pane · enter attach · esc back
+```
+
+The `enter attach` token sits between `tab next pane` and `esc back`. Exact token placement and wording is fixed by this spec.
+
+### Token wording is unconditional
+
+The `enter attach` token reads identically regardless of viewport content state (real bytes, "(no saved content)" placeholder, or OS read error). Enter's semantics are identical in all three cases — it attaches to the session, not to the scrollback — so the chrome wording does not branch on viewport state.
+
+### Sessions-page help bar
+
+The Sessions-page help bar is **unaffected**. It already advertises `Enter` for Sessions-page attach; the preview chrome's new `enter attach` token does not propagate to or duplicate that bar.
+
+---
+
 ## Working Notes
