@@ -24,6 +24,8 @@ This specification covers:
 
 Preview's `Update` handler gains a `tea.KeyEnter` case. When the user presses `Enter` while preview is the active page, preview commits an attach to the previewed session, applying any `(window, pane)` focus the user navigated to inside preview before handing off to the existing connector path.
 
+`Enter` is **intercepted** by preview's `Update` handler and is NOT forwarded to the embedded viewport. The handler returns after dispatching the attach sequence; the key event does not propagate further. Today's `bubbles/viewport` treats `Enter` as a no-op for scrolling, so the observable difference is zero — but future `bubbles/viewport` behaviour for `Enter` cannot leak through to preview.
+
 ### What Enter commits to
 
 Preview's `]`, `[`, and `Tab` keys already build up a real `(window, pane)` focus — they are not viewport chrome, they are navigation state. Enter treats that state as **intent**, not a viewport-rendering concept:
@@ -53,6 +55,7 @@ A proactive existence check, run **before** the pre-select calls.
 - **Zero exit (session exists)**: proceed to step 2.
 - **Non-zero exit (session gone)**: bail. The session has been killed externally (by `tmux kill-session`, `portal clean`, the daemon, or another tmux client) between preview open and Enter. Dispatch the refresh-and-bail path — see *Session-killed-externally bail path* below. Steps 2–4 do not run.
 - **OS-layer error (missing binary, exec failure)** — distinct from a non-zero exit: treat as "session present" and proceed to step 2. An OS-layer error is not a tmux-state signal; the connector will fail in the same shape it would have without the check, and `EnsureServer` already validates tmux is invocable in bootstrap.
+  - **Discriminator contract**: build phase MUST distinguish `*exec.ExitError` (non-zero exit — bail) from non-`ExitError` errors (OS-layer failure — proceed). The discriminator mechanism is a build decision (e.g. extend `Commander` return shape, type-assert at call site); the spec-level contract is that the two cases are not collapsed into a single "any error" branch.
 
 This is one extra tmux round-trip per Enter. Negligible — sub-millisecond locally, well within UI responsiveness.
 
@@ -68,6 +71,7 @@ Best-effort. Uses the window index preview captured at open and walked with `]`/
 
 - **Zero exit**: proceed.
 - **Non-zero exit (window no longer exists)**: log and swallow. Do not block, do not warn the user, do not abort. Proceed to step 3 (which will also fail), then step 4.
+- **Log shape**: swallowed failures log at WARN through the existing structured logger (`internal/state`), consistent with how bootstrap logs similar best-effort failures. Build phase picks the exact component string (e.g. `ComponentPreview` or `ComponentTUI`); the spec-level contract is WARN-level + structured-logger + greppable component, not silent.
 - **No re-enumeration**: do NOT call `list-panes -F` or any structural enumeration on Enter. Re-enumeration would cost a round-trip on every Enter for an edge case that is bounded and self-correcting.
 
 ### 3. `tmux select-pane -t <session>:<window_index>.<pane_index>`
@@ -75,14 +79,16 @@ Best-effort. Uses the window index preview captured at open and walked with `]`/
 Best-effort. Uses the pane index preview captured at open and walked with `Tab`.
 
 - **Zero exit**: proceed.
-- **Non-zero exit (pane no longer exists)**: log and swallow. Same shape as step 2.
+- **Non-zero exit (pane no longer exists)**: log and swallow. Same shape as step 2 (WARN through the structured logger; same component string).
 
 ### 4. Connector handoff
 
 The existing connector path runs, unchanged:
 
-- **Outside tmux**: `AttachConnector` issues `syscall.Exec` to hand off the process to `tmux attach-session -A -t <session>`.
-- **Inside tmux**: `SwitchConnector` issues `tmux switch-client -t <session>` (two-step: create detached session if needed, then switch).
+- **Outside tmux**: `AttachConnector` issues `syscall.Exec` to hand off the process to `tmux attach-session -A -t '=<session>'`.
+- **Inside tmux**: `SwitchConnector` issues `tmux switch-client -t '=<session>'` (two-step: create detached session if needed, then switch).
+
+The connector target is intentionally **session-only** (no `:window.pane` suffix). The pre-select calls in steps 2 and 3 are what position tmux on the focused `(window, pane)`; the connector resolves the session's current window/pane at connect time and inherits whatever the pre-selects established. Both `attach-session` and `switch-client` use the `=` exact-match prefix uniformly with the pre-select calls (see *Exact-match target syntax* above).
 
 If the pre-select calls all succeeded, the connector lands the user on the focused `(window, pane)`. If the pre-selects failed (steps 2 and/or 3), tmux's last-current pane in the session wins as a natural fallback — equivalent to the pre-existing Sessions-page Enter behaviour. No regression.
 
@@ -114,11 +120,13 @@ On non-zero `has-session` exit, preview dispatches a refresh-and-bail message th
 
 1. **Transitions `pagePreview → pageSessions`** — the same page-state transition that `Esc` performs today.
 2. **Triggers the existing sessions-list refresh** on that transition. Per the prior preview spec, the dismiss handler already dispatches a sessions-list refresh on the `pagePreview → pageSessions` transition so externally-killed sessions disappear from the post-dismiss list. The bail path reuses this contract.
-3. **Emits an inline flash message** — one ephemeral line pinned above the Sessions list, e.g.:
+3. **Emits an inline flash message** — one ephemeral line pinned above the Sessions list. Exact wording is fixed by this spec:
 
    ```
    session "<name>" no longer exists
    ```
+
+   The `<name>` placeholder is the captured session name. Double quotes surround the name. No trailing punctuation. Build phase must not paraphrase the message.
 
 The user lands back on the Sessions page with the killed session already absent from the list and a single-line message explaining why their Enter "didn't work".
 
@@ -135,7 +143,7 @@ The flash mechanism is **bespoke to the Sessions page** and scoped to this edge 
 Shape:
 
 - **State**: a small piece of model state on the Sessions page model — at minimum an active flash text string and an associated timestamp or tick handle.
-- **Render**: a single chrome line rendered between the filter input and the Sessions list. The flash sits adjacent to the list it is describing — the filter input remains in its existing position above the flash, and no existing chrome row is replaced or overlaid.
+- **Render**: a single chrome line rendered between the filter input and the Sessions list. The flash sits adjacent to the list it is describing — the filter input remains in its existing position above the flash, and no existing chrome row is replaced or overlaid. The flash row is rendered **only when a flash is active**; when no flash is active, no row is reserved (the list sits directly under the filter input as today). First bail visually pushes the list down by one row; tick expiry or the next clearing keystroke pops it back up.
 - **Clear conditions**:
   - The next `tea.KeyMsg` (actionable keystroke) — see *Flash interaction with filter input* below.
   - A tick `tea.Cmd` after a short duration. Default principle: "long enough to read, short enough not to linger". Exact tick duration is a build-phase decision; the discussion noted `~3s` as a reasonable default.
