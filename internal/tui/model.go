@@ -1355,6 +1355,18 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Spec § Inline flash > Clear conditions, § Flash interaction with
+		// filter input: an actionable KeyMsg with an active flash clears
+		// the flash as a side effect and the keystroke continues to its
+		// normal handler — "one key, one intent". Non-KeyMsg events
+		// (WindowSizeMsg, FocusMsg, BlurMsg, MouseMsg) never reach this
+		// branch, so the flash survives them. When no flash is active
+		// the check is a single bool read with no observable effect.
+		if m.flashText != "" && isActionableKey(msg) {
+			m.clearFlash()
+			// Deliberate fall-through: do NOT return. The keystroke
+			// continues to the existing handlers below.
+		}
 		if msg.Type == tea.KeyCtrlC {
 			return m, tea.Quit
 		}

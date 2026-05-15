@@ -53,3 +53,24 @@ func flashTickCmd(gen uint64) tea.Cmd {
 		return flashTickMsg{Gen: gen}
 	})
 }
+
+// isActionableKey reports whether a tea.KeyMsg is an actionable
+// keystroke — i.e. one that should clear an active inline flash as a
+// side effect (spec § Inline flash > Clear conditions, § Flash
+// interaction with filter input).
+//
+// Defensive shape: a KeyMsg with a non-zero Type (any named key like
+// KeyEnter, KeyEsc, KeyDown, or KeyRunes which is negative) OR a
+// non-empty Runes slice counts as actionable. The zero-zero shape
+// (Type=0 == keyNUL, Runes=nil) is treated as non-actionable — a
+// defensive guard against unusual library-emitted no-op KeyMsgs.
+// In practice every real keystroke satisfies one of these conditions,
+// so this is effectively "any non-empty KeyMsg" while remaining safe
+// against the pathological empty case.
+//
+// Non-KeyMsg events (WindowSizeMsg, FocusMsg, BlurMsg, MouseMsg) never
+// reach a `case tea.KeyMsg` branch, so the flash is unaffected by them
+// without any code here.
+func isActionableKey(msg tea.KeyMsg) bool {
+	return msg.Type != 0 || len(msg.Runes) > 0
+}
