@@ -90,4 +90,52 @@ The pre-select sequence does not trigger any tmux hook events — `select-window
 
 ---
 
+## Session-killed-externally bail path
+
+When `has-session` returns non-zero (step 1 of the pre-select sequence), the session has been killed between preview open and Enter. Preview bails instead of proceeding through the rest of the sequence.
+
+### Behaviour
+
+On non-zero `has-session` exit, preview dispatches a refresh-and-bail message that:
+
+1. **Transitions `pagePreview → pageSessions`** — the same page-state transition that `Esc` performs today.
+2. **Triggers the existing sessions-list refresh** on that transition. Per the prior preview spec, the dismiss handler already dispatches a sessions-list refresh on the `pagePreview → pageSessions` transition so externally-killed sessions disappear from the post-dismiss list. The bail path reuses this contract.
+3. **Emits an inline flash message** — one ephemeral line pinned above the Sessions list, e.g.:
+
+   ```
+   session "<name>" no longer exists
+   ```
+
+The user lands back on the Sessions page with the killed session already absent from the list and a single-line message explaining why their Enter "didn't work".
+
+### Inline flash — feature-local infrastructure
+
+The flash mechanism is **bespoke to the Sessions page** and scoped to this edge case. This feature does NOT introduce a general-purpose toast/notification layer.
+
+Shape:
+
+- **State**: a small piece of model state on the Sessions page model — at minimum an active flash text string and an associated timestamp or tick handle.
+- **Render**: a single chrome line rendered above the Sessions list.
+- **Clear conditions**:
+  - The next `tea.KeyMsg` (actionable keystroke) — see *Flash interaction with filter input* below.
+  - A tick `tea.Cmd` after a short duration. Default principle: "long enough to read, short enough not to linger". Exact tick duration is a build-phase decision; the discussion noted `~3s` as a reasonable default.
+  - Modifier-only events (e.g. holding shift alone), resize events, and focus events do NOT count as clearing events.
+
+Future general-purpose flash/toast infrastructure may replace or absorb this bespoke chrome line. That work is out of scope (logged as inbox idea `.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md`).
+
+### Flash interaction with filter input
+
+The first keystroke post-bail clears the flash AND applies to the filter input as normal — **one key, one intent**. The flash does not swallow the keystroke on the user's behalf. If the user starts typing into the filter immediately after the bail, those characters land in the filter input as they would on any other Sessions-page render; the flash simply clears.
+
+### Accepted residual — TOCTOU between has-session and connector
+
+A vanishingly small race window remains between `has-session` returning zero and the connector firing: the session can be killed in the microseconds between the two calls. This residual is **accepted as rare and intentionally not designed for**:
+
+- **Outside tmux**: `tmux attach-session -A -t <name>` auto-creates a new empty session with the killed name (the `-A` flag's existing behaviour). The user lands in a fresh session, not in an error state. Weird but not destructive.
+- **Inside tmux**: `tmux switch-client -t <name>` errors; the TUI has already torn down, so the message location is unclear.
+
+Documented here so build phase does not attempt a defensive guard against a window with no observable victim distinct from "session killed during the connector call itself".
+
+---
+
 ## Working Notes
