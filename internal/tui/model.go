@@ -995,6 +995,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applySessions(msg.Sessions)
 		m.reanchorSessionCursor(msg.PreserveName)
 		return m, nil
+	case flashTickMsg:
+		// Generation-guard: a tick scheduled for an earlier flash must
+		// not early-clear a flash that has since been replaced by a
+		// rapid successive bail (spec § Replacement on rapid successive
+		// bails). setFlash bumps flashGen monotonically; flashTickCmd
+		// captures the gen at schedule time. On fire we clear only if
+		// the captured gen still matches the live gen — otherwise the
+		// tick belongs to a superseded flash and is silently dropped.
+		// Also safely no-ops if the flash was cleared manually (e.g.
+		// by a keystroke) since clearFlash leaves flashGen untouched
+		// and clearFlash itself is idempotent.
+		if msg.Gen == m.flashGen {
+			m.clearFlash()
+		}
+		return m, nil
 	}
 
 	// Delegate to the active view
