@@ -84,6 +84,14 @@ If the pre-select calls all succeeded, the connector lands the user on the focus
 
 Preview captures structural enumeration at preview-open and walks `]`/`[`/`Tab` purely locally — no mid-preview re-enumeration. Pre-select acts against those captured-then-walked coordinates. This model is inherited from the prior preview spec and is restated here for completeness.
 
+### Captured coordinate values — raw tmux indices, not slice positions
+
+The captured `(window, pane)` values passed to `select-window -t <session>:<window_index>` and `select-pane -t <session>:<window_index>.<pane_index>` MUST be raw tmux `window_index` and `pane_index` values (the values returned by `list-windows -F '#{window_index}'` / `list-panes -F '#{pane_index}'`), **not** 0-based slice positions in the captured enumeration.
+
+Tmux's `window_index` and `pane_index` are 1-based by default and can be non-contiguous (e.g. after window or pane kills). Storing slice position would silently misaddress on any session with non-contiguous indices.
+
+The existing `WindowGroup` enumeration shape from `ListWindowsAndPanesInSession` already preserves raw `WindowIndex` and `PaneIndices[]int`. Preview's existing `currentRawIndices()` helper (`internal/tui/pagepreview.go`) already distinguishes raw indices from slice cursors; the pre-select sequence must use the raw values from that helper (or equivalent).
+
 ### Hook firing
 
 The pre-select sequence does not trigger any tmux hook events — `select-window` and `select-pane` are plain tmux commands. The connector handoff WILL trigger tmux's `client-attached` hook (which Portal registers to run `portal state signal-hydrate`), but post-bootstrap there are no armed `@portal-skeleton-*` panes, so `signal-hydrate` is a no-op and no on-resume hooks fire. On-resume hooks fire only inside the hydrate helper's exec chain during restore (bootstrap step 5), per `cmd/state_hydrate.go`'s `execShellOrHookAndExit`. This feature does not change hook semantics.

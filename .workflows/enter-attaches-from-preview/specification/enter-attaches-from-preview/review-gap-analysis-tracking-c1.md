@@ -69,10 +69,10 @@ The spec defers "captured coordinate provenance" (which struct field backs the c
 The prior spec's enumeration probably already uses tmux indices, but this spec should pin the contract explicitly so the build phase cannot inadvertently regress it. Minor-to-important severity depending on how the captured field is shaped today.
 
 **Proposed Addition**:
-[Leave blank until discussed]
+New subsection "Captured coordinate values — raw tmux indices, not slice positions" pinning that captured (window, pane) MUST be raw tmux window_index / pane_index, not slice positions. WindowGroup and currentRawIndices() already preserve this distinction; the contract is now explicit in the spec.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Contract pinned; existing code (WindowGroup, currentRawIndices) already conforms — spec catches up.
 
 ---
 
