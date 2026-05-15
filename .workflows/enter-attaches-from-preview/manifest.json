@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "enter-attaches-from-preview-2-2",
+          "task": "enter-attaches-from-preview-2-3",
           "task_map": {
             "enter-attaches-from-preview-1": "tick-bd96a2",
             "enter-attaches-from-preview-1-1": "tick-82f0df",
@@ -49,7 +49,8 @@
             "enter-attaches-from-preview-1-6": "tick-90fd51",
             "enter-attaches-from-preview-1-7": "tick-20559f",
             "enter-attaches-from-preview-1-8": "tick-8c4d1a",
-            "enter-attaches-from-preview-2-1": "tick-9ba22a"
+            "enter-attaches-from-preview-2-1": "tick-9ba22a",
+            "enter-attaches-from-preview-2-2": "tick-673b52"
           },
           "external_id": "tick-6cea9c"
         }
