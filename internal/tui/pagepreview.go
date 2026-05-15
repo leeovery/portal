@@ -169,7 +169,7 @@ func (m previewModel) chromeLine() string {
 	pOrdinal := m.paneIdx + 1
 	windowName := m.currentGroup().WindowName
 	return fmt.Sprintf(
-		"Window %d of %d · Pane %d of %d · win: %s    ] next win · [ prev win · tab next pane · esc back",
+		"Window %d of %d · Pane %d of %d · win: %s    ] next win · [ prev win · tab next pane · enter attach · esc back",
 		wOrdinal, wTotal, pOrdinal, pTotal, windowName,
 	)
 }

@@ -105,10 +105,49 @@ func TestPreviewChromeLine_IncludesBracketAndTabAndEscAsVisibleHints(t *testing.
 
 	got := stripANSI(m.chromeLine())
 
-	for _, token := range []string{"]", "[", "tab", "esc"} {
+	for _, token := range []string{"]", "[", "tab", "enter", "esc"} {
 		if !strings.Contains(got, token) {
 			t.Errorf("chromeLine() = %q; want visible hint token %q", got, token)
 		}
+	}
+}
+
+func TestPreviewChromeLine_IncludesEnterAttachTokenBetweenTabAndEsc(t *testing.T) {
+	groups := []tmux.WindowGroup{
+		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+	}
+	m := newPreviewModelForHelpers("work", groups, 0, 0)
+
+	got := stripANSI(m.chromeLine())
+
+	const wantSegment = "· tab next pane · enter attach · esc back"
+	if !strings.Contains(got, wantSegment) {
+		t.Errorf("chromeLine() = %q; want substring %q", got, wantSegment)
+	}
+
+	tabIdx := strings.Index(got, "tab next pane")
+	enterIdx := strings.Index(got, "enter attach")
+	escIdx := strings.Index(got, "esc back")
+	if tabIdx < 0 || enterIdx < 0 || escIdx < 0 {
+		t.Fatalf("chromeLine() = %q; missing one of: 'tab next pane', 'enter attach', 'esc back'", got)
+	}
+	if tabIdx >= enterIdx || enterIdx >= escIdx {
+		t.Errorf("chromeLine() = %q; want order tab next pane (%d) < enter attach (%d) < esc back (%d)", got, tabIdx, enterIdx, escIdx)
+	}
+}
+
+func TestPreviewChromeLine_FullStringEqualityForCanonicalShape(t *testing.T) {
+	groups := []tmux.WindowGroup{
+		{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0, 1}},
+		{WindowIndex: 1, WindowName: "logs", PaneIndices: []int{0}},
+	}
+	m := newPreviewModelForHelpers("work", groups, 0, 0)
+
+	got := stripANSI(m.chromeLine())
+
+	const want = "Window 1 of 2 · Pane 1 of 2 · win: main    ] next win · [ prev win · tab next pane · enter attach · esc back"
+	if got != want {
+		t.Errorf("chromeLine() = %q; want %q", got, want)
 	}
 }
 
