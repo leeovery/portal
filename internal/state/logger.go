@@ -34,6 +34,7 @@ const (
 	ComponentNotify    = "notify"
 	ComponentHooks     = "hooks"
 	ComponentBootstrap = "bootstrap"
+	ComponentPreview   = "preview"
 )
 
 // LogRotateThreshold is the file-size cap at which Logger rotates the current
