@@ -42,4 +42,52 @@ Implementation shape (e.g. `tea.Sequence` vs a single combined connector wrapper
 
 ---
 
+## Pre-select + attach sequence
+
+On `tea.KeyEnter` in preview, the following four-call sequence runs in order. Each step has defined semantics for both success and failure paths.
+
+### 1. `tmux has-session -t <session>`
+
+A proactive existence check, run **before** the pre-select calls.
+
+- **Zero exit (session exists)**: proceed to step 2.
+- **Non-zero exit (session gone)**: bail. The session has been killed externally (by `tmux kill-session`, `portal clean`, the daemon, or another tmux client) between preview open and Enter. Dispatch the refresh-and-bail path — see *Session-killed-externally bail path* below. Steps 2–4 do not run.
+- **OS-layer error (missing binary, exec failure)** — distinct from a non-zero exit: treat as "session present" and proceed to step 2. An OS-layer error is not a tmux-state signal; the connector will fail in the same shape it would have without the check, and `EnsureServer` already validates tmux is invocable in bootstrap.
+
+This is one extra tmux round-trip per Enter. Negligible — sub-millisecond locally, well within UI responsiveness.
+
+### 2. `tmux select-window -t <session>:<window_index>`
+
+Best-effort. Uses the window index preview captured at open and walked with `]`/`[`.
+
+- **Zero exit**: proceed.
+- **Non-zero exit (window no longer exists)**: log and swallow. Do not block, do not warn the user, do not abort. Proceed to step 3 (which will also fail), then step 4.
+- **No re-enumeration**: do NOT call `list-panes -F` or any structural enumeration on Enter. Re-enumeration would cost a round-trip on every Enter for an edge case that is bounded and self-correcting.
+
+### 3. `tmux select-pane -t <session>:<window_index>.<pane_index>`
+
+Best-effort. Uses the pane index preview captured at open and walked with `Tab`.
+
+- **Zero exit**: proceed.
+- **Non-zero exit (pane no longer exists)**: log and swallow. Same shape as step 2.
+
+### 4. Connector handoff
+
+The existing connector path runs, unchanged:
+
+- **Outside tmux**: `AttachConnector` issues `syscall.Exec` to hand off the process to `tmux attach-session -A -t <session>`.
+- **Inside tmux**: `SwitchConnector` issues `tmux switch-client -t <session>` (two-step: create detached session if needed, then switch).
+
+If the pre-select calls all succeeded, the connector lands the user on the focused `(window, pane)`. If the pre-selects failed (steps 2 and/or 3), tmux's last-current pane in the session wins as a natural fallback — equivalent to the pre-existing Sessions-page Enter behaviour. No regression.
+
+### Captured coordinate freshness
+
+Preview captures structural enumeration at preview-open and walks `]`/`[`/`Tab` purely locally — no mid-preview re-enumeration. Pre-select acts against those captured-then-walked coordinates. This model is inherited from the prior preview spec and is restated here for completeness.
+
+### Hook firing
+
+The pre-select sequence does not trigger any tmux hook events — `select-window` and `select-pane` are plain tmux commands. The connector handoff WILL trigger tmux's `client-attached` hook (which Portal registers to run `portal state signal-hydrate`), but post-bootstrap there are no armed `@portal-skeleton-*` panes, so `signal-hydrate` is a no-op and no on-resume hooks fire. On-resume hooks fire only inside the hydrate helper's exec chain during restore (bootstrap step 5), per `cmd/state_hydrate.go`'s `execShellOrHookAndExit`. This feature does not change hook semantics.
+
+---
+
 ## Working Notes
