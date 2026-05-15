@@ -1643,7 +1643,12 @@ func (m Model) renderEditProjectContent() string {
 	return b.String()
 }
 
-// viewSessionList renders the session list using bubbles/list.
+// viewSessionList renders the session list using bubbles/list. When an
+// inline flash is active (m.flashText != ""), one styled chrome row is
+// inserted between the bubbles/list title/filter input row and the rest
+// of the list view. No row is reserved when the flash is inactive; the
+// list sits directly under the title/filter as before (spec § Inline
+// flash — feature-local infrastructure > Render).
 func (m Model) viewSessionList() string {
 	var modalContent string
 	switch m.modal {
@@ -1652,5 +1657,33 @@ func (m Model) viewSessionList() string {
 	case modalRename:
 		modalContent = m.renameInput.View()
 	}
-	return renderListWithModal(m.sessionList, modalContent)
+	listView := renderListWithModal(m.sessionList, modalContent)
+	if m.flashText == "" {
+		return listView
+	}
+
+	// Split off the first line (title / filter input row) and insert the
+	// flash row between it and the remainder. Using a manual split keeps
+	// the existing list view byte-identical aside from the inserted row,
+	// satisfying "no existing chrome replaced or overlaid".
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		// Single-line list view (degenerate); append the flash below.
+		return listView + "\n" + m.renderFlashRow()
+	}
+	return listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
+}
+
+// flashRowStyle is constructed fresh per render so no shared lipgloss
+// style mutation can bleed background colour through into the flash row.
+// Subdued / dim foreground keeps the chrome low-emphasis (spec § Inline
+// flash — feature-local infrastructure > Render: "styled row").
+var flashRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+
+// renderFlashRow returns the styled flash row for the Sessions page.
+// flashText is rendered verbatim (no truncation, no transformation); the
+// caller is responsible for the message wording (spec pins it as
+// `session "<name>" no longer exists` at the call site).
+func (m *Model) renderFlashRow() string {
+	return flashRowStyle.Render(m.flashText)
 }

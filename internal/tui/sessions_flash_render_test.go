@@ -1,0 +1,194 @@
+package tui
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/leeovery/portal/internal/tmux"
+)
+
+// Tests for the Sessions-page inline-flash render contract (spec §
+// Inline flash — feature-local infrastructure > Render). The flash row
+// is conditionally inserted between the filter input (title row) and
+// the Sessions list. When flashText is empty no row is reserved; when
+// non-empty exactly one styled row carrying the verbatim text appears.
+
+// lineIndexContaining returns the first index in lines that contains
+// the given substring, or -1.
+func lineIndexContaining(lines []string, substr string) int {
+	for i, l := range lines {
+		if strings.Contains(l, substr) {
+			return i
+		}
+	}
+	return -1
+}
+
+// renderedSessionLines returns the View output of m split on newlines.
+func renderedSessionLines(t *testing.T, m Model) []string {
+	t.Helper()
+	return strings.Split(m.View(), "\n")
+}
+
+// flashModelWithSessions builds a Model on the Sessions page seeded with
+// the given session names so the rendered list contains predictable
+// substrings the tests can locate.
+func flashModelWithSessions(names ...string) Model {
+	sessions := make([]tmux.Session, 0, len(names))
+	for _, n := range names {
+		sessions = append(sessions, tmux.Session{Name: n, Windows: 1, Attached: false})
+	}
+	m := NewModelWithSessions(sessions)
+	m.termWidth = 80
+	m.termHeight = 24
+	return m
+}
+
+func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
+	// Baseline contract: with flashText empty, the rendered View matches
+	// the bubbles/list.View() output verbatim — no row inserted, no
+	// existing chrome replaced.
+	m := flashModelWithSessions("alpha-row")
+	if m.flashText != "" {
+		t.Fatalf("setup invariant: want empty flashText, got %q", m.flashText)
+	}
+
+	got := m.View()
+	want := m.sessionList.View()
+	if got != want {
+		t.Errorf("View() with empty flashText must equal list.View() verbatim\nwant:\n%s\n\ngot:\n%s", want, got)
+	}
+}
+
+func TestSessionsView_FlashRow_AppearsBetweenTitleAndList(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	const flash = "session \"alpha\" no longer exists"
+	m.setFlash(flash)
+
+	lines := renderedSessionLines(t, m)
+	titleIdx := lineIndexContaining(lines, "Sessions")
+	if titleIdx < 0 {
+		t.Fatalf("title %q not found in render:\n%s", "Sessions", strings.Join(lines, "\n"))
+	}
+	flashIdx := lineIndexContaining(lines, flash)
+	if flashIdx < 0 {
+		t.Fatalf("flash text %q not found in render:\n%s", flash, strings.Join(lines, "\n"))
+	}
+	rowIdx := lineIndexContaining(lines, "alpha-row")
+	if rowIdx < 0 {
+		t.Fatalf("session row not found in render:\n%s", strings.Join(lines, "\n"))
+	}
+	if flashIdx <= titleIdx {
+		t.Errorf("flash index %d must be > title index %d", flashIdx, titleIdx)
+	}
+	if rowIdx <= flashIdx {
+		t.Errorf("session row index %d should be > flash index %d", rowIdx, flashIdx)
+	}
+}
+
+func TestSessionsView_FlashActivation_ShiftsListDownByOne(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+
+	beforeLines := renderedSessionLines(t, m)
+	beforeIdx := lineIndexContaining(beforeLines, "alpha-row")
+	if beforeIdx < 0 {
+		t.Fatalf("session row missing in baseline render")
+	}
+
+	m.setFlash("transient")
+	afterLines := renderedSessionLines(t, m)
+	afterIdx := lineIndexContaining(afterLines, "alpha-row")
+	if afterIdx < 0 {
+		t.Fatalf("session row missing in flash render")
+	}
+
+	if afterIdx-beforeIdx != 1 {
+		t.Errorf("activation row shift: want +1, got %d (before=%d after=%d)",
+			afterIdx-beforeIdx, beforeIdx, afterIdx)
+	}
+}
+
+func TestSessionsView_FlashDeactivation_ShiftsListUpByOne(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	m.setFlash("transient")
+
+	withFlashLines := renderedSessionLines(t, m)
+	withFlashIdx := lineIndexContaining(withFlashLines, "alpha-row")
+	if withFlashIdx < 0 {
+		t.Fatalf("session row missing in flash render")
+	}
+
+	m.clearFlash()
+	clearedLines := renderedSessionLines(t, m)
+	clearedIdx := lineIndexContaining(clearedLines, "alpha-row")
+	if clearedIdx < 0 {
+		t.Fatalf("session row missing in cleared render")
+	}
+
+	if withFlashIdx-clearedIdx != 1 {
+		t.Errorf("deactivation row shift: want -1 (i.e. cleared idx + 1 == flash idx), got delta %d (flash=%d cleared=%d)",
+			withFlashIdx-clearedIdx, withFlashIdx, clearedIdx)
+	}
+}
+
+func TestSessionsView_FlashText_AppearsVerbatim(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	const flash = `session "weird-name with spaces" no longer exists`
+	m.setFlash(flash)
+
+	rendered := m.View()
+	if !strings.Contains(rendered, flash) {
+		t.Errorf("expected verbatim flash text %q in rendered output, got:\n%s", flash, rendered)
+	}
+}
+
+func TestSessionsView_OnlyOneFlashRowAdded(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	const flash = "__FLASH_MARKER_42__"
+
+	baselineLines := renderedSessionLines(t, m)
+	m.setFlash(flash)
+	flashedLines := renderedSessionLines(t, m)
+
+	if len(flashedLines)-len(baselineLines) != 1 {
+		t.Errorf("flash insertion should add exactly one row: baseline=%d flashed=%d diff=%d",
+			len(baselineLines), len(flashedLines), len(flashedLines)-len(baselineLines))
+	}
+
+	// And the flash text itself appears on exactly one line.
+	count := 0
+	for _, l := range flashedLines {
+		if strings.Contains(l, flash) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("flash text occurrences: want 1, got %d", count)
+	}
+}
+
+func TestProjectsPage_FlashTextNotRendered(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	const flash = "__SHOULD_NOT_APPEAR_ON_PROJECTS__"
+	m.setFlash(flash)
+
+	// Switch to Projects page; the flash row must not appear there.
+	m.activePage = PageProjects
+	out := m.View()
+	if strings.Contains(out, flash) {
+		t.Errorf("flash text leaked onto Projects page render:\n%s", out)
+	}
+}
+
+func TestLoadingPage_FlashTextNotRendered(t *testing.T) {
+	m := flashModelWithSessions("alpha-row")
+	const flash = "__SHOULD_NOT_APPEAR_ON_LOADING__"
+	m.setFlash(flash)
+
+	// Switch to loading page; flash text must not appear there.
+	m.activePage = PageLoading
+	out := m.View()
+	if strings.Contains(out, flash) {
+		t.Errorf("flash text leaked onto Loading page render:\n%s", out)
+	}
+}
