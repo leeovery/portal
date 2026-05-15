@@ -4,7 +4,8 @@
 
 ### Phase 1: Enter binding with pre-select and attach
 
-status: draft
+status: approved
+approved_at: 2026-05-15
 
 **Goal**: Add the `Enter` keybinding to the preview page that commits an attach to the previewed session, honouring the `(window, pane)` focus the user navigated to with `]`/`[`/`Tab`. Implement the four-call sequence (`has-session` → `select-window` → `select-pane` → connector) with exact-match `=<session>` targets, the `*exec.ExitError` vs OS-error discriminator, best-effort silent-WARN handling for pre-select failures, and the chrome line `enter attach` token. Non-zero `has-session` exit dismisses to Sessions without attaching (placeholder bail — full flash UX lands in Phase 2).
 
@@ -25,7 +26,8 @@ status: draft
 
 ### Phase 2: Session-killed-externally bail path with inline flash
 
-status: draft
+status: approved
+approved_at: 2026-05-15
 
 **Goal**: When `has-session` returns non-zero, dispatch the refresh-and-bail message that transitions `pagePreview → pageSessions`, triggers the existing dismiss-time sessions-list refresh, and emits a feature-local inline flash on the Sessions page reading exactly `session "<name>" no longer exists`. Add the flash state, render row, tick-based auto-clear, keystroke-based clear, and rapid-bail replacement semantics to the Sessions page model.
 
