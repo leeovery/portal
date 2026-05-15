@@ -56,6 +56,12 @@ A proactive existence check, run **before** the pre-select calls.
 
 This is one extra tmux round-trip per Enter. Negligible — sub-millisecond locally, well within UI responsiveness.
 
+#### Exact-match target syntax
+
+`has-session` and all subsequent `-t <session>` calls (`select-window`, `select-pane`, `attach-session`, `switch-client`) MUST use tmux's exact-match prefix `=` — i.e. `-t '=<session>'` rather than `-t <session>`. Without this, tmux's default target resolution matches by prefix: a killed session "foo" coexisting with a live "foo-2" would have `has-session -t foo` return zero (matching "foo-2"), causing the bail path to be missed and the connector to attach to or auto-create the wrong session.
+
+The exact-match prefix must be applied uniformly across the four-call sequence; any single call that drops it can re-introduce the prefix-collision hazard.
+
 ### 2. `tmux select-window -t <session>:<window_index>`
 
 Best-effort. Uses the window index preview captured at open and walked with `]`/`[`.

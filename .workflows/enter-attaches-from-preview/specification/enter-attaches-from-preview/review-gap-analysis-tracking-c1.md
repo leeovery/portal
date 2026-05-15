@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-15
 cycle: 1
 phase: Gap Analysis
@@ -116,9 +116,9 @@ Two possible resolutions:
 Minor severity — narrow edge case, but worth pinning the answer.
 
 **Proposed Addition**:
-[Leave blank until discussed]
+New subsection "Exact-match target syntax" in *Pre-select + attach sequence > Step 1*: MUST use `-t '=<session>'` exact-match prefix uniformly across has-session, select-window, select-pane, attach-session, switch-client. Prevents prefix-collision with related session names.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Exact-match `=` prefix applied uniformly across the four-call sequence.
 
 ---
