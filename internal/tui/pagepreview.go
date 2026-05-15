@@ -246,7 +246,9 @@ type previewSessionsRefreshedMsg struct {
 }
 
 // Update routes Esc to a synthesised previewDismissedMsg, intercepts
-// Home / End for preview-owned top/bottom jumps, and absorbs
+// Home / End for preview-owned top/bottom jumps, intercepts Enter to
+// dispatch the four-call pre-select + attach pipeline against the
+// captured-then-walked (window, pane) coordinates, and absorbs
 // tea.WindowSizeMsg to resize the embedded viewport in place. All other
 // messages — including the remaining viewport scroll keys (Up, Down,
 // PgUp, PgDn, ctrl-u, ctrl-d, j, k) — delegate to bubbles/viewport so
@@ -277,6 +279,25 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		case tea.KeyEnd:
 			m.viewport.GotoBottom()
 			return m, nil
+		// Enter commits an attach to the previewed session, honouring any
+		// (window, pane) focus walked via ] / [ / Tab. The case must intercept
+		// before viewport.Update at the bottom of Update — bubbles/viewport
+		// treats Enter as a no-op today, but preview owns the key so any
+		// future viewport binding cannot leak through. The pipeline receives
+		// raw tmux WindowIndex / PaneIndices values (not 0-based slice
+		// positions) via currentRawIndices, so non-contiguous indices and
+		// non-zero pane-base-index sessions address the right tmux target.
+		// Dispatch is unconditional regardless of viewport content state
+		// (real bytes, "(no saved content)" placeholder, or OS read error)
+		// per spec § Other edge cases > Mid-load. nil attacher is a defensive
+		// silent no-op so non-attach-wired test callsites can construct
+		// previewModel without nil-panicking on Enter.
+		case tea.KeyEnter:
+			if m.attacher == nil {
+				return m, nil
+			}
+			windowIndex, paneIndex := m.currentRawIndices()
+			return m, m.attacher.Run(m.session, windowIndex, paneIndex)
 		case tea.KeyTab:
 			paneCount := len(m.currentGroup().PaneIndices)
 			if paneCount <= 1 {
