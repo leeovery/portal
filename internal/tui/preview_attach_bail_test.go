@@ -9,13 +9,18 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// Tests for top-level handling of previewAttachBailMsg (and the terminal
-// previewAttachErrorMsg). The bail handler mirrors the previewDismissedMsg
-// shape: transition to PageSessions, zero m.preview, dispatch a sessions-list
-// refresh keyed by the message's Session name. Phase 2 (task 2-5) layers an
-// inline flash emission + tick onto that base — flash-specific assertions
-// live in preview_attach_bail_flash_test.go. Tests here cover transitions,
+// Tests for top-level handling of previewAttachBailMsg. The bail handler
+// mirrors the previewDismissedMsg shape: transition to PageSessions, zero
+// m.preview, dispatch a sessions-list refresh keyed by the message's
+// Session name. Phase 2 (task 2-5) layers an inline flash emission + tick
+// onto that base — flash-specific assertions live in
+// preview_attach_bail_flash_test.go. Tests here cover transitions,
 // preview-zeroing, refresh-cmd dispatch, and Esc-dismiss regressions.
+//
+// The success terminal (previewAttachSelectedMsg) is covered by
+// preview_attach_selected_test.go; the prior previewAttachErrorMsg pinning
+// tests were retired in Phase 3 task 3-1 when the connector handoff moved
+// post-TUI.
 
 // pressSpaceThenBail opens the preview via Space, then feeds a
 // previewAttachBailMsg directly into Update, mirroring how the cmd produced
@@ -247,36 +252,5 @@ func TestEscDismissPathUnchangedAfterBailHandlerAdded(t *testing.T) {
 	}
 	if lister.calls != 1 {
 		t.Errorf("expected Esc dismiss to still trigger 1 ListSessions call, got %d", lister.calls)
-	}
-}
-
-func TestPreviewAttachErrorWithNilErrIsNoOp(t *testing.T) {
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(sessions, enum, reader)
-
-	_, cmd := m.Update(previewAttachErrorMsg{Err: nil})
-
-	if cmd != nil {
-		t.Errorf("expected nil cmd on previewAttachErrorMsg{Err: nil}, got %T", cmd)
-	}
-}
-
-func TestPreviewAttachErrorWithNonNilErrQuits(t *testing.T) {
-	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
-	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
-	reader := &recordingReader{bytes: []byte("hi")}
-	m := modelWithSeams(sessions, enum, reader)
-
-	_, cmd := m.Update(previewAttachErrorMsg{Err: errors.New("boom")})
-
-	if cmd == nil {
-		t.Fatalf("expected non-nil cmd on previewAttachErrorMsg{Err: non-nil}")
-	}
-	if msg := cmd(); msg != tea.Quit() {
-		// tea.Quit is a function that returns tea.quitMsg. Comparison via the
-		// returned message is the canonical bubbletea-test pattern.
-		t.Errorf("expected tea.Quit() msg from error handler, got %T", msg)
 	}
 }

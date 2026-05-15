@@ -111,10 +111,9 @@ func TestSpaceOnSessionsPage_PassesModelAttacherIntoPreviewModel(t *testing.T) {
 
 func TestNewPreviewAttachPipeline_ReturnsNonNilAttacher(t *testing.T) {
 	tm := &fakePreviewAttachTmux{hasPresent: true}
-	conn := &fakePreviewConnector{}
 	logger, _ := newTestLogger(t)
 
-	p := NewPreviewAttachPipeline(tm, conn, logger)
+	p := NewPreviewAttachPipeline(tm, logger)
 	if p == nil {
 		t.Fatalf("NewPreviewAttachPipeline returned nil")
 	}
@@ -132,9 +131,8 @@ func TestNewPreviewAttachPipeline_ReturnsNonNilAttacher(t *testing.T) {
 
 func TestNewPreviewAttachPipeline_NilLoggerTolerated(t *testing.T) {
 	tm := &fakePreviewAttachTmux{hasPresent: true}
-	conn := &fakePreviewConnector{}
 
-	p := NewPreviewAttachPipeline(tm, conn, nil)
+	p := NewPreviewAttachPipeline(tm, nil)
 	if p == nil {
 		t.Fatalf("NewPreviewAttachPipeline returned nil with nil logger")
 	}

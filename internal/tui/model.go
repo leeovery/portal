@@ -979,17 +979,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		tickCmd := flashTickCmd(m.flashGen)
 		refreshCmd := m.refreshSessionsAfterPreviewCmd(preserveName)
 		return m, tea.Batch(refreshCmd, tickCmd)
-	case previewAttachErrorMsg:
-		// Connector-terminal envelope. Nil Err is a no-op (inside-tmux
-		// switch-client success — surrounding tmux client repaints on its
-		// own; outside tmux the connector's syscall.Exec replaces the
-		// process and this branch is unreachable). Non-nil Err is a
-		// connector failure: surface it by quitting, matching the
-		// Sessions-page Enter path's existing processTUIResult flow.
-		if msg.Err != nil {
-			return m, tea.Quit
-		}
-		return m, nil
+	case previewAttachSelectedMsg:
+		// Success terminal of the preview-Enter pipeline. The pre-select
+		// tmux calls (HasSessionProbe + SelectWindow + SelectPane) have
+		// already run inside the live tea.Cmd; we now record the captured
+		// session on the model and quit so the TUI program shuts down
+		// before the connector runs.
+		//
+		// Shape parity with handleSessionListEnter (the Sessions-page
+		// Enter handler): set m.selected + tea.Quit; processTUIResult
+		// performs the connector.Connect call AFTER tea.NewProgram.Run
+		// returns. Inside-tmux this prevents the orphan portal process
+		// regression where switch-client would move the surrounding tmux
+		// client to the target session while portal kept event-looping
+		// with no UI. Outside-tmux the connector's syscall.Exec replaces
+		// the process post-TUI; same effect either way.
+		m.selected = msg.Session
+		return m, tea.Quit
 	case previewSessionsRefreshedMsg:
 		// Lister errors are non-fatal here: the user just dismissed
 		// preview and expects to land on the Sessions list. A tea.Quit

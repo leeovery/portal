@@ -12,10 +12,10 @@ import (
 // used by preview_adapter.go for TmuxEnumerator / ScrollbackReader.
 var _ previewAttachTmux = (*tmux.Client)(nil)
 
-// previewAttachTmux is the tmux-facing seam for the Enter pre-select + attach
-// pipeline. Three methods, one per pre-connector tmux call: HasSessionProbe
-// (step 1, three-shape discriminator), SelectWindow (step 2, best-effort),
-// SelectPane (step 3, best-effort).
+// previewAttachTmux is the tmux-facing seam for the Enter pre-select pipeline.
+// Three methods, one per pre-connector tmux call: HasSessionProbe (step 1,
+// three-shape discriminator), SelectWindow (step 2, best-effort), SelectPane
+// (step 3, best-effort).
 //
 // Production wiring is *tmux.Client (each method on Client matches the shape
 // here byte-for-byte). Tests substitute fakes recording call order and
@@ -24,15 +24,6 @@ type previewAttachTmux interface {
 	HasSessionProbe(name string) (bool, error)
 	SelectWindow(session string, window int) error
 	SelectPane(session string, window, pane int) error
-}
-
-// previewSessionConnector is the connector-facing seam for the pipeline's
-// terminal call. The production adapter is wired in task 1-5 to delegate to
-// the cmd-layer SessionConnector (AttachConnector outside tmux,
-// SwitchConnector inside tmux). Kept as a TUI-local interface to avoid an
-// internal/tui → cmd import.
-type previewSessionConnector interface {
-	Connect(name string) error
 }
 
 // previewAttachBailMsg signals that Enter must abandon the connector handoff
@@ -48,40 +39,43 @@ type previewAttachBailMsg struct {
 	Session string
 }
 
-// previewAttachErrorMsg is the connector-terminal envelope. Err carries the
-// outcome of previewSessionConnector.Connect:
+// previewAttachSelectedMsg is the success terminal of the preview-Enter
+// pipeline. The pipeline executes only the three pre-select tmux calls
+// (HasSessionProbe + SelectWindow + SelectPane) and then emits this message
+// carrying the captured session name. The model handler records the name
+// on m.selected and returns tea.Quit so the TUI program shuts down before
+// the connector runs — matching the Sessions-page Enter handoff shape.
 //
-//   - nil: connector returned without error. Two production shapes collapse
-//     here. (a) Inside tmux: switch-client succeeded; the top-level handler
-//     quits the program so the surrounding tmux client repaints. (b) Outside
-//     tmux: AttachConnector's syscall.Exec replaces the portal process and
-//     never returns — control does not reach this branch in production.
-//   - non-nil: connector failure. Inside tmux this is typically the
-//     switch-client error; the top-level handler surfaces it.
-type previewAttachErrorMsg struct {
-	Err error
+// The connector.Connect call happens post-TUI in cmd/open.go's
+// processTUIResult, NOT inside the live tea.Cmd goroutine. This eliminates
+// the inside-tmux orphan-portal-process regression where switch-client
+// would move the surrounding tmux client to the target session while the
+// portal process kept event-looping with no UI.
+type previewAttachSelectedMsg struct {
+	Session string
 }
 
-// previewAttachPipeline composes the four-call Enter sequence into a single
-// tea.Cmd factory exercisable in isolation. Dependencies are constructor-
-// injected so tests can substitute fakes for tmux, the connector, and the
+// previewAttachPipeline composes the three pre-select tmux calls into a
+// single tea.Cmd factory exercisable in isolation. Dependencies are
+// constructor-injected so tests can substitute fakes for tmux and the
 // logger without touching package-level state.
 //
-// Spec: § Pre-select + attach sequence.
+// The pipeline NO LONGER owns the connector handoff. On success it emits
+// previewAttachSelectedMsg and the connector.Connect call is performed
+// post-TUI by cmd/open.go's processTUIResult — see preview_attach.go
+// docstring on previewAttachSelectedMsg for rationale.
+//
+// Spec: § Pre-select + attach sequence (steps 1-3; step 4 is post-TUI).
 type previewAttachPipeline struct {
-	tmux      previewAttachTmux
-	connector previewSessionConnector
-	logger    *state.Logger
+	tmux   previewAttachTmux
+	logger *state.Logger
 }
 
 // NewPreviewAttachPipeline is the production constructor for the Enter
-// pre-select + attach pipeline. The seam interfaces (previewAttachTmux,
-// previewSessionConnector) stay unexported so the pipeline's internals
-// are not part of the package's exported surface; production callers pass
-// concrete types that satisfy them structurally (*tmux.Client satisfies
-// previewAttachTmux; the cmd-layer SessionConnector — *AttachConnector or
-// *SwitchConnector — satisfies previewSessionConnector via its
-// Connect(name string) error method).
+// pre-select pipeline. The seam interface (previewAttachTmux) stays
+// unexported so the pipeline's internals are not part of the package's
+// exported surface; production callers pass concrete types that satisfy
+// it structurally (*tmux.Client satisfies previewAttachTmux).
 //
 // logger may be nil — every Warn call inside Run honours *state.Logger's
 // nil-receiver no-op contract. Passing nil from production sites where a
@@ -89,14 +83,14 @@ type previewAttachPipeline struct {
 //
 // The returned PreviewAttacher is the exported seam consumed by tui.Model
 // via WithPreviewAttachPipeline.
-func NewPreviewAttachPipeline(t previewAttachTmux, c previewSessionConnector, logger *state.Logger) PreviewAttacher {
-	return &previewAttachPipeline{tmux: t, connector: c, logger: logger}
+func NewPreviewAttachPipeline(t previewAttachTmux, logger *state.Logger) PreviewAttacher {
+	return &previewAttachPipeline{tmux: t, logger: logger}
 }
 
-// Run returns a tea.Cmd that executes the four-call sequence end-to-end and
-// resolves to exactly one of two terminal message types: previewAttachBailMsg
-// for the externally-killed bail path, or previewAttachErrorMsg for the
-// connector-handoff envelope.
+// Run returns a tea.Cmd that executes the three pre-select tmux calls in
+// order and resolves to exactly one of two terminal message types:
+// previewAttachBailMsg for the externally-killed bail path, or
+// previewAttachSelectedMsg for the post-pre-select handoff envelope.
 //
 // Step semantics (spec § Pre-select + attach sequence):
 //
@@ -109,11 +103,16 @@ func NewPreviewAttachPipeline(t previewAttachTmux, c previewSessionConnector, lo
 //     (true, non-ExitError-err) OS-layer fault; log WARN, proceed.
 //  2. SelectWindow(session, window) — best-effort; log WARN on err, proceed.
 //  3. SelectPane(session, window, pane) — best-effort; log WARN on err, proceed.
-//  4. connector.Connect(session) — terminal. Wrap outcome in previewAttachErrorMsg.
+//  4. Emit previewAttachSelectedMsg{Session: session}. The model handler
+//     records the session on m.selected and returns tea.Quit; the
+//     connector.Connect call runs post-TUI in cmd/open.go's
+//     processTUIResult. Inside-tmux: TUI quits before switch-client runs,
+//     so no orphan portal process. Outside-tmux: same effect via post-TUI
+//     syscall.Exec.
 //
 // The Cmd executes synchronously inside its goroutine. Blocking tmux calls
-// are acceptable per spec — the four-call sequence is sub-millisecond locally
-// and runs off the UI thread.
+// are acceptable per spec — the three-call sequence is sub-millisecond
+// locally and runs off the UI thread.
 func (p *previewAttachPipeline) Run(session string, window, pane int) tea.Cmd {
 	return func() tea.Msg {
 		// Step 0: empty-session defensive guard.
@@ -143,9 +142,9 @@ func (p *previewAttachPipeline) Run(session string, window, pane int) tea.Cmd {
 			p.logger.Warn(state.ComponentPreview, "select-pane %q:%d.%d failed: %v", session, window, pane, err)
 		}
 
-		// Step 4: connector handoff. In production the outside-tmux path
-		// never returns (syscall.Exec replaces the process); the inside-tmux
-		// path returns nil on success and non-nil on switch-client failure.
-		return previewAttachErrorMsg{Err: p.connector.Connect(session)}
+		// Step 4: emit selected envelope. The connector handoff happens
+		// post-TUI in cmd/open.go's processTUIResult; the model handler
+		// records the session on m.selected and returns tea.Quit.
+		return previewAttachSelectedMsg{Session: session}
 	}
 }

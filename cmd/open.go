@@ -409,11 +409,18 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	}
 	previewReader := tui.NewProductionScrollbackReader(stateDir)
 
-	// Resolve the connector once and share it with both the preview-page
-	// Enter pipeline and the post-TUI Sessions-page handoff. Both
+	// Resolve the connector once. It is used post-TUI by processTUIResult
+	// for both Sessions-page Enter and Preview-page Enter. Both
 	// *AttachConnector and *SwitchConnector are safe to reuse across
 	// calls — neither holds per-attach state — so a single instance per
-	// openTUI invocation is sufficient.
+	// openTUI invocation is sufficient. The preview-page pipeline no
+	// longer holds a reference to the connector: it emits a
+	// previewAttachSelectedMsg, the model records the selected session +
+	// tea.Quit, and the connector handoff happens in processTUIResult
+	// after the TUI program shuts down. This prevents the inside-tmux
+	// orphan-portal-process regression where switch-client would move
+	// the surrounding tmux client while portal kept event-looping with
+	// no UI.
 	connector := buildSessionConnector(client)
 
 	// Open a best-effort logger so the pre-select pipeline can WARN on
@@ -425,7 +432,7 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	if err != nil {
 		previewLogger = nil
 	}
-	previewAttacher := tui.NewPreviewAttachPipeline(client, connector, previewLogger)
+	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
 
 	cfg := tuiConfig{
 		lister:          client,
