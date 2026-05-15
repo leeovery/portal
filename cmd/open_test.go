@@ -1081,3 +1081,51 @@ func TestBuildSessionConnector(t *testing.T) {
 		}
 	})
 }
+
+// recordingExecer captures syscall.Exec arguments without replacing the
+// test process. Used to verify AttachConnector's argv shape — the
+// production AttachConnector hands off to tmux via syscall.Exec, which
+// would otherwise destroy the test process.
+type recordingExecer struct {
+	argv0 string
+	argv  []string
+}
+
+func (r *recordingExecer) Exec(argv0 string, argv []string, _ []string) error {
+	r.argv0 = argv0
+	r.argv = argv
+	return nil
+}
+
+// TestAttachConnectorConnectArgv pins the argv passed to syscall.Exec at the
+// AttachConnector boundary. The "-A" flag enables tmux's atomic
+// create-or-attach behaviour (creates the session if it doesn't exist,
+// attaches otherwise) and the "=" prefix on the target forces tmux's
+// exact-match resolution — without it, a killed session "foo" coexisting
+// with a live "foo-2" would silently prefix-match the wrong session. See
+// spec § Pre-select + attach sequence > step 4 and > Exact-match target
+// syntax.
+func TestAttachConnectorConnectArgv(t *testing.T) {
+	rec := &recordingExecer{}
+	ac := &AttachConnector{
+		execer:   rec,
+		tmuxPath: "/usr/bin/tmux",
+	}
+
+	if err := ac.Connect("foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if rec.argv0 != "/usr/bin/tmux" {
+		t.Errorf("argv0 = %q, want %q", rec.argv0, "/usr/bin/tmux")
+	}
+	want := []string{"tmux", "attach-session", "-A", "-t", "=foo"}
+	if len(rec.argv) != len(want) {
+		t.Fatalf("argv = %v, want %v", rec.argv, want)
+	}
+	for i := range want {
+		if rec.argv[i] != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, rec.argv[i], want[i])
+		}
+	}
+}

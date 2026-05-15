@@ -334,7 +334,7 @@ func TestHasSession(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "has-session -t my-session"
+		wantArgs := "has-session -t =my-session"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -360,6 +360,86 @@ func TestHasSession(t *testing.T) {
 
 		if got {
 			t.Error("HasSession() = true, want false")
+		}
+	})
+}
+
+// TestHasSessionUsesExactMatchPrefix is a regression test that documents the
+// prefix-collision rationale for tmux's "=" exact-match target syntax.
+//
+// Without the "=" prefix, tmux's default `-t <session>` resolution matches by
+// prefix. A killed session "foo" coexisting with a live "foo-2" would silently
+// resolve `has-session -t foo` to "foo-2" (zero exit), causing the
+// session-killed-externally bail path in the preview Enter sequence to be
+// missed and the connector to attach to (or auto-create) the wrong session.
+//
+// Uniform use of "=<session>" across HasSession / SelectWindow / SelectPane /
+// SwitchClient / attach-session closes this hole. This test pins the prefix
+// at the HasSession entry point so any future refactor that drops it will
+// fail loudly here.
+//
+// Spec: .workflows/enter-attaches-from-preview/specification/enter-attaches-from-preview/specification.md
+// § Pre-select + attach sequence > Exact-match target syntax.
+func TestHasSessionUsesExactMatchPrefix(t *testing.T) {
+	mock := &MockCommander{}
+	client := tmux.NewClient(mock)
+
+	_ = client.HasSession("foo")
+
+	if len(mock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+	}
+	got := mock.Calls[0]
+	want := []string{"has-session", "-t", "=foo"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	// Prefix-collision regression: the target MUST begin with "=" so tmux's
+	// exact-match resolution kicks in. A killed "foo" coexisting with a
+	// live "foo-2" would otherwise prefix-match "foo-2" and bypass the
+	// bail path.
+	if !strings.HasPrefix(got[2], "=") {
+		t.Errorf("target %q lacks exact-match prefix '='; prefix-collision regression hazard", got[2])
+	}
+
+	// Drive a commander that simulates real tmux's exact-match semantics:
+	// "=foo" matches the literal session "foo" only, while bare "foo"
+	// would prefix-match the live "foo-2" (the hazard). We pin HasSession
+	// to the exact-match arm so a killed "foo" with live "foo-2"
+	// coexisting reports absent — the precondition for the bail path.
+	t.Run("killed foo with live foo-2 reports absent", func(t *testing.T) {
+		exactMock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if len(args) >= 3 && args[0] == "has-session" && args[1] == "-t" {
+					// Live sessions on the simulated server: {"foo-2"}.
+					// "=foo" must NOT match (foo is dead); "=foo-2"
+					// matches. Bare "foo" would prefix-match "foo-2",
+					// which is the hazard we're guarding against.
+					switch args[2] {
+					case "=foo":
+						return "", fmt.Errorf("can't find session: foo")
+					case "=foo-2":
+						return "", nil
+					case "foo":
+						// If we hit this case, HasSession dropped the
+						// "=" prefix and tmux prefix-matched "foo-2".
+						return "", nil
+					}
+				}
+				return "", fmt.Errorf("unexpected args: %v", args)
+			},
+		}
+		c := tmux.NewClient(exactMock)
+		if c.HasSession("foo") {
+			t.Errorf("HasSession(\"foo\") = true while only live session is \"foo-2\"; prefix-collision regression")
+		}
+		if !c.HasSession("foo-2") {
+			t.Errorf("HasSession(\"foo-2\") = false; expected true")
 		}
 	})
 }
@@ -524,7 +604,7 @@ func TestSwitchClient(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "switch-client -t my-session"
+		wantArgs := "switch-client -t =my-session"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -2076,7 +2156,7 @@ func TestSelectLayout(t *testing.T) {
 }
 
 func TestSelectWindow(t *testing.T) {
-	t.Run("invokes select-window with composed session:window target", func(t *testing.T) {
+	t.Run("invokes select-window with composed session:window target with exact-match prefix", func(t *testing.T) {
 		mock := &MockCommander{}
 		client := tmux.NewClient(mock)
 
@@ -2085,7 +2165,7 @@ func TestSelectWindow(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := []string{"select-window", "-t", "work:2"}
+		want := []string{"select-window", "-t", "=work:2"}
 		got := mock.Calls[0]
 		if len(got) != len(want) {
 			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
@@ -2155,7 +2235,7 @@ func TestSelectWindow(t *testing.T) {
 		}
 	})
 
-	t.Run("does not prepend exact-match prefix", func(t *testing.T) {
+	t.Run("prepends exact-match prefix to session segment", func(t *testing.T) {
 		mock := &MockCommander{}
 		client := tmux.NewClient(mock)
 
@@ -2166,14 +2246,14 @@ func TestSelectWindow(t *testing.T) {
 		if len(got) < 3 {
 			t.Fatalf("call too short: %v", got)
 		}
-		if strings.HasPrefix(got[2], "=") {
-			t.Errorf("target %q must not carry exact-match prefix", got[2])
+		if !strings.HasPrefix(got[2], "=") {
+			t.Errorf("target %q lacks exact-match prefix '='", got[2])
 		}
 	})
 }
 
 func TestSelectPane(t *testing.T) {
-	t.Run("invokes select-pane with composed window.pane target", func(t *testing.T) {
+	t.Run("invokes select-pane with composed window.pane target with exact-match prefix", func(t *testing.T) {
 		mock := &MockCommander{}
 		client := tmux.NewClient(mock)
 
@@ -2182,7 +2262,7 @@ func TestSelectPane(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := []string{"select-pane", "-t", "work:2.3"}
+		want := []string{"select-pane", "-t", "=work:2.3"}
 		got := mock.Calls[0]
 		if len(got) != len(want) {
 			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
@@ -2212,7 +2292,7 @@ func TestSelectPane(t *testing.T) {
 }
 
 func TestResizePaneZoom(t *testing.T) {
-	t.Run("invokes resize-pane -Z with composed window.pane target", func(t *testing.T) {
+	t.Run("invokes resize-pane -Z with composed window.pane target with exact-match prefix", func(t *testing.T) {
 		mock := &MockCommander{}
 		client := tmux.NewClient(mock)
 
@@ -2221,7 +2301,7 @@ func TestResizePaneZoom(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		want := []string{"resize-pane", "-Z", "-t", "work:1.2"}
+		want := []string{"resize-pane", "-Z", "-t", "=work:1.2"}
 		got := mock.Calls[0]
 		if len(got) != len(want) {
 			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)

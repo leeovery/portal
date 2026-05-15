@@ -116,8 +116,15 @@ func (c *Client) ServerRunning() bool {
 
 // HasSession reports whether a tmux session with the given name exists.
 // Returns false when the session does not exist or no tmux server is running.
+//
+// The "=" prefix forces tmux's exact-match target resolution rather than the
+// default prefix match. Without it, a killed session "foo" coexisting with a
+// live "foo-2" would silently resolve `has-session -t foo` to "foo-2",
+// bypassing the session-killed-externally bail path in the preview Enter
+// sequence. See spec § Pre-select + attach sequence > Exact-match target
+// syntax.
 func (c *Client) HasSession(name string) bool {
-	_, err := c.cmd.Run("has-session", "-t", name)
+	_, err := c.cmd.Run("has-session", "-t", "="+name)
 	return err == nil
 }
 
@@ -286,8 +293,14 @@ func (c *Client) RenameSession(oldName, newName string) error {
 
 // SwitchClient switches the current tmux client to the named session.
 // Used when Portal is running inside an existing tmux session.
+//
+// The "=" prefix forces tmux's exact-match target resolution — uniform with
+// HasSession / SelectWindow / SelectPane / attach-session so a prefix-
+// collision (killed "foo" coexisting with live "foo-2") never silently
+// resolves to the wrong session. See spec § Pre-select + attach sequence >
+// Exact-match target syntax.
 func (c *Client) SwitchClient(name string) error {
-	_, err := c.cmd.Run("switch-client", "-t", name)
+	_, err := c.cmd.Run("switch-client", "-t", "="+name)
 	if err != nil {
 		return fmt.Errorf("failed to switch to session %q: %w", name, err)
 	}
@@ -431,8 +444,33 @@ type PaneCoord struct {
 // "my-project:0.1"). It is the single canonical formatter for this target;
 // callers must not hand-roll the equivalent fmt.Sprintf so the format stays
 // uniform across the codebase.
+//
+// This format is dual-purpose: it doubles as the canonical hooks.json key
+// for per-pane on-resume hooks (see internal/restore/session.go
+// collectArmInfos). Callers issuing a -t flag against tmux MUST instead use
+// PaneTargetExact, which prepends tmux's exact-match prefix "=" to the
+// session segment. PaneTarget intentionally does NOT carry the prefix so
+// the hook-key format stays stable across releases — changing it would
+// silently invalidate every entry in hooks.json.
 func PaneTarget(session string, window, pane int) string {
 	return fmt.Sprintf("%s:%d.%d", session, window, pane)
+}
+
+// PaneTargetExact formats a tmux pane target string with the "=" exact-match
+// prefix on the session segment (e.g. "=my-project:0.1"). Used by every
+// internal Client method that issues a `-t` flag at the pane level
+// (SelectPane, ResizePaneZoom).
+//
+// The "=" prefix forces tmux's exact-match target resolution rather than the
+// default prefix match. Without it, a killed session "foo" coexisting with a
+// live "foo-2" would silently resolve `-t foo:0.0` to "foo-2:0.0", attaching
+// or operating on the wrong session. See spec § Pre-select + attach sequence
+// > Exact-match target syntax.
+//
+// PaneTarget (no prefix) remains the canonical hook-key formatter; do not
+// mix the two — hook lookups against an "=" -prefixed key would miss.
+func PaneTargetExact(session string, window, pane int) string {
+	return fmt.Sprintf("=%s:%d.%d", session, window, pane)
 }
 
 // ListPanesInSession enumerates live panes in the named session and returns
@@ -770,48 +808,65 @@ func (c *Client) SelectLayout(session string, window int, layout string) error {
 }
 
 // SelectWindow sets the active window within the named session via
-// "tmux select-window -t <session>:<window>". The target carries no
-// exact-match prefix — uniform "=<session>" wrapping across HasSession /
-// SelectWindow / SelectPane / SwitchClient is a separate concern applied by
-// the caller layer, not this method.
+// "tmux select-window -t =<session>:<window>". The "=" prefix forces tmux's
+// exact-match target resolution — uniform with HasSession / SelectPane /
+// SwitchClient so prefix-collision (killed "foo" coexisting with live
+// "foo-2") never silently lands on the wrong session. See spec § Pre-select
+// + attach sequence > Exact-match target syntax.
 //
 // Caller semantics (best-effort vs escalate) live with the caller, not here.
 // SelectWindow itself returns the wrapped error on non-zero exit (window or
 // session absent) and lets the caller decide whether to log-and-swallow.
+//
+// Error context uses the bare (non-prefixed) "<session>:<window>" form so
+// logs and error messages stay readable; the prefix is a tmux-resolution
+// artefact, not a user-facing identifier.
 func (c *Client) SelectWindow(session string, window int) error {
-	target := fmt.Sprintf("%s:%d", session, window)
+	bareTarget := fmt.Sprintf("%s:%d", session, window)
+	target := "=" + bareTarget
 	args := []string{"select-window", "-t", target}
 	_, err := c.cmd.Run(args...)
 	if err != nil {
-		return fmt.Errorf("failed to select-window %s: %w", target, err)
+		return fmt.Errorf("failed to select-window %s: %w", bareTarget, err)
 	}
 	return nil
 }
 
 // SelectPane sets the active pane within the named window via
-// "tmux select-pane -t <session>:<window>.<pane>". The pane index is the live
-// index after restoration (caller is responsible for translating saved →
+// "tmux select-pane -t =<session>:<window>.<pane>". The pane index is the
+// live index after restoration (caller is responsible for translating saved →
 // live).
+//
+// The "=" prefix forces tmux's exact-match target resolution — uniform with
+// HasSession / SelectWindow / SwitchClient. See spec § Pre-select + attach
+// sequence > Exact-match target syntax. Error context uses the bare
+// PaneTarget form for readability.
 func (c *Client) SelectPane(session string, window, pane int) error {
-	target := PaneTarget(session, window, pane)
+	bareTarget := PaneTarget(session, window, pane)
+	target := PaneTargetExact(session, window, pane)
 	args := []string{"select-pane", "-t", target}
 	_, err := c.cmd.Run(args...)
 	if err != nil {
-		return fmt.Errorf("failed to select-pane %s: %w", target, err)
+		return fmt.Errorf("failed to select-pane %s: %w", bareTarget, err)
 	}
 	return nil
 }
 
 // ResizePaneZoom toggles zoom on the named pane via "tmux resize-pane -Z -t
-// <session>:<window>.<pane>". Zoom is a toggle; callers must apply it only
+// =<session>:<window>.<pane>". Zoom is a toggle; callers must apply it only
 // when the saved state indicated a zoomed window and the layout has just been
 // freshly applied (which leaves zoom off), to land on the correct final state.
+//
+// The "=" prefix forces tmux's exact-match target resolution, uniform with
+// the rest of the Client's -t-bearing call sites. See spec § Pre-select +
+// attach sequence > Exact-match target syntax.
 func (c *Client) ResizePaneZoom(session string, window, pane int) error {
-	target := PaneTarget(session, window, pane)
+	bareTarget := PaneTarget(session, window, pane)
+	target := PaneTargetExact(session, window, pane)
 	args := []string{"resize-pane", "-Z", "-t", target}
 	_, err := c.cmd.Run(args...)
 	if err != nil {
-		return fmt.Errorf("failed to resize-pane -Z %s: %w", target, err)
+		return fmt.Errorf("failed to resize-pane -Z %s: %w", bareTarget, err)
 	}
 	return nil
 }

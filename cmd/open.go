@@ -64,15 +64,41 @@ func (sc *SwitchConnector) Connect(name string) error {
 
 // AttachConnector connects to a session by exec-ing tmux attach-session.
 // Used when Portal is running outside tmux (bare shell).
-type AttachConnector struct{}
+//
+// The execer and tmuxPath fields are optional injection seams for tests —
+// they are exclusively for unit-test substitution to avoid the real
+// syscall.Exec replacing the test process. When either is unset, Connect
+// falls back to production defaults (realExecer + exec.LookPath("tmux")).
+type AttachConnector struct {
+	execer   execer
+	tmuxPath string
+}
 
 // Connect replaces the current process with tmux attach-session.
+//
+// The exec'd argv is `tmux attach-session -A -t =<name>`:
+//   - `-A` enables tmux's atomic create-or-attach semantics (the session
+//     is created if absent, attached otherwise). This is also the residual
+//     fallback for the TOCTOU window between has-session and connector
+//     handoff described in spec § Session-killed-externally bail path.
+//   - `=` prefixes the target so tmux uses exact-match resolution rather
+//     than prefix match — uniform with HasSession / SelectWindow /
+//     SelectPane / SwitchClient. See spec § Pre-select + attach sequence
+//     > Exact-match target syntax.
 func (ac *AttachConnector) Connect(name string) error {
-	tmuxPath, err := exec.LookPath("tmux")
-	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
+	tmuxPath := ac.tmuxPath
+	if tmuxPath == "" {
+		p, err := exec.LookPath("tmux")
+		if err != nil {
+			return fmt.Errorf("tmux not found: %w", err)
+		}
+		tmuxPath = p
 	}
-	return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", name}, os.Environ())
+	ex := ac.execer
+	if ex == nil {
+		ex = &realExecer{}
+	}
+	return ex.Exec(tmuxPath, []string{"tmux", "attach-session", "-A", "-t", "=" + name}, os.Environ())
 }
 
 // buildSessionConnector returns the appropriate SessionConnector based on

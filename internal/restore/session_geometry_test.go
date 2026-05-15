@@ -124,7 +124,7 @@ func TestApplyWindowGeometry_SelectsLivePaneIndexForActivePane(t *testing.T) {
 
 	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
-	wantTarget := "work:0.1"
+	wantTarget := "=work:0.1"
 	if findCallTarget(mock.Calls, "select-pane", wantTarget) < 0 {
 		t.Errorf("expected select-pane -t %s, got calls: %v", wantTarget, mock.Calls)
 	}
@@ -142,7 +142,7 @@ func TestApplyWindowGeometry_AppliesZoomAfterLayoutWhenZoomedTrue(t *testing.T) 
 	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	layoutIdx := findCallTarget(mock.Calls, "select-layout", "work:0")
-	zoomIdx := findResizePaneZoom(mock.Calls, "work:0.0")
+	zoomIdx := findResizePaneZoom(mock.Calls, "=work:0.0")
 	if layoutIdx < 0 {
 		t.Fatalf("no select-layout call; calls: %v", mock.Calls)
 	}
@@ -228,10 +228,10 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 	}
 
 	// Subsequent steps must still proceed.
-	if findCallTarget(mock.Calls, "select-pane", "work:0.0") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:0.0") < 0 {
 		t.Errorf("expected select-pane to still run after layout failure; calls: %v", mock.Calls)
 	}
-	if findResizePaneZoom(mock.Calls, "work:0.0") < 0 {
+	if findResizePaneZoom(mock.Calls, "=work:0.0") < 0 {
 		t.Errorf("expected resize-pane -Z to still run after layout failure; calls: %v", mock.Calls)
 	}
 
@@ -268,10 +268,10 @@ func TestApplyWindowGeometry_DefaultsToStructuralPositionZeroWhenNoPaneActive(t 
 
 	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
-	if findCallTarget(mock.Calls, "select-pane", "work:0.0") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:0.0") < 0 {
 		t.Errorf("expected select-pane -t work:0.0 (structural position 0 default); calls: %v", mock.Calls)
 	}
-	if findResizePaneZoom(mock.Calls, "work:0.0") < 0 {
+	if findResizePaneZoom(mock.Calls, "=work:0.0") < 0 {
 		t.Errorf("expected resize-pane -Z -t work:0.0 (structural position 0 default); calls: %v", mock.Calls)
 	}
 }
@@ -288,8 +288,8 @@ func TestApplyWindowGeometry_OrdersLayoutThenPaneThenZoom(t *testing.T) {
 	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
 	layoutIdx := findCallTarget(mock.Calls, "select-layout", "work:0")
-	paneIdx := findCallTarget(mock.Calls, "select-pane", "work:0.0")
-	zoomIdx := findResizePaneZoom(mock.Calls, "work:0.0")
+	paneIdx := findCallTarget(mock.Calls, "select-pane", "=work:0.0")
+	zoomIdx := findResizePaneZoom(mock.Calls, "=work:0.0")
 	if layoutIdx < 0 || paneIdx < 0 || zoomIdx < 0 {
 		t.Fatalf("missing call(s): layout=%d pane=%d zoom=%d; calls: %v", layoutIdx, paneIdx, zoomIdx, mock.Calls)
 	}
@@ -319,7 +319,7 @@ func TestApplyWindowGeometry_SinglePaneWindowSelectsThatPane(t *testing.T) {
 	if count != 1 {
 		t.Errorf("select-pane calls = %d, want 1", count)
 	}
-	if findCallTarget(mock.Calls, "select-pane", "work:0.0") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:0.0") < 0 {
 		t.Errorf("expected select-pane work:0.0; calls: %v", mock.Calls)
 	}
 }
@@ -340,10 +340,10 @@ func TestApplyWindowGeometry_UsesLiveIndicesFromBaseAndPaneBase(t *testing.T) {
 	if findSelectLayoutTarget(mock.Calls, "work:1", "L") < 0 {
 		t.Errorf("expected select-layout work:1 L; calls: %v", mock.Calls)
 	}
-	if findCallTarget(mock.Calls, "select-pane", "work:1.1") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:1.1") < 0 {
 		t.Errorf("expected select-pane work:1.1; calls: %v", mock.Calls)
 	}
-	if findResizePaneZoom(mock.Calls, "work:1.1") < 0 {
+	if findResizePaneZoom(mock.Calls, "=work:1.1") < 0 {
 		t.Errorf("expected resize-pane -Z work:1.1; calls: %v", mock.Calls)
 	}
 }
@@ -372,10 +372,10 @@ func TestApplyWindowGeometry_ContinuesRemainingWindowsWhenOneFails(t *testing.T)
 	if findSelectLayoutTarget(mock.Calls, "work:1", "L1") < 0 {
 		t.Errorf("expected select-layout work:1 L1; calls: %v", mock.Calls)
 	}
-	if findCallTarget(mock.Calls, "select-pane", "work:1.0") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:1.0") < 0 {
 		t.Errorf("expected select-pane work:1.0; calls: %v", mock.Calls)
 	}
-	if findResizePaneZoom(mock.Calls, "work:1.0") < 0 {
+	if findResizePaneZoom(mock.Calls, "=work:1.0") < 0 {
 		t.Errorf("expected resize-pane -Z work:1.0; calls: %v", mock.Calls)
 	}
 }
@@ -396,10 +396,10 @@ func TestApplyWindowGeometry_FirstActivePaneWins(t *testing.T) {
 
 	r.ApplyWindowGeometry(sess, liveCoordsFromSaved(sess, 0, 0))
 
-	if findCallTarget(mock.Calls, "select-pane", "work:0.1") < 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:0.1") < 0 {
 		t.Errorf("expected select-pane work:0.1 (first active wins); calls: %v", mock.Calls)
 	}
-	if findCallTarget(mock.Calls, "select-pane", "work:0.2") >= 0 {
+	if findCallTarget(mock.Calls, "select-pane", "=work:0.2") >= 0 {
 		t.Errorf("did not expect select-pane work:0.2 when earlier pane also active; calls: %v", mock.Calls)
 	}
 }
