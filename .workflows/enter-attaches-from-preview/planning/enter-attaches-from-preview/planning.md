@@ -85,3 +85,15 @@ approved_at: 2026-05-15
 |-------------|------|------------|
 | enter-attaches-from-preview-3-1 | Restructure preview-Enter to hand off connector after TUI quit | inside-tmux path leaves no orphan portal process, outside-tmux path unchanged (still terminates via syscall.Exec), pinning test for nil-cmd on success is updated, docstring reconciled with new shape |
 | enter-attaches-from-preview-3-2 | Extract shared preview-teardown helper for dismiss + bail handlers | Esc-dismiss behaviour unchanged, bail still uses msg.Session for preserveName, no behavioural change visible to tests |
+
+### Phase 4: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| enter-attaches-from-preview-4-1 | Close previewLogger to remove lifecycle asymmetry | repeated openTUI invocations would otherwise leak fd, Logger.Close is nil-safe, no other call sites change |
+| enter-attaches-from-preview-4-2 | Delete redundant flashModelOnSessionsPage alias | all callers rewritten to flashModelWithSessions, function definition removed, tests pass unchanged |
+| enter-attaches-from-preview-4-3 | Extract singlePaneGroups() test helper for repeated stubEnumerator fixture | 21 occurrences across 3 test files replaced, literal appears at most once outside helper, tests pass unchanged |

@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: enter-attaches-from-preview (Cycle 2)
 
 ## Task 1: Close previewLogger to remove lifecycle asymmetry
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -30,7 +30,7 @@ sources: architecture
 - Existing tests continue to pass; no new test required.
 
 ## Task 2: Delete redundant flashModelOnSessionsPage alias
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -49,7 +49,7 @@ sources: duplication
 - Tests pass unchanged.
 
 ## Task 3: Extract singlePaneGroups() test helper for repeated stubEnumerator fixture
-status: pending
+status: approved
 severity: low
 sources: duplication
 
