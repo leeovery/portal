@@ -121,6 +121,10 @@ Shape:
   - A tick `tea.Cmd` after a short duration. Default principle: "long enough to read, short enough not to linger". Exact tick duration is a build-phase decision; the discussion noted `~3s` as a reasonable default.
   - Modifier-only events (e.g. holding shift alone), resize events, and focus events do NOT count as clearing events.
 
+### Replacement on rapid successive bails
+
+A new bail while a prior flash is still visible **replaces** the prior flash's text and **resets** the tick — the visible message always reflects the most recent bail. Any pending tick from the prior flash is cancelled or otherwise prevented from firing against the new flash. Build-phase shape (e.g. monotonic flash ID, single-shot tick handle, generation counter) is a build decision; the spec-level constraint is "latest bail wins, prior pending tick must not clear the new flash early".
+
 Future general-purpose flash/toast infrastructure may replace or absorb this bespoke chrome line. That work is out of scope (logged as inbox idea `.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md`).
 
 ### Flash interaction with filter input

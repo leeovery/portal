@@ -48,10 +48,10 @@ If a user bails (sees flash for session A), opens preview on session B, and B is
 The natural answer is "latest bail wins, tick resets" — anything else would feel wrong (the visible message must match the most recent bail). But because the spec describes "state: an active flash text string and an associated timestamp or tick handle" without specifying replacement, an implementer could leak the old tick and prematurely clear the new flash. Minor severity — easy to spec, easy to miss in implementation.
 
 **Proposed Addition**:
-[Leave blank until discussed]
+New subsection "Replacement on rapid successive bails" in *Inline flash — feature-local infrastructure*: latest bail wins, prior pending tick must not clear new flash early. Build-phase shape (monotonic ID / single-shot handle / generation counter) is build decision.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Latest-bail-wins with tick reset; build phase picks the mechanism.
 
 ---
 
