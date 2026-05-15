@@ -253,4 +253,37 @@ The policy does not forbid expansion — it requires that proposals argue the ve
 
 ---
 
+## Out of scope
+
+### Deferred to build phase (implementation details)
+
+- **Exact `tea.Cmd` sequencing shape** — whether to use `tea.Sequence` or a single combined connector wrapper that performs all four calls. The spec-level constraint is the ordering (`has-session` → `select-window` → `select-pane` → connector); the cmd composition is a build decision.
+- **Inside-tmux uniformity** — whether to use `switch-client -t session:win.pane` as a one-shot or explicit pre-select also inside tmux. Default: uniform pre-select unless build phase finds a reason to diverge.
+- **Short-circuit when no preview navigation occurred** — micro-optimisation to skip pre-select calls if the user hasn't pressed `]`/`[`/`Tab`. Default: always-issue; the cost is two cheap tmux calls.
+- **Captured coordinate provenance** — which struct field on `previewModel` backs the captured `(window, pane)`. The data already exists for `]`/`[`/`Tab` navigation; the spec does not pin the field name or shape.
+- **Exact flash tick duration** — the discussion noted `~3s` as reasonable; build phase picks the exact value. The spec-level constraint is the principle: "long enough to read, short enough not to linger".
+
+### Out of scope for this feature entirely
+
+- **General-purpose flash/toast infrastructure.** Logged as inbox idea `.workflows/.inbox/ideas/2026-05-14--general-tui-flash-infrastructure.md`. The feature-local flash in this work unit is intentionally bespoke and may later be subsumed.
+- **Hook behaviour on attach.** This feature does not change hook semantics. See *Pre-select + attach sequence > Hook firing* for the no-impact analysis.
+- **`@portal-restoring` interaction.** Preview is unreachable from the Loading page; by the time the user is on the Sessions page, restoration is complete. No interaction surface.
+
+---
+
+## References to prior preview spec
+
+The following surfaces are inherited unchanged from `.workflows/session-scrollback-preview/specification.md` and are not re-stated here:
+
+- **Preview open trigger** — `Space` on the Sessions page.
+- **Preview layout** — chrome line + viewport region.
+- **Viewport behaviour** — scroll keys passed through to `bubbles/viewport`.
+- **Esc-level tree** — `Esc` dismisses preview back to Sessions, with the existing dismiss-on-transition sessions-list refresh.
+- **Scrollback read pipeline** — `state.TailScrollback` synchronous tail-N read with the three observable shapes (real bytes / `(nil, nil)` / OS error).
+- **Window/pane structural enumeration capture** — captured at preview-open via `ListWindowsAndPanesInSession`, walked locally by `]`/`[`/`Tab`.
+
+This feature **does not edit** the prior spec. The prior spec is a frozen historical record of what was built at the time. Anything that needed to change about the prior preview is captured additively in this specification.
+
+---
+
 ## Working Notes
