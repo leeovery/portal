@@ -26,10 +26,10 @@ The spec says the flash renders as "a single chrome line rendered above the Sess
 An implementer would have to make a layout call that affects visual outcome. Given the user's prior feedback on anchoring to visual outcomes, this seems worth pinning explicitly rather than leaving to "build phase". Minor severity — there is a most-natural answer (between filter and list, so the flash sits adjacent to the list it is describing) but the spec should say it.
 
 **Proposed Addition**:
-[Leave blank until discussed]
+Update the *Inline flash — feature-local infrastructure > Shape > Render* bullet to: "a single chrome line rendered between the filter input and the Sessions list. The flash sits adjacent to the list it is describing — the filter input remains in its existing position above the flash, and no existing chrome row is replaced or overlaid."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Flash sits between filter input and list — visually adjacent to the list it describes.
 
 ---
 

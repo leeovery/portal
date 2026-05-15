@@ -115,7 +115,7 @@ The flash mechanism is **bespoke to the Sessions page** and scoped to this edge 
 Shape:
 
 - **State**: a small piece of model state on the Sessions page model — at minimum an active flash text string and an associated timestamp or tick handle.
-- **Render**: a single chrome line rendered above the Sessions list.
+- **Render**: a single chrome line rendered between the filter input and the Sessions list. The flash sits adjacent to the list it is describing — the filter input remains in its existing position above the flash, and no existing chrome row is replaced or overlaid.
 - **Clear conditions**:
   - The next `tea.KeyMsg` (actionable keystroke) — see *Flash interaction with filter input* below.
   - A tick `tea.Cmd` after a short duration. Default principle: "long enough to read, short enough not to linger". Exact tick duration is a build-phase decision; the discussion noted `~3s` as a reasonable default.
