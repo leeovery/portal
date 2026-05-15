@@ -729,6 +729,22 @@ func (m Model) refreshSessionsAfterPreviewCmd(preserveName string) tea.Cmd {
 	}
 }
 
+// exitPreviewToSessions performs the shared preview-teardown prelude used by
+// both previewDismissedMsg (Esc) and previewAttachBailMsg (HasSessionProbe
+// reported gone) handlers. It flips activePage back to PageSessions, zeroes
+// m.preview to release the viewport buffer, and returns the live Sessions
+// refresh command anchored on preserveName. Callers MUST capture
+// preserveName BEFORE invoking this helper — m.preview is zeroed in-place,
+// so reading m.preview.session afterwards yields an empty string.
+//
+// The returned cmd may be nil when no SessionLister is wired (test
+// harnesses); callers tea.Batch'ing the result must tolerate that.
+func (m *Model) exitPreviewToSessions(preserveName string) tea.Cmd {
+	m.activePage = PageSessions
+	m.preview = previewModel{}
+	return m.refreshSessionsAfterPreviewCmd(preserveName)
+}
+
 // reanchorSessionCursor moves the bubbles/list cursor onto the visible item
 // whose session name matches name, after a SetItems update. If name is no
 // longer present (e.g. the session was killed externally during preview),
@@ -950,12 +966,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// consumes; cursor is re-anchored by name so a still-existing
 		// previously-highlighted session keeps its cursor and a removed
 		// one falls back to a clamped neighbour.
-		// Capture preserveName BEFORE zeroing m.preview below — flipping
-		// the order silently sends an empty value to the refresh handler.
-		preserveName := m.preview.session
-		m.activePage = PageSessions
-		m.preview = previewModel{}
-		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
+		// Capture preserveName BEFORE invoking exitPreviewToSessions —
+		// the helper zeroes m.preview, so reading m.preview.session
+		// afterwards silently sends an empty value to the refresh handler.
+		captured := m.preview.session
+		return m, m.exitPreviewToSessions(captured)
 	case previewAttachBailMsg:
 		// Session-killed-externally bail path (spec § Session-killed-externally
 		// bail path > Behaviour). Mirrors previewDismissedMsg: transition
@@ -972,13 +987,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resolves (spec § Render-frame ordering: "visible response first, list
 		// consistency converges within a render or two"). tea.Batch tolerates
 		// nil cmds, so a nil refresh (no SessionLister wired) is safe.
-		preserveName := msg.Session
-		m.activePage = PageSessions
-		m.preview = previewModel{}
-		m.setFlash(formatSessionGoneFlash(preserveName))
-		tickCmd := flashTickCmd(m.flashGen)
-		refreshCmd := m.refreshSessionsAfterPreviewCmd(preserveName)
-		return m, tea.Batch(refreshCmd, tickCmd)
+		refreshCmd := m.exitPreviewToSessions(msg.Session)
+		m.setFlash(formatSessionGoneFlash(msg.Session))
+		return m, tea.Batch(refreshCmd, flashTickCmd(m.flashGen))
 	case previewAttachSelectedMsg:
 		// Success terminal of the preview-Enter pipeline. The pre-select
 		// tmux calls (HasSessionProbe + SelectWindow + SelectPane) have
