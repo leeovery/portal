@@ -24,6 +24,21 @@ approved_at: 2026-05-15
 - [ ] Existing preview behaviour (open via Space, `]`/`[`/`Tab` navigation, viewport scroll, `Esc` dismiss with sessions-list refresh) is unchanged
 - [ ] Test suite green; `go test ./...` passes
 
+#### Tasks
+
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| enter-attaches-from-preview-1-1 | Add SelectWindow method to tmux.Client | window no longer exists (wrapped non-zero exit error) |
+| enter-attaches-from-preview-1-2 | Apply exact-match `=` target prefix uniformly across HasSession, SelectWindow, SelectPane, SwitchClient, and AttachConnector | prefix-collision ("foo" vs "foo-2"), session names containing `=`, existing non-Enter callers unaffected |
+| enter-attaches-from-preview-1-3 | Add ExitError discriminator for has-session probe | `*exec.ExitError` (absent → bail), non-`ExitError` OS-layer error (proceed), zero exit (present), existing boolean HasSession callers unchanged |
+| enter-attaches-from-preview-1-4 | Build four-call attach pipeline tea.Cmd factory with bail message and WARN-swallow logger | select-window non-zero exit (log + proceed), select-pane non-zero exit (log + proceed), has-session ExitError (bail before selects), has-session OS-layer error (proceed), connector handoff error, inside-tmux vs outside-tmux connector branches |
+| enter-attaches-from-preview-1-5 | Wire attach pipeline seam into tuiConfig, tui.Model, and openTUI production construction | inside-tmux selects SwitchConnector, outside-tmux selects AttachConnector, test fake injection via t.Cleanup |
+| enter-attaches-from-preview-1-6 | Intercept tea.KeyEnter in previewModel.Update and dispatch pipeline with raw indices | user did not navigate (captured-at-open indices), user navigated via `]`/`[`/`Tab` (walked indices), Enter must not propagate to embedded viewport, raw indices used on non-contiguous index sessions |
+| enter-attaches-from-preview-1-7 | Handle previewAttachBailMsg in top-level Model.Update with placeholder bail (transition + refresh, no flash) | bail arrives mid-preview, refresh cmd error tolerated silently, existing Esc dismiss path unchanged |
+| enter-attaches-from-preview-1-8 | Update preview chromeLine to include `enter attach` token between `tab next pane` and `esc back` | token unconditional across viewport content states (real bytes / `(no saved content)` / `(unable to read scrollback)`), Sessions-page help bar untouched |
+
 ### Phase 2: Session-killed-externally bail path with inline flash
 
 status: approved
