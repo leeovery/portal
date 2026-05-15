@@ -958,19 +958,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
 	case previewAttachBailMsg:
 		// Session-killed-externally bail path (spec § Session-killed-externally
-		// bail path). Mirrors previewDismissedMsg: transition pagePreview →
-		// PageSessions, zero m.preview, dispatch the sessions-list refresh so
-		// the externally-killed session disappears from the post-bail view.
-		// Reads from msg.Session (not m.preview.session) for robustness — the
-		// pipeline owns the source of truth for the captured session name.
+		// bail path > Behaviour). Mirrors previewDismissedMsg: transition
+		// pagePreview → PageSessions, zero m.preview, dispatch the sessions-list
+		// refresh so the externally-killed session disappears from the post-bail
+		// view. Reads from msg.Session (not m.preview.session) for robustness —
+		// the pipeline owns the source of truth for the captured session name.
 		//
-		// Phase 1 (this handler): transition + refresh only.
-		// Phase 2: extend with inline flash emission so the user sees why
-		// Enter did not attach.
+		// Phase 2 (this handler): also emit the inline flash with the spec-exact
+		// wording, then schedule a flashTickCmd capturing the POST-bump flashGen
+		// (setFlash bumps the generation first). Refresh + tick are composed via
+		// tea.Batch — NOT tea.Sequence — so the flash is rendered immediately on
+		// the same render frame as the page flip, before the async refresh
+		// resolves (spec § Render-frame ordering: "visible response first, list
+		// consistency converges within a render or two"). tea.Batch tolerates
+		// nil cmds, so a nil refresh (no SessionLister wired) is safe.
 		preserveName := msg.Session
 		m.activePage = PageSessions
 		m.preview = previewModel{}
-		return m, m.refreshSessionsAfterPreviewCmd(preserveName)
+		m.setFlash(formatSessionGoneFlash(preserveName))
+		tickCmd := flashTickCmd(m.flashGen)
+		refreshCmd := m.refreshSessionsAfterPreviewCmd(preserveName)
+		return m, tea.Batch(refreshCmd, tickCmd)
 	case previewAttachErrorMsg:
 		// Connector-terminal envelope. Nil Err is a no-op (inside-tmux
 		// switch-client success — surrounding tmux client repaints on its

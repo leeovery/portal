@@ -9,11 +9,13 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// Tests for Phase 1 top-level handling of previewAttachBailMsg (and the
-// terminal previewAttachErrorMsg). The bail handler must mirror the
-// previewDismissedMsg shape: transition to PageSessions, zero m.preview,
-// dispatch a sessions-list refresh keyed by the message's Session name.
-// Phase 2 will extend with a flash; this phase deliberately does NOT emit one.
+// Tests for top-level handling of previewAttachBailMsg (and the terminal
+// previewAttachErrorMsg). The bail handler mirrors the previewDismissedMsg
+// shape: transition to PageSessions, zero m.preview, dispatch a sessions-list
+// refresh keyed by the message's Session name. Phase 2 (task 2-5) layers an
+// inline flash emission + tick onto that base — flash-specific assertions
+// live in preview_attach_bail_flash_test.go. Tests here cover transitions,
+// preview-zeroing, refresh-cmd dispatch, and Esc-dismiss regressions.
 
 // pressSpaceThenBail opens the preview via Space, then feeds a
 // previewAttachBailMsg directly into Update, mirroring how the cmd produced
@@ -78,12 +80,17 @@ func TestPreviewAttachBailDispatchesRefreshCmd(t *testing.T) {
 	_, cmd := pressSpaceThenBail(t, m, "alpha")
 
 	if cmd == nil {
-		t.Fatalf("expected non-nil refresh cmd from bail handler")
+		t.Fatalf("expected non-nil cmd from bail handler")
 	}
-	msg := cmd()
-	refreshed, ok := msg.(previewSessionsRefreshedMsg)
+	// Bail handler now returns tea.Batch(refresh, tick) (Phase 2). Drain
+	// the batch and locate the refresh msg.
+	cmds := drainBatchCmds(cmd)
+	if cmds == nil {
+		t.Fatalf("expected tea.BatchMsg from bail cmd, got non-batch")
+	}
+	refreshed, ok := findRefreshedMsg(cmds)
 	if !ok {
-		t.Fatalf("expected previewSessionsRefreshedMsg from bail refresh cmd, got %T", msg)
+		t.Fatalf("expected previewSessionsRefreshedMsg in bail batch")
 	}
 	if lister.calls != 1 {
 		t.Errorf("expected exactly 1 ListSessions call, got %d", lister.calls)
@@ -109,20 +116,27 @@ func TestPreviewAttachBailPreservesSessionNameFromMessage(t *testing.T) {
 	_, cmd := pressSpaceThenBail(t, m, "bravo")
 
 	if cmd == nil {
-		t.Fatalf("expected non-nil refresh cmd from bail handler")
+		t.Fatalf("expected non-nil cmd from bail handler")
 	}
-	refreshed, ok := cmd().(previewSessionsRefreshedMsg)
+	cmds := drainBatchCmds(cmd)
+	if cmds == nil {
+		t.Fatalf("expected tea.BatchMsg from bail cmd, got non-batch")
+	}
+	refreshed, ok := findRefreshedMsg(cmds)
 	if !ok {
-		t.Fatalf("expected previewSessionsRefreshedMsg, got %T", cmd())
+		t.Fatalf("expected previewSessionsRefreshedMsg in bail batch")
 	}
 	if refreshed.PreserveName != "bravo" {
 		t.Errorf("bail handler must read msg.Session: expected PreserveName=%q, got %q", "bravo", refreshed.PreserveName)
 	}
 }
 
-func TestPreviewAttachBailReturnsNilCmdWhenNoLister(t *testing.T) {
-	// Acceptance: refresh cmd is nil when session lister is nil
-	// (consistent with refreshSessionsAfterPreviewCmd contract).
+func TestPreviewAttachBailNoListerStillEmitsTickCleanly(t *testing.T) {
+	// Phase 2: bail returns tea.Batch(refresh, tick). When no SessionLister
+	// is wired, refreshSessionsAfterPreviewCmd returns nil; bubbletea's
+	// Batch compacts a single-non-nil-cmd input down to that cmd directly
+	// (no BatchMsg wrapper). So the returned cmd produces a flashTickMsg
+	// directly. The page still transitions cleanly and the flash is set.
 	sessions := []tmux.Session{{Name: "alpha", Windows: 1, Attached: false}}
 	enum := &stubEnumerator{groups: []tmux.WindowGroup{{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}}}}
 	reader := &recordingReader{bytes: []byte("hi")}
@@ -130,11 +144,18 @@ func TestPreviewAttachBailReturnsNilCmdWhenNoLister(t *testing.T) {
 
 	got, cmd := pressSpaceThenBail(t, m, "alpha")
 
-	if cmd != nil {
-		t.Errorf("expected nil refresh cmd when no lister wired, got %T", cmd)
-	}
 	if got.activePage != PageSessions {
 		t.Errorf("bail must still transition cleanly without a lister, got %v", got.activePage)
+	}
+	if got.flashText == "" {
+		t.Errorf("expected flash to be set even without a lister, got empty")
+	}
+	if cmd == nil {
+		t.Fatalf("expected non-nil cmd from bail handler (tick is non-nil), got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(flashTickMsg); !ok {
+		t.Errorf("expected flashTickMsg directly from compacted Batch (only tick non-nil), got %T", msg)
 	}
 }
 
@@ -152,10 +173,19 @@ func TestPreviewAttachBailToleratesListerErrorSilently(t *testing.T) {
 
 	got, cmd := pressSpaceThenBail(t, m, "alpha")
 	if cmd == nil {
-		t.Fatalf("expected non-nil refresh cmd from bail handler")
+		t.Fatalf("expected non-nil cmd from bail handler")
 	}
-	// Drain the refresh cmd and feed the resulting msg through Update.
-	updated, _ := got.Update(cmd())
+	// Bail returns tea.Batch(refresh, tick); fish the refresh cmd's msg
+	// out of the batch and feed it through Update.
+	cmds := drainBatchCmds(cmd)
+	if cmds == nil {
+		t.Fatalf("expected tea.BatchMsg from bail cmd, got non-batch")
+	}
+	refreshMsg, ok := findRefreshedMsg(cmds)
+	if !ok {
+		t.Fatalf("expected previewSessionsRefreshedMsg in bail batch")
+	}
+	updated, _ := got.Update(refreshMsg)
 	final, ok := updated.(Model)
 	if !ok {
 		t.Fatalf("expected Model after refresh msg, got %T", updated)
@@ -185,11 +215,15 @@ func TestPreviewAttachBailEmptySessionNameStillTransitions(t *testing.T) {
 		t.Errorf("expected PageSessions even with empty session, got %v", got.activePage)
 	}
 	if cmd == nil {
-		t.Fatalf("expected non-nil refresh cmd (lister wired)")
+		t.Fatalf("expected non-nil cmd (lister wired)")
 	}
-	refreshed, ok := cmd().(previewSessionsRefreshedMsg)
+	cmds := drainBatchCmds(cmd)
+	if cmds == nil {
+		t.Fatalf("expected tea.BatchMsg from bail cmd, got non-batch")
+	}
+	refreshed, ok := findRefreshedMsg(cmds)
 	if !ok {
-		t.Fatalf("expected previewSessionsRefreshedMsg, got %T", cmd())
+		t.Fatalf("expected previewSessionsRefreshedMsg in bail batch")
 	}
 	if refreshed.PreserveName != "" {
 		t.Errorf("expected empty PreserveName forwarded, got %q", refreshed.PreserveName)

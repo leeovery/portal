@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -73,4 +74,16 @@ func flashTickCmd(gen uint64) tea.Cmd {
 // without any code here.
 func isActionableKey(msg tea.KeyMsg) bool {
 	return msg.Type != 0 || len(msg.Runes) > 0
+}
+
+// formatSessionGoneFlash returns the spec-exact wording for the
+// session-killed-externally bail flash: `session "<name>" no longer exists`
+// (spec § Session-killed-externally bail path > Behaviour). Literal
+// double-quote bytes wrap the name — never %q — so output is byte-exact
+// regardless of name content (spaces, dashes, unicode, etc.).
+//
+// No trailing punctuation. No paraphrase. Callers must not modify the
+// returned string before passing it to setFlash.
+func formatSessionGoneFlash(name string) string {
+	return fmt.Sprintf(`session "%s" no longer exists`, name)
 }
