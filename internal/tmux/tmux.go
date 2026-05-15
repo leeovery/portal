@@ -769,6 +769,25 @@ func (c *Client) SelectLayout(session string, window int, layout string) error {
 	return nil
 }
 
+// SelectWindow sets the active window within the named session via
+// "tmux select-window -t <session>:<window>". The target carries no
+// exact-match prefix — uniform "=<session>" wrapping across HasSession /
+// SelectWindow / SelectPane / SwitchClient is a separate concern applied by
+// the caller layer, not this method.
+//
+// Caller semantics (best-effort vs escalate) live with the caller, not here.
+// SelectWindow itself returns the wrapped error on non-zero exit (window or
+// session absent) and lets the caller decide whether to log-and-swallow.
+func (c *Client) SelectWindow(session string, window int) error {
+	target := fmt.Sprintf("%s:%d", session, window)
+	args := []string{"select-window", "-t", target}
+	_, err := c.cmd.Run(args...)
+	if err != nil {
+		return fmt.Errorf("failed to select-window %s: %w", target, err)
+	}
+	return nil
+}
+
 // SelectPane sets the active pane within the named window via
 // "tmux select-pane -t <session>:<window>.<pane>". The pane index is the live
 // index after restoration (caller is responsible for translating saved →

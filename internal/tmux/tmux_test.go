@@ -2075,6 +2075,103 @@ func TestSelectLayout(t *testing.T) {
 	})
 }
 
+func TestSelectWindow(t *testing.T) {
+	t.Run("invokes select-window with composed session:window target", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectWindow("work", 2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"select-window", "-t", "work:2"}
+		got := mock.Calls[0]
+		if len(got) != len(want) {
+			t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("issues select-window exactly once", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		if err := client.SelectWindow("work", 2); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 Commander.Run call, got %d", len(mock.Calls))
+		}
+	})
+
+	t.Run("returns nil on zero exit", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		if err := client.SelectWindow("work", 0); err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("returns wrapped error when tmux command fails", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("tmux failed")}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectWindow("work", 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "failed to select-window") {
+			t.Errorf("error %q lacks expected prefix", err.Error())
+		}
+		if !strings.Contains(err.Error(), "work:0") {
+			t.Errorf("error %q lacks target context", err.Error())
+		}
+	})
+
+	t.Run("wraps *CommandError so errors.As recovers it", func(t *testing.T) {
+		cmdErr := &tmux.CommandError{Stderr: "can't find window: 99", Err: fmt.Errorf("exit status 1")}
+		mock := &MockCommander{Err: cmdErr}
+		client := tmux.NewClient(mock)
+
+		err := client.SelectWindow("work", 99)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		var recovered *tmux.CommandError
+		if !errors.As(err, &recovered) {
+			t.Fatalf("errors.As did not recover *CommandError from %T: %v", err, err)
+		}
+		if recovered.Stderr != "can't find window: 99" {
+			t.Errorf("recovered Stderr = %q, want %q", recovered.Stderr, "can't find window: 99")
+		}
+		if !strings.Contains(err.Error(), "work:99") {
+			t.Errorf("error %q lacks target context", err.Error())
+		}
+	})
+
+	t.Run("does not prepend exact-match prefix", func(t *testing.T) {
+		mock := &MockCommander{}
+		client := tmux.NewClient(mock)
+
+		if err := client.SelectWindow("work", 2); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		got := mock.Calls[0]
+		if len(got) < 3 {
+			t.Fatalf("call too short: %v", got)
+		}
+		if strings.HasPrefix(got[2], "=") {
+			t.Errorf("target %q must not carry exact-match prefix", got[2])
+		}
+	})
+}
+
 func TestSelectPane(t *testing.T) {
 	t.Run("invokes select-pane with composed window.pane target", func(t *testing.T) {
 		mock := &MockCommander{}
