@@ -17,7 +17,7 @@
         "enter-attaches-from-preview": {
           "status": "in-progress",
           "review_cycle": 1,
-          "finding_gate_mode": "gated",
+          "finding_gate_mode": "auto",
           "date": "2026-05-15",
           "sources": {
             "enter-attaches-from-preview": {

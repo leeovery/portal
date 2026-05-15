@@ -116,6 +116,12 @@ On non-zero `has-session` exit, preview dispatches a refresh-and-bail message th
 
 The user lands back on the Sessions page with the killed session already absent from the list and a single-line message explaining why their Enter "didn't work".
 
+### Render-frame ordering
+
+The transition, refresh dispatch, and flash emission are issued from the same `Update` return — they share a single Bubble Tea cycle on the dispatch side. The refresh itself may be asynchronous (returning a later `sessionsLoadedMsg`); in that case a brief render frame may show the freshly-transitioned Sessions page with the **prior** list state plus the flash, followed by a second render once the refresh resolves. This transient stale-row frame is **acceptable** — the flash text always reflects the bail, and the killed-session row is removed by the next render.
+
+The build phase MUST NOT gate the flash render on refresh completion (which would delay the visible response to Enter). The principle is: visible response first, list consistency converges within a render or two.
+
 ### Inline flash — feature-local infrastructure
 
 The flash mechanism is **bespoke to the Sessions page** and scoped to this edge case. This feature does NOT introduce a general-purpose toast/notification layer.

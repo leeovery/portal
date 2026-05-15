@@ -91,10 +91,10 @@ The bail dispatches three things: a `pagePreview → pageSessions` transition, t
 The spec's intent ("user lands back on Sessions page with the killed session already absent and a single-line message") suggests the killed-session row should not be visibly present alongside the flash. The implementer needs the contract pinned: either "flash render is gated on refresh completion" or "best-effort, transient stale row is acceptable". Minor severity — visible only in a brief render frame.
 
 **Proposed Addition**:
-[Leave blank until discussed]
+New subsection "Render-frame ordering" in *Session-killed-externally bail path*: transition+refresh+flash dispatched same Update cycle. Transient stale-row frame acceptable if refresh is async; flash render MUST NOT gate on refresh completion.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Visible response first; list consistency converges within a render or two.
 
 ---
 
