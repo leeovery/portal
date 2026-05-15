@@ -184,7 +184,7 @@ User initially dismissed the staleness concern on the grounds that portal is a p
 
 ### Trade-offs
 
-- No user-visible feedback when pre-select fails. The user expected to land on pane 3 of window 2; instead they land on whatever tmux had as current. Considered acceptable because (a) the precondition (mutation by another client mid-preview) is rare and (b) the fallback is the pre-existing Enter semantics, not a regression.
+- No user-visible feedback when pre-select fails. The user expected to land on pane 3 of window 2; instead they land on whatever tmux had as current. Considered acceptable because (a) the precondition (mutation by another client mid-preview) is rare, (b) the fallback is the pre-existing Enter semantics, not a regression, and (c) the asymmetry with the session-killed flash is principled: silent feedback for cosmetic degradation where the *intent succeeded* (user is in the session), loud feedback for total failure where the *intent failed* (user is not in the session). Spec should pin the principle so future signal/no-signal decisions land consistently.
 - The "session itself was killed externally" case is a different shape — the *connector* fails, not the pre-select. Handled in a separate sub-decision below.
 
 Confidence: high.
@@ -333,6 +333,14 @@ Out of scope of the spec, deferred to build phase:
 - Inside-tmux uniformity (whether to use `switch-client -t session:win.pane` one-shot or explicit pre-select also inside-tmux) — implementation detail; default uniform pre-select unless build phase finds a reason.
 - Short-circuit when no preview navigation occurred — micro-optimisation; default always-issue.
 - Captured coordinate provenance (which struct field on `previewModel` backs the captured `(window, pane)`) — implementation detail; the data already exists for `]`/`[`/`Tab` navigation.
+
+Spec-phase clarifications to include (bundled from final review):
+
+- **Flash interaction with filter input.** The first keystroke post-bail clears the flash AND applies to the filter input as normal — one key, one intent. Do not swallow keystrokes on the user's behalf.
+- **Flash auto-clear principle.** Long enough to read, short enough not to linger. Default `~3s` tick OR next action `tea.KeyMsg` clears it. Modifier-only events, resize, and focus events do not count. Build phase picks the exact tick duration.
+- **has-session OS-level error.** If `tmux has-session` errors at the OS layer (missing binary, exec failure) — distinct from non-zero exit — treat as "session present" and proceed. An OS-layer error is not a tmux-state signal; the connector will fail in the same shape it would have without the check, and `EnsureServer` already validates tmux is invocable in bootstrap.
+- **Captured coordinate freshness.** Preview captures structural enumeration at preview-open and walks `]`/`[`/`Tab` purely locally — no mid-preview re-enumeration. Pre-select acts against those captured-then-walked coordinates. This model is inherited from the prior preview spec; the new spec restates it.
+- **Enter token on placeholder/error preview.** The `enter attach` chrome token reads identically regardless of viewport content state, because Enter's semantics are identical — it attaches to the session, not to the scrollback. No conditional chrome wording.
 
 Out of scope of this feature entirely:
 
