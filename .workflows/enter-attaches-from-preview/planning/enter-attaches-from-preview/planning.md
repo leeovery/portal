@@ -60,3 +60,17 @@ approved_at: 2026-05-15
 - [ ] Flash render is not gated on refresh completion — a transient frame showing prior list state plus the flash is acceptable, killed-session row is removed by the next render
 - [ ] The Sessions-page help bar is unaffected (still advertises Sessions-page `Enter` semantics, no preview-chrome propagation)
 - [ ] Test suite green; `go test ./...` passes
+
+#### Tasks
+
+status: approved
+approved_at: 2026-05-15
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| enter-attaches-from-preview-2-1 | Add flash state fields and setFlash/clearFlash helpers to Sessions page model | zero-value model has no flash, setFlash increments generation monotonically, clearFlash resets to zero-value |
+| enter-attaches-from-preview-2-2 | Render conditional flash row between filter input and Sessions list | no row reserved when flashText empty, row appears between filter input and list when active, list shifts down by exactly one row, no overlay of existing chrome |
+| enter-attaches-from-preview-2-3 | Add flashTickMsg with generation guard for tick-based auto-clear | stale-generation tick does NOT clear current flash, current-generation tick clears flash, tick after manual clear is no-op, build-chosen duration honours spec principle (~3s) |
+| enter-attaches-from-preview-2-4 | Clear flash on actionable KeyMsg without swallowing keystroke | first keystroke clears flash AND lands in filter input, modifier-only key does not clear, WindowSizeMsg does not clear, focus events do not clear |
+| enter-attaches-from-preview-2-5 | Replace placeholder previewAttachBailMsg handler with refresh + exact-text flash dispatch | exact wording `session "<name>" no longer exists` (double quotes, no trailing punctuation, no paraphrase), session name with special chars preserved verbatim, dispatch issued in single Update return, flash render not gated on refresh completion |
+| enter-attaches-from-preview-2-6 | Rapid-bail replacement resets text and supersedes prior tick via generation bump | second bail replaces first text, prior in-flight tick does not clear new flash early, second bail's own tick still clears at its own deadline, N successive bails preserve only latest |
