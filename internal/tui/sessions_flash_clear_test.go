@@ -20,14 +20,10 @@ import (
 //   - When no flash is active, the actionable-key check is a single
 //     bool read and the keystroke proceeds as normal.
 
-func flashModelOnSessionsPage(names ...string) Model {
-	return flashModelWithSessions(names...)
-}
-
 func TestSessionsFlashClear_FirstKeystrokeClearsFlash_AndLandsInFilterInput(t *testing.T) {
 	// "One key, one intent": pressing '/' on the Sessions page with an
 	// active flash must clear the flash AND open the list's filter input.
-	m := flashModelOnSessionsPage("alpha", "beta")
+	m := flashModelWithSessions("alpha", "beta")
 	m.setFlash("attach failed — session gone")
 	if m.flashText == "" {
 		t.Fatalf("setup invariant: flashText empty before keystroke")
@@ -50,7 +46,7 @@ func TestSessionsFlashClear_FirstKeystrokeClearsFlash_AndLandsInFilterInput(t *t
 }
 
 func TestSessionsFlashClear_WindowSizeMsgDoesNotClearFlash(t *testing.T) {
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("flash text")
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -64,7 +60,7 @@ func TestSessionsFlashClear_WindowSizeMsgDoesNotClearFlash(t *testing.T) {
 }
 
 func TestSessionsFlashClear_FocusMsgDoesNotClearFlash(t *testing.T) {
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("flash text")
 
 	updated, _ := m.Update(tea.FocusMsg{})
@@ -78,7 +74,7 @@ func TestSessionsFlashClear_FocusMsgDoesNotClearFlash(t *testing.T) {
 }
 
 func TestSessionsFlashClear_BlurMsgDoesNotClearFlash(t *testing.T) {
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("flash text")
 
 	updated, _ := m.Update(tea.BlurMsg{})
@@ -92,7 +88,7 @@ func TestSessionsFlashClear_BlurMsgDoesNotClearFlash(t *testing.T) {
 }
 
 func TestSessionsFlashClear_MouseMsgDoesNotClearFlash(t *testing.T) {
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("flash text")
 
 	updated, _ := m.Update(tea.MouseMsg{})
@@ -110,7 +106,7 @@ func TestSessionsFlashClear_KeystrokeWithNoFlashIsNormalNoOverhead(t *testing.T)
 	// keystroke must proceed through its normal handler. We verify the
 	// observable consequence: '/' still opens filter input, gen counter
 	// is unchanged (no setFlash/clearFlash side effect occurred).
-	m := flashModelOnSessionsPage("alpha", "beta")
+	m := flashModelWithSessions("alpha", "beta")
 	if m.flashText != "" || m.flashGen != 0 {
 		t.Fatalf("setup invariant: want empty flash with gen=0, got text=%q gen=%d", m.flashText, m.flashGen)
 	}
@@ -135,7 +131,7 @@ func TestSessionsFlashClear_SuccessiveKeystrokesAllLandNormally(t *testing.T) {
 	// After the first keystroke clears the flash, subsequent keystrokes
 	// have no flash to clear (single bool check no-ops) and still reach
 	// their normal handler. Verify by entering filter mode then typing.
-	m := flashModelOnSessionsPage("alpha", "beta")
+	m := flashModelWithSessions("alpha", "beta")
 	m.setFlash("bail")
 
 	// First keystroke: '/' clears flash AND opens filter input.
@@ -166,7 +162,7 @@ func TestSessionsFlashClear_SuccessiveKeystrokesAllLandNormally(t *testing.T) {
 func TestSessionsFlashClear_FlashClearingKeystrokeAlsoReachesListBindings(t *testing.T) {
 	// Spec: cursor-movement keys (e.g. down-arrow) must reach the list's
 	// keymap and move the cursor; the flash clear is a side effect only.
-	m := flashModelOnSessionsPage("alpha", "beta", "gamma")
+	m := flashModelWithSessions("alpha", "beta", "gamma")
 	m.setFlash("bail")
 	cursorBefore := m.sessionList.Index()
 
@@ -183,7 +179,7 @@ func TestSessionsFlashClear_FlashClearingKeystrokeAlsoReachesListBindings(t *tes
 func TestSessionsFlashClear_EscWithActiveFlashClearsFlashAndQuits(t *testing.T) {
 	// Edge case from task: Esc with active flash must clear the flash
 	// AND run the normal Esc action (quit when no filter applied).
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("bail")
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -201,7 +197,7 @@ func TestSessionsFlashClear_EnterWithActiveFlashClearsFlashAndRunsEnterHandler(t
 	// normal Enter handler runs. With no selectable session and no
 	// sessionCreator, the Enter handler is a safe no-op — we still verify
 	// flash was cleared.
-	m := flashModelOnSessionsPage("alpha")
+	m := flashModelWithSessions("alpha")
 	m.setFlash("bail")
 	// Ensure filter is not applied so Esc/Enter paths are predictable.
 	if m.sessionList.FilterState() == list.FilterApplied {
