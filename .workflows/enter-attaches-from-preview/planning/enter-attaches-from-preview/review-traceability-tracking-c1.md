@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-15
 cycle: 1
 phase: Traceability Review
@@ -66,7 +66,7 @@ The current task 1-6 acceptance and tests cover index correctness, intercept-vs-
 - `"Enter dispatches the pipeline when viewport rendered an OS read error"` — reader returns `(nil, errors.New("EIO"))`, send Enter, assert attacher was called.
 ```
 
-**Resolution**: Pending
-**Notes**: Also worth extending task 1-6 Edge Cases with a one-liner pinning the spec rationale, but the acceptance + tests change above is the load-bearing fix. The implementation does not need to change — only the task contract.
+**Resolution**: Fixed
+**Notes**: Applied to phase-1-tasks.md and tick-90fd51 description. Added the unconditional acceptance criterion, three viewport-content-state tests, and a sibling Edge Case entry pinning the spec rationale.
 
 ---

@@ -330,6 +330,7 @@ total: 8
 - [ ] When the user has navigated via `]`/`[`/`Tab`, raw indices reflect the walked focus.
 - [ ] On a session with non-contiguous `window_index` (e.g. 0, 2, 5) or non-zero `pane-base-index`, the dispatched indices are the raw tmux values, not slice positions.
 - [ ] When `m.attacher` is nil, Enter is a silent no-op (returns `(m, nil)`).
+- [ ] Enter dispatches the attach pipeline unconditionally regardless of viewport content state — real-bytes, `(nil, nil)` placeholder, and OS-level read error all produce identical dispatch behaviour. No confirmation prompt, no viewport-state guard.
 
 **Tests**:
 - `"Enter dispatches with captured-at-open raw indices when user has not navigated"`
@@ -338,6 +339,9 @@ total: 8
 - `"Enter dispatches with raw tmux indices on non-contiguous-index session"`
 - `"Enter is intercepted and not forwarded to viewport"`
 - `"Enter is a no-op when attacher is nil"`
+- `"Enter dispatches the pipeline when viewport rendered real bytes"` — construct previewModel with a ScrollbackReader returning real bytes, send Enter, assert attacher was called.
+- `"Enter dispatches the pipeline when viewport rendered the (no saved content) placeholder"` — reader returns `(nil, nil)`, send Enter, assert attacher was called.
+- `"Enter dispatches the pipeline when viewport rendered an OS read error"` — reader returns `(nil, errors.New("EIO"))`, send Enter, assert attacher was called.
 
 **Edge Cases**:
 - Non-contiguous `window_index` (e.g. after a window kill): captured `WindowIndex` from `WindowGroup` is preserved. The test fixture must use a non-trivial `WindowIndex` (e.g. 5) to prove slice-position is NOT used.
