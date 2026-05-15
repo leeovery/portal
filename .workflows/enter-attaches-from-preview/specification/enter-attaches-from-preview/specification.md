@@ -138,4 +138,53 @@ Documented here so build phase does not attempt a defensive guard against a wind
 
 ---
 
+## Other edge cases
+
+This section pins behaviour for edge cases that the discussion explicitly enumerated. All collapse to the previously decided shape — no additional behaviour is required — but they are documented here so build phase and review do not re-litigate them.
+
+### Mid-load / placeholder preview content
+
+The viewport's `state.TailScrollback` read is synchronous (per the prior preview spec). There are three observable viewport content shapes:
+
+1. **Real bytes** — viewport renders content.
+2. **`(nil, nil)`** — viewport renders the "(no saved content)" placeholder (brand-new session, no `.bin` yet, or daemon hasn't captured).
+3. **OS-level read error** — viewport renders an error string (EACCES, EIO).
+
+**Enter attaches unconditionally regardless of viewport content state.** No confirmation prompt, no guard.
+
+Rationale:
+
+- Whether scrollback was *saved* is independent of whether the session is *attachable*. The live tmux session exists either way — preview wouldn't have opened on a non-existent session.
+- A "no saved content" placeholder most commonly means the daemon hasn't captured yet, or the session is fresh. Neither is a reason to block attach.
+- An OS read error is a *file-system* problem, not a session problem. Blocking attach on it would make file trouble unnecessarily block session use.
+
+The user's keystroke is their commitment.
+
+### Stale row in the Sessions list
+
+If the Sessions list has reordered (whether from external mutation or filter dynamics) between preview open and Enter, Enter is unaffected: **Enter attaches by captured session name, not by list-row position**. The list-row position the user opened preview on is not used by the attach path.
+
+### Filter committed, previewed session no longer matches
+
+Same answer — Enter does not traverse the filtered list. Attach is by name; after attach the TUI exits or `switch-client`s, and Sessions-page filter state is irrelevant.
+
+### Filter committed, zero matches
+
+Structurally impossible to reach from preview. To open preview the user highlighted a row, which means the filter had ≥1 match at preview-open. If matches subsequently went to zero (the previewed session was killed), that collapses into the **session-killed-externally** bail path above and is handled by `has-session` + flash.
+
+### In-flight filter input
+
+Cannot coexist with preview being open — preview owns the keymap once entered, so `tea.KeyEnter` is dispatched to preview's `Update`, never to the filter input. Non-issue by construction.
+
+### Principle — silent vs loud feedback
+
+This feature applies a deliberate asymmetry between the pre-select failure path (silent) and the session-killed-externally path (loud, via flash):
+
+- **Silent feedback** when the intent succeeded (user is in the session) but with cosmetic degradation (landed on tmux's last-current pane instead of the preview-focused pane). The fallback is the pre-existing Enter semantics, not a regression.
+- **Loud feedback** when the intent failed (user is not in the session) — the user expected to attach but the session is gone. They need to know.
+
+Future signal/no-signal decisions in this area should land consistently with this principle.
+
+---
+
 ## Working Notes
