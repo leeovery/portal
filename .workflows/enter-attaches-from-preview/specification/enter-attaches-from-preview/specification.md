@@ -20,4 +20,26 @@ This specification covers:
 
 ---
 
+## Enter binding behaviour
+
+Preview's `Update` handler gains a `tea.KeyEnter` case. When the user presses `Enter` while preview is the active page, preview commits an attach to the previewed session, applying any `(window, pane)` focus the user navigated to inside preview before handing off to the existing connector path.
+
+### What Enter commits to
+
+Preview's `]`, `[`, and `Tab` keys already build up a real `(window, pane)` focus — they are not viewport chrome, they are navigation state. Enter treats that state as **intent**, not a viewport-rendering concept:
+
+- **Session**: the session the preview was opened on (captured by name at preview open, not by list-row position).
+- **Window**: the window index the user navigated to via `]`/`[`, defaulting to the captured window if the user did not navigate.
+- **Pane**: the pane index the user navigated to via `Tab`, defaulting to the captured pane if the user did not navigate.
+
+The user paid keystrokes to focus a specific coordinate; Enter honours those keystrokes. The "walked-away peek" scenario (user previously had pane 2 active in the session, walked away, came back, previewed, Tab'd to pane 0 to peek, then Enter) is the accepted cost: Enter lands on the last-focused preview pane rather than tmux's prior current pane. The user's most recent `]`/`[`/`Tab` press is their stated intent — if they only wanted to peek, they would have used `Esc`.
+
+### Transition mechanics
+
+The pre-select and attach sequence is issued **as one logical unit from preview's `Update`**. No intermediate render. No round-trip to the Sessions page. Preview does not dismiss to Sessions and then re-fire Enter — the Sessions-page `Enter` handler does not know about preview's `(window, pane)` focus, so the sequence must be authored as a single unit in preview's update.
+
+Implementation shape (e.g. `tea.Sequence` vs a single combined connector wrapper) is a build-phase detail. The spec-level constraint is: the four-call sequence (`has-session` → `select-window` → `select-pane` → connector) must complete in order, with selects completing before the connector hands off the terminal.
+
+---
+
 ## Working Notes
