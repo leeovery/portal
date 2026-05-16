@@ -62,6 +62,9 @@
     },
     "enter-attaches-from-preview": {
       "work_type": "feature"
+    },
+    "preview-visual-distinction": {
+      "work_type": "feature"
     }
   },
   "defaults": {
