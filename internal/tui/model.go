@@ -38,12 +38,14 @@ type SessionLister interface {
 }
 
 // PreviewAttacher is the exported seam through which the preview page's
-// Enter handler dispatches the pre-select + attach pipeline (spec
-// § Pre-select + attach sequence). Run returns a tea.Cmd that executes the
-// four-call sequence end-to-end and resolves to one of the pipeline's
-// terminal messages. Production wiring is the previewAttachPipeline
-// constructed via NewPreviewAttachPipeline in cmd/open.go; tests that do
-// not exercise Enter pass nil.
+// Enter handler dispatches the pre-select pipeline (spec § Pre-select +
+// attach sequence). Run returns a tea.Cmd that executes the three
+// pre-select calls (has-session probe, select-window, select-pane) and
+// emits a previewAttachSelectedMsg or previewAttachBailMsg; the connector
+// handoff is post-TUI in cmd/open.go's processTUIResult. Production
+// wiring is the previewAttachPipeline constructed via
+// NewPreviewAttachPipeline in cmd/open.go; tests that do not exercise
+// Enter pass nil.
 type PreviewAttacher interface {
 	Run(session string, window, pane int) tea.Cmd
 }
@@ -503,9 +505,8 @@ func WithScrollbackReader(r ScrollbackReader) Option {
 // WithPreviewAttachPipeline wires the PreviewAttacher seam used by the
 // preview page's Enter binding. Production callers pass the pipeline
 // constructed via NewPreviewAttachPipeline (closing over *tmux.Client +
-// the resolved SessionConnector + a nullable *state.Logger); tests that
-// do not exercise Enter can omit this option, leaving previewAttacher
-// nil.
+// a nullable *state.Logger); tests that do not exercise Enter can omit
+// this option, leaving previewAttacher nil.
 func WithPreviewAttachPipeline(p PreviewAttacher) Option {
 	return func(m *Model) {
 		m.previewAttacher = p
@@ -1726,16 +1727,16 @@ func (m Model) viewSessionList() string {
 	return listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
 }
 
-// flashRowStyle is constructed fresh per render so no shared lipgloss
-// style mutation can bleed background colour through into the flash row.
-// Subdued / dim foreground keeps the chrome low-emphasis (spec § Inline
-// flash — feature-local infrastructure > Render: "styled row").
+// flashRowStyle is a package-level immutable lipgloss style; lipgloss
+// value semantics prevent mutation bleed across renders. Subdued / dim
+// foreground keeps the chrome low-emphasis (spec § Inline flash —
+// feature-local infrastructure > Render: "styled row").
 var flashRowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 
 // renderFlashRow returns the styled flash row for the Sessions page.
 // flashText is rendered verbatim (no truncation, no transformation); the
 // caller is responsible for the message wording (spec pins it as
 // `session "<name>" no longer exists` at the call site).
-func (m *Model) renderFlashRow() string {
+func (m Model) renderFlashRow() string {
 	return flashRowStyle.Render(m.flashText)
 }

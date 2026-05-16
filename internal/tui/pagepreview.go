@@ -247,8 +247,9 @@ type previewSessionsRefreshedMsg struct {
 
 // Update routes Esc to a synthesised previewDismissedMsg, intercepts
 // Home / End for preview-owned top/bottom jumps, intercepts Enter to
-// dispatch the four-call pre-select + attach pipeline against the
-// captured-then-walked (window, pane) coordinates, and absorbs
+// dispatch the pre-select pipeline against the captured-then-walked
+// (window, pane) coordinates (the connector handoff runs post-TUI in
+// cmd/open.go's processTUIResult), and absorbs
 // tea.WindowSizeMsg to resize the embedded viewport in place. All other
 // messages — including the remaining viewport scroll keys (Up, Down,
 // PgUp, PgDn, ctrl-u, ctrl-d, j, k) — delegate to bubbles/viewport so

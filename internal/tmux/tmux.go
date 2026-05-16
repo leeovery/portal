@@ -494,9 +494,8 @@ func PaneTarget(session string, window, pane int) string {
 }
 
 // PaneTargetExact formats a tmux pane target string with the "=" exact-match
-// prefix on the session segment (e.g. "=my-project:0.1"). Used by every
-// internal Client method that issues a `-t` flag at the pane level
-// (SelectPane, ResizePaneZoom).
+// prefix on the session segment (e.g. "=my-project:0.1"). Used by callers
+// issuing a `-t` flag at the pane level.
 //
 // The "=" prefix forces tmux's exact-match target resolution rather than the
 // default prefix match. Without it, a killed session "foo" coexisting with a
