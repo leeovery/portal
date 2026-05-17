@@ -339,6 +339,27 @@ These are not new product decisions — they are decision-grade specifics that f
 
 The existing `chromeLine()` method on `previewModel` at `internal/tui/pagepreview.go:165-175` is **deleted**. Callers in `View()` invoke the new pure function `composeChromeLine(width int, …) string` directly with the current width and the relevant model fields. The pure-function signature is the testable boundary; a thin method wrapper would add an indirection without value.
 
+### Cascade algorithm (predicate-over-output)
+
+The four-step cascade is **not** a stack of incremental transformations. Each tier produces a *candidate output*, measures it via `lipgloss.Width`, and returns if it fits. Otherwise falls through to the next tier.
+
+Algorithm:
+
+```
+tier 1: compose with name truncated to fit + full keymap     → measure → if fits, return
+tier 2: compose with name segment dropped  + full keymap     → measure → if fits, return
+tier 3: compose with name segment dropped  + compact keymap  → measure → if fits, return
+tier 4: corners + filler `─` (no chrome content)             → always fits any width ≥ 2 → return
+```
+
+Tier interactions:
+
+- Tiers 1 and 2 are mutually exclusive — if tier 1's truncated name fits, tier 2 isn't reached; if tier 2 drops the segment, tier 1's work is discarded.
+- Tiers 2 and 3 differ only in keymap form — tier 3 strictly compresses tier 2 further by swapping the verbose keymap for the compact one.
+- Tier 4 supersedes whatever was attempted before.
+
+Step 4 is load-bearing: it guarantees the top edge always renders cleanly down to width 2 (the two corner glyphs). Without it, terminal widths narrow enough to fail tier 3 would either clip the chrome or wrap it to a second visual row — wrapping in particular breaks the frame because the bottom corner shifts down by one row, destroying the visual integrity the cascade exists to protect. Even though tier 4 is rarely reached in practice (sub-40-col terminals are degenerate), its existence is what lets the cascade make a strong guarantee.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
