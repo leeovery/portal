@@ -255,6 +255,59 @@ where `styledBorder := lipgloss.NewStyle().Foreground(adaptiveBlue).Render`.
 
 **Implication for `composeChromeLine`'s purity**: the function returns the *unstyled* chrome content string. Top-edge styling — border parts coloured, chrome parts default — happens at the call site in `View()` where the final composition assembles. This keeps `composeChromeLine` pure and testable purely on content output, independent of colour rendering.
 
+## SGR reset injection
+
+The embedded `bubbles/viewport` renders raw ANSI bytes from scrollback as straight passthrough (per the prior `session-scrollback-preview` spec). A scrollback line can legitimately end with an unterminated SGR sequence — for example, a `bat`-rendered file whose last visible line set a background colour and the buffer ended before issuing a reset. With the new frame, an unterminated SGR sits in the cell adjacent to the right border on that row.
+
+**Concrete risk**: the terminal is in "set bg=red" state when `lipgloss` emits the right border character. `lipgloss`'s `BorderForeground` emits its own SGR for the border foreground colour but does not reliably reset background state. The border character could render with the design blue foreground over an unwanted red background — coloured squares where the border should be.
+
+### Rule
+
+Inject `\x1b[0m` (SGR reset) at the **end of every non-empty viewport row** before composing with the frame. Per-line, not just at end-of-buffer — each line carries unterminated SGR independently.
+
+### Algorithm
+
+When wrapping `viewport.View()` output for the frame composition:
+
+1. Split on `\n`.
+2. For each line where `len(line) > 0`, append `\x1b[0m`.
+3. Join back with `\n`.
+4. Pass the joined string into the frame composition.
+
+Reference implementation:
+
+```go
+func injectSGRResets(s string) string {
+    lines := strings.Split(s, "\n")
+    for i, line := range lines {
+        if len(line) > 0 {
+            lines[i] = line + "\x1b[0m"
+        }
+    }
+    return strings.Join(lines, "\n")
+}
+```
+
+### Edge cases
+
+1. **Trailing newline.** If `viewport.View()` ends with `\n`, splitting yields an empty trailing element. The empty element is **ignored** — no reset appended. The bottom border is rendered by `lipgloss` with its own SGR; a trailing empty line carrying or not carrying a reset is immaterial.
+2. **"Non-empty" definition.** Byte-length > 0. A line of literal spaces with an embedded SGR is non-empty and gets a reset; the rule does not try to distinguish whitespace-only from visible content.
+3. **Idempotency.** Terminals treat `\x1b[0m\x1b[0m` as a single reset. No deduplication logic — if the content already ended with a reset, double-resetting is harmless. Tests include a fixture line that already ends in `\x1b[0m` to confirm rendering does not degrade.
+
+### Placement relative to lipgloss border emission
+
+The injected reset goes at end-of-row of viewport content, **before** `lipgloss` composes the border. On a composed row the byte sequence is:
+
+```
+[lipgloss left-border SGR][│][reset][content with injected reset at row-end][lipgloss right-border SGR][│][reset]
+```
+
+`lipgloss` uses `go-runewidth` + `termenv` for ANSI-aware measurement — both preserve SGR codes when measuring width (they count cells, not bytes). The injected reset survives into the final composed string. No further placement consideration is needed; the cascade-tier end-to-end test asserts this in practice (see *Tests*).
+
+### Scope of coverage
+
+The SGR-reset injection covers **every render**, so rows scrolling into view are also protected — viewport scroll is just a model-state change inside `bubbles/viewport` that re-routes through Update → View on the same tick, and the frame wraps the latest rendered output.
+
 ---
 
 ## Working Notes
