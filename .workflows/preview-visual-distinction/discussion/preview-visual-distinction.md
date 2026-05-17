@@ -183,6 +183,12 @@ Implementation: when wrapping `viewport.View()` output, split on `\n`, append `\
 
 Cost: trivial. Upside: border integrity is bulletproof regardless of scrollback content. Removes the "depends on lipgloss internal SGR handling" uncertainty entirely.
 
+### Scroll redraw
+
+Bubble Tea has no partial-screen redraw mechanism — every Update tick re-renders the full View(). Viewport scroll is a model-state change inside `bubbles/viewport` (its visible-window offset), routed through Update and re-rendered via `viewport.View()` on the same tick.
+
+**Decision: no special handling.** The frame is composed in `pagepreview.go`'s `View()` once per tick around whatever `viewport.View()` currently shows. Scroll is owned entirely by viewport's existing behaviour; the frame wraps the latest rendered output. The SGR-reset injection covers every render, so rows scrolling into view are also protected.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
