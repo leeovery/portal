@@ -308,6 +308,62 @@ The injected reset goes at end-of-row of viewport content, **before** `lipgloss`
 
 The SGR-reset injection covers **every render**, so rows scrolling into view are also protected — viewport scroll is just a model-state change inside `bubbles/viewport` that re-routes through Update → View on the same tick, and the frame wraps the latest rendered output.
 
+## Resize behaviour
+
+Bubble Tea emits one `tea.WindowSizeMsg` per terminal-resize signal. Dragging a terminal corner produces a stream of them. Each goes through `Update → View`.
+
+**Rule: repaint every tick, no debounce.** Preview's resize handler in `pagepreview.go`'s `Update` does three things on each `tea.WindowSizeMsg`:
+
+1. Call `m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows).
+2. Recompute the chrome line via `composeChromeLine(msg.Width − 2, …)` for the new inner width.
+3. Allow `View()` to re-render the frame.
+
+`composeChromeLine` is a pure function with no I/O. `viewport.SetSize` does not reallocate content — it adjusts the visible window over an immutable buffer. Preview's structural enumeration is captured at preview-open and is **not** re-fetched on resize. The per-tick cost is small; debouncing would only hurt (dropped frames would make chrome visibly lag resize, and timer state would add complexity for a problem that doesn't exist). Bubble Tea's runtime already coalesces redundant `View()` calls at the framerate level.
+
+The build phase has one explicit obligation: implement the `tea.WindowSizeMsg` case in preview's `Update`. No special-casing for rapid resize streams.
+
+## Initial sizing and preview-open ordering
+
+The parent Bubble Tea model holds current terminal dimensions from program-start (it has been receiving `tea.WindowSizeMsg` events since startup). When the user presses `Space` on the Sessions page, `NewPreviewModel` is constructed in the Sessions page's `Update` handler, which has access to the parent's tracked dimensions.
+
+**Rule**: `NewPreviewModel(…, width, height int)` accepts `width` and `height` as constructor parameters. The Sessions page's `Update` handler passes its current width / height into the constructor. Inside the constructor:
+
+- `viewport.SetSize(width − 2, height − 2)` is called once with initial dimensions.
+- The initial chrome string is pre-computed for the inner width.
+
+The first `View()` call on the freshly-constructed `previewModel` renders with correct dimensions — no race between preview-open and the first `WindowSizeMsg`, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
+
+## Scroll redraw
+
+Bubble Tea has no partial-screen redraw mechanism — every `Update` tick re-renders the full `View()`. Viewport scroll is a model-state change inside `bubbles/viewport` (its visible-window offset), routed through `Update` and re-rendered via `viewport.View()` on the same tick.
+
+**Rule: no special scroll handling.** The frame is composed in `pagepreview.go`'s `View()` once per tick around whatever `viewport.View()` currently shows. Scroll is owned entirely by viewport's existing behaviour; the frame wraps the latest rendered output. The SGR-reset injection covers every render, so rows scrolling into view are also protected.
+
+## Integration with page state machine
+
+The frame lives only in `pagePreview`'s `View()`. `pageSessions`'s `View()` has no frame. No other page is touched.
+
+### Bootstrap warning flush
+
+Preview is unreachable from the Loading page. Bootstrap's warning flush happens at loading-page dismiss with alt-screen toggling to avoid corrupting the rendered UI. The Sessions page renders only after bootstrap completes and any warnings are flushed. Preview is reached via `Space` on the Sessions page — by the time the user can press `Space`, bootstrap is fully done.
+
+**Rule: no interaction with bootstrap, no special handling.**
+
+### Filter-then-preview transition
+
+- **Entry transition (Sessions → Preview via `Space`)**: preview's `View()` renders the frame for the first time on that tick. Bubble Tea repaints the full screen on every tick anyway, so there is no flicker — the frame's appearance is the visual signature of the page change.
+- **Exit transition (Preview → Sessions via `Esc`)**: the existing dismiss-refresh path from `enter-attaches-from-preview` is unchanged. `pageSessions`'s `View()` simply does not render a frame. The sessions-list refresh on dismiss continues to be dispatched as before.
+
+**Rule: no new flicker, no special transition handling.** The frame's presence in `pagePreview`'s `View()` and absence in `pageSessions`'s `View()` is the natural shape of the page state machine and needs no further plumbing.
+
+## Vertical degradation
+
+The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top edge + bottom edge). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
+
+**Rule: render anyway. No vertical threshold, no row-budget-aware degradation, no refusal-to-open flash.**
+
+Unlike narrow terminals and long window names (realistic and common — multi-pane tmux splits, side-by-side terminal layouts), terminals tall enough to break preview but short enough to not be obviously unusable are a degenerate case nobody hits accidentally. Recovery is to press `Esc`, resize, and retry.
+
 ---
 
 ## Working Notes
