@@ -189,6 +189,21 @@ Bubble Tea has no partial-screen redraw mechanism — every Update tick re-rende
 
 **Decision: no special handling.** The frame is composed in `pagepreview.go`'s `View()` once per tick around whatever `viewport.View()` currently shows. Scroll is owned entirely by viewport's existing behaviour; the frame wraps the latest rendered output. The SGR-reset injection covers every render, so rows scrolling into view are also protected.
 
+### Integration with existing page state
+
+Two adjacent integration questions, both about whether the frame introduces new interaction with the rest of the TUI.
+
+**Bootstrap warning flush.** Preview is unreachable from the Loading page. Bootstrap's warning flush happens at loading-page dismiss with alt-screen toggling (per CLAUDE.md) to avoid corrupting the rendered UI. The Sessions page renders only after bootstrap completes and any warnings are flushed. Preview is reached via Space on the Sessions page. By the time the user can press Space, bootstrap is fully done.
+
+**Decision: no interaction, no special handling.**
+
+**Filter-then-preview transition.** The frame lives only in `pagePreview`'s `View()`. `pageSessions`'s `View()` has no frame.
+
+- Entry transition (Sessions → Preview via Space): preview's View() renders the frame for the first time on that tick. Bubble Tea repaints the full screen on every tick anyway, so there is no flicker — the frame's appearance is the visual signature of the page change.
+- Exit transition (Preview → Sessions via Esc): the existing dismiss-refresh path from `enter-attaches-from-preview` is unchanged — pageSessions's View() just doesn't render a frame. The sessions-list refresh on dismiss continues to be dispatched as before.
+
+**Decision: no new flicker, no special transition handling.** The frame's existence in pagePreview's View() and absence in pageSessions's View() is the natural shape of the page state machine and needs no further plumbing.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
