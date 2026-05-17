@@ -28,6 +28,41 @@ This builds on three already-shipped pieces:
 
 Those specs are frozen historical records of what they shipped. This feature *replaces* the verbose keymap token strings they introduced (the new glyph form is captured here as its own decision); they are not retroactively edited.
 
+## Visual treatment
+
+The preview body is wrapped in a visible frame painted by Portal. The body's rendering (raw ANSI scrollback bytes via the embedded `bubbles/viewport`) is **not touched** — distinction comes from the enclosure, not from modifying what the session emitted.
+
+### Frame structure
+
+The frame consists of four edges around the viewport:
+
+- **Top edge** — manually composed (`╭─{chrome content}{filler}─╮`). Carries the chrome line as part of the top border row. See *Top edge composition*.
+- **Left edge / right edge / bottom edge** — rendered by `lipgloss` using its `RoundedBorder()` preset with `BorderForeground` set to the design colour.
+
+The chrome line (window/pane indicators + keymap) lives **inside the top border row**, not above it. The frame surrounds the viewport directly; there is no chrome row above the frame.
+
+### Border style
+
+`lipgloss.RoundedBorder()` — matching the existing modal precedent at `internal/tui/modal.go:24`. Portal's implicit rule is "rounded border = contextual surface, no border = main page"; preview is a contextual surface and fits that rule. Geometry differentiates preview from modals — modals are small centred overlays, preview is a full-width framed page — so identical border characters cause no visual confusion.
+
+The manually-composed top edge **must source its corner and edge characters from the chosen `lipgloss` border value** rather than hardcoding them, so a future style switch is a single-point edit.
+
+### Border colour
+
+`lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}` — a single unified colour across inside-tmux and bare-shell contexts. Applied to all four edges (the three `lipgloss`-rendered edges plus the hand-composed top edge's border parts).
+
+Both variants sit at mid-luminance with recognisable blue saturation. The light variant is dark enough to be visible against pale terminal backgrounds; the dark variant is light enough to be visible against dark backgrounds. Neither competes with Portal's existing accents (pink-magenta cursor `ANSI 212`, green attached badge `ANSI 76`) — different hue families. This introduces a third accent colour to Portal's palette, owned by preview chrome.
+
+### Colour robustness
+
+The frame's **enclosure is the load-bearing distinction signal**. The blue tint is enhancement, and is allowed to degrade:
+
+- **`NO_COLOR=1`** — `lipgloss`/`termenv` respects the convention and renders the border in default foreground. Blue is dropped; the frame remains visible. Distinction signal is preserved.
+- **8/16-colour terminals or `TERM=dumb`** — `lipgloss`/`termenv` automatically downgrades the hex tones to the nearest palette colour. Design intent is approximated, not lost.
+- **Truecolor terminals** — rendered as specified.
+
+No explicit Portal handling is required beyond what `lipgloss`/`termenv` already provides. The hex values are not hard requirements at the implementation layer — they are the design target.
+
 ---
 
 ## Working Notes
