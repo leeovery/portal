@@ -147,6 +147,16 @@ False path: briefly considered "drop chrome above some narrow-terminal threshold
 
 Side benefit: defends against pathological window names regardless of terminal width — e.g. a long file path as a vim session's window name no longer breaks rendering today.
 
+### Truncation semantics
+
+Step 1 of the cascade ("truncate window name with `…` suffix") and the "target: ~8 chars" minimum in step 2 are specified in **display cells**, not bytes or runes. Window names are arbitrary UTF-8 — tmux allows CJK, emoji, combining marks, and double-width glyphs.
+
+Implementation: iterate codepoint-by-codepoint accumulating `runewidth.RuneWidth(r)` (or equivalently `lipgloss.Width` of single-rune strings — lipgloss uses `go-runewidth` underneath). Stop when adding the next rune would exceed `budget - 1` (reserving 1 cell for the `…` suffix). Append `…` (1 cell wide).
+
+Naïve byte-slicing (`s[:n]`) is forbidden — it can land mid-rune and produce invalid UTF-8 in the top border. Naïve rune-counting overcounts: a string of CJK glyphs is 1 rune per 2 cells, so "n runes" can be 2× the visual budget. The same display-cell-aware primitive applies wherever the cascade truncates anything.
+
+Tested with table-driven cases including ASCII, CJK, emoji, and combining marks.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
