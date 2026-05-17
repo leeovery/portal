@@ -69,6 +69,14 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
 
   Session name visibility [decided] → not surfaced
 
+  Rendering integrity [decided] (surfaced in review-001)
+  ├─ Resize repaint [decided] → repaint every tick, no debounce
+  ├─ ANSI bleed protection [decided] → inject SGR reset per row
+  ├─ Scroll redraw [decided] → no special handling
+  └─ Integration with page state (bootstrap, filter-then-preview) [decided] → no special handling
+
+  Test strategy [decided] → pure-function unit + Update/View integration; no snapshots
+
 ---
 
 *Subtopics are documented below as they reach `decided` or accumulate enough exploration to capture.*
