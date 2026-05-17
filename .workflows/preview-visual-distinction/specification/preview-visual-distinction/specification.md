@@ -201,6 +201,60 @@ Asserts:
 - Final display-cell width ≤ budget.
 - `…` is appended only when truncation actually occurred (full-string-fits case returns the original string).
 
+## Top edge composition
+
+The frame's top edge is composed manually in `pagePreview`'s `View()` rather than via a `lipgloss` primitive (there is no first-class label-in-border primitive in `lipgloss`).
+
+### Column layout
+
+For a given terminal width `width` and a `chromeWidth = lipgloss.Width(chromeContent)`:
+
+- Column `0`: `╭` (left corner — sourced from `lipgloss.RoundedBorder()`)
+- Column `1`: `─` (one-cell padding after left corner)
+- Columns `2` through `2 + chromeWidth − 1`: chrome content (display-cell width = `chromeWidth`)
+- Columns `2 + chromeWidth` through `width − 3`: `─` filler (any remaining cells)
+- Column `width − 2`: `─` (one-cell padding before right corner)
+- Column `width − 1`: `╮` (right corner)
+
+The right corner is pinned at `width − 1` regardless of chrome length.
+
+### Tier 4 (no chrome content)
+
+At tier 4 the entire middle range `[2, width − 3]` is `─` filler. The top edge becomes `╭{─ × (width − 2)}╮`.
+
+### Degenerate widths
+
+The cascade returns gracefully at every width ≥ 2:
+
+- width 2: `╭╮` (corners only, no padding, no filler)
+- width 3: `╭─╮`
+- width 4: `╭──╮`
+
+All such tiny widths fall into tier 4 behaviour automatically because there is no room for chrome content under any tier.
+
+### Width below 2
+
+`composeChromeLine` returns the **empty string** for `width < 2`. The frame composition in `View()` calls `lipgloss` bordering with whatever width the model holds; `lipgloss` handles widths it cannot render by clipping (its own behaviour). Consistent with the "no special vertical handling" stance — widths 0 and 1 are degenerate, render whatever falls out, no error path, no panic.
+
+### Color application
+
+`lipgloss`'s `BorderForeground(color)` colours only the border characters that `lipgloss` renders (left edge, right edge, bottom edge). The hand-composed top edge needs the same colour applied — otherwise three edges would render in the design blue and the top edge in default foreground.
+
+The top edge is composed as **two stylings concatenated**:
+
+- **Border parts** — corner glyphs, the `─` padding cells, and the `─` filler. Wrapped in `lipgloss.NewStyle().Foreground(adaptiveBlue).Render(…)` so they pick up the design colour.
+- **Chrome content** — rendered with no explicit foreground, inheriting terminal default. Chrome reads as legible terminal text against the blue-bordered surround. This matches the convention used elsewhere in the TUI for label-style strips.
+
+Final assembly at the `View()` call site, conceptually:
+
+```
+styledBorder("╭─") + chromeContent + styledBorder(filler + "─╮")
+```
+
+where `styledBorder := lipgloss.NewStyle().Foreground(adaptiveBlue).Render`.
+
+**Implication for `composeChromeLine`'s purity**: the function returns the *unstyled* chrome content string. Top-edge styling — border parts coloured, chrome parts default — happens at the call site in `View()` where the final composition assembles. This keeps `composeChromeLine` pure and testable purely on content output, independent of colour rendering.
+
 ---
 
 ## Working Notes
