@@ -64,7 +64,7 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
   Border composition [exploring]
   ├─ Chrome line: inside header vs above frame [decided] → top header
   ├─ Width cascade / truncation [decided] → cascading degradation
-  ├─ Border style (rounded / normal / thick) [pending]
+  ├─ Border style [decided] → RoundedBorder (matches modal)
   └─ Border color [pending]
 
   Session name visibility [pending]
@@ -147,6 +147,28 @@ False path: briefly considered "drop chrome above some narrow-terminal threshold
 `composeChromeLine` is a pure function in `internal/tui/pagepreview.go`. Tested at each cascade threshold with table-driven cases.
 
 Side benefit: defends against pathological window names regardless of terminal width — e.g. a long file path as a vim session's window name no longer breaks rendering today.
+
+Confidence: high.
+
+---
+
+## Border style
+
+### Context
+
+`lipgloss` ships several border presets (`NormalBorder`, `RoundedBorder`, `ThickBorder`, `DoubleBorder`, `BlockBorder`, `HiddenBorder`). Portal currently uses borders in exactly one place: `internal/tui/modal.go:24` uses `RoundedBorder()` for kill/rename/edit modal overlays. No other styles are in use.
+
+### Decision
+
+**`lipgloss.RoundedBorder()`** — matches the existing modal precedent.
+
+**Rationale**:
+
+1. Introducing a second border style would silently establish a new design rule in Portal ("each contextual surface has its own border style"). The current implicit rule is simpler: rounded border = contextual surface, no border = main page. Preview is a contextual surface, so it fits.
+2. Geometry already differentiates preview from modals — modals are small centered overlays, preview is a full-width framed page. They will never be visually confused even with identical border characters.
+3. Rounded corners read more cleanly at small column widths than `ThickBorder`'s heavier glyphs.
+
+A coupling worth naming for the build phase: the manually-composed top edge (chrome-in-header) must use the same character set as `RoundedBorder`'s left/right/bottom edges so the corners align. Implementation must source corner/edge characters from the chosen lipgloss border value rather than hardcoding them — that way a future style switch would be a one-line change.
 
 Confidence: high.
 
