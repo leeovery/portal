@@ -62,15 +62,13 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
   └─ Combination [decided] → rejected
 
   Border composition [exploring]
-  ├─ Chrome line: inside header vs above frame [pending]
+  ├─ Chrome line: inside header vs above frame [decided] → top header
+  ├─ Width cascade / truncation [decided] → cascading degradation
   ├─ Border style (rounded / normal / thick) [pending]
   └─ Border color [pending]
 
   Session name visibility [pending]
   └─ Whether to surface session name on preview (currently shows window name only) [pending]
-
-  Behaviour under terminal constraints [pending]
-  └─ Narrow / short terminals — does the border cost too much? [pending]
 
 ---
 
@@ -103,6 +101,52 @@ Preview's chrome line is a single row at the top. Underneath, the embedded `bubb
 **Border-only.** Wrap the viewport in a visible frame; do not touch the body's rendering.
 
 Decisive factor: the dim approach's failure mode is *content-dependent* — it works on a plain prompt and breaks on a tmux session full of `bat`, `vim`, or a colorful prompt — which is precisely the scrollback content preview is most useful for. The border approach is content-independent: it is Portal's paint over Portal's layout, and its appearance does not vary with what the session was doing. Real estate cost is modest and predictable; ANSI-interaction risk for dim is unbounded and only surfaces in the wild.
+
+Confidence: high.
+
+---
+
+## Chrome line composition and width cascade
+
+### Context
+
+With the border-only direction locked, two layout questions follow immediately: (a) where the existing chrome line sits relative to the new frame, and (b) how the chrome behaves when terminal width can't accommodate it. The chrome today (`internal/tui/pagepreview.go:165-175` → `chromeLine()`) is `Window M of M · Pane X of X · win: {name}    ] next win · [ prev win · tab next pane · enter attach · esc back` — roughly 110 chars of fixed overhead plus a variable-length window name. There is no width-awareness today; long window names or narrow terminals already wrap to a second visual row in option A's structure, just silently.
+
+### Options Considered
+
+**Layout — chrome above the frame (A) vs chrome as the frame's top header (B).**
+
+- **A — chrome above frame**: structurally simpler in lipgloss. Chrome `Render()`s independently; frame surrounds only the viewport. Overhead: chrome row + top border row = 2 rows. Overflow failure mode: chrome wraps to a second visual row, pushing the viewport down.
+- **B — chrome in top header**: the metadata strip becomes part of the frame edge (e.g. `┌─ window 1 of 3 · pane 1 of 1 · win:nvim · ] next win · … esc back ─┐`). Overhead: 1 row. Reinforces "this is one contained preview surface." Overflow failure mode: the corner character clips or wraps, breaking the entire border integrity — strictly worse than A's wrap, *unless* width-handling exists.
+- Lipgloss has no first-class label-in-border primitive; B requires assembling the top edge manually (corner + chrome chars + corner). One-time, bounded work.
+
+**Width handling — none vs cascading truncation.**
+
+- **No width handling**: existing behaviour. A wraps silently; B breaks.
+- **Cascading truncation**: a pure function `composeChromeLine(width int, …) string` that applies degradation in order until the line fits.
+
+### Journey
+
+Initial lean was B for the visual gestalt — single bounded preview surface, the metadata strip reads as a *label of* the thing rather than a *line above* the thing. Concern raised: B's overflow failure is worse than A's, so it's only viable if width can be respected.
+
+This pivoted the conversation: width handling isn't a B-specific safety net — A also benefits today (long window names wrap and push the viewport down silently). So the truncation cascade is a real robustness improvement either way, and adopting B just makes it load-bearing rather than nice-to-have. Implementation is bounded: pure function, no I/O, exhaustively unit-testable at width thresholds. The previewModel already receives terminal width via `tea.WindowSizeMsg` (needed to size the viewport), so the data is available; no new model surface.
+
+False path: briefly considered "drop chrome above some narrow-terminal threshold and let viewport fill the frame." Rejected as a primary strategy — the chrome is the only navigational discoverability inside preview; dropping it should be the absolute last-resort fallback, not the first response to narrowing.
+
+### Decision
+
+**Layout: B — chrome line as the frame's top header.** Implemented by composing the top edge manually (`┌─ … ─┐`) rather than reaching for a lipgloss primitive that doesn't exist. Frame surrounds the viewport; bottom edge is the standard lipgloss border.
+
+**Width handling: cascading degradation**, applied in order until the assembled line fits the available width (measured with `lipgloss.Width`):
+
+1. **Truncate window name with `…` suffix** when the budget for the name segment is positive but smaller than the name.
+2. **Drop the `· win: {name}` segment** entirely if budget for it is below a sensible minimum (target: ~8 chars; below that the truncation reads as garbage).
+3. **Swap full keymap for compact form** — `] [ tab enter esc` instead of the verbose `] next win · [ prev win · tab next pane · enter attach · esc back`. Saves ~50 chars. Labels are not lost from the product — the bottom help bar still carries the verbose form on the Sessions page; preview's chrome is just a hint surface here.
+4. **Drop chrome entirely** — render the frame with no header label. Strictly a degenerate-terminal fallback; almost no real user terminal hits this.
+
+`composeChromeLine` is a pure function in `internal/tui/pagepreview.go`. Tested at each cascade threshold with table-driven cases.
+
+Side benefit: defends against pathological window names regardless of terminal width — e.g. a long file path as a vim session's window name no longer breaks rendering today.
 
 Confidence: high.
 
