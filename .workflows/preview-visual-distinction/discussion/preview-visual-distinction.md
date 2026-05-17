@@ -444,6 +444,28 @@ Tests assert against these exact bytes.
 
 **Scope note.** Touching the verbose form means changing what `preview-keymap-discoverability` (the quick-fix that added the word tokens) and `enter-attaches-from-preview` (which added the `enter attach` token) shipped. Those specs are frozen historical records — not edited. This feature's spec captures the new glyph form as its own decision; the prior specs remain accurate as records of what they shipped at the time.
 
+### SGR reset injection — edge cases
+
+The "split on `\n`, append `\x1b[0m` to each non-empty line, then join" rule needs three edge cases pinned:
+
+1. **Trailing newline.** If `viewport.View()` ends with `\n`, splitting yields an empty trailing element. The empty element is **ignored** — no reset appended. The bottom border is rendered by lipgloss with its own SGR; a trailing empty line carrying or not carrying a reset is immaterial.
+2. **"Non-empty" definition.** Byte-length > 0. A line of literal spaces with an embedded SGR is non-empty and gets a reset; we do not try to distinguish whitespace-only from visible content.
+3. **Idempotency.** Terminals treat `\x1b[0m\x1b[0m` as a single reset. No deduplication logic — if the content already ended with a reset, double-resetting is harmless. Tests include a fixture line that already ends in `\x1b[0m` to confirm rendering does not degrade.
+
+Reference implementation:
+
+```go
+func injectSGRResets(s string) string {
+    lines := strings.Split(s, "\n")
+    for i, line := range lines {
+        if len(line) > 0 {
+            lines[i] = line + "\x1b[0m"
+        }
+    }
+    return strings.Join(lines, "\n")
+}
+```
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
