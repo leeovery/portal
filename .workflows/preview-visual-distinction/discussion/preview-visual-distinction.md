@@ -503,6 +503,28 @@ Decision: `NewPreviewModel(…, width, height int)` accepts width and height as 
 
 The first `View()` call on the freshly-constructed previewModel renders with correct dimensions — no race between preview-open and first WindowSizeMsg, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
 
+### Cascade-tier end-to-end test coverage
+
+Test surface 5 is extended with a table-driven sub-test that drives the full `Update → View` pipeline across the cascade tiers, not just the pure-function thresholds.
+
+Procedure:
+
+- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and a fixed window-name fixture.
+- For each width in the cascade-threshold table (e.g. 200, 60, 40, 25, 15), dispatch `Update(tea.WindowSizeMsg{Width: w, Height: 30})`, then call `View()`.
+- Assert the rendered output contains the expected tier signature:
+
+| Width | Expected signature                                                    |
+|-------|-----------------------------------------------------------------------|
+| 200   | Full window name + verbose keymap (`⇥ next pane`)                     |
+| 60    | Window name truncated with `…` suffix; verbose keymap                 |
+| 40    | No `win:` segment (tier 2 dropped); verbose keymap                    |
+| 25    | No `win:`; compact keymap `] [ ⇥ ⏎ ⎋`                                 |
+| 15    | Top edge is `╭{─ × 13}╮` (tier 4: corners + filler, no chrome)        |
+
+- Assert SGR reset bytes are present on each viewport content row in every case.
+
+This ties the pure-function cascade thresholds (surface 1) to the actual rendered frame, catching regressions where `composeChromeLine`'s output and the `View()` composition could drift apart.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
