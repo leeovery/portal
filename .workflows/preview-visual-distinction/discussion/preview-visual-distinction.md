@@ -56,30 +56,55 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
 
 ### Map
 
-  Visual treatment approach [pending]
-  ├─ Dim-only [pending]
-  ├─ Border-only [pending]
-  └─ Combination (dim + border) [pending]
+  Visual treatment approach [decided] → border-only
+  ├─ Dim-only [decided] → rejected
+  ├─ Border-only [decided] → chosen
+  └─ Combination [decided] → rejected
 
-  Dimming mechanism and intensity [pending]
-  ├─ How to dim ANSI scrollback (overlay vs reset vs faint SGR) [pending]
-  └─ Intensity target on dark/light themes [pending]
-
-  Border composition (if used) [pending]
-  ├─ Border style and color [pending]
-  └─ Relationship to existing chrome line (above border vs inside header) [pending]
+  Border composition [exploring]
+  ├─ Chrome line: inside header vs above frame [pending]
+  ├─ Border style (rounded / normal / thick) [pending]
+  └─ Border color [pending]
 
   Session name visibility [pending]
   └─ Whether to surface session name on preview (currently shows window name only) [pending]
 
   Behaviour under terminal constraints [pending]
-  ├─ Narrow / short terminals — does the border cost too much? [pending]
-  ├─ Low-color terminals — does dim degrade gracefully? [pending]
-  └─ Accessibility — text remains legible at chosen dim level [pending]
+  └─ Narrow / short terminals — does the border cost too much? [pending]
 
 ---
 
 *Subtopics are documented below as they reach `decided` or accumulate enough exploration to capture.*
+
+---
+
+## Visual treatment approach
+
+### Context
+
+Preview's chrome line is a single row at the top. Underneath, the embedded `bubbles/viewport` renders raw scrollback bytes (ANSI passthrough). The body has no styling of our own — whatever colors and SGR sequences the session emitted are rendered verbatim. The question is what signal we add on top of that to make the page unambiguously read as "preview, not attached."
+
+### Options Considered
+
+**Dim-only — render the scrollback at reduced contrast.**
+- Pros: zero screen-real-estate cost beyond the existing chrome line; minimal change to the layout; subtle.
+- Cons: ANSI scrollback is already colored (vim, bat, git diffs, prompts). Reliably dimming a colored payload is harder than dimming plain text — naïve wrapper styles (e.g. lipgloss `Faint(true)` applied around the viewport) interact unpredictably with the embedded SGR sequences the viewport prints verbatim. Failure mode shows up months later on a specific user colorscheme. The fade is content-dependent rather than chrome-defined.
+
+**Border-only — wrap the viewport in a visible frame.**
+- Pros: the visual cue is *enclosure*, painted by Portal rather than by the session's own bytes, so it is reliable regardless of scrollback content. The existing chrome line tucks naturally into the frame's header region. Costs ~2 rows + 2 cols (≈4–8% of vertical space on typical 50/24-row terminals — negligible).
+- Cons: takes screen real estate; the body of the preview still *renders* identically to attached — distinction comes purely from the surround.
+
+**Combination (border + subtle dim).**
+- Pros: maximally unambiguous.
+- Cons: pays both costs (real estate + ANSI-interaction risk) for a signal one of them already provides.
+
+### Decision
+
+**Border-only.** Wrap the viewport in a visible frame; do not touch the body's rendering.
+
+Decisive factor: the dim approach's failure mode is *content-dependent* — it works on a plain prompt and breaks on a tmux session full of `bat`, `vim`, or a colorful prompt — which is precisely the scrollback content preview is most useful for. The border approach is content-independent: it is Portal's paint over Portal's layout, and its appearance does not vary with what the session was doing. Real estate cost is modest and predictable; ANSI-interaction risk for dim is unbounded and only surfaces in the wild.
+
+Confidence: high.
 
 ---
 
