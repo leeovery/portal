@@ -125,6 +125,55 @@ Tests assert against these exact bytes.
 
 Replacing the word tokens with glyphs modifies what `preview-keymap-discoverability` and `enter-attaches-from-preview` shipped. Those prior specs remain accurate as records of what *they* shipped at the time; this feature's spec captures the new glyph form as its own decision.
 
+## Width cascade
+
+Terminal widths and window names vary unboundedly; chrome content that overflows the available top-edge budget would either clip the right corner or wrap to a second visual row, breaking the entire frame (the bottom corner would shift down by one row). The cascade is the mechanism that guarantees the top edge is always exactly one row, at any width ≥ 2.
+
+### Algorithm shape: predicate-over-output
+
+The four-tier cascade is **not** a stack of incremental transformations. Each tier produces a *candidate output*, measures it via `lipgloss.Width`, and returns the candidate if it fits. Otherwise it falls through to the next tier.
+
+```
+tier 1: compose with name truncated to fit + verbose keymap   → measure → if fits, return
+tier 2: compose with name segment dropped  + verbose keymap   → measure → if fits, return
+tier 3: compose with name segment dropped  + compact keymap   → measure → if fits, return
+tier 4: corners + filler `─` (no chrome content)              → always fits any width ≥ 2 → return
+```
+
+Tier interactions:
+
+- Tiers 1 and 2 are mutually exclusive — if tier 1's truncated name fits, tier 2 isn't reached; if tier 2 drops the segment, tier 1's work is discarded.
+- Tiers 2 and 3 differ only in keymap form — tier 3 strictly compresses tier 2 further by swapping the verbose keymap for the compact one.
+- Tier 4 supersedes whatever was attempted before.
+
+### Tier-by-tier behaviour
+
+**Tier 1 — truncate window name with `…` suffix.** When the budget for the window name segment is positive but smaller than the full name, the name is truncated to fit and a `…` (U+2026, 1 cell wide) suffix appended.
+
+**Tier 2 — drop the `· win: {name}` segment entirely.** Reached when the budget for the window name segment falls below a sensible minimum (**target: ~8 display cells**). Below that minimum the truncation reads as garbage rather than as a recognisable name. The whole `· win: {name}` interpunct-prefixed segment is removed, not just the name string.
+
+**Tier 3 — swap verbose keymap for compact form.** Reached when even with the window name segment dropped the verbose keymap still overflows. Saves ≈73 cells (verbose form is 82 cells, compact is 9). Action labels are not permanently lost from the product — once the user has seen the verbose chrome at wider widths, the keys-only form reads as a recognised compression rather than a fresh-eyes puzzle.
+
+**Tier 4 — drop chrome entirely; render corners + filler.** A degenerate-terminal fallback (sub-40-col terminals, almost no real user terminal hits this). The top edge becomes `╭{─ × (width − 2)}╮`. Always fits any width ≥ 2.
+
+### Load-bearing tier 4
+
+Tier 4 is **load-bearing** — it is what guarantees the top edge always renders cleanly down to width 2 (the two corner glyphs). Without it, terminal widths narrow enough to fail tier 3 would either clip the chrome or wrap it to a second visual row, and wrapping in particular breaks the frame because the bottom corner shifts down by one row, destroying the visual integrity the cascade exists to protect. Tier 4 is rarely reached in practice, but its existence is what lets the cascade make a strong guarantee.
+
+### Defending against pathological window names
+
+A side benefit of the cascade: pathological window names — long file paths surfaced by vim, e.g. — no longer break rendering regardless of terminal width. The truncation-then-drop path applies the same regardless of whether the budget pressure came from the terminal being narrow or the name being long.
+
+### Pure function
+
+The cascade is implemented as a pure function:
+
+```go
+func composeChromeLine(width int, /* model fields */) string
+```
+
+Located in `internal/tui/pagepreview.go`. No I/O. Returns the unstyled top-edge chrome content as a single-line string. Width measurements use `lipgloss.Width`. Tested exhaustively at the cascade thresholds with table-driven cases.
+
 ---
 
 ## Working Notes
