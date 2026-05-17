@@ -174,6 +174,33 @@ func composeChromeLine(width int, /* model fields */) string
 
 Located in `internal/tui/pagepreview.go`. No I/O. Returns the unstyled top-edge chrome content as a single-line string. Width measurements use `lipgloss.Width`. Tested exhaustively at the cascade thresholds with table-driven cases.
 
+## Display-cell-aware truncation
+
+Tier 1 of the cascade ("truncate window name with `…` suffix") and the ~8-cell minimum in tier 2 are specified in **display cells**, not bytes or runes. Window names are arbitrary UTF-8 — tmux allows CJK, emoji, combining marks, and double-width glyphs. Naïve byte-slicing (`s[:n]`) can land mid-rune and produce invalid UTF-8 in the top border. Naïve rune-counting overcounts: a string of CJK glyphs is 1 rune per 2 cells, so "n runes" can be 2× the visual budget.
+
+### Algorithm
+
+Iterate codepoint by codepoint, accumulating `runewidth.RuneWidth(r)` (or equivalently `lipgloss.Width` of single-rune strings — `lipgloss` uses `go-runewidth` underneath). Stop when adding the next rune would exceed `budget − 1` (reserving 1 cell for the `…` suffix). Append `…` (1 cell wide).
+
+### Where it applies
+
+The display-cell primitive is the **same primitive** used wherever the cascade truncates anything — currently the window name, but the rule is the unit of measure, not the field. Any future truncation in this codepath uses the same primitive.
+
+### Test coverage
+
+Table-driven with at least these glyph classes:
+
+- ASCII (1 cell per rune)
+- CJK (2 cells per rune)
+- Emoji (2 cells per rune, including ZWJ sequences)
+- Combining marks (0 cells per combining rune; base+combiner = base's width)
+
+Asserts:
+
+- No mid-rune cuts (output is valid UTF-8).
+- Final display-cell width ≤ budget.
+- `…` is appended only when truncation actually occurred (full-string-fits case returns the original string).
+
 ---
 
 ## Working Notes
