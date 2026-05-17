@@ -399,6 +399,51 @@ where `styledBorder := lipgloss.NewStyle().Foreground(adaptiveBlue).Render`.
 
 Build-phase implication: the `composeChromeLine` pure function returns the *unstyled* chrome content string. Top-edge styling — border parts colored, chrome parts default — happens at the call site in `View()` where the final composition assembles. This keeps `composeChromeLine` pure and testable purely on content output, independent of color rendering.
 
+### Keymap glyphs (verbose and compact forms)
+
+The verbose form's word tokens `tab`, `enter`, `esc` are replaced with macOS-convention keyboard glyphs. The bracket keys `]` / `[` stay as ASCII because they are literally the characters the user presses — no glyph is more accurate.
+
+**Glyph set:**
+
+| Key   | Glyph | Codepoint |
+|-------|-------|-----------|
+| `]`   | `]`   | ASCII     |
+| `[`   | `[`   | ASCII     |
+| Tab   | `⇥`   | U+21E5    |
+| Enter | `⏎`   | U+23CE    |
+| Esc   | `⎋`   | U+238B    |
+
+**Verbose form** (default at typical widths):
+
+```
+] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back
+```
+
+**Compact form** (cascade tier 3):
+
+```
+] [ ⇥ ⏎ ⎋
+```
+
+Compact uses single-space separators (no interpunct) — the entire point of tier 3 is character compression, and 4 separators × 2 cells saved = 8 cells back into the budget. Display-cell width of the compact form is 9 cells, comfortably below any realistic terminal floor above tier 4.
+
+**Token order matches across forms** — `] [ tab enter esc` left-to-right in both — so a user resizing the terminal sees the same sequence of keys, just with action labels added or removed.
+
+**Font fallback.** `⇥` and `⏎` are present in essentially every modern monospace font. `⎋` (U+238B) is the weakest link — present in SF Mono, Menlo, JetBrains Mono, Fira Code, Cascadia, and most modern terminal-targeted fonts, but a user on an old terminal with a font lacking that codepoint sees a fallback box. Acceptable degradation: the bracket keys `]` / `[` still render, the message "this is preview" still lands via the frame, and the keys still work.
+
+**Bake into constants** in `pagepreview.go`:
+
+```go
+const (
+    verboseKeymap = "] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
+    compactKeymap = "] [ ⇥ ⏎ ⎋"
+)
+```
+
+Tests assert against these exact bytes.
+
+**Scope note.** Touching the verbose form means changing what `preview-keymap-discoverability` (the quick-fix that added the word tokens) and `enter-attaches-from-preview` (which added the `enter attach` token) shipped. Those specs are frozen historical records — not edited. This feature's spec captures the new glyph form as its own decision; the prior specs remain accurate as records of what they shipped at the time.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
