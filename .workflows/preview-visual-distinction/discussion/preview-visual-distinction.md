@@ -147,6 +147,14 @@ False path: briefly considered "drop chrome above some narrow-terminal threshold
 
 Side benefit: defends against pathological window names regardless of terminal width — e.g. a long file path as a vim session's window name no longer breaks rendering today.
 
+### Vertical degeneracy
+
+The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
+
+**Decision: render anyway. No vertical threshold, no row-budget-aware degradation, no refusal-to-open flash.**
+
+Rationale: unlike narrow terminals and long window names (which are realistic and common — multi-pane tmux splits, side-by-side terminal layouts), terminals tall enough to break preview but short enough to not be obviously unusable are a degenerate case nobody hits accidentally. Either the user has deliberately squashed the window (in which case the recovery is press Esc, resize, retry) or the terminal is broken in ways preview's chrome wouldn't fix anyway. Inventing a row-budget cascade or a "preview unavailable" flash would be speculative complexity for a case that doesn't bite.
+
 Confidence: high.
 
 ---
