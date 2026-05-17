@@ -230,6 +230,18 @@ Both variants sit at mid-luminance with a recognisable blue saturation. The ligh
 
 This introduces a third accent color to Portal's palette, owned by preview chrome.
 
+### Color robustness: NO_COLOR, low-color terminals
+
+Explicitly captured so the spec phase does not treat the hex tones as hard requirements:
+
+**The frame's *enclosure* is the load-bearing distinction signal. The blue tint is enhancement.**
+
+- **`NO_COLOR=1`**: lipgloss/termenv respects the convention and renders the border in default foreground. The blue is dropped; the frame remains visible. Distinction signal is preserved.
+- **8/16-color terminals or `TERM=dumb`**: lipgloss/termenv automatically downgrades hex to the nearest palette color. Result is whatever the terminal's nearest-blue happens to be — design intent is approximated, not lost.
+- **Truecolor terminals**: rendered as specified.
+
+No explicit Portal handling is needed beyond what lipgloss/termenv provides out of the box.
+
 Confidence: high.
 
 ---
