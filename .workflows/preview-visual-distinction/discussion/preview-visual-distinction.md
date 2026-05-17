@@ -204,6 +204,18 @@ Two adjacent integration questions, both about whether the frame introduces new 
 
 **Decision: no new flicker, no special transition handling.** The frame's existence in pagePreview's View() and absence in pageSessions's View() is the natural shape of the page state machine and needs no further plumbing.
 
+### Test strategy
+
+Five testable surfaces emerged across this discussion. **Decision: all five are pure-function unit tests or `Update + View` integration tests with the existing `previewModel` mocks. No golden / snapshot files, no real-tmux integration test.**
+
+1. **`composeChromeLine(width, …)`** — pure function. Table-driven cases at each cascade threshold: window name fits, window name truncates, window name dropped (segment removed), keymap compacted, chrome dropped entirely.
+2. **Display-cell truncation primitive** — pure function. Table-driven cases with ASCII, CJK glyphs, emoji, and combining marks. Asserts no mid-rune cuts and correct cell-budget arithmetic.
+3. **SGR reset injection** — pure function. Fixture lines containing unterminated SGR sequences; assert each non-empty line in the output ends with `\x1b[0m`.
+4. **Resize handling** — `Update(tea.WindowSizeMsg{Width, Height})` on a `previewModel` constructed with mock `TmuxEnumerator` / `ScrollbackReader`. Assert viewport `SetSize` was called with `Width-2, Height-2` and that the chrome line was recomputed for the new inner width.
+5. **Frame composition end-to-end** — `Update + View` on `previewModel` with mocks. Assert `View()` output contains the rounded corner glyphs (`╭`, `╮`, `╰`, `╯`), the chrome line on the top edge, and the SGR-reset bytes.
+
+Rationale: pure-function tests cover the substantive logic exhaustively at minimal cost. The `Update + View` shape with mocked seams is the existing project convention (per `session-scrollback-preview`'s test-seam architecture) — no `tmuxtest` import, runs without a real tmux server, `t.Parallel()` would be safe (preview's seams are constructor-injected, not package-level). Snapshot tests would couple to lipgloss's specific border-rendering output, locking us to upstream behaviour we should not test against.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
