@@ -65,10 +65,9 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
   ├─ Chrome line: inside header vs above frame [decided] → top header
   ├─ Width cascade / truncation [decided] → cascading degradation
   ├─ Border style [decided] → RoundedBorder (matches modal)
-  └─ Border color [pending]
+  └─ Border color [exploring]
 
-  Session name visibility [pending]
-  └─ Whether to surface session name on preview (currently shows window name only) [pending]
+  Session name visibility [decided] → not surfaced
 
 ---
 
@@ -169,6 +168,32 @@ Confidence: high.
 3. Rounded corners read more cleanly at small column widths than `ThickBorder`'s heavier glyphs.
 
 A coupling worth naming for the build phase: the manually-composed top edge (chrome-in-header) must use the same character set as `RoundedBorder`'s left/right/bottom edges so the corners align. Implementation must source corner/edge characters from the chosen lipgloss border value rather than hardcoding them — that way a future style switch would be a one-line change.
+
+Confidence: high.
+
+---
+
+## Session name visibility in chrome
+
+### Context
+
+Today's chrome shows `win:{name}` — the *window* name within the session. Whether to additionally surface the *session* name was open. The session name is available to the previewModel at construction time (it is what triggered preview-open from the Sessions list).
+
+### Journey
+
+Initial framing surfaced as a review flag — the width cascade had been decided assuming chrome contains window name only; if session name was added, the ~110-char fixed-overhead figure would have been invalidated and the cascade re-opened to address how truncation chooses between session and window name when budget runs out.
+
+The deeper question landed cleanly: does the chrome describe *identity* (what session you're previewing) or *dynamic context* (what's changing as you cycle within preview)? Window name has genuine dynamic value — pressing `]` / `[` cycles to a new window and the name changes. Session name has no such surface: there's no key inside preview that changes which session you're on; identity is fixed at preview-open by the act of selecting from the Sessions list.
+
+Side observation from the user during this thread: even window name is borderline-useful — tmux window names are often noisy echoes of argv[0] (the `preview-keymap-discoverability` quick-fix added the `win:` prefix specifically because raw window names were being misread as stray numbers). Window name stays because (a) it does change within preview when cycling, and (b) it's already shipped. But its borderline value reinforces a cascade-ordering point: dropping the `· win: {name}` segment is step 2 of the truncation cascade, which means we're cutting something acknowledged as low-value early — a healthy alignment between budget-pressure relief and what the user actually relies on.
+
+### Decision
+
+**Session name is not surfaced in the preview chrome.**
+
+The chrome stays *dynamic-only*: it describes what changes as the user navigates within preview, not what is already established by the act of opening preview. Identity is anchored by the Sessions-page selection that triggered preview; chrome's job is navigation context, not re-asserting identity.
+
+Consequence: the previously-decided width cascade stands as-is. No change to the ~110-char fixed-overhead math, no new truncation tier needed, no decision required about whether to drop session or window name first under width pressure.
 
 Confidence: high.
 
