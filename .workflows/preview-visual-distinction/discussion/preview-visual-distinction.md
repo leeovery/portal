@@ -148,7 +148,7 @@ False path: briefly considered "drop chrome above some narrow-terminal threshold
 
 1. **Truncate window name with `…` suffix** when the budget for the name segment is positive but smaller than the name.
 2. **Drop the `· win: {name}` segment** entirely if budget for it is below a sensible minimum (target: ~8 chars; below that the truncation reads as garbage).
-3. **Swap full keymap for compact form** — `] [ tab enter esc` instead of the verbose `] next win · [ prev win · tab next pane · enter attach · esc back`. Saves ~50 chars. Labels are not lost from the product — the bottom help bar still carries the verbose form on the Sessions page; preview's chrome is just a hint surface here.
+3. **Swap full keymap for compact form** — `] [ ⇥ ⏎ ⎋` (9 cells) instead of the verbose `] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back` (82 cells). Saves ~73 cells. Action labels are not lost from the product — once the user has seen the verbose chrome at wider widths, the keys-only form reads as a recognised compression rather than a fresh-eyes puzzle. (See *Keymap glyphs* below for the chosen glyph set and the scope note on why the verbose form is also touched.)
 4. **Drop chrome entirely** — render the frame with no header label. Strictly a degenerate-terminal fallback; almost no real user terminal hits this.
 
 `composeChromeLine` is a pure function in `internal/tui/pagepreview.go`. Tested at each cascade threshold with table-driven cases.
@@ -333,7 +333,7 @@ Confidence: high.
 
 ## Implementation form specifics
 
-These are not new product decisions — they are decision-grade specifics that fell out as the discussion drilled into review-002 findings. Spec digests these; build phase implements them.
+These decisions fell out of review-002's findings — they are not after-the-fact build details, they are decisions the discussion locks now. Each pins a specific implementation form so spec digests a complete artifact and the build phase has no remaining design degrees of freedom in these areas.
 
 ### Replace `chromeLine()` with `composeChromeLine`
 
@@ -474,7 +474,7 @@ The injected reset goes at end-of-row of viewport content, *before* lipgloss com
 [lipgloss left-border SGR][│][reset][content with injected reset at row-end][lipgloss right-border SGR][│][reset]
 ```
 
-Lipgloss uses `go-runewidth` + `termenv` for ANSI-aware measurement — both preserve SGR codes when measuring width (they count cells, not bytes). The injected reset survives into the final composed string. No special placement consideration is needed beyond what F2 specifies; the cascade-tier end-to-end tests (see F8 below) confirm the boundary in practice.
+Lipgloss uses `go-runewidth` + `termenv` for ANSI-aware measurement — both preserve SGR codes when measuring width (they count cells, not bytes). The injected reset survives into the final composed string. No special placement consideration is needed beyond what *SGR reset injection — edge cases* specifies; the *Cascade-tier end-to-end test coverage* section below confirms the boundary in practice.
 
 ### Degenerate width below corners
 
@@ -535,12 +535,25 @@ The existing `const previewChromeHeight = 1` becomes outdated under the new mode
 
 ### Key Insights
 
-*(populated as discussion progresses)*
+1. **Enclosure is the load-bearing distinction signal; everything else is enhancement.** The frame's presence makes preview unmistakable from an attached session; the AdaptiveColor blue and the glyph chrome are additive polish that degrade gracefully when not supported (NO_COLOR, low-color terminals, fonts missing `⎋`).
+2. **The chrome is dynamic-only.** It describes what changes as the user navigates within preview (window/pane cycle), not what is established by the act of opening preview (session identity). This framing pre-empts a class of "should we surface X" questions by giving them a clear rule.
+3. **Frame integrity demands width-awareness as a first-class concern.** Chrome wrapping to a second visual row breaks the bottom corner alignment — i.e. the *whole frame* — so a robust cascade with a guaranteed tier-4 floor is what licenses the chrome-in-header layout choice. Without the cascade, B (chrome inside the top border) would be too fragile.
+4. **Discussion decides; spec digests.** The user's mid-session correction reshaped the second half of the discussion: review-002's mechanical findings were treated as decisions to lock here, not as "spec-phase verification items." This is now captured in cross-session memory.
+5. **Visual decisions benefit from Paper-rendered side-by-side comparisons.** Picking the border color via four candidate swatches on the Paper canvas was faster and more confident than picking from descriptions; worth repeating for any future colour / glyph / layout decision in this codebase.
 
 ### Open Threads
 
-*(populated as discussion progresses)*
+None deliberately deferred. All map subtopics and all 26 review findings (13 across each of review-001 and review-002) are decided.
 
 ### Current State
 
-- Nothing decided yet — discussion just initialized.
+- Visual treatment: border-only.
+- Frame: `lipgloss.RoundedBorder()` matching modal precedent, with `BorderForeground` = `AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}`.
+- Chrome line: rides on the manually-composed top edge of the frame (B), keys glyphified (`⇥`, `⏎`, `⎋`), bracket keys (`]`, `[`) preserved as ASCII.
+- Width handling: four-tier predicate-over-output cascade with display-cell-aware truncation, tier 4 guaranteeing top-edge integrity down to width 2.
+- Render integrity: per-row SGR reset injection on viewport output; resize repaint every tick with no debounce; no special handling for scroll, bootstrap interaction, or page-state transitions.
+- Code shape: new `composeChromeLine(width int, …) string` pure function replaces existing `chromeLine()` method; `previewChromeHeight = 1` constant renamed to `previewFrameOverhead = 2`; `NewPreviewModel` takes `width, height` as constructor parameters.
+- Tests: pure-function unit tests + `Update + View` integration with existing mock seams; cascade-tier table-driven sub-test covering widths 200, 60, 40, 25, 15.
+- Robustness: chrome stays 1 row at all widths ≥ 2 (cascade invariant); degenerate widths below 2 return empty chrome and rely on lipgloss's own clipping.
+
+Confidence to proceed to specification: high. The discussion has produced a decision-grade artifact; spec digests rather than designs.
