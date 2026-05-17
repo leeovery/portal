@@ -339,6 +339,10 @@ These are not new product decisions — they are decision-grade specifics that f
 
 The existing `chromeLine()` method on `previewModel` at `internal/tui/pagepreview.go:165-175` is **deleted**. Callers in `View()` invoke the new pure function `composeChromeLine(width int, …) string` directly with the current width and the relevant model fields. The pure-function signature is the testable boundary; a thin method wrapper would add an indirection without value.
 
+### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
+
+The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
+
 ---
 
 ## Summary
