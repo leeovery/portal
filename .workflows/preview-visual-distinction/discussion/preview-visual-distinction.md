@@ -482,6 +482,27 @@ Cascade tier 4 produces `╭─...─╮` at any width ≥ 2. Below width 2 ther
 
 Decision: `composeChromeLine` returns the empty string for `width < 2`. The frame composition in `View()` calls lipgloss bordering with whatever width the model holds; lipgloss handles widths it cannot render by clipping (its own behaviour). Consistent with the "no special vertical handling" stance — width 0 or 1 is degenerate, render whatever falls out, no error path.
 
+### Chrome-row invariant for resize math
+
+`m.viewport.SetSize(msg.Width - 2, msg.Height - 2)` assumes top edge = 1 row, bottom edge = 1 row. The cascade guarantees a one-row top edge at any width ≥ 2 (tier 4 produces `╭{─ × (width-2)}╮`, all on one row). Below width 2 the system is degenerate anyway.
+
+Capture the invariant explicitly:
+
+- `composeChromeLine`'s doc comment: *"Returns a single-line string with no embedded newlines. The cascade guarantees one-row output for all widths ≥ 2; below that, returns the empty string."*
+- `previewFrameOverhead = 2` comment: *"top border (1 row, carrying chrome via cascade) + bottom border (1 row) = 2 rows of frame overhead."*
+- Test: `strings.Count(composeChromeLine(w, …), "\n") == 0` across the cascade-tier width thresholds.
+
+### Initial WindowSizeMsg / preview-open ordering
+
+The parent Bubble Tea model holds current terminal dimensions from program-start (it has been receiving `tea.WindowSizeMsg` events since startup). When the user presses Space on the Sessions page, `NewPreviewModel` is constructed in the Sessions page's `Update` handler, which has access to the parent's tracked dimensions.
+
+Decision: `NewPreviewModel(…, width, height int)` accepts width and height as constructor parameters. The Sessions page's `Update` handler passes its current width / height into the constructor. Inside the constructor:
+
+- `viewport.SetSize(width - 2, height - 2)` is called once with initial dimensions.
+- The initial chrome string is pre-computed for the inner width.
+
+The first `View()` call on the freshly-constructed previewModel renders with correct dimensions — no race between preview-open and first WindowSizeMsg, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
