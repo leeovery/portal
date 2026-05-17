@@ -466,6 +466,22 @@ func injectSGRResets(s string) string {
 }
 ```
 
+### SGR reset placement vs lipgloss border emission
+
+The injected reset goes at end-of-row of viewport content, *before* lipgloss composes the border. On a composed row the byte sequence is:
+
+```
+[lipgloss left-border SGR][│][reset][content with injected reset at row-end][lipgloss right-border SGR][│][reset]
+```
+
+Lipgloss uses `go-runewidth` + `termenv` for ANSI-aware measurement — both preserve SGR codes when measuring width (they count cells, not bytes). The injected reset survives into the final composed string. No special placement consideration is needed beyond what F2 specifies; the cascade-tier end-to-end tests (see F8 below) confirm the boundary in practice.
+
+### Degenerate width below corners
+
+Cascade tier 4 produces `╭─...─╮` at any width ≥ 2. Below width 2 there is no valid frame top edge.
+
+Decision: `composeChromeLine` returns the empty string for `width < 2`. The frame composition in `View()` calls lipgloss bordering with whatever width the model holds; lipgloss handles widths it cannot render by clipping (its own behaviour). Consistent with the "no special vertical handling" stance — width 0 or 1 is degenerate, render whatever falls out, no error path.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
