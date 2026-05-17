@@ -360,6 +360,26 @@ Tier interactions:
 
 Step 4 is load-bearing: it guarantees the top edge always renders cleanly down to width 2 (the two corner glyphs). Without it, terminal widths narrow enough to fail tier 3 would either clip the chrome or wrap it to a second visual row — wrapping in particular breaks the frame because the bottom corner shifts down by one row, destroying the visual integrity the cascade exists to protect. Even though tier 4 is rarely reached in practice (sub-40-col terminals are degenerate), its existence is what lets the cascade make a strong guarantee.
 
+### Top edge composition
+
+The top edge is `╭─{chrome content}{filler ─}─╮`. By column:
+
+- Column 0: `╭` (left corner)
+- Column 1: `─` (one-cell padding after left corner)
+- Columns 2 through (2 + chromeWidth − 1): chrome content, display-cell width = `chromeWidth`
+- Columns (2 + chromeWidth) through (width − 3): `─` filler (any remaining cells)
+- Column (width − 2): `─` (one-cell padding before right corner)
+- Column (width − 1): `╮` (right corner)
+
+This pins the right corner at `width − 1` regardless of chrome length. At tier 4 the entire middle range `[2, width − 3]` is `─` filler — the top edge becomes `╭{─ × (width − 2)}╮`.
+
+Degenerate widths:
+- width 2: `╭╮` (corners only, no padding, no filler)
+- width 3: `╭─╮`
+- width 4: `╭──╮`
+
+All such tiny widths fall into tier 4 behaviour automatically because there is no room for chrome content under any tier.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
