@@ -331,6 +331,16 @@ Confidence: high.
 
 ---
 
+## Implementation form specifics
+
+These are not new product decisions — they are decision-grade specifics that fell out as the discussion drilled into review-002 findings. Spec digests these; build phase implements them.
+
+### Replace `chromeLine()` with `composeChromeLine`
+
+The existing `chromeLine()` method on `previewModel` at `internal/tui/pagepreview.go:165-175` is **deleted**. Callers in `View()` invoke the new pure function `composeChromeLine(width int, …) string` directly with the current width and the relevant model fields. The pure-function signature is the testable boundary; a thin method wrapper would add an indirection without value.
+
+---
+
 ## Summary
 
 ### Key Insights
