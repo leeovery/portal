@@ -171,6 +171,18 @@ Rationale: `composeChromeLine` is a pure function with no I/O. `viewport.SetSize
 
 Build phase has one explicit obligation: implement the `tea.WindowSizeMsg` case in preview's `Update`. No special-casing for rapid resize streams.
 
+### ANSI bleed protection
+
+The embedded viewport renders raw ANSI bytes from scrollback as straight passthrough (per the prior `session-scrollback-preview` spec). A scrollback line can legitimately end with an unterminated SGR sequence — for example, a `bat`-rendered file whose last visible line set a background color and the buffer ended before issuing a reset. With the new frame, an unterminated SGR sits in the cell adjacent to the right border on its row.
+
+Concrete risk: terminal is in "set bg=red" state when lipgloss emits the right border character. Lipgloss's `BorderForeground` emits its own SGR for the border foreground colour but does not reliably reset background state. The border character could render with the design blue foreground over an unwanted red background — coloured squares where the border should be.
+
+**Decision: inject `\x1b[0m` (SGR reset) at the end of every viewport row before composing with the frame.** Per-line, not just at end-of-buffer — each line carries unterminated SGR independently.
+
+Implementation: when wrapping `viewport.View()` output, split on `\n`, append `\x1b[0m` to each non-empty line, then pass the joined string into lipgloss's frame rendering. Five-line function, pure, unit-testable with fixture lines ending in unterminated SGR.
+
+Cost: trivial. Upside: border integrity is bulletproof regardless of scrollback content. Removes the "depends on lipgloss internal SGR handling" uncertainty entirely.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
