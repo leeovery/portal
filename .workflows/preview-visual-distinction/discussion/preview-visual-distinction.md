@@ -157,6 +157,20 @@ Naïve byte-slicing (`s[:n]`) is forbidden — it can land mid-rune and produce 
 
 Tested with table-driven cases including ASCII, CJK, emoji, and combining marks.
 
+### Resize repaint behaviour
+
+Bubble Tea emits one `tea.WindowSizeMsg` per terminal-resize signal. Dragging a terminal corner produces a stream of them. Each `tea.WindowSizeMsg` goes through Update → View.
+
+**Decision: repaint every tick, no debounce.** Preview's resize handler in `pagepreview.go`'s `Update` does three things on each `tea.WindowSizeMsg`:
+
+1. Call `m.viewport.SetSize(msg.Width - 2, msg.Height - 2)` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows).
+2. Recompute the chrome line via `composeChromeLine(msg.Width - 2, …)` for the new inner width.
+3. Allow `View()` to re-render the frame.
+
+Rationale: `composeChromeLine` is a pure function with no I/O. `viewport.SetSize` doesn't reallocate content — it adjusts the visible window over an immutable buffer. Preview's structural enumeration was captured at preview-open and is not re-fetched on resize. The per-tick cost is small enough that debouncing would only hurt: dropping frames would make chrome visibly lag resize, and maintaining a timer adds state for a problem that doesn't exist. Bubble Tea's runtime already coalesces redundant `View()` calls at the framerate level.
+
+Build phase has one explicit obligation: implement the `tea.WindowSizeMsg` case in preview's `Update`. No special-casing for rapid resize streams.
+
 ### Vertical degeneracy
 
 The cascade addresses horizontal width. Vertical is intentionally not handled. The frame costs 2 rows (top chrome edge + bottom border). On an 8-row terminal the viewport gets 5 rows; on a 5-row terminal it gets 2; below that, effectively nothing.
