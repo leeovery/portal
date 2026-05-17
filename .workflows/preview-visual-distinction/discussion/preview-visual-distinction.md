@@ -61,11 +61,11 @@ A combination is also possible (subtle border + slightly dimmed body). The goal 
   ├─ Border-only [decided] → chosen
   └─ Combination [decided] → rejected
 
-  Border composition [exploring]
+  Border composition [decided]
   ├─ Chrome line: inside header vs above frame [decided] → top header
   ├─ Width cascade / truncation [decided] → cascading degradation
   ├─ Border style [decided] → RoundedBorder (matches modal)
-  └─ Border color [exploring]
+  └─ Border color [decided] → AdaptiveColor deeper saturated blue, single unified
 
   Session name visibility [decided] → not surfaced
 
@@ -194,6 +194,41 @@ Side observation from the user during this thread: even window name is borderlin
 The chrome stays *dynamic-only*: it describes what changes as the user navigates within preview, not what is already established by the act of opening preview. Identity is anchored by the Sessions-page selection that triggered preview; chrome's job is navigation context, not re-asserting identity.
 
 Consequence: the previously-decided width cascade stands as-is. No change to the ~110-char fixed-overhead math, no new truncation tier needed, no decision required about whether to drop session or window name first under width pressure.
+
+Confidence: high.
+
+---
+
+## Border color
+
+### Context
+
+Portal's existing TUI palette (`internal/tui/session_item.go`, `internal/tui/project_item.go`, `internal/tui/model.go`) is grays + two saturated accents — ANSI `212` (pink-magenta) for the list cursor and ANSI `76` (green) for the attached badge. Grays cluster at `#555555` / `#777777` / `#888888` / `#999999`. The modal (`internal/tui/modal.go:24`) uses `RoundedBorder` with no explicit `BorderForeground` — it inherits terminal default foreground (uncoloured).
+
+Adding any colored border on the preview frame is therefore (a) a new accent in Portal's palette, and (b) automatically a differentiation from the modal even at identical border *shape*.
+
+### Journey
+
+First sub-question that came up: should the color differ between inside-tmux and bare-shell contexts (review F11)? Inside tmux the preview frame nests inside whatever tmux pane the user is running Portal in (potentially next to tmux's own `pane-border-style` colors); bare shell, the frame is alone on screen.
+
+Decided: **single unified color**, not context-aware. Reasoning — context-aware styling would be Portal's first instance of "we render differently inside vs outside tmux," which is a pattern worth not introducing for a chrome accent. A single mid-luminance color reads acceptably in both contexts.
+
+Then four candidates were compared visually on Paper:
+
+- **Steel slate** (AdaptiveColor: `#5B6B7B` light / `#8B9CAE` dark) — sits in Portal's gray family with a slight blue tint; reads as chrome.
+- **Deeper saturated blue** (AdaptiveColor: `#3B5577` light / `#7B95BD` dark) — recognisably blue, slightly more deliberate.
+- **ANSI bright blue (Color("12"))** — bold, terminal-palette-inherited; reads as an active surface rather than chrome.
+- **ANSI dim blue (Color("4"))** — fails the contrast test on dark terminals.
+
+User preferred the deeper saturated blue — it reads more like "Portal painted this surface" than the steel slate's "Portal hinted at a frame," which fits the intent of *making preview visually unmistakable*.
+
+### Decision
+
+**`lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}`** — single unified color across inside-tmux and bare-shell contexts.
+
+Both variants sit at mid-luminance with a recognisable blue saturation. The light variant (`#3B5577`) is dark enough to be visible against pale terminal backgrounds; the dark variant (`#7B95BD`) is light enough to be visible against dark backgrounds. Neither competes with the existing accents — pink-magenta cursor (`212`) and green attached badge (`76`) are saturated in different hue families.
+
+This introduces a third accent color to Portal's palette, owned by preview chrome.
 
 Confidence: high.
 
