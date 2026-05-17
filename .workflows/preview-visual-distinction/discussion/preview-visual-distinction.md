@@ -380,6 +380,25 @@ Degenerate widths:
 
 All such tiny widths fall into tier 4 behaviour automatically because there is no room for chrome content under any tier.
 
+### Color application on the top edge
+
+Lipgloss's `BorderForeground(color)` colors only the border characters lipgloss renders (left edge, right edge, bottom edge). The hand-composed top edge needs the same color applied — otherwise three edges would render in the design blue and the top edge in default foreground.
+
+Decision: the top edge is composed in `View()` as **two stylings concatenated**:
+
+- **Border parts** (corner glyphs + `─` padding + `─` filler) — wrapped in `lipgloss.NewStyle().Foreground(adaptiveBlue).Render(…)` so they pick up the design color.
+- **Chrome content** — rendered with no explicit foreground, inheriting terminal default. This matches how the bottom help bar text renders today (`model.go:531-533` uses an explicit description color for sub-elements, but the chrome strip is conceptually a label, not a styled description). Chrome reads as legible terminal text against the blue-bordered surround.
+
+Final assembly at the View() call site:
+
+```
+styledBorder("╭─") + chromeContent + styledBorder(filler + "─╮")
+```
+
+where `styledBorder := lipgloss.NewStyle().Foreground(adaptiveBlue).Render`.
+
+Build-phase implication: the `composeChromeLine` pure function returns the *unstyled* chrome content string. Top-edge styling — border parts colored, chrome parts default — happens at the call site in `View()` where the final composition assembles. This keeps `composeChromeLine` pure and testable purely on content output, independent of color rendering.
+
 ### Rename `previewChromeHeight` to `previewFrameOverhead = 2`
 
 The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment "top border (carrying chrome) + bottom border." This names the magic 2 used in the resize math (`SetSize(msg.Width - 2, msg.Height - 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
