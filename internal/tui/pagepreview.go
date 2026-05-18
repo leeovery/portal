@@ -5,9 +5,32 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
+
+// verboseKeymap and compactKeymap are the two canonical keymap strings used by
+// the preview frame's chrome line. They are pinned to the spec's exact byte
+// content so tests catch unintentional drift loudly per
+// specification.md § Keymap glyphs > Constants. Verbose is the default form at
+// typical widths; compact is the cascade tier 3 compression (single-space
+// separated, no interpunct, 9 display cells). Token order matches across both
+// forms — `] [ ⇥ ⏎ ⎋` left-to-right — so a user resizing the terminal sees the
+// same sequence of keys with action labels added or removed.
+const (
+	verboseKeymap = "] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
+	compactKeymap = "] [ ⇥ ⏎ ⎋"
+)
+
+// previewBorderColor is the single unified adaptive colour applied to all four
+// edges of the preview frame (the three lipgloss-rendered edges plus the
+// hand-composed top edge's border parts) per specification.md § Border colour
+// and § Style sourcing. The name foregrounds the variable's role (border
+// colour for the preview frame) rather than its current hue, so a future hue
+// change does not produce a misleading identifier. Hex values are the design
+// target; lipgloss/termenv handles NO_COLOR and palette downgrade automatically.
+var previewBorderColor = lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}
 
 // previewChromeHeight is the number of lines occupied by the chrome line
 // rendered above the viewport. v1 uses a single header line; if chrome
