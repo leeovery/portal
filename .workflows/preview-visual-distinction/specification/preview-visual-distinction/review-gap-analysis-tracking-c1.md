@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-18
 cycle: 1
 phase: Gap Analysis
@@ -259,7 +259,7 @@ The spec defines `injectSGRResets` and says it runs "when wrapping `viewport.Vie
 This is borderline; a careful implementer reading both sections together will compose them correctly. But the View() line in the summary doesn't enumerate the SGR injector invocation.
 
 **Proposed Addition**:
-{To be discussed — make the SGR injector's invocation point in `View()` explicit in the code-shape section.}
+Update the file-scope summary's `View()` row to enumerate the three steps: pass viewport output through `injectSGRResets`, compose top edge, wrap with `lipgloss` frame using `previewBorderColor`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to the file-scope summary table.

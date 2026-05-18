@@ -429,7 +429,7 @@ Used in both the `lipgloss` border styling on the three rendered edges (via `Bor
 | `internal/tui/pagepreview.go` (chromeLine method)                  | Delete; replaced by `composeChromeLine` pure function        |
 | `internal/tui/pagepreview.go` (previewChromeHeight const)          | Rename to `previewFrameOverhead = 2`; update comment         |
 | `internal/tui/pagepreview.go` (Update — `tea.WindowSizeMsg` case)  | Add `viewport.SetSize(W−2, H−2)` + chrome recompute          |
-| `internal/tui/pagepreview.go` (View)                               | Compose top edge manually; wrap viewport content with frame  |
+| `internal/tui/pagepreview.go` (View)                               | Pass `viewport.View()` output through `injectSGRResets`, compose top edge manually, wrap with `lipgloss` frame using `previewBorderColor` |
 | `internal/tui/pagepreview.go` (NewPreviewModel)                    | Accept `width, height int`; initialise viewport + chrome     |
 | `internal/tui/pagepreview.go` (keymap constants)                   | Add `verboseKeymap` / `compactKeymap` constants              |
 | `internal/tui/pagepreview.go` (SGR injector)                       | Add `injectSGRResets` helper                                 |
