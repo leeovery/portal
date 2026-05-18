@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-18
 cycle: 2
 phase: Plan Integrity Review
@@ -122,7 +122,7 @@ Edge Cases entry (replacement):
   - The previous rows that read 'width 2 → ╭╮' / 'width 3 → ╭─╮' / 'width 4 → ╭──╮' were using the spec's outer-width convention (from § Top edge composition > Degenerate widths, where 'width' means outer terminal width) but the leftmost column of the threshold table is the function argument (inner width). Under the function-argument convention, those outer-width fixtures correspond to args 0, 1, 2.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Verified against `tick show tick-c90448` (live description) and spec lines 132-134 (Unit of measure: function arg = inner width, returned cells = width + 2) and 240-246 (Degenerate widths: "width 2: ╭╮" uses outer-terminal-width convention per the immediately-preceding Column layout paragraph at line 223).
 
 ---
@@ -150,7 +150,7 @@ Tightening the phase bullet to `width >= 0` removes the gap and matches task 1-4
 - [ ] `composeChromeLine` exists as a pure function in `internal/tui/pagepreview.go`, returns a single-row top-edge string (no embedded newlines) of display-cell width `width + 2` for every `width >= 0` (args 0 and 1 produce the minimum tier-4 frames `╭╮` and `╭─╮` respectively), and returns the empty string for `width < 0`. The `width` parameter is the inner frame width (`terminalWidth − 2`); the returned string has display-cell width `width + 2` (the outer terminal width).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -167,7 +167,7 @@ The `phase-1-tasks.md` file contains the cycle-0 task content and was not update
 
 No action required for plan integrity; flagged so the orchestrator can decide whether to refresh or remove the mirror at conclusion.
 
-**Resolution**: Pending (informational — no plan content change proposed)
+**Resolution**: Skipped (informational — no plan content change proposed; live tick database is authoritative)
 **Notes**: Out of scope for cycle-2 integrity remediation per the "Task scope only — check the plan as built" rule. Mentioned for completeness. Same finding as cycle 1-c2 finding 4 (carried forward unchanged).
 
 ---

@@ -12,7 +12,7 @@ approved_at: 2026-05-18
 
 **Acceptance**:
 - [ ] `pagePreview.View()` output contains rounded corners (`╭ ╮ ╰ ╯`) and all four edges are coloured via `previewBorderColor`.
-- [ ] `composeChromeLine` exists as a pure function in `internal/tui/pagepreview.go`, returns a single-row top-edge string (no embedded newlines) of display-cell width `width + 2` for every `width >= 2`, and returns the empty string for `width < 0`.
+- [ ] `composeChromeLine` exists as a pure function in `internal/tui/pagepreview.go`, returns a single-row top-edge string (no embedded newlines) of display-cell width `width + 2` for every `width >= 0` (args 0 and 1 produce the minimum tier-4 frames `╭╮` and `╭─╮` respectively), and returns the empty string for `width < 0`. The `width` parameter is the inner frame width (`terminalWidth − 2`); the returned string has display-cell width `width + 2` (the outer terminal width).
 - [ ] `composeChromeLine` selects the correct cascade tier — tier 1 (truncate with `…`), tier 2 (drop `· win: {name}` at the 8-cell minimum boundary), tier 3 (swap to `compactKeymap`), tier 4 (corners + `─` filler only) — verified by table-driven tests at threshold widths.
 - [ ] Window-name truncation operates in display cells (not bytes or runes), appends `…` only when truncation actually occurred, never produces mid-rune cuts, and is verified across ASCII, CJK, emoji (including ZWJ sequences), and combining-mark glyph classes.
 - [ ] Package-level constants `verboseKeymap = "] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"` and `compactKeymap = "] [ ⇥ ⏎ ⎋"` exist with the exact spec-defined byte content; tests assert against these constants by literal bytes.
