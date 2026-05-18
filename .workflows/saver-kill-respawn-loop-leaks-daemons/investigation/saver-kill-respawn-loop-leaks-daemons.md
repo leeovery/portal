@@ -85,23 +85,170 @@ The 2026-05-11 work unit **`multiple-state-daemons-running-concurrently`** (comp
 
 ### Code Trace
 
-*To be populated during Step 5 (Code Analysis).*
+**Bootstrap step 4 entry — `EnsurePortalSaverVersion` (`internal/tmux/portal_saver.go:249-259`):**
+
+```go
+stored, readErr := state.ReadVersionFile(stateDir)
+if portalSaverVersionMismatch(stored, currentVersion, readErr) && c.HasSession(PortalSaverName) {
+    _ = killSaverAndWaitForDaemonFn(c, stateDir)
+}
+return BootstrapPortalSaver(c, stateDir)
+```
+
+The mismatch predicate (`portalSaverVersionMismatch`, lines 265-276) returns `true` on **any** `readErr != nil`, including `ErrVersionFileAbsent`:
+
+```go
+func portalSaverVersionMismatch(stored, currentVersion string, readErr error) bool {
+    if readErr != nil {                                     // ← absent file counts as mismatch
+        return true
+    }
+    if currentVersion == "" || currentVersion == "dev" { return true }
+    if stored == "" || stored == "dev" { return true }
+    return stored != currentVersion
+}
+```
+
+The function comment (line 232-241) makes this intentional: *"Read error from state.ReadVersionFile (including ErrVersionFileAbsent — first-ever bootstrap or user-initiated state-dir cleanup)"*. The design assumed daemon.version is reliably present when a healthy daemon runs, so its absence implies the daemon is gone and a recycle is safe. Three properties break that assumption.
+
+**Kill barrier — `killSaverAndWaitForDaemon` (`internal/tmux/portal_saver.go:150-186`):**
+
+```go
+priorPID, readErr := killBarrierReadPID(stateDir)
+if readErr != nil { _ = c.KillSession(PortalSaverName); return nil }
+if !killBarrierIsAlive(priorPID) { _ = c.KillSession(PortalSaverName); return nil }
+_ = c.KillSession(PortalSaverName)
+// poll IsAlive every 50ms, give up after killBarrierTimeout (5s)
+for range ticker.C {
+    if !killBarrierIsAlive(priorPID) { return nil }
+    if !time.Now().Before(deadline) {
+        killBarrierLogger.Warn(state.ComponentBootstrap,
+            "prior daemon (pid=%d) did not exit within %v", priorPID, killBarrierTimeout)
+        return nil
+    }
+}
+```
+
+The barrier kills `_portal-saver` (which delivers SIGHUP to the pane process), then polls. If the daemon doesn't exit in 5s, it proceeds anyway and the orphan continues running.
+
+**Daemon SIGHUP handler — `cmd/state_daemon.go:303-307`:**
+
+```go
+sigCh := make(chan os.Signal, 1)
+signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
+go func() { <-sigCh; cancel() }()
+```
+
+SIGHUP cancels the daemon's context. But the run loop (line 70-81) is:
+
+```go
+for {
+    select {
+    case <-ticker.C:
+        tick(deps)               // ← runs synchronously; no ctx awareness inside
+    case <-ctx.Done():
+        return daemonShutdownFunc(deps)
+    }
+}
+```
+
+`tick()` runs synchronously inside the `ticker.C` arm. `ctx.Done()` is only reachable **between** ticks, never during one. The expensive work inside `tick → captureAndCommit` (line 132-159) iterates every live pane and calls `state.CaptureAndHashPane` (which invokes `tmux capture-pane -e -p -S -` — unbounded scrollback) for each. On this user's profile (23 panes × ~1.2MB average rendered text), measured wall time exceeds 5s for the cold sweep — wider than `killBarrierTimeout`.
+
+**Lock-contention cascade — `cmd/state_daemon.go:247-271`:**
+
+```go
+lockFile, err := acquireDaemonLock(dir)
+if err != nil {
+    if errors.Is(err, state.ErrDaemonLockHeld) {
+        logger.Warn(state.ComponentDaemon, "another daemon holds the lock; exiting")
+        return nil                              // ← early exit; pidfile/version NOT written
+    }
+    // ... non-EWOULDBLOCK fatal
+}
+daemonLockFile = lockFile
+state.WritePIDFile(dir, os.Getpid())
+state.WriteVersionFile(dir, version)
+```
+
+A newly-spawned daemon that loses the lock race returns `nil` (clean exit) **before writing daemon.pid or daemon.version**. Its `RunE` returns, the cobra command exits, the pane process terminates. Tmux's `_portal-saver` session is destroyed because its initial pane process has exited (`destroy-unattached=off` doesn't save a session whose only pane has exited normally — that's a different lifecycle axis).
+
+**The immediately-following `SetSessionOption`** (`internal/tmux/portal_saver.go:221`):
+
+```go
+if err := c.SetSessionOption(PortalSaverName, "destroy-unattached", "off"); err != nil {
+    return fmt.Errorf("bootstrap _portal-saver: set destroy-unattached: %w", err)
+}
+```
+
+Runs against `_portal-saver`, which has just been destroyed by the lock-loser's pane exit. tmux returns `exit status 1: no such session: _portal-saver`. Surfaced as the visible `step 4 (EnsureSaver) failed` warning.
 
 ### Root Cause
 
-*To be populated during Step 6 (Root Cause Synthesis).*
+The bug is the **conjunction of two defects** in the saver-bootstrap and daemon-startup pair, plus a third open question whose mechanism is unknown but whose user-visible effect is neutralised by fixing the other two.
+
+**Defect 1 — Version-mismatch false positive when `daemon.version` is absent.**
+
+`portalSaverVersionMismatch` collapses three distinct conditions into a single "mismatch" result: (a) genuine version disagreement (release upgrade), (b) dev-build workflows (current or stored is `dev`/empty), and (c) "file absent". Case (c) is the false positive: file absence does not imply version mismatch; it merely means "we cannot confirm the version, but the daemon may still be perfectly healthy". `EnsurePortalSaverVersion` makes no alive-check before the kill decision — so any condition that nukes `daemon.version` while leaving the daemon alive triggers an unnecessary kill on every subsequent bootstrap.
+
+**Defect 2 — Daemon SIGHUP unresponsive within the 5s kill-barrier window for users with non-trivial scrollback.**
+
+The synchronous `tick()` call inside the ticker's `select` arm means `ctx.Done()` is structurally unreachable during a tick. The prior-bug fix (`multiple-state-daemons-running-concurrently`, 2026-05-11) sized `killBarrierTimeout` at 5s based on "3.9s cold sweep + margin"; the user's profile has since grown past that bound. The kill barrier's polling loop is correct, but the **daemon side of the contract** — "exit promptly on SIGHUP" — is violated for any user whose per-tick wall time exceeds the timeout.
+
+When the barrier gives up early, the new daemon spawns, immediately collides with the still-held lock, exits cleanly, destroys the just-created `_portal-saver` pane process, and triggers the `SetSessionOption` "no such session" cascade.
+
+**Defect 3 (open sub-question) — Why does `daemon.version` keep disappearing?**
+
+Code analysis enumerated every production file-removal path that could touch state files:
+
+| Path | Removes | Production reachability |
+|---|---|---|
+| `cmd/state_cleanup.go:155` `os.RemoveAll(dir)` | entire state dir | Only via explicit `portal state cleanup --purge` — user-confirmed not invoked |
+| `cmd/state_daemon.go:117, 241` | `save.requested` only | Daemon-internal; doesn't touch daemon.version |
+| `cmd/state_hydrate.go:128, 268` | per-pane FIFO files | hydrate helper; doesn't touch daemon.version |
+| `internal/state/logger.go:182` | `portal.log.old` only | log rotation path |
+| `internal/state/commit.go:128` | scrollback bin files | dedup cleanup; scrollback-only |
+| `internal/state/fifo_sweep.go:47` | per-pane FIFO files | bootstrap sweep; doesn't touch daemon.version |
+
+**No production code path removes `daemon.version` individually.** The disappearance therefore originates either (a) from an external process the user is not aware of, (b) from a dev-build / test path that escaped its sandbox, or (c) from a `--purge` invocation that was forgotten. The investigation cannot pin this without reproducing the disappearance in instrumented conditions.
+
+**Critically, Defect 3 does not need to be fixed for the user-visible symptom to disappear.** Fixing Defect 1 (treating `ErrVersionFileAbsent` + healthy alive-check as "no kill needed") makes the kill decision resilient to daemon.version's transient absence regardless of its cause. The defect can be relegated to a documentation note and a follow-up investigation if it recurs.
 
 ### Contributing Factors
 
-*To be populated.*
+- **`captureAndCommit`'s per-pane cost grows with rendered scrollback size.** `state.CaptureAndHashPane` invokes `tmux capture-pane -e -p -S -` unconditionally for the hash check (dedup avoids the file write only, not the capture call). At 23 panes × ~1.2MB rendered text per pane, the cold sweep wall time exceeds the prior fix's 5s window.
+- **`tick()` is structurally non-interruptible.** Even between per-pane iterations there is no `ctx.Done()` poll — the only cancellation observation point is the outer `select` arm.
+- **`EnsurePortalSaverVersion` does not consult `BootstrapAliveCheck` before the version-mismatch decision.** A healthy daemon's mere existence is irrelevant to the version-mismatch branch — it asks "are the version strings equal?" without first asking "is there even a daemon to recycle?"
+- **Lock-loser daemons don't write `daemon.version` before exiting.** Combined with whatever's nuking the file in Defect 3, this widens the window during which the file is absent on disk.
+- **The version-mismatch comment encodes the wrong invariant as intentional.** Line 236-237 of portal_saver.go explicitly says ErrVersionFileAbsent counts as mismatch, "for first-ever bootstrap or user-initiated state-dir cleanup." The comment is a design choice that ages badly once the file proves not to be reliably present.
 
 ### Why It Wasn't Caught
 
-*To be populated.*
+- **The prior fix (`multiple-state-daemons-running-concurrently`, 2026-05-11) shipped with a 5s `killBarrierTimeout` sized to the test author's measured worst case (3.9s).** No knob was provided for users with larger scrollback profiles, and the timing isn't measured/exposed in any way that would surface "your sweep is getting close to the bound."
+- **`portalSaverVersionMismatch`'s test surface (`internal/tmux/portal_saver_test.go`) asserts the false-positive behaviour as correct.** The unit test for "absent version file" pins the current return-true behaviour — codifying the bug as the contract.
+- **No alive-daemon-with-missing-version-file integration test exists.** The healthy-but-missing-marker case isn't modelled. The closest integration test (`portal_saver_integration_test.go`) verifies kill-respawn under explicit version mismatch, not under absent version.
+- **The orphan-leak symptom is invisible until you `ps | grep portal`.** The kill-respawn churn is silent in the user's terminal — only portal.log captures the WARN cascade, and the user hadn't been opening portal.log.
+- **The scrollback-size-vs-tick-time relationship was characterised in the prior spec but not turned into a regression guard.** A regression test like "fixture pane with N MB of scrollback, daemon must exit within X seconds of SIGHUP" doesn't exist.
+- **Defect 3's invisibility is the deepest gap.** If `daemon.version` is silently disappearing for some reason outside portal's code paths, no portal test or check would catch it. The Defect 1 fix makes this irrelevant — but the underlying question "what's deleting it?" deserves a follow-up.
 
 ### Blast Radius
 
-*To be populated.*
+**Directly affected:**
+
+- `internal/tmux/portal_saver.go` — `EnsurePortalSaverVersion`, `portalSaverVersionMismatch`. Decision logic for the kill branch.
+- `cmd/state_daemon.go` — `defaultDaemonRun`, `tick`, `captureAndCommit`. SIGHUP responsiveness depends on making the per-pane loop ctx-aware.
+- `internal/state/capture.go` — `CaptureStructure` and the per-pane callers. If we add per-pane ctx checks, they live here.
+- `portal.log` — three WARN lines per bootstrap pollute the diagnostic record, making it harder to spot real warnings.
+
+**Potentially affected:**
+
+- **Save reliability between portal invocations.** Every cycle leaves no live `_portal-saver` session, so no daemon is running to capture state until the next bootstrap. Saves are silently paused.
+- **Memory consumption.** Orphan daemons accumulate over uptime; on the affected machine three are alive (the oldest from 5 days ago), each holding ~40MB resident.
+- **Startup latency.** ~520ms per bootstrap is consistently wasted on the kill-respawn block; for users who run `portal` frequently this aggregates.
+
+**Not affected:**
+
+- The structural-index merge logic — orthogonal layer, already addressed by the 2026-05-09 daemon-merge fix.
+- Per-pane scrollback dump correctness — separate code path; affected only by "are saves running at all" not by "how saves are computed."
+- The hydrate cascade — different timing, different markers, different files. Independent.
 
 ---
 
