@@ -198,10 +198,10 @@ Tier 1 truncates "the window name." The spec doesn't say where this string comes
 This affects test fixture construction (Surface 5 says "a fixed window-name fixture" — implementer needs to know where to inject it) and the `composeChromeLine` signature (finding #4).
 
 **Proposed Addition**:
-{To be discussed — name the model field / accessor that yields the current window name.}
+Source the window name from `m.currentGroup().WindowName` (which returns `m.groups[m.windowIdx].WindowName`). Counts come from `len(m.groups)` and `len(m.currentGroup().Panes)`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Chrome line content* > *Segments* (named field for each segment) and *Resize behaviour* (View()'s composeChromeLine invocation uses the concrete accessors).
 
 ---
 

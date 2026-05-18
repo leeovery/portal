@@ -69,9 +69,9 @@ The chrome line is the metadata strip that rides on the frame's top edge. It is 
 
 ### Segments (left to right)
 
-1. **Window indicator** — `Window M of N`
-2. **Pane indicator** — `Pane X of Y`
-3. **Window name** — `win: {name}`
+1. **Window indicator** — `Window M of N` (`M = m.windowIdx + 1`, `N = len(m.groups)`)
+2. **Pane indicator** — `Pane X of Y` (`X = m.paneIdx + 1`, `Y = len(m.currentGroup().Panes)`)
+3. **Window name** — `win: {name}` (sourced from `m.currentGroup().WindowName` — `currentGroup()` returns `m.groups[m.windowIdx]`, a `tmux.WindowGroup`)
 4. **Keymap** — see *Keymap glyphs* below
 
 Segments 1–3 are joined by `·` (middle dot, U+00B7) with spaces on either side. The keymap is separated from the preceding segments by whitespace padding so it visually right-aligns within the available chrome budget at wide widths and compresses toward the centre at narrow widths.
@@ -332,7 +332,7 @@ Bubble Tea emits one `tea.WindowSizeMsg` per terminal-resize signal. Dragging a 
 1. Record the new dimensions on the model (`m.width`, `m.height`).
 2. Call `m.viewport.SetSize(max(0, msg.Width − 2), max(0, msg.Height − 2))` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows). The `max(0, …)` clamps guard against the degenerate case where `msg.Width` or `msg.Height` is 0 or 1 — `viewport.SetSize` with negative arguments is unspecified, so the clamp is mandatory at every call site.
 
-`View()` then **recomputes the chrome line every tick** via `composeChromeLine(m.width − 2, m.windowIdx, m.windowCount, m.paneIdx, m.paneCount, m.windowName)` and composes the frame. No cached chrome field — recomputing per tick is cheap (pure function, no I/O), and this avoids the alternative of having to invalidate a cache from every navigation key handler (`]`, `[`, `⇥`) in addition to the resize handler. The single per-tick recompute covers resize, window/pane navigation, and any other model state change that affects chrome content with no per-handler bookkeeping.
+`View()` then **recomputes the chrome line every tick** via `composeChromeLine(m.width − 2, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().Panes), m.currentGroup().WindowName)` and composes the frame. No cached chrome field — recomputing per tick is cheap (pure function, no I/O), and this avoids the alternative of having to invalidate a cache from every navigation key handler (`]`, `[`, `⇥`) in addition to the resize handler. The single per-tick recompute covers resize, window/pane navigation, and any other model state change that affects chrome content with no per-handler bookkeeping.
 
 `composeChromeLine` is a pure function with no I/O. `viewport.SetSize` does not reallocate content — it adjusts the visible window over an immutable buffer. Preview's structural enumeration is captured at preview-open and is **not** re-fetched on resize. The per-tick cost is small; debouncing would only hurt (dropped frames would make chrome visibly lag resize, and timer state would add complexity for a problem that doesn't exist). Bubble Tea's runtime already coalesces redundant `View()` calls at the framerate level.
 
