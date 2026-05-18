@@ -158,7 +158,7 @@ generate_release_notes() {
     return 1
   fi
 
-  code_diff=$(git diff "$base_ref..$target_ref" 2> /dev/null || echo "")
+  code_diff=$(git diff "$base_ref..$target_ref" 2> /dev/null | tr -d '\0' || echo "")
 
   # Build prompt for Claude
   local prompt="Generate a release commit message for version v${version}.
