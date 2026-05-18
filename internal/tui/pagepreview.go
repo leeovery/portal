@@ -301,9 +301,13 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
-		width:      width,
-		height:     height,
+		// Constructor exception: m.innerWidth() / m.innerHeight() are not
+		// available inside the composite literal because m.width / m.height
+		// have not yet been assigned. The arithmetic intentionally mirrors
+		// those methods (max(0, dim - previewFrameOverhead)).
+		viewport: viewport.New(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
+		width:    width,
+		height:   height,
 	}
 
 	// Single dispatcher shared with cycle handlers (Tab, ], [) so the three
@@ -351,6 +355,22 @@ func (m previewModel) currentPaneKey() string {
 // trivial ("Window 1 of 1 / Pane 1 of 1").
 func (m previewModel) degenerate() bool {
 	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
+}
+
+// innerWidth returns the inner width available inside the preview frame —
+// the model's total width minus previewFrameOverhead, clamped to ≥ 0. Single
+// source of truth for the inner-dimension arithmetic that is otherwise
+// duplicated across the WindowSizeMsg handler, the View() chrome composer,
+// and the test helpers driving chrome at the model's actual width.
+func (m previewModel) innerWidth() int {
+	return max(0, m.width-previewFrameOverhead)
+}
+
+// innerHeight returns the inner height available inside the preview frame —
+// the model's total height minus previewFrameOverhead, clamped to ≥ 0. Peer
+// of innerWidth; see that method's doc for rationale.
+func (m previewModel) innerHeight() int {
+	return max(0, m.height-previewFrameOverhead)
 }
 
 // readFocusedPaneIntoViewport performs the synchronous tail-N read for the
@@ -449,8 +469,8 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		// re-anchor via GotoBottom and Home/End jumps are explicit.
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = max(0, msg.Width-previewFrameOverhead)
-		m.viewport.Height = max(0, msg.Height-previewFrameOverhead)
+		m.viewport.Width = m.innerWidth()
+		m.viewport.Height = m.innerHeight()
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -539,7 +559,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 // content propagate without per-handler cache invalidation.
 func (m previewModel) View() string {
 	left, chrome, right := composeChromeLineParts(
-		m.width-previewFrameOverhead,
+		m.innerWidth(),
 		m.windowIdx, len(m.groups),
 		m.paneIdx, len(m.currentGroup().PaneIndices),
 		m.currentGroup().WindowName,

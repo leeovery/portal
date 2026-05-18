@@ -48,7 +48,7 @@ func chromeLineForTest(m previewModel) string {
 // width — chromeLineForTest's fixed inner width of 200 would compose a
 // different tier and the comparison would fail.
 func chromeLineAtModelWidth(m previewModel) string {
-	return composeChromeLine(m.width-previewFrameOverhead, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+	return composeChromeLine(m.innerWidth(), m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
 }
 
 // newFramePreviewModel constructs a single-window single-pane previewModel
