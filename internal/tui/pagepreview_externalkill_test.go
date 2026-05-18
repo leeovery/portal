@@ -385,12 +385,7 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 	// the same cascade tier the renderer used, not chromeLineForTest's
 	// fixed-width 200 (a different cascade tier).
 	for i, mm := range models {
-		want := composeChromeLine(
-			mm.width-previewFrameOverhead,
-			mm.windowIdx, len(mm.groups),
-			mm.paneIdx, len(mm.currentGroup().PaneIndices),
-			mm.currentGroup().WindowName,
-		)
+		want := chromeLineAtModelWidth(mm)
 		if !strings.Contains(stripANSI(mm.View()), want) {
 			t.Errorf("step %d: View() did not contain chrome line — composition broken", i)
 		}

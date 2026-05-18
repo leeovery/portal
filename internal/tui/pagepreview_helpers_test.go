@@ -41,6 +41,16 @@ func chromeLineForTest(m previewModel) string {
 	return composeChromeLine(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
 }
 
+// chromeLineAtModelWidth composes the chrome line at the model's actual
+// inner width (m.width − previewFrameOverhead), matching how View()
+// renders chrome at runtime. Use this when asserting against View()
+// output, where the rendered cascade tier depends on the model's actual
+// width — chromeLineForTest's fixed inner width of 200 would compose a
+// different tier and the comparison would fail.
+func chromeLineAtModelWidth(m previewModel) string {
+	return composeChromeLine(m.width-previewFrameOverhead, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+}
+
 // newFramePreviewModel constructs a single-window single-pane previewModel
 // with the requested window name and ScrollbackReader payload, at the
 // canonical 80x24 dimensions used across these frame tests.

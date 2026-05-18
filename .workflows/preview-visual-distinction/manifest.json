@@ -90,7 +90,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "preview-visual-distinction-2-3",
+          "current_task": "preview-visual-distinction-2-4",
           "completed_tasks": [
             "preview-visual-distinction-1-1",
             "preview-visual-distinction-1-2",
@@ -102,7 +102,8 @@
             "preview-visual-distinction-1-8",
             "preview-visual-distinction-1-9",
             "preview-visual-distinction-2-1",
-            "preview-visual-distinction-2-2"
+            "preview-visual-distinction-2-2",
+            "preview-visual-distinction-2-3"
           ],
           "completed_phases": [
             1

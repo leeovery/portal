@@ -35,12 +35,7 @@ func TestPreviewView_RendersChromeLineAboveViewportContent(t *testing.T) {
 	// previewFrameOverhead inner), not chromeLineForTest's fixed-width 200.
 	// Compose at the same inner width as View() does so the comparison is
 	// against the actually rendered cascade tier.
-	wantChrome := composeChromeLine(
-		m.width-previewFrameOverhead,
-		m.windowIdx, len(m.groups),
-		m.paneIdx, len(m.currentGroup().PaneIndices),
-		m.currentGroup().WindowName,
-	)
+	wantChrome := chromeLineAtModelWidth(m)
 	gotFirst := stripANSI(lines[0])
 	if gotFirst != wantChrome {
 		t.Errorf("View() first line = %q; want chrome line %q", gotFirst, wantChrome)
