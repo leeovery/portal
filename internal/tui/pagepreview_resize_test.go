@@ -1,0 +1,70 @@
+package tui
+
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/tmux"
+)
+
+// TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize pins
+// the task 1-7 resize contract: tea.WindowSizeMsg records msg.Width/msg.Height
+// on m.width/m.height and calls m.viewport.SetSize with both dimensions
+// reduced by previewFrameOverhead (= 2), clamped non-negative. The frame
+// occupies one row at the top and one at the bottom, plus one column at the
+// left and one at the right, so the inner viewport surface is
+// (msg.Width − 2) × (msg.Height − 2) per § Resize behaviour.
+func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *testing.T) {
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: nil, err: nil}
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
+	if !ok {
+		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
+	}
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	if updated.width != 100 {
+		t.Errorf("expected m.width=100 recorded on resize, got %d", updated.width)
+	}
+	if updated.height != 30 {
+		t.Errorf("expected m.height=30 recorded on resize, got %d", updated.height)
+	}
+	if updated.viewport.Width != 100-previewFrameOverhead {
+		t.Errorf("expected viewport.Width=%d (msg.Width − previewFrameOverhead), got %d", 100-previewFrameOverhead, updated.viewport.Width)
+	}
+	if updated.viewport.Height != 30-previewFrameOverhead {
+		t.Errorf("expected viewport.Height=%d (msg.Height − previewFrameOverhead), got %d", 30-previewFrameOverhead, updated.viewport.Height)
+	}
+}
+
+// TestPreviewWindowSizeMsg_ClampsViewportDimensionsNonNegative pins the
+// degenerate-terminal contract: viewport.SetSize with negative arguments is
+// unspecified, so the WindowSizeMsg handler must clamp both dimensions to
+// zero at the lower bound. msg.Width=1, msg.Height=0 produces viewport
+// dimensions (0, 0) — the clamp boundary per § Resize behaviour.
+func TestPreviewWindowSizeMsg_ClampsViewportDimensionsNonNegative(t *testing.T) {
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: nil, err: nil}
+	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
+	if !ok {
+		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
+	}
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 1, Height: 0})
+
+	if updated.viewport.Width != 0 {
+		t.Errorf("expected viewport.Width clamped to 0 for msg.Width=1, got %d", updated.viewport.Width)
+	}
+	if updated.viewport.Height != 0 {
+		t.Errorf("expected viewport.Height clamped to 0 for msg.Height=0, got %d", updated.viewport.Height)
+	}
+}

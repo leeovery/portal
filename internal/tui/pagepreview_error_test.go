@@ -316,8 +316,8 @@ func TestPreviewError_ChromeCountsUnaffectedByErrorBranch(t *testing.T) {
 	// chromeLine() under the error branch must be byte-identical to the
 	// chromeLine() of an equivalent model whose reader returned bytes — chrome
 	// is a pure function of cached groups + windowIdx + paneIdx.
-	got := stripANSI(m.chromeLine())
-	expected := stripANSI(newPreviewModelForHelpers("work", groups, 0, 0).chromeLine())
+	got := stripANSI(chromeLineForTest(m))
+	expected := stripANSI(chromeLineForTest(newPreviewModelForHelpers("work", groups, 0, 0)))
 	if got != expected {
 		t.Errorf("chromeLine() under error = %q; want %q (identical to non-error shape)", got, expected)
 	}

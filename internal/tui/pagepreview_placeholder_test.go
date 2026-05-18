@@ -97,12 +97,12 @@ func TestPreviewPlaceholder_ChromeCountsRemainCorrectWhenPlaceholderShown(t *tes
 		t.Fatalf("expected ok=true, got false")
 	}
 
-	chrome := stripANSI(m.chromeLine())
+	chrome := stripANSI(chromeLineForTest(m))
 
 	// chromeLine() must produce identical output to the non-placeholder shape
 	// because chrome is a pure function of the cached groups + windowIdx +
 	// paneIdx, not of viewport content.
-	expected := stripANSI(newPreviewModelForHelpers("work", groups, 0, 0).chromeLine())
+	expected := stripANSI(chromeLineForTest(newPreviewModelForHelpers("work", groups, 0, 0)))
 	if chrome != expected {
 		t.Errorf("chromeLine() under placeholder = %q; want %q (identical to non-placeholder shape)", chrome, expected)
 	}

@@ -27,6 +27,20 @@ func newPreviewModelForHelpers(session string, groups []tmux.WindowGroup, window
 	}
 }
 
+// chromeLineForTest is the test-only shim that replaced the deleted
+// chromeLine() method on previewModel. Tests asserting on chrome content
+// call this against a model; the helper feeds the model's structural
+// fields into composeChromeLine at a fixed inner width of 200, well above
+// the cascade tier-1 threshold so the full verbose chrome (counters +
+// "win: {name}" segment + verbose keymap) renders for any reasonable
+// window-name length. Substring assertions across pre-existing tests
+// ("Window M of N", "Pane X of Y", window name, keymap action words via
+// the verbose form) all hit at this width. Tests that need to probe other
+// cascade tiers call composeChromeLine directly with a tier-specific width.
+func chromeLineForTest(m previewModel) string {
+	return composeChromeLine(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+}
+
 func TestPreviewModel_currentGroup_ReturnsCachedWindowGroupAtWindowIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},

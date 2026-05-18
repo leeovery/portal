@@ -353,40 +353,6 @@ func (m previewModel) degenerate() bool {
 	return len(m.groups) == 1 && len(m.groups[0].PaneIndices) == 1
 }
 
-// chromeLine renders the single-line chrome floor described in
-// § Multi-pane Rendering Shape > Chrome Floor: window/pane ordinal
-// counters, the focused window's name, and visible cycle-key hints.
-//
-// Counters are 1-based ordinals — wOrdinal in 1..len(groups), pOrdinal in
-// 1..len(currentGroup().PaneIndices) — derived from slice position, not
-// the raw tmux WindowIndex / PaneIndices values. Under non-contiguous
-// window_index (e.g. 0,2,5) or pane-base-index 1, this preserves the
-// "1..N as the user cycles, never the raw index" contract per
-// § Multi-pane Rendering Shape > Counter semantics. Window name is
-// rendered verbatim — pipe handling and other escaping is the
-// enumeration layer's responsibility.
-//
-// Pure: no I/O, no enumerator / reader calls. Wired into View() by the
-// build-phase task that follows; this method is callable in isolation
-// from tests and produces the same string regardless of mid-flight model
-// state on enumerator/reader.
-//
-// Wording deliberately excludes liveness-implying tokens
-// ("live", "now showing", "realtime", "current command", etc.) per
-// § Source of Preview Bytes > Surface label honesty: preview is a
-// snapshot, not a live tail.
-func (m previewModel) chromeLine() string {
-	wTotal := len(m.groups)
-	pTotal := len(m.currentGroup().PaneIndices)
-	wOrdinal := m.windowIdx + 1
-	pOrdinal := m.paneIdx + 1
-	windowName := m.currentGroup().WindowName
-	return fmt.Sprintf(
-		"Window %d of %d · Pane %d of %d · win: %s    ] next win · [ prev win · tab next pane · enter attach · esc back",
-		wOrdinal, wTotal, pOrdinal, pTotal, windowName,
-	)
-}
-
 // readFocusedPaneIntoViewport performs the synchronous tail-N read for the
 // currently-focused pane and translates the ScrollbackReader.Tail (bytes, err)
 // outcome to viewport content, anchored at scroll-tail. Shared by every
@@ -475,9 +441,15 @@ type previewSessionsRefreshedMsg struct {
 func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// bubbles@v1.0.0's viewport.Model does not expose SetSize — the
+		// spec's `viewport.SetSize(W, H)` lowers to direct field assignment
+		// here. Semantically equivalent for the resize contract (adjust the
+		// visible window over the immutable buffer); YOffset auto-clamping
+		// is not observable in the preview's usage because cycle handlers
+		// re-anchor via GotoBottom and Home/End jumps are explicit.
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width
+		m.viewport.Width = max(0, msg.Width-previewFrameOverhead)
 		m.viewport.Height = max(0, msg.Height-previewFrameOverhead)
 		return m, nil
 	case tea.KeyMsg:
@@ -553,12 +525,12 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 	return m, cmd
 }
 
-// View returns the chrome line composed vertically above the embedded
-// viewport contents. Chrome on top, viewport below — single newline
-// separator. Header-on-top is the build-phase choice (spec § Open Items >
-// Chrome Floor defers placement); only previewFrameOverhead and this
-// orientation change if footer is later preferred. Pinned by tests so
-// drift is caught loudly.
+// View is a temporary stub returning the bare viewport content with no
+// frame and no chrome. TODO(task 1-8): replace with the full painted-frame
+// composition (lipgloss rounded border + composeChromeLine on the top edge
+// + SGR-reset injection on the viewport rows). Between tasks 1-7 and 1-8
+// the preview renders without chrome — this is the intentional atomic
+// refactor seam.
 func (m previewModel) View() string {
-	return m.chromeLine() + "\n" + m.viewport.View()
+	return m.viewport.View()
 }

@@ -39,9 +39,9 @@ func TestPreviewChromeLine_EnterAttachTokenByteIdenticalAcrossViewportStates(t *
 			if !ok {
 				t.Fatalf("expected ok=true on construction, got false")
 			}
-			got := stripANSI(m.chromeLine())
+			got := stripANSI(chromeLineForTest(m))
 
-			if !strings.Contains(got, "· tab next pane · enter attach · esc back") {
+			if !strings.Contains(got, "· ⇥ next pane · ⏎ attach · ⎋ back") {
 				t.Errorf("chromeLine() = %q; missing canonical enter-attach segment", got)
 			}
 

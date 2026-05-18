@@ -192,14 +192,14 @@ func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *test
 	models := driveKilledSessionSequence(m)
 
 	// Initial chrome — open-time enumeration shape.
-	initialChrome := stripANSI(m.chromeLine())
+	initialChrome := stripANSI(chromeLineForTest(m))
 	if !strings.Contains(initialChrome, "Window 1 of 2") || !strings.Contains(initialChrome, "Pane 1 of 2") {
 		t.Errorf("initial chrome lost open-time totals: %q", initialChrome)
 	}
 
 	// Per-step chrome — never reflect the post-open shape.
 	for i, mm := range models {
-		chrome := stripANSI(mm.chromeLine())
+		chrome := stripANSI(chromeLineForTest(mm))
 		if strings.Contains(chrome, "REENUMERATED") {
 			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, chrome)
 		}
@@ -217,7 +217,7 @@ func TestPreviewExternalKill_ChromeStableWhenBinFilesDisappearMidPreview(t *test
 	// lands us on (windowIdx=1, paneIdx=0), so chrome should read
 	// "Window 2 of 2" / "Pane 1 of 2" with the "of N" totals unchanged from
 	// the at-open enumeration.
-	finalChrome := stripANSI(models[len(models)-1].chromeLine())
+	finalChrome := stripANSI(chromeLineForTest(models[len(models)-1]))
 	if !strings.Contains(finalChrome, "Window 2 of 2") {
 		t.Errorf("final chrome must show ordinal Window 2 (from windowIdx=1) with preserved 'of 2' total; got: %q", finalChrome)
 	}
@@ -385,7 +385,7 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 		// View() composes chromeLine() and viewport.View() internally; if
 		// any of the three would panic, the contains-check below would
 		// not be reached. The assertion doubles as the panic surface.
-		if !strings.Contains(stripANSI(mm.View()), stripANSI(mm.chromeLine())) {
+		if !strings.Contains(stripANSI(mm.View()), stripANSI(chromeLineForTest(mm))) {
 			t.Errorf("step %d: View() did not contain chromeLine() — composition broken", i)
 		}
 	}

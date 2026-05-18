@@ -31,7 +31,7 @@ func TestPreviewView_RendersChromeLineAboveViewportContent(t *testing.T) {
 		t.Fatalf("View() returned no lines: %q", out)
 	}
 
-	wantChrome := stripANSI(m.chromeLine())
+	wantChrome := stripANSI(chromeLineForTest(m))
 	gotFirst := stripANSI(lines[0])
 	if gotFirst != wantChrome {
 		t.Errorf("View() first line = %q; want chrome line %q", gotFirst, wantChrome)
@@ -49,8 +49,9 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	if updated.viewport.Width != 120 {
-		t.Errorf("expected viewport.Width=120, got %d", updated.viewport.Width)
+	wantWidth := 120 - previewFrameOverhead
+	if updated.viewport.Width != wantWidth {
+		t.Errorf("expected viewport.Width=%d (msg.Width - previewFrameOverhead), got %d", wantWidth, updated.viewport.Width)
 	}
 	wantHeight := 40 - previewFrameOverhead
 	if updated.viewport.Height != wantHeight {
@@ -75,23 +76,23 @@ func TestPreviewView_ChromeRowCountConstantAcrossTabAndBracketCycles(t *testing.
 		return strings.Count(s, "\n") + 1
 	}
 
-	before := chromeLineCount(m.chromeLine())
+	before := chromeLineCount(chromeLineForTest(m))
 
 	// Tab → next pane within current window.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if got := chromeLineCount(m.chromeLine()); got != before {
+	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after Tab: before=%d after=%d", before, got)
 	}
 
 	// `]` → next window.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	if got := chromeLineCount(m.chromeLine()); got != before {
+	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after ]: before=%d after=%d", before, got)
 	}
 
 	// `[` → previous window.
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
-	if got := chromeLineCount(m.chromeLine()); got != before {
+	if got := chromeLineCount(chromeLineForTest(m)); got != before {
 		t.Errorf("chrome line count changed after [: before=%d after=%d", before, got)
 	}
 }

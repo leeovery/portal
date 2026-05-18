@@ -116,7 +116,7 @@ func TestPreviewChromeStability_ChromeLineAfterEachCycleReflectsOpenTimeCachedGr
 	// 3 panes per window. The post-open shape ("REENUMERATED" / 1x1) must
 	// never appear.
 	for i, mm := range models {
-		line := mm.chromeLine()
+		line := chromeLineForTest(mm)
 		if strings.Contains(line, "REENUMERATED") {
 			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, line)
 		}
@@ -154,8 +154,8 @@ func TestPreviewChromeStability_ChromeLineAfterEachCycleReflectsOpenTimeCachedGr
 		"first-window",  // after Tab #3 (wrap)
 	}
 	for i, want := range wantFocusedName {
-		if !strings.Contains(models[i].chromeLine(), want) {
-			t.Errorf("step %d: expected focused window name %q in chromeLine(), got %q", i, want, models[i].chromeLine())
+		if !strings.Contains(chromeLineForTest(models[i]), want) {
+			t.Errorf("step %d: expected focused window name %q in chromeLine(), got %q", i, want, chromeLineForTest(models[i]))
 		}
 	}
 }
@@ -182,7 +182,7 @@ func TestPreviewChromeStability_ChromeLineNeverReflectsPostOpenEnumeratorStateCh
 		t.Errorf("expected ListWindowsAndPanesInSession called exactly 1 time even with armed second-call error, got %d", enum.callCount)
 	}
 	for i, mm := range models {
-		line := mm.chromeLine()
+		line := chromeLineForTest(mm)
 		if strings.Contains(line, "REENUMERATED") {
 			t.Errorf("step %d: chromeLine() leaked post-open enumerator state: %q", i, line)
 		}

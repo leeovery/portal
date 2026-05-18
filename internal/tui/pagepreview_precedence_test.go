@@ -168,8 +168,9 @@ func TestPreviewPrecedence_WindowSizeMsgStillReachesViewportForReflow(t *testing
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 132, Height: 42})
 
-	if updated.viewport.Width != 132 {
-		t.Errorf("expected viewport.Width=132 after WindowSizeMsg, got %d", updated.viewport.Width)
+	wantWidth := 132 - previewFrameOverhead
+	if updated.viewport.Width != wantWidth {
+		t.Errorf("expected viewport.Width=%d (msg.Width - previewFrameOverhead) after WindowSizeMsg, got %d", wantWidth, updated.viewport.Width)
 	}
 	wantHeight := 42 - previewFrameOverhead
 	if updated.viewport.Height != wantHeight {

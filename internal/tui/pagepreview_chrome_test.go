@@ -22,7 +22,7 @@ func TestPreviewChromeLine_Renders1BasedOrdinalsForZeroIndexedGroups(t *testing.
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
 	if !strings.Contains(got, "Window 1 of 2") {
 		t.Errorf("chromeLine() = %q; want substring %q", got, "Window 1 of 2")
@@ -51,7 +51,7 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenWindowIndexValuesAreNonConti
 	}
 	for _, tc := range cases {
 		m := newPreviewModelForHelpers("work", groups, tc.windowIdx, 0)
-		got := stripANSI(m.chromeLine())
+		got := stripANSI(chromeLineForTest(m))
 		if !strings.Contains(got, tc.want) {
 			t.Errorf("windowIdx=%d: chromeLine() = %q; want substring %q", tc.windowIdx, got, tc.want)
 		}
@@ -77,7 +77,7 @@ func TestPreviewChromeLine_RendersOneToNCountersWhenPaneIndicesStartAt1(t *testi
 	}
 	for _, tc := range cases {
 		m := newPreviewModelForHelpers("work", groups, 0, tc.paneIdx)
-		got := stripANSI(m.chromeLine())
+		got := stripANSI(chromeLineForTest(m))
 		if !strings.Contains(got, tc.want) {
 			t.Errorf("paneIdx=%d: chromeLine() = %q; want substring %q", tc.paneIdx, got, tc.want)
 		}
@@ -90,7 +90,7 @@ func TestPreviewChromeLine_IncludesWindowNameVerbatimIncludingSpaces(t *testing.
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
 	if !strings.Contains(got, "editor window") {
 		t.Errorf("chromeLine() = %q; want substring %q (verbatim, including space)", got, "editor window")
@@ -103,9 +103,12 @@ func TestPreviewChromeLine_IncludesBracketAndTabAndEscAsVisibleHints(t *testing.
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
-	for _, token := range []string{"]", "[", "tab", "enter", "esc"} {
+	// Keymap glyphs per spec § Keymap glyphs: ] / [ stay ASCII; ⇥ (Tab),
+	// ⏎ (Enter), ⎋ (Esc) replace the verbose word tokens. The chrome line
+	// must surface every keypress glyph as a visible hint.
+	for _, token := range []string{"]", "[", "⇥", "⏎", "⎋"} {
 		if !strings.Contains(got, token) {
 			t.Errorf("chromeLine() = %q; want visible hint token %q", got, token)
 		}
@@ -118,21 +121,24 @@ func TestPreviewChromeLine_IncludesEnterAttachTokenBetweenTabAndEsc(t *testing.T
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
-	const wantSegment = "· tab next pane · enter attach · esc back"
+	// Spec § Verbose form: action labels follow each glyph, separated by
+	// middle dots. The "⏎ attach" token sits between "⇥ next pane" and
+	// "⎋ back" in left-to-right order.
+	const wantSegment = "· ⇥ next pane · ⏎ attach · ⎋ back"
 	if !strings.Contains(got, wantSegment) {
 		t.Errorf("chromeLine() = %q; want substring %q", got, wantSegment)
 	}
 
-	tabIdx := strings.Index(got, "tab next pane")
-	enterIdx := strings.Index(got, "enter attach")
-	escIdx := strings.Index(got, "esc back")
+	tabIdx := strings.Index(got, "⇥ next pane")
+	enterIdx := strings.Index(got, "⏎ attach")
+	escIdx := strings.Index(got, "⎋ back")
 	if tabIdx < 0 || enterIdx < 0 || escIdx < 0 {
-		t.Fatalf("chromeLine() = %q; missing one of: 'tab next pane', 'enter attach', 'esc back'", got)
+		t.Fatalf("chromeLine() = %q; missing one of: '⇥ next pane', '⏎ attach', '⎋ back'", got)
 	}
 	if tabIdx >= enterIdx || enterIdx >= escIdx {
-		t.Errorf("chromeLine() = %q; want order tab next pane (%d) < enter attach (%d) < esc back (%d)", got, tabIdx, enterIdx, escIdx)
+		t.Errorf("chromeLine() = %q; want order ⇥ next pane (%d) < ⏎ attach (%d) < ⎋ back (%d)", got, tabIdx, enterIdx, escIdx)
 	}
 }
 
@@ -143,11 +149,15 @@ func TestPreviewChromeLine_FullStringEqualityForCanonicalShape(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
-	const want = "Window 1 of 2 · Pane 1 of 2 · win: main    ] next win · [ prev win · tab next pane · enter attach · esc back"
-	if got != want {
-		t.Errorf("chromeLine() = %q; want %q", got, want)
+	// Substring equality against the unstyled chrome content. The full
+	// chromeLineForTest output includes lipgloss border corners ('╭', '╮')
+	// and filler dashes around the chrome content; the canonical chrome
+	// content itself is the substring asserted here.
+	const wantContent = "Window 1 of 2 · Pane 1 of 2 · win: main ] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
+	if !strings.Contains(got, wantContent) {
+		t.Errorf("chromeLine() = %q; want substring %q", got, wantContent)
 	}
 }
 
@@ -160,7 +170,7 @@ func TestPreviewChromeLine_DoesNotExposeRawTmuxIndices(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 1, 1)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
 	if strings.Contains(got, "99") {
 		t.Errorf("chromeLine() = %q; raw WindowIndex 99 leaked into chrome", got)
@@ -192,7 +202,7 @@ func TestPreviewChromeLine_ProducesNoIOWhenInvoked(t *testing.T) {
 	enumCallsBefore := enum.calls
 	readerCallsBefore := len(reader.calls)
 
-	_ = m.chromeLine()
+	_ = chromeLineForTest(m)
 
 	if enum.calls != enumCallsBefore {
 		t.Errorf("chromeLine() invoked enumerator: calls before=%d, after=%d", enumCallsBefore, enum.calls)
@@ -208,7 +218,7 @@ func TestPreviewChromeLine_WordingDoesNotPromiseLiveness(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := strings.ToLower(stripANSI(m.chromeLine()))
+	got := strings.ToLower(stripANSI(chromeLineForTest(m)))
 
 	for _, banned := range []string{"live", "now showing", "realtime", "current command"} {
 		if strings.Contains(got, banned) {
@@ -223,7 +233,7 @@ func TestPreviewChromeLine_SingleWindowSinglePaneRendersOneOfOne(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
 	if !strings.Contains(got, "Window 1 of 1") {
 		t.Errorf("chromeLine() = %q; want substring %q for 1x1 case", got, "Window 1 of 1")
@@ -242,7 +252,7 @@ func TestPreviewChromeLine_WindowNameWithPipeRenderedVerbatim(t *testing.T) {
 	}
 	m := newPreviewModelForHelpers("work", groups, 0, 0)
 
-	got := stripANSI(m.chromeLine())
+	got := stripANSI(chromeLineForTest(m))
 
 	if !strings.Contains(got, "weird|name with spaces") {
 		t.Errorf("chromeLine() = %q; want substring %q (verbatim)", got, "weird|name with spaces")
@@ -259,7 +269,7 @@ func TestPreviewChromeLine_DoesNotEmbedTmuxFormatCodePrefix(t *testing.T) {
 	}
 	for _, paneIdx := range []int{0} {
 		m := newPreviewModelForHelpers("work", groups, 0, paneIdx)
-		got := stripANSI(m.chromeLine())
+		got := stripANSI(chromeLineForTest(m))
 		if strings.Contains(got, "#W:") {
 			t.Errorf("chromeLine() = %q; must not contain raw tmux format-code label %q", got, "#W:")
 		}

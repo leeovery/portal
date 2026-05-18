@@ -127,7 +127,7 @@ func TestPreviewBrandNew_ChromeCountsAccurateAcrossAllPlaceholderCycles(t *testi
 		if s.applyKey {
 			m, _ = m.Update(s.key)
 		}
-		chrome := stripANSI(m.chromeLine())
+		chrome := stripANSI(chromeLineForTest(m))
 		if !strings.Contains(chrome, s.wantWindow) {
 			t.Errorf("%s: chrome = %q; want substring %q", s.name, chrome, s.wantWindow)
 		}
@@ -251,7 +251,7 @@ func TestPreviewMixed_BytesPaneAndPlaceholderPanesCoexist(t *testing.T) {
 	if !strings.Contains(view, "first pane bytes") {
 		t.Errorf("(w0,p0) viewport = %q; want substring %q", view, "first pane bytes")
 	}
-	chrome := stripANSI(m.chromeLine())
+	chrome := stripANSI(chromeLineForTest(m))
 	if !strings.Contains(chrome, "Window 1 of 2") {
 		t.Errorf("(w0,p0) chrome = %q; want substring %q", chrome, "Window 1 of 2")
 	}
