@@ -240,10 +240,10 @@ The cascade-tier table at widths 200/60/40/25/15 asserts specific tier signature
 Without pinning the window-name fixture used in the test, an implementer cannot tell whether the table assertions hold. The same concern applies to the width 60 row's "Window name truncated with `…` suffix" assertion — the fixture name needs to be long enough that it truncates at width 60 but doesn't get dropped.
 
 **Proposed Addition**:
-{To be discussed — specify the test fixture window name, or convert the table to assertions on tier-output shape rather than tied-to-exact-width signatures.}
+Pin fixture to `"nvim-editor"` (11 ASCII chars) — long enough to truncate at width 60 but fits at width 200.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Tests* > Surface 5 cascade-tier sub-test.
 
 ---
 

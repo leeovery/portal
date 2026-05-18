@@ -492,13 +492,13 @@ Extended with a **table-driven cascade-tier sub-test** that drives the full `Upd
 
 Procedure:
 
-- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and a fixed window-name fixture.
+- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and the fixed fixture: 1 window, 1 pane, **window name `"nvim-editor"` (11 ASCII chars, 11 display cells)**. This fixture is long enough to truncate at width 60 (tier 1) and clearly distinguishable from being dropped (tier 2) — but short enough to fit fully at width 200.
 - For each width in the cascade-threshold table, dispatch `Update(tea.WindowSizeMsg{Width: w, Height: 30})`, then call `View()`.
 - Assert the rendered output contains the expected tier signature:
 
 | Width | Expected signature                                              |
 |-------|-----------------------------------------------------------------|
-| 200   | Full window name + verbose keymap (`⇥ next pane`)               |
+| 200   | Full window name `nvim-editor` + verbose keymap (`⇥ next pane`) |
 | 60    | Window name truncated with `…` suffix; verbose keymap           |
 | 40    | No `win:` segment (tier 2 dropped); verbose keymap              |
 | 25    | No `win:`; compact keymap `] [ ⇥ ⏎ ⎋`                           |
