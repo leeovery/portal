@@ -29,7 +29,8 @@ approved_at: 2026-05-18
 - [ ] `go build ./...` and `go test ./...` pass; `pageSessions`'s `View()` is unchanged and renders no frame.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-18
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
