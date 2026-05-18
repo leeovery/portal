@@ -59,3 +59,14 @@ approved_at: 2026-05-18
 | preview-visual-distinction-2-4 | Extract tier4Row helper to deduplicate collapsed-row reconstruction | literal expression appears at most once |
 | preview-visual-distinction-2-5 | Fix stale chromeLine reference in helpers-test docstring | none |
 | preview-visual-distinction-2-6 | Collapse composeChromeLine to a one-liner over composeChromeLineParts | preserve signature, width<0 guard, chromeLineForTest still compiles |
+
+### Phase 3: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| preview-visual-distinction-3-1 | Extract innerWidth/innerHeight methods on previewModel | none |
+| preview-visual-distinction-3-2 | Extract firstLine test helper for top-row extraction idiom | none |

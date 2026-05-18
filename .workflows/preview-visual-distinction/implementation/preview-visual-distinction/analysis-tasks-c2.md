@@ -5,7 +5,7 @@
 - total_proposed: 2
 
 ## Task 1: Extract innerWidth/innerHeight methods on previewModel
-- status: pending
+- status: created
 - severity: low
 - sources: architecture
 
@@ -36,7 +36,7 @@
 ---
 
 ## Task 2: Extract firstLine test helper for top-row extraction idiom
-- status: pending
+- status: created
 - severity: low
 - sources: duplication
 
