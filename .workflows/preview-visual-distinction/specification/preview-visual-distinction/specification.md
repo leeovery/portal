@@ -340,9 +340,9 @@ The build phase has one explicit obligation: implement the `tea.WindowSizeMsg` c
 
 ## Initial sizing and preview-open ordering
 
-The parent Bubble Tea model holds current terminal dimensions from program-start (it has been receiving `tea.WindowSizeMsg` events since startup). When the user presses `Space` on the Sessions page, `NewPreviewModel` is constructed in the Sessions page's `Update` handler, which has access to the parent's tracked dimensions.
+The parent Bubble Tea model in `internal/tui/model.go` holds current terminal dimensions on `m.termWidth` / `m.termHeight` from program-start (its own `tea.WindowSizeMsg` handler records them). When the user presses `Space` on the Sessions page, `NewPreviewModel` is constructed at `model.go:1421`, where the parent's tracked dimensions are passed in.
 
-**Rule**: `NewPreviewModel(…, width, height int)` accepts `width` and `height` as constructor parameters. The Sessions page's `Update` handler passes its current width / height into the constructor. Inside the constructor:
+**Rule**: `NewPreviewModel(…, width, height int)` already accepts `width` and `height` as constructor parameters (`pagepreview.go:74`); the call site at `model.go:1421` already passes `m.termWidth, m.termHeight`. No new plumbing. Inside the constructor:
 
 - The dimensions are stored on the model (`m.width`, `m.height`).
 - `viewport.SetSize(width − 2, height − 2)` is called once with initial dimensions.
@@ -396,7 +396,7 @@ This names the magic 2 used in the resize math (`SetSize(msg.Width − 2, msg.He
 
 ### `NewPreviewModel` signature change
 
-`NewPreviewModel` accepts `width` and `height` as constructor parameters (see *Initial sizing and preview-open ordering*). The Sessions page's `Update` handler passes its current width / height into the constructor.
+`NewPreviewModel` already accepts `width` and `height` as constructor parameters today (`internal/tui/pagepreview.go:74`). The parent Bubble Tea model in `internal/tui/model.go` tracks the current terminal dimensions on `m.termWidth` / `m.termHeight` (already plumbed via its own `tea.WindowSizeMsg` handler) and passes them at the preview-open call site (`model.go:1421`). **No new plumbing is required** in the Sessions-page model or its `Update` handler — the dimensions are already available where `NewPreviewModel` is called.
 
 ### Chrome-row invariant for resize math
 
@@ -425,7 +425,7 @@ The `AdaptiveColor` defining the border foreground is declared once in `pageprev
 | `internal/tui/pagepreview.go` (NewPreviewModel)                    | Accept `width, height int`; initialise viewport + chrome     |
 | `internal/tui/pagepreview.go` (keymap constants)                   | Add `verboseKeymap` / `compactKeymap` constants              |
 | `internal/tui/pagepreview.go` (SGR injector)                       | Add `injectSGRResets` helper                                 |
-| Sessions page preview-open call site                               | Pass current `width, height` into `NewPreviewModel`          |
+| `internal/tui/model.go:1421` (preview-open call site)              | No change required — already passes `m.termWidth, m.termHeight` to `NewPreviewModel` |
 
 No other files are touched.
 

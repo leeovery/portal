@@ -99,10 +99,10 @@ This becomes load-bearing in two places:
 Pinning the signature is a one-line decision that removes an interpretation surface.
 
 **Proposed Addition**:
-{To be discussed — fix the exact signature, e.g., `composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string`.}
+Fix the exact signature `composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Already logged as part of Finding 1's *Pure function* update — signature and parameter docstring pinned.
 
 ---
 
@@ -118,10 +118,10 @@ The File scope summary table lists "Sessions page preview-open call site" withou
 A planner would have to either inspect the codebase to find the call site, or accept that the file name is "whichever file contains the `Space`-binding handler for the Sessions page." Easy to resolve, but currently absent.
 
 **Proposed Addition**:
-{To be discussed — name the exact file path for the call site.}
+Name the call site as `internal/tui/model.go:1421`. The parent model already tracks dimensions on `m.termWidth, m.termHeight`; no new plumbing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Initial sizing and preview-open ordering*, *Code shape changes* > *`NewPreviewModel` signature change*, and the file-scope summary table. Also resolves Finding 8.
 
 ---
 
