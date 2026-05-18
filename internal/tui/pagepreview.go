@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
+	"github.com/mattn/go-runewidth"
 )
 
 // verboseKeymap and compactKeymap are the two canonical keymap strings used by
@@ -55,6 +56,49 @@ const previewPlaceholder = "(no saved content)"
 // exists on previewModel; future focus changes onto the same pane retry the
 // read fresh via the dispatcher.
 const previewReadError = "(unable to read scrollback)"
+
+// truncateToCells returns s clipped to fit within a budget measured in display
+// cells, appending the single-rune ellipsis "…" only when truncation actually
+// occurred. Cells are measured per runewidth.RuneWidth — ASCII = 1, CJK = 2,
+// emoji = 2, combining marks = 0 — so output width matches what a terminal
+// will paint, not byte length or rune count. Used by the preview frame's
+// chrome cascade (tier 1 window-name truncation, tier 2 8-cell minimum) per
+// specification.md § Display-cell-aware truncation and
+// § Width cascade > Tier 1.
+//
+// Contract:
+//   - budget <= 0 returns "".
+//   - empty s returns "".
+//   - if runewidth.StringWidth(s) <= budget, s is returned unchanged (no
+//     ellipsis).
+//   - otherwise runes are accumulated until adding the next rune would exceed
+//     budget − 1 (reserving one cell for the ellipsis), then "…" is appended.
+//   - budget == 1 with non-empty s that does not fit whole returns "…"
+//     (width 1) — the canonical result; do NOT collapse to "".
+//   - no mid-rune cuts: the loop never partially consumes a codepoint, so
+//     output is always valid UTF-8.
+func truncateToCells(s string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if s == "" {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= budget {
+		return s
+	}
+	var b []byte
+	used := 0
+	for _, r := range s {
+		w := runewidth.RuneWidth(r)
+		if used+w > budget-1 {
+			break
+		}
+		b = append(b, string(r)...)
+		used += w
+	}
+	return string(b) + "…"
+}
 
 // previewModel renders a single tmux pane's saved scrollback inside a
 // viewport. v1 of the preview page covers the full terminal; chrome (header,
