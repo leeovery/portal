@@ -492,16 +492,18 @@ Extended with a **table-driven cascade-tier sub-test** that drives the full `Upd
 
 Procedure:
 
-- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and the fixed fixture: 1 window, 1 pane, **window name `"nvim-editor"` (11 ASCII chars, 11 display cells)**. This fixture is long enough to truncate at width 60 (tier 1) and clearly distinguishable from being dropped (tier 2) — but short enough to fit fully at width 200.
+- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and the fixed fixture: 1 window, 1 pane, **window name `"nvim-editor"` (11 ASCII chars, 11 display cells)**. This fixture is long enough to truncate (tier 1) and clearly distinguishable from being dropped (tier 2) — but short enough to fit fully at width 200.
 - For each width in the cascade-threshold table, dispatch `Update(tea.WindowSizeMsg{Width: w, Height: 30})`, then call `View()`.
-- Assert the rendered output contains the expected tier signature:
+- Assert the rendered output contains the expected tier signature.
+
+The realised cascade math (using `lipgloss.Width(verboseKeymap) == 57`) yields tier intervals: tier 1 full at outer ≥ 108; tier 1 truncated at outer ∈ [105, 107]; tier 2 at outer ∈ [89, 104]; tier 3 at outer ∈ [41, 88]; tier 4 at outer ∈ [2, 40]. Picked widths are interior to each interval to avoid fragility:
 
 | Width | Expected signature                                              |
 |-------|-----------------------------------------------------------------|
 | 200   | Full window name `nvim-editor` + verbose keymap (`⇥ next pane`) |
-| 60    | Window name truncated with `…` suffix; verbose keymap           |
-| 40    | No `win:` segment (tier 2 dropped); verbose keymap              |
-| 25    | No `win:`; compact keymap `] [ ⇥ ⏎ ⎋`                           |
+| 105   | Window name truncated with `…` suffix (`nvim-ed…`); verbose keymap |
+| 95    | No `win:` segment (tier 2 dropped); verbose keymap              |
+| 50    | No `win:`; compact keymap `] [ ⇥ ⏎ ⎋`                           |
 | 15    | Top edge is `╭{─ × 13}╮` (tier 4: corners + filler, no chrome)  |
 
 - Assert SGR reset bytes are present on each viewport content row in every case.

@@ -89,9 +89,6 @@ func truncateToCells(s string, budget int) string {
 	if budget <= 0 {
 		return ""
 	}
-	if s == "" {
-		return ""
-	}
 	if runewidth.StringWidth(s) <= budget {
 		return s
 	}
@@ -146,26 +143,16 @@ func tier4Row(border lipgloss.Border, outer int) string {
 	return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight
 }
 
-// composeChromeLine returns a single-line top-edge row for the preview frame,
-// including the corner glyphs sourced from `lipgloss.RoundedBorder()`. The
-// `width` parameter is the INNER frame width (`terminalWidth − 2`); the
-// returned string has display-cell width `width + 2` (the outer terminal
-// width) for `width >= 0`, and is the empty string for `width < 0`. The
-// cascade guarantees one-row output for all widths >= 2; below that, returns
-// the empty string. No embedded newlines.
+// composeChromeLine returns a single-line top-edge row for the preview frame.
+// Thin wrapper over composeChromeLineParts; see that function (and
+// selectChromeTier) for the canonical cascade rules.
 //
-// Tier cascade per specification.md § Width cascade:
-//
-//   - Tier 1 — full chrome with window name truncated (with `…` suffix) to fit
-//     the remaining budget. Active when the name budget is >= minWindowNameCells.
-//   - Tier 2 — drop the `· win: {name}` segment; keep verbose keymap.
-//   - Tier 3 — drop `· win: {name}` and use compact keymap form.
-//   - Tier 4 — corners + `─` filler only; load-bearing fallback that always
-//     fits at any width >= 0.
-//
-// Pure: no I/O. composeChromeLineParts is its structural sibling and shares
-// the single tier-selection helper `selectChromeTier` so the two surfaces
-// cannot drift.
+// Contract:
+//   - `width` is the INNER frame width (`terminalWidth − 2`).
+//   - For `width >= 0` the returned string has display-cell width `width + 2`
+//     (the outer terminal width) and contains no embedded newlines.
+//   - For `width < 0` returns the empty string. Widths 0 and 1 still produce
+//     a non-empty tier-4 row (`╭╮` and `╭─╮` respectively).
 func composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string {
 	left, chrome, right := composeChromeLineParts(width, windowIdx, windowCount, paneIdx, paneCount, windowName)
 	return left + chrome + right
@@ -467,6 +454,9 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		// visible window over the immutable buffer); YOffset auto-clamping
 		// is not observable in the preview's usage because cycle handlers
 		// re-anchor via GotoBottom and Home/End jumps are explicit.
+		// TODO: when bubbles is upgraded to a version exposing
+		// viewport.SetSize, switch to the method call so YOffset auto-clamping
+		// is engaged uniformly.
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = m.innerWidth()
@@ -564,6 +554,9 @@ func (m previewModel) View() string {
 		m.paneIdx, len(m.currentGroup().PaneIndices),
 		m.currentGroup().WindowName,
 	)
+	// At tier 4 the entire collapsed row is returned as `left`; chrome and
+	// right are empty. BorderForeground then tints the whole row uniformly,
+	// which is the documented tier-4 signal.
 	borderStyle := lipgloss.NewStyle().Foreground(previewBorderColor)
 	styledTop := borderStyle.Render(left) + chrome + borderStyle.Render(right)
 
