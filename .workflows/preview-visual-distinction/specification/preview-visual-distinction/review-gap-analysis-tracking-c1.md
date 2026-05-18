@@ -32,10 +32,10 @@ An implementer cannot tell from the spec whether:
 The resize-handler section says `composeChromeLine(msg.Width − 2, …)` — passing `width − 2` (inner width including the 1-cell padding on each side but excluding the corners), which is a third reading. The chrome-row invariant section refers to `composeChromeLine(w, …)` without disambiguating.
 
 **Proposed Addition**:
-{To be discussed — pin the exact unit of the `width` parameter, what `composeChromeLine` returns, and what cascade tiers measure against.}
+Pin `composeChromeLine`'s `width` parameter as inner frame width (`terminalWidth − 2`). Function returns the complete top-edge row of display-cell width `width + 2`. Update Tier 4 to `╭{─ × width}╮`. Disambiguate the column-layout section.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Width cascade* (new *Unit of measure* subsection + updated Tier 4 + updated *Pure function* signature/docstring) and *Top edge composition* (Column layout disambiguation + *Width below threshold* threshold update).
 
 ---
 

@@ -129,6 +129,12 @@ Replacing the word tokens with glyphs modifies what `preview-keymap-discoverabil
 
 Terminal widths and window names vary unboundedly; chrome content that overflows the available top-edge budget would either clip the right corner or wrap to a second visual row, breaking the entire frame (the bottom corner would shift down by one row). The cascade is the mechanism that guarantees the top edge is always exactly one row, at any width ≥ 2.
 
+### Unit of measure
+
+`composeChromeLine`'s `width` parameter is the **inner frame width** in display cells — i.e. `terminalWidth − 2`, the same value passed to `viewport.SetSize`. It excludes the left and right border columns (`╭`, `╮`) that `lipgloss` owns on the rendered output. The function returns the **complete top-edge row** including those corner glyphs, so the returned string has display-cell width `width + 2` (the outer terminal width) when `width ≥ 0`.
+
+Each cascade tier produces a candidate row, measures it via `lipgloss.Width`, and returns the candidate when its width equals `width + 2`. Otherwise it falls through to the next tier.
+
 ### Algorithm shape: predicate-over-output
 
 The four-tier cascade is **not** a stack of incremental transformations. Each tier produces a *candidate output*, measures it via `lipgloss.Width`, and returns the candidate if it fits. Otherwise it falls through to the next tier.
@@ -154,7 +160,7 @@ Tier interactions:
 
 **Tier 3 — swap verbose keymap for compact form.** Reached when even with the window name segment dropped the verbose keymap still overflows. Saves ≈73 cells (verbose form is 82 cells, compact is 9). Action labels are not permanently lost from the product — once the user has seen the verbose chrome at wider widths, the keys-only form reads as a recognised compression rather than a fresh-eyes puzzle.
 
-**Tier 4 — drop chrome entirely; render corners + filler.** A degenerate-terminal fallback (sub-40-col terminals, almost no real user terminal hits this). The top edge becomes `╭{─ × (width − 2)}╮`. Always fits any width ≥ 2.
+**Tier 4 — drop chrome entirely; render corners + filler.** A degenerate-terminal fallback (sub-40-col terminals, almost no real user terminal hits this). The top edge becomes `╭{─ × width}╮` (corners + `width` filler cells = `width + 2` total). Always fits at every `width ≥ 0` (terminal width ≥ 2).
 
 ### Load-bearing tier 4
 
@@ -169,10 +175,17 @@ A side benefit of the cascade: pathological window names — long file paths sur
 The cascade is implemented as a pure function:
 
 ```go
-func composeChromeLine(width int, /* model fields */) string
+func composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string
 ```
 
-Located in `internal/tui/pagepreview.go`. No I/O. Returns the unstyled top-edge chrome content as a single-line string. Width measurements use `lipgloss.Width`. Tested exhaustively at the cascade thresholds with table-driven cases.
+Located in `internal/tui/pagepreview.go`. No I/O. Parameters:
+
+- `width` — inner frame width (`terminalWidth − 2`).
+- `windowIdx` / `windowCount` — values for the `Window M of N` segment (`M = windowIdx + 1`).
+- `paneIdx` / `paneCount` — values for the `Pane X of Y` segment (`X = paneIdx + 1`).
+- `windowName` — UTF-8 window name for the `win: {name}` segment (cascade tier 1 truncates this; tier 2 drops the segment).
+
+Returns the **complete top-edge row** including corner glyphs — display-cell width is `width + 2` for `width ≥ 0`, and the empty string for `width < 0`. Width measurements use `lipgloss.Width`. Tested exhaustively at the cascade thresholds with table-driven cases.
 
 ## Display-cell-aware truncation
 
@@ -207,7 +220,9 @@ The frame's top edge is composed manually in `pagePreview`'s `View()` rather tha
 
 ### Column layout
 
-For a given terminal width `width` and a `chromeWidth = lipgloss.Width(chromeContent)`:
+The column layout below uses `width` for the **outer terminal width**. `composeChromeLine`'s `width` parameter is the *inner* frame width (`terminalWidth − 2`); the function returns the complete top-edge row at the outer width.
+
+For a given outer terminal width `width` and a `chromeWidth = lipgloss.Width(chromeContent)`:
 
 - Column `0`: `╭` (left corner — sourced from `lipgloss.RoundedBorder()`)
 - Column `1`: `─` (one-cell padding after left corner)
@@ -232,9 +247,9 @@ The cascade returns gracefully at every width ≥ 2:
 
 All such tiny widths fall into tier 4 behaviour automatically because there is no room for chrome content under any tier.
 
-### Width below 2
+### Width below threshold
 
-`composeChromeLine` returns the **empty string** for `width < 2`. The frame composition in `View()` calls `lipgloss` bordering with whatever width the model holds; `lipgloss` handles widths it cannot render by clipping (its own behaviour). Consistent with the "no special vertical handling" stance — widths 0 and 1 are degenerate, render whatever falls out, no error path, no panic.
+`composeChromeLine` returns the **empty string** for `width < 0` (terminal width < 2). The frame composition in `View()` calls `lipgloss` bordering with whatever width the model holds; `lipgloss` handles widths it cannot render by clipping (its own behaviour). Consistent with the "no special vertical handling" stance — terminal widths 0 and 1 are degenerate, render whatever falls out, no error path, no panic.
 
 ### Color application
 
