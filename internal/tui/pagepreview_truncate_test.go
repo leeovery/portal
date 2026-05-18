@@ -60,3 +60,26 @@ func TestTruncateToCells(t *testing.T) {
 		})
 	}
 }
+
+// TestTruncateToCells_ZWJSequenceTruncationInvariants exercises the truncation
+// arm with a ZWJ-sequence input long enough to force the slow path. The
+// current algorithm iterates codepoint-by-codepoint and is not
+// grapheme-cluster aware, so the exact byte content of the truncated output
+// is an implementation detail (a trailing ZWJ may dangle). This test asserts
+// only the spec-mandated universal invariants — valid UTF-8, width ≤ budget,
+// ellipsis suffix when truncation occurred — to document that those hold
+// even when the input crosses a ZWJ boundary at the cut point.
+func TestTruncateToCells_ZWJSequenceTruncationInvariants(t *testing.T) {
+	const input = "👨‍👩‍👧hello"
+	const budget = 4
+	got := truncateToCells(input, budget)
+	if !utf8.ValidString(got) {
+		t.Errorf("truncateToCells(%q, %d) = %q produced invalid UTF-8", input, budget, got)
+	}
+	if w := runewidth.StringWidth(got); w > budget {
+		t.Errorf("truncateToCells(%q, %d) = %q has width %d > budget %d", input, budget, got, w, budget)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncateToCells(%q, %d) = %q missing ellipsis suffix on a truncating input", input, budget, got)
+	}
+}

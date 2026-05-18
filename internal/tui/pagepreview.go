@@ -280,6 +280,10 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		return previewModel{}, false
 	}
 
+	// Mirrors m.innerWidth() / m.innerHeight() — those methods aren't usable
+	// here because m.width / m.height haven't been assigned yet.
+	innerW := max(0, width-previewFrameOverhead)
+	innerH := max(0, height-previewFrameOverhead)
 	m := previewModel{
 		session:    session,
 		enumerator: enumerator,
@@ -288,13 +292,9 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		// Constructor exception: m.innerWidth() / m.innerHeight() are not
-		// available inside the composite literal because m.width / m.height
-		// have not yet been assigned. The arithmetic intentionally mirrors
-		// those methods (max(0, dim - previewFrameOverhead)).
-		viewport: viewport.New(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
-		width:    width,
-		height:   height,
+		viewport:   viewport.New(innerW, innerH),
+		width:      width,
+		height:     height,
 	}
 
 	// Single dispatcher shared with cycle handlers (Tab, ], [) so the three

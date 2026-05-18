@@ -45,6 +45,13 @@ func TestComposeChromeLine_OutputWidthEqualsArgPlusTwo(t *testing.T) {
 	}
 }
 
+// TestComposeChromeLine_NoEmbeddedNewlinesAcrossThresholds sweeps the
+// cascade-boundary width set (every tier-transition arg). The
+// spec-mandated invariant test for the resize-math contract is
+// TestComposeChromeLine_NoEmbeddedNewlines below, which uses the spec's
+// chrome-row invariant width set. Both assertions hold identically; the
+// two width sets exist because they answer different questions (cascade
+// boundaries vs resize-math invariant widths).
 func TestComposeChromeLine_NoEmbeddedNewlinesAcrossThresholds(t *testing.T) {
 	for _, arg := range []int{0, 1, 2, 5, 13, 25, 40, 60, 87, 95, 102, 103, 200} {
 		got := ccl(arg, testWindowName)

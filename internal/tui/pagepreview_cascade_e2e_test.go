@@ -154,12 +154,26 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 
 			tc.assert(t, stripped, raw)
 
-			// Every row must carry at least one SGR-reset byte sequence
-			// somewhere in the raw output — viewport rows pass through
-			// injectSGRResets so the unterminated "\x1b[41m" in the body
-			// cannot bleed into the right border at any cascade tier.
-			if !strings.Contains(raw, "\x1b[0m") {
-				t.Errorf("expected '\\x1b[0m' SGR reset present in raw View() output at width %d; raw=%q", tc.width, raw)
+			// Tighter per-row assertion (spec § SGR reset injection): every
+			// viewport content row carrying a fixture token must also carry a
+			// "\x1b[0m" SGR reset in its raw form. A file-global Contains
+			// check would pass even if only one row was wrapped; this guards
+			// the per-row injection guarantee the spec actually requires.
+			rawLines := strings.Split(raw, "\n")
+			for _, fixtureToken := range []string{"hello", "world"} {
+				found := false
+				for _, line := range rawLines {
+					if !strings.Contains(stripANSI(line), fixtureToken) {
+						continue
+					}
+					found = true
+					if !strings.Contains(line, "\x1b[0m") {
+						t.Errorf("width %d: row containing %q lacks SGR reset; raw line=%q", tc.width, fixtureToken, line)
+					}
+				}
+				if !found {
+					t.Errorf("width %d: fixture token %q not rendered in any row; raw=%q", tc.width, fixtureToken, raw)
+				}
 			}
 		})
 	}
