@@ -37,8 +37,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "preview-visual-distinction-1-9",
+          "phase": 2,
+          "task": "~",
           "task_map": {
             "preview-visual-distinction": "tick-2d1808",
             "preview-visual-distinction-1": "tick-1d5bda",
