@@ -167,17 +167,8 @@ func tier4Row(border lipgloss.Border, outer int) string {
 // the single tier-selection helper `selectChromeTier` so the two surfaces
 // cannot drift.
 func composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string {
-	if width < 0 {
-		return ""
-	}
-	border := lipgloss.RoundedBorder()
-	outer := width + 2
-	chrome, fillerCells := selectChromeTier(outer, windowIdx, windowCount, paneIdx, paneCount, windowName)
-	if chrome == "" {
-		// Tier 4 collapse: corners + (outer-2) filler.
-		return tier4Row(border, outer)
-	}
-	return border.TopLeft + border.Top + chrome + strings.Repeat(border.Top, fillerCells) + border.Top + border.TopRight
+	left, chrome, right := composeChromeLineParts(width, windowIdx, windowCount, paneIdx, paneCount, windowName)
+	return left + chrome + right
 }
 
 // composeChromeLineParts runs the same cascade as composeChromeLine and
