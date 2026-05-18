@@ -38,7 +38,7 @@ approved_at: 2026-05-18
 | preview-visual-distinction-1-1 | Add keymap glyph constants and adaptive border color | none |
 | preview-visual-distinction-1-2 | Rename previewChromeHeight to previewFrameOverhead = 2 | arithmetic drift in pagepreview_layout_test.go, _precedence_test.go, _scroll_test.go |
 | preview-visual-distinction-1-3 | Add display-cell-aware truncation primitive | ASCII, CJK 2-cell, emoji incl. ZWJ, combining marks 0-cell, no truncation needed, budget <= 1 |
-| preview-visual-distinction-1-4 | Implement composeChromeLine cascade tiers 1-4 | tier-2 entry at 8-cell minimum boundary, tier-4 degenerate widths 2/3/4, width < 0 returns empty string, width + 2 exact output width invariant |
+| preview-visual-distinction-1-4 | Implement composeChromeLine cascade tiers 1-4 | tier-2 entry at 8-cell minimum boundary, tier-4 degenerate args 0/1/2 (outer widths 2/3/4), arg < 0 returns empty string, arg + 2 exact output width invariant |
 | preview-visual-distinction-1-5 | Chrome-row single-line invariant test | none |
 | preview-visual-distinction-1-6 | Add injectSGRResets helper | trailing newline empty element ignored, already-terminated line idempotency, whitespace-only line with embedded SGR, fully empty input |
 | preview-visual-distinction-1-7 | Wire tea.WindowSizeMsg handler in Update and delete chromeLine() method | msg.Width/Height of 0 or 1 negative-arg clamp, chromeLine() callers redirected to composeChromeLine |

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-18
 cycle: 3
 phase: Plan Integrity Review
@@ -48,7 +48,7 @@ The same row also still uses the phrase "width + 2 exact output width invariant"
 | preview-visual-distinction-1-4 | Implement composeChromeLine cascade tiers 1-4 | tier-2 entry at 8-cell minimum boundary, tier-4 degenerate args 0/1/2 (outer widths 2/3/4), arg < 0 returns empty string, arg + 2 exact output width invariant |
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This is the only collateral artefact found from the cycle-2 width-convention switch. All other downstream tasks (1-5, 1-7, 1-8, 1-9) and the phase-level acceptance bullets are internally consistent.
 
 ---
