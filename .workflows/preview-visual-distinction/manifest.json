@@ -1,7 +1,7 @@
 {
   "name": "preview-visual-distinction",
   "work_type": "feature",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-16",
   "description": "Make the TUI quick-preview visually distinct from an attached session so users can tell instantly they are in read-only preview mode.",
   "phases": {
@@ -147,5 +147,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-18"
 }
