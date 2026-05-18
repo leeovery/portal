@@ -1,0 +1,16 @@
+{
+  "name": "saver-kill-respawn-loop-leaks-daemons",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-05-18",
+  "description": "Bootstrap kill-respawn loop on _portal-saver leaks daemon processes and adds ~520ms to every portal startup; chain involves version-mismatch misfire, SIGHUP-unresponsive capture loop, and lock-contention session destruction.",
+  "phases": {
+    "investigation": {
+      "items": {
+        "saver-kill-respawn-loop-leaks-daemons": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}

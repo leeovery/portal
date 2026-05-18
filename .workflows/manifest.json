@@ -65,6 +65,9 @@
     },
     "preview-visual-distinction": {
       "work_type": "feature"
+    },
+    "saver-kill-respawn-loop-leaks-daemons": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
