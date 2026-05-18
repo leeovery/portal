@@ -327,15 +327,16 @@ The SGR-reset injection covers **every render**, so rows scrolling into view are
 
 Bubble Tea emits one `tea.WindowSizeMsg` per terminal-resize signal. Dragging a terminal corner produces a stream of them. Each goes through `Update → View`.
 
-**Rule: repaint every tick, no debounce.** Preview's resize handler in `pagepreview.go`'s `Update` does three things on each `tea.WindowSizeMsg`:
+**Rule: repaint every tick, no debounce.** Preview's resize handler in `pagepreview.go`'s `Update` does two things on each `tea.WindowSizeMsg`:
 
-1. Call `m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows).
-2. Recompute the chrome line via `composeChromeLine(msg.Width − 2, …)` for the new inner width.
-3. Allow `View()` to re-render the frame.
+1. Record the new dimensions on the model (`m.width`, `m.height`).
+2. Call `m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows).
+
+`View()` then **recomputes the chrome line every tick** via `composeChromeLine(m.width − 2, m.windowIdx, m.windowCount, m.paneIdx, m.paneCount, m.windowName)` and composes the frame. No cached chrome field — recomputing per tick is cheap (pure function, no I/O), and this avoids the alternative of having to invalidate a cache from every navigation key handler (`]`, `[`, `⇥`) in addition to the resize handler. The single per-tick recompute covers resize, window/pane navigation, and any other model state change that affects chrome content with no per-handler bookkeeping.
 
 `composeChromeLine` is a pure function with no I/O. `viewport.SetSize` does not reallocate content — it adjusts the visible window over an immutable buffer. Preview's structural enumeration is captured at preview-open and is **not** re-fetched on resize. The per-tick cost is small; debouncing would only hurt (dropped frames would make chrome visibly lag resize, and timer state would add complexity for a problem that doesn't exist). Bubble Tea's runtime already coalesces redundant `View()` calls at the framerate level.
 
-The build phase has one explicit obligation: implement the `tea.WindowSizeMsg` case in preview's `Update`. No special-casing for rapid resize streams.
+The build phase has one explicit obligation: implement the `tea.WindowSizeMsg` case in preview's `Update` (record dimensions + `viewport.SetSize`). No special-casing for rapid resize streams.
 
 ## Initial sizing and preview-open ordering
 
@@ -343,10 +344,10 @@ The parent Bubble Tea model holds current terminal dimensions from program-start
 
 **Rule**: `NewPreviewModel(…, width, height int)` accepts `width` and `height` as constructor parameters. The Sessions page's `Update` handler passes its current width / height into the constructor. Inside the constructor:
 
+- The dimensions are stored on the model (`m.width`, `m.height`).
 - `viewport.SetSize(width − 2, height − 2)` is called once with initial dimensions.
-- The initial chrome string is pre-computed for the inner width.
 
-The first `View()` call on the freshly-constructed `previewModel` renders with correct dimensions — no race between preview-open and the first `WindowSizeMsg`, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
+`View()` recomputes the chrome line on every tick (see *Resize behaviour*), so no separate pre-computation is needed at construction time. The first `View()` call on the freshly-constructed `previewModel` renders with correct dimensions — no race between preview-open and the first `WindowSizeMsg`, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
 
 ## Scroll redraw
 

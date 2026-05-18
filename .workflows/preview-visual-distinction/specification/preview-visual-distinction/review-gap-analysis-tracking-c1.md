@@ -76,10 +76,10 @@ Two readings are possible:
 The "Initial sizing" section implies caching: "The initial chrome string is pre-computed for the inner width." The Resize section also implies caching: "Recompute the chrome line via `composeChromeLine(msg.Width − 2, …)`." Both suggest the chrome is stored on a model field. But the navigation-triggered recompute is never mentioned.
 
 **Proposed Addition**:
-{To be discussed — either drop the caching and recompute in `View()` every tick, or explicitly enumerate the events that trigger recompute (resize, next-window, prev-window, next-pane).}
+Drop chrome caching. `View()` recomputes via `composeChromeLine(m.width − 2, …)` every tick. No invalidation logic in navigation handlers.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Resize behaviour* (revised rule + flow) and *Initial sizing and preview-open ordering* (constructor no longer pre-computes chrome).
 
 ---
 
