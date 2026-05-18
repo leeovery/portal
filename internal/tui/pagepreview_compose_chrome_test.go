@@ -54,6 +54,23 @@ func TestComposeChromeLine_NoEmbeddedNewlinesAcrossThresholds(t *testing.T) {
 	}
 }
 
+// Chrome-row single-line invariant test per specification.md § Chrome-row
+// invariant for resize math and § Tests > Chrome-row invariant test. The
+// resize math viewport.SetSize(msg.Width − 2, msg.Height − 2) assumes the
+// top edge is exactly one row at every width; this test guards that
+// assumption across the spec's chrome-row invariant width set, which spans
+// every cascade tier (tier 1 wide, tier 1 truncated, tier 2, tier 3, tier 4
+// down to degenerate widths). Negative widths are excluded — they return
+// empty string and are not load-bearing for this invariant.
+func TestComposeChromeLine_NoEmbeddedNewlines(t *testing.T) {
+	for _, w := range []int{200, 80, 60, 40, 25, 15, 10, 4, 3, 2, 0} {
+		got := composeChromeLine(w, 0, 1, 0, 1, testWindowName)
+		if n := strings.Count(got, "\n"); n != 0 {
+			t.Errorf("composeChromeLine(width=%d) returned %d embedded newline(s); want 0; got=%q", w, n, got)
+		}
+	}
+}
+
 func TestComposeChromeLine_CornerGlyphsSourcedFromLipglossRoundedBorder(t *testing.T) {
 	border := lipgloss.RoundedBorder()
 	got := ccl(200, testWindowName)
