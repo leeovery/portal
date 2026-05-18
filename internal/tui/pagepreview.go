@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +24,13 @@ const (
 	verboseKeymap = "] next win · [ prev win · ⇥ next pane · ⏎ attach · ⎋ back"
 	compactKeymap = "] [ ⇥ ⏎ ⎋"
 )
+
+// minWindowNameCells is the lower bound on the display-cell budget allocated
+// to the window-name string before the cascade falls through from tier 1
+// ("truncate window name with …") to tier 2 ("drop · win: {name} segment
+// entirely"). Below this minimum a truncated name reads as garbage rather
+// than as a recognisable name. Per specification.md § Width cascade > Tier 2.
+const minWindowNameCells = 8
 
 // previewBorderColor is the single unified adaptive colour applied to all four
 // edges of the preview frame (the three lipgloss-rendered edges plus the
@@ -98,6 +106,126 @@ func truncateToCells(s string, budget int) string {
 		used += w
 	}
 	return string(b) + "…"
+}
+
+// chromeSegmentSeparator and chromeKeymapPadding are the fixed glyphs joining
+// chrome line segments per specification.md § Chrome line content > Segments.
+// `chromeSegmentSeparator` precedes the "win: {name}" segment; a single space
+// (`chromeKeymapPadding`) separates the structural segments from the keymap
+// and the right-edge `─` filler performs the visual right-alignment described
+// in the spec at wide widths.
+const (
+	chromeSegmentSeparator = " · win: "
+	chromeKeymapPadding    = " "
+)
+
+// composeChromeLine returns a single-line top-edge row for the preview frame,
+// including the corner glyphs sourced from `lipgloss.RoundedBorder()`. The
+// `width` parameter is the INNER frame width (`terminalWidth − 2`); the
+// returned string has display-cell width `width + 2` (the outer terminal
+// width) for `width >= 0`, and is the empty string for `width < 0`. The
+// cascade guarantees one-row output for all widths >= 2; below that, returns
+// the empty string. No embedded newlines.
+//
+// Tier cascade per specification.md § Width cascade:
+//
+//   - Tier 1 — full chrome with window name truncated (with `…` suffix) to fit
+//     the remaining budget. Active when the name budget is >= minWindowNameCells.
+//   - Tier 2 — drop the `· win: {name}` segment; keep verbose keymap.
+//   - Tier 3 — drop `· win: {name}` and use compact keymap form.
+//   - Tier 4 — corners + `─` filler only; load-bearing fallback that always
+//     fits at any width >= 0.
+//
+// Pure: no I/O. composeChromeLineParts is its structural sibling and shares
+// the single tier-selection helper `selectChromeTier` so the two surfaces
+// cannot drift.
+func composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) string {
+	if width < 0 {
+		return ""
+	}
+	border := lipgloss.RoundedBorder()
+	outer := width + 2
+	chrome, fillerCells := selectChromeTier(outer, windowIdx, windowCount, paneIdx, paneCount, windowName)
+	if chrome == "" {
+		// Tier 4 collapse: corners + (outer-2) filler.
+		return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight
+	}
+	return border.TopLeft + border.Top + chrome + strings.Repeat(border.Top, fillerCells) + border.Top + border.TopRight
+}
+
+// composeChromeLineParts runs the same cascade as composeChromeLine and
+// returns the three structural pieces of the top-edge row: the styled left
+// border prefix (corner + 1-cell padding for non-tier-4 tiers; the entire
+// collapsed row for tier 4), the unstyled chrome content (empty at tier 4),
+// and the styled right border suffix (filler + 1-cell padding + corner for
+// non-tier-4 tiers; empty for tier 4). Concatenating left + chrome + right
+// reproduces composeChromeLine's output byte-identically.
+//
+// Used by View() to apply BorderForeground colour to the border parts while
+// leaving the chrome content unstyled (terminal default foreground) per
+// specification.md § Top edge composition > Color application.
+func composeChromeLineParts(width, windowIdx, windowCount, paneIdx, paneCount int, windowName string) (left, chrome, right string) {
+	if width < 0 {
+		return "", "", ""
+	}
+	border := lipgloss.RoundedBorder()
+	outer := width + 2
+	c, fillerCells := selectChromeTier(outer, windowIdx, windowCount, paneIdx, paneCount, windowName)
+	if c == "" {
+		// Tier 4 collapse: the entire row is border parts. Returning the full
+		// row as `left` keeps the (left + chrome + right) concatenation
+		// contract intact while leaving chrome empty (the documented tier-4
+		// signal callers can branch on).
+		return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight, "", ""
+	}
+	left = border.TopLeft + border.Top
+	right = strings.Repeat(border.Top, fillerCells) + border.Top + border.TopRight
+	return left, c, right
+}
+
+// selectChromeTier is the single tier-selection helper shared by
+// composeChromeLine and composeChromeLineParts. It returns the unstyled
+// chrome content string (empty at tier 4) and the filler-cell count between
+// chrome and the right-side 1-cell border padding (zero at tier 4 since the
+// caller owns the entire collapsed row).
+//
+// `outer` is the OUTER terminal width (width + 2). The caller is responsible
+// for translating the inner-width argument to outer and for the `width < 0`
+// short-circuit; this helper assumes outer >= 2.
+func selectChromeTier(outer, windowIdx, windowCount, paneIdx, paneCount int, windowName string) (chrome string, fillerCells int) {
+	counters := fmt.Sprintf("Window %d of %d · Pane %d of %d", windowIdx+1, windowCount, paneIdx+1, paneCount)
+
+	// Tier 1: full chrome with truncated window name. Fixed overhead is
+	// the two corners + two 1-cell border-padding cells + counters + the
+	// " · win: " segment glyphs + the single space between segments and
+	// keymap + the verbose keymap. The name occupies whatever remains.
+	fixedTier1 := 4 + lipgloss.Width(counters) + lipgloss.Width(chromeSegmentSeparator) + lipgloss.Width(chromeKeymapPadding) + lipgloss.Width(verboseKeymap)
+	nameBudget := outer - fixedTier1
+	if nameBudget >= minWindowNameCells {
+		truncated := truncateToCells(windowName, nameBudget)
+		candidate := counters + chromeSegmentSeparator + truncated + chromeKeymapPadding + verboseKeymap
+		cw := lipgloss.Width(candidate)
+		filler := outer - 4 - cw
+		if filler >= 0 {
+			return candidate, filler
+		}
+	}
+
+	// Tier 2: drop the "· win: {name}" segment; keep verbose keymap.
+	candidate2 := counters + chromeKeymapPadding + verboseKeymap
+	if filler := outer - 4 - lipgloss.Width(candidate2); filler >= 0 {
+		return candidate2, filler
+	}
+
+	// Tier 3: drop "· win: {name}" + use compact keymap.
+	candidate3 := counters + chromeKeymapPadding + compactKeymap
+	if filler := outer - 4 - lipgloss.Width(candidate3); filler >= 0 {
+		return candidate3, filler
+	}
+
+	// Tier 4: corners + filler only. fillerCells is unused; the caller
+	// rebuilds the entire row from outer.
+	return "", 0
 }
 
 // previewModel renders a single tmux pane's saved scrollback inside a
