@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Painted preview frame with chrome cascade
-status: draft
+status: approved
+approved_at: 2026-05-18
 
 **Goal**: `pagePreview`'s `View()` renders a Portal-painted rounded blue frame around the viewport whose top edge carries a width-cascading chrome line (window/pane indicators, optional window name, glyph keymap), with SGR-reset injection protecting the right border from unterminated scrollback SGR sequences, repainting every tick on resize and navigation.
 
