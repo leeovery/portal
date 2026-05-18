@@ -71,6 +71,18 @@ Three suspected causes from the inbox-stage investigation, all in the `_portal-s
 
 **Open sub-question to investigate alongside #1**: why does `daemon.version` keep disappearing? Was present as `0.5.0` at session start, gone by end. Whole state dir got wiped during the investigation. **User confirmed (2026-05-18)**: the disappearance was unprompted — no `portal clean`, no manual `rm`, nothing user-initiated touched the state dir. The deleter is therefore somewhere in portal's own runtime path. Candidates to investigate: an atomic-write race in `state.WriteVersionFile`, an over-eager cleanup pass in the daemon's tick loop, the bootstrap's CleanStale step (#10), or shutdown-flush behaviour in `defaultShutdownFlush`.
 
+### Prior Work — Cross-Reference
+
+The 2026-05-11 work unit **`multiple-state-daemons-running-concurrently`** (completed) is the direct predecessor in the same code surface. Its spec documented:
+
+- **Defect 1 — No singleton enforcement.** `WritePIDFile` was an informational pidfile, not a lock. **Fixed** by introducing `daemon.lock` (flock-based, exposed via `state.AcquireDaemonLock`).
+- **Defect 2 — Bootstrap doesn't synchronise with killed daemon's exit.** No barrier between `KillSession(_portal-saver)` and the immediately-following `BootstrapPortalSaver` create. **Fixed** by introducing `killSaverAndWaitForDaemon` with a 5s timeout, sized to "sit above the daemon's cold-sweep ceiling (3.9s on the affected user's scrollback profile) with margin."
+- **Why daemons survive kill signal.** `defaultDaemonRun` is `for { select { ticker.C / ctx.Done() } }` — `tick()` runs synchronously inside the select arm, so `ctx.Done()` is only reachable **between ticks, never during one**. SIGHUP `cancel()` is observed only after the in-flight `tick()` completes.
+- **Sweep cost drives the orphan-eligibility window.** `captureAndCommit` runs sequentially: marker list → `CaptureStructure` → per-pane `CaptureAndHashPane` (unconditional `capture-pane -e -p -S -` for the hash) → `WriteScrollbackIfChanged` → `state.Commit`. Dedup avoids file write only, not the expensive tmux call.
+- **Recycle-induced sweep pressure.** Kill-respawn itself emits `session-closed` and `session-created` hooks, both of which fire `save.requested` and force the surviving daemon's sweep into a back-to-back regime — widening the cancel-to-exit window precisely on the recycle path the barrier was meant to defend.
+
+**Implication for the current bug**: the prior fix shipped the `daemon.lock` and `killSaverAndWaitForDaemon` machinery, but the 5s timeout is now empirically inadequate for this user's scrollback profile (~27MB across 23 panes; earlier evidence shows >5s observed in the wild). On top of that, the current bug compounds with a **second issue not addressed by the prior fix**: `portalSaverVersionMismatch`'s false-positive treatment of "absent version file" as "version mismatch", which triggers the kill barrier on every bootstrap even when no version upgrade has occurred.
+
 ### Code Trace
 
 *To be populated during Step 5 (Code Analysis).*
