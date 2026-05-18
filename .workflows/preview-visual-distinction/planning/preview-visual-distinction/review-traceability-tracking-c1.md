@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-18
 cycle: 1
 phase: Traceability Review
@@ -191,7 +191,7 @@ Also update `NewPreviewModel` to call `viewport.New(max(0, width-previewFrameOve
 **Spec Reference**: `.workflows/preview-visual-distinction/specification/preview-visual-distinction/specification.md` § Frame structure, § Border style, § Border colour, § Top edge composition, § Top edge composition > Color application, § Resize behaviour, § Initial sizing and preview-open ordering, § SGR reset injection.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -248,7 +248,7 @@ Also add to **Tests**:
 - `"composeChromeLineParts and composeChromeLine share tier-selection logic via a private helper"` (structural assertion — single tier-selection entry point exists; verified by inspection or by a test that mutates a fixture and confirms both functions reflect the change consistently)
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Linked to Finding 1 — both findings together cover the chrome-styling deviation. Finding 1 fixes the call site (task 1-8); this finding fixes the underlying primitive (task 1-4) so the call site has the right tool. Approving Finding 1 without this finding would force task 1-8 to either inline the slicing logic (brittle) or re-run cascade logic at the call site (duplication).
 
 ---
