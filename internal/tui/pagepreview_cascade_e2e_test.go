@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 
@@ -41,12 +40,6 @@ import (
 //
 // See pagepreview_compose_chrome_test.go for the unit-level cascade
 // thresholds; this test reuses the same math, applied through View().
-
-// ansiSGRRe matches ANSI SGR escape sequences for stripping styled output
-// before substring matching on chrome content. Spec § Test conventions
-// requires e2e cascade tests to "Strip ANSI escape sequences before substring
-// matching" so chrome assertions key off plain content.
-var ansiSGRRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 	// Fixture: one window, one pane, window name "nvim-editor". The
@@ -171,7 +164,7 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 			m, _ = m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
 
 			raw := m.View()
-			stripped := ansiSGRRe.ReplaceAllString(raw, "")
+			stripped := stripANSI(raw)
 
 			tc.assert(t, stripped, raw)
 
