@@ -32,7 +32,7 @@
         "preview-visual-distinction": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "3fd9338b2a31372ec0075c5b8f26a3ad4fc1158b",
+          "spec_commit": "77d5337eaddcba046906ecc7cadc119ce405d8b2",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
