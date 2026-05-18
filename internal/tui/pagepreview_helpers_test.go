@@ -14,7 +14,7 @@ import (
 // canonical way to drive it from in-package tests.
 //
 // enumerator and reader are intentionally left nil: the helpers under test
-// (currentGroup, currentRawIndices, currentPaneKey, degenerate, chromeLine)
+// (currentGroup, currentRawIndices, currentPaneKey, degenerate, composeChromeLine)
 // must be pure — any helper that accidentally calls m.enumerator or m.reader
 // would nil-panic in these tests, locking the purity contract from the
 // outside.
