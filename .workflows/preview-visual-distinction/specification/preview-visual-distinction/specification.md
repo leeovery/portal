@@ -413,6 +413,86 @@ The `AdaptiveColor` defining the border foreground is declared once in `pageprev
 
 No other files are touched.
 
+## Tests
+
+Five testable surfaces. All five are pure-function unit tests or `Update + View` integration tests with the existing `previewModel` mock seams (`TmuxEnumerator`, `ScrollbackReader`). **No golden / snapshot files. No real-tmux integration test.** Pure-function tests cover the substantive logic exhaustively at minimal cost; `Update + View` with mocked seams matches the existing project convention from `session-scrollback-preview`.
+
+### Surface 1 — `composeChromeLine(width, …)` pure function
+
+Table-driven cases at each cascade threshold:
+
+- **Window name fits** (wide width) — full window name present, verbose keymap.
+- **Window name truncates** — `…` suffix present, verbose keymap, no mid-rune cuts.
+- **Window name dropped (tier 2)** — `· win: …` segment absent, verbose keymap.
+- **Keymap compacted (tier 3)** — `· win: …` absent, compact form `] [ ⇥ ⏎ ⎋` present.
+- **Chrome dropped (tier 4)** — output is corners + `─` filler only.
+
+### Surface 2 — Display-cell truncation primitive
+
+Table-driven cases with at least:
+
+- ASCII (1 cell per rune)
+- CJK glyphs (2 cells per rune)
+- Emoji (including ZWJ sequences, 2 cells per rune)
+- Combining marks (0-cell continuers)
+
+Asserts: no mid-rune cuts, final display-cell width ≤ budget, `…` appended only when truncation actually occurred.
+
+### Surface 3 — SGR reset injection
+
+Fixture lines containing unterminated SGR sequences. Asserts each non-empty line in the output ends with `\x1b[0m`. Includes:
+
+- Line ending in `set bg=red` SGR — gets reset appended.
+- Line ending in `\x1b[0m` already — gets a second reset appended (idempotency confirmed harmless).
+- Empty line — no reset appended.
+- Whitespace-only line with embedded SGR — non-empty, gets reset.
+- Trailing-newline input — trailing empty element ignored.
+
+### Surface 4 — Resize handling
+
+`Update(tea.WindowSizeMsg{Width, Height})` on a `previewModel` constructed with mock `TmuxEnumerator` / `ScrollbackReader`. Asserts:
+
+- `viewport.SetSize` was called with `Width − 2, Height − 2`.
+- The chrome line was recomputed for the new inner width.
+
+### Surface 5 — Frame composition end-to-end
+
+`Update + View` on `previewModel` with mocks. Asserts the rendered `View()` output contains:
+
+- The rounded corner glyphs (`╭`, `╮`, `╰`, `╯`).
+- The chrome content on the top edge.
+- The SGR reset bytes on viewport content rows.
+
+Extended with a **table-driven cascade-tier sub-test** that drives the full `Update → View` pipeline across cascade tiers, not just the pure-function thresholds:
+
+Procedure:
+
+- Construct `previewModel` with mock `TmuxEnumerator` + `ScrollbackReader` and a fixed window-name fixture.
+- For each width in the cascade-threshold table, dispatch `Update(tea.WindowSizeMsg{Width: w, Height: 30})`, then call `View()`.
+- Assert the rendered output contains the expected tier signature:
+
+| Width | Expected signature                                              |
+|-------|-----------------------------------------------------------------|
+| 200   | Full window name + verbose keymap (`⇥ next pane`)               |
+| 60    | Window name truncated with `…` suffix; verbose keymap           |
+| 40    | No `win:` segment (tier 2 dropped); verbose keymap              |
+| 25    | No `win:`; compact keymap `] [ ⇥ ⏎ ⎋`                           |
+| 15    | Top edge is `╭{─ × 13}╮` (tier 4: corners + filler, no chrome)  |
+
+- Assert SGR reset bytes are present on each viewport content row in every case.
+
+This ties the pure-function cascade thresholds (surface 1) to the actual rendered frame, catching regressions where `composeChromeLine`'s output and the `View()` composition could drift apart.
+
+### Chrome-row invariant test
+
+A focused assertion that `strings.Count(composeChromeLine(w, …), "\n") == 0` across the cascade-tier width thresholds. Guards the assumption baked into `m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` that the top edge is always exactly one row.
+
+### Test conventions
+
+- No `t.Parallel()` (matches the cmd-package convention noted in CLAUDE.md, applied here because preview's mocks are constructor-injected — even though parallel would technically be safe, project convention dictates serial).
+- No `tmuxtest` imports — preview tests must not depend on a real tmux server.
+- Tests assert against the `verboseKeymap` / `compactKeymap` constants by literal byte content.
+
 ---
 
 ## Working Notes
