@@ -27,6 +27,10 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	}
 	reader := &recordingReader{bytes: []byte("hello-from-preview\n")}
 	m := modelWithSeams(sessions, enum, reader)
+	// Wider terminal so the chrome cascade lands at tier 1 — the assertions
+	// below check for the full "win: editor" segment which only renders when
+	// the full verbose chrome (counters + segment + verbose keymap) fits.
+	m.termWidth = 120
 
 	updated, _ := m.Update(keySpaceMsg())
 	got, ok := updated.(Model)

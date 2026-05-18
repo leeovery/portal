@@ -380,13 +380,19 @@ func TestPreviewExternalKill_NoPanicWhenAllPanesReturnNilNilMidPreview(t *testin
 
 	// Exercise View() at every step — the chrome+viewport composition path
 	// is the most likely panic surface if the model has lost a structural
-	// invariant under degradation.
+	// invariant under degradation. View() composes chromeLine at the model's
+	// actual width (m.width − previewFrameOverhead inner); compare against
+	// the same cascade tier the renderer used, not chromeLineForTest's
+	// fixed-width 200 (a different cascade tier).
 	for i, mm := range models {
-		// View() composes chromeLine() and viewport.View() internally; if
-		// any of the three would panic, the contains-check below would
-		// not be reached. The assertion doubles as the panic surface.
-		if !strings.Contains(stripANSI(mm.View()), stripANSI(chromeLineForTest(mm))) {
-			t.Errorf("step %d: View() did not contain chromeLine() — composition broken", i)
+		want := composeChromeLine(
+			mm.width-previewFrameOverhead,
+			mm.windowIdx, len(mm.groups),
+			mm.paneIdx, len(mm.currentGroup().PaneIndices),
+			mm.currentGroup().WindowName,
+		)
+		if !strings.Contains(stripANSI(mm.View()), want) {
+			t.Errorf("step %d: View() did not contain chrome line — composition broken", i)
 		}
 	}
 }

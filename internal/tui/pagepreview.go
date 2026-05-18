@@ -301,7 +301,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(width, max(0, height-previewFrameOverhead)),
+		viewport:   viewport.New(max(0, width-previewFrameOverhead), max(0, height-previewFrameOverhead)),
 		width:      width,
 		height:     height,
 	}
@@ -525,12 +525,32 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 	return m, cmd
 }
 
-// View is a temporary stub returning the bare viewport content with no
-// frame and no chrome. TODO(task 1-8): replace with the full painted-frame
-// composition (lipgloss rounded border + composeChromeLine on the top edge
-// + SGR-reset injection on the viewport rows). Between tasks 1-7 and 1-8
-// the preview renders without chrome — this is the intentional atomic
-// refactor seam.
+// View renders the painted preview frame: a hand-composed top edge carrying
+// the chrome line, plus lipgloss-rendered left/right/bottom edges around the
+// viewport body. Per spec § Top edge composition > Color application, the
+// border parts (corners + 1-cell padding + filler) wrap in
+// BorderForeground(previewBorderColor) while the chrome content itself
+// renders with no explicit foreground so it inherits the terminal default.
+// Per spec § SGR reset injection, viewport rows pass through injectSGRResets
+// before being handed to lipgloss so unterminated SGR sequences in scrollback
+// cannot bleed into the right border. Per spec § Resize behaviour the chrome
+// line is recomputed every tick — no cached field on the model — so resize,
+// window/pane navigation, and any other state change that affects chrome
+// content propagate without per-handler cache invalidation.
 func (m previewModel) View() string {
-	return m.viewport.View()
+	left, chrome, right := composeChromeLineParts(
+		m.width-previewFrameOverhead,
+		m.windowIdx, len(m.groups),
+		m.paneIdx, len(m.currentGroup().PaneIndices),
+		m.currentGroup().WindowName,
+	)
+	borderStyle := lipgloss.NewStyle().Foreground(previewBorderColor)
+	styledTop := borderStyle.Render(left) + chrome + borderStyle.Render(right)
+
+	bodyBorderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder(), false, true, true, true).
+		BorderForeground(previewBorderColor)
+	body := bodyBorderStyle.Render(injectSGRResets(m.viewport.View()))
+
+	return styledTop + "\n" + body
 }
