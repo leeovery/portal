@@ -394,6 +394,8 @@ The existing `const previewChromeHeight = 1` becomes outdated under the new mode
 
 This names the magic 2 used in the resize math (`SetSize(msg.Width − 2, msg.Height − 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
 
+The constant is package-internal to `internal/tui`. The rename must also update existing references in sibling test files: `pagepreview_layout_test.go`, `pagepreview_precedence_test.go`, `pagepreview_scroll_test.go` (test files reference the constant in their viewport-height assertions; those assertions also need their arithmetic updated from `msg.Height − previewChromeHeight` to `msg.Height − previewFrameOverhead` since the magic value changes from 1 to 2). No references outside the `internal/tui` package.
+
 ### `NewPreviewModel` signature change
 
 `NewPreviewModel` already accepts `width` and `height` as constructor parameters today (`internal/tui/pagepreview.go:74`). The parent Bubble Tea model in `internal/tui/model.go` tracks the current terminal dimensions on `m.termWidth` / `m.termHeight` (already plumbed via its own `tea.WindowSizeMsg` handler) and passes them at the preview-open call site (`model.go:1421`). **No new plumbing is required** in the Sessions-page model or its `Update` handler — the dimensions are already available where `NewPreviewModel` is called.
@@ -427,7 +429,7 @@ The `AdaptiveColor` defining the border foreground is declared once in `pageprev
 | `internal/tui/pagepreview.go` (SGR injector)                       | Add `injectSGRResets` helper                                 |
 | `internal/tui/model.go:1421` (preview-open call site)              | No change required — already passes `m.termWidth, m.termHeight` to `NewPreviewModel` |
 
-No other files are touched.
+No production files outside `internal/tui/pagepreview.go` and `internal/tui/model.go` are touched. The `previewChromeHeight` → `previewFrameOverhead` rename additionally updates references in `pagepreview_layout_test.go`, `pagepreview_precedence_test.go`, and `pagepreview_scroll_test.go` (test files only; arithmetic on those assertions also updates because the constant value changes from 1 to 2).
 
 ## Tests
 

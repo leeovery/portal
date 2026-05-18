@@ -137,10 +137,10 @@ The spec renames `previewChromeHeight` and asserts "No other files are touched."
 Likely the constant is file-local, but the spec asserts a "no other files touched" bound without verifying.
 
 **Proposed Addition**:
-{To be discussed — either confirm `previewChromeHeight` is file-local (in which case state it), or list any external call sites that need updating.}
+The constant is package-internal to `internal/tui`. The rename also updates sibling test files (`pagepreview_layout_test.go`, `pagepreview_precedence_test.go`, `pagepreview_scroll_test.go`) — assertion arithmetic also updates because the value changes from 1 to 2.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Code shape changes* > *Rename `previewChromeHeight` → `previewFrameOverhead = 2`* and the closing paragraph after the file-scope summary.
 
 ---
 
