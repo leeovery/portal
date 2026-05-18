@@ -53,10 +53,10 @@ The "~" makes this an approximate target. An implementer must pick an exact inte
 A related concern: the test table fixes `width: 40` to "No `win:` segment (tier 2 dropped); verbose keymap" — this implicitly pegs the threshold, but the test value isn't documented as the canonical threshold definition.
 
 **Proposed Addition**:
-{To be discussed — fix the tier-2 minimum as an exact integer constant.}
+Fix the tier-2 minimum as `const minWindowNameCells = 8`. Tests assert tier-2 entry exactly at this boundary.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Width cascade* Tier 2.
 
 ---
 

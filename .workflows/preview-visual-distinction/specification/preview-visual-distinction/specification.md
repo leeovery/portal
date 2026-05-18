@@ -156,7 +156,7 @@ Tier interactions:
 
 **Tier 1 — truncate window name with `…` suffix.** When the budget for the window name segment is positive but smaller than the full name, the name is truncated to fit and a `…` (U+2026, 1 cell wide) suffix appended.
 
-**Tier 2 — drop the `· win: {name}` segment entirely.** Reached when the budget for the window name segment falls below a sensible minimum (**target: ~8 display cells**). Below that minimum the truncation reads as garbage rather than as a recognisable name. The whole `· win: {name}` interpunct-prefixed segment is removed, not just the name string.
+**Tier 2 — drop the `· win: {name}` segment entirely.** Reached when the budget remaining for the window name string after the cascade math is below a fixed minimum of **8 display cells** (`const minWindowNameCells = 8`). Below that minimum the truncation reads as garbage rather than as a recognisable name. The whole `· win: {name}` interpunct-prefixed segment is removed, not just the name string. Tests assert tier-2 entry exactly at the integer boundary.
 
 **Tier 3 — swap verbose keymap for compact form.** Reached when even with the window name segment dropped the verbose keymap still overflows. Saves ≈73 cells (verbose form is 82 cells, compact is 9). Action labels are not permanently lost from the product — once the user has seen the verbose chrome at wider widths, the keys-only form reads as a recognised compression rather than a fresh-eyes puzzle.
 
