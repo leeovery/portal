@@ -69,7 +69,7 @@ Three suspected causes from the inbox-stage investigation, all in the `_portal-s
 2. **SIGHUP-unresponsive capture loop.** `cmd/state_daemon.go:306` registers SIGHUP/SIGTERM via `signal.Notify`, but the capture loop appears to block on per-pane work without polling the signal channel mid-iteration. `killSaverAndWaitForDaemon`'s 5s deadline elapses while the daemon is still mid-capture, leaving an orphan.
 3. **Lock-contention cascade.** The newly-spawned daemon can't acquire `daemon.lock` (orphan still holds it), exits, its pane process exit destroys the just-created `_portal-saver` session, and the immediately-following `SetSessionOption(_portal-saver, destroy-unattached, off)` fails with "no such session" — the visible `step 4 (EnsureSaver) failed` warning.
 
-**Open sub-question to investigate alongside #1**: why does `daemon.version` keep disappearing? Was present as `0.5.0` at session start, gone by end. Whole state dir got wiped during the investigation — unclear which code path nuked it. Candidates: `portal clean`, atomic-write race in `state.WriteVersionFile`, or something else.
+**Open sub-question to investigate alongside #1**: why does `daemon.version` keep disappearing? Was present as `0.5.0` at session start, gone by end. Whole state dir got wiped during the investigation. **User confirmed (2026-05-18)**: the disappearance was unprompted — no `portal clean`, no manual `rm`, nothing user-initiated touched the state dir. The deleter is therefore somewhere in portal's own runtime path. Candidates to investigate: an atomic-write race in `state.WriteVersionFile`, an over-eager cleanup pass in the daemon's tick loop, the bootstrap's CleanStale step (#10), or shutdown-flush behaviour in `defaultShutdownFlush`.
 
 ### Code Trace
 
