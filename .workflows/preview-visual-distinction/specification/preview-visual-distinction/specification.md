@@ -266,7 +266,7 @@ Final assembly at the `View()` call site, conceptually:
 styledBorder("╭─") + chromeContent + styledBorder(filler + "─╮")
 ```
 
-where `styledBorder := lipgloss.NewStyle().Foreground(adaptiveBlue).Render`.
+where `styledBorder := lipgloss.NewStyle().Foreground(previewBorderColor).Render` (see *Style sourcing* for the constant definition).
 
 **Implication for `composeChromeLine`'s purity**: the function returns the *unstyled* chrome content string. Top-edge styling — border parts coloured, chrome parts default — happens at the call site in `View()` where the final composition assembles. This keeps `composeChromeLine` pure and testable purely on content output, independent of colour rendering.
 
@@ -414,7 +414,13 @@ Capture the invariant explicitly:
 
 Corner and edge characters used in the manually-composed top edge are **sourced from the chosen `lipgloss` border value** (`lipgloss.RoundedBorder()`) rather than hardcoded — a future border-style switch is then a one-line change.
 
-The `AdaptiveColor` defining the border foreground is declared once in `pagepreview.go` (or a near neighbour) and used by both the `lipgloss` border styling on the three rendered edges and the `lipgloss.NewStyle().Foreground(...)` wrapper on the hand-composed top edge's border parts.
+The `AdaptiveColor` defining the border foreground is declared as a package-level constant in `internal/tui/pagepreview.go`:
+
+```go
+var previewBorderColor = lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}
+```
+
+Used in both the `lipgloss` border styling on the three rendered edges (via `BorderForeground(previewBorderColor)`) and the `lipgloss.NewStyle().Foreground(previewBorderColor)` wrapper on the hand-composed top edge's border parts. The name `previewBorderColor` is preferred over `adaptiveBlue` to keep the variable's *role* (border colour for the preview frame) front-and-centre rather than its current *hue*, so a future hue change does not produce a misleading identifier.
 
 ### File scope summary
 
@@ -427,6 +433,7 @@ The `AdaptiveColor` defining the border foreground is declared once in `pageprev
 | `internal/tui/pagepreview.go` (NewPreviewModel)                    | Accept `width, height int`; initialise viewport + chrome     |
 | `internal/tui/pagepreview.go` (keymap constants)                   | Add `verboseKeymap` / `compactKeymap` constants              |
 | `internal/tui/pagepreview.go` (SGR injector)                       | Add `injectSGRResets` helper                                 |
+| `internal/tui/pagepreview.go` (adaptive color)                     | Add `var previewBorderColor = lipgloss.AdaptiveColor{…}`     |
 | `internal/tui/model.go:1421` (preview-open call site)              | No change required — already passes `m.termWidth, m.termHeight` to `NewPreviewModel` |
 
 No production files outside `internal/tui/pagepreview.go` and `internal/tui/model.go` are touched. The `previewChromeHeight` → `previewFrameOverhead` rename additionally updates references in `pagepreview_layout_test.go`, `pagepreview_precedence_test.go`, and `pagepreview_scroll_test.go` (test files only; arithmetic on those assertions also updates because the constant value changes from 1 to 2).

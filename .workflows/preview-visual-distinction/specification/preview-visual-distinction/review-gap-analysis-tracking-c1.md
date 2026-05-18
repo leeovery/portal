@@ -217,10 +217,10 @@ The color application section uses `adaptiveBlue` in the conceptual code example
 Tests don't depend on the name, so this is minor — but the File scope summary doesn't list "add adaptive color constant" as a change line, even though it's a new top-level declaration.
 
 **Proposed Addition**:
-{To be discussed — pin the constant name and location, and add the constant addition to the File scope summary if appropriate.}
+Pin as `var previewBorderColor = lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}` at package level in `internal/tui/pagepreview.go`. Update color-application example. Add row to file-scope summary.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Code shape changes* > *Style sourcing*, the color-application example in *Top edge composition*, and the file-scope summary table.
 
 ---
 
