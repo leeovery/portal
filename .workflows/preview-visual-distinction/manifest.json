@@ -50,7 +50,14 @@
             "preview-visual-distinction-1-6": "tick-9c2331",
             "preview-visual-distinction-1-7": "tick-674c91",
             "preview-visual-distinction-1-8": "tick-5f158b",
-            "preview-visual-distinction-1-9": "tick-86f581"
+            "preview-visual-distinction-1-9": "tick-86f581",
+            "preview-visual-distinction-2": "tick-8ba817",
+            "preview-visual-distinction-2-1": "tick-c58e2c",
+            "preview-visual-distinction-2-2": "tick-b63008",
+            "preview-visual-distinction-2-3": "tick-561b0d",
+            "preview-visual-distinction-2-4": "tick-69663d",
+            "preview-visual-distinction-2-5": "tick-6f9c15",
+            "preview-visual-distinction-2-6": "tick-1a45a2"
           },
           "external_id": "tick-2d1808"
         }
@@ -62,7 +69,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

@@ -5,7 +5,7 @@
 - total_proposed: 6
 
 ## Task 1: Unify ANSI-stripping in cascade e2e test on package helper
-- status: pending
+- status: created
 - severity: medium
 - sources: duplication
 
@@ -31,7 +31,7 @@
 ---
 
 ## Task 2: Promote `newFramePreviewModelAt` to shared preview-model test helper
-- status: pending
+- status: created
 - severity: medium
 - sources: duplication
 
@@ -56,7 +56,7 @@
 ---
 
 ## Task 3: Add `chromeLineAtModelWidth` test helper alongside `chromeLineForTest`
-- status: pending
+- status: created
 - severity: low
 - sources: duplication
 
@@ -85,7 +85,7 @@
 ---
 
 ## Task 4: Extract `tier4Row` helper to deduplicate collapsed-row reconstruction
-- status: pending
+- status: created
 - severity: low
 - sources: duplication, architecture
 
@@ -110,7 +110,7 @@
 ---
 
 ## Task 5: Fix stale `chromeLine` reference in helpers-test docstring
-- status: pending
+- status: created
 - severity: low
 - sources: standards
 
@@ -131,7 +131,7 @@
 ---
 
 ## Task 6: Collapse `composeChromeLine` to a one-liner over `composeChromeLineParts`
-- status: pending
+- status: created
 - severity: low
 - sources: architecture
 

@@ -44,3 +44,18 @@ approved_at: 2026-05-18
 | preview-visual-distinction-1-7 | Wire tea.WindowSizeMsg handler in Update and delete chromeLine() method | msg.Width/Height of 0 or 1 negative-arg clamp, chromeLine() callers redirected to composeChromeLine |
 | preview-visual-distinction-1-8 | Compose painted frame in View() and initialise viewport in NewPreviewModel | chrome recomputed every tick no cached field, first-frame correctness at construction, degenerate widths handed to lipgloss without panic |
 | preview-visual-distinction-1-9 | End-to-end cascade-tier Update + View test | tier 1/2/3/4 signatures at widths 200/60/40/25/15, SGR reset present on every content row |
+
+### Phase 2: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| preview-visual-distinction-2-1 | Unify ANSI-stripping in cascade e2e test on package helper | none |
+| preview-visual-distinction-2-2 | Promote newFramePreviewModelAt to shared preview-model test helper | three call sites migrated, helper accessible at package scope |
+| preview-visual-distinction-2-3 | Add chromeLineAtModelWidth test helper alongside chromeLineForTest | none |
+| preview-visual-distinction-2-4 | Extract tier4Row helper to deduplicate collapsed-row reconstruction | literal expression appears at most once |
+| preview-visual-distinction-2-5 | Fix stale chromeLine reference in helpers-test docstring | none |
+| preview-visual-distinction-2-6 | Collapse composeChromeLine to a one-liner over composeChromeLineParts | preserve signature, width<0 guard, chromeLineForTest still compiles |
