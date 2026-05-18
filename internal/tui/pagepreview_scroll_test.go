@@ -151,9 +151,9 @@ func TestPreviewWindowSizeMsgUpdatesViewportDimensions(t *testing.T) {
 	if updated.viewport.Width != 120 {
 		t.Errorf("expected viewport.Width=120, got %d", updated.viewport.Width)
 	}
-	wantHeight := 40 - previewChromeHeight
+	wantHeight := 40 - previewFrameOverhead
 	if updated.viewport.Height != wantHeight {
-		t.Errorf("expected viewport.Height=%d (msg.Height - previewChromeHeight), got %d", wantHeight, updated.viewport.Height)
+		t.Errorf("expected viewport.Height=%d (msg.Height - previewFrameOverhead), got %d", wantHeight, updated.viewport.Height)
 	}
 	if updated.width != 120 {
 		t.Errorf("expected previewModel.width=120, got %d", updated.width)

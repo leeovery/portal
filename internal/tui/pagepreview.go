@@ -32,11 +32,11 @@ const (
 // target; lipgloss/termenv handles NO_COLOR and palette downgrade automatically.
 var previewBorderColor = lipgloss.AdaptiveColor{Light: "#3B5577", Dark: "#7B95BD"}
 
-// previewChromeHeight is the number of lines occupied by the chrome line
-// rendered above the viewport. v1 uses a single header line; if chrome
-// later grows to multiple lines, only this constant changes — viewport
-// resize math is centralised on it.
-const previewChromeHeight = 1
+// previewFrameOverhead is the total number of frame rows the preview's
+// rounded border occupies: top border (carrying chrome) + bottom border
+// = 2 rows of frame overhead. Used to compute the viewport's inner
+// height in NewPreviewModel and the tea.WindowSizeMsg handler.
+const previewFrameOverhead = 2
 
 // previewPlaceholder is the canonical user-facing string rendered into the
 // viewport when the ScrollbackReader returns the unified "no content
@@ -111,7 +111,7 @@ func NewPreviewModel(session string, enumerator TmuxEnumerator, reader Scrollbac
 		groups:     groups,
 		windowIdx:  0,
 		paneIdx:    0,
-		viewport:   viewport.New(width, max(0, height-previewChromeHeight)),
+		viewport:   viewport.New(width, max(0, height-previewFrameOverhead)),
 		width:      width,
 		height:     height,
 	}
@@ -288,7 +288,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.Width = msg.Width
-		m.viewport.Height = max(0, msg.Height-previewChromeHeight)
+		m.viewport.Height = max(0, msg.Height-previewFrameOverhead)
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -366,7 +366,7 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 // View returns the chrome line composed vertically above the embedded
 // viewport contents. Chrome on top, viewport below — single newline
 // separator. Header-on-top is the build-phase choice (spec § Open Items >
-// Chrome Floor defers placement); only previewChromeHeight and this
+// Chrome Floor defers placement); only previewFrameOverhead and this
 // orientation change if footer is later preferred. Pinned by tests so
 // drift is caught loudly.
 func (m previewModel) View() string {

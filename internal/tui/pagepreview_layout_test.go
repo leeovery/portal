@@ -52,9 +52,9 @@ func TestPreviewWindowSizeMsg_SetsViewportHeightToMsgHeightMinusChrome(t *testin
 	if updated.viewport.Width != 120 {
 		t.Errorf("expected viewport.Width=120, got %d", updated.viewport.Width)
 	}
-	wantHeight := 40 - previewChromeHeight
+	wantHeight := 40 - previewFrameOverhead
 	if updated.viewport.Height != wantHeight {
-		t.Errorf("expected viewport.Height=%d (msg.Height - previewChromeHeight), got %d", wantHeight, updated.viewport.Height)
+		t.Errorf("expected viewport.Height=%d (msg.Height - previewFrameOverhead), got %d", wantHeight, updated.viewport.Height)
 	}
 }
 
@@ -125,8 +125,8 @@ func TestNewPreviewModel_SizesViewportWithChromeSubtracted(t *testing.T) {
 		t.Fatalf("setup: expected ok=true, got false")
 	}
 
-	wantHeight := initialHeight - previewChromeHeight
+	wantHeight := initialHeight - previewFrameOverhead
 	if m.viewport.Height != wantHeight {
-		t.Errorf("expected viewport.Height=%d (initialHeight - previewChromeHeight), got %d", wantHeight, m.viewport.Height)
+		t.Errorf("expected viewport.Height=%d (initialHeight - previewFrameOverhead), got %d", wantHeight, m.viewport.Height)
 	}
 }
