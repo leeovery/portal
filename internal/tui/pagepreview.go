@@ -108,6 +108,24 @@ func truncateToCells(s string, budget int) string {
 	return string(b) + "…"
 }
 
+// injectSGRResets appends "\x1b[0m" (SGR reset) to the end of every
+// non-empty line in s, ignoring empty lines (including any trailing
+// empty element produced by a terminating newline). Used to protect
+// the right border from unterminated SGR sequences in the scrollback
+// body — see spec § SGR reset injection.
+//
+// Pure: no I/O. Idempotent in observable behaviour — terminals collapse
+// "\x1b[0m\x1b[0m" to a single reset, so re-applying does not corrupt rendering.
+func injectSGRResets(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if len(line) > 0 {
+			lines[i] = line + "\x1b[0m"
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // chromeSegmentSeparator and chromeKeymapPadding are the fixed glyphs joining
 // chrome line segments per specification.md § Chrome line content > Segments.
 // `chromeSegmentSeparator` precedes the "win: {name}" segment; a single space
