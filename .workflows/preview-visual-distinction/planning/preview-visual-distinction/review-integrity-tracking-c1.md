@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-18
 cycle: 1
 phase: Plan Integrity Review
@@ -34,7 +34,7 @@ The final Tests entry on task 1-4 reads `'composeChromeLineParts and composeChro
 - 'composeChromeLineParts chrome region width matches composeChromeLine chrome region at every cascade threshold' (drives both functions over the same width set and asserts lipgloss.Width(chrome) matches the chrome span extracted from composeChromeLine's output by length subtraction — a behavioural drift guard that replaces the by-inspection structural assertion)
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -59,7 +59,7 @@ The acceptance criterion "All four edges are styled with previewBorderColor — 
 - All four edges are styled with previewBorderColor — verified by locating each of the four rounded corner glyphs ('╭','╮','╰','╯') in the rendered output and asserting an SGR colour sequence appears within the byte run immediately preceding each corner. The hex codes of previewBorderColor.Light ('3B5577') and previewBorderColor.Dark ('7B95BD') need not be literal-byte asserted (lipgloss may translate via terminal-profile mapping); a non-empty foreground SGR ('\x1b[38;…m') prefix on each corner is sufficient. The test must inspect all four corners individually so a one-edge regression cannot pass.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -84,7 +84,7 @@ The Do bullet describing the chrome-foreground assertion is contradictory: it sa
     - Asserts that the chrome content region of the rendered top row is not wrapped in a foreground-colour SGR. Procedure: take the raw (un-stripped) top row, locate the chrome substring by its plain-text content (e.g. 'Window 1 of 1 · Pane 1 of 1 · win: nvim-editor' at width 80), then split the raw top row at that substring into (prefix, chromeBytes, suffix). Assert: (a) prefix contains a foreground SGR sequence ('\x1b[38;'); (b) suffix contains a foreground SGR sequence ('\x1b[38;'); (c) chromeBytes contains no '\x1b[38;' sequence (no explicit foreground inside the chrome region). If the chrome region happens to end with an SGR reset that's fine — the load-bearing assertion is that the chrome span carries no foreground SGR of its own.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -110,7 +110,7 @@ Task 1-7's plan deliberately stubs `View()` to return `m.viewport.View()` so the
   - The task 1-7 + 1-8 pair is an atomic refactor: between these two commits the rendered preview shows no chrome. Reviewers landing 1-7 in isolation should expect a temporary regression of the preview chrome until 1-8 lands.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -136,7 +136,7 @@ The phase acceptance specifies sourcing for the *top-edge* corner glyphs but is 
 - [ ] The bottom border (left edge, right edge, bottom edge, and corners ╰ ╯) is rendered via a single `lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), false, true, true, true).BorderForeground(previewBorderColor)` body-wrap so all four corners derive from the same `lipgloss.RoundedBorder()` source and the same `previewBorderColor`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -168,7 +168,7 @@ The Solution says "Introduce two package-level string constants and one package-
   - 'previewBorderColor Light hex equals 3B5577 and Dark hex equals 7B95BD'
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -201,7 +201,7 @@ The algorithm step "Otherwise iterate runes, accumulating cells. Stop when addin
     - For budget == 1 with non-empty s that does not fit whole: the loop adds zero runes (every rune would exceed budget − 1 == 0), then '…' is appended — output is '…' (width 1). This is the canonical result; do not collapse to "".
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
