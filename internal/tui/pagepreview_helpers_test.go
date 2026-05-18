@@ -41,6 +41,34 @@ func chromeLineForTest(m previewModel) string {
 	return composeChromeLine(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
 }
 
+// newFramePreviewModel constructs a single-window single-pane previewModel
+// with the requested window name and ScrollbackReader payload, at the
+// canonical 80x24 dimensions used across these frame tests.
+func newFramePreviewModel(t *testing.T, windowName string, payload []byte) previewModel {
+	t.Helper()
+	return newFramePreviewModelAt(t, windowName, payload, 80, 24)
+}
+
+// newFramePreviewModelAt is the explicit-dimensions variant of
+// newFramePreviewModel. Used by tests that need a wider terminal to
+// trigger cascade tier 1 (full verbose chrome with " · win: {name}"),
+// or other non-default sizes. Session is fixed to "work" — the only
+// value any in-package preview test currently needs.
+func newFramePreviewModelAt(t *testing.T, windowName string, payload []byte, width, height int) previewModel {
+	t.Helper()
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: windowName, PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: payload}
+	m, ok := NewPreviewModel("work", enum, reader, nil, width, height)
+	if !ok {
+		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
+	}
+	return m
+}
+
 func TestPreviewModel_currentGroup_ReturnsCachedWindowGroupAtWindowIdx(t *testing.T) {
 	groups := []tmux.WindowGroup{
 		{WindowIndex: 0, WindowName: "alpha", PaneIndices: []int{0, 1}},

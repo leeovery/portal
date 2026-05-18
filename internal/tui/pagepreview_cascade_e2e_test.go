@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // End-to-end cascade-tier test driving the full Update → View pipeline.
@@ -47,7 +46,6 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 	// an unterminated SGR — guarantees the SGR-reset injection path is
 	// exercised at every tier so the per-row "\x1b[0m" assertion is
 	// meaningful regardless of width.
-	const session = "work"
 	const windowName = "nvim-editor"
 	body := []byte("\x1b[41mhello\nworld\n")
 
@@ -151,16 +149,7 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			enum := &stubEnumerator{
-				groups: []tmux.WindowGroup{
-					{WindowIndex: 0, WindowName: windowName, PaneIndices: []int{0}},
-				},
-			}
-			reader := &recordingReader{bytes: body}
-			m, ok := NewPreviewModel(session, enum, reader, nil, tc.width, 30)
-			if !ok {
-				t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-			}
+			m := newFramePreviewModelAt(t, windowName, body, tc.width, 30)
 			m, _ = m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
 
 			raw := m.View()

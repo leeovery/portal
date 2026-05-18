@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/tmux"
 )
 
 // TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize pins
@@ -15,16 +14,7 @@ import (
 // left and one at the right, so the inner viewport surface is
 // (msg.Width − 2) × (msg.Height − 2) per § Resize behaviour.
 func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
-		},
-	}
-	reader := &recordingReader{bytes: nil, err: nil}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := newFramePreviewModelAt(t, "main", nil, 80, 24)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -48,16 +38,7 @@ func TestPreviewWindowSizeMsg_RecordsDimensionsAndSetsViewportToInnerSize(t *tes
 // zero at the lower bound. msg.Width=1, msg.Height=0 produces viewport
 // dimensions (0, 0) — the clamp boundary per § Resize behaviour.
 func TestPreviewWindowSizeMsg_ClampsViewportDimensionsNonNegative(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
-		},
-	}
-	reader := &recordingReader{bytes: nil, err: nil}
-	m, ok := NewPreviewModel("work", enum, reader, nil, 80, 24)
-	if !ok {
-		t.Fatalf("setup: expected ok=true from NewPreviewModel, got false")
-	}
+	m := newFramePreviewModelAt(t, "main", nil, 80, 24)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 1, Height: 0})
 
