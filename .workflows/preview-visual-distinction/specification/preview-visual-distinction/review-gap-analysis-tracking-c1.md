@@ -160,10 +160,10 @@ The spec says `composeChromeLine` returns empty string for `width < 2`, and "lip
 The spec's stance ("widths 0 and 1 are degenerate, render whatever falls out, no error path, no panic") covers the `composeChromeLine` side but not the `viewport.SetSize` side. An implementer might reasonably guard against negative SetSize arguments or might not — the spec leaves it open.
 
 **Proposed Addition**:
-{To be discussed — clarify whether the constructor and resize handler guard `SetSize` against negative inputs, or rely on bubbles/viewport's own behaviour.}
+Clamp `viewport.SetSize` arguments to `max(0, …)` at both call sites (constructor and resize handler).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to *Resize behaviour* and *Initial sizing and preview-open ordering*. Both call sites use `max(0, msg.Width − 2)` / `max(0, msg.Height − 2)`.
 
 ---
 
@@ -179,10 +179,10 @@ The spec's stance ("widths 0 and 1 are degenerate, render whatever falls out, no
 If new fields are needed (the Sessions page would need its own `tea.WindowSizeMsg` handler to record dimensions), the File scope summary's claim that the only changes are in `pagepreview.go` plus the preview-open call site under-states the work.
 
 **Proposed Addition**:
-{To be discussed — confirm Sessions page already tracks width/height, or add the dimension-tracking work to the file scope summary.}
+The parent model in `model.go` already tracks `m.termWidth`/`m.termHeight`; preview-open at `model.go:1421` already passes them. No new plumbing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Resolved together with Finding 5. Already logged.
 
 ---
 

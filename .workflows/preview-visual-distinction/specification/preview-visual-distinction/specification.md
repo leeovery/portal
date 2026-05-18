@@ -330,7 +330,7 @@ Bubble Tea emits one `tea.WindowSizeMsg` per terminal-resize signal. Dragging a 
 **Rule: repaint every tick, no debounce.** Preview's resize handler in `pagepreview.go`'s `Update` does two things on each `tea.WindowSizeMsg`:
 
 1. Record the new dimensions on the model (`m.width`, `m.height`).
-2. Call `m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows).
+2. Call `m.viewport.SetSize(max(0, msg.Width − 2), max(0, msg.Height − 2))` to adjust the viewport's visible window for the new inner dimensions (subtracting 2 for left+right border columns and top+bottom border rows). The `max(0, …)` clamps guard against the degenerate case where `msg.Width` or `msg.Height` is 0 or 1 — `viewport.SetSize` with negative arguments is unspecified, so the clamp is mandatory at every call site.
 
 `View()` then **recomputes the chrome line every tick** via `composeChromeLine(m.width − 2, m.windowIdx, m.windowCount, m.paneIdx, m.paneCount, m.windowName)` and composes the frame. No cached chrome field — recomputing per tick is cheap (pure function, no I/O), and this avoids the alternative of having to invalidate a cache from every navigation key handler (`]`, `[`, `⇥`) in addition to the resize handler. The single per-tick recompute covers resize, window/pane navigation, and any other model state change that affects chrome content with no per-handler bookkeeping.
 
@@ -345,7 +345,7 @@ The parent Bubble Tea model in `internal/tui/model.go` holds current terminal di
 **Rule**: `NewPreviewModel(…, width, height int)` already accepts `width` and `height` as constructor parameters (`pagepreview.go:74`); the call site at `model.go:1421` already passes `m.termWidth, m.termHeight`. No new plumbing. Inside the constructor:
 
 - The dimensions are stored on the model (`m.width`, `m.height`).
-- `viewport.SetSize(width − 2, height − 2)` is called once with initial dimensions.
+- `viewport.SetSize(max(0, width − 2), max(0, height − 2))` is called once with initial dimensions (same `max(0, …)` clamp as the resize handler).
 
 `View()` recomputes the chrome line on every tick (see *Resize behaviour*), so no separate pre-computation is needed at construction time. The first `View()` call on the freshly-constructed `previewModel` renders with correct dimensions — no race between preview-open and the first `WindowSizeMsg`, no "first frame at zero width" edge case. Subsequent `tea.WindowSizeMsg` updates apply via the resize handler.
 
