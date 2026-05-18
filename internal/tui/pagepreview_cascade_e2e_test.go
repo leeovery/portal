@@ -135,10 +135,7 @@ func TestPreviewView_CascadeTiersEndToEnd(t *testing.T) {
 					t.Errorf("tier 4: expected no keymap; stripped=%q", stripped)
 				}
 				// Top-edge ASCII pattern: "╭" + 13 × "─" + "╮".
-				topRow := stripped
-				if i := strings.IndexByte(stripped, '\n'); i >= 0 {
-					topRow = stripped[:i]
-				}
+				topRow := firstLine(stripped)
 				want := "╭" + strings.Repeat("─", 13) + "╮"
 				if topRow != want {
 					t.Errorf("tier 4: top-edge pattern mismatch; got %q want %q", topRow, want)

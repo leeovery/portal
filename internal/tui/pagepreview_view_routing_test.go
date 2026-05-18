@@ -61,11 +61,8 @@ func TestModelViewRoutesPagePreviewToPreviewModel(t *testing.T) {
 	// branch). The default sessions title contains "session" or the list's
 	// own header — assert the chrome line is the FIRST line of output, not
 	// a sessions-list header.
-	firstLine := rendered
-	if idx := strings.IndexByte(rendered, '\n'); idx >= 0 {
-		firstLine = rendered[:idx]
-	}
-	if !strings.Contains(firstLine, "Window 1 of 1") {
-		t.Errorf("expected first line to be the preview chrome, got %q", firstLine)
+	topRow := firstLine(rendered)
+	if !strings.Contains(topRow, "Window 1 of 1") {
+		t.Errorf("expected first line to be the preview chrome, got %q", topRow)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
@@ -39,6 +40,16 @@ func newPreviewModelForHelpers(session string, groups []tmux.WindowGroup, window
 // cascade tiers call composeChromeLine directly with a tier-specific width.
 func chromeLineForTest(m previewModel) string {
 	return composeChromeLine(200, m.windowIdx, len(m.groups), m.paneIdx, len(m.currentGroup().PaneIndices), m.currentGroup().WindowName)
+}
+
+// firstLine returns the first '\n'-terminated line of s, or all of s if no
+// newline is present. Used by frame/routing/cascade tests to extract the
+// top row from a rendered View() before asserting on its width or content.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // chromeLineAtModelWidth composes the chrome line at the model's actual

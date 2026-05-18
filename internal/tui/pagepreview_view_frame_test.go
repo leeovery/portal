@@ -45,10 +45,7 @@ func TestPreviewView_TopRowWidthEqualsOuterTerminalWidth(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 
 	out := m.View()
-	topRow := out
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		topRow = out[:i]
-	}
+	topRow := firstLine(out)
 
 	if got := lipgloss.Width(topRow); got != 80 {
 		t.Errorf("top row width = %d; want 80; row=%q", got, topRow)
@@ -86,10 +83,7 @@ func TestPreviewView_ChromeContentRenderedWithNoExplicitForegroundSGR(t *testing
 	m, _ = m.Update(tea.WindowSizeMsg{Width: wideWidth, Height: 24})
 
 	out := m.View()
-	topRow := out
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		topRow = out[:i]
-	}
+	topRow := firstLine(out)
 
 	chromeSubstring := "Window 1 of 1 · Pane 1 of 1 · win: nvim-editor"
 	idx := strings.Index(stripANSI(topRow), chromeSubstring)
@@ -191,10 +185,7 @@ func TestPreviewView_FirstFrameCorrectnessAtConstruction(t *testing.T) {
 	m := newFramePreviewModel(t, "nvim-editor", []byte("\x1b[41mhello\nworld\n"))
 
 	out := m.View()
-	topRow := out
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		topRow = out[:i]
-	}
+	topRow := firstLine(out)
 
 	if got := lipgloss.Width(topRow); got != 80 {
 		t.Errorf("first-frame top row width = %d; want 80; row=%q", got, topRow)
