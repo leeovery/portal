@@ -137,6 +137,15 @@ const (
 	chromeKeymapPadding    = " "
 )
 
+// tier4Row returns the entire tier-4 collapsed top-edge row: the two corner
+// glyphs from the supplied lipgloss.Border bracketing (outer-2) repetitions of
+// the top edge glyph (clamped at zero). Shared by composeChromeLine and
+// composeChromeLineParts so the tier-4 fallback shape cannot drift between the
+// single-string and parts surfaces. `outer` is the OUTER terminal width.
+func tier4Row(border lipgloss.Border, outer int) string {
+	return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight
+}
+
 // composeChromeLine returns a single-line top-edge row for the preview frame,
 // including the corner glyphs sourced from `lipgloss.RoundedBorder()`. The
 // `width` parameter is the INNER frame width (`terminalWidth − 2`); the
@@ -166,7 +175,7 @@ func composeChromeLine(width, windowIdx, windowCount, paneIdx, paneCount int, wi
 	chrome, fillerCells := selectChromeTier(outer, windowIdx, windowCount, paneIdx, paneCount, windowName)
 	if chrome == "" {
 		// Tier 4 collapse: corners + (outer-2) filler.
-		return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight
+		return tier4Row(border, outer)
 	}
 	return border.TopLeft + border.Top + chrome + strings.Repeat(border.Top, fillerCells) + border.Top + border.TopRight
 }
@@ -194,7 +203,7 @@ func composeChromeLineParts(width, windowIdx, windowCount, paneIdx, paneCount in
 		// row as `left` keeps the (left + chrome + right) concatenation
 		// contract intact while leaving chrome empty (the documented tier-4
 		// signal callers can branch on).
-		return border.TopLeft + strings.Repeat(border.Top, max(0, outer-2)) + border.TopRight, "", ""
+		return tier4Row(border, outer), "", ""
 	}
 	left = border.TopLeft + border.Top
 	right = strings.Repeat(border.Top, fillerCells) + border.Top + border.TopRight
