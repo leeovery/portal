@@ -364,6 +364,55 @@ The cascade addresses horizontal width. Vertical is intentionally not handled. T
 
 Unlike narrow terminals and long window names (realistic and common — multi-pane tmux splits, side-by-side terminal layouts), terminals tall enough to break preview but short enough to not be obviously unusable are a degenerate case nobody hits accidentally. Recovery is to press `Esc`, resize, and retry.
 
+## Code shape changes
+
+The build phase touches `internal/tui/pagepreview.go` and the Sessions page's preview-open call site. Specific edits below.
+
+### Replace `chromeLine()` with `composeChromeLine`
+
+The existing `chromeLine()` method on `previewModel` at `internal/tui/pagepreview.go:165-175` is **deleted**. Callers in `View()` invoke the new pure function `composeChromeLine(width int, …) string` directly with the current width and the relevant model fields. The pure-function signature is the testable boundary; a thin method wrapper would add an indirection without value.
+
+### Rename `previewChromeHeight` → `previewFrameOverhead = 2`
+
+The existing `const previewChromeHeight = 1` becomes outdated under the new model (chrome no longer sits above the viewport — it shares the top border row). Rename to `previewFrameOverhead = 2` with the comment `"top border (carrying chrome) + bottom border = 2 rows of frame overhead"`.
+
+This names the magic 2 used in the resize math (`SetSize(msg.Width − 2, msg.Height − 2)`), preserves the file-local convention of naming chrome dimensions, and gives a single edit point if the frame's vertical geometry ever changes.
+
+### `NewPreviewModel` signature change
+
+`NewPreviewModel` accepts `width` and `height` as constructor parameters (see *Initial sizing and preview-open ordering*). The Sessions page's `Update` handler passes its current width / height into the constructor.
+
+### Chrome-row invariant for resize math
+
+`m.viewport.SetSize(msg.Width − 2, msg.Height − 2)` assumes top edge = 1 row, bottom edge = 1 row. The cascade guarantees a one-row top edge at any width ≥ 2 (tier 4 produces `╭{─ × (width − 2)}╮`, all on one row). Below width 2 the system is degenerate anyway.
+
+Capture the invariant explicitly:
+
+- `composeChromeLine`'s doc comment: *"Returns a single-line string with no embedded newlines. The cascade guarantees one-row output for all widths ≥ 2; below that, returns the empty string."*
+- `previewFrameOverhead` comment: as above.
+- A test that asserts `strings.Count(composeChromeLine(w, …), "\n") == 0` across the cascade-tier width thresholds.
+
+### Style sourcing
+
+Corner and edge characters used in the manually-composed top edge are **sourced from the chosen `lipgloss` border value** (`lipgloss.RoundedBorder()`) rather than hardcoded — a future border-style switch is then a one-line change.
+
+The `AdaptiveColor` defining the border foreground is declared once in `pagepreview.go` (or a near neighbour) and used by both the `lipgloss` border styling on the three rendered edges and the `lipgloss.NewStyle().Foreground(...)` wrapper on the hand-composed top edge's border parts.
+
+### File scope summary
+
+| File / location                                                    | Change                                                       |
+|--------------------------------------------------------------------|--------------------------------------------------------------|
+| `internal/tui/pagepreview.go` (chromeLine method)                  | Delete; replaced by `composeChromeLine` pure function        |
+| `internal/tui/pagepreview.go` (previewChromeHeight const)          | Rename to `previewFrameOverhead = 2`; update comment         |
+| `internal/tui/pagepreview.go` (Update — `tea.WindowSizeMsg` case)  | Add `viewport.SetSize(W−2, H−2)` + chrome recompute          |
+| `internal/tui/pagepreview.go` (View)                               | Compose top edge manually; wrap viewport content with frame  |
+| `internal/tui/pagepreview.go` (NewPreviewModel)                    | Accept `width, height int`; initialise viewport + chrome     |
+| `internal/tui/pagepreview.go` (keymap constants)                   | Add `verboseKeymap` / `compactKeymap` constants              |
+| `internal/tui/pagepreview.go` (SGR injector)                       | Add `injectSGRResets` helper                                 |
+| Sessions page preview-open call site                               | Pass current `width, height` into `NewPreviewModel`          |
+
+No other files are touched.
+
 ---
 
 ## Working Notes
