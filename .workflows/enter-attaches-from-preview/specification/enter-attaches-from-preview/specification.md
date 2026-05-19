@@ -1,5 +1,11 @@
 # Specification: Enter Attaches From Preview
 
+> **Corrigendum (2026-05-19)**: This specification originally directed
+> `tmux attach-session -A -t '=<session>'` as the outside-tmux connector
+> argv. The `-A` flag is not valid on `attach-session` (it belongs to
+> `new-session`); the correct argv is `tmux attach-session -t '=<session>'`.
+> Corrected by work unit `drop-invalid-A-flag-from-attach-session-argv`.
+
 ## Overview
 
 Add an `Enter` binding to the scrollback preview page that attaches to the previewed session, honouring any `(window, pane)` focus the user navigated to inside preview. Today preview's `Update` handler has no `tea.KeyEnter` case — `Enter` falls through to the embedded viewport as a no-op, forcing the user to press `Esc` to dismiss and then `Enter` on the Sessions list. This feature adds the single-keystroke commit path the user's mental model expects.
@@ -85,7 +91,7 @@ Best-effort. Uses the pane index preview captured at open and walked with `Tab`.
 
 The existing connector path runs, unchanged:
 
-- **Outside tmux**: `AttachConnector` issues `syscall.Exec` to hand off the process to `tmux attach-session -A -t '=<session>'`.
+- **Outside tmux**: `AttachConnector` issues `syscall.Exec` to hand off the process to `tmux attach-session -t '=<session>'`.
 - **Inside tmux**: `SwitchConnector` issues `tmux switch-client -t '=<session>'` (two-step: create detached session if needed, then switch).
 
 The connector target is intentionally **session-only** (no `:window.pane` suffix). The pre-select calls in steps 2 and 3 are what position tmux on the focused `(window, pane)`; the connector resolves the session's current window/pane at connect time and inherits whatever the pre-selects established. Both `attach-session` and `switch-client` use the `=` exact-match prefix uniformly with the pre-select calls (see *Exact-match target syntax* above).
@@ -163,7 +169,7 @@ The first keystroke post-bail clears the flash AND applies to the filter input a
 
 A vanishingly small race window remains between `has-session` returning zero and the connector firing: the session can be killed in the microseconds between the two calls. This residual is **accepted as rare and intentionally not designed for**:
 
-- **Outside tmux**: `tmux attach-session -A -t <name>` auto-creates a new empty session with the killed name (the `-A` flag's existing behaviour). The user lands in a fresh session, not in an error state. Weird but not destructive.
+- **Outside tmux**: `tmux attach-session -t <name>` returns a non-zero exit because the named session is gone. The connector handoff fails and portal exits with the tmux error printed to stderr. The bail-flash path inside the pre-select pipeline (has-session probe) catches this case before the connector runs in normal flow; this paragraph documents only the residual TOCTOU window where the session is killed between has-session probe and exec handoff.
 - **Inside tmux**: `tmux switch-client -t <name>` errors; the TUI has already torn down, so the message location is unclear.
 
 Documented here so build phase does not attempt a defensive guard against a window with no observable victim distinct from "session killed during the connector call itself".
