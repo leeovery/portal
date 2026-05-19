@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Alive-check gating in EnsurePortalSaverVersion + daemon.version breadcrumb
-status: draft
+status: approved
+approved_at: 2026-05-19
 
 **Goal**: Eliminate the unnecessary kill-respawn cascade on healthy bootstrap by gating the kill decision on daemon aliveness before the version-mismatch predicate, writing `daemon.version` defensively on the survived path, and adding a DEBUG breadcrumb to every `state.WriteVersionFile` call.
 
@@ -21,7 +22,8 @@ status: draft
 - [ ] All tests from `multiple-state-daemons-running-concurrently` remain green; the `daemon.lock` flock primitive and `killSaverAndWaitForDaemon` polling loop are untouched.
 
 ### Phase 2: Context-aware `captureAndCommit` (daemon side of the kill-barrier contract)
-status: draft
+status: approved
+approved_at: 2026-05-19
 
 **Goal**: Thread `ctx` from `defaultDaemonRun` through `tick` into `captureAndCommit` and the per-pane loop in `cmd/state_daemon.go`, so the daemon honours cancellation between per-pane iterations. This caps worst-case SIGHUP-to-exit latency at one pane's `capture-pane` wall time rather than the aggregate of all panes.
 
