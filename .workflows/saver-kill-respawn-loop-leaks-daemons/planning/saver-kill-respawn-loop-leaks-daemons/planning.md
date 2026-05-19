@@ -65,3 +65,18 @@ approved_at: 2026-05-19
 | saver-kill-respawn-loop-leaks-daemons-2-4 | Add `ctx.Done()` check between per-pane iterations with cancel-mid-loop unit test on multi-pane fixture | mid-loop cancel after k panes processed → no `Commit()`, no `PrevIndex` replacement, scrollback writes already done by `WriteScrollbackIfChanged` for completed panes are not rolled back (per-pane writes are atomic; spec requires no *partial commit* of sessions.json, not rollback of per-pane scrollback files), `anyScrollbackChanged` discarded |
 | saver-kill-respawn-loop-leaks-daemons-2-5 | Integration test: daemon mid-tick + SIGHUP exits within bounded window (real-tmux fixture, multi-pane synthetic scrollback) | threshold confirmed/adjusted from fresh wall-time measurement of one pane's `capture-pane`, recycle-induced sweep pressure (back-to-back `session-closed`/`session-created` hooks firing `save.requested`), exit bounded under 5s `killBarrierTimeout`, `killBarrierTimeout` stays at 5s |
 | saver-kill-respawn-loop-leaks-daemons-2-6 | Fault-injection integration test: lock-loser daemon's pane exit destroys `_portal-saver` (cascade regression guard) | sentinel holds `daemon.lock` via `state.AcquireDaemonLock` in test goroutine, new daemon exits within ~1s, `has-session` poll (100ms tick, 2s ceiling) returns failure, `SetSessionOption(_portal-saver, destroy-unattached, off)` returns `exit status 1` containing `no such session`, regression-watch suites (`multiple-state-daemons-running-concurrently`, `daemon-merge-reintroduces-dead-sessions`, `killed-sessions-resurrect-on-restart`) remain green |
+
+### Phase 3: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-3-1 | Collapse `shouldKillSaverOnVersionDecision` + `portalSaverVersionMismatch` into a single predicate | reframed predicate-matrix covers dev-stored, dev-current, empty-stored, empty-current, equal non-dev, mismatched non-dev, readErr non-absent, readErr `ErrVersionFileAbsent → false`; dead re-export removed from `export_test.go` |
+| saver-kill-respawn-loop-leaks-daemons-3-2 | Thread a real `*state.Logger` to the bootstrap-side defensive `WriteVersionFile` call | bootstrap-survived-path repair emits one DEBUG breadcrumb (version + pid + dest path) tagged `ComponentDaemon`; wrapper site no longer flags follow-up gap |
+| saver-kill-respawn-loop-leaks-daemons-3-3 | Extract `PollUntil` helper to eliminate six near-identical polling loops in integration tests | `PollUntil` returns bool (no `t.Fatal` inside); each helper preserves external signature + fatal message wording; skip-on-tmux-absent paths intact |
+| saver-kill-respawn-loop-leaks-daemons-3-4 | Extract `StagePortalBinary` helper to eliminate repeated build+PATH preamble across integration tests | PATH composition (binDir prepended) preserved; skip-on-build-failure and skip-on-LookPath-failure semantics preserved at four call sites |
+| saver-kill-respawn-loop-leaks-daemons-3-5 | Extract `sentinelIndex` + `assertNoCommit` helpers for `captureAndCommit` unchanged-pointer tests | pointer-identity assertion preserved (`deps.PrevIndex == sentinel`); `sessions.json` non-existence assertion preserved; peer `assertCommitReplacedPrev` for replaced-pointer case |
+| saver-kill-respawn-loop-leaks-daemons-3-6 | Extract `assertKillBeforeNew` helper for kill-before-new-session order checks | both `kill-session` and `new-session` must be present (helper fails if either missing); ordering assertion semantics preserved across four call sites |

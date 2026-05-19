@@ -53,7 +53,14 @@
             "saver-kill-respawn-loop-leaks-daemons-2-3": "tick-d2d669",
             "saver-kill-respawn-loop-leaks-daemons-2-4": "tick-5b3af3",
             "saver-kill-respawn-loop-leaks-daemons-2-5": "tick-c23b83",
-            "saver-kill-respawn-loop-leaks-daemons-2-6": "tick-9444ce"
+            "saver-kill-respawn-loop-leaks-daemons-2-6": "tick-9444ce",
+            "saver-kill-respawn-loop-leaks-daemons-3": "tick-58461a",
+            "saver-kill-respawn-loop-leaks-daemons-3-1": "tick-eca89e",
+            "saver-kill-respawn-loop-leaks-daemons-3-2": "tick-2e4105",
+            "saver-kill-respawn-loop-leaks-daemons-3-3": "tick-2e087b",
+            "saver-kill-respawn-loop-leaks-daemons-3-4": "tick-12d9a8",
+            "saver-kill-respawn-loop-leaks-daemons-3-5": "tick-0768be",
+            "saver-kill-respawn-loop-leaks-daemons-3-6": "tick-7d5ae1"
           },
           "external_id": "tick-2ab8a7"
         }
@@ -65,7 +72,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

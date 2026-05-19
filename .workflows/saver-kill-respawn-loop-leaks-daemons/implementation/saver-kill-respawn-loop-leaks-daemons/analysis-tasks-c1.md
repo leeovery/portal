@@ -6,7 +6,7 @@ total_proposed: 6
 # Analysis Tasks: saver-kill-respawn-loop-leaks-daemons (Cycle 1)
 
 ## Task 1: Collapse shouldKillSaverOnVersionDecision + portalSaverVersionMismatch into a single predicate
-status: pending
+status: approved
 severity: high
 sources: duplication, architecture
 
@@ -38,7 +38,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Thread a real *state.Logger to the bootstrap-side defensive WriteVersionFile call
-status: pending
+status: approved
 severity: medium
 sources: standards, architecture
 
@@ -69,7 +69,7 @@ sources: standards, architecture
 ---
 
 ## Task 3: Extract PollUntil helper to eliminate six near-identical polling loops in integration tests
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -99,7 +99,7 @@ sources: duplication
 ---
 
 ## Task 4: Extract StagePortalBinary helper to eliminate repeated build+PATH preamble across integration tests
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -127,7 +127,7 @@ sources: duplication
 ---
 
 ## Task 5: Extract sentinelIndex + assertNoCommit helpers for captureAndCommit unchanged-pointer tests
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -156,7 +156,7 @@ sources: duplication
 ---
 
 ## Task 6: Extract assertKillBeforeNew helper for kill-before-new-session order checks
-status: pending
+status: approved
 severity: low
 sources: duplication
 
