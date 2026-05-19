@@ -44,6 +44,20 @@ var BootstrapAliveCheck = state.DaemonAlive
 // state.ReadVersionFile.
 var portalSaverReadVersionFile = state.ReadVersionFile
 
+// portalSaverWriteVersionFile is the function used by EnsurePortalSaverVersion
+// on the alive+absent branch to defensively write daemon.version before
+// falling through to BootstrapPortalSaver. It is a package-level seam so tests
+// can record invocations and inject errors without touching the filesystem.
+//
+// The seam binds the logger choice on the production side by passing nil to
+// state.WriteVersionFile — Logger's nil-receiver contract treats this as a
+// no-op, so the bootstrap breadcrumb from Task 1-2 does not land for this
+// defensive call site. Wiring a real logger here can be a follow-up if a
+// breadcrumb at the call site is wanted.
+var portalSaverWriteVersionFile = func(dir, version string) error {
+	return state.WriteVersionFile(dir, version, nil)
+}
+
 // PortalSaverRetryDelay is the sleep between new-session retry attempts. It is
 // exported as a var so tests can shrink it. Defaults to 100ms.
 var PortalSaverRetryDelay = 100 * time.Millisecond
@@ -262,23 +276,40 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 //
 // kill-session is invoked tolerantly via killSaverAndWaitForDaemonFn: the
 // barrier helper handles its own kill-session tolerance and the wait for the
-// prior daemon's exit. This function never writes daemon.version itself — the
-// new daemon owns that on its own startup; Task 1-4 will layer a defensive
-// write onto the alive+absent branch from this caller. After the optional
-// kill, BootstrapPortalSaver always runs to (re)create the session and apply
-// the defensive destroy-unattached=off option.
+// prior daemon's exit. This function never writes daemon.version itself for
+// the kill path — the new daemon owns that on its own startup. On the
+// alive+absent branch (alive=true and readErr is ErrVersionFileAbsent) it
+// defensively writes daemon.version=currentVersion via
+// portalSaverWriteVersionFile before falling through to BootstrapPortalSaver,
+// closing the lock-loser lifecycle hole described in the spec: lock-loser
+// daemons exit cleanly before writing daemon.version, leaving the file
+// observably absent until the next bootstrap repairs it. In the pathological
+// case where the alive daemon is running an older binary AND daemon.version
+// was absent, this write effectively asserts "the version going forward"
+// rather than the running daemon's actual version; any disagreement is
+// resolved by the next legitimate recycle.
+//
+// After the optional kill or defensive write, BootstrapPortalSaver always
+// runs to (re)create the session and apply the defensive
+// destroy-unattached=off option.
 func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error {
 	stored, readErr := portalSaverReadVersionFile(stateDir)
 	alive := BootstrapAliveCheck(stateDir)
 
-	if alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr) {
-		// Task 1-4 integration point: on the alive+absent branch
-		// (handled inside shouldKillSaverOnVersionDecision as "no kill"),
-		// the defensive WriteVersionFile(stateDir, currentVersion, logger)
-		// call will be layered into the alive && !shouldKill path so the
-		// missing daemon.version is repaired before BootstrapPortalSaver
-		// runs. Leaving that here as an explicit hook for the next task.
+	switch {
+	case alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr):
 		_ = killSaverAndWaitForDaemonFn(c, stateDir)
+	case alive && errors.Is(readErr, state.ErrVersionFileAbsent):
+		// Defensive complement: lock-loser daemons return cleanly before
+		// writing daemon.version, so on every bootstrap we observe the
+		// alive-daemon + missing-version-file shape until the file is
+		// repaired. Write currentVersion from the bootstrap side so the
+		// audit trail is restored and the kill cascade cannot re-trigger
+		// silently. A write failure must propagate — BootstrapPortalSaver
+		// is NOT called when the defensive write fails.
+		if err := portalSaverWriteVersionFile(stateDir, currentVersion); err != nil {
+			return fmt.Errorf("defensive daemon.version write failed: %w", err)
+		}
 	}
 	return BootstrapPortalSaver(c, stateDir)
 }

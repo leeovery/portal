@@ -613,19 +613,6 @@ func writeVersion(t *testing.T, dir, version string) {
 	}
 }
 
-// assertNoDaemonVersionFile fails the test if daemon.version exists in dir.
-func assertNoDaemonVersionFile(t *testing.T, dir string) {
-	t.Helper()
-	_, err := os.Stat(state.DaemonVersion(dir))
-	if err == nil {
-		t.Errorf("daemon.version exists at %q after EnsurePortalSaverVersion; the function must not write it", state.DaemonVersion(dir))
-		return
-	}
-	if !os.IsNotExist(err) {
-		t.Fatalf("unexpected stat error for daemon.version: %v", err)
-	}
-}
-
 func TestEnsurePortalSaverVersion_DoesNotKillWhenStoredMatchesCurrent(t *testing.T) {
 	stubAliveCheck(t, true)
 	shrinkRetryDelay(t)
@@ -885,11 +872,33 @@ func TestEnsurePortalSaverVersion_AlwaysInvokesBootstrapPortalSaver(t *testing.T
 	}
 }
 
-func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionItself(t *testing.T) {
+// TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionOnKillPath asserts that
+// the caller never writes daemon.version itself on the kill branches — the new
+// daemon owns the file on its own startup. The defensive write introduced by
+// Task 1-4 fires only on the alive+absent branch (covered separately by
+// TestEnsurePortalSaverVersion_Alive_Absent_*); the kill-path contract that
+// EnsurePortalSaverVersion does not touch daemon.version itself is preserved.
+//
+// We exercise the alive+stored-dev kill branch so the defensive write seam is
+// NOT reachable but the kill is. A version-mismatch branch would work too;
+// stored-dev is chosen because it leaves daemon.version on disk before the
+// call so the post-condition pins "no rewrite" rather than "no write at all".
+func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionOnKillPath(t *testing.T) {
 	stubAliveCheck(t, true)
 	shrinkRetryDelay(t)
 
-	dir := t.TempDir() // start with no daemon.version
+	dir := t.TempDir()
+	writeVersion(t, dir, "dev") // stored-dev → kill path; daemon.version present
+
+	// Pre-read so we can detect any subsequent rewrite.
+	before, err := os.ReadFile(state.DaemonVersion(dir))
+	if err != nil {
+		t.Fatalf("read daemon.version: %v", err)
+	}
+
+	// Suppress the real kill barrier so we observe nothing but the caller's
+	// own behaviour against the state directory.
+	installKillSaverFn(t, func(*tmux.Client, string) error { return nil })
 
 	scenario := &versionScenario{sessionPresent: true}
 	mock := &MockCommander{RunFunc: scenario.run(t)}
@@ -899,7 +908,13 @@ func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionItself(t *testing.T) 
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	assertNoDaemonVersionFile(t, dir)
+	after, err := os.ReadFile(state.DaemonVersion(dir))
+	if err != nil {
+		t.Fatalf("read daemon.version after call: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("EnsurePortalSaverVersion mutated daemon.version on kill path: before=%q after=%q", before, after)
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -2016,5 +2031,286 @@ func TestPortalSaverVersionMismatch_PredicateMatrix(t *testing.T) {
 					tc.stored, tc.currentVersion, tc.readErr, got, tc.want)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Task 1-4: defensive WriteVersionFile on the alive+absent branch.
+//
+// EnsurePortalSaverVersion must call portalSaverWriteVersionFile(stateDir,
+// currentVersion) on (alive=true, errors.Is(readErr, ErrVersionFileAbsent))
+// BEFORE BootstrapPortalSaver is invoked, and only on that one branch. A
+// write error must propagate out (wrapped) and prevent BootstrapPortalSaver
+// from being called.
+// ----------------------------------------------------------------------------
+
+// installWriteVersionFile swaps the portalSaverWriteVersionFile seam for the
+// duration of the test and restores it via t.Cleanup.
+func installWriteVersionFile(t *testing.T, fn func(string, string) error) {
+	t.Helper()
+	seam := tmux.PortalSaverWriteVersionFileSeam()
+	prev := *seam
+	*seam = fn
+	t.Cleanup(func() { *seam = prev })
+}
+
+// defensiveWriteCall records one invocation of portalSaverWriteVersionFile.
+type defensiveWriteCall struct {
+	dir     string
+	version string
+}
+
+func TestEnsurePortalSaverVersion_Alive_Absent_InvokesDefensiveWriteBeforeBootstrap(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version → ErrVersionFileAbsent
+
+	// Record the call order across the defensive write and BootstrapPortalSaver
+	// (which goes through the tmux mock — has-session is the first call
+	// BootstrapPortalSaver makes).
+	var order []string
+	var writes []defensiveWriteCall
+	installWriteVersionFile(t, func(d, v string) error {
+		order = append(order, "write")
+		writes = append(writes, defensiveWriteCall{dir: d, version: v})
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 {
+				order = append(order, args[0])
+			}
+			return scenario.run(t)(args...)
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if len(writes) != 1 {
+		t.Fatalf("expected exactly 1 defensive write, got %d", len(writes))
+	}
+	if writes[0].dir != dir {
+		t.Errorf("defensive write dir = %q, want %q", writes[0].dir, dir)
+	}
+	if writes[0].version != "v0.4.2" {
+		t.Errorf("defensive write version = %q, want %q", writes[0].version, "v0.4.2")
+	}
+
+	// The defensive write must happen BEFORE BootstrapPortalSaver runs.
+	// BootstrapPortalSaver's first observable action through the mock is
+	// has-session, so "write" must precede the first "has-session" in order.
+	writeIdx, hasSessionIdx := -1, -1
+	for i, op := range order {
+		if op == "write" && writeIdx == -1 {
+			writeIdx = i
+		}
+		if op == "has-session" && hasSessionIdx == -1 {
+			hasSessionIdx = i
+		}
+	}
+	if writeIdx == -1 {
+		t.Fatalf("defensive write never recorded; order=%v", order)
+	}
+	if hasSessionIdx == -1 {
+		t.Fatalf("has-session never recorded; BootstrapPortalSaver may not have been invoked; order=%v", order)
+	}
+	if writeIdx >= hasSessionIdx {
+		t.Errorf("defensive write at %d must precede BootstrapPortalSaver's first has-session at %d (order=%v)", writeIdx, hasSessionIdx, order)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_Absent_DefensiveWriteErrorPropagatesAndSkipsBootstrap(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version → ErrVersionFileAbsent
+
+	sentinel := errors.New("read-only filesystem")
+	installWriteVersionFile(t, func(string, string) error {
+		return sentinel
+	})
+
+	// Mock that fatals on any call — BootstrapPortalSaver MUST NOT run when
+	// the defensive write fails.
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			t.Fatalf("BootstrapPortalSaver was invoked despite defensive write failure: %v", args)
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2")
+	if err == nil {
+		t.Fatalf("EnsurePortalSaverVersion returned nil; want wrapped defensive-write error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("returned error %v does not wrap sentinel %v", err, sentinel)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_Match_DoesNotInvokeDefensiveWrite(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	writeCalls := 0
+	installWriteVersionFile(t, func(string, string) error {
+		writeCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("expected 0 defensive write calls on alive+match, got %d", writeCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_MismatchNeitherDev_DoesNotInvokeDefensiveWrite(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1")
+
+	writeCalls := 0
+	installWriteVersionFile(t, func(string, string) error {
+		writeCalls++
+		return nil
+	})
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("expected 0 defensive write calls on alive+mismatch, got %d", writeCalls)
+	}
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_StoredDev_DoesNotInvokeDefensiveWrite(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "dev")
+
+	writeCalls := 0
+	installWriteVersionFile(t, func(string, string) error {
+		writeCalls++
+		return nil
+	})
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("expected 0 defensive write calls on alive+stored-dev, got %d", writeCalls)
+	}
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+stored-dev, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_CurrentDev_DoesNotInvokeDefensiveWrite(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	writeCalls := 0
+	installWriteVersionFile(t, func(string, string) error {
+		writeCalls++
+		return nil
+	})
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("expected 0 defensive write calls on alive+current-dev, got %d", writeCalls)
+	}
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+current-dev, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_NotAlive_Absent_DoesNotInvokeDefensiveWrite(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // absent
+
+	writeCalls := 0
+	installWriteVersionFile(t, func(string, string) error {
+		writeCalls++
+		return nil
+	})
+
+	// Suppress BootstrapPortalSaver's own stale-daemon barrier so the only
+	// thing we are observing is the defensive-write seam.
+	installKillSaverFn(t, func(*tmux.Client, string) error { return nil })
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if writeCalls != 0 {
+		t.Errorf("expected 0 defensive write calls when daemon not alive, got %d", writeCalls)
 	}
 }

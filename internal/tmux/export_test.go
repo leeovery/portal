@@ -47,3 +47,11 @@ func KillSaverAndWaitForDaemonFnSeam() *func(*Client, string) error {
 func PortalSaverReadVersionFileSeam() *func(string) (string, error) {
 	return &portalSaverReadVersionFile
 }
+
+// PortalSaverWriteVersionFileSeam returns a pointer to the
+// portalSaverWriteVersionFile seam so tests can record invocations and inject
+// errors for the defensive alive+absent write performed by
+// EnsurePortalSaverVersion before BootstrapPortalSaver.
+func PortalSaverWriteVersionFileSeam() *func(string, string) error {
+	return &portalSaverWriteVersionFile
+}
