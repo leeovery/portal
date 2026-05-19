@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-19
 cycle: 1
 phase: Plan Integrity Review
@@ -62,7 +62,7 @@ Impact is low because the test cases are recoverable from `Do`, but adding the e
 > - Dev cases must assert true even though they superficially 'match' the absent-case behaviour; the reason differs (dev short-circuit vs unreadable file), and case names should reflect that.
 > - The reframed comment must not introduce ambiguity: if a reader's first question is 'why does absent return true if it's no longer load-bearing?', the comment should answer it (predicate's verdict is consumed by an alive-check gate in EnsurePortalSaverVersion).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim via `tick update tick-c911bf`. Added 8-line `Tests:` block between Acceptance Criteria and Edge Cases. User approved via auto mode (cycle 1).
 
 ---
