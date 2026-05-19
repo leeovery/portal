@@ -2,6 +2,7 @@ package tmux_test
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -1623,5 +1624,101 @@ func TestSetBarrierLogger_IgnoresNilLogger(t *testing.T) {
 
 	if *loggerSeam != tmux.BarrierLogger(recorder) {
 		t.Errorf("SetBarrierLogger(nil) overwrote the previously installed logger")
+	}
+}
+
+// TestPortalSaverVersionMismatch_PredicateMatrix pins the six-row truth matrix
+// of portalSaverVersionMismatch.
+//
+// Framing: the predicate's verdict is one input — EnsurePortalSaverVersion
+// consults BootstrapAliveCheck FIRST; this predicate is only consulted on the
+// alive-with-readable-version branch. Therefore the predicate's
+// "absent → true" row is NOT a load-bearing "absent counts as version
+// mismatch" contract on the kill decision; it is a predicate-layer verdict
+// that the caller gates with an alive-check before driving any kill. See
+// EnsurePortalSaverVersion in internal/tmux/portal_saver.go and the ordering
+// tests on that caller for the authoritative kill-decision contract.
+//
+// Each row is driven directly through the test-only re-export
+// tmux.PortalSaverVersionMismatch (no caller, no tmux mock) so the table
+// asserts predicate behaviour in isolation. Rows mirror spec
+// §Testing Requirements (saver-kill-respawn-loop-leaks-daemons).
+func TestPortalSaverVersionMismatch_PredicateMatrix(t *testing.T) {
+	cases := []struct {
+		name           string
+		stored         string
+		currentVersion string
+		readErr        error
+		want           bool
+	}{
+		{
+			name:           "match",
+			stored:         "0.5.0",
+			currentVersion: "0.5.0",
+			readErr:        nil,
+			want:           false,
+		},
+		{
+			name:           "real_mismatch_neither_dev",
+			stored:         "0.5.0",
+			currentVersion: "0.5.1",
+			readErr:        nil,
+			want:           true,
+		},
+		{
+			// Predicate-layer verdict only. EnsurePortalSaverVersion's
+			// alive-check gate (covered by the caller's ordering tests)
+			// is what actually drives the kill decision in production;
+			// this row pins that the predicate itself still returns true
+			// so the alive-check ordering remains the load-bearing change.
+			name:           "absent_neither_dev_predicate_layer_only",
+			stored:         "",
+			currentVersion: "0.5.0",
+			readErr:        state.ErrVersionFileAbsent,
+			want:           true,
+		},
+		{
+			// Distinct from the absent row above: a non-absent I/O error
+			// (e.g. permission denied) also collapses to true at the
+			// predicate layer. The two error shapes must not be conflated
+			// in case names because the caller's alive-check gate may
+			// eventually treat them differently.
+			name:           "non_absent_io_read_error",
+			stored:         "",
+			currentVersion: "0.5.0",
+			readErr:        fs.ErrPermission,
+			want:           true,
+		},
+		{
+			// Dev short-circuit: stored=="dev" returns true even though
+			// stored and current superficially differ — the reason is the
+			// dev-build workflow, not unreadable state. Distinct in name
+			// from the absent / I/O-error rows above.
+			name:           "stored_dev_short_circuit",
+			stored:         "dev",
+			currentVersion: "0.5.0",
+			readErr:        nil,
+			want:           true,
+		},
+		{
+			// Dev short-circuit on the current side. Same rationale as
+			// stored_dev_short_circuit; both sides of the dev rule are
+			// pinned explicitly.
+			name:           "current_dev_short_circuit",
+			stored:         "0.5.0",
+			currentVersion: "dev",
+			readErr:        nil,
+			want:           true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tmux.PortalSaverVersionMismatch(tc.stored, tc.currentVersion, tc.readErr)
+			if got != tc.want {
+				t.Errorf("portalSaverVersionMismatch(stored=%q, current=%q, readErr=%v) = %v; want %v",
+					tc.stored, tc.currentVersion, tc.readErr, got, tc.want)
+			}
+		})
 	}
 }

@@ -10,6 +10,13 @@ import "time"
 // KillSaverAndWaitForDaemon re-exports killSaverAndWaitForDaemon for tests.
 var KillSaverAndWaitForDaemon = killSaverAndWaitForDaemon
 
+// PortalSaverVersionMismatch re-exports the portalSaverVersionMismatch
+// predicate so the external tmux_test package can drive its six-row truth
+// matrix directly. The predicate is one input to EnsurePortalSaverVersion's
+// kill decision; the alive-check is consulted first in the caller. See
+// TestPortalSaverVersionMismatch_PredicateMatrix.
+var PortalSaverVersionMismatch = portalSaverVersionMismatch
+
 // BarrierReadPIDSeam returns a pointer to the killBarrierReadPID seam so tests
 // can swap and restore it via t.Cleanup.
 func BarrierReadPIDSeam() *func(string) (int, error) { return &killBarrierReadPID }
