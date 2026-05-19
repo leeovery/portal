@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "saver-kill-respawn-loop-leaks-daemons": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
