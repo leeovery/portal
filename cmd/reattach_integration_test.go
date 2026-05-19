@@ -45,7 +45,7 @@
 //     `sessions.json` (bootstrap creates skeleton sessions before
 //     downstream commands run).
 //  3. `switch-client` (inside-tmux) attach path verified end-to-end.
-//  4. `exec attach-session -A` (bare-shell) attach path verified
+//  4. `exec attach-session` (bare-shell) attach path verified
 //     end-to-end (mock connector substitutes for the real syscall.Exec
 //     to avoid PTY hand-off in tests).
 //  5. Name in neither live nor saved still fails with the existing
@@ -491,7 +491,7 @@ func TestReattachIntegration_AttachInsideTmuxSwitchClientPath(t *testing.T) {
 // planning task 5-10 case 4: when Portal is invoked from a bare shell
 // (TMUX unset), `portal attach NAME` must dispatch through the
 // outside-tmux pipeline that production wires to AttachConnector
-// (`syscall.Exec` + `tmux attach-session -A -t NAME`). We substitute a
+// (`syscall.Exec` + `tmux attach-session -t NAME`). We substitute a
 // mockSessionConnector so the test does not require a real PTY hand-
 // off — per the planning brief's "mock connectors so the test does
 // not require a real PTY" guidance.

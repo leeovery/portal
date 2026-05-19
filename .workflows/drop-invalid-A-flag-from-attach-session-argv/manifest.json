@@ -67,14 +67,16 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 1,
+          "current_phase": 2,
           "current_task": "~",
           "completed_tasks": [
             "drop-invalid-A-flag-from-attach-session-argv-1-1",
-            "drop-invalid-A-flag-from-attach-session-argv-1-2"
+            "drop-invalid-A-flag-from-attach-session-argv-1-2",
+            "drop-invalid-A-flag-from-attach-session-argv-2-1"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }
