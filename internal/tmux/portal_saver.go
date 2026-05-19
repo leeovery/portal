@@ -357,10 +357,36 @@ func shouldKillSaverOnVersionDecision(stored, currentVersion string, readErr err
 	return stored != currentVersion
 }
 
-// portalSaverVersionMismatch encodes the version-comparison rules for
-// EnsurePortalSaverVersion. Any failure to read the version file, a dev /
-// empty currentVersion, a dev / empty stored version, or a non-equal stored
-// vs. current pair all count as a mismatch.
+// portalSaverVersionMismatch is a defensive predicate answering the question
+// "if we were to kill the current daemon, should we trust that a freshly
+// respawned daemon would be on a different/usable version?". It returns true
+// when:
+//
+//  1. stored != currentVersion (a real version mismatch on a clean read), OR
+//  2. either side of the pair is "" or "dev" (dev-build short-circuit — we
+//     cannot reason about version equality when either side is unstamped), OR
+//  3. the read failed for any reason, INCLUDING errors.Is(readErr,
+//     state.ErrVersionFileAbsent) — an unreadable or absent file does not
+//     let the predicate answer "no" with confidence, so it answers "yes"
+//     defensively at this layer.
+//
+// It returns false otherwise (clean read, neither side dev/empty, versions
+// equal).
+//
+// NOTE — not load-bearing for the kill decision: as of the saver-kill-respawn
+// fix, EnsurePortalSaverVersion no longer drives its kill decision from this
+// predicate. The authoritative kill gate is now BootstrapAliveCheck(stateDir)
+// FIRST — a dead daemon is never killed and an alive daemon with an absent
+// version file is repaired defensively (via portalSaverWriteVersionFile)
+// rather than recycled. The predicate's "absent counts as mismatch" rule
+// therefore no longer translates into "absent triggers a kill"; it only
+// expresses the predicate's local, defensive contract. See
+// EnsurePortalSaverVersion (and shouldKillSaverOnVersionDecision, which
+// encodes the alive-daemon kill-decision matrix inline) for the authoritative
+// kill-decision rules.
+//
+// This predicate is preserved for callers that want the dev-short-circuit /
+// read-error-folded shape and is covered by its own predicate-matrix test.
 func portalSaverVersionMismatch(stored, currentVersion string, readErr error) bool {
 	if readErr != nil {
 		return true
