@@ -744,13 +744,7 @@ func TestDaemonStartup_SeedsHashMapFromDisk(t *testing.T) {
 	}
 
 	// Capture deps via the run-func seam so we can inspect HashMap.
-	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
-	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
@@ -792,13 +786,7 @@ func TestDaemonStartup_LoadsPrevIndexFromSessionsJSON(t *testing.T) {
 		t.Fatalf("seed sessions.json: %v", err)
 	}
 
-	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
-	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
@@ -820,13 +808,7 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
-	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
-	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
@@ -859,13 +841,7 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 		t.Fatalf("seed bad sessions.json: %v", err)
 	}
 
-	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
-	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {

@@ -204,13 +204,7 @@ func TestStateDaemon_PassesPreparedDepsToRunFunc(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	withDaemonLockFileReset(t)
 
-	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
-		*holder = deps
-		return nil
-	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	holder := withImmediateRun(t)
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
