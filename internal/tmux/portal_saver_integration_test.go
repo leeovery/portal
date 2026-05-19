@@ -131,24 +131,13 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// machine without `go` on PATH (or a broken build) should skip
 	// cleanly rather than fail with a noisy build error — the
 	// invariant under test is structural, not "go build works".
-	binDir := t.TempDir()
-	if err := restoretest.BuildPortalBinary(binDir); err != nil {
-		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
-	}
+	//
 	// PATH inheritance: t.Setenv guarantees PATH is restored on test
 	// exit. tmuxtest's exec.Command("tmux", ...) inherits the test
 	// process's PATH, and the tmux server inherits that, so the
 	// daemon resolves on PATH when the shell-command "portal state
 	// daemon" is exec'd inside the saver session.
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	// Verify portal is actually resolvable after the PATH prepend.
-	// Belt-and-braces: if anything is wrong with the build or PATH
-	// wiring, fail the skip path with a clear message rather than
-	// blowing up later inside the recycle loop.
-	if _, err := exec.LookPath("portal"); err != nil {
-		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
-	}
+	_ = restoretest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	// The daemon resolves its state directory via PORTAL_STATE_DIR.
@@ -284,14 +273,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 	// Build portal binary and PATH-prepend so the daemon resolves at
 	// exec time inside the test-spawned tmux server. Mirrors the skip
 	// shape used by TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle.
-	binDir := t.TempDir()
-	if err := restoretest.BuildPortalBinary(binDir); err != nil {
-		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := exec.LookPath("portal"); err != nil {
-		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
-	}
+	_ = restoretest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -424,14 +406,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
-	binDir := t.TempDir()
-	if err := restoretest.BuildPortalBinary(binDir); err != nil {
-		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if _, err := exec.LookPath("portal"); err != nil {
-		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
-	}
+	_ = restoretest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	// PORTAL_STATE_DIR propagates to the tmux server (forked from this

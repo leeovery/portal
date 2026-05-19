@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"testing"
 )
 
 // ProjectRoot walks up from the current working directory until it finds
@@ -73,6 +74,34 @@ func BuildPortalBinary(dir string) error {
 // by BuildPortalBinaryDir, BuildPortalBinaryStable, and the public
 // BuildPortalBinary wrapper so the underlying `go build` invocation
 // lives in one place.
+// StagePortalBinary builds the portal CLI into a fresh t.TempDir,
+// prepends that directory to $PATH for the duration of the test, and
+// asserts `portal` is resolvable via exec.LookPath. Returns the
+// directory holding the built binary.
+//
+// Skip semantics mirror the inlined preambles previously duplicated
+// across the default-lane real-tmux integration tests: a `go build`
+// failure (no `go` on PATH, compile error) is a clean t.Skipf, as is
+// a post-prepend exec.LookPath miss. Neither escalates to t.Fatal —
+// the invariants these tests pin are structural, not "build works".
+//
+// PATH composition: binDir is prepended ahead of the inherited PATH so
+// the freshly built binary cannot be shadowed by any system-installed
+// `portal`. The t.Setenv contract restores the prior PATH on test
+// exit.
+func StagePortalBinary(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	if err := BuildPortalBinary(binDir); err != nil {
+		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := exec.LookPath("portal"); err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+	return binDir
+}
+
 func buildPortalBinaryInto(dir string) error {
 	binary := filepath.Join(dir, "portal")
 	root, err := ProjectRoot()

@@ -178,11 +178,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	// resolves the `portal` argv-0 cleanly. We invoke the binary by
 	// absolute path below, but PATH prepend is retained so any internal
 	// re-exec (none today, defensive) finds the same build.
-	binDir := t.TempDir()
-	if err := restoretest.BuildPortalBinary(binDir); err != nil {
-		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	binDir := restoretest.StagePortalBinary(t)
 	binary, err := exec.LookPath("portal")
 	if err != nil {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
