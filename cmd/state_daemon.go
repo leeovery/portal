@@ -266,7 +266,7 @@ var stateDaemonCmd = &cobra.Command{
 		if err := state.WritePIDFile(dir, os.Getpid()); err != nil {
 			return fmt.Errorf("write PID file: %w", err)
 		}
-		if err := state.WriteVersionFile(dir, version); err != nil {
+		if err := state.WriteVersionFile(dir, version, logger); err != nil {
 			return fmt.Errorf("write version file: %w", err)
 		}
 

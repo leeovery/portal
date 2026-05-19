@@ -165,7 +165,7 @@ func TestDaemonAlive(t *testing.T) {
 func TestVersionFile(t *testing.T) {
 	t.Run("writes and reads a version file", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := state.WriteVersionFile(dir, "1.2.3"); err != nil {
+		if err := state.WriteVersionFile(dir, "1.2.3", nil); err != nil {
 			t.Fatalf("WriteVersionFile: %v", err)
 		}
 
@@ -191,7 +191,7 @@ func TestVersionFile(t *testing.T) {
 
 	t.Run("distinguishes empty contents from absent file", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := state.WriteVersionFile(dir, ""); err != nil {
+		if err := state.WriteVersionFile(dir, "", nil); err != nil {
 			t.Fatalf("WriteVersionFile(\"\"): %v", err)
 		}
 
@@ -206,7 +206,7 @@ func TestVersionFile(t *testing.T) {
 
 	t.Run("round-trips the literal dev marker", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := state.WriteVersionFile(dir, "dev"); err != nil {
+		if err := state.WriteVersionFile(dir, "dev", nil); err != nil {
 			t.Fatalf("WriteVersionFile: %v", err)
 		}
 
@@ -221,7 +221,7 @@ func TestVersionFile(t *testing.T) {
 
 	t.Run("writes version file with mode 0600", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := state.WriteVersionFile(dir, "0.0.1"); err != nil {
+		if err := state.WriteVersionFile(dir, "0.0.1", nil); err != nil {
 			t.Fatalf("WriteVersionFile: %v", err)
 		}
 

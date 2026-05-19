@@ -64,9 +64,9 @@
         "saver-kill-respawn-loop-leaks-daemons": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle": 0,
           "linters": [
             {
@@ -86,9 +86,10 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "tick-fd935f",
+          "current_task": "tick-d8fbef",
           "completed_tasks": [
-            "saver-kill-respawn-loop-leaks-daemons-1-1"
+            "saver-kill-respawn-loop-leaks-daemons-1-1",
+            "saver-kill-respawn-loop-leaks-daemons-1-2"
           ]
         }
       }

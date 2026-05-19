@@ -120,7 +120,7 @@ func TestStateDaemon_OverwritesPIDAndVersionAcrossInvocations(t *testing.T) {
 	if err := state.WritePIDFile(dir, 42); err != nil {
 		t.Fatalf("seed pid: %v", err)
 	}
-	if err := state.WriteVersionFile(dir, "stale"); err != nil {
+	if err := state.WriteVersionFile(dir, "stale", nil); err != nil {
 		t.Fatalf("seed version: %v", err)
 	}
 

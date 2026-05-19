@@ -180,7 +180,7 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// This exercises the real portalSaverVersionMismatch comparison
 	// in the second EnsurePortalSaverVersion call — no test seam, no
 	// stubbed mismatch helper.
-	if err := state.WriteVersionFile(dir, "v-test-0-old"); err != nil {
+	if err := state.WriteVersionFile(dir, "v-test-0-old", nil); err != nil {
 		t.Fatalf("WriteVersionFile (force mismatch): %v", err)
 	}
 

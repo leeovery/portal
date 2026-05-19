@@ -97,7 +97,7 @@ func TestCollectStatus_DaemonRunningFalseForDeadPID(t *testing.T) {
 func TestCollectStatus_DaemonVersionFromVersionFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-	if err := state.WriteVersionFile(dir, "v1.2.3"); err != nil {
+	if err := state.WriteVersionFile(dir, "v1.2.3", nil); err != nil {
 		t.Fatalf("WriteVersionFile: %v", err)
 	}
 

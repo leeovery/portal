@@ -608,7 +608,7 @@ func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error)
 // writeVersion seeds dir with daemon.version containing the supplied content.
 func writeVersion(t *testing.T, dir, version string) {
 	t.Helper()
-	if err := state.WriteVersionFile(dir, version); err != nil {
+	if err := state.WriteVersionFile(dir, version, nil); err != nil {
 		t.Fatalf("WriteVersionFile(%q) returned error: %v", version, err)
 	}
 }
