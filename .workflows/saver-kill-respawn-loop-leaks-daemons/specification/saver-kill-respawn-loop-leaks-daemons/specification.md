@@ -48,7 +48,7 @@ When the barrier gives up early, the new daemon spawns, immediately collides wit
 
 #### Defect 3 — `daemon.version` disappearance (open, instrumentation only)
 
-Code-trace exhaustively enumerated every production file-removal path; **no production code path removes `daemon.version` individually**. The disappearance therefore originates from outside portal's production code (manual `--purge`, dev-build escape, or external process). Fixing Defect 1 makes the disappearance non-load-bearing for the user-visible symptom — Defect 3 becomes a follow-up question, not a blocker.
+Code-trace exhaustively enumerated every production file-removal path; **no linearly-traced production code path removes `daemon.version` individually**. The user confirmed no user-initiated cleanup (no `portal clean`, no manual `rm`, no state-dir touch), so the deleter is most likely inside portal's own runtime path but in a code path not surfaced by the linear trace — candidate suspects (carried forward under Change 3) include an atomic-write race inside `state.WriteVersionFile`, an over-eager cleanup pass in the daemon's tick loop, the bootstrap `CleanStale` step, or shutdown-flush behaviour. Fixing Defect 1 makes the disappearance non-load-bearing for the user-visible symptom regardless of which suspect is correct — Defect 3 becomes a follow-up question, not a blocker.
 
 #### Why It Wasn't Caught
 

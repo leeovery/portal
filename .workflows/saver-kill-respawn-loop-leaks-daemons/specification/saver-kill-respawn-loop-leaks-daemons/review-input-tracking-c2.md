@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-19
 cycle: 2
 phase: Input Review
@@ -30,7 +30,7 @@ This matters because:
 **Proposed Addition**:
 Reword Defect 3's origin sentence to match the investigation's conclusion: production code paths were ruled out by code trace, the user confirmed no user-initiated cleanup occurred, so the deleter is likely inside portal's own runtime path but in a code path not surfaced by the linear code trace (atomic-write race, over-eager cleanup pass, bootstrap CleanStale, or shutdown-flush behaviour — already enumerated under Change 3's carry-forward). Keep the closing point that fixing Defect 1 makes the disappearance non-load-bearing.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Defect 3 origin paragraph reworded to align with investigation's user-confirmed conclusion (suspect lives inside portal's runtime path, not external) and the candidate-list carry-forward under Change 3.
 
 ---
