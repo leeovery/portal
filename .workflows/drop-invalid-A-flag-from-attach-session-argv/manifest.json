@@ -1,7 +1,7 @@
 {
   "name": "drop-invalid-A-flag-from-attach-session-argv",
   "work_type": "quick-fix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-19",
   "description": "Remove invalid -A flag from tmux attach-session argv in cmd/open.go that breaks every outside-tmux attach on v0.5.1/v0.5.2",
   "phases": {
@@ -81,5 +81,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-19"
 }
