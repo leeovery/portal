@@ -38,11 +38,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "saver-kill-respawn-loop-leaks-daemons-1-3",
+          "task": "saver-kill-respawn-loop-leaks-daemons-1-4",
           "task_map": {
             "saver-kill-respawn-loop-leaks-daemons-1": "tick-753c11",
             "saver-kill-respawn-loop-leaks-daemons-1-1": "tick-c911bf",
-            "saver-kill-respawn-loop-leaks-daemons-1-2": "tick-fd935f"
+            "saver-kill-respawn-loop-leaks-daemons-1-2": "tick-fd935f",
+            "saver-kill-respawn-loop-leaks-daemons-1-3": "tick-d8fbef"
           },
           "external_id": "tick-2ab8a7"
         }
