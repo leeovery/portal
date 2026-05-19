@@ -649,6 +649,29 @@ func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error)
 	}
 }
 
+// newVersionScenarioClient constructs the standard versionScenario / MockCommander /
+// tmux.Client triplet used by most version-flow tests. Tests that need a custom
+// RunFunc wrapper around scenario.run still construct the pieces inline.
+func newVersionScenarioClient(t *testing.T, sessionPresent bool) (*versionScenario, *MockCommander, *tmux.Client) {
+	t.Helper()
+	scenario := &versionScenario{sessionPresent: sessionPresent}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	return scenario, mock, tmux.NewClient(mock)
+}
+
+// recordBarrierCalls installs a kill-saver stub that increments a counter on
+// every invocation and returns a pointer to the counter so callers can assert
+// on the observed call count.
+func recordBarrierCalls(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		calls++
+		return nil
+	})
+	return &calls
+}
+
 // writeVersion seeds dir with daemon.version containing the supplied content.
 func writeVersion(t *testing.T, dir, version string) {
 	t.Helper()
@@ -664,9 +687,7 @@ func TestEnsurePortalSaverVersion_DoesNotKillWhenStoredMatchesCurrent(t *testing
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.2")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -690,9 +711,7 @@ func TestEnsurePortalSaverVersion_KillsAndRecreatesWhenStoredDiffersFromCurrent(
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.1")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, mock, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -718,9 +737,7 @@ func TestEnsurePortalSaverVersion_AlwaysRestartsWhenCurrentIsEmpty(t *testing.T)
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.2")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, ""); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -741,9 +758,7 @@ func TestEnsurePortalSaverVersion_AlwaysRestartsWhenCurrentIsLiteralDev(t *testi
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.2")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -764,9 +779,7 @@ func TestEnsurePortalSaverVersion_TreatsStoredDevAsMismatch(t *testing.T) {
 	dir := t.TempDir()
 	writeVersion(t, dir, "dev")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -788,9 +801,7 @@ func TestEnsurePortalSaverVersion_TreatsEmptyStoredVersionAsMismatch(t *testing.
 	// File exists but contains an empty string (post-trim).
 	writeVersion(t, dir, "")
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -818,9 +829,7 @@ func TestEnsurePortalSaverVersion_SkipsKillWhenNoSessionExists(t *testing.T) {
 
 	dir := t.TempDir() // no daemon.version → mismatch=true
 
-	scenario := &versionScenario{sessionPresent: false}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, false)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -928,9 +937,7 @@ func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionOnKillPath(t *testing
 	// own behaviour against the state directory.
 	installKillSaverFn(t, func(*tmux.Client, string) error { return nil })
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -1333,9 +1340,7 @@ func TestEnsurePortalSaverVersion_InvokesBarrierHelperOnVersionMismatch(t *testi
 		return nil
 	})
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, mock, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -1370,9 +1375,7 @@ func TestEnsurePortalSaverVersion_DoesNotInvokeBarrierHelperOnVersionMatch(t *te
 		return nil
 	})
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -1656,17 +1659,11 @@ func TestEnsurePortalSaverVersion_NotAlive_AbsentVersion_DoesNotKill(t *testing.
 
 	dir := t.TempDir() // no daemon.version pre-populated
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
 	// Session present so HasSession would historically permit the kill — the
 	// alive-check gate is what suppresses it under the new contract.
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -1677,8 +1674,8 @@ func TestEnsurePortalSaverVersion_NotAlive_AbsentVersion_DoesNotKill(t *testing.
 	// own stale-daemon branch (session present + alive-check false) — that is
 	// BootstrapPortalSaver's contract, not this caller's. We pin the caller's
 	// contract by asserting at most one barrier call from the union of both.
-	if barrierCalls > 1 {
-		t.Errorf("expected at most 1 barrier invocation when daemon not alive (only BootstrapPortalSaver's stale-daemon branch), got %d", barrierCalls)
+	if *barrierCalls > 1 {
+		t.Errorf("expected at most 1 barrier invocation when daemon not alive (only BootstrapPortalSaver's stale-daemon branch), got %d", *barrierCalls)
 	}
 }
 
@@ -1689,17 +1686,11 @@ func TestEnsurePortalSaverVersion_NotAlive_VersionMismatch_DoesNotKill(t *testin
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.1") // mismatches current; neither dev
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
 	// Session present so HasSession would historically permit the kill — the
 	// alive-check gate is what suppresses it under the new contract.
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -1709,8 +1700,8 @@ func TestEnsurePortalSaverVersion_NotAlive_VersionMismatch_DoesNotKill(t *testin
 	// is not alive, regardless of version mismatch. BootstrapPortalSaver may
 	// still invoke the barrier on its own stale-daemon branch. We pin the
 	// caller's contract by asserting at most one barrier call across both.
-	if barrierCalls > 1 {
-		t.Errorf("expected at most 1 barrier invocation when daemon not alive (BootstrapPortalSaver's branch only), got %d", barrierCalls)
+	if *barrierCalls > 1 {
+		t.Errorf("expected at most 1 barrier invocation when daemon not alive (BootstrapPortalSaver's branch only), got %d", *barrierCalls)
 	}
 }
 
@@ -1721,22 +1712,16 @@ func TestEnsurePortalSaverVersion_Alive_StoredDev_Kills(t *testing.T) {
 	dir := t.TempDir()
 	writeVersion(t, dir, "dev")
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on stored=dev, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on stored=dev, got %d", *barrierCalls)
 	}
 }
 
@@ -1747,22 +1732,16 @@ func TestEnsurePortalSaverVersion_Alive_CurrentDev_Kills(t *testing.T) {
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.2")
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on current=dev, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on current=dev, got %d", *barrierCalls)
 	}
 }
 
@@ -1772,22 +1751,16 @@ func TestEnsurePortalSaverVersion_Alive_AbsentVersionNeitherDev_DoesNotKill(t *t
 
 	dir := t.TempDir() // no daemon.version → ErrVersionFileAbsent
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	scenario, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 0 {
-		t.Errorf("expected 0 barrier invocations on alive+absent (neither dev), got %d", barrierCalls)
+	if *barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations on alive+absent (neither dev), got %d", *barrierCalls)
 	}
 	if scenario.killSessionCalls != 0 {
 		t.Errorf("expected 0 kill-session calls on alive+absent (neither dev), got %d", scenario.killSessionCalls)
@@ -1807,22 +1780,16 @@ func TestEnsurePortalSaverVersion_Alive_NonAbsentReadError_Kills(t *testing.T) {
 
 	dir := t.TempDir()
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive+non-absent-read-error, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+non-absent-read-error, got %d", *barrierCalls)
 	}
 }
 
@@ -1833,22 +1800,16 @@ func TestEnsurePortalSaverVersion_Alive_VersionsMatch_DoesNotKill(t *testing.T) 
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.2")
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 0 {
-		t.Errorf("expected 0 barrier invocations on alive+match (neither dev), got %d", barrierCalls)
+	if *barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations on alive+match (neither dev), got %d", *barrierCalls)
 	}
 }
 
@@ -1859,22 +1820,16 @@ func TestEnsurePortalSaverVersion_Alive_VersionsMismatch_Kills(t *testing.T) {
 	dir := t.TempDir()
 	writeVersion(t, dir, "v0.4.1")
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch (neither dev), got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch (neither dev), got %d", *barrierCalls)
 	}
 }
 
@@ -1901,26 +1856,20 @@ func TestEnsurePortalSaverVersion_ConsultsAliveCheckBeforeVersionMismatchDecisio
 		return "v0.4.1", nil
 	})
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
 	dir := t.TempDir()
 	// sessionPresent=false so BootstrapPortalSaver's own stale-daemon branch
 	// does not also invoke the barrier — isolates the assertion to
 	// EnsurePortalSaverVersion's call site only.
-	scenario := &versionScenario{sessionPresent: false}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, false)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
 	}
 
-	if barrierCalls != 0 {
-		t.Errorf("expected 0 barrier invocations when alive-check returns false (regardless of version mismatch), got %d", barrierCalls)
+	if *barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations when alive-check returns false (regardless of version mismatch), got %d", *barrierCalls)
 	}
 	if aliveCalls == 0 {
 		t.Errorf("BootstrapAliveCheck was never consulted")
@@ -1936,8 +1885,8 @@ func TestEnsurePortalSaverVersion_ConsultsAliveCheckBeforeVersionMismatchDecisio
 	if err := tmux.EnsurePortalSaverVersion(client2, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion (alive=true) returned error: %v", err)
 	}
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive=true + mismatch, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive=true + mismatch, got %d", *barrierCalls)
 	}
 }
 
@@ -2189,9 +2138,7 @@ func TestEnsurePortalSaverVersion_Alive_Match_DoesNotInvokeDefensiveWrite(t *tes
 		return nil
 	})
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -2215,15 +2162,9 @@ func TestEnsurePortalSaverVersion_Alive_MismatchNeitherDev_DoesNotInvokeDefensiv
 		return nil
 	})
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -2232,8 +2173,8 @@ func TestEnsurePortalSaverVersion_Alive_MismatchNeitherDev_DoesNotInvokeDefensiv
 	if writeCalls != 0 {
 		t.Errorf("expected 0 defensive write calls on alive+mismatch, got %d", writeCalls)
 	}
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch, got %d", *barrierCalls)
 	}
 }
 
@@ -2250,15 +2191,9 @@ func TestEnsurePortalSaverVersion_Alive_StoredDev_DoesNotInvokeDefensiveWrite(t 
 		return nil
 	})
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -2267,8 +2202,8 @@ func TestEnsurePortalSaverVersion_Alive_StoredDev_DoesNotInvokeDefensiveWrite(t 
 	if writeCalls != 0 {
 		t.Errorf("expected 0 defensive write calls on alive+stored-dev, got %d", writeCalls)
 	}
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive+stored-dev, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+stored-dev, got %d", *barrierCalls)
 	}
 }
 
@@ -2285,15 +2220,9 @@ func TestEnsurePortalSaverVersion_Alive_CurrentDev_DoesNotInvokeDefensiveWrite(t
 		return nil
 	})
 
-	barrierCalls := 0
-	installKillSaverFn(t, func(*tmux.Client, string) error {
-		barrierCalls++
-		return nil
-	})
+	barrierCalls := recordBarrierCalls(t)
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
@@ -2302,8 +2231,8 @@ func TestEnsurePortalSaverVersion_Alive_CurrentDev_DoesNotInvokeDefensiveWrite(t
 	if writeCalls != 0 {
 		t.Errorf("expected 0 defensive write calls on alive+current-dev, got %d", writeCalls)
 	}
-	if barrierCalls != 1 {
-		t.Errorf("expected exactly 1 barrier invocation on alive+current-dev, got %d", barrierCalls)
+	if *barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+current-dev, got %d", *barrierCalls)
 	}
 }
 
@@ -2409,9 +2338,7 @@ func TestEnsurePortalSaverVersion_NotAlive_Absent_DoesNotInvokeDefensiveWrite(t 
 	// thing we are observing is the defensive-write seam.
 	installKillSaverFn(t, func(*tmux.Client, string) error { return nil })
 
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
+	_, _, client := newVersionScenarioClient(t, true)
 
 	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
 		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
