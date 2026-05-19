@@ -217,7 +217,7 @@ func TestDaemonTick_NoOpWhenNeitherDirtyNorGap(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	deps.MaxGap = 30 * time.Second
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
 		t.Errorf("list-sessions invoked when not dirty and not gap: %v", got)
@@ -236,7 +236,7 @@ func TestDaemonTick_FiresWhenDirty(t *testing.T) {
 	deps.LastSaveAt = time.Now() // gap=false
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("list-sessions not invoked when dirty")
@@ -255,7 +255,7 @@ func TestDaemonTick_FiresAfterMaxGap(t *testing.T) {
 	deps.MaxGap = 10 * time.Millisecond
 	deps.LastSaveAt = time.Now().Add(-1 * time.Hour) // very old
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("list-sessions not invoked after max-gap")
@@ -272,7 +272,7 @@ func TestDaemonTick_FiresOnFirstTickWhenLastSaveAtZero(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	// Don't set LastSaveAt — leave it as zero.
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
 		t.Errorf("first tick should fire even without dirty flag (LastSaveAt zero)")
@@ -290,7 +290,7 @@ func TestDaemonTick_SkipsEntireTickWhenRestoring(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
 		t.Errorf("list-sessions invoked during restore: %v", got)
@@ -306,7 +306,7 @@ func TestDaemonTick_PreservesSaveRequestedWhenRestoring(t *testing.T) {
 	deps := makeDeps(t, dir, fc)
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested should survive a restore-suppressed tick; stat=%v", err)
@@ -322,7 +322,7 @@ func TestDaemonTick_RemovesSaveRequestedAfterSuccess(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Errorf("save.requested should be removed after successful capture; stat=%v", err)
@@ -346,7 +346,7 @@ func TestDaemonTick_PreservesSaveRequestedOnError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
 		t.Errorf("save.requested should survive a failed cycle; stat=%v", err)
@@ -363,7 +363,7 @@ func TestDaemonTick_PicksUpNotifyArrivingBetweenTicks(t *testing.T) {
 
 	// Tick 1: dirty flag set, fires capture, clears flag.
 	touchSaveRequested(t, dir)
-	tick(deps)
+	tick(context.Background(), deps)
 	if _, err := os.Stat(state.SaveRequested(dir)); !os.IsNotExist(err) {
 		t.Fatalf("save.requested should be cleared after first tick; stat=%v", err)
 	}
@@ -373,7 +373,7 @@ func TestDaemonTick_PicksUpNotifyArrivingBetweenTicks(t *testing.T) {
 	touchSaveRequested(t, dir)
 
 	// Tick 2: dirty flag set again, fires another capture.
-	tick(deps)
+	tick(context.Background(), deps)
 
 	secondCalls := len(fc.callsContaining("list-sessions"))
 	if secondCalls <= firstCalls {
@@ -414,7 +414,7 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	for _, call := range fc.callsContaining("capture-pane") {
 		// args[6] is the -t target.
@@ -442,7 +442,7 @@ func TestDaemonTick_ContinuesOnPerPaneCaptureError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	// commit must still happen.
 	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
@@ -463,7 +463,7 @@ func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	logBytes, err := os.ReadFile(state.PortalLog(dir))
 	if err != nil {
@@ -491,7 +491,7 @@ func TestDaemonTick_LogsAndSkipsOnCaptureStructureError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
 		t.Errorf("sessions.json should not be written on capture-structure error; stat=%v", err)
@@ -514,7 +514,7 @@ func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testi
 	}
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	if !deps.LastSaveAt.Equal(originalLastSave) {
 		t.Errorf("LastSaveAt advanced despite commit failure: %v != %v", deps.LastSaveAt, originalLastSave)
@@ -633,7 +633,7 @@ func TestTick_SkipsOnTransportError(t *testing.T) {
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
-	tick(deps)
+	tick(context.Background(), deps)
 
 	t.Run("no_capture", func(t *testing.T) {
 		// capture-pane is invoked inside captureAndCommit, only reached if the
@@ -820,5 +820,104 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 	// read errors.
 	if !strings.Contains(string(logBytes), "sessions.json corrupt") {
 		t.Errorf("expected corrupt-index warning in log; got:\n%s", logBytes)
+	}
+}
+
+// TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour is the
+// happy-path regression guard for the ctx-threading plumbing step (spec
+// § Change 2 / Phase 2 Task 2-1). It drives a multi-pane fixture through
+// captureAndCommit with a never-cancelled context.Background() and asserts the
+// pre-threading semantics still hold:
+//
+//  1. PrevIndex is replaced with the freshly captured index (the input
+//     pointer is overwritten with the post-capture &idx).
+//  2. state.Commit is invoked exactly once — observable as a single
+//     sessions.json file on disk containing the captured sessions.
+//  3. All panes are processed — every (sess, win, pane) tuple in the
+//     fixture surfaces a scrollback file and a capture-pane call.
+//
+// Subsequent tasks (2-2/2-3/2-4) will introduce mid-iteration ctx.Done()
+// observation points; this test pins the uncancelled-ctx behaviour so those
+// future changes cannot silently regress the happy path.
+func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Two sessions, two windows total, three panes — exercises the inner
+	// loop's pane-iteration across the (sess, win, pane) nesting.
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0\nside|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
+			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
+		captureByTarget: map[string]string{
+			"work:0.0": "work-pane-0-bytes",
+			"work:0.1": "work-pane-1-bytes",
+			"side:0.0": "side-pane-0-bytes",
+		},
+	}
+
+	// Seed PrevIndex with a sentinel value distinct from anything the fixture
+	// will produce, so we can prove the pointer was replaced (not merely
+	// mutated to equivalent contents).
+	sentinelPrev := &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    "sentinel-must-be-replaced",
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = sentinelPrev
+
+	if err := captureAndCommit(context.Background(), deps); err != nil {
+		t.Fatalf("captureAndCommit returned error on happy path: %v", err)
+	}
+
+	// (1) PrevIndex pointer replacement.
+	if deps.PrevIndex == sentinelPrev {
+		t.Errorf("PrevIndex pointer not replaced; still references seed sentinel")
+	}
+	if deps.PrevIndex == nil {
+		t.Fatal("PrevIndex is nil after successful capture; expected new &idx")
+	}
+	if len(deps.PrevIndex.Sessions) != 2 {
+		t.Errorf("PrevIndex.Sessions length = %d; want 2", len(deps.PrevIndex.Sessions))
+	}
+	for _, sess := range deps.PrevIndex.Sessions {
+		if sess.Name == "sentinel-must-be-replaced" {
+			t.Errorf("PrevIndex still contains sentinel session; want fresh capture only")
+		}
+	}
+
+	// (2) state.Commit invoked exactly once — sessions.json exists with the
+	// captured sessions decoded back.
+	sessionsJSONPath := state.SessionsJSON(dir)
+	data, err := os.ReadFile(sessionsJSONPath)
+	if err != nil {
+		t.Fatalf("sessions.json not written by commit: %v", err)
+	}
+	committed, err := state.DecodeIndex(data)
+	if err != nil {
+		t.Fatalf("decode committed sessions.json: %v", err)
+	}
+	if len(committed.Sessions) != 2 {
+		t.Errorf("committed sessions length = %d; want 2", len(committed.Sessions))
+	}
+
+	// (3) All panes processed — three capture-pane calls (one per pane) and
+	// three scrollback files on disk.
+	captureCalls := fc.callsContaining("capture-pane")
+	if len(captureCalls) != 3 {
+		t.Errorf("capture-pane call count = %d; want 3 (one per pane): %v", len(captureCalls), captureCalls)
+	}
+	for _, key := range []string{
+		state.SanitizePaneKey("work", 0, 0),
+		state.SanitizePaneKey("work", 0, 1),
+		state.SanitizePaneKey("side", 0, 0),
+	} {
+		if _, err := os.Stat(state.ScrollbackFile(dir, key)); err != nil {
+			t.Errorf("scrollback file missing for pane %q: %v", key, err)
+		}
 	}
 }

@@ -73,7 +73,7 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 	for {
 		select {
 		case <-ticker.C:
-			tick(deps)
+			tick(ctx, deps)
 		case <-ctx.Done():
 			return daemonShutdownFunc(deps)
 		}
@@ -91,7 +91,7 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 //  2. !dirty && !gap is the no-op fast path (per-tick idle cost is one stat).
 //  3. captureAndCommit failures leave LastSaveAt and save.requested untouched
 //     so the next tick retries.
-func tick(deps *daemonDeps) {
+func tick(ctx context.Context, deps *daemonDeps) {
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
 		deps.Logger.Warn(state.ComponentDaemon, "read @portal-restoring: %v", err)
@@ -107,7 +107,7 @@ func tick(deps *daemonDeps) {
 		return
 	}
 
-	if err := captureAndCommit(deps); err != nil {
+	if err := captureAndCommit(ctx, deps); err != nil {
 		deps.Logger.Warn(state.ComponentDaemon, "tick: %v", err)
 		return
 	}
@@ -129,7 +129,11 @@ func tick(deps *daemonDeps) {
 // continues — one bad pane must not abort the rest of the save. Errors at the
 // "phase boundary" steps (list markers, capture structure, commit) propagate
 // to the caller so tick can log and back off.
-func captureAndCommit(deps *daemonDeps) error {
+func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
+	// ctx is threaded as the first parameter for future per-iteration
+	// ctx.Done() observation points (see spec § Change 2). This plumbing-only
+	// step intentionally does not yet act on cancellation.
+	_ = ctx
 	skipSet, err := state.ListSkeletonMarkers(deps.Client)
 	if err != nil {
 		return fmt.Errorf("list markers: %w", err)
@@ -195,7 +199,10 @@ func defaultShutdownFlush(deps *daemonDeps) error {
 		return nil
 	}
 	deps.Logger.Info(state.ComponentDaemon, "final flush")
-	if err := captureAndCommit(deps); err != nil {
+	// shutdown flush is non-cancellable — the cancelled context is what
+	// triggered the flush; passing it through would abort the very save we
+	// are exiting to perform.
+	if err := captureAndCommit(context.Background(), deps); err != nil {
 		deps.Logger.Warn(state.ComponentDaemon, "final flush: %v", err)
 	}
 	return nil
