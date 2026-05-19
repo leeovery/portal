@@ -10,7 +10,7 @@
 
 ## Task 1: Drop stale `-A` from cmd/reattach_integration_test.go comments
 
-- status: pending
+- status: approved
 - severity: medium
 - sources: standards
 

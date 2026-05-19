@@ -26,7 +26,9 @@
           "task": "~",
           "task_map": {
             "drop-invalid-A-flag-from-attach-session-argv-1-1": "tick-38a654",
-            "drop-invalid-A-flag-from-attach-session-argv-1-2": "tick-41f8a8"
+            "drop-invalid-A-flag-from-attach-session-argv-1-2": "tick-41f8a8",
+            "drop-invalid-A-flag-from-attach-session-argv-2": "tick-072ad0",
+            "drop-invalid-A-flag-from-attach-session-argv-2-1": "tick-e93e04"
           },
           "external_id": "tick-867444"
         }
