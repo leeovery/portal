@@ -296,6 +296,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"fileutil":         {},
 		"fuzzy":            {},
 		"hooks":            {},
+		"portalbintest":    {},
 		"project":          {},
 		"resolver":         {},
 		"restore":          {},

@@ -1,18 +1,22 @@
-// Untagged build helpers shared by default-lane and integration-lane
-// callers. ProjectRoot + buildPortalBinaryInto previously lived in
-// restoretest.go under `//go:build integration`; they were lifted here
-// so default-tagged tests (notably
-// internal/tmux/portal_saver_integration_test.go, which exercises the
-// singleton-invariant acceptance under the default `go test ./...`
-// lane) can reuse the same `go build` plumbing without re-inlining the
-// project-root walk and exec.Command wiring.
+// Package portalbintest provides test-only helpers for compiling the
+// portal CLI binary and staging it on $PATH for integration tests.
 //
-// The integration-tagged wrappers in restoretest.go
-// (BuildPortalBinaryDir, BuildPortalBinaryStable) delegate their build
-// invocation to buildPortalBinaryInto so the underlying `go build .`
-// command line lives in exactly one place.
-
-package restoretest
+// These helpers were previously housed in internal/restoretest but have
+// no semantic tie to restore — they are consumed by daemon and saver
+// integration tests as well. The package is dependency-free beyond
+// stdlib + testing so any test package can import it without dragging
+// in tmux / state fixtures.
+//
+// Exported surface:
+//
+//   - ProjectRoot — repo-root resolver (walks up from CWD to find go.mod).
+//   - BuildPortalBinary — pure error-returning `go build .` wrapper.
+//   - StagePortalBinary — t.Helper-flavoured build + PATH-prepend +
+//     exec.LookPath composition used by default-lane real-tmux
+//     integration tests.
+//
+// Production code must not import this package.
+package portalbintest
 
 import (
 	"fmt"
@@ -29,12 +33,8 @@ import (
 // internal/tmux/, etc.).
 //
 // Returns an error rather than fatalling so it can be reused by helpers
-// that also return error (BuildPortalBinaryStable, BuildPortalBinary)
-// without dragging *testing.T into pure plumbing.
-//
-// Exported because internal/restoretest/restoretest_test.go (external
-// _test package) exercises this helper's contract directly, and because
-// default-lane integration tests in internal/tmux/ also depend on it.
+// that also return error (BuildPortalBinary, BuildPortalBinaryStable in
+// restoretest) without dragging *testing.T into pure plumbing.
 func ProjectRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -62,18 +62,11 @@ func ProjectRoot() (string, error) {
 // Pure error-returning variant for callers that want to decide between
 // hard-fail and clean-skip on build failure (e.g. the
 // singleton-invariant test in internal/tmux/, which skips when `go`
-// is not available rather than fatalling). The *testing.T-flavoured
-// integration wrappers (BuildPortalBinaryDir, BuildPortalBinaryStable)
-// call buildPortalBinaryInto directly so callers in restoretest.go do
-// not pay the public-wrapper indirection.
+// is not available rather than fatalling).
 func BuildPortalBinary(dir string) error {
 	return buildPortalBinaryInto(dir)
 }
 
-// buildPortalBinaryInto compiles the portal CLI into dir/portal. Shared
-// by BuildPortalBinaryDir, BuildPortalBinaryStable, and the public
-// BuildPortalBinary wrapper so the underlying `go build` invocation
-// lives in one place.
 // StagePortalBinary builds the portal CLI into a fresh t.TempDir,
 // prepends that directory to $PATH for the duration of the test, and
 // asserts `portal` is resolvable via exec.LookPath. Returns the
@@ -102,6 +95,10 @@ func StagePortalBinary(t *testing.T) string {
 	return binDir
 }
 
+// buildPortalBinaryInto compiles the portal CLI into dir/portal. Shared
+// by BuildPortalBinary and the integration-tagged wrappers in
+// restoretest (BuildPortalBinaryDir, BuildPortalBinaryStable) so the
+// underlying `go build` invocation lives in one place.
 func buildPortalBinaryInto(dir string) error {
 	binary := filepath.Join(dir, "portal")
 	root, err := ProjectRoot()

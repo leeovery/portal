@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -43,7 +44,7 @@ import (
 func BuildPortalBinaryDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := buildPortalBinaryInto(dir); err != nil {
+	if err := portalbintest.BuildPortalBinary(dir); err != nil {
 		t.Fatalf("build portal binary: %v", err)
 	}
 	return dir
@@ -63,7 +64,7 @@ func BuildPortalBinaryStable() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("mkdir temp: %w", err)
 	}
-	if err := buildPortalBinaryInto(dir); err != nil {
+	if err := portalbintest.BuildPortalBinary(dir); err != nil {
 		_ = os.RemoveAll(dir)
 		return "", err
 	}

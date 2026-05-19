@@ -56,7 +56,7 @@ Path arguments go through: direct path detection → alias lookup → zoxide que
 | `ui` | Shared Bubble Tea file-browser model (`BrowserCancelMsg`, `BrowserDirSelectedMsg`, `DirLister`) consumed by both `internal/tui` and `cmd/open.go` |
 | `fileutil` | Shared utilities — `AtomicWrite` (temp file + rename) used by hooks store |
 | `fuzzy` | Substring-based fuzzy matching/filtering |
-| `restoretest` / `tmuxtest` | Test-only helpers (shared restore drivers, real-tmux socket fixtures) — production code must not import these |
+| `restoretest` / `tmuxtest` / `portalbintest` | Test-only helpers — production code must not import these. `restoretest` holds restore-specific scaffolding (sessions.json seeders, signal-hydrate drivers, marker-clear pollers, integration-tagged `BuildPortalBinaryDir`/`BuildPortalBinaryStable` wrappers). `tmuxtest` provides real-tmux socket fixtures. `portalbintest` provides general-purpose `go build` / PATH-stage helpers (`BuildPortalBinary`, `StagePortalBinary`, `ProjectRoot`) consumed by restore, daemon, and saver integration tests |
 
 ### Config path resolution (cmd/config.go)
 

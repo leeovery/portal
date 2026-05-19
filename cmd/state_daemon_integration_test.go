@@ -26,7 +26,7 @@ package cmd_test
 // internal/tmux/portal_saver_integration_test.go:
 //
 //   - tmuxtest.SkipIfNoTmux skips when tmux is not on PATH.
-//   - restoretest.BuildPortalBinary failure is a clean Skip (not a
+//   - portalbintest.BuildPortalBinary failure is a clean Skip (not a
 //     Fatal) — a dev machine without `go` or a broken build is not a
 //     responsiveness-contract failure.
 //
@@ -46,7 +46,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
@@ -178,7 +178,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	// resolves the `portal` argv-0 cleanly. We invoke the binary by
 	// absolute path below, but PATH prepend is retained so any internal
 	// re-exec (none today, defensive) finds the same build.
-	binDir := restoretest.StagePortalBinary(t)
+	binDir := portalbintest.StagePortalBinary(t)
 	binary, err := exec.LookPath("portal")
 	if err != nil {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)

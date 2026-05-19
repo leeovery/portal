@@ -57,7 +57,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
@@ -137,7 +137,7 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	// process's PATH, and the tmux server inherits that, so the
 	// daemon resolves on PATH when the shell-command "portal state
 	// daemon" is exec'd inside the saver session.
-	_ = restoretest.StagePortalBinary(t)
+	_ = portalbintest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	// The daemon resolves its state directory via PORTAL_STATE_DIR.
@@ -273,7 +273,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 	// Build portal binary and PATH-prepend so the daemon resolves at
 	// exec time inside the test-spawned tmux server. Mirrors the skip
 	// shape used by TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle.
-	_ = restoretest.StagePortalBinary(t)
+	_ = portalbintest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -406,7 +406,7 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
-	_ = restoretest.StagePortalBinary(t)
+	_ = portalbintest.StagePortalBinary(t)
 
 	dir := t.TempDir()
 	// PORTAL_STATE_DIR propagates to the tmux server (forked from this

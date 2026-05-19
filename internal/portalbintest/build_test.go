@@ -1,7 +1,7 @@
-package restoretest_test
+package portalbintest_test
 
-// Untagged tests for the shared build/stage helpers in
-// internal/restoretest/build.go. These mirror the default-lane usage
+// Untagged tests for the build/stage helpers in
+// internal/portalbintest/build.go. These mirror the default-lane usage
 // pattern: callers in internal/tmux/ and cmd/ that depend on a real
 // `portal` binary and a PATH-prepended bin directory but compile under
 // `go test ./...` without the integration tag.
@@ -13,8 +13,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/leeovery/portal/internal/restoretest"
+	"github.com/leeovery/portal/internal/portalbintest"
 )
+
+// TestProjectRoot asserts ProjectRoot walks up from the test's runtime CWD
+// until it finds the directory containing the repository's go.mod. The
+// integration test packages (cmd/bootstrap, internal/restore, cmd) all
+// rely on this to compile the portal CLI from the repo root.
+func TestProjectRoot(t *testing.T) {
+	root, err := portalbintest.ProjectRoot()
+	if err != nil {
+		t.Fatalf("ProjectRoot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("expected go.mod under %s: %v", root, err)
+	}
+	// Sanity: the located module should be the portal module. We read
+	// the first line of go.mod and assert the module path matches; a
+	// false positive (e.g. a stray go.mod in a parent dir) would
+	// otherwise pass the os.Stat check above.
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	want := "module github.com/leeovery/portal"
+	if !strings.Contains(string(data), want) {
+		t.Errorf("go.mod at %s does not declare %q; got:\n%s", root, want, data)
+	}
+}
 
 // TestStagePortalBinary asserts the helper composes
 // BuildPortalBinary + t.Setenv("PATH", ...) + exec.LookPath("portal")
@@ -25,7 +51,7 @@ import (
 func TestStagePortalBinary(t *testing.T) {
 	priorPATH := os.Getenv("PATH")
 
-	binDir := restoretest.StagePortalBinary(t)
+	binDir := portalbintest.StagePortalBinary(t)
 
 	if binDir == "" {
 		t.Fatalf("StagePortalBinary returned empty binDir")

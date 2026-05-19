@@ -8,39 +8,11 @@
 package restoretest_test
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/leeovery/portal/internal/restoretest"
 )
-
-// TestProjectRoot asserts ProjectRoot walks up from the test's runtime CWD
-// until it finds the directory containing the repository's go.mod. The
-// integration test packages (cmd/bootstrap, internal/restore, cmd) all
-// rely on this to compile the portal CLI from the repo root.
-func TestProjectRoot(t *testing.T) {
-	root, err := restoretest.ProjectRoot()
-	if err != nil {
-		t.Fatalf("ProjectRoot: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Fatalf("expected go.mod under %s: %v", root, err)
-	}
-	// Sanity: the located module should be the portal module. We read
-	// the first line of go.mod and assert the module path matches; a
-	// false positive (e.g. a stray go.mod in a parent dir) would
-	// otherwise pass the os.Stat check above.
-	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		t.Fatalf("read go.mod: %v", err)
-	}
-	want := "module github.com/leeovery/portal"
-	if !contains(string(data), want) {
-		t.Errorf("go.mod at %s does not declare %q; got:\n%s", root, want, data)
-	}
-}
 
 // TestSortedKeySet covers the ordering guarantee of SortedKeySet across
 // the cases the round-trip diagnostics actually exercise: empty, single
@@ -89,18 +61,4 @@ func TestSortedKeySet(t *testing.T) {
 			}
 		})
 	}
-}
-
-// contains is a stdlib-free substring check so the test does not pull in
-// strings just for one assertion.
-func contains(haystack, needle string) bool {
-	if len(needle) == 0 {
-		return true
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

@@ -1,7 +1,5 @@
 // Package restoretest provides shared test scaffolding for portal's
-// reboot round-trip integration tests AND a small set of general-purpose
-// test fixtures consumed by both default-tagged and integration-tagged
-// callers.
+// reboot round-trip integration tests.
 //
 // The package has a mixed build-tag layout:
 //
@@ -12,18 +10,14 @@
 //	    waitfor_file_exists.go.
 //	  - OpenTestLogger — *state.Logger opener that registers t.Cleanup,
 //	    defined in logger.go.
-//	  - ProjectRoot — repo-root resolver shared by the build helpers,
-//	    defined in build.go.
-//	  - BuildPortalBinary — pure error-returning `go build .` wrapper
-//	    for default-lane callers (e.g. the singleton-invariant test in
-//	    internal/tmux/), defined in build.go.
 //	  These run under default `go test ./...` and have no dependency on
 //	  tmux fixtures.
 //
 //	Integration-only (`//go:build integration`):
-//	  - BuildPortalBinaryDir / BuildPortalBinaryStable — `go build` the
-//	    portal CLI for the in-pane hydrate helper to resolve on PATH.
-//	    Thin wrappers over the untagged buildPortalBinaryInto helper.
+//	  - BuildPortalBinaryDir / BuildPortalBinaryStable — thin wrappers
+//	    over portalbintest.BuildPortalBinary that adapt the
+//	    error-returning helper to *testing.T-driven (Fatal) and
+//	    sync.Once-cached (stable os.MkdirTemp) lifetimes respectively.
 //	  - PrependPATH — t.Setenv-based PATH manipulation.
 //	  - DriveSignalHydrate / DriveSignalHydrateBinary — direct FIFO-byte
 //	    writer (DriveSignalHydrate) and its `portal state signal-hydrate`
@@ -37,12 +31,18 @@
 //	  only to share scaffolding across the integration-tagged consumer
 //	  files in cmd/bootstrap, internal/restore, and cmd.
 //
+// General-purpose `go build` plumbing (BuildPortalBinary,
+// StagePortalBinary, ProjectRoot) lives in the sibling
+// internal/portalbintest package — it has no semantic tie to restore
+// and is consumed by daemon and saver integration tests too.
+//
 // Convention: integration-only helpers live in `//go:build integration`-
 // tagged files; general-purpose seed primitives omit the tag. Adding a
 // new helper means choosing the file/tag that matches its dependency
-// surface — if it needs tmux or `go build`, it goes in a tagged file; if
-// it is a pure stdlib + testing helper, it goes in an untagged file.
+// surface — if it needs tmux, it goes in a tagged file; if it is a pure
+// stdlib + testing helper, it goes in an untagged file.
 //
-// The package depends only on internal/tmux + internal/state + stdlib +
-// testing — no import cycles with internal/restore or cmd/bootstrap.
+// The package depends only on internal/tmux + internal/state +
+// internal/portalbintest + stdlib + testing — no import cycles with
+// internal/restore or cmd/bootstrap.
 package restoretest
