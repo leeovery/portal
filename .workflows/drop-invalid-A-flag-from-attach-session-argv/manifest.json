@@ -44,12 +44,12 @@
     "implementation": {
       "items": {
         "drop-invalid-A-flag-from-attach-session-argv": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "gated",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
-          "analysis_cycle": 2,
+          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
