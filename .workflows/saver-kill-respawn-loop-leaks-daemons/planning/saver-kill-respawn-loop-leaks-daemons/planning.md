@@ -21,6 +21,18 @@ approved_at: 2026-05-19
 - [ ] The existing `portal_saver_integration_test.go` "kill-respawn under explicit version mismatch" test stays green — real version mismatch (both sides non-dev, non-empty, disagreeing) still triggers `killSaverAndWaitForDaemon`.
 - [ ] All tests from `multiple-state-daemons-running-concurrently` remain green; the `daemon.lock` flock primitive and `killSaverAndWaitForDaemon` polling loop are untouched.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-1-1 | Reframe `portalSaverVersionMismatch` table tests to cover all six matrix rows | stored=dev, current=dev, ErrVersionFileAbsent, non-absent I/O read error |
+| saver-kill-respawn-loop-leaks-daemons-1-2 | Add DEBUG breadcrumb to `state.WriteVersionFile` under `ComponentDaemon` | existing WriteVersionFile tests stay green, no new error paths, no I/O side effects beyond logging |
+| saver-kill-respawn-loop-leaks-daemons-1-3 | Gate kill decision on `BootstrapAliveCheck` in `EnsurePortalSaverVersion` before mismatch predicate | alive+dev short-circuit (either side dev), alive+absent → no-kill, alive+read-error → kill, not-alive → no-kill regardless of version state |
+| saver-kill-respawn-loop-leaks-daemons-1-4 | Defensive `WriteVersionFile(currentVersion)` on alive+absent branch before `BootstrapPortalSaver` | write failure surfaces as error, no race with daemon's own write on survived path, pathological older-binary alive case (defensive write asserts going-forward version) |
+| saver-kill-respawn-loop-leaks-daemons-1-5 | Revise function comment at `internal/tmux/portal_saver.go:232-241` to match new contract | none |
+| saver-kill-respawn-loop-leaks-daemons-1-6 | Integration test: alive daemon + absent `daemon.version` survives bootstrap (real-tmux fixture) | single live daemon PID matches `daemon.lock` holder, three WARN lines absent from `portal.log`, existing kill-respawn-under-explicit-mismatch integration test stays green |
+
 ### Phase 2: Context-aware `captureAndCommit` (daemon side of the kill-barrier contract)
 status: approved
 approved_at: 2026-05-19
