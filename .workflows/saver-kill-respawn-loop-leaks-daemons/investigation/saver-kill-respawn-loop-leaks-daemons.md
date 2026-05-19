@@ -288,7 +288,7 @@ Add a DEBUG-level log entry on `state.WriteVersionFile` capturing the caller and
 
 - **Defect 3, alternative: Investigate the deleter as a hard prerequisite.** Block this fix until we've reproduced the disappearance and identified the culprit. **Rejected** — code-trace exhaustively ruled out portal's own production paths; further investigation would require instrumented in-the-wild reproduction over days. Fix 1 makes the disappearance non-load-bearing for the user-visible symptom; Fix 3's breadcrumb gives us instrumentation if recurrence happens.
 
-- **Bundle hook-registration redundancy fix into this work unit.** Both bugs make portal startup slow. **Rejected** — orthogonal mechanism (`internal/tmux/hooks_register.go`), orthogonal symptom (no orphan leak, no save pause), already logged separately (`.workflows/.inbox/bugs/2026-05-19--redundant-show-hooks-during-bootstrap-hook-registration.md`). Bundling would risk muddying review scope.
+- **Bundle hook-registration redundancy fix into this work unit.** Both bugs make portal startup slow. **Rejected** — orthogonal mechanism (`internal/tmux/hooks_register.go`), orthogonal symptom (no orphan leak, no save pause), already logged separately (`.workflows/.inbox/bugs/2026-05-18--redundant-show-hooks-during-bootstrap-hook-registration.md`). Bundling would risk muddying review scope.
 
 ### Discussion
 
