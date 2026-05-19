@@ -66,14 +66,23 @@ type HookRegistrar struct {
 // migration logger seam is wired through. *state.Logger satisfies
 // tmux.MigrationLogger structurally.
 //
-// As a side-effect, the same *state.Logger is installed as the
-// tmux.BarrierLogger sink used by the kill-barrier helper's
-// WARN-on-timeout path. *state.Logger structurally satisfies
-// BarrierLogger via its Warn(component, format string, args ...any)
-// method. SetBarrierLogger is idempotent and tolerates a nil argument,
-// so calling it on every RegisterPortalHooks invocation is safe.
+// As a side-effect, the same *state.Logger is installed as two
+// internal/tmux package-level logger sinks:
+//
+//   - tmux.BarrierLogger — used by the kill-barrier helper's
+//     WARN-on-timeout path. *state.Logger structurally satisfies
+//     BarrierLogger via its Warn(component, format string, args ...any)
+//     method.
+//   - tmux.versionWriterLogger — used by the bootstrap-side defensive
+//     portalSaverWriteVersionFile call site so its "daemon.version write:"
+//     DEBUG breadcrumb lands in portal.log under ComponentDaemon, matching
+//     the daemon-startup call site (spec § Change 3, Acceptance #9).
+//
+// Both setters are idempotent and tolerate a nil argument, so calling
+// them on every RegisterPortalHooks invocation is safe.
 func (r *HookRegistrar) RegisterPortalHooks() error {
 	tmux.SetBarrierLogger(r.Logger)
+	tmux.SetVersionWriterLogger(r.Logger)
 	return tmux.RegisterPortalHooks(r.Client, r.Logger)
 }
 

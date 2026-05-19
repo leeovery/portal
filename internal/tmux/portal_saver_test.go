@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -2304,6 +2305,92 @@ func TestEnsurePortalSaverVersion_Alive_CurrentDev_DoesNotInvokeDefensiveWrite(t
 	}
 	if barrierCalls != 1 {
 		t.Errorf("expected exactly 1 barrier invocation on alive+current-dev, got %d", barrierCalls)
+	}
+}
+
+// TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb pins
+// spec § Change 3 / Acceptance Criterion #9: every state.WriteVersionFile
+// call emits one DEBUG breadcrumb prefixed "daemon.version write:" containing
+// version, caller pid, and destination path — including the bootstrap-side
+// defensive call. Guards against the wrapper reverting to passing nil.
+func TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "debug")
+
+	lg, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = lg.Close() })
+
+	// Save and restore the prior package-level logger sink via the test seam
+	// so this test cannot leak its capturing logger into siblings.
+	loggerSeam := tmux.VersionWriterLoggerSeam()
+	prev := *loggerSeam
+	t.Cleanup(func() { *loggerSeam = prev })
+
+	tmux.SetVersionWriterLogger(lg)
+
+	// Invoke the production bootstrap wrapper through the seam. In a fresh
+	// test process this is the original `portalSaverWriteVersionFile`
+	// function; no other test in this file mutates the seam at package-init
+	// time.
+	wrapper := *tmux.PortalSaverWriteVersionFileSeam()
+	if err := wrapper(dir, "v9.9.9"); err != nil {
+		t.Fatalf("portalSaverWriteVersionFile: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	log := string(data)
+
+	if count := strings.Count(log, "daemon.version write:"); count != 1 {
+		t.Fatalf("expected exactly 1 'daemon.version write:' breadcrumb, got %d. log:\n%s", count, log)
+	}
+	if !strings.Contains(log, "| DEBUG |") {
+		t.Errorf("breadcrumb not DEBUG level:\n%s", log)
+	}
+	if !strings.Contains(log, "| "+state.ComponentDaemon+" |") {
+		t.Errorf("breadcrumb component != %q:\n%s", state.ComponentDaemon, log)
+	}
+	if !strings.Contains(log, "version=v9.9.9") {
+		t.Errorf("breadcrumb missing version token:\n%s", log)
+	}
+	wantPID := "pid=" + strconv.Itoa(os.Getpid())
+	if !strings.Contains(log, wantPID) {
+		t.Errorf("breadcrumb missing %q:\n%s", wantPID, log)
+	}
+	wantPath := "path=" + filepath.Join(dir, "daemon.version")
+	if !strings.Contains(log, wantPath) {
+		t.Errorf("breadcrumb missing %q:\n%s", wantPath, log)
+	}
+}
+
+// TestSetVersionWriterLogger_IgnoresNilLogger pins that calling
+// SetVersionWriterLogger(nil) leaves the previously-installed logger in
+// place, matching the SetBarrierLogger nil-tolerance contract.
+func TestSetVersionWriterLogger_IgnoresNilLogger(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "portal.log")
+	t.Setenv("PORTAL_LOG_LEVEL", "debug")
+	lg, err := state.OpenLogger(logPath, false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = lg.Close() })
+
+	loggerSeam := tmux.VersionWriterLoggerSeam()
+	prev := *loggerSeam
+	t.Cleanup(func() { *loggerSeam = prev })
+
+	tmux.SetVersionWriterLogger(lg)
+	tmux.SetVersionWriterLogger(nil) // must be a no-op
+
+	if *loggerSeam != lg {
+		t.Errorf("SetVersionWriterLogger(nil) overwrote the previously installed logger")
 	}
 }
 

@@ -49,13 +49,45 @@ var portalSaverReadVersionFile = state.ReadVersionFile
 // falling through to BootstrapPortalSaver. It is a package-level seam so tests
 // can record invocations and inject errors without touching the filesystem.
 //
-// The seam binds the logger choice on the production side by passing nil to
-// state.WriteVersionFile — Logger's nil-receiver contract treats this as a
-// no-op, so the bootstrap breadcrumb from Task 1-2 does not land for this
-// defensive call site. Wiring a real logger here can be a follow-up if a
-// breadcrumb at the call site is wanted.
+// The wrapper forwards the package-level versionWriterLogger (installed via
+// SetVersionWriterLogger from internal/bootstrapadapter) to
+// state.WriteVersionFile so the bootstrap-side defensive write emits the
+// same "daemon.version write:" DEBUG breadcrumb as the daemon-startup call
+// site. A nil sink remains safe: *state.Logger's nil-receiver semantics
+// degrade Debug to a no-op without panicking.
 var portalSaverWriteVersionFile = func(dir, version string) error {
-	return state.WriteVersionFile(dir, version, nil)
+	return state.WriteVersionFile(dir, version, versionWriterLogger)
+}
+
+// versionWriterLogger is the package-level sink for the
+// "daemon.version write:" DEBUG breadcrumb emitted by state.WriteVersionFile
+// when invoked through portalSaverWriteVersionFile (the bootstrap-side
+// defensive write). Production wiring installs the real *state.Logger via
+// SetVersionWriterLogger from internal/bootstrapadapter at the same site
+// that calls SetBarrierLogger. The default zero value is a nil *state.Logger,
+// which Logger.Debug treats as a no-op — so the wrapper is safe to call
+// before production wiring runs (e.g. in tests that exercise the seam
+// without installing a logger).
+var versionWriterLogger *state.Logger
+
+// SetVersionWriterLogger installs a *state.Logger as the sink for the
+// "daemon.version write:" DEBUG breadcrumb emitted by the bootstrap-side
+// defensive portalSaverWriteVersionFile call. A nil argument is ignored so
+// the package never loses its sink to a programming error in the wiring
+// layer; the default (nil) is itself safe via Logger's nil-receiver
+// contract, so callers may also simply skip the call.
+//
+// Production wiring calls this once from internal/bootstrapadapter
+// alongside SetBarrierLogger, threading the same *state.Logger that the
+// rest of bootstrap uses. The result is a single grep anchor in portal.log
+// — "daemon.version write:" — that surfaces both the daemon-startup call
+// site and the bootstrap-survived-path defensive repair (spec § Change 3,
+// Acceptance Criterion #9).
+func SetVersionWriterLogger(l *state.Logger) {
+	if l == nil {
+		return
+	}
+	versionWriterLogger = l
 }
 
 // PortalSaverRetryDelay is the sleep between new-session retry attempts. It is

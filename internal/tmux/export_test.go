@@ -1,6 +1,10 @@
 package tmux
 
-import "time"
+import (
+	"time"
+
+	"github.com/leeovery/portal/internal/state"
+)
 
 // Test-only re-exports of unexported identifiers so the external tmux_test
 // package can exercise the kill-barrier helper and swap its seams. Production
@@ -56,3 +60,8 @@ func PortalSaverReadVersionFileSeam() *func(string) (string, error) {
 func PortalSaverWriteVersionFileSeam() *func(string, string) error {
 	return &portalSaverWriteVersionFile
 }
+
+// VersionWriterLoggerSeam returns a pointer to the versionWriterLogger
+// package-level sink so tests can install a capturing *state.Logger via
+// SetVersionWriterLogger and restore the prior value via t.Cleanup.
+func VersionWriterLoggerSeam() **state.Logger { return &versionWriterLogger }
