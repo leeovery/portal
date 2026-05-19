@@ -130,10 +130,17 @@ func tick(ctx context.Context, deps *daemonDeps) {
 // "phase boundary" steps (list markers, capture structure, commit) propagate
 // to the caller so tick can log and back off.
 func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
-	// ctx is threaded as the first parameter for future per-iteration
-	// ctx.Done() observation points (see spec § Change 2). This plumbing-only
-	// step intentionally does not yet act on cancellation.
-	_ = ctx
+	// observation point 1 of 3: pre-enumeration; ensures a cancellation that
+	// arrives between ticker fire and tick entry returns immediately without
+	// any tmux work or commit. See spec § Change 2.
+	//
+	// Return nil (not an error) — tick logs WARN on non-nil return, and a
+	// cancellation must not produce a log line.
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 	skipSet, err := state.ListSkeletonMarkers(deps.Client)
 	if err != nil {
 		return fmt.Errorf("list markers: %w", err)

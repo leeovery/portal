@@ -921,3 +921,73 @@ func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.
 		}
 	}
 }
+
+// TestCaptureAndCommit_PreCancelledCtxReturnsImmediately covers observation
+// point 1 of 3 (spec § Change 2 / Phase 2 Task 2-2): the ctx.Done() check at
+// captureAndCommit's entry, before any tmux enumeration work. A context that
+// is already cancelled when captureAndCommit is invoked must:
+//
+//  1. Return nil (not an error — tick logs WARN on non-nil; cancellation must
+//     not log).
+//  2. Not invoke ListSkeletonMarkers (show-options), CaptureStructure
+//     (list-sessions / list-panes), or any capture-pane call.
+//  3. Leave deps.PrevIndex unchanged (no pointer replacement).
+//  4. Produce no commit — sessions.json must not be written.
+func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Seed a multi-pane fixture so that, if the cancellation check were
+	// missing, the function would do observable work (enumerate sessions,
+	// capture panes, commit) — the assertions below would catch the leak.
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+		captureByTarget: map[string]string{
+			"work:0.0": "work-pane-0-bytes",
+		},
+	}
+
+	// Seed PrevIndex with a sentinel — assertion target for "unchanged".
+	sentinelPrev := &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    "sentinel-must-be-preserved",
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = sentinelPrev
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := captureAndCommit(ctx, deps); err != nil {
+		t.Errorf("captureAndCommit returned error on pre-cancelled ctx: %v; want nil", err)
+	}
+
+	// No tmux work: ListSkeletonMarkers (show-options), CaptureStructure
+	// (list-sessions / list-panes), capture-pane.
+	if got := fc.callsContaining("show-options"); len(got) != 0 {
+		t.Errorf("show-options invoked on pre-cancelled ctx (ListSkeletonMarkers leaked): %v", got)
+	}
+	if got := fc.callsContaining("list-sessions"); len(got) != 0 {
+		t.Errorf("list-sessions invoked on pre-cancelled ctx (CaptureStructure leaked): %v", got)
+	}
+	if got := fc.callsContaining("list-panes"); len(got) != 0 {
+		t.Errorf("list-panes invoked on pre-cancelled ctx (CaptureStructure leaked): %v", got)
+	}
+	if got := fc.callsContaining("capture-pane"); len(got) != 0 {
+		t.Errorf("capture-pane invoked on pre-cancelled ctx: %v", got)
+	}
+
+	// PrevIndex pointer unchanged — no commit-side mutation.
+	if deps.PrevIndex != sentinelPrev {
+		t.Errorf("PrevIndex pointer replaced on pre-cancelled ctx; want sentinel preserved")
+	}
+
+	// No commit — sessions.json must not exist.
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json written on pre-cancelled ctx; stat err = %v", err)
+	}
+}

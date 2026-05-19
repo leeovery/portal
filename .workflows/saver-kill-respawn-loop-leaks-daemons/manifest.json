@@ -94,7 +94,8 @@
             "saver-kill-respawn-loop-leaks-daemons-1-4",
             "saver-kill-respawn-loop-leaks-daemons-1-5",
             "saver-kill-respawn-loop-leaks-daemons-1-6",
-            "saver-kill-respawn-loop-leaks-daemons-2-1"
+            "saver-kill-respawn-loop-leaks-daemons-2-1",
+            "saver-kill-respawn-loop-leaks-daemons-2-2"
           ],
           "completed_phases": [
             1
