@@ -66,7 +66,9 @@
             "saver-kill-respawn-loop-leaks-daemons-4-2": "tick-7bc0d8",
             "saver-kill-respawn-loop-leaks-daemons-4-3": "tick-8dedac",
             "saver-kill-respawn-loop-leaks-daemons-5": "tick-8e9f11",
-            "saver-kill-respawn-loop-leaks-daemons-5-1": "tick-df1f6c"
+            "saver-kill-respawn-loop-leaks-daemons-5-1": "tick-df1f6c",
+            "saver-kill-respawn-loop-leaks-daemons-6": "tick-d678f7",
+            "saver-kill-respawn-loop-leaks-daemons-6-1": "tick-8aeca5"
           },
           "external_id": "tick-2ab8a7"
         }
@@ -98,8 +100,8 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 5,
-          "current_task": "~",
+          "current_phase": 6,
+          "current_task": "tick-8aeca5",
           "completed_tasks": [
             "saver-kill-respawn-loop-leaks-daemons-1-1",
             "saver-kill-respawn-loop-leaks-daemons-1-2",

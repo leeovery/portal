@@ -102,3 +102,13 @@ approved_at: 2026-05-19
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | saver-kill-respawn-loop-leaks-daemons-5-1 | Extract version-scenario and barrier-count test helpers in `portal_saver_test.go` | helper-definition site colocated near existing `versionScenario` type definition; 24 triplet call sites preserve their `sessionPresent` boolean per site; 12 barrier-count sites switch downstream assertions to pointer deref |
+
+### Phase 6: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-6-1 | Migrate five inline `daemonRunFunc` holders to the existing `withImmediateRun` helper | five listed call sites only; `go test ./cmd/...` passes with same case count; no behaviour change |
