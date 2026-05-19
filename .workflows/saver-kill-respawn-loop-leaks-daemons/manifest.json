@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "saver-kill-respawn-loop-leaks-daemons": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "0076970daee1d47cfe3810bac70bbf9a68145138",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
