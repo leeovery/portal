@@ -40,3 +40,10 @@ func BarrierLoggerSeam() *BarrierLogger { return &killBarrierLogger }
 func KillSaverAndWaitForDaemonFnSeam() *func(*Client, string) error {
 	return &killSaverAndWaitForDaemonFn
 }
+
+// PortalSaverReadVersionFileSeam returns a pointer to the
+// portalSaverReadVersionFile seam so tests can simulate version-file read
+// behaviour (including non-absent I/O errors) without touching the filesystem.
+func PortalSaverReadVersionFileSeam() *func(string) (string, error) {
+	return &portalSaverReadVersionFile
+}

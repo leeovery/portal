@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -35,6 +36,13 @@ const portalSaverCommand = "portal state daemon"
 // for a given state directory. It is a package-level seam so tests can stub
 // the check without writing real PID files. Defaults to state.DaemonAlive.
 var BootstrapAliveCheck = state.DaemonAlive
+
+// portalSaverReadVersionFile is the function used by EnsurePortalSaverVersion
+// to read the stored daemon.version from a state directory. It is a
+// package-level seam so tests can simulate read errors (including non-absent
+// I/O failures) without touching the filesystem. Defaults to
+// state.ReadVersionFile.
+var portalSaverReadVersionFile = state.ReadVersionFile
 
 // PortalSaverRetryDelay is the sleep between new-session retry attempts. It is
 // exported as a var so tests can shrink it. Defaults to 100ms.
@@ -226,36 +234,96 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 }
 
 // EnsurePortalSaverVersion bootstraps _portal-saver while honoring the
-// version-marker upgrade protocol. Before delegating to BootstrapPortalSaver,
-// it compares the daemon's recorded version (daemon.version inside stateDir)
-// to currentVersion (the invoking binary's cmd.version). On any mismatch — and
-// always for dev builds (currentVersion == "" or "dev") — it kills the live
-// _portal-saver session so the new binary can take over on the subsequent
-// recreation. Mismatch sources, all treated equally:
+// version-marker upgrade protocol. The kill decision is gated on daemon
+// aliveness FIRST, then the version-mismatch matrix is consulted only when a
+// live daemon is present. The full decision matrix:
 //
-//   - Read error from state.ReadVersionFile (including ErrVersionFileAbsent —
-//     first-ever bootstrap or user-initiated state-dir cleanup).
-//   - currentVersion is "" or "dev" (dev-build workflow).
-//   - stored version is "" or "dev" (previous run was a dev build, or the
-//     daemon crashed before writing).
-//   - stored != currentVersion (release-build upgrade).
+//	| alive | version file state             | versions match | action  |
+//	|-------|--------------------------------|----------------|---------|
+//	| no    | (any)                          | (any)          | no kill |
+//	| yes   | (any)                          | either is dev  | kill    |
+//	| yes   | absent (ErrVersionFileAbsent)  | (n/a)          | no kill |
+//	| yes   | read error (non-absent I/O)    | (n/a)          | kill    |
+//	| yes   | reads cleanly, neither dev     | match          | no kill |
+//	| yes   | reads cleanly, neither dev     | mismatch       | kill    |
 //
-// kill-session is invoked tolerantly: errors are intentionally swallowed
-// because the session may have auto-destroyed between has-session and
-// kill-session. This function never writes daemon.version itself — the new
-// daemon owns that on its own startup. After the optional kill,
-// BootstrapPortalSaver always runs to (re)create the session and apply the
-// defensive destroy-unattached=off option.
+// Rationale: a healthy daemon should not be recycled simply because
+// daemon.version is missing — the absent file can be repaired defensively
+// from the bootstrap side (Task 1-4) without paying the kill-respawn cost.
+// The "absent" row used to be folded into the mismatch predicate, which made
+// every bootstrap with a missing version file fire an unnecessary kill.
+//
+// portalSaverVersionMismatch retains its current external shape and is still
+// covered by its own predicate-matrix test (it is also referenced by other
+// code paths); this caller no longer drives the kill decision from it
+// directly. The dev short-circuit and "read-error-is-mismatch" behaviours of
+// the predicate are reproduced inline here, byte-equivalent in semantics, so
+// the matrix above is the single source of truth for the kill decision.
+//
+// kill-session is invoked tolerantly via killSaverAndWaitForDaemonFn: the
+// barrier helper handles its own kill-session tolerance and the wait for the
+// prior daemon's exit. This function never writes daemon.version itself — the
+// new daemon owns that on its own startup; Task 1-4 will layer a defensive
+// write onto the alive+absent branch from this caller. After the optional
+// kill, BootstrapPortalSaver always runs to (re)create the session and apply
+// the defensive destroy-unattached=off option.
 func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error {
-	stored, readErr := state.ReadVersionFile(stateDir)
-	if portalSaverVersionMismatch(stored, currentVersion, readErr) && c.HasSession(PortalSaverName) {
-		// Tolerant: the synchronous kill barrier handles the kill itself and
-		// waits for the prior daemon's exit before we fall through to
-		// BootstrapPortalSaver. Errors are swallowed because the session may
-		// have auto-destroyed between has-session and kill-session.
+	stored, readErr := portalSaverReadVersionFile(stateDir)
+	alive := BootstrapAliveCheck(stateDir)
+
+	if alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr) {
+		// Task 1-4 integration point: on the alive+absent branch
+		// (handled inside shouldKillSaverOnVersionDecision as "no kill"),
+		// the defensive WriteVersionFile(stateDir, currentVersion, logger)
+		// call will be layered into the alive && !shouldKill path so the
+		// missing daemon.version is repaired before BootstrapPortalSaver
+		// runs. Leaving that here as an explicit hook for the next task.
 		_ = killSaverAndWaitForDaemonFn(c, stateDir)
 	}
 	return BootstrapPortalSaver(c, stateDir)
+}
+
+// shouldKillSaverOnVersionDecision encodes the kill-decision matrix for
+// EnsurePortalSaverVersion on the alive-daemon branch only. Callers must have
+// already established that the daemon is alive — this helper does not
+// consult BootstrapAliveCheck. It returns true on every "kill" row of the
+// matrix and false on every "no kill" row.
+//
+// Evaluation order, matching the spec matrix:
+//
+//  1. Dev-build short-circuit: either side of the version pair is "" or
+//     "dev" (with the stored-side check gated on readErr == nil so we do
+//     not interpret an unreadable file as "stored is empty"). Byte-
+//     equivalent to portalSaverVersionMismatch's dev rules.
+//  2. Absent version file (errors.Is(readErr, ErrVersionFileAbsent)): no
+//     kill — Task 1-4 layers a defensive write here from the caller.
+//  3. Non-absent read error: kill (conservative).
+//  4. Clean read, versions match: no kill.
+//  5. Clean read, versions differ: kill.
+func shouldKillSaverOnVersionDecision(stored, currentVersion string, readErr error) bool {
+	// Dev-build short-circuit. currentVersion always counts regardless of
+	// readErr; stored-side only counts when the file read succeeded (a read
+	// error already means "stored is unknown", not "stored is empty").
+	if currentVersion == "" || currentVersion == "dev" {
+		return true
+	}
+	if readErr == nil && (stored == "" || stored == "dev") {
+		return true
+	}
+
+	if errors.Is(readErr, state.ErrVersionFileAbsent) {
+		// Alive daemon + missing version file: no kill. The defensive
+		// write (Task 1-4) repairs the file from the bootstrap side.
+		return false
+	}
+	if readErr != nil {
+		// Non-absent I/O error — conservative: treat unknown state as
+		// "needs recycle". The alive-check above guards against killing a
+		// daemon when no daemon is present.
+		return true
+	}
+
+	return stored != currentVersion
 }
 
 // portalSaverVersionMismatch encodes the version-comparison rules for

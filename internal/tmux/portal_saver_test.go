@@ -789,27 +789,13 @@ func TestEnsurePortalSaverVersion_TreatsEmptyStoredVersionAsMismatch(t *testing.
 	}
 }
 
-func TestEnsurePortalSaverVersion_TreatsAbsentVersionFileAsMismatch(t *testing.T) {
-	stubAliveCheck(t, true)
-	shrinkRetryDelay(t)
-
-	dir := t.TempDir() // no daemon.version pre-populated
-
-	scenario := &versionScenario{sessionPresent: true}
-	mock := &MockCommander{RunFunc: scenario.run(t)}
-	client := tmux.NewClient(mock)
-
-	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
-		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
-	}
-
-	if scenario.killSessionCalls != 1 {
-		t.Errorf("expected exactly 1 kill-session call when version file is absent, got %d", scenario.killSessionCalls)
-	}
-	if scenario.newSessionCalls != 1 {
-		t.Errorf("expected exactly 1 new-session call after kill, got %d", scenario.newSessionCalls)
-	}
-}
+// NOTE: TestEnsurePortalSaverVersion_TreatsAbsentVersionFileAsMismatch was
+// removed by Task 1-3. The old caller-layer contract treated an absent
+// daemon.version as a mismatch and killed the saver session; the new
+// contract gates the kill decision on BootstrapAliveCheck first, and the
+// "alive+absent" row of the matrix is now a NO-KILL row. The current
+// behaviour is pinned by TestEnsurePortalSaverVersion_Alive_AbsentVersionNeitherDev_DoesNotKill
+// further down in this file.
 
 func TestEnsurePortalSaverVersion_SkipsKillWhenNoSessionExists(t *testing.T) {
 	stubAliveCheck(t, false) // irrelevant when session absent
@@ -1624,6 +1610,316 @@ func TestSetBarrierLogger_IgnoresNilLogger(t *testing.T) {
 
 	if *loggerSeam != tmux.BarrierLogger(recorder) {
 		t.Errorf("SetBarrierLogger(nil) overwrote the previously installed logger")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Task 1-3: alive-check-first ordering inside EnsurePortalSaverVersion.
+//
+// The kill decision must consult BootstrapAliveCheck(stateDir) before the
+// version-mismatch predicate. These tests pin the six-row decision matrix
+// end-to-end (caller-layer, not the predicate in isolation).
+// ----------------------------------------------------------------------------
+
+// installReadVersionFile swaps the portalSaverReadVersionFile seam for the
+// duration of the test and restores it via t.Cleanup. Used to drive the
+// non-absent I/O-error and call-ordering branches without filesystem fixtures.
+func installReadVersionFile(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	seam := tmux.PortalSaverReadVersionFileSeam()
+	prev := *seam
+	*seam = fn
+	t.Cleanup(func() { *seam = prev })
+}
+
+func TestEnsurePortalSaverVersion_NotAlive_AbsentVersion_DoesNotKill(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version pre-populated
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	// Session present so HasSession would historically permit the kill — the
+	// alive-check gate is what suppresses it under the new contract.
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	// EnsurePortalSaverVersion itself must not drive a kill when the daemon
+	// is not alive. BootstrapPortalSaver may still invoke the barrier on its
+	// own stale-daemon branch (session present + alive-check false) — that is
+	// BootstrapPortalSaver's contract, not this caller's. We pin the caller's
+	// contract by asserting at most one barrier call from the union of both.
+	if barrierCalls > 1 {
+		t.Errorf("expected at most 1 barrier invocation when daemon not alive (only BootstrapPortalSaver's stale-daemon branch), got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_NotAlive_VersionMismatch_DoesNotKill(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1") // mismatches current; neither dev
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	// Session present so HasSession would historically permit the kill — the
+	// alive-check gate is what suppresses it under the new contract.
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	// EnsurePortalSaverVersion itself must not drive a kill when the daemon
+	// is not alive, regardless of version mismatch. BootstrapPortalSaver may
+	// still invoke the barrier on its own stale-daemon branch. We pin the
+	// caller's contract by asserting at most one barrier call across both.
+	if barrierCalls > 1 {
+		t.Errorf("expected at most 1 barrier invocation when daemon not alive (BootstrapPortalSaver's branch only), got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_StoredDev_Kills(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "dev")
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on stored=dev, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_CurrentDev_Kills(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "dev"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on current=dev, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_AbsentVersionNeitherDev_DoesNotKill(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir() // no daemon.version → ErrVersionFileAbsent
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations on alive+absent (neither dev), got %d", barrierCalls)
+	}
+	if scenario.killSessionCalls != 0 {
+		t.Errorf("expected 0 kill-session calls on alive+absent (neither dev), got %d", scenario.killSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call (BootstrapPortalSaver still runs), got %d", scenario.setOptionCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_NonAbsentReadError_Kills(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	installReadVersionFile(t, func(string) (string, error) {
+		return "", fs.ErrPermission
+	})
+
+	dir := t.TempDir()
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+non-absent-read-error, got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_VersionsMatch_DoesNotKill(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.2")
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations on alive+match (neither dev), got %d", barrierCalls)
+	}
+}
+
+func TestEnsurePortalSaverVersion_Alive_VersionsMismatch_Kills(t *testing.T) {
+	stubAliveCheck(t, true)
+	shrinkRetryDelay(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1")
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	scenario := &versionScenario{sessionPresent: true}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive+mismatch (neither dev), got %d", barrierCalls)
+	}
+}
+
+// TestEnsurePortalSaverVersion_ConsultsAliveCheckBeforeVersionMismatchDecision
+// asserts the new ordering invariant: BootstrapAliveCheck is invoked before
+// any version-mismatch verdict drives a kill. The test runs the same
+// version-mismatch fixture twice — once with alive=false (kill suppressed)
+// and once with alive=true (kill fires) — proving the alive-check gates the
+// predicate's verdict in the caller.
+func TestEnsurePortalSaverVersion_ConsultsAliveCheckBeforeVersionMismatchDecision(t *testing.T) {
+	shrinkRetryDelay(t)
+
+	var aliveCalls int
+	prevAlive := tmux.BootstrapAliveCheck
+	tmux.BootstrapAliveCheck = func(string) bool {
+		aliveCalls++
+		return false // not alive
+	}
+	t.Cleanup(func() { tmux.BootstrapAliveCheck = prevAlive })
+
+	installReadVersionFile(t, func(string) (string, error) {
+		// Drive a "mismatch" verdict at the predicate layer to prove the
+		// alive-check gate is what suppresses the kill.
+		return "v0.4.1", nil
+	})
+
+	barrierCalls := 0
+	installKillSaverFn(t, func(*tmux.Client, string) error {
+		barrierCalls++
+		return nil
+	})
+
+	dir := t.TempDir()
+	// sessionPresent=false so BootstrapPortalSaver's own stale-daemon branch
+	// does not also invoke the barrier — isolates the assertion to
+	// EnsurePortalSaverVersion's call site only.
+	scenario := &versionScenario{sessionPresent: false}
+	mock := &MockCommander{RunFunc: scenario.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if barrierCalls != 0 {
+		t.Errorf("expected 0 barrier invocations when alive-check returns false (regardless of version mismatch), got %d", barrierCalls)
+	}
+	if aliveCalls == 0 {
+		t.Errorf("BootstrapAliveCheck was never consulted")
+	}
+
+	// Now flip alive=true on the same fixture and confirm the same
+	// mismatching version drives exactly one kill — proving the predicate
+	// verdict is gated by the alive-check.
+	tmux.BootstrapAliveCheck = func(string) bool { return true }
+	scenario2 := &versionScenario{sessionPresent: true}
+	mock2 := &MockCommander{RunFunc: scenario2.run(t)}
+	client2 := tmux.NewClient(mock2)
+	if err := tmux.EnsurePortalSaverVersion(client2, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion (alive=true) returned error: %v", err)
+	}
+	if barrierCalls != 1 {
+		t.Errorf("expected exactly 1 barrier invocation on alive=true + mismatch, got %d", barrierCalls)
 	}
 }
 
