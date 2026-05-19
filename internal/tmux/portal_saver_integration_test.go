@@ -376,6 +376,207 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 	assertNoForbiddenLogSubstrings(t, dir)
 }
 
+// TestBootstrapPortalSaver_LockContention_CascadeChainReachable is the
+// real-tmux fault-injection regression guard for spec § Testing
+// Requirements → Integration tests #3 ("Lock-loser daemon's pane exit
+// destroys _portal-saver session") and § Coordination with prior
+// bugfix.
+//
+// Why fault injection: Phase 1 of this bugfix (Defect 1 — alive-check-
+// first in EnsurePortalSaverVersion) eliminates the natural trigger
+// for the lock-contention cascade (back-to-back bootstraps no longer
+// kill-respawn unnecessarily, so the lock-loser path is no longer
+// reachable through the production kill-respawn loop). This test
+// keeps the cascade observable by forcing the contention via a
+// sentinel goroutine that holds daemon.lock for the test duration.
+// Post-fix, the test is a permanent regression guard on the cascade
+// chain (lock-loser exits → pane exits → tmux destroys
+// _portal-saver → SetSessionOption returns "no such session"), not
+// on the conditions that trigger it.
+//
+// Flow:
+//
+//  1. Skip if tmux is not on PATH or a portal binary cannot be built.
+//  2. Sentinel goroutine acquires daemon.lock via state.AcquireDaemonLock
+//     and signals readiness on a closed-on-ready channel. The lock fd
+//     is released via t.Cleanup BEFORE any code path that could
+//     t.Fatal — otherwise lock leaks across tests in the same
+//     binary.
+//  3. Stand up an isolated tmux server via tmuxtest.New.
+//  4. Invoke BootstrapPortalSaver(client, stateDir). The session is
+//     created and tmux exec's `portal state daemon` as the pane
+//     process. The daemon binary calls AcquireDaemonLock, fails with
+//     ErrDaemonLockHeld (sentinel holds it), logs a single WARN line,
+//     and exits 0 (the lock-loser path).
+//  5. Poll state.DaemonAlive(stateDir) until it returns false within a
+//     1s ceiling at 50ms tick. Lock-loser daemons exit before writing
+//     daemon.pid, so DaemonAlive is typically false from the first
+//     poll — that observation also satisfies the assertion.
+//  6. Poll tmux has-session for _portal-saver until it returns
+//     failure within a 2s ceiling at 100ms tick. The pane process
+//     (the lock-loser daemon) exits → tmux destroys the window →
+//     last-window-closed destroys the session.
+//  7. Assert SetSessionOption(_portal-saver, destroy-unattached, off)
+//     returns an error whose string contains BOTH "exit status 1"
+//     AND "no such session". Both substrings are required so an
+//     unrelated exit-1 (e.g. permission denied on a different
+//     surface) does not produce a false-positive pass.
+func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	binDir := t.TempDir()
+	if err := restoretest.BuildPortalBinary(binDir); err != nil {
+		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := exec.LookPath("portal"); err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+
+	dir := t.TempDir()
+	// PORTAL_STATE_DIR propagates to the tmux server (forked from this
+	// process) and onward to the daemon binary so AcquireDaemonLock
+	// contends against the SAME daemon.lock path the sentinel holds.
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Sentinel: acquire daemon.lock BEFORE BootstrapPortalSaver so the
+	// spawned daemon process is guaranteed to lose the lock race. The
+	// closed-on-ready chan is the synchronisation primitive — no
+	// time.Sleep, no time-based wait. t.Cleanup releases the lock fd;
+	// register the cleanup BEFORE any code path that could t.Fatal so
+	// the lock is never leaked across tests in the same binary.
+	ready := make(chan struct{})
+	var sentinelErr error
+	var sentinelFile *os.File
+	go func() {
+		f, err := state.AcquireDaemonLock(dir)
+		if err != nil {
+			sentinelErr = err
+			close(ready)
+			return
+		}
+		sentinelFile = f
+		close(ready)
+	}()
+	<-ready
+	if sentinelErr != nil {
+		t.Fatalf("sentinel AcquireDaemonLock: %v", sentinelErr)
+	}
+	if sentinelFile == nil {
+		t.Fatal("sentinel returned nil *os.File without error")
+	}
+	t.Cleanup(func() {
+		// Closing the fd releases the kernel-side flock, making the
+		// daemon.lock acquirable by subsequent tests in the same
+		// binary.
+		_ = sentinelFile.Close()
+	})
+
+	sock := tmuxtest.New(t, "ptl-cascade-")
+	client := sock.Client()
+
+	// Start a long-lived holder session FIRST so the tmux server
+	// survives _portal-saver's destruction. Without a second session,
+	// tmux shuts the server down when the only session dies, and
+	// subsequent SetSessionOption calls hit "no server running" rather
+	// than the "no such session" failure the cascade chain is supposed
+	// to surface. The holder runs `sleep infinity` so its pane never
+	// exits during the test; tmuxtest.New's kill-server cleanup tears
+	// it down at test end.
+	if err := client.NewDetachedSessionNoCwd("_cascade-holder", "sleep 60"); err != nil {
+		t.Fatalf("create holder session: %v", err)
+	}
+
+	// ACTION: BootstrapPortalSaver creates _portal-saver with
+	// `portal state daemon` as the pane command. The daemon attempts
+	// AcquireDaemonLock, fails with ErrDaemonLockHeld (sentinel holds
+	// it), logs a single WARN and exits 0. BootstrapPortalSaver itself
+	// returns nil — its contract is "session created and
+	// destroy-unattached set", which both succeed before the pane
+	// process completes its lock contention. There is, however, a
+	// race where the lock-loser daemon exits AND tmux destroys the
+	// session BEFORE SetSessionOption inside BootstrapPortalSaver
+	// runs — in which case BootstrapPortalSaver itself returns the
+	// cascade-chain error. Both outcomes are acceptable for this
+	// regression guard (the cascade chain is observable either way).
+	_ = tmux.BootstrapPortalSaver(client, dir)
+
+	// Assertion 1: daemon's process is not alive within 1s. Lock-loser
+	// daemons typically exit before writing daemon.pid; DaemonAlive
+	// returns false from the first poll in that case. The poll
+	// tolerates both shapes (file absent → false; file present
+	// pointing at dead PID → false).
+	if !waitForDaemonNotAlive(t, dir, 1*time.Second, 50*time.Millisecond) {
+		t.Fatalf("state.DaemonAlive(%s) did not return false within 1s "+
+			"(lock-loser daemon should exit before writing daemon.pid or "+
+			"exit shortly after writing it)", dir)
+	}
+
+	// Assertion 2: tmux has-session for _portal-saver returns failure
+	// within 2s at 100ms tick. The pane process exiting → tmux
+	// destroys the window → last-window-closed destroys the session.
+	if !waitForSessionAbsent(t, client, tmux.PortalSaverName, 2*time.Second, 100*time.Millisecond) {
+		t.Fatalf("_portal-saver session did not disappear within 2s " +
+			"(pane process should have exited, destroying the session)")
+	}
+
+	// Assertion 3: SetSessionOption(_portal-saver, destroy-unattached,
+	// off) returns an error containing BOTH "exit status 1" AND
+	// "no such session". Asserting both substrings independently
+	// rules out a false positive from any other exit-1 error
+	// (permission denied, malformed args, etc.).
+	err := client.SetSessionOption(tmux.PortalSaverName, "destroy-unattached", "off")
+	if err == nil {
+		t.Fatalf("SetSessionOption returned nil; expected error after session destruction")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "exit status 1") {
+		t.Fatalf("SetSessionOption error %q does not contain %q", msg, "exit status 1")
+	}
+	if !strings.Contains(msg, "no such session") {
+		t.Fatalf("SetSessionOption error %q does not contain %q", msg, "no such session")
+	}
+}
+
+// waitForDaemonNotAlive polls state.DaemonAlive(dir) until it returns
+// false or the timeout elapses. Returns true if DaemonAlive became
+// false within the deadline, false on timeout. Used by the lock-
+// contention cascade test where the lock-loser daemon either never
+// writes daemon.pid (DaemonAlive false from the start) or writes it
+// and exits shortly after.
+func waitForDaemonNotAlive(t *testing.T, dir string, timeout, tick time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if !state.DaemonAlive(dir) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(tick)
+	}
+}
+
+// waitForSessionAbsent polls client.HasSession(name) until it returns
+// false or the timeout elapses. Returns true if the session
+// disappeared within the deadline. Used by the lock-contention
+// cascade test to observe tmux destroying _portal-saver after the
+// pane process exits.
+func waitForSessionAbsent(t *testing.T, client *tmux.Client, name string, timeout, tick time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if !client.HasSession(name) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(tick)
+	}
+}
+
 // waitForVersionFile polls until daemon.version exists in dir, or
 // fatals the test on timeout. The daemon writes its version
 // asynchronously after acquiring the lock, so callers that depend on
