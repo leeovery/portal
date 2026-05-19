@@ -11,6 +11,33 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "drop-invalid-A-flag-from-attach-session-argv": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "4aac8f7143593d3812cd90d1c5be48f454821896",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "drop-invalid-A-flag-from-attach-session-argv-1-1": "tick-38a654",
+            "drop-invalid-A-flag-from-attach-session-argv-1-2": "tick-41f8a8"
+          },
+          "external_id": "tick-867444"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "drop-invalid-A-flag-from-attach-session-argv": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
