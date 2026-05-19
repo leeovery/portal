@@ -1938,23 +1938,24 @@ func TestEnsurePortalSaverVersion_ConsultsAliveCheckBeforeVersionMismatchDecisio
 	}
 }
 
-// TestPortalSaverVersionMismatch_PredicateMatrix pins the six-row truth matrix
-// of portalSaverVersionMismatch.
+// TestShouldKillSaverOnVersionDecision_PredicateMatrix pins the truth matrix
+// of shouldKillSaverOnVersionDecision — the single predicate encoding the
+// alive-daemon kill-decision rules consulted by EnsurePortalSaverVersion.
 //
-// Framing: the predicate's verdict is one input — EnsurePortalSaverVersion
-// consults BootstrapAliveCheck FIRST; this predicate is only consulted on the
-// alive-with-readable-version branch. Therefore the predicate's
-// "absent → true" row is NOT a load-bearing "absent counts as version
-// mismatch" contract on the kill decision; it is a predicate-layer verdict
-// that the caller gates with an alive-check before driving any kill. See
-// EnsurePortalSaverVersion in internal/tmux/portal_saver.go and the ordering
-// tests on that caller for the authoritative kill-decision contract.
+// Framing: the predicate's verdict is the kill-decision on the alive-daemon
+// branch only. EnsurePortalSaverVersion consults BootstrapAliveCheck FIRST;
+// this predicate is only consulted when the daemon is known to be alive. The
+// `absent → false` row reflects the load-bearing "don't recycle on missing
+// version file" rule — the caller layers a defensive WriteVersionFile on that
+// branch (Task 1-4) rather than killing. See EnsurePortalSaverVersion in
+// internal/tmux/portal_saver.go and the ordering tests on that caller for the
+// authoritative kill-decision contract.
 //
 // Each row is driven directly through the test-only re-export
-// tmux.PortalSaverVersionMismatch (no caller, no tmux mock) so the table
-// asserts predicate behaviour in isolation. Rows mirror spec
+// tmux.ShouldKillSaverOnVersionDecision (no caller, no tmux mock) so the
+// table asserts predicate behaviour in isolation. Rows mirror spec
 // §Testing Requirements (saver-kill-respawn-loop-leaks-daemons).
-func TestPortalSaverVersionMismatch_PredicateMatrix(t *testing.T) {
+func TestShouldKillSaverOnVersionDecision_PredicateMatrix(t *testing.T) {
 	cases := []struct {
 		name           string
 		stored         string
@@ -1963,61 +1964,81 @@ func TestPortalSaverVersionMismatch_PredicateMatrix(t *testing.T) {
 		want           bool
 	}{
 		{
-			name:           "match",
+			// Equal non-dev versions on a clean read: no kill.
+			name:           "equal_non_dev_match",
 			stored:         "0.5.0",
 			currentVersion: "0.5.0",
 			readErr:        nil,
 			want:           false,
 		},
 		{
-			name:           "real_mismatch_neither_dev",
+			// Genuine version mismatch on a clean read with neither side
+			// dev/empty: kill.
+			name:           "mismatched_non_dev",
 			stored:         "0.5.0",
 			currentVersion: "0.5.1",
 			readErr:        nil,
 			want:           true,
 		},
 		{
-			// Predicate-layer verdict only. EnsurePortalSaverVersion's
-			// alive-check gate (covered by the caller's ordering tests)
-			// is what actually drives the kill decision in production;
-			// this row pins that the predicate itself still returns true
-			// so the alive-check ordering remains the load-bearing change.
-			name:           "absent_neither_dev_predicate_layer_only",
+			// Load-bearing row: under the unified predicate, an absent
+			// version file does NOT trigger a kill on the alive-daemon
+			// branch. The caller repairs the file defensively via
+			// portalSaverWriteVersionFile rather than recycling the daemon
+			// (Task 1-4). The prior parallel predicate returned true here;
+			// pinning false explicitly prevents silent regression.
+			name:           "readErr_ErrVersionFileAbsent_no_kill",
 			stored:         "",
 			currentVersion: "0.5.0",
 			readErr:        state.ErrVersionFileAbsent,
-			want:           true,
+			want:           false,
 		},
 		{
-			// Distinct from the absent row above: a non-absent I/O error
-			// (e.g. permission denied) also collapses to true at the
-			// predicate layer. The two error shapes must not be conflated
-			// in case names because the caller's alive-check gate may
-			// eventually treat them differently.
-			name:           "non_absent_io_read_error",
+			// Non-absent I/O error (e.g. permission denied): conservative
+			// kill. Distinct row from the absent case above because the
+			// caller treats the two error shapes differently — absent is
+			// repaired in place, non-absent escalates to a recycle.
+			name:           "readErr_non_absent_io_error",
 			stored:         "",
 			currentVersion: "0.5.0",
 			readErr:        fs.ErrPermission,
 			want:           true,
 		},
 		{
-			// Dev short-circuit: stored=="dev" returns true even though
-			// stored and current superficially differ — the reason is the
-			// dev-build workflow, not unreadable state. Distinct in name
-			// from the absent / I/O-error rows above.
-			name:           "stored_dev_short_circuit",
+			// Dev short-circuit on the stored side. Gated on readErr == nil
+			// (an unreadable file is not "stored is empty"). With a clean
+			// read, stored="dev" triggers kill regardless of current.
+			name:           "dev_version_stored",
 			stored:         "dev",
 			currentVersion: "0.5.0",
 			readErr:        nil,
 			want:           true,
 		},
 		{
-			// Dev short-circuit on the current side. Same rationale as
-			// stored_dev_short_circuit; both sides of the dev rule are
-			// pinned explicitly.
-			name:           "current_dev_short_circuit",
+			// Dev short-circuit on the current side. currentVersion always
+			// counts regardless of readErr.
+			name:           "dev_version_current",
 			stored:         "0.5.0",
 			currentVersion: "dev",
+			readErr:        nil,
+			want:           true,
+		},
+		{
+			// Empty-stored short-circuit on a clean read. Same dev-rule
+			// branch as stored="dev" — both shapes collapse to kill at the
+			// predicate layer.
+			name:           "empty_stored",
+			stored:         "",
+			currentVersion: "0.5.0",
+			readErr:        nil,
+			want:           true,
+		},
+		{
+			// Empty-current short-circuit. currentVersion=="" counts
+			// regardless of readErr.
+			name:           "empty_current",
+			stored:         "0.5.0",
+			currentVersion: "",
 			readErr:        nil,
 			want:           true,
 		},
@@ -2025,9 +2046,9 @@ func TestPortalSaverVersionMismatch_PredicateMatrix(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tmux.PortalSaverVersionMismatch(tc.stored, tc.currentVersion, tc.readErr)
+			got := tmux.ShouldKillSaverOnVersionDecision(tc.stored, tc.currentVersion, tc.readErr)
 			if got != tc.want {
-				t.Errorf("portalSaverVersionMismatch(stored=%q, current=%q, readErr=%v) = %v; want %v",
+				t.Errorf("shouldKillSaverOnVersionDecision(stored=%q, current=%q, readErr=%v) = %v; want %v",
 					tc.stored, tc.currentVersion, tc.readErr, got, tc.want)
 			}
 		})

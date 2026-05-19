@@ -267,13 +267,6 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 // The "absent" row used to be folded into the mismatch predicate, which made
 // every bootstrap with a missing version file fire an unnecessary kill.
 //
-// portalSaverVersionMismatch retains its current external shape and is still
-// covered by its own predicate-matrix test (it is also referenced by other
-// code paths); this caller no longer drives the kill decision from it
-// directly. The dev short-circuit and "read-error-is-mismatch" behaviours of
-// the predicate are reproduced inline here, byte-equivalent in semantics, so
-// the matrix above is the single source of truth for the kill decision.
-//
 // kill-session is invoked tolerantly via killSaverAndWaitForDaemonFn: the
 // barrier helper handles its own kill-session tolerance and the wait for the
 // prior daemon's exit. This function never writes daemon.version itself for
@@ -324,8 +317,7 @@ func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error 
 //
 //  1. Dev-build short-circuit: either side of the version pair is "" or
 //     "dev" (with the stored-side check gated on readErr == nil so we do
-//     not interpret an unreadable file as "stored is empty"). Byte-
-//     equivalent to portalSaverVersionMismatch's dev rules.
+//     not interpret an unreadable file as "stored is empty").
 //  2. Absent version file (errors.Is(readErr, ErrVersionFileAbsent)): no
 //     kill — Task 1-4 layers a defensive write here from the caller.
 //  3. Non-absent read error: kill (conservative).
@@ -354,49 +346,6 @@ func shouldKillSaverOnVersionDecision(stored, currentVersion string, readErr err
 		return true
 	}
 
-	return stored != currentVersion
-}
-
-// portalSaverVersionMismatch is a defensive predicate answering the question
-// "if we were to kill the current daemon, should we trust that a freshly
-// respawned daemon would be on a different/usable version?". It returns true
-// when:
-//
-//  1. stored != currentVersion (a real version mismatch on a clean read), OR
-//  2. either side of the pair is "" or "dev" (dev-build short-circuit — we
-//     cannot reason about version equality when either side is unstamped), OR
-//  3. the read failed for any reason, INCLUDING errors.Is(readErr,
-//     state.ErrVersionFileAbsent) — an unreadable or absent file does not
-//     let the predicate answer "no" with confidence, so it answers "yes"
-//     defensively at this layer.
-//
-// It returns false otherwise (clean read, neither side dev/empty, versions
-// equal).
-//
-// NOTE — not load-bearing for the kill decision: as of the saver-kill-respawn
-// fix, EnsurePortalSaverVersion no longer drives its kill decision from this
-// predicate. The authoritative kill gate is now BootstrapAliveCheck(stateDir)
-// FIRST — a dead daemon is never killed and an alive daemon with an absent
-// version file is repaired defensively (via portalSaverWriteVersionFile)
-// rather than recycled. The predicate's "absent counts as mismatch" rule
-// therefore no longer translates into "absent triggers a kill"; it only
-// expresses the predicate's local, defensive contract. See
-// EnsurePortalSaverVersion (and shouldKillSaverOnVersionDecision, which
-// encodes the alive-daemon kill-decision matrix inline) for the authoritative
-// kill-decision rules.
-//
-// This predicate is preserved for callers that want the dev-short-circuit /
-// read-error-folded shape and is covered by its own predicate-matrix test.
-func portalSaverVersionMismatch(stored, currentVersion string, readErr error) bool {
-	if readErr != nil {
-		return true
-	}
-	if currentVersion == "" || currentVersion == "dev" {
-		return true
-	}
-	if stored == "" || stored == "dev" {
-		return true
-	}
 	return stored != currentVersion
 }
 
