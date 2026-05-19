@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-19
 cycle: 1
 phase: Input Review
@@ -25,8 +25,8 @@ The spec asserts that the lock-loser daemon's clean exit "destroys the just-crea
 **Proposed Addition**:
 Add a clarifying sentence: the session dies because tmux destroys a session whose only pane's initial process has exited normally — this is a distinct lifecycle axis from `destroy-unattached`, which governs the detach/no-clients case. The cascade is therefore unaffected by the `destroy-unattached=off` setting that the failing `SetSessionOption` call was trying to apply.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: User selected auto mode at this finding. Added verbatim to spec.
 
 ---
 
@@ -42,8 +42,8 @@ The investigation explicitly notes that the kill-respawn path *itself* generates
 **Proposed Addition**:
 Add a note (under Defect 2 root cause or Why It Wasn't Caught) that the recycle path generates additional sweep pressure on the surviving daemon via `save.requested` events fired by `session-closed` and `session-created` hooks, producing a back-to-back sweep regime that widens the cancel-to-exit window precisely on the path the barrier defends. The ctx-aware loop in Change 2 must remain interruptible under this pressure.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Added as a paragraph under Defect 2 cascade explanation.
 
 ---
 
@@ -62,8 +62,8 @@ The spec's Change 1 captures the test surface that pins the bug as contract ("mu
 **Proposed Addition**:
 Note under Change 1 (or in implementation guidance) that the existing comment on `portalSaverVersionMismatch` (currently `portal_saver.go:232-241`) explicitly encodes "ErrVersionFileAbsent counts as mismatch" as intentional design and must be updated to reflect the new contract — the alive-check ordering is what captures the broader invariant, and the predicate no longer treats absence as mismatch on its own.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Added as "Update the existing function comment" note under Change 1.
 
 ---
 
@@ -84,8 +84,8 @@ This is borderline — the spec correctly scopes Defect 3 as instrumentation-onl
 **Proposed Addition**:
 Under Change 3 (or in an explanatory note), preserve a pointer that the investigation enumerated production removal paths and ruled them out; if the breadcrumb captures a recurrence, the follow-up investigation should start from the candidate list (atomic-write race in `WriteVersionFile`, over-eager cleanup in the daemon tick loop, `CleanStale`, shutdown-flush behaviour) rather than re-tracing. Cite the investigation as the source.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied as "Carry-forward for future investigation" paragraph under Change 3.
 
 ---
 
@@ -101,8 +101,8 @@ The spec's integration test #2 targets "under 2s on the test fixture" for SIGHUP
 **Proposed Addition**:
 Add a note under Integration test #2 either committing to taking a fresh wall-time measurement of one pane's `capture-pane` invocation against a representative scrollback fixture and sizing the test threshold from that, or explicitly designating the 2s threshold as a heuristic with permission to adjust during implementation.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied. Annotated the 2s as heuristic and committed implementation to take a measurement.
 
 ---
 
@@ -118,7 +118,7 @@ The spec cross-references `multiple-state-daemons-running-concurrently` thorough
 **Proposed Addition**:
 Add `daemon-merge-reintroduces-dead-sessions` and `killed-sessions-resurrect-on-restart` to the Risk & Rollout coordination/regression-watch list, noting that they exercise adjacent daemon/restore surfaces and their tests should remain green (without claiming any of their logic is being touched).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-applied as "Adjacent closed bugfixes — regression-watch list" subsection under Coordination with prior bugfix.
 
 ---

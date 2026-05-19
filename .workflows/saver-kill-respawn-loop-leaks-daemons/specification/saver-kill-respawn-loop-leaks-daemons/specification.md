@@ -42,7 +42,9 @@ for {
 
 `ctx.Done()` is structurally unreachable during a tick. The expensive work inside `tick → captureAndCommit` iterates every live pane and invokes `tmux capture-pane -e -p -S -` (unbounded scrollback) per pane for the hash check. On the affected user's profile (~23 panes × ~1.2MB rendered text), measured wall time exceeds the 5s `killBarrierTimeout` sized by the prior fix.
 
-When the barrier gives up early, the new daemon spawns, immediately collides with the still-held `daemon.lock`, exits cleanly **without writing `daemon.pid` or `daemon.version`**, destroys the just-created `_portal-saver` pane process, and triggers the `SetSessionOption(_portal-saver, destroy-unattached, off)` "no such session" cascade.
+When the barrier gives up early, the new daemon spawns, immediately collides with the still-held `daemon.lock`, exits cleanly **without writing `daemon.pid` or `daemon.version`**, destroys the just-created `_portal-saver` pane process, and triggers the `SetSessionOption(_portal-saver, destroy-unattached, off)` "no such session" cascade. The session dies because tmux destroys a session whose only pane's initial process has exited normally — a distinct lifecycle axis from `destroy-unattached`, which governs the detach/no-clients case. The cascade is therefore unaffected by the `destroy-unattached=off` setting that the failing `SetSessionOption` call was trying to apply.
+
+**Recycle-induced sweep pressure (self-amplifying property).** The kill-respawn path itself emits `session-closed` and `session-created` hooks; both fire `save.requested` events on the surviving daemon, pushing it into a back-to-back sweep regime. This widens the cancel-to-exit window precisely on the recycle path the barrier is meant to defend. Change 2's ctx-aware loop must remain interruptible under this pressure.
 
 #### Defect 3 — `daemon.version` disappearance (open, instrumentation only)
 
@@ -72,6 +74,8 @@ Rework the kill decision in `EnsurePortalSaverVersion` to consult `BootstrapAliv
 | No | (any) | (any) | **No kill needed.** No daemon to recycle. Proceed to BootstrapPortalSaver. |
 
 `portalSaverVersionMismatch` keeps its current external shape but is **no longer the lone gate**. The alive-check classifies the situation first; the mismatch predicate is consulted only on the alive-with-readable-version branch.
+
+**Update the existing function comment.** The comment currently at `internal/tmux/portal_saver.go:232-241` explicitly encodes "ErrVersionFileAbsent counts as mismatch — for first-ever bootstrap or user-initiated state-dir cleanup" as intentional design. That invariant is being inverted by Change 1 (alive-check ordering is what captures the broader invariant; the predicate no longer treats absence as mismatch in isolation). The comment must be revised to reflect the new contract, otherwise it becomes a future trap for the next reader.
 
 **Defensive complement:** when bootstrap observes "alive daemon + absent `daemon.version`" on the survived path, write `daemon.version` from the bootstrap side before proceeding. This closes the lock-loser lifecycle hole (lock-loser daemons return cleanly before writing `daemon.version`, leaving the file observably absent until the next bootstrap repairs it).
 
@@ -141,6 +145,8 @@ No behavioural change. No additional file I/O, no new error paths, no return-sha
 - Reproducing the disappearance. The investigation could not, and this spec does not commit to doing so.
 - Identifying the deleter. The breadcrumb gives instrumentation for future diagnosis; it does not itself answer the question.
 
+**Carry-forward for future investigation.** The investigation enumerated and ruled out every production file-removal path that could touch `daemon.version`: `state.WriteVersionFile`'s atomic-write target was the only writer, and no individual `Remove`/`Unlink` of `daemon.version` exists anywhere in production code. Paths checked and ruled out: `cmd/state_cleanup.go` `os.RemoveAll(dir)` (only via explicit `--purge`), `cmd/state_daemon.go` save.requested removals, `cmd/state_hydrate.go` per-pane FIFO removals, `internal/state/logger.go` log-rotation, `internal/state/commit.go` scrollback dedup, `internal/state/fifo_sweep.go` per-pane FIFO sweep. If Change 3's breadcrumb captures a recurrence, the follow-up investigation should start from the candidate list flagged by this investigation: an atomic-write race inside `state.WriteVersionFile`, an over-eager cleanup pass in the daemon's tick loop, the bootstrap `CleanStale` step, or shutdown-flush behaviour in `defaultShutdownFlush`. Source: investigation.md "Root Cause" → Defect 3 ruled-out table and open-sub-question candidates.
+
 ### Acceptance Criteria
 
 The fix is complete when **all** of the following observable conditions hold:
@@ -209,7 +215,7 @@ The fix is complete when **all** of the following observable conditions hold:
 
 1. **"Alive daemon, daemon.version absent, versions match"** → bootstrap completes without firing the kill barrier. `_portal-saver` survives; `daemon.version` is present and correct post-bootstrap. Pins Defect 1's user-visible contract.
 
-2. **"Daemon mid-tick, SIGHUP arrives"** → on a fixture with multiple panes loaded with synthetic scrollback, send SIGHUP while a tick is in progress. The daemon process exits within a bounded window (target: under 2s on the test fixture). Pins Defect 2's responsiveness contract.
+2. **"Daemon mid-tick, SIGHUP arrives"** → on a fixture with multiple panes loaded with synthetic scrollback, send SIGHUP while a tick is in progress. The daemon process exits within a bounded window (target: under 2s on the test fixture). The 2s figure is a **heuristic threshold**, not anchored to a fresh measurement — no fresh wall-time measurement of one pane's `capture-pane` invocation against a representative scrollback fixture was taken during the investigation. Implementation should take that measurement and either confirm 2s as appropriate or adjust the threshold from the measurement. Pins Defect 2's responsiveness contract.
 
 3. **"Lock-loser daemon's pane exit destroys `_portal-saver` session"** → force the lock contention scenario (spawn a second daemon while the first holds the lock) and assert the chain: lock-loser exits → pane process terminates → `_portal-saver` session is destroyed → `SetSessionOption` fails with "no such session". Closes synthesis-flagged gap from investigation: confirms the cascade is what we believe before the fix lands.
 
@@ -277,6 +283,11 @@ Main risk surfaces to watch during review:
 
 - Builds directly on `multiple-state-daemons-running-concurrently` (completed 2026-05-11). That spec's `daemon.lock` and `killSaverAndWaitForDaemon` machinery is treated as a frozen prior layer. Implementation must not touch the lock primitive or the barrier's polling loop.
 - The prior spec sized the barrier timeout to a measured 3.9s + margin. This spec doesn't resize the timeout — it makes the daemon-side contract correct so the existing timeout never has to be exceeded under healthy conditions.
+
+**Adjacent closed bugfixes — regression-watch list.** The following exercise adjacent daemon/restore surfaces. This bugfix does not touch their logic; their tests should remain green:
+
+- `daemon-merge-reintroduces-dead-sessions` — structural-index merge in the daemon's commit pipeline.
+- `killed-sessions-resurrect-on-restart` — bootstrap-side restore decisions for explicitly killed sessions.
 
 ---
 
