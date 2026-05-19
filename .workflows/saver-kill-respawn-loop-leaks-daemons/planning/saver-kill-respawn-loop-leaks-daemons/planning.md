@@ -22,7 +22,8 @@ approved_at: 2026-05-19
 - [ ] All tests from `multiple-state-daemons-running-concurrently` remain green; the `daemon.lock` flock primitive and `killSaverAndWaitForDaemon` polling loop are untouched.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-19
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
