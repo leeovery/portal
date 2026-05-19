@@ -102,7 +102,7 @@ const daemonPidPollInterval = 50 * time.Millisecond
 //  7. Directly overwrite daemon.version with a different value
 //     ("v-test-0-old") so the second EnsurePortalSaverVersion call
 //     observes a real version mismatch (no new test seam — exercises
-//     the production portalSaverVersionMismatch comparison).
+//     the production shouldKillSaverOnVersionDecision comparison).
 //  8. Second EnsurePortalSaverVersion("v-test-1") — triggers the
 //     mismatch branch, which invokes the synchronous kill barrier,
 //     waits for the prior daemon to exit, kills the saver session,
@@ -167,7 +167,7 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 	priorPID := waitForLiveDaemon(t, dir, singletonRecycleTimeout)
 
 	// Force a version mismatch by overwriting daemon.version directly.
-	// This exercises the real portalSaverVersionMismatch comparison
+	// This exercises the real shouldKillSaverOnVersionDecision comparison
 	// in the second EnsurePortalSaverVersion call — no test seam, no
 	// stubbed mismatch helper.
 	if err := state.WriteVersionFile(dir, "v-test-0-old", nil); err != nil {
