@@ -52,3 +52,16 @@ approved_at: 2026-05-19
 - [ ] `killBarrierTimeout` remains at 5s; the `killSaverAndWaitForDaemon` polling loop is unchanged.
 - [ ] `daemonShutdownFunc` does not depend on a cancelled tick's output — no deadlock between cancellation and the shutdown flush.
 - [ ] Tests from `multiple-state-daemons-running-concurrently`, `daemon-merge-reintroduces-dead-sessions`, and `killed-sessions-resurrect-on-restart` all remain green.
+
+#### Tasks
+status: approved
+approved_at: 2026-05-19
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-2-1 | Thread `ctx` from `defaultDaemonRun` through `tick` into `captureAndCommit` (signature change + happy-path regression) | `defaultShutdownFlush` keeps calling `captureAndCommit` (uses `context.Background()` so non-cancellable shutdown flush is preserved), no signature changes propagate outside `cmd/state_daemon.go`, `internal/state/capture.go` untouched, `daemonShutdownFunc` does not depend on cancelled tick output |
+| saver-kill-respawn-loop-leaks-daemons-2-2 | Add `ctx.Done()` check at `captureAndCommit` entry (pre-enumeration) with cancel-before-first unit test | already-cancelled ctx at entry → early return, no `ListSkeletonMarkers` call, no commit, no `PrevIndex` mutation, `LastSaveAt` unchanged |
+| saver-kill-respawn-loop-leaks-daemons-2-3 | Add `ctx.Done()` check post-enumeration, pre-first-iteration with unit test | cancellation observed after `CaptureStructure` returns but before loop starts → early return, no per-pane work, no `Commit()`, no `PrevIndex` replacement |
+| saver-kill-respawn-loop-leaks-daemons-2-4 | Add `ctx.Done()` check between per-pane iterations with cancel-mid-loop unit test on multi-pane fixture | mid-loop cancel after k panes processed → no `Commit()`, no `PrevIndex` replacement, scrollback writes already done by `WriteScrollbackIfChanged` for completed panes are not rolled back (per-pane writes are atomic; spec requires no *partial commit* of sessions.json, not rollback of per-pane scrollback files), `anyScrollbackChanged` discarded |
+| saver-kill-respawn-loop-leaks-daemons-2-5 | Integration test: daemon mid-tick + SIGHUP exits within bounded window (real-tmux fixture, multi-pane synthetic scrollback) | threshold confirmed/adjusted from fresh wall-time measurement of one pane's `capture-pane`, recycle-induced sweep pressure (back-to-back `session-closed`/`session-created` hooks firing `save.requested`), exit bounded under 5s `killBarrierTimeout`, `killBarrierTimeout` stays at 5s |
+| saver-kill-respawn-loop-leaks-daemons-2-6 | Fault-injection integration test: lock-loser daemon's pane exit destroys `_portal-saver` (cascade regression guard) | sentinel holds `daemon.lock` via `state.AcquireDaemonLock` in test goroutine, new daemon exits within ~1s, `has-session` poll (100ms tick, 2s ceiling) returns failure, `SetSessionOption(_portal-saver, destroy-unattached, off)` returns `exit status 1` containing `no such session`, regression-watch suites (`multiple-state-daemons-running-concurrently`, `daemon-merge-reintroduces-dead-sessions`, `killed-sessions-resurrect-on-restart`) remain green |
