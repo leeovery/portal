@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "saver-kill-respawn-loop-leaks-daemons": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 3,
           "finding_gate_mode": "auto",
           "date": "2026-05-19",
