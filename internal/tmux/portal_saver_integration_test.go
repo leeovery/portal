@@ -48,6 +48,7 @@ package tmux_test
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,6 +246,177 @@ func TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle(t *testing.T) 
 		dumpDiagnostics(t, dir, postRecycleServerPID, priorPID, currentPID,
 			"expected exactly 1 `portal state daemon` child of tmux server (pid=%d), got %d\npgrep raw output:\n%s",
 			postRecycleServerPID, count, raw)
+	}
+}
+
+// TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill is the
+// real-tmux integration test gating spec § Acceptance Criteria →
+// Steady-state bootstrap and § Testing Requirements → Integration tests
+// #1: with an alive daemon and an absent daemon.version, bootstrap
+// completes WITHOUT firing the kill barrier and _portal-saver survives.
+//
+// This pins the user-visible end-to-end contract of the Defect-1 fix:
+// the matrix-and-ordering unit tests (Tasks 1-1, 1-3, 1-4) verify the
+// kill-decision logic in isolation, but only a real tmux server with a
+// real daemon proves the no-kill branch end-to-end — same daemon
+// process before/after, daemon.version repaired defensively, no WARN
+// substrings in portal.log.
+//
+// Flow:
+//  1. Skip if tmux or the `portal` binary cannot be staged (mirrors the
+//     existing singleton-invariant test's skip surface).
+//  2. Stand up an isolated tmux server via tmuxtest.New and spawn the
+//     saver via the first EnsurePortalSaverVersion call.
+//  3. Wait for daemon liveness and daemon.version presence (the daemon
+//     writes its own version on startup after acquiring the lock).
+//  4. Capture the daemon PID, then DELETE daemon.version to set up the
+//     alive+absent input shape.
+//  5. Invoke EnsurePortalSaverVersion(client, dir, "0.5.0-test") — the
+//     ACTION under test. With alive=true and readErr=ErrVersionFileAbsent
+//     the production path takes the no-kill defensive-write branch.
+//  6. Assert the survival contract: nil return, session present, version
+//     repaired to exactly "0.5.0-test", PID unchanged (same process),
+//     daemon still alive, and no kill/lock-loser/EnsureSaver-failure WARN
+//     substrings in portal.log.
+func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	// Build portal binary and PATH-prepend so the daemon resolves at
+	// exec time inside the test-spawned tmux server. Mirrors the skip
+	// shape used by TestEnsurePortalSaverVersion_SingletonInvariantAcrossRecycle.
+	binDir := t.TempDir()
+	if err := restoretest.BuildPortalBinary(binDir); err != nil {
+		t.Skipf("portal binary build failed; skipping real-daemon integration test: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if _, err := exec.LookPath("portal"); err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	sock := tmuxtest.New(t, "ptl-aliveabsent-")
+	client := sock.Client()
+
+	// Bootstrap the saver via EnsurePortalSaverVersion; the daemon
+	// spawns, acquires the lock, and writes daemon.pid + daemon.version.
+	// currentVersion here is the "before" version — the same value is
+	// passed to the second invocation below so the matrix row exercised
+	// is "alive + absent + (versions would match if present)".
+	const currentVersion = "0.5.0-test"
+	if err := tmux.EnsurePortalSaverVersion(client, dir, currentVersion); err != nil {
+		t.Fatalf("initial EnsurePortalSaverVersion: %v", err)
+	}
+	sock.WaitForSession(t, tmux.PortalSaverName, singletonRecycleTimeout)
+
+	// Poll until the daemon is alive (daemon.pid points at a live
+	// process) AND daemon.version has been written. The version write
+	// is async w.r.t. tmux's new-session return — the daemon writes it
+	// after acquiring the lock, so this poll absorbs that gap before
+	// the test's setup step deletes the file.
+	priorPID := waitForLiveDaemon(t, dir, singletonRecycleTimeout)
+	waitForVersionFile(t, dir, singletonRecycleTimeout)
+
+	// Set up the alive+absent input shape by removing daemon.version.
+	// The daemon stays alive (we did not touch its process), but
+	// EnsurePortalSaverVersion's next call will observe
+	// ErrVersionFileAbsent on the read and route through the no-kill
+	// defensive-write branch.
+	if err := os.Remove(state.DaemonVersion(dir)); err != nil {
+		t.Fatalf("remove daemon.version: %v", err)
+	}
+
+	// ACTION: invoke EnsurePortalSaverVersion with the same daemon
+	// alive and daemon.version absent.
+	if err := tmux.EnsurePortalSaverVersion(client, dir, currentVersion); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion (alive+absent): %v", err)
+	}
+
+	// Assertion 2: tmux has-session for _portal-saver succeeds. The
+	// session must survive — the no-kill branch must not have routed
+	// through killSaverAndWaitForDaemonFn.
+	if !client.HasSession(tmux.PortalSaverName) {
+		t.Fatalf("_portal-saver session does not exist after EnsurePortalSaverVersion on alive+absent input")
+	}
+
+	// Assertion 3: daemon.version exists and equals currentVersion
+	// exactly. This is the defensive-write contract from Task 1-4.
+	stored, err := state.ReadVersionFile(dir)
+	if err != nil {
+		t.Fatalf("ReadVersionFile after defensive write: %v", err)
+	}
+	if stored != currentVersion {
+		t.Fatalf("daemon.version contents = %q; want %q", stored, currentVersion)
+	}
+
+	// Assertion 4: same daemon PID before and after. If the kill
+	// barrier had fired, the daemon would have been killed and a new
+	// process spawned with a different PID.
+	currentPID, err := state.ReadPIDFile(dir)
+	if err != nil {
+		t.Fatalf("ReadPIDFile after action: %v", err)
+	}
+	if currentPID != priorPID {
+		t.Fatalf("daemon PID changed: prior=%d current=%d (expected no respawn)",
+			priorPID, currentPID)
+	}
+
+	// Assertion 5: daemon is still alive. Belt-and-braces alongside
+	// the PID-equality check — proves the PID points at a live process
+	// rather than a stale entry.
+	if !state.DaemonAlive(dir) {
+		t.Fatalf("DaemonAlive(%s) = false after action; want true", dir)
+	}
+
+	// Assertion 6: portal.log does NOT contain any of the three WARN
+	// substrings. If the kill barrier ran, lock contention occurred,
+	// or EnsureSaver failed, at least one of these substrings would
+	// appear. Absent log file → assertion trivially holds.
+	assertNoForbiddenLogSubstrings(t, dir)
+}
+
+// waitForVersionFile polls until daemon.version exists in dir, or
+// fatals the test on timeout. The daemon writes its version
+// asynchronously after acquiring the lock, so callers that depend on
+// the file being present must poll rather than read once.
+func waitForVersionFile(t *testing.T, dir string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := state.ReadVersionFile(dir); err == nil {
+			return
+		}
+		time.Sleep(daemonPidPollInterval)
+	}
+	t.Fatalf("daemon.version did not appear within %s (state dir=%s)", timeout, dir)
+}
+
+// assertNoForbiddenLogSubstrings reads portal.log in dir and fails the
+// test if any of the three forbidden WARN substrings (kill-barrier
+// timeout, lock contention, or step-4 EnsureSaver failure) appear.
+// Absence of portal.log is acceptable — the assertion holds trivially
+// because none of the forbidden substrings can be present.
+func assertNoForbiddenLogSubstrings(t *testing.T, dir string) {
+	t.Helper()
+	data, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		t.Fatalf("read portal.log: %v", err)
+	}
+	contents := string(data)
+	forbidden := []string{
+		"prior daemon (pid=",
+		"another daemon holds the lock; exiting",
+		"step 4 (EnsureSaver) failed:",
+	}
+	for _, sub := range forbidden {
+		if strings.Contains(contents, sub) {
+			t.Fatalf("portal.log contains forbidden substring %q\n--- portal.log ---\n%s",
+				sub, contents)
+		}
 	}
 }
 
