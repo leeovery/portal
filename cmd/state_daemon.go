@@ -151,6 +151,15 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("capture structure: %w", err)
 	}
 
+	// observation point 2 of 3: post-enumeration, pre-first-iteration; covers
+	// cancellation during the CaptureStructure subprocess call. Returns before
+	// any per-pane work or Commit invocation. See spec § Change 2.
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+
 	anyScrollbackChanged := false
 	for _, sess := range idx.Sessions {
 		for _, win := range sess.Windows {

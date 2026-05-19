@@ -53,6 +53,13 @@ type daemonFakeCommander struct {
 	captureByTarget    map[string]string
 	captureErrByTarget map[string]error
 
+	// dispatchHook, if non-nil, is invoked after every dispatch resolution
+	// with the args of the just-handled call. Used by ctx-cancellation tests
+	// to fire cancel() while a tmux subcall is "in flight" inside
+	// CaptureStructure (e.g. on show-environment) so the surrounding code
+	// observes the cancellation at the next ctx.Done() check.
+	dispatchHook func(args []string)
+
 	// commitErr, if non-nil, is returned for the "set-option -s" / similar
 	// writes — currently unused since Commit writes via os.WriteFile, not tmux.
 
@@ -64,15 +71,25 @@ type daemonFakeCommander struct {
 func (c *daemonFakeCommander) Run(args ...string) (string, error) {
 	c.mu.Lock()
 	c.calls = append(c.calls, append([]string(nil), args...))
+	hook := c.dispatchHook
 	c.mu.Unlock()
-	return c.dispatch(args)
+	out, err := c.dispatch(args)
+	if hook != nil {
+		hook(args)
+	}
+	return out, err
 }
 
 func (c *daemonFakeCommander) RunRaw(args ...string) (string, error) {
 	c.mu.Lock()
 	c.rawCalls = append(c.rawCalls, append([]string(nil), args...))
+	hook := c.dispatchHook
 	c.mu.Unlock()
-	return c.dispatch(args)
+	out, err := c.dispatch(args)
+	if hook != nil {
+		hook(args)
+	}
+	return out, err
 }
 
 func (c *daemonFakeCommander) dispatch(args []string) (string, error) {
@@ -989,5 +1006,118 @@ func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
 	// No commit — sessions.json must not exist.
 	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
 		t.Errorf("sessions.json written on pre-cancelled ctx; stat err = %v", err)
+	}
+}
+
+// TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork
+// covers observation point 2 of 3 (spec § Change 2 / Phase 2 Task 2-3): the
+// ctx.Done() check immediately after CaptureStructure returns and before the
+// per-pane loop begins. The test triggers cancel() from inside the commander's
+// dispatch hook while CaptureStructure is still running (specifically on its
+// final tmux subcall, show-environment) — so CaptureStructure completes
+// successfully with a populated multi-pane index, but the ctx is observed
+// cancelled at the post-enumeration check before any per-pane work runs.
+//
+// Pins the timing-specific behaviour: cancellation observed AFTER
+// CaptureStructure, not at entry. Distinguishes observation point 2 from
+// observation point 1 — point 1 would catch a pre-call cancel; point 2 is
+// load-bearing for cancellations that arrive during CaptureStructure's
+// subprocess calls.
+//
+// Asserts:
+//  1. Returns nil (not an error — tick logs WARN on non-nil).
+//  2. CaptureStructure ran to completion (list-sessions / list-panes /
+//     show-environment all observed).
+//  3. No per-pane work began: zero capture-pane calls.
+//  4. No commit landed on disk: sessions.json absent.
+//  5. deps.PrevIndex pointer unchanged from its pre-call value (no
+//     post-loop replacement).
+func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Multi-pane fixture — if the post-enumeration check were missing, the
+	// per-pane loop would iterate three panes and the assertions below would
+	// catch the leak (capture-pane calls / scrollback files / committed
+	// sessions.json).
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0\nside|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
+			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
+		captureByTarget: map[string]string{
+			"work:0.0": "work-pane-0-bytes",
+			"work:0.1": "work-pane-1-bytes",
+			"side:0.0": "side-pane-0-bytes",
+		},
+	}
+
+	// Seed PrevIndex with a sentinel — assertion target for "unchanged".
+	sentinelPrev := &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    "sentinel-must-be-preserved",
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = sentinelPrev
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Wire the dispatch hook: cancel() fires when CaptureStructure makes its
+	// final subcall (show-environment), which runs once per kept session
+	// after list-sessions / list-panes. By the time CaptureStructure
+	// returns, ctx is cancelled — but the function itself completes
+	// successfully with the freshly populated multi-pane index.
+	//
+	// The ctx.Done() check at observation point 2 then fires before the
+	// per-pane loop begins.
+	fc.dispatchHook = func(args []string) {
+		if len(args) > 0 && args[0] == "show-environment" {
+			cancel()
+		}
+	}
+
+	if err := captureAndCommit(ctx, deps); err != nil {
+		t.Errorf("captureAndCommit returned error on mid-CaptureStructure cancel: %v; want nil", err)
+	}
+
+	// CaptureStructure ran to completion — all three of its tmux subcalls
+	// landed before observation point 2 fired.
+	if got := fc.callsContaining("list-sessions"); len(got) == 0 {
+		t.Errorf("list-sessions not invoked; CaptureStructure did not start")
+	}
+	if got := fc.callsContaining("list-panes"); len(got) == 0 {
+		t.Errorf("list-panes not invoked; CaptureStructure did not enumerate panes")
+	}
+	if got := fc.callsContaining("show-environment"); len(got) == 0 {
+		t.Errorf("show-environment not invoked; CaptureStructure did not reach its env phase")
+	}
+
+	// No per-pane work began.
+	if got := fc.callsContaining("capture-pane"); len(got) != 0 {
+		t.Errorf("capture-pane invoked after post-enumeration cancel: %v", got)
+	}
+	// No scrollback files written.
+	for _, key := range []string{
+		state.SanitizePaneKey("work", 0, 0),
+		state.SanitizePaneKey("work", 0, 1),
+		state.SanitizePaneKey("side", 0, 0),
+	} {
+		if _, err := os.Stat(state.ScrollbackFile(dir, key)); !os.IsNotExist(err) {
+			t.Errorf("scrollback file unexpectedly written for %q on cancel: stat err = %v", key, err)
+		}
+	}
+
+	// PrevIndex pointer unchanged — no post-loop replacement.
+	if deps.PrevIndex != sentinelPrev {
+		t.Errorf("PrevIndex pointer replaced on mid-CaptureStructure cancel; want sentinel preserved")
+	}
+
+	// No commit — sessions.json must not exist.
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json written on mid-CaptureStructure cancel; stat err = %v", err)
 	}
 }
