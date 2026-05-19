@@ -546,16 +546,9 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 // and exits shortly after.
 func waitForDaemonNotAlive(t *testing.T, dir string, timeout, tick time.Duration) bool {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if !state.DaemonAlive(dir) {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(tick)
-	}
+	return tmuxtest.PollUntil(t, timeout, tick, func() bool {
+		return !state.DaemonAlive(dir)
+	})
 }
 
 // waitForSessionAbsent polls client.HasSession(name) until it returns
@@ -565,16 +558,9 @@ func waitForDaemonNotAlive(t *testing.T, dir string, timeout, tick time.Duration
 // pane process exits.
 func waitForSessionAbsent(t *testing.T, client *tmux.Client, name string, timeout, tick time.Duration) bool {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if !client.HasSession(name) {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(tick)
-	}
+	return tmuxtest.PollUntil(t, timeout, tick, func() bool {
+		return !client.HasSession(name)
+	})
 }
 
 // waitForVersionFile polls until daemon.version exists in dir, or
@@ -583,12 +569,11 @@ func waitForSessionAbsent(t *testing.T, client *tmux.Client, name string, timeou
 // the file being present must poll rather than read once.
 func waitForVersionFile(t *testing.T, dir string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := state.ReadVersionFile(dir); err == nil {
-			return
-		}
-		time.Sleep(daemonPidPollInterval)
+	if tmuxtest.PollUntil(t, timeout, daemonPidPollInterval, func() bool {
+		_, err := state.ReadVersionFile(dir)
+		return err == nil
+	}) {
+		return
 	}
 	t.Fatalf("daemon.version did not appear within %s (state dir=%s)", timeout, dir)
 }
@@ -671,13 +656,16 @@ func countDaemonChildren(t *testing.T, serverPID int) (int, string) {
 // daemon process rather than a stubbed IsProcessAlive seam.
 func waitForLiveDaemon(t *testing.T, dir string, timeout time.Duration) int {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	var livePID int
+	if tmuxtest.PollUntil(t, timeout, daemonPidPollInterval, func() bool {
 		pid, err := state.ReadPIDFile(dir)
 		if err == nil && state.IsProcessAlive(pid) {
-			return pid
+			livePID = pid
+			return true
 		}
-		time.Sleep(daemonPidPollInterval)
+		return false
+	}) {
+		return livePID
 	}
 	t.Fatalf("daemon.pid did not point at a live process within %s "+
 		"(state dir=%s)", timeout, dir)
@@ -693,13 +681,16 @@ func waitForLiveDaemon(t *testing.T, dir string, timeout time.Duration) int {
 // overwritten but the prior daemon process lingers).
 func waitForNewLiveDaemon(t *testing.T, dir string, prior int, timeout time.Duration) int {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	var newPID int
+	if tmuxtest.PollUntil(t, timeout, daemonPidPollInterval, func() bool {
 		pid, err := state.ReadPIDFile(dir)
 		if err == nil && pid != prior && state.IsProcessAlive(pid) {
-			return pid
+			newPID = pid
+			return true
 		}
-		time.Sleep(daemonPidPollInterval)
+		return false
+	}) {
+		return newPID
 	}
 	t.Fatalf("daemon.pid did not converge on a new live PID (prior=%d) "+
 		"within %s (state dir=%s)", prior, timeout, dir)

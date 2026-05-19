@@ -575,12 +575,10 @@ func anchorThreshold(singlePaneWallTime time.Duration) time.Duration {
 // pid, which exists before the pidfile is written.
 func waitForDaemonAlive(t *testing.T, stateDir string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if state.DaemonAlive(stateDir) {
-			return
-		}
-		time.Sleep(daemonAlivePollInterval)
+	if tmuxtest.PollUntil(t, timeout, daemonAlivePollInterval, func() bool {
+		return state.DaemonAlive(stateDir)
+	}) {
+		return
 	}
 	// On timeout, surface any portal.log output the daemon wrote so
 	// startup failures (lock contention, ensure-dir errors, etc.) are
