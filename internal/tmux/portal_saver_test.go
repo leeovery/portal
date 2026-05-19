@@ -959,50 +959,46 @@ func (r *recordingBarrierLogger) Warn(component, format string, args ...any) {
 	r.warns = append(r.warns, component+" | "+format)
 }
 
+// swapSeam swaps the value at ptr to v for the duration of the test and
+// restores the prior value via t.Cleanup. Centralises the install/restore
+// pattern shared by the install* helpers below; LIFO cleanup ordering is
+// preserved by t.Cleanup.
+func swapSeam[T any](t *testing.T, ptr *T, v T) {
+	t.Helper()
+	prev := *ptr
+	*ptr = v
+	t.Cleanup(func() { *ptr = prev })
+}
+
 // installBarrierReadPID swaps the killBarrierReadPID seam for the duration of
 // the test and restores it via t.Cleanup.
 func installBarrierReadPID(t *testing.T, fn func(string) (int, error)) {
 	t.Helper()
-	seam := tmux.BarrierReadPIDSeam()
-	prev := *seam
-	*seam = fn
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.BarrierReadPIDSeam(), fn)
 }
 
 // installBarrierIsAlive swaps the killBarrierIsAlive seam for the test.
 func installBarrierIsAlive(t *testing.T, fn func(int) bool) {
 	t.Helper()
-	seam := tmux.BarrierIsAliveSeam()
-	prev := *seam
-	*seam = fn
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.BarrierIsAliveSeam(), fn)
 }
 
 // installBarrierPollInterval shrinks the poll cadence for tests.
 func installBarrierPollInterval(t *testing.T, d time.Duration) {
 	t.Helper()
-	seam := tmux.BarrierPollIntervalSeam()
-	prev := *seam
-	*seam = d
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.BarrierPollIntervalSeam(), d)
 }
 
 // installBarrierTimeout shrinks the total timeout for tests.
 func installBarrierTimeout(t *testing.T, d time.Duration) {
 	t.Helper()
-	seam := tmux.BarrierTimeoutSeam()
-	prev := *seam
-	*seam = d
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.BarrierTimeoutSeam(), d)
 }
 
 // installBarrierLogger swaps the WARN-emission seam for a recorder.
 func installBarrierLogger(t *testing.T, log tmux.BarrierLogger) {
 	t.Helper()
-	seam := tmux.BarrierLoggerSeam()
-	prev := *seam
-	*seam = log
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.BarrierLoggerSeam(), log)
 }
 
 // snapshotDir returns a map of every regular file in dir keyed by relative
@@ -1321,10 +1317,7 @@ type barrierCall struct {
 // function and restores the original via t.Cleanup.
 func installKillSaverFn(t *testing.T, fn func(*tmux.Client, string) error) {
 	t.Helper()
-	seam := tmux.KillSaverAndWaitForDaemonFnSeam()
-	prev := *seam
-	*seam = fn
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.KillSaverAndWaitForDaemonFnSeam(), fn)
 }
 
 func TestEnsurePortalSaverVersion_InvokesBarrierHelperOnVersionMismatch(t *testing.T) {
@@ -1654,10 +1647,7 @@ func TestSetBarrierLogger_IgnoresNilLogger(t *testing.T) {
 // non-absent I/O-error and call-ordering branches without filesystem fixtures.
 func installReadVersionFile(t *testing.T, fn func(string) (string, error)) {
 	t.Helper()
-	seam := tmux.PortalSaverReadVersionFileSeam()
-	prev := *seam
-	*seam = fn
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.PortalSaverReadVersionFileSeam(), fn)
 }
 
 func TestEnsurePortalSaverVersion_NotAlive_AbsentVersion_DoesNotKill(t *testing.T) {
@@ -2082,10 +2072,7 @@ func TestShouldKillSaverOnVersionDecision_PredicateMatrix(t *testing.T) {
 // duration of the test and restores it via t.Cleanup.
 func installWriteVersionFile(t *testing.T, fn func(string, string) error) {
 	t.Helper()
-	seam := tmux.PortalSaverWriteVersionFileSeam()
-	prev := *seam
-	*seam = fn
-	t.Cleanup(func() { *seam = prev })
+	swapSeam(t, tmux.PortalSaverWriteVersionFileSeam(), fn)
 }
 
 // defensiveWriteCall records one invocation of portalSaverWriteVersionFile.
