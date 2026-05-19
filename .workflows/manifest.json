@@ -68,6 +68,9 @@
     },
     "saver-kill-respawn-loop-leaks-daemons": {
       "work_type": "bugfix"
+    },
+    "drop-invalid-A-flag-from-attach-session-argv": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
