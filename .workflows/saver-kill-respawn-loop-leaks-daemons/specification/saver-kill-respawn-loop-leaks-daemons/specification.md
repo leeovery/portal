@@ -67,17 +67,22 @@ Rework the kill decision in `EnsurePortalSaverVersion` to consult `BootstrapAliv
 
 | Daemon alive? | Version file state | Versions match? | Action |
 |---|---|---|---|
-| Yes | Absent | (unknowable) | **No kill.** Write daemon.version defensively from bootstrap, then proceed to BootstrapPortalSaver. |
-| Yes | Present, reads cleanly | Match | **No kill.** Proceed to BootstrapPortalSaver. |
-| Yes | Present, reads cleanly | Mismatch (real upgrade) | **Kill.** Run `killSaverAndWaitForDaemon`, then BootstrapPortalSaver. |
+| Yes | (any) | Either side is `dev` or `""` | **Kill.** Dev-build short-circuit — preserves current behaviour (development workflows always recycle). |
+| Yes | Absent | (unknowable, neither dev) | **No kill.** Write daemon.version defensively from bootstrap, then proceed to BootstrapPortalSaver. |
+| Yes | Present, reads cleanly | Match (neither dev) | **No kill.** Proceed to BootstrapPortalSaver. |
+| Yes | Present, reads cleanly | Mismatch, neither dev (real upgrade) | **Kill.** Run `killSaverAndWaitForDaemon`, then BootstrapPortalSaver. |
 | Yes | Read error (non-absent I/O failure) | (unknowable) | **Kill.** Conservative — treat unknown I/O failure as needing recycle. |
 | No | (any) | (any) | **No kill needed.** No daemon to recycle. Proceed to BootstrapPortalSaver. |
+
+The dev-build rule is the first row evaluated when the daemon is alive — it short-circuits the rest of the matrix. The "no daemon" branch is unaffected by dev semantics (nothing to recycle).
+
+**No new function signature.** `EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error` already takes `stateDir` as a parameter. `BootstrapAliveCheck` is the existing package-level variable (already wired to `state.DaemonAlive`) and is invoked with that same `stateDir`. No caller-side signature changes propagate from this fix.
 
 `portalSaverVersionMismatch` keeps its current external shape but is **no longer the lone gate**. The alive-check classifies the situation first; the mismatch predicate is consulted only on the alive-with-readable-version branch.
 
 **Update the existing function comment.** The comment currently at `internal/tmux/portal_saver.go:232-241` explicitly encodes "ErrVersionFileAbsent counts as mismatch — for first-ever bootstrap or user-initiated state-dir cleanup" as intentional design. That invariant is being inverted by Change 1 (alive-check ordering is what captures the broader invariant; the predicate no longer treats absence as mismatch in isolation). The comment must be revised to reflect the new contract, otherwise it becomes a future trap for the next reader.
 
-**Defensive complement:** when bootstrap observes "alive daemon + absent `daemon.version`" on the survived path, write `daemon.version` from the bootstrap side before proceeding. This closes the lock-loser lifecycle hole (lock-loser daemons return cleanly before writing `daemon.version`, leaving the file observably absent until the next bootstrap repairs it).
+**Defensive complement:** when bootstrap observes "alive daemon + absent `daemon.version`" on the survived path, write `daemon.version` from the bootstrap side before proceeding. The string written is `currentVersion` — the same value `EnsurePortalSaverVersion` received as a parameter (injected at build time via `-ldflags -X github.com/leeovery/portal/cmd.version`). No comparison against the running daemon's actual binary is performed — the alive-check has already determined the daemon is healthy, and the user is responsible for an explicit recycle on intentional upgrades. In pathological cases where the alive daemon is running an older binary AND `daemon.version` was absent, the defensive write effectively asserts "the version going forward" rather than the daemon's actual version; any disagreement is resolved by the next legitimate recycle. This closes the lock-loser lifecycle hole (lock-loser daemons return cleanly before writing `daemon.version`, leaving the file observably absent until the next bootstrap repairs it).
 
 **What stays unchanged:**
 
@@ -90,7 +95,7 @@ Rework the kill decision in `EnsurePortalSaverVersion` to consult `BootstrapAliv
 
 ### Change 2 — Context-aware `captureAndCommit`
 
-**Target:** `cmd/state_daemon.go` — `defaultDaemonRun`, `tick`, `captureAndCommit`. Signature updates may propagate into `internal/state/capture.go` if the per-pane callers live there.
+**Target:** `cmd/state_daemon.go` only — `defaultDaemonRun`, `tick`, `captureAndCommit`. Signature changes are **local to this file**. The per-pane `state.CaptureAndHashPane` call is invoked directly from inside `captureAndCommit`'s loop (currently `cmd/state_daemon.go:152`), so the `ctx.Done()` check sits adjacent to that call in the same file. `internal/state/capture.go` is **not modified** — its `CaptureStructure` and `CaptureAndHashPane` signatures remain unchanged.
 
 **Required behaviour:**
 
@@ -100,7 +105,11 @@ This caps worst-case daemon-exit latency at **one pane's `capture-pane` wall tim
 
 **Cancellation semantics:**
 
-- Cancellation is observed **between per-pane iterations**, not mid-`capture-pane` invocation. An in-flight `tmux capture-pane` call completes before the cancel is honoured.
+- `ctx.Done()` is observed at three points inside `captureAndCommit`:
+  1. **Before pane enumeration begins** — checked at function entry, ensures cancellation while a tick is queued returns immediately.
+  2. **After enumeration, before the first per-pane iteration** — covers cancellation during the (fast) `CaptureStructure` call.
+  3. **Between per-pane iterations** — covers cancellation during the bulk of the work.
+- Cancellation is **not** honoured mid-`capture-pane` invocation. The `tmux list-panes` enumeration call and any in-flight `tmux capture-pane` invocation complete before the cancel is observed. These are single subprocess calls; `list-panes` is fast, and the per-pane `capture-pane` is bounded by one pane's scrollback (the resulting cap on worst-case exit latency).
 - On cancellation, return early **without committing partial state**. The current tick is abandoned cleanly — no half-applied scrollback writes, no partial commit.
 - The outer `select { ticker.C / ctx.Done() }` loop continues to handle the no-tick-in-progress cancellation path. Its semantics are unchanged.
 - Shutdown flush behaviour (`daemonShutdownFunc`) is unchanged — it still runs on the cancelled-context path after the tick-loop returns.
@@ -129,6 +138,10 @@ Add a single DEBUG-level log entry inside `state.WriteVersionFile` capturing:
 - The version string being written
 - The caller's pid (`os.Getpid()`)
 - The destination path
+
+**Component:** `state.ComponentDaemon` (existing constant in `internal/state/logger.go`). Reasoning: `WriteVersionFile` lives in the `internal/state` package and is most commonly invoked from the daemon's startup path. The bootstrap-side defensive write (Change 1) also flows through the same helper; using `ComponentDaemon` keeps a single grep anchor regardless of caller.
+
+**Format anchor:** the log line MUST begin with `daemon.version write:` so future Defect 3 investigations can grep on a stable prefix. Example: `daemon.version write: version=0.5.0 pid=12345 path=/Users/x/.config/portal/state/daemon.version`. The exact `fmt` template is implementation choice, but the prefix is contract.
 
 No behavioural change. No additional file I/O, no new error paths, no return-shape changes. Pure instrumentation.
 
@@ -162,7 +175,7 @@ The fix is complete when **all** of the following observable conditions hold:
 
 3. **Single live daemon, no orphans.** `pgrep -f "portal state daemon"` returns exactly one PID after bootstrap, and that PID matches the one holding `daemon.lock` (verifiable via `lsof daemon.lock`).
 
-4. **`daemon.version` is repaired defensively.** If a bootstrap encounters "alive daemon + absent `daemon.version`", the file exists after bootstrap completes and contains the current binary version.
+4. **`daemon.version` is repaired defensively on the survived-daemon path.** If a bootstrap encounters "alive daemon + absent `daemon.version`" and takes the no-kill branch, the file exists synchronously after `EnsurePortalSaverVersion` returns and contains `currentVersion`. (On the kill-respawn path, the fresh daemon writes `daemon.version` asynchronously after acquiring `daemon.lock` — a brief window of observable absence is acceptable on that path. Integration tests for the kill-respawn path must wait for the new daemon's write rather than asserting synchronous presence.)
 
 5. **~520ms reclaimed.** Wall-time of `portal hooks list` against an already-running tmux server with a healthy saver no longer includes the kill-respawn block. (Informational — not a hard regression test, but the developer should verify the improvement empirically.)
 
@@ -186,7 +199,9 @@ The fix is complete when **all** of the following observable conditions hold:
 
 #### Unit tests
 
-**`portalSaverVersionMismatch` table tests** — the existing test pinning false-positive behaviour must be **replaced** (it codifies the bug as contract). New cases:
+**`portalSaverVersionMismatch` table tests** — the existing test's assertions are preserved (the predicate still returns `true` for absent), but its framing must be **reworked**, not deleted: rename the test and update its documentation so it no longer claims "absent counts as version mismatch" as a load-bearing contract. The predicate's `absent → true` verdict is still valid at the predicate layer; what changes is that `EnsurePortalSaverVersion` no longer drives the kill decision from the predicate alone — the alive-check ordering (covered by the new `EnsurePortalSaverVersion` tests below) is now the authoritative gate.
+
+Cases the reframed table must cover:
 
 | Stored | Current | Read error | Expected |
 |---|---|---|---|
@@ -217,7 +232,12 @@ The fix is complete when **all** of the following observable conditions hold:
 
 2. **"Daemon mid-tick, SIGHUP arrives"** → on a fixture with multiple panes loaded with synthetic scrollback, send SIGHUP while a tick is in progress. The daemon process exits within a bounded window (target: under 2s on the test fixture). The 2s figure is a **heuristic threshold**, not anchored to a fresh measurement — no fresh wall-time measurement of one pane's `capture-pane` invocation against a representative scrollback fixture was taken during the investigation. Implementation should take that measurement and either confirm 2s as appropriate or adjust the threshold from the measurement. Pins Defect 2's responsiveness contract.
 
-3. **"Lock-loser daemon's pane exit destroys `_portal-saver` session"** → force the lock contention scenario (spawn a second daemon while the first holds the lock) and assert the chain: lock-loser exits → pane process terminates → `_portal-saver` session is destroyed → `SetSessionOption` fails with "no such session". Closes synthesis-flagged gap from investigation: confirms the cascade is what we believe before the fix lands.
+3. **"Lock-loser daemon's pane exit destroys `_portal-saver` session"** → uses **fault injection** to force the lock contention scenario: a sentinel process holds `daemon.lock` (via `state.AcquireDaemonLock` in a test goroutine), then `BootstrapPortalSaver` is invoked. The test asserts the chain:
+   - The new daemon's process exits cleanly within a bounded window (target: under 1s).
+   - `tmux has-session -t _portal-saver` returns failure after the daemon process exits (poll with 100ms tick, 2s ceiling).
+   - The immediately-following `SetSessionOption(_portal-saver, destroy-unattached, off)` returns `exit status 1` containing the substring `no such session`.
+
+   Observation mechanism: combination of process-wait + `has-session` polling + direct call assertion. Post-fix, this test continues to pass because the conditions for the cascade (forced lock contention) remain reachable via the fault-injection harness — only the *natural* trigger (kill-barrier giving up early) is eliminated. The test is a permanent regression guard on the cascade chain, not on the conditions that trigger it. Closes synthesis-flagged gap from investigation.
 
 #### Regression preservation
 
@@ -252,7 +272,7 @@ The following are explicitly **not** part of this bugfix and should not be addre
 #### Fix complexity
 
 - **Change 1:** ~30 lines across `internal/tmux/portal_saver.go` — predicate refactor + alive-check threading + defensive `WriteVersionFile` call on the survived path.
-- **Change 2:** ~20 lines in `cmd/state_daemon.go` plus signature updates that may propagate into `internal/state/capture.go` per-pane callers.
+- **Change 2:** ~20 lines, all within `cmd/state_daemon.go`. No changes to `internal/state/capture.go`.
 - **Change 3:** ~1 line — a `logger.Debug(...)` call inside `state.WriteVersionFile`.
 - **Test updates** dominate the diff (table-test expansion, new integration fixtures).
 

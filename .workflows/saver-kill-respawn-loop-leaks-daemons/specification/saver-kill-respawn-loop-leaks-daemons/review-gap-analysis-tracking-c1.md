@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-19
 cycle: 1
 phase: Gap Analysis
@@ -7,6 +7,17 @@ topic: saver-kill-respawn-loop-leaks-daemons
 ---
 
 # Review Tracking: saver-kill-respawn-loop-leaks-daemons - Gap Analysis
+
+**Resolution summary:** All 9 findings auto-applied under auto-mode (carried from input-review phase). Concrete content was formulated for each gap and added to the specification. Highlights:
+- F1: Dev-build rows added to Change 1 decision matrix; dev short-circuits the alive-check.
+- F2: Documented that `stateDir` is already a parameter to `EnsurePortalSaverVersion`; no signature change.
+- F3: Defensive write uses `currentVersion`; the daemon's actual binary version is not probed.
+- F4: Three explicit `ctx.Done()` observation points listed (entry, post-enumeration, between iterations).
+- F5: Breadcrumb logs under `state.ComponentDaemon` with stable `daemon.version write:` prefix as grep anchor.
+- F6: Criterion #4 scoped to survived path; kill-respawn path explicitly allows brief absence.
+- F7: Integration test #3 reframed as fault-injection with concrete observation mechanisms.
+- F8: Change 2 signature claim made definitive — local to `cmd/state_daemon.go`, no propagation to `internal/state/capture.go`.
+- F9: Existing predicate test is reframed (rename + redoc), not deleted; assertions preserved.
 
 ## Findings
 
