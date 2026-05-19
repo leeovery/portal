@@ -34,12 +34,16 @@
           "format": "tick",
           "spec_commit": "3ede058ec2ca0a756ca8cf48736546dd4dcf7535",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "saver-kill-respawn-loop-leaks-daemons-1-1",
-          "task_map": {}
+          "task": "saver-kill-respawn-loop-leaks-daemons-1-2",
+          "task_map": {
+            "saver-kill-respawn-loop-leaks-daemons-1": "tick-753c11",
+            "saver-kill-respawn-loop-leaks-daemons-1-1": "tick-c911bf"
+          },
+          "external_id": "tick-2ab8a7"
         }
       }
     }
