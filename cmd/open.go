@@ -76,11 +76,7 @@ type AttachConnector struct {
 
 // Connect replaces the current process with tmux attach-session.
 //
-// The exec'd argv is `tmux attach-session -A -t =<name>`:
-//   - `-A` enables tmux's atomic create-or-attach semantics (the session
-//     is created if absent, attached otherwise). This is also the residual
-//     fallback for the TOCTOU window between has-session and connector
-//     handoff described in spec § Session-killed-externally bail path.
+// The exec'd argv is `tmux attach-session -t =<name>`:
 //   - `=` prefixes the target so tmux uses exact-match resolution rather
 //     than prefix match — uniform with HasSession / SelectWindow /
 //     SelectPane / SwitchClient. See spec § Pre-select + attach sequence
@@ -98,7 +94,7 @@ func (ac *AttachConnector) Connect(name string) error {
 	if ex == nil {
 		ex = &realExecer{}
 	}
-	return ex.Exec(tmuxPath, []string{"tmux", "attach-session", "-A", "-t", "=" + name}, os.Environ())
+	return ex.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", "=" + name}, os.Environ())
 }
 
 // buildSessionConnector returns the appropriate SessionConnector based on
