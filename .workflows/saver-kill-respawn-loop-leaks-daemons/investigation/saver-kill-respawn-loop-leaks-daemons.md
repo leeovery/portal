@@ -254,7 +254,77 @@ Code analysis enumerated every production file-removal path that could touch sta
 
 ## Fix Direction
 
-*To be populated during Step 8 (Findings Review & Fix Discussion).*
+### Chosen Approach
+
+Two coordinated structural changes plus a thin instrumentation add-on for the open Defect 3.
+
+**Change 1 — Trust an alive daemon over a missing-version reading (Defect 1).**
+
+Rework `EnsurePortalSaverVersion` (`internal/tmux/portal_saver.go:249`) to consult `BootstrapAliveCheck(stateDir)` **first**. If a daemon is alive AND the version file is absent OR reads cleanly with a matching version, skip the kill entirely. Only kill on a real version disagreement (stored present, non-dev, non-matching) or on a non-`ErrVersionFileAbsent` I/O error. `portalSaverVersionMismatch` keeps its current shape but is no longer the lone gate — the alive-check classifies the situation first, and the mismatch predicate is consulted only when there's no live daemon or the daemon's version is genuinely different.
+
+Defensive complement: when bootstrap observes "alive daemon + absent daemon.version" on the survived path, write daemon.version from the bootstrap side. Closes the lock-loser-doesn't-write lifecycle hole so the file is never observably absent.
+
+**Change 2 — Make `captureAndCommit` context-aware (Defect 2).**
+
+Thread `ctx` into `captureAndCommit` (`cmd/state_daemon.go:132`) and the per-pane loop. Check `ctx.Done()` between per-pane iterations of the structural-index loop. On cancellation, return early. This caps the worst-case daemon-exit latency at "one pane's `capture-pane` wall time" rather than "all panes' aggregated wall time", regardless of the user's scrollback profile.
+
+The structural fix preferred over raising `killBarrierTimeout`: a larger timeout defers the next profile-growth failure but doesn't resolve the underlying contract violation (daemon must exit promptly on SIGHUP). The prior fix's barrier remains correct on the bootstrap side; this change makes the daemon side correct.
+
+**Change 3 — Debug breadcrumb on daemon.version writes (Defect 3, instrumentation only).**
+
+Add a DEBUG-level log entry on `state.WriteVersionFile` capturing the caller and pid. No behavioural change. The next time the file disappears, the log gives a paper trail. If the file never disappears in a fresh `portal.log` after Changes 1 and 2 ship, the answer to Defect 3 may simply be "an external/manual cleanup that won't recur" — and the breadcrumb confirms or refutes that without needing a follow-up investigation.
+
+**Deciding factor:** the user asked for a coherent single-PR fix that hardens both layers (bootstrap decision + daemon responsiveness) rather than patching just the symptom. Changes 1 and 2 are independently sufficient for the user-visible loop to stop firing — together they restore correctness on both sides of the contract. Change 3 is cheap insurance against Defect 3 being a real recurring bug rather than a one-off.
+
+### Options Explored
+
+- **Defect 1, alternative A: Distinguish `ErrVersionFileAbsent` inside `portalSaverVersionMismatch` only.** Smallest change — `if errors.Is(readErr, state.ErrVersionFileAbsent) { return false }` and otherwise keep current behaviour. **Rejected** — narrows the symptom (file absent → no kill) but misses the broader point: a healthy daemon should never be killed for a missing version marker regardless of *why* the file is missing. The alive-check ordering change captures the broader invariant.
+
+- **Defect 2, alternative X: Raise `killBarrierTimeout` from 5s to 10s.** Smaller blast radius, no daemon-internal changes. **Rejected** — defers the next failure rather than fixing it. The prior bugfix already shipped 5s with margin against a measured 3.9s sweep; the user's profile grew past that bound within months. Re-sizing without making the daemon ctx-aware repeats the same mistake.
+
+- **Defect 2, alternative Y: Bound `tmux capture-pane -S` to a fixed line count (e.g. `-S -3000`).** Caps the per-pane work directly. **Rejected** — changes scrollback semantics (we'd save less history than the user expects) and is the wrong layer for this fix. Capture-pane bounding may be worth a separate scoping discussion but doesn't belong in the SIGHUP-responsiveness fix.
+
+- **Defect 2, alternative Z: Move per-pane work onto a goroutine with a cancellable channel.** More structural change. **Rejected** — heavier than the in-line `ctx.Done()` check, introduces new concurrency surface, doesn't improve worst-case exit latency over the inline approach.
+
+- **Defect 3, alternative: Investigate the deleter as a hard prerequisite.** Block this fix until we've reproduced the disappearance and identified the culprit. **Rejected** — code-trace exhaustively ruled out portal's own production paths; further investigation would require instrumented in-the-wild reproduction over days. Fix 1 makes the disappearance non-load-bearing for the user-visible symptom; Fix 3's breadcrumb gives us instrumentation if recurrence happens.
+
+- **Bundle hook-registration redundancy fix into this work unit.** Both bugs make portal startup slow. **Rejected** — orthogonal mechanism (`internal/tmux/hooks_register.go`), orthogonal symptom (no orphan leak, no save pause), already logged separately (`.workflows/.inbox/bugs/2026-05-19--redundant-show-hooks-during-bootstrap-hook-registration.md`). Bundling would risk muddying review scope.
+
+### Discussion
+
+The user asked whether this bug is the reason portal takes 3–6s to boot. Honest answer was "partly" — ~520ms of the 3.2s steady-state belongs to this bug, ~1.5s belongs to the hook-registration redundancy, and the TUI loading floor (`LoadingMinDuration = 1.2s`) layers on top when going through the TUI path. That breakdown shaped the scoping: this bug stays focused on the kill-respawn loop and orphan leak (correctness + ~520ms perf), the hook-registration win is logged as a separate bugfix in the inbox.
+
+Synthesis agent (high confidence, 3 gaps) confirmed every defect claim against source. The three gaps it surfaced:
+
+1. **Defect 3 mechanism unidentified** — addressed in scope via the Change-3 breadcrumb. Not blocking.
+2. **No empirical verification of the lock-loser-pane-exit → session-destroyed chain** — should be addressed by a new integration test in the spec phase.
+3. **No fresh wall-time measurement of the current cold sweep** — informational, not blocking. The spec may want a measurement to size any test timeouts.
+
+The prior bugfix (`multiple-state-daemons-running-concurrently`, completed 2026-05-11) introduced the `daemon.lock` flock and the `killSaverAndWaitForDaemon` barrier this bug is exercising. Its analysis was correct for the conditions it tested against — the 5s timeout was sized to a measured 3.9s cold sweep with margin. The current bug is the next layer: the timeout was a band-aid over a daemon that doesn't exit promptly, and the band-aid no longer fits. The fix completes the contract the prior bug started.
+
+### Testing Recommendations
+
+Unit:
+
+- `portalSaverVersionMismatch` table tests: alive + absent + matching version → no kill; alive + present + matching → no kill; alive + present + mismatching → kill; dead + any → kill (current behaviour preserved for the no-daemon path). The existing test must be replaced — it codifies the false-positive return as correct.
+- `EnsurePortalSaverVersion` ordering tests: assert `BootstrapAliveCheck` is consulted before the kill decision.
+- `captureAndCommit` ctx-cancellation tests: assert early return on cancellation between per-pane iterations.
+
+Integration (real tmux fixture):
+
+- "Alive daemon, daemon.version absent, current and stored versions match" → bootstrap completes without firing the kill barrier. Pins Defect 1's user-visible contract.
+- "Daemon mid-tick, SIGHUP arrives" → daemon process exits within a bounded window (1–2s) regardless of pane count. Pins Defect 2's responsiveness contract.
+- "Lock-loser daemon's pane exit destroys `_portal-saver` session" → fixture asserts the chain is what we believe it is. Closes synthesis gap #2.
+
+Regression preservation:
+
+- Existing `multiple-state-daemons-running-concurrently` tests must remain green. The lock primitive and the kill-barrier loop are not being changed.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium. Change 1 is ~30 lines across `portal_saver.go` (predicate refactor + alive-check threading). Change 2 is ~20 lines in `state_daemon.go` + signature updates in `internal/state/capture.go`. Change 3 is a one-line `Debug` call. Test updates dominate the diff.
+- **Regression risk:** Low. The lock primitive stays unchanged; both fixes are local refactors of decision logic and loop interruptibility. The version-mismatch alive-check ordering is additive — it gates the existing kill branch with one new condition; the no-daemon path is unchanged.
+- **Recommended approach:** Regular release. No hotfix needed — the symptom is recoverable (kill the orphan daemons manually, daemon.version gets written on next clean bootstrap), the impact is performance + silent save pause rather than data corruption.
 
 ---
 
