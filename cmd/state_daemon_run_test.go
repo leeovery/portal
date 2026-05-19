@@ -197,6 +197,53 @@ func makeDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonDeps {
 	}
 }
 
+// sentinelIndex returns a fixed-shape *state.Index distinguishable by name.
+// Used as a seed for deps.PrevIndex so post-call assertions can verify the
+// pointer was (or was not) replaced by captureAndCommit. The exact shape is
+// not load-bearing — it just needs to be obviously distinct from any fixture-
+// driven capture so a stale reference is easy to spot.
+func sentinelIndex(name string) *state.Index {
+	return &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    name,
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+}
+
+// assertNoCommit asserts the two invariants of the "captureAndCommit returned
+// without committing" outcome:
+//
+//  1. deps.PrevIndex pointer is unchanged (still references sentinel).
+//  2. sessions.json does not exist in stateDir.
+//
+// Used by the cancellation-path tests where captureAndCommit must short-circuit
+// without mutating PrevIndex or writing the commit artifact.
+func assertNoCommit(t *testing.T, deps *daemonDeps, sentinel *state.Index, stateDir string) {
+	t.Helper()
+	if deps.PrevIndex != sentinel {
+		t.Errorf("PrevIndex pointer replaced; want sentinel preserved")
+	}
+	if _, err := os.Stat(state.SessionsJSON(stateDir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json written when no commit expected; stat err = %v", err)
+	}
+}
+
+// assertCommitReplacedPrev is the peer of assertNoCommit for the happy-path
+// regression guard: captureAndCommit must replace deps.PrevIndex with a fresh
+// non-nil pointer (not merely mutate the sentinel's contents).
+func assertCommitReplacedPrev(t *testing.T, deps *daemonDeps, sentinel *state.Index, stateDir string) {
+	t.Helper()
+	if deps.PrevIndex == sentinel {
+		t.Errorf("PrevIndex pointer not replaced; still references sentinel")
+	}
+	if deps.PrevIndex == nil {
+		t.Fatal("PrevIndex is nil after successful capture; expected new &idx")
+	}
+	_ = stateDir // reserved for future on-disk assertions; kept for signature parity with assertNoCommit
+}
+
 // touchSaveRequested creates an empty save.requested in dir.
 func touchSaveRequested(t *testing.T, dir string) {
 	t.Helper()
@@ -877,13 +924,7 @@ func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.
 	// Seed PrevIndex with a sentinel value distinct from anything the fixture
 	// will produce, so we can prove the pointer was replaced (not merely
 	// mutated to equivalent contents).
-	sentinelPrev := &state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{{
-			Name:    "sentinel-must-be-replaced",
-			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
-		}},
-	}
+	sentinelPrev := sentinelIndex("sentinel-must-be-replaced")
 	deps := makeDeps(t, dir, fc)
 	deps.PrevIndex = sentinelPrev
 
@@ -892,12 +933,7 @@ func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.
 	}
 
 	// (1) PrevIndex pointer replacement.
-	if deps.PrevIndex == sentinelPrev {
-		t.Errorf("PrevIndex pointer not replaced; still references seed sentinel")
-	}
-	if deps.PrevIndex == nil {
-		t.Fatal("PrevIndex is nil after successful capture; expected new &idx")
-	}
+	assertCommitReplacedPrev(t, deps, sentinelPrev, dir)
 	if len(deps.PrevIndex.Sessions) != 2 {
 		t.Errorf("PrevIndex.Sessions length = %d; want 2", len(deps.PrevIndex.Sessions))
 	}
@@ -966,13 +1002,7 @@ func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
 	}
 
 	// Seed PrevIndex with a sentinel — assertion target for "unchanged".
-	sentinelPrev := &state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{{
-			Name:    "sentinel-must-be-preserved",
-			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
-		}},
-	}
+	sentinelPrev := sentinelIndex("sentinel-must-be-preserved")
 	deps := makeDeps(t, dir, fc)
 	deps.PrevIndex = sentinelPrev
 
@@ -998,15 +1028,8 @@ func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
 		t.Errorf("capture-pane invoked on pre-cancelled ctx: %v", got)
 	}
 
-	// PrevIndex pointer unchanged — no commit-side mutation.
-	if deps.PrevIndex != sentinelPrev {
-		t.Errorf("PrevIndex pointer replaced on pre-cancelled ctx; want sentinel preserved")
-	}
-
-	// No commit — sessions.json must not exist.
-	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
-		t.Errorf("sessions.json written on pre-cancelled ctx; stat err = %v", err)
-	}
+	// PrevIndex pointer unchanged + no commit on disk.
+	assertNoCommit(t, deps, sentinelPrev, dir)
 }
 
 // TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork
@@ -1053,13 +1076,7 @@ func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t
 	}
 
 	// Seed PrevIndex with a sentinel — assertion target for "unchanged".
-	sentinelPrev := &state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{{
-			Name:    "sentinel-must-be-preserved",
-			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
-		}},
-	}
+	sentinelPrev := sentinelIndex("sentinel-must-be-preserved")
 	deps := makeDeps(t, dir, fc)
 	deps.PrevIndex = sentinelPrev
 
@@ -1111,15 +1128,8 @@ func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t
 		}
 	}
 
-	// PrevIndex pointer unchanged — no post-loop replacement.
-	if deps.PrevIndex != sentinelPrev {
-		t.Errorf("PrevIndex pointer replaced on mid-CaptureStructure cancel; want sentinel preserved")
-	}
-
-	// No commit — sessions.json must not exist.
-	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
-		t.Errorf("sessions.json written on mid-CaptureStructure cancel; stat err = %v", err)
-	}
+	// PrevIndex pointer unchanged + no commit on disk.
+	assertNoCommit(t, deps, sentinelPrev, dir)
 }
 
 // TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed covers observation
@@ -1159,13 +1169,7 @@ func TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed(t *testing.T) {
 		},
 	}
 
-	sentinelPrev := &state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{{
-			Name:    "sentinel-must-be-preserved",
-			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
-		}},
-	}
+	sentinelPrev := sentinelIndex("sentinel-must-be-preserved")
 	deps := makeDeps(t, dir, fc)
 	deps.PrevIndex = sentinelPrev
 
@@ -1195,18 +1199,11 @@ func TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed(t *testing.T) {
 		t.Errorf("capture-pane invoked %d times; want fewer than 3 (mid-loop cancel should short-circuit): %v", len(captureCalls), captureCalls)
 	}
 
-	// PrevIndex pointer unchanged — no post-loop replacement.
-	if deps.PrevIndex != sentinelPrev {
-		t.Errorf("PrevIndex pointer replaced on mid-loop cancel; want sentinel preserved")
-	}
-
-	// No commit — sessions.json must not exist. Per-pane scrollback files
-	// from completed iterations MAY remain on disk; that is intentional
+	// PrevIndex pointer unchanged + no commit on disk. Per-pane scrollback
+	// files from completed iterations MAY remain on disk; that is intentional
 	// (atomic writes, no rollback), and the spec's no-partial-commit
 	// invariant is about sessions.json, not per-pane files.
-	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
-		t.Errorf("sessions.json written on mid-loop cancel; stat err = %v", err)
-	}
+	assertNoCommit(t, deps, sentinelPrev, dir)
 }
 
 // TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
@@ -1237,13 +1234,7 @@ func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
 		},
 	}
 
-	sentinelPrev := &state.Index{
-		Version: state.SchemaVersion,
-		Sessions: []state.Session{{
-			Name:    "sentinel-must-be-replaced",
-			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
-		}},
-	}
+	sentinelPrev := sentinelIndex("sentinel-must-be-replaced")
 	deps := makeDeps(t, dir, fc)
 	deps.PrevIndex = sentinelPrev
 
@@ -1270,10 +1261,5 @@ func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
 	}
 
 	// PrevIndex pointer replaced.
-	if deps.PrevIndex == sentinelPrev {
-		t.Errorf("PrevIndex pointer not replaced on successful capture; still references sentinel")
-	}
-	if deps.PrevIndex == nil {
-		t.Fatal("PrevIndex is nil after successful capture; expected new &idx")
-	}
+	assertCommitReplacedPrev(t, deps, sentinelPrev, dir)
 }
