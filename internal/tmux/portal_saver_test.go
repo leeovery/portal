@@ -103,6 +103,81 @@ func countCalls(calls [][]string, name string) int {
 	return n
 }
 
+// assertKillBeforeNew scans calls for the first kill-session and first
+// new-session arg-set and asserts the kill index precedes the new-session
+// index. Fails the test if either command is missing or if order is reversed.
+func assertKillBeforeNew(t *testing.T, calls [][]string) {
+	t.Helper()
+	killIdx, newIdx := -1, -1
+	for i, c := range calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "kill-session":
+			if killIdx == -1 {
+				killIdx = i
+			}
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		}
+	}
+	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
+		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, calls)
+	}
+}
+
+func TestAssertKillBeforeNew_PassesWhenKillPrecedesNew(t *testing.T) {
+	stub := &testing.T{}
+	calls := [][]string{
+		{"has-session", "-t", "_portal-saver"},
+		{"kill-session", "-t", "_portal-saver"},
+		{"new-session", "-d", "-s", "_portal-saver"},
+	}
+	assertKillBeforeNew(stub, calls)
+	if stub.Failed() {
+		t.Errorf("expected no failure when kill precedes new, got Failed()=true")
+	}
+}
+
+func TestAssertKillBeforeNew_FailsWhenKillMissing(t *testing.T) {
+	stub := &testing.T{}
+	calls := [][]string{
+		{"has-session", "-t", "_portal-saver"},
+		{"new-session", "-d", "-s", "_portal-saver"},
+	}
+	assertKillBeforeNew(stub, calls)
+	if !stub.Failed() {
+		t.Errorf("expected failure when kill-session is missing, got Failed()=false")
+	}
+}
+
+func TestAssertKillBeforeNew_FailsWhenNewMissing(t *testing.T) {
+	stub := &testing.T{}
+	calls := [][]string{
+		{"has-session", "-t", "_portal-saver"},
+		{"kill-session", "-t", "_portal-saver"},
+	}
+	assertKillBeforeNew(stub, calls)
+	if !stub.Failed() {
+		t.Errorf("expected failure when new-session is missing, got Failed()=false")
+	}
+}
+
+func TestAssertKillBeforeNew_FailsWhenNewPrecedesKill(t *testing.T) {
+	stub := &testing.T{}
+	calls := [][]string{
+		{"new-session", "-d", "-s", "_portal-saver"},
+		{"kill-session", "-t", "_portal-saver"},
+	}
+	assertKillBeforeNew(stub, calls)
+	if !stub.Failed() {
+		t.Errorf("expected failure when new-session precedes kill-session, got Failed()=false")
+	}
+}
+
 func TestBootstrapPortalSaver_CreatesOnFreshServer(t *testing.T) {
 	stubAliveCheck(t, false) // irrelevant when session absent
 	shrinkRetryDelay(t)
@@ -197,23 +272,7 @@ func TestBootstrapPortalSaver_KillsAndRecreatesWhenSessionExistsButDaemonDead(t 
 		t.Errorf("expected 1 set-option call, got %d", got)
 	}
 
-	// Order check: kill-session must precede new-session.
-	killIdx, newIdx := -1, -1
-	for i, c := range mock.Calls {
-		switch c[0] {
-		case "kill-session":
-			if killIdx == -1 {
-				killIdx = i
-			}
-		case "new-session":
-			if newIdx == -1 {
-				newIdx = i
-			}
-		}
-	}
-	if killIdx >= newIdx {
-		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
-	}
+	assertKillBeforeNew(t, mock.Calls)
 }
 
 // TestBootstrapPortalSaver_RecoversFromFlockLoserEmptySession exercises the
@@ -291,23 +350,7 @@ func TestBootstrapPortalSaver_RecoversFromFlockLoserDeadPaneSession(t *testing.T
 		t.Errorf("expected 1 set-option call, got %d (calls: %v)", got, mock.Calls)
 	}
 
-	// Order check: kill-session must precede new-session.
-	killIdx, newIdx := -1, -1
-	for i, c := range mock.Calls {
-		switch c[0] {
-		case "kill-session":
-			if killIdx == -1 {
-				killIdx = i
-			}
-		case "new-session":
-			if newIdx == -1 {
-				newIdx = i
-			}
-		}
-	}
-	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
-		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
-	}
+	assertKillBeforeNew(t, mock.Calls)
 }
 
 func TestBootstrapPortalSaver_AlwaysSetsDestroyUnattachedOff(t *testing.T) {
@@ -665,23 +708,7 @@ func TestEnsurePortalSaverVersion_KillsAndRecreatesWhenStoredDiffersFromCurrent(
 		t.Errorf("expected exactly 1 set-option call, got %d", scenario.setOptionCalls)
 	}
 
-	// Order check: kill-session must precede new-session.
-	killIdx, newIdx := -1, -1
-	for i, c := range mock.Calls {
-		switch c[0] {
-		case "kill-session":
-			if killIdx == -1 {
-				killIdx = i
-			}
-		case "new-session":
-			if newIdx == -1 {
-				newIdx = i
-			}
-		}
-	}
-	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
-		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
-	}
+	assertKillBeforeNew(t, mock.Calls)
 }
 
 func TestEnsurePortalSaverVersion_AlwaysRestartsWhenCurrentIsEmpty(t *testing.T) {
@@ -1519,22 +1546,7 @@ func TestBootstrapPortalSaver_PreservesKillBeforeNewSessionOrderThroughBarrier(t
 		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
 	}
 
-	killIdx, newIdx := -1, -1
-	for i, c := range mock.Calls {
-		switch c[0] {
-		case "kill-session":
-			if killIdx == -1 {
-				killIdx = i
-			}
-		case "new-session":
-			if newIdx == -1 {
-				newIdx = i
-			}
-		}
-	}
-	if killIdx == -1 || newIdx == -1 || killIdx >= newIdx {
-		t.Errorf("kill-session at %d must precede new-session at %d (calls: %v)", killIdx, newIdx, mock.Calls)
-	}
+	assertKillBeforeNew(t, mock.Calls)
 }
 
 // TestBootstrapPortalSaver_ToleratesBarrierWarnOnTimeoutPath confirms that
