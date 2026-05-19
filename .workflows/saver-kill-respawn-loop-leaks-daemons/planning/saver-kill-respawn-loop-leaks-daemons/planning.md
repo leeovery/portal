@@ -92,3 +92,13 @@ approved_at: 2026-05-19
 | saver-kill-respawn-loop-leaks-daemons-4-1 | Update stale `portalSaverVersionMismatch` references in integration-test doc comments | none |
 | saver-kill-respawn-loop-leaks-daemons-4-2 | Decide and act on `restoretest` package scope drift | imports updated at all consumer sites (daemon, saver, TUI integration tests); CLAUDE.md package table reflects new scope; `restoretest` (if kept) contains only restore-domain helpers |
 | saver-kill-respawn-loop-leaks-daemons-4-3 | Collapse eight `install*` seam helpers into a single generic helper | `t.Cleanup` LIFO ordering preserved so seam-restore order is unchanged across the eight call sites |
+
+### Phase 5: Analysis (Cycle 3)
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-5-1 | Extract version-scenario and barrier-count test helpers in `portal_saver_test.go` | helper-definition site colocated near existing `versionScenario` type definition; 24 triplet call sites preserve their `sessionPresent` boolean per site; 12 barrier-count sites switch downstream assertions to pointer deref |
