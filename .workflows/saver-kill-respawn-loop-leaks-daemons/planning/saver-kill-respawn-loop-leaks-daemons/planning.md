@@ -80,3 +80,15 @@ approved_at: 2026-05-19
 | saver-kill-respawn-loop-leaks-daemons-3-4 | Extract `StagePortalBinary` helper to eliminate repeated build+PATH preamble across integration tests | PATH composition (binDir prepended) preserved; skip-on-build-failure and skip-on-LookPath-failure semantics preserved at four call sites |
 | saver-kill-respawn-loop-leaks-daemons-3-5 | Extract `sentinelIndex` + `assertNoCommit` helpers for `captureAndCommit` unchanged-pointer tests | pointer-identity assertion preserved (`deps.PrevIndex == sentinel`); `sessions.json` non-existence assertion preserved; peer `assertCommitReplacedPrev` for replaced-pointer case |
 | saver-kill-respawn-loop-leaks-daemons-3-6 | Extract `assertKillBeforeNew` helper for kill-before-new-session order checks | both `kill-session` and `new-session` must be present (helper fails if either missing); ordering assertion semantics preserved across four call sites |
+
+### Phase 4: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| saver-kill-respawn-loop-leaks-daemons-4-1 | Update stale `portalSaverVersionMismatch` references in integration-test doc comments | none |
+| saver-kill-respawn-loop-leaks-daemons-4-2 | Decide and act on `restoretest` package scope drift | imports updated at all consumer sites (daemon, saver, TUI integration tests); CLAUDE.md package table reflects new scope; `restoretest` (if kept) contains only restore-domain helpers |
+| saver-kill-respawn-loop-leaks-daemons-4-3 | Collapse eight `install*` seam helpers into a single generic helper | `t.Cleanup` LIFO ordering preserved so seam-restore order is unchanged across the eight call sites |

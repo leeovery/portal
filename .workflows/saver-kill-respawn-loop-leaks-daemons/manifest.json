@@ -60,7 +60,11 @@
             "saver-kill-respawn-loop-leaks-daemons-3-3": "tick-2e087b",
             "saver-kill-respawn-loop-leaks-daemons-3-4": "tick-12d9a8",
             "saver-kill-respawn-loop-leaks-daemons-3-5": "tick-0768be",
-            "saver-kill-respawn-loop-leaks-daemons-3-6": "tick-7d5ae1"
+            "saver-kill-respawn-loop-leaks-daemons-3-6": "tick-7d5ae1",
+            "saver-kill-respawn-loop-leaks-daemons-4": "tick-d24e3f",
+            "saver-kill-respawn-loop-leaks-daemons-4-1": "tick-88db34",
+            "saver-kill-respawn-loop-leaks-daemons-4-2": "tick-7bc0d8",
+            "saver-kill-respawn-loop-leaks-daemons-4-3": "tick-8dedac"
           },
           "external_id": "tick-2ab8a7"
         }

@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: saver-kill-respawn-loop-leaks-daemons (Cycle 2)
 
 ## Task 1: Update stale `portalSaverVersionMismatch` references in integration-test doc comments
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -31,7 +31,7 @@ sources: architecture
 - Re-run the existing integration tests around lines 105 and 170; no behavioural change expected.
 
 ## Task 2: Decide and act on `restoretest` package scope drift
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -58,7 +58,7 @@ sources: architecture
 - Run the full integration test suite touching daemon, saver, and any restore drivers to confirm no import or symbol breakage.
 
 ## Task 3: Collapse eight `install*` seam helpers into a single generic helper
-status: pending
+status: approved
 severity: low
 sources: duplication
 
