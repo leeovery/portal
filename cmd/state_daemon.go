@@ -164,6 +164,18 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	for _, sess := range idx.Sessions {
 		for _, win := range sess.Windows {
 			for _, pane := range win.Panes {
+				// observation point 3 of 3: between per-pane iterations; caps
+				// worst-case exit latency at one pane's capture-pane wall time.
+				// Returns before this iteration's CaptureAndHashPane. Per-pane
+				// scrollback writes from prior iterations in this cycle are not
+				// rolled back — they are atomic, and the spec's no-partial-commit
+				// invariant is about sessions.json, not per-pane files. See spec
+				// § Change 2.
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+				}
 				paneKey := state.SanitizePaneKey(sess.Name, win.Index, pane.Index)
 				if _, skipped := skipSet[paneKey]; skipped {
 					continue

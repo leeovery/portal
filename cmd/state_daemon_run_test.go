@@ -1121,3 +1121,159 @@ func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t
 		t.Errorf("sessions.json written on mid-CaptureStructure cancel; stat err = %v", err)
 	}
 }
+
+// TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed covers observation
+// point 3 of 3 (spec § Change 2 / Phase 2 Task 2-4): the ctx.Done() check at
+// the top of the innermost per-pane loop body. The test drives a multi-pane
+// fixture (1 session × 1 window × 3 panes) and cancels after the first pane's
+// capture-pane subcall fires — so observation point 3 fires before iteration
+// k+1 begins.
+//
+// Per-pane scrollback files from completed iterations may remain on disk
+// (atomic writes — no rollback). The spec's no-partial-commit invariant is
+// about sessions.json, not per-pane files (see spec § Change 2 Cancellation
+// semantics).
+//
+// Asserts:
+//  1. Returns nil (not an error — tick logs WARN on non-nil).
+//  2. capture-pane invoked at least once (the iteration that triggered the
+//     cancel) but fewer than 3 times (subsequent iterations short-circuit).
+//  3. sessions.json absent — Commit was not invoked.
+//  4. deps.PrevIndex pointer unchanged from its pre-call value (no
+//     post-loop replacement).
+func TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Single session, single window, three panes — exercises the innermost
+	// pane-iteration loop.
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
+			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",
+		captureByTarget: map[string]string{
+			"work:0.0": "work-pane-0-bytes",
+			"work:0.1": "work-pane-1-bytes",
+			"work:0.2": "work-pane-2-bytes",
+		},
+	}
+
+	sentinelPrev := &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    "sentinel-must-be-preserved",
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = sentinelPrev
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Wire the dispatch hook: cancel() fires after the first pane's
+	// capture-pane subcall. The current iteration completes its write; the
+	// next iteration's observation-point-3 check observes ctx.Done() and
+	// returns nil before invoking CaptureAndHashPane on pane 2.
+	fc.dispatchHook = func(args []string) {
+		if len(args) > 0 && args[0] == "capture-pane" {
+			cancel()
+		}
+	}
+
+	if err := captureAndCommit(ctx, deps); err != nil {
+		t.Errorf("captureAndCommit returned error on mid-loop cancel: %v; want nil", err)
+	}
+
+	// capture-pane invoked at least once but fewer than 3 times.
+	captureCalls := fc.callsContaining("capture-pane")
+	if len(captureCalls) < 1 {
+		t.Errorf("capture-pane invoked %d times; want at least 1", len(captureCalls))
+	}
+	if len(captureCalls) >= 3 {
+		t.Errorf("capture-pane invoked %d times; want fewer than 3 (mid-loop cancel should short-circuit): %v", len(captureCalls), captureCalls)
+	}
+
+	// PrevIndex pointer unchanged — no post-loop replacement.
+	if deps.PrevIndex != sentinelPrev {
+		t.Errorf("PrevIndex pointer replaced on mid-loop cancel; want sentinel preserved")
+	}
+
+	// No commit — sessions.json must not exist. Per-pane scrollback files
+	// from completed iterations MAY remain on disk; that is intentional
+	// (atomic writes, no rollback), and the spec's no-partial-commit
+	// invariant is about sessions.json, not per-pane files.
+	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
+		t.Errorf("sessions.json written on mid-loop cancel; stat err = %v", err)
+	}
+}
+
+// TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
+// is the regression guard for observation point 3 (spec § Change 2 / Phase 2
+// Task 2-4): the same multi-pane fixture as the mid-loop-cancel test, run
+// without any cancellation, must process every pane and commit fully. Pins
+// that observation point 3's `default:` arm does not silently short-circuit
+// the happy path.
+//
+// Asserts:
+//  1. Returns nil.
+//  2. capture-pane invoked exactly 3 times (one per pane).
+//  3. sessions.json exists and decodes to the captured index.
+//  4. deps.PrevIndex pointer replaced (no longer the sentinel).
+func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
+			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
+			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",
+		captureByTarget: map[string]string{
+			"work:0.0": "work-pane-0-bytes",
+			"work:0.1": "work-pane-1-bytes",
+			"work:0.2": "work-pane-2-bytes",
+		},
+	}
+
+	sentinelPrev := &state.Index{
+		Version: state.SchemaVersion,
+		Sessions: []state.Session{{
+			Name:    "sentinel-must-be-replaced",
+			Windows: []state.Window{{Index: 9, Name: "old", Panes: []state.Pane{{Index: 9, CWD: "/old"}}}},
+		}},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.PrevIndex = sentinelPrev
+
+	if err := captureAndCommit(context.Background(), deps); err != nil {
+		t.Fatalf("captureAndCommit returned error on uncancelled multi-pane fixture: %v", err)
+	}
+
+	captureCalls := fc.callsContaining("capture-pane")
+	if len(captureCalls) != 3 {
+		t.Errorf("capture-pane call count = %d; want 3 (one per pane): %v", len(captureCalls), captureCalls)
+	}
+
+	// sessions.json exists and decodes back to the captured index.
+	data, err := os.ReadFile(state.SessionsJSON(dir))
+	if err != nil {
+		t.Fatalf("sessions.json not written by commit: %v", err)
+	}
+	committed, err := state.DecodeIndex(data)
+	if err != nil {
+		t.Fatalf("decode committed sessions.json: %v", err)
+	}
+	if len(committed.Sessions) != 1 {
+		t.Errorf("committed sessions length = %d; want 1", len(committed.Sessions))
+	}
+
+	// PrevIndex pointer replaced.
+	if deps.PrevIndex == sentinelPrev {
+		t.Errorf("PrevIndex pointer not replaced on successful capture; still references sentinel")
+	}
+	if deps.PrevIndex == nil {
+		t.Fatal("PrevIndex is nil after successful capture; expected new &idx")
+	}
+}
