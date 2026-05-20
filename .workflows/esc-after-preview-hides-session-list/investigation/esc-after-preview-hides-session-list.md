@@ -59,23 +59,80 @@ The first `Esc` after returning from the preview puts the TUI into a hidden / em
 
 ### Code Trace
 
-_To be filled during code analysis._
+**Entry point:** `previewModel.Update` in `internal/tui/pagepreview.go:467` — `tea.KeyEsc` case returns `previewDismissedMsg{}`.
+
+**Execution path on the buggy Esc:**
+
+1. `internal/tui/pagepreview.go:467-468` — `tea.KeyEsc` in `previewModel.Update` returns `previewDismissedMsg{}` (single Esc keystroke; no second delivery).
+2. `internal/tui/model.go:954-974` — top-level Update receives `previewDismissedMsg`, captures `m.preview.session` and calls `m.exitPreviewToSessions(captured)`.
+3. `internal/tui/model.go:743-747` — `exitPreviewToSessions` sets `m.activePage = PageSessions`, zeros `m.preview`, returns the live-refresh `tea.Cmd` (`refreshSessionsAfterPreviewCmd`).
+4. Render tick: the Sessions page renders with the **existing** filtered list — at this exact moment the filter is still intact, cursor still on the previously-highlighted session.
+5. Refresh cmd resolves → emits `previewSessionsRefreshedMsg`.
+6. `internal/tui/model.go:1011-1023` — handler calls `m.applySessions(msg.Sessions)` then `m.reanchorSessionCursor(msg.PreserveName)` and returns `(m, nil)`.
+7. `internal/tui/model.go:660-668` — `applySessions` calls `m.sessionList.SetItems(ToListItems(filtered))` and **discards its returned `tea.Cmd`**.
+
+**Inside `bubbles/list.SetItems`** (`bubbles@v1.0.0/list.go:385-397`):
+
+```go
+func (m *Model) SetItems(i []Item) tea.Cmd {
+    var cmd tea.Cmd
+    m.items = i
+    if m.filterState != Unfiltered {
+        m.filteredItems = nil          // ← list is now visibly empty
+        cmd = filterItems(*m)          // ← async cmd we silently drop
+    }
+    m.updatePagination()
+    m.updateKeybindings()
+    return cmd
+}
+```
+
+When the committed filter is applied (`filterState == FilterApplied`), `SetItems`:
+- Nils out `m.filteredItems` immediately (next render shows 0 visible items)
+- Returns a `filterItems` cmd that asynchronously runs the filter against the new `m.items` and emits a `FilterMatchesMsg` (`bubbles@v1.0.0/list.go:1260-1284`) which the list's Update consumes (`bubbles@v1.0.0/list.go:833-835`) to repopulate `filteredItems`.
+
+Because `applySessions` discards this cmd, the `FilterMatchesMsg` never fires; `filteredItems` stays nil; the list renders empty while `filterState` is still `FilterApplied`.
+
+**Second Esc** (`internal/tui/model.go:1057` → bubbles list handleBrowsing path, `bubbles@v1.0.0/list.go:864-867`):
+
+```go
+case key.Matches(msg, m.KeyMap.ClearFilter):
+    m.resetFiltering()
+```
+
+Esc matches `KeyMap.ClearFilter` (which defaults to Esc) — `resetFiltering()` clears the filter text and sets `filterState = Unfiltered`. The list now renders unfiltered items; the committed filter is permanently gone.
+
+**Key files involved:**
+- `internal/tui/model.go` — `applySessions` (lines 660-668), `previewSessionsRefreshedMsg` handler (lines 1011-1023), `exitPreviewToSessions` (lines 743-747)
+- `internal/tui/pagepreview.go` — `previewModel.Update` Esc arm (line 467)
+- `github.com/charmbracelet/bubbles@v1.0.0/list/list.go` — `SetItems`, `filterItems`, `handleBrowsing`/ClearFilter
 
 ### Root Cause
 
-_To be filled during synthesis._
+`applySessions` calls `m.sessionList.SetItems(...)` and discards the `tea.Cmd` that `bubbles/list` returns. When a filter is applied at the moment of the call, `SetItems` synchronously nils `filteredItems` and defers re-filtering into the returned cmd. Dropping the cmd leaves the list in a "filter applied, filtered items empty" state that renders as a blank list.
+
+The bug only manifests on the preview-dismiss path because that is the only `applySessions` call site that can run with `filterState == FilterApplied` — the other call site (`SessionsMsg` handler at line 897) runs at boot-time, before any filter could be committed.
 
 ### Contributing Factors
 
-_To be filled._
+- `applySessions` was extracted as a "single canonical sequence" but its signature drops the cmd, making its caller-facing API silently lossy when a filter is applied.
+- The preview-dismiss refresh path (added in `enter-attaches-from-preview` for the externally-killed-session case) is the first realistic scenario in which `applySessions` can be called against a filtered list — the original `SessionsMsg`-only use was filter-naive.
+- The list's `SetItems` API has the well-known "returns a cmd you must propagate" shape; an analogous trap exists for `SetItem`, `InsertItem`, `RemoveItem` (lines 421, 435, 449 in bubbles list) — anywhere these are called without forwarding the cmd, a filtered list will go blank.
 
 ### Why It Wasn't Caught
 
-_To be filled._
+- The existing preview-dismiss tests (`pagepreview_dismiss_test.go`, `pagepreview_externalkill_test.go`) exercise the dismiss flow with no committed filter on the Sessions page. The specific keystroke sequence (`/` → type → `Enter` → `Space` → `Esc`) was not in the test surface.
+- The pre-existing `SessionsMsg` callsite happened to be safe because filter state was Unfiltered at boot-time, masking the latent bug in `applySessions`'s lossy cmd handling.
+- Bubble Tea's "returns a cmd you must forward" pattern is easy to miss for void-returning helpers — there is no compile-time signal.
 
 ### Blast Radius
 
-_To be filled._
+**Directly affected:**
+- TUI Sessions page when dismissing the scrollback preview after committing a filter — the documented reproduction path.
+
+**Potentially affected (latent, not yet observed):**
+- The externally-killed-session-during-preview branch (`previewAttachBailMsg` handler, `internal/tui/model.go:975-993`) traverses the same `exitPreviewToSessions` → refresh → `applySessions` path. If preview was bailed (HasSessionProbe reported gone) while the Sessions page held a committed filter, the user would land on the same empty-list state. Not separately reported but would behave identically.
+- `applySessions` itself: if any future call site invokes it from a context where a filter might be applied, the same blank-list outcome would occur. The fix at `applySessions` covers all future call sites uniformly.
 
 ---
 

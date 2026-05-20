@@ -74,6 +74,9 @@
     },
     "space-dismisses-preview": {
       "work_type": "quick-fix"
+    },
+    "esc-after-preview-hides-session-list": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
