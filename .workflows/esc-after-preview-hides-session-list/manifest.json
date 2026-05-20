@@ -33,12 +33,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "42dddbdb99fa6a85e62dcfbf477ffa37e86d03c9",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "esc-after-preview-hides-session-list-1-1",
           "task_map": {}
         }
       }

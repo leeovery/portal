@@ -22,7 +22,8 @@ approved_at: 2026-05-20
 - [ ] `go test ./internal/tui/...` passes; no regressions in the wider suite.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-20
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
