@@ -20,3 +20,15 @@ approved_at: 2026-05-20
 - [ ] A new test in the kill-refresh flow exercises the filter-applied → `x` → confirm sequence via real keystrokes with wired `SessionKiller` and `SessionLister` seams, asserting `visibleSessionNames` slice equality against the expected filtered post-kill slice.
 - [ ] Boot path unchanged — initial unfiltered Sessions/Projects load renders identically to before (`SetItems` returns `nil` when filter state is `Unfiltered`; propagated cmd is a no-op).
 - [ ] `go test ./internal/tui/...` passes; no regressions in the wider suite.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| esc-after-preview-hides-session-list-1-1 | Extend test harness to drain propagated refilter cmd | helper must return unchanged when no sessionLister is wired; filter cmd returns nil when list is Unfiltered |
+| esc-after-preview-hides-session-list-1-2 | Add VisibleItems and cursor-index assertions to existing preview-Esc filter test | cursor preservation across asynchronous refilter round-trip; slice-equality not length-only |
+| esc-after-preview-hides-session-list-1-3 | Change applySessions signature to return tea.Cmd and propagate at both call sites | SetItems returns nil on unfiltered lists (boot path); previewAttachBailMsg covered transitively; no tea.Batch needed at either site |
+| esc-after-preview-hides-session-list-1-4 | Add kill-refresh-under-filter regression test | real keystroke path (no hand-crafted SessionsMsg); killed row absent from post-kill slice; filter retained through killAndRefresh |
+| esc-after-preview-hides-session-list-1-5 | Sweep WithInsideTmux and ProjectsLoadedMsg SetItems discard sites | WithInsideTmux runs pre-tea.NewProgram (no dispatcher); ProjectsLoadedMsg not reachable with a committed projects filter today |
+| esc-after-preview-hides-session-list-1-6 | Audit sibling bubbles/list mutator call sites (SetItem/InsertItem/RemoveItem) | any discovered site touching a filtered list; audit outcome captured even when empty |
