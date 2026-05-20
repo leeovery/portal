@@ -466,6 +466,8 @@ func (m previewModel) Update(msg tea.Msg) (previewModel, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEsc:
 			return m, func() tea.Msg { return previewDismissedMsg{} }
+		case tea.KeySpace:
+			return m, func() tea.Msg { return previewDismissedMsg{} }
 		// viewport.DefaultKeyMap (bubbles@v1.0.0) does not bind Home/End;
 		// preview must own them to satisfy the acceptance criterion that
 		// these keys jump to top/bottom inside the loaded buffer.
