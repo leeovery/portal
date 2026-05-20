@@ -93,6 +93,35 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 - **Regression risk:** Low — `SetItems` returns `nil` when filter state is `Unfiltered`, so all currently-unfiltered call paths are functionally unchanged. The change is strictly more correct, never less.
 - **Release:** Regular release, single PR. No feature flag, no hotfix urgency (UX friction only).
 
+### Test Coverage
+
+**Lock in the fix at the wrong-axis miss site:**
+
+- `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` (`internal/tui/pagepreview_refetch_test.go:270-301`) already exercises the exact buggy sequence (filter applied + `Space` + `Esc` with a wired `SessionLister` driving the refresh) but only asserts `FilterState`, `FilterValue`, and `IsFiltered`. **Add a `VisibleItems()` assertion** — use `visibleSessionNames(got)` (or equivalent helper already in the test package) and assert equality with the expected filtered slice. This is the single assertion that would have caught the bug and is what prevents the same wrong-axis miss recurring.
+
+**Cover the latent variant:**
+
+- Add a test in the kill-refresh flow that:
+  1. Applies a committed filter to the Sessions page.
+  2. Triggers the `x` kill-confirm modal flow against a filtered row.
+  3. Asserts the Sessions page still renders filtered items (via `VisibleItems()` / `visibleSessionNames`) after the resulting `SessionsMsg` round-trip.
+
+  Codifies the latent-variant coverage; ensures `killAndRefresh` going through `applySessions` retains the filter.
+
+**Existing test left unchanged:**
+
+- `TestPreviewEscPreservesCommittedFilter` (`internal/tui/pagepreview_dismiss_test.go:121-151`) correctly asserts filter retention; it just never reached `applySessions` (no wired `SessionLister`, and `pressSpaceThenEsc` discards the refresh cmd). Its assertions are still correct — no change needed. The new `VisibleItems()` assertion in `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` is the one that exercises the fix end-to-end.
+
+### Acceptance Criteria
+
+1. **Primary symptom resolved:** On the documented reproduction path (filter → commit → Space → Esc), the Sessions page renders the filtered list intact after the single `Esc` keystroke. The committed filter text is preserved; matching rows remain visible; the previously-highlighted row remains the cursor.
+2. **Latent variants resolved:** Killing a session via `x` while a filter is applied leaves the filtered list rendered after the refresh. Renaming a session via `r` while a filter is applied leaves the filtered list rendered after the refresh. Externally-killed-during-preview bail (`previewAttachBailMsg`) leaves the filtered list rendered after the refresh.
+3. **Boot path unchanged:** Initial Sessions/Projects load (no filter applied) renders identically to before — `SetItems` returns `nil` in the unfiltered case, so the propagated cmd is a no-op.
+4. **`applySessions` returns the `SetItems` cmd:** Signature is `func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd`; both call sites batch/return the returned cmd.
+5. **Secondary sweep applied:** `Model.WithInsideTmux` and the `ProjectsLoadedMsg` handler no longer discard the cmd returned by `SetItems`. Their lossy shape is removed.
+6. **Test additions:** `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` includes a `VisibleItems()` assertion. A new test covers the kill-refresh-under-filter scenario.
+7. **No regressions in existing TUI tests:** `go test ./internal/tui/...` passes.
+
 ---
 
 ## Working Notes
