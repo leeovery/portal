@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-20
 cycle: 1
 phase: Input Review
@@ -64,7 +64,7 @@ The investigation documents that the `SessionsMsg`/`applySessions` site was init
 **Proposed Addition**:
 _Pending discussion_ — add a short clause noting that `x` and `r` keystrokes are accepted on the Sessions page even when a committed filter is applied, which is what makes `killAndRefresh` / `renameAndRefresh` reachable from a filtered list.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added the `x`/`r`-accepted-mid-filter clause to the Root Cause second paragraph.
 
 ---
