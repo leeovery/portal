@@ -55,6 +55,14 @@ var portalSaverReadVersionFile = state.ReadVersionFile
 // same "daemon.version write:" DEBUG breadcrumb as the daemon-startup call
 // site. A nil sink remains safe: *state.Logger's nil-receiver semantics
 // degrade Debug to a no-op without panicking.
+//
+// Wiring-order invariant: callers that fire this wrapper before bootstrap
+// step 2 (RegisterPortalHooks) has run will silently drop the breadcrumb,
+// because versionWriterLogger is still nil. Today the only production
+// producer is EnsurePortalSaverVersion (bootstrap step 4), which always
+// runs after step 2 installs the logger — so the breadcrumb is reliable.
+// Adding a new caller from an earlier step (or from outside the bootstrap
+// orchestrator) requires installing the logger first.
 var portalSaverWriteVersionFile = func(dir, version string) error {
 	return state.WriteVersionFile(dir, version, versionWriterLogger)
 }
@@ -321,10 +329,9 @@ func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error 
 	stored, readErr := portalSaverReadVersionFile(stateDir)
 	alive := BootstrapAliveCheck(stateDir)
 
-	switch {
-	case alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr):
+	if alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr) {
 		_ = killSaverAndWaitForDaemonFn(c, stateDir)
-	case alive && errors.Is(readErr, state.ErrVersionFileAbsent):
+	} else if alive && errors.Is(readErr, state.ErrVersionFileAbsent) {
 		// Defensive complement: lock-loser daemons return cleanly before
 		// writing daemon.version, so on every bootstrap we observe the
 		// alive-daemon + missing-version-file shape until the file is

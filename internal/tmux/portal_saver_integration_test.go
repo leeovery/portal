@@ -1,14 +1,23 @@
 package tmux_test
 
-// Real-tmux integration test for the singleton-invariant acceptance
-// criterion of the multiple-state-daemons-running-concurrently fix
-// (specification.md § Acceptance Criteria → Singleton invariant). This
-// file is the load-bearing verification that the kill barrier (Task
-// 2-1, 2-2) plus the daemon-side flock (Task 1-1, 1-2) compose to
-// guarantee "at most one `portal state daemon` per state directory"
-// across a real recycle.
+// Real-tmux integration tests for the saver/daemon contract. This file
+// holds three load-bearing fixtures, each pinning a distinct invariant:
 //
-// Why this test exists despite seam-level coverage:
+//  1. TestBootstrapPortalSaver_PreservesSingletonInvariantAcrossRecycle —
+//     singleton invariant from the multiple-state-daemons-running-
+//     concurrently fix; back-to-back EnsurePortalSaverVersion with a
+//     forced version mismatch must leave N==1 daemons per stateDir.
+//  2. TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill —
+//     Defect 1 user-visible contract from saver-kill-respawn-loop-
+//     leaks-daemons; alive daemon + absent daemon.version survives
+//     bootstrap without firing the kill barrier and the file is
+//     repaired defensively.
+//  3. TestBootstrapPortalSaver_LockContention_CascadeChainReachable —
+//     fault-injection regression guard for the lock-loser-pane-exit →
+//     session-destroy → SetSessionOption cascade; only the natural
+//     trigger is eliminated by the fix.
+//
+// Why these tests exist despite seam-level coverage:
 //
 //   - Existing BootstrapAliveCheck seam-level unit tests can fix a
 //     pidfile and probe it, but cannot model "what happens when the
@@ -17,11 +26,10 @@ package tmux_test
 //     real daemon process. They prove the barrier polls correctly;
 //     they do not prove a respawned daemon actually displaces the
 //     prior one without leaving an orphan attached to the tmux server.
-//   - This test reproduces the original-bug shape (back-to-back
-//     EnsurePortalSaverVersion with a forced version mismatch between
-//     them) and asserts N==1 daemons per stateDir after both calls
-//     return. Pre-fix, the recycle would leave an orphan attached to
-//     the tmux server's PID; post-fix, the lock + barrier hold N==1.
+//   - The singleton test reproduces the original-bug shape (back-to-
+//     back EnsurePortalSaverVersion with a forced version mismatch
+//     between them) and asserts N==1 daemons per stateDir after both
+//     calls return.
 //
 // Skip behaviour:
 //
@@ -403,6 +411,18 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 //     AND "no such session". Both substrings are required so an
 //     unrelated exit-1 (e.g. permission denied on a different
 //     surface) does not produce a false-positive pass.
+//
+// Regression-watch suites that exercise adjacent daemon/restore
+// surfaces and must remain green alongside this test (per spec
+// § Risk & Rollout → Coordination):
+//
+//   - multiple-state-daemons-running-concurrently — daemon.lock flock
+//     + killSaverAndWaitForDaemon barrier; this test's sentinel reuses
+//     state.AcquireDaemonLock from that suite.
+//   - daemon-merge-reintroduces-dead-sessions — structural-index merge
+//     in the daemon's commit pipeline.
+//   - killed-sessions-resurrect-on-restart — bootstrap-side restore
+//     decisions for explicitly killed sessions.
 func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
@@ -420,6 +440,12 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 	// time.Sleep, no time-based wait. t.Cleanup releases the lock fd;
 	// register the cleanup BEFORE any code path that could t.Fatal so
 	// the lock is never leaked across tests in the same binary.
+	//
+	// Memory ordering: sentinelErr and sentinelFile are written by the
+	// goroutine and read by the parent. close(ready) establishes the
+	// happens-before edge under Go's memory model (a receive from a
+	// channel happens after the corresponding close), so no mutex is
+	// needed on these single-shot writes.
 	ready := make(chan struct{})
 	var sentinelErr error
 	var sentinelFile *os.File
@@ -458,7 +484,7 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 	// to surface. The holder runs `sleep infinity` so its pane never
 	// exits during the test; tmuxtest.New's kill-server cleanup tears
 	// it down at test end.
-	if err := client.NewDetachedSessionNoCwd("_cascade-holder", "sleep 60"); err != nil {
+	if err := client.NewDetachedSessionNoCwd("_cascade-holder", "sleep infinity"); err != nil {
 		t.Fatalf("create holder session: %v", err)
 	}
 
@@ -558,6 +584,11 @@ func waitForVersionFile(t *testing.T, dir string, timeout time.Duration) {
 // timeout, lock contention, or step-4 EnsureSaver failure) appear.
 // Absence of portal.log is acceptable — the assertion holds trivially
 // because none of the forbidden substrings can be present.
+//
+// Reads portal.log only — not state.PortalLogOld. The tests using this
+// helper are short-lived and never trigger log rotation, so the rotated
+// file cannot exist; if a future test exercises a longer-running scenario
+// that rotates the log, the helper must be extended to scan both files.
 func assertNoForbiddenLogSubstrings(t *testing.T, dir string) {
 	t.Helper()
 	data, err := os.ReadFile(state.PortalLog(dir))

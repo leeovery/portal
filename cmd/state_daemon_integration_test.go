@@ -549,13 +549,13 @@ func measureSinglePaneCapture(t *testing.T, sock *tmuxtest.Socket) time.Duration
 }
 
 // anchorThreshold derives the measurement-anchored exit-latency
-// threshold from a fresh single-pane capture-pane wall time:
-// threshold = max(2s, 2 × singlePaneWallTime). The 2s floor comes from
-// the heuristic anchor in spec § Testing Requirements → Integration
-// tests #2 ("target: under 2s on the test fixture"); the 2× multiplier
-// gives the daemon enough margin to absorb signal delivery + ctx-Done
-// observation overhead without flaking on hosts where capture-pane is
-// already slow.
+// threshold from a fresh single-pane capture-pane wall time: a minimum
+// floor of 2s, scaling up to 2 × singlePaneWallTime once the measured
+// per-pane wall time exceeds 1s. The 2s floor comes from the heuristic
+// anchor in spec § Testing Requirements → Integration tests #2
+// ("target: under 2s on the test fixture"); the 2× multiplier gives the
+// daemon enough margin to absorb signal delivery + ctx-Done observation
+// overhead without flaking on hosts where capture-pane is already slow.
 func anchorThreshold(singlePaneWallTime time.Duration) time.Duration {
 	doubled := 2 * singlePaneWallTime
 	if doubled < 2*time.Second {
