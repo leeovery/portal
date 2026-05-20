@@ -25,7 +25,7 @@ When a user filters the Sessions page, commits the filter, opens the scrollback 
 
 - The blank-list / lost-filter symptom on the preview-dismiss path.
 - The same latent symptom on every other code path that routes through `applySessions` — kill-refresh, rename-refresh, externally-killed-during-preview bail.
-- Sweep of the remaining `SetItems` discard sites in `internal/tui/model.go` (`Model.WithInsideTmux`, `ProjectsLoadedMsg` handler). These are currently safe because they run before any filter is applied, but the lossy plumbing shape is identical and would break if a filter could be applied at those points in the future. Fixing them in the same pass closes the class of bug.
+- Sweep of the remaining `SetItems` discard sites in `internal/tui/model.go` (`Model.WithInsideTmux`, `ProjectsLoadedMsg` handler), plus an audit of sibling `bubbles/list` mutator APIs (`SetItem`, `InsertItem`, `RemoveItem`) against `m.sessionList` and `m.projectList`. The sibling APIs share the same "returns a cmd you must propagate" contract — any call site that discards the cmd against a filtered list would blank-render the same way. Propagate the cmd at any sites found; if none exist, record that the audit ran clean.
 
 **Out of scope:**
 
@@ -118,7 +118,7 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 2. **Latent variants resolved:** Killing a session via `x` while a filter is applied leaves the filtered list rendered after the refresh. Renaming a session via `r` while a filter is applied leaves the filtered list rendered after the refresh. Externally-killed-during-preview bail (`previewAttachBailMsg`) leaves the filtered list rendered after the refresh.
 3. **Boot path unchanged:** Initial Sessions/Projects load (no filter applied) renders identically to before — `SetItems` returns `nil` in the unfiltered case, so the propagated cmd is a no-op.
 4. **`applySessions` returns the `SetItems` cmd:** Signature is `func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd`; both call sites batch/return the returned cmd.
-5. **Secondary sweep applied:** `Model.WithInsideTmux` and the `ProjectsLoadedMsg` handler no longer discard the cmd returned by `SetItems`. Their lossy shape is removed.
+5. **Secondary sweep applied:** `Model.WithInsideTmux` and the `ProjectsLoadedMsg` handler no longer discard the cmd returned by `SetItems`. Sibling mutators (`SetItem`, `InsertItem`, `RemoveItem`) on `m.sessionList`/`m.projectList` are audited; any discard sites found are fixed the same way; the audit outcome is recorded.
 6. **Test additions:** `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` includes a `VisibleItems()` assertion. A new test covers the kill-refresh-under-filter scenario.
 7. **No regressions in existing TUI tests:** `go test ./internal/tui/...` passes.
 

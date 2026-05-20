@@ -25,8 +25,8 @@ The investigation explicitly flags that the same lossy-plumbing class extends be
 **Proposed Addition**:
 _Pending discussion_ — decide whether to broaden the sweep to `SetItem`/`InsertItem`/`RemoveItem` audit, or scope it explicitly to `SetItems` only.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Extended scope to audit sibling mutator APIs (`SetItem`/`InsertItem`/`RemoveItem`) and record audit outcome. Updated Scope and Acceptance Criteria 5.
 
 ---
 

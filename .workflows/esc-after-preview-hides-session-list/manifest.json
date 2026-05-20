@@ -17,7 +17,7 @@
         "esc-after-preview-hides-session-list": {
           "status": "in-progress",
           "review_cycle": 1,
-          "finding_gate_mode": "gated",
+          "finding_gate_mode": "auto",
           "date": "2026-05-20",
           "sources": {
             "esc-after-preview-hides-session-list": {
