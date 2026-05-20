@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-20
 cycle: 2
 phase: Gap Analysis
@@ -32,8 +32,8 @@ The Scope section already excludes the harder cursor-reanchor-under-filter case 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff.
 
 ---
 
@@ -50,7 +50,7 @@ Minor — the implementer reads the handler anyway. But the parallel guidance fo
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff.
 
 ---

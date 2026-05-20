@@ -88,6 +88,7 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 - The current `SessionsMsg` handler (`internal/tui/model.go:893-915`) returns `nil` on both branches it can reach after `applySessions`. After the change, return the propagated cmd directly on the post-applySessions branches — no `tea.Batch` is needed at this site (a Batch is only required if the same return expression also carries another cmd; presently it does not).
 - The `previewAttachBailMsg` handler (`internal/tui/model.go:975-993`) reaches `applySessions` transitively via `exitPreviewToSessions` → `refreshSessionsAfterPreviewCmd` → `previewSessionsRefreshedMsg`. The bail path is therefore covered by the `previewSessionsRefreshedMsg` call-site fix — no separate change is required at the bail handler itself.
 - The `ProjectsLoadedMsg` handler propagation is shape-consistency only: it is not reachable today with a committed projects filter (the handler fires before the page transitions to `pageProjects`, and the projects list filter is never applied at this point). No production-reachable failure exists to test against, and no test is added for this site — a contrived test would have to construct a state that cannot occur in production. Acceptance criterion #5 is satisfied by the code change and the diff review.
+- The current `ProjectsLoadedMsg` handler (`internal/tui/model.go:936-947`) returns `m, nil`. After the change, capture the cmd from the `SetItems` call and return it directly — no `tea.Batch` is needed at this site (the handler does not currently combine multiple cmds at the return point).
 
 ### Alternatives Considered (Rejected)
 
@@ -104,7 +105,9 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 
 **Lock in the fix at the wrong-axis miss site:**
 
-- `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` (`internal/tui/pagepreview_refetch_test.go:270-301`) already exercises the exact buggy sequence (filter applied + `Space` + `Esc` with a wired `SessionLister` driving the refresh) but only asserts `FilterState`, `FilterValue`, and `IsFiltered`. **Add a `VisibleItems()` assertion** — use `visibleSessionNames(got)` (or equivalent helper already in the test package) and assert equality with the expected filtered slice. This is the single assertion that would have caught the bug and is what prevents the same wrong-axis miss recurring.
+- `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` (`internal/tui/pagepreview_refetch_test.go:270-301`) already exercises the exact buggy sequence (filter applied + `Space` + `Esc` with a wired `SessionLister` driving the refresh) but only asserts `FilterState`, `FilterValue`, and `IsFiltered`. **Add two assertions:**
+  - A `VisibleItems()` assertion — use `visibleSessionNames(got)` (or equivalent helper already in the test package) and assert equality with the expected filtered slice. This is the single assertion that would have caught the original bug and is what prevents the same wrong-axis miss recurring.
+  - A cursor-index assertion — assert the bubbles list's selected index (`got.sessionList.Index()` or via an existing helper) points at the previously-highlighted row. This locks in AC #1's cursor-preservation clause; without it, a future handler reordering or library behaviour shift could regress cursor preservation silently.
 
 **Cover the latent variant:**
 
