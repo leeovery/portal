@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Forward SetItems cmd through applySessions and sweep sibling discard sites
-status: draft
+status: approved
+approved_at: 2026-05-20
 
 **Goal**: Eliminate the blank-list / lost-filter symptom across every code path that mutates the sessions or projects `bubbles/list` while a committed filter may be applied, by propagating the `tea.Cmd` returned by `SetItems` out of all current discard sites, and lock the fix in with targeted test additions.
 
