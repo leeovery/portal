@@ -111,7 +111,7 @@ Esc matches `KeyMap.ClearFilter` (which defaults to Esc) — `resetFiltering()` 
 
 `applySessions` calls `m.sessionList.SetItems(...)` and discards the `tea.Cmd` that `bubbles/list` returns. When a filter is applied at the moment of the call, `SetItems` synchronously nils `filteredItems` and defers re-filtering into the returned cmd. Dropping the cmd leaves the list in a "filter applied, filtered items empty" state that renders as a blank list.
 
-The bug only manifests on the preview-dismiss path because that is the only `applySessions` call site that can run with `filterState == FilterApplied` — the other call site (`SessionsMsg` handler at line 897) runs at boot-time, before any filter could be committed.
+The bug is most prominently reproducible on the preview-dismiss path because `previewSessionsRefreshedMsg` always fires after a `Space` keystroke that necessarily happens on the Sessions page (where a filter may be applied). However, the `SessionsMsg` `applySessions` call site (`model.go:893-897`) is **not** boot-only as initially scoped — it also fires from `killAndRefresh` (`model.go:1517-1525`) and `renameAndRefresh` (`model.go:1571-1579`), which can run while a filter is applied (`x` and `r` keys are accepted on the Sessions page mid-filter). Those paths exhibit the same latent blank-list outcome on filtered lists; they have not been reported separately, but share the bug.
 
 ### Contributing Factors
 
@@ -121,8 +121,8 @@ The bug only manifests on the preview-dismiss path because that is the only `app
 
 ### Why It Wasn't Caught
 
-- The existing preview-dismiss tests (`pagepreview_dismiss_test.go`, `pagepreview_externalkill_test.go`) exercise the dismiss flow with no committed filter on the Sessions page. The specific keystroke sequence (`/` → type → `Enter` → `Space` → `Esc`) was not in the test surface.
-- The pre-existing `SessionsMsg` callsite happened to be safe because filter state was Unfiltered at boot-time, masking the latent bug in `applySessions`'s lossy cmd handling.
+- `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` (`pagepreview_refetch_test.go:270-301`) **does** exercise the exact buggy sequence — filter applied + Space + Esc with a wired `SessionLister` driving the refresh — but it only asserts `FilterState` / `FilterValue` / `IsFiltered`. None of those probe `filteredItems`. A single assertion against `VisibleItems()` (or the existing `visibleSessionNames` helper) would have caught the bug. The wrong axis was checked, not a missing test.
+- `TestPreviewEscPreservesCommittedFilter` (`pagepreview_dismiss_test.go:121-151`) uses `pressSpaceThenEsc` which discards the refresh cmd (`updated3, _ := got2.Update(msg)` at line 41), AND `modelWithSeams` does not wire a `SessionLister` — so the test never reaches `previewSessionsRefreshedMsg` / `applySessions`. False sense of coverage.
 - Bubble Tea's "returns a cmd you must forward" pattern is easy to miss for void-returning helpers — there is no compile-time signal.
 
 ### Blast Radius
@@ -131,8 +131,11 @@ The bug only manifests on the preview-dismiss path because that is the only `app
 - TUI Sessions page when dismissing the scrollback preview after committing a filter — the documented reproduction path.
 
 **Potentially affected (latent, not yet observed):**
-- The externally-killed-session-during-preview branch (`previewAttachBailMsg` handler, `internal/tui/model.go:975-993`) traverses the same `exitPreviewToSessions` → refresh → `applySessions` path. If preview was bailed (HasSessionProbe reported gone) while the Sessions page held a committed filter, the user would land on the same empty-list state. Not separately reported but would behave identically.
-- `applySessions` itself: if any future call site invokes it from a context where a filter might be applied, the same blank-list outcome would occur. The fix at `applySessions` covers all future call sites uniformly.
+- `killAndRefresh` (`internal/tui/model.go:1517-1525`) — triggered by `x` on the Sessions page after the kill-confirm modal. Emits `SessionsMsg`, routes through the same `applySessions`. If the user has a committed filter and kills a session, the list goes blank.
+- `renameAndRefresh` (`internal/tui/model.go:1571-1579`) — triggered by `r` → rename-modal commit. Same `SessionsMsg` → `applySessions` path; same exposure under an applied filter.
+- The externally-killed-session-during-preview branch (`previewAttachBailMsg` handler, `internal/tui/model.go:975-993`) traverses the same `exitPreviewToSessions` → refresh → `applySessions` path. If preview was bailed (HasSessionProbe reported gone) while the Sessions page held a committed filter, the user would land on the same empty-list state.
+- `Model.WithInsideTmux` (`internal/tui/model.go:403-411`) and `ProjectsLoadedMsg` handler (`model.go:936-947`) also call `SetItems` and discard the cmd — currently safe (construction-time / boot-time before any filter), but share the same lossy shape.
+- The fix at `applySessions` (forwarding the cmd) covers the preview-dismiss, kill-refresh, and rename-refresh paths uniformly. Other discard sites (`WithInsideTmux`, `ProjectsLoadedMsg`) are out of scope for this bug but worth a sweeping check during implementation.
 
 ---
 
