@@ -1,0 +1,16 @@
+{
+  "name": "esc-after-preview-hides-session-list",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-05-20",
+  "description": "Esc after preview-from-filtered-list hides session list and discards committed filter",
+  "phases": {
+    "investigation": {
+      "items": {
+        "esc-after-preview-hides-session-list": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}
