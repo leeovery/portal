@@ -137,6 +137,38 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "saver-kill-respawn-loop-leaks-daemons": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "saver-kill-respawn-loop-leaks-daemons-1-1",
+            "saver-kill-respawn-loop-leaks-daemons-1-2",
+            "saver-kill-respawn-loop-leaks-daemons-1-3",
+            "saver-kill-respawn-loop-leaks-daemons-1-4",
+            "saver-kill-respawn-loop-leaks-daemons-1-5",
+            "saver-kill-respawn-loop-leaks-daemons-1-6",
+            "saver-kill-respawn-loop-leaks-daemons-2-1",
+            "saver-kill-respawn-loop-leaks-daemons-2-2",
+            "saver-kill-respawn-loop-leaks-daemons-2-3",
+            "saver-kill-respawn-loop-leaks-daemons-2-4",
+            "saver-kill-respawn-loop-leaks-daemons-2-5",
+            "saver-kill-respawn-loop-leaks-daemons-2-6",
+            "saver-kill-respawn-loop-leaks-daemons-3-1",
+            "saver-kill-respawn-loop-leaks-daemons-3-2",
+            "saver-kill-respawn-loop-leaks-daemons-3-3",
+            "saver-kill-respawn-loop-leaks-daemons-3-4",
+            "saver-kill-respawn-loop-leaks-daemons-3-5",
+            "saver-kill-respawn-loop-leaks-daemons-3-6",
+            "saver-kill-respawn-loop-leaks-daemons-4-1",
+            "saver-kill-respawn-loop-leaks-daemons-4-2",
+            "saver-kill-respawn-loop-leaks-daemons-4-3",
+            "saver-kill-respawn-loop-leaks-daemons-5-1",
+            "saver-kill-respawn-loop-leaks-daemons-6-1"
+          ]
+        }
+      }
     }
   }
 }
