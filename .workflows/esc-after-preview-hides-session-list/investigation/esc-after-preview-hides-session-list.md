@@ -141,7 +141,45 @@ The bug is most prominently reproducible on the preview-dismiss path because `pr
 
 ## Fix Direction
 
-_To be filled after findings review._
+### Chosen Approach
+
+Forward the `tea.Cmd` returned by `m.sessionList.SetItems(...)` out of `applySessions` so callers can propagate it.
+
+- Change the signature from `func (m *Model) applySessions(sessions []tmux.Session)` to `func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd` and return whatever `SetItems` returns.
+- Update the two call sites to propagate the cmd:
+  - `SessionsMsg` handler (`internal/tui/model.go:893-918`) — batch the returned cmd into whatever the handler already returns; the cmd is `nil` at boot-time so this path is functionally unchanged.
+  - `previewSessionsRefreshedMsg` handler (`internal/tui/model.go:1011-1023`) — return the cmd directly (handler currently returns `nil`).
+
+Result: when `SetItems` is called against a `FilterApplied` list, the deferred `filterItems` cmd actually fires, the list's `FilterMatchesMsg` consumer repopulates `filteredItems`, and the Sessions page renders the filtered list intact with the previously-highlighted row still visible. The committed filter survives the preview-dismiss round-trip — matching `TestPreviewEscPreservesCommittedFilter`'s documented intent.
+
+The latent variants (`killAndRefresh`, `renameAndRefresh`, `previewAttachBailMsg`) all route through `applySessions`, so this single change fixes them in lock-step. No further call-site work.
+
+**Deciding factor:** The bug is mechanical lossy plumbing of bubbles/list's documented contract — propagating the cmd is the minimum sufficient fix, low-risk, single-point change. Alternative fixes either fight the library or change well-tested behaviour (filter retention) unnecessarily.
+
+### Options Explored
+
+1. **Forward the SetItems cmd from applySessions** *(chosen)* — minimal, library-aligned, fixes preview-dismiss + kill-refresh + rename-refresh + preview-bail uniformly.
+2. **Clear the committed filter on preview-dismiss** *(rejected)* — defeats the existing documented intent (`TestPreviewEscPreservesCommittedFilter` and the `previewDismissedMsg` handler comment explicitly preserve filter state byte-identically). Users committed for a reason.
+3. **Intercept `FilterMatchesMsg` / re-route the filter pipeline** *(rejected)* — overbuilt. The library already does the right thing if we propagate its cmd.
+
+### Discussion
+
+User priorities: ship a narrow bugfix that resolves the reported symptoms cleanly without expanding scope.
+
+Surfaced edge case (recorded as a follow-up, NOT in this bugfix's scope):
+- `reanchorSessionCursor` runs synchronously in the `previewSessionsRefreshedMsg` handler **before** `FilterMatchesMsg` fires; after `SetItems`, `filteredItems` is nil, so `VisibleItems()` returns empty and the reanchor silently no-ops. This pre-existing latent behaviour means the cursor preservation guarantee on the externally-killed-during-preview path under an applied filter is currently weakened. Out of scope here — fix the disappearing-list / lost-filter symptoms first; file a separate follow-up for sequencing reanchor after the refilter so the cursor lands on the intended item under filter.
+
+### Testing Recommendations
+
+- **Add a `VisibleItems()` assertion** to `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` (`internal/tui/pagepreview_refetch_test.go:270-301`). The existing test exercises the buggy path but only asserts filter metadata. Use `visibleSessionNames(got)` (or equivalent) and assert equality with the expected filtered slice. This locks in the fix and prevents the same wrong-axis miss recurring.
+- **Optional but recommended**: add a small test in the kill-refresh flow that applies a filter, kills a session via the modal, and asserts the list still renders filtered items after the `SessionsMsg` round-trip. Codifies the latent-variant coverage.
+- The existing `TestPreviewEscPreservesCommittedFilter` does not need to change — it correctly asserts filter retention; it just didn't reach `applySessions` (no wired `SessionLister`).
+
+### Risk Assessment
+
+- **Fix complexity:** Low — signature change plus two return-statement adjustments.
+- **Regression risk:** Low — `SetItems` returns `nil` when filter state is Unfiltered, so the boot path and all currently-unfiltered call paths are functionally unchanged. The change is strictly more correct, never less.
+- **Recommended approach:** Regular release, single PR. No feature flag, no hotfix urgency (UX friction only — no data, no tmux state involved).
 
 ---
 
