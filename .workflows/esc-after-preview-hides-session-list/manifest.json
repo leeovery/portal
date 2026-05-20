@@ -38,13 +38,14 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "esc-after-preview-hides-session-list-1-5",
+          "task": "esc-after-preview-hides-session-list-1-6",
           "task_map": {
             "esc-after-preview-hides-session-list-1": "tick-341b0f",
             "esc-after-preview-hides-session-list-1-1": "tick-18ed97",
             "esc-after-preview-hides-session-list-1-2": "tick-8f489c",
             "esc-after-preview-hides-session-list-1-3": "tick-ffe008",
-            "esc-after-preview-hides-session-list-1-4": "tick-87e490"
+            "esc-after-preview-hides-session-list-1-4": "tick-87e490",
+            "esc-after-preview-hides-session-list-1-5": "tick-f63ec9"
           },
           "external_id": "tick-99e7c1"
         }
