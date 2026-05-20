@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-20
 cycle: 1
 phase: Gap Analysis
@@ -28,8 +28,8 @@ Without guidance, an implementer would have to make this design call. The spec a
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -51,8 +51,8 @@ Recommend either (a) requiring tests for both additional variants, or (b) explic
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -70,8 +70,8 @@ If skipped intentionally (the path is unreachable today), the spec should state 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -89,8 +89,8 @@ A planner cannot turn "record the audit outcome" into a concrete task without kn
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -115,8 +115,8 @@ Existing test patterns in the package likely give clear precedent, but the spec 
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -138,8 +138,8 @@ A one-line note ("`previewAttachBailMsg` reaches `applySessions` via the same `p
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---
 
@@ -157,7 +157,7 @@ This is minor — the implementer will read the handler anyway — but the asymm
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — see specification diff for the final wording.
 
 ---

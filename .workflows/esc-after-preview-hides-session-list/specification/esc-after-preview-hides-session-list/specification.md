@@ -25,7 +25,7 @@ When a user filters the Sessions page, commits the filter, opens the scrollback 
 
 - The blank-list / lost-filter symptom on the preview-dismiss path.
 - The same latent symptom on every other code path that routes through `applySessions` — kill-refresh, rename-refresh, externally-killed-during-preview bail.
-- Sweep of the remaining `SetItems` discard sites in `internal/tui/model.go` (`Model.WithInsideTmux`, `ProjectsLoadedMsg` handler), plus an audit of sibling `bubbles/list` mutator APIs (`SetItem`, `InsertItem`, `RemoveItem`) against `m.sessionList` and `m.projectList`. The sibling APIs share the same "returns a cmd you must propagate" contract — any call site that discards the cmd against a filtered list would blank-render the same way. Propagate the cmd at any sites found; if none exist, record that the audit ran clean.
+- Sweep of the remaining `SetItems` discard sites in `internal/tui/model.go` (`Model.WithInsideTmux`, `ProjectsLoadedMsg` handler), plus an audit of sibling `bubbles/list` mutator APIs (`SetItem`, `InsertItem`, `RemoveItem`) against `m.sessionList` and `m.projectList`. The sibling APIs share the same "returns a cmd you must propagate" contract — any call site that discards the cmd against a filtered list would blank-render the same way. Propagate the cmd at any sites found; if none exist, record the audit outcome (sites checked + result) in the PR description.
 
 **Out of scope:**
 
@@ -76,12 +76,18 @@ Forward the `tea.Cmd` returned by `m.sessionList.SetItems(...)` out of every cal
 
 **Secondary sweep — other `SetItems` discard sites:**
 
-- **`Model.WithInsideTmux`** (`internal/tui/model.go:403-411`) — propagate the returned cmd out of the constructor-style helper. Since `WithInsideTmux` is currently a chained builder returning `*Model`, this change requires returning `(*Model, tea.Cmd)` (or analogous) and updating the call site to batch the cmd. Currently safe (construction-time, no filter possible), but the lossy shape is fixed for consistency and future-safety.
+- **`Model.WithInsideTmux`** (`internal/tui/model.go:403-411`) — `WithInsideTmux` is called before `tea.NewProgram(m).Run()` at TUI construction time (`cmd/open.go:360`), so there is no `tea.Cmd` dispatcher available to batch into. At this point the session list is empty and no filter can be applied, so `SetItems` returns `nil` unconditionally. Keep the chained `*Model` return shape, but capture the returned cmd locally and assert/comment that it is always `nil` at this site (e.g. `if cmd := m.sessionList.SetItems(...); cmd != nil { panic("unreachable: WithInsideTmux runs before any filter can be applied") }`, or a quieter discard-with-comment variant). The intent is to lock in the safe invariant without rewiring the constructor signature; if the call site ever moves to a point where a filter can be applied, the panic surfaces the breakage immediately.
 - **`ProjectsLoadedMsg` handler** (`internal/tui/model.go:936-947`) — call site updates the *projects* list, not the sessions list. Apply the same propagation: capture the cmd from the `SetItems` call and batch/return it from the handler. Currently safe (handler runs before any project filter can be committed), but treated the same way.
 
 **Mechanism:** When `SetItems` is called against a `FilterApplied` list, the propagated `filterItems` cmd actually fires; the list's `FilterMatchesMsg` consumer repopulates `filteredItems`; the Sessions (or Projects) page renders the filtered list intact with the previously-highlighted row still visible. When the list is `Unfiltered`, `SetItems` returns `nil` and behaviour is unchanged.
 
 Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path, and the externally-killed-during-preview bail path all preserve their committed filter across the round-trip via a single point change in `applySessions`. The secondary sweep eliminates the same lossy shape from the remaining call sites.
+
+**Implementation notes for the implementer:**
+
+- The current `SessionsMsg` handler (`internal/tui/model.go:893-915`) returns `nil` on both branches it can reach after `applySessions`. After the change, return the propagated cmd directly on the post-applySessions branches — no `tea.Batch` is needed at this site (a Batch is only required if the same return expression also carries another cmd; presently it does not).
+- The `previewAttachBailMsg` handler (`internal/tui/model.go:975-993`) reaches `applySessions` transitively via `exitPreviewToSessions` → `refreshSessionsAfterPreviewCmd` → `previewSessionsRefreshedMsg`. The bail path is therefore covered by the `previewSessionsRefreshedMsg` call-site fix — no separate change is required at the bail handler itself.
+- The `ProjectsLoadedMsg` handler propagation is shape-consistency only: it is not reachable today with a committed projects filter (the handler fires before the page transitions to `pageProjects`, and the projects list filter is never applied at this point). No production-reachable failure exists to test against, and no test is added for this site — a contrived test would have to construct a state that cannot occur in production. Acceptance criterion #5 is satisfied by the code change and the diff review.
 
 ### Alternatives Considered (Rejected)
 
@@ -103,11 +109,16 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 **Cover the latent variant:**
 
 - Add a test in the kill-refresh flow that:
-  1. Applies a committed filter to the Sessions page.
-  2. Triggers the `x` kill-confirm modal flow against a filtered row.
-  3. Asserts the Sessions page still renders filtered items (via `VisibleItems()` / `visibleSessionNames`) after the resulting `SessionsMsg` round-trip.
+  1. Applies a committed filter to the Sessions page (mirror the filter-commit drive used by `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh`).
+  2. Drives the full `x` kill-confirm modal flow via real keystrokes (`x` to open the confirm modal, then the confirm key as used elsewhere in the package's kill tests) — do **not** shortcut by hand-crafting a `SessionsMsg`. The point is to exercise the production message path through `killAndRefresh` → `SessionsMsg` → `applySessions`.
+  3. Wire a `SessionKiller` seam that succeeds and a `SessionLister` seam that returns the post-kill session slice (sans the killed row), following the same mock/seam wiring pattern used by the existing kill tests in the package.
+  4. Asserts post-refresh state with `visibleSessionNames(got)` against the expected filtered slice (the same helper used by the augmented preview test). Slice-equality is the assertion; length-only is insufficient.
 
   Codifies the latent-variant coverage; ensures `killAndRefresh` going through `applySessions` retains the filter.
+
+**Test scope — one representative latent-variant test is sufficient:**
+
+The kill-refresh test above is the canonical regression test for the latent variants. The rename-refresh variant (`renameAndRefresh`), the externally-killed-during-preview bail (`previewAttachBailMsg`), and the `ProjectsLoadedMsg` Projects-page propagation all route through the same `applySessions` (or analogous propagation) and are covered by mechanical inspection of the diff plus the kill-refresh test. **Do not add separate tests for each latent variant** — the spec deliberately scopes test work to the single representative case; reviewers verify the rest by reading the diff.
 
 **Existing test left unchanged:**
 
