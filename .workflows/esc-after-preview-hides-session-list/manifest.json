@@ -37,8 +37,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "esc-after-preview-hides-session-list-1-6",
+          "phase": 2,
+          "task": "~",
           "task_map": {
             "esc-after-preview-hides-session-list-1": "tick-341b0f",
             "esc-after-preview-hides-session-list-1-1": "tick-18ed97",
