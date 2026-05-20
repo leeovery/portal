@@ -77,12 +77,12 @@
     "implementation": {
       "items": {
         "saver-kill-respawn-loop-leaks-daemons": {
-          "status": "in-progress",
+          "status": "completed",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 5,
+          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
