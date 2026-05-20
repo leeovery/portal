@@ -61,6 +61,38 @@ The preview-dismiss path is the most prominently affected because `previewSessio
 - `TestPreviewEscPreservesCommittedFilter` (`internal/tui/pagepreview_dismiss_test.go:121-151`) uses `pressSpaceThenEsc` which discards the refresh cmd (`updated3, _ := got2.Update(msg)` at line 41), and `modelWithSeams` does not wire a `SessionLister` — so the test never reaches `previewSessionsRefreshedMsg` / `applySessions`. False sense of coverage.
 - Bubble Tea's "returns a cmd you must forward" pattern is easy to miss for void-returning helpers — no compile-time signal.
 
+### Fix Approach
+
+Forward the `tea.Cmd` returned by `m.sessionList.SetItems(...)` out of every call site in `internal/tui/model.go` that currently discards it.
+
+**Primary change — `applySessions`:**
+
+- Change the signature from `func (m *Model) applySessions(sessions []tmux.Session)` to `func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd`.
+- Return whatever `m.sessionList.SetItems(...)` returns.
+- Update both call sites to propagate the cmd:
+  - **`SessionsMsg` handler** (`internal/tui/model.go:893-918`) — batch the returned cmd into whatever the handler already returns. The cmd is `nil` at boot time, so the boot path is functionally unchanged. On `killAndRefresh` / `renameAndRefresh` round-trips, the cmd carries the deferred refilter.
+  - **`previewSessionsRefreshedMsg` handler** (`internal/tui/model.go:1011-1023`) — return the cmd directly (handler currently returns `nil`).
+
+**Secondary sweep — other `SetItems` discard sites:**
+
+- **`Model.WithInsideTmux`** (`internal/tui/model.go:403-411`) — propagate the returned cmd out of the constructor-style helper. Since `WithInsideTmux` is currently a chained builder returning `*Model`, this change requires returning `(*Model, tea.Cmd)` (or analogous) and updating the call site to batch the cmd. Currently safe (construction-time, no filter possible), but the lossy shape is fixed for consistency and future-safety.
+- **`ProjectsLoadedMsg` handler** (`internal/tui/model.go:936-947`) — call site updates the *projects* list, not the sessions list. Apply the same propagation: capture the cmd from the `SetItems` call and batch/return it from the handler. Currently safe (handler runs before any project filter can be committed), but treated the same way.
+
+**Mechanism:** When `SetItems` is called against a `FilterApplied` list, the propagated `filterItems` cmd actually fires; the list's `FilterMatchesMsg` consumer repopulates `filteredItems`; the Sessions (or Projects) page renders the filtered list intact with the previously-highlighted row still visible. When the list is `Unfiltered`, `SetItems` returns `nil` and behaviour is unchanged.
+
+Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path, and the externally-killed-during-preview bail path all preserve their committed filter across the round-trip via a single point change in `applySessions`. The secondary sweep eliminates the same lossy shape from the remaining call sites.
+
+### Alternatives Considered (Rejected)
+
+1. **Clear the committed filter on preview-dismiss.** Defeats the existing documented intent (`TestPreviewEscPreservesCommittedFilter` and the `previewDismissedMsg` handler explicitly preserve filter state byte-identically). Users committed for a reason.
+2. **Intercept `FilterMatchesMsg` / re-route the filter pipeline.** Overbuilt. The library already does the right thing if its cmd is propagated.
+
+### Risk
+
+- **Fix complexity:** Low — signature change in one helper, plus mechanical cmd propagation at the call sites.
+- **Regression risk:** Low — `SetItems` returns `nil` when filter state is `Unfiltered`, so all currently-unfiltered call paths are functionally unchanged. The change is strictly more correct, never less.
+- **Release:** Regular release, single PR. No feature flag, no hotfix urgency (UX friction only).
+
 ---
 
 ## Working Notes
