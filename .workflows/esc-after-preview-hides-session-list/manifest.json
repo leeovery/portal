@@ -30,7 +30,7 @@
     "planning": {
       "items": {
         "esc-after-preview-hides-session-list": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "42dddbdb99fa6a85e62dcfbf477ffa37e86d03c9",
           "task_list_gate_mode": "auto",
