@@ -32,7 +32,7 @@
         "esc-after-preview-hides-session-list": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "883f0058ad02c714672677a85550bb01f4811695",
+          "spec_commit": "42dddbdb99fa6a85e62dcfbf477ffa37e86d03c9",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
