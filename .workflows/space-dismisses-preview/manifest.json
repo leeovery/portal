@@ -1,0 +1,16 @@
+{
+  "name": "space-dismisses-preview",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-05-20",
+  "description": "Make Space toggle scrollback preview off (mirror Esc) in the TUI session list",
+  "phases": {
+    "specification": {
+      "items": {
+        "space-dismisses-preview": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -71,6 +71,9 @@
     },
     "drop-invalid-A-flag-from-attach-session-argv": {
       "work_type": "quick-fix"
+    },
+    "space-dismisses-preview": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
