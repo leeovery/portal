@@ -44,8 +44,8 @@ The investigation observes the bug is likely a regression introduced during one 
 **Proposed Addition**:
 _Pending discussion_ — likely a short note in "Why It Wasn't Caught" (or a new short subsection) attributing the regressing call path to `enter-attaches-from-preview` and noting the original `SessionsMsg`-only `applySessions` usage was filter-naive.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added a regression-provenance bullet to "Why It Wasn't Caught" attributing the first filter-reachable `applySessions` path to `enter-attaches-from-preview`.
 
 ---
 
