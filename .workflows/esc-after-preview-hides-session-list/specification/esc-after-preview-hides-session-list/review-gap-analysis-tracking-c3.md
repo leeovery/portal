@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-20
 cycle: 3
 phase: Gap Analysis
@@ -31,7 +31,7 @@ Recommend the spec either (a) prescribe extending `pressSpaceThenEscWithRefresh`
 
 **Proposed Addition**:
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied — added "Test harness must drain the propagated refilter cmd" subsection to Test Coverage prescribing the helper extension.
 
 ---

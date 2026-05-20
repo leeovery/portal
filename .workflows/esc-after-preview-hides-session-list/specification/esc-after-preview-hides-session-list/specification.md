@@ -123,6 +123,18 @@ Result: the preview-dismiss path, the kill-refresh path, the rename-refresh path
 
 The kill-refresh test above is the canonical regression test for the latent variants. The rename-refresh variant (`renameAndRefresh`), the externally-killed-during-preview bail (`previewAttachBailMsg`), and the `ProjectsLoadedMsg` Projects-page propagation all route through the same `applySessions` (or analogous propagation) and are covered by mechanical inspection of the diff plus the kill-refresh test. **Do not add separate tests for each latent variant** — the spec deliberately scopes test work to the single representative case; reviewers verify the rest by reading the diff.
 
+**Test harness must drain the propagated refilter cmd:**
+
+The fix mechanism is asynchronous: when `SetItems` runs against a `FilterApplied` list it synchronously nils `filteredItems` and returns a `filterItems` `tea.Cmd`; that cmd asynchronously emits `FilterMatchesMsg`, which the bubbles list's own `Update` consumes to repopulate `filteredItems`. Only after this round-trip does `VisibleItems()` return the filtered slice.
+
+The existing helper `pressSpaceThenEscWithRefresh` (`internal/tui/pagepreview_refetch_test.go:76-112`) discards the cmd returned by the refresh-message `Update` call (`updated4, _ := got3.Update(refreshMsg)` at line 106). After the fix, that discarded cmd is the propagated `filterItems` cmd. **Extend the helper** (and any analogous helper used by the new kill-refresh test) to:
+
+1. Capture the cmd returned by the `Update` call that processes `previewSessionsRefreshedMsg` / `SessionsMsg`.
+2. Invoke the cmd to obtain its `tea.Msg` (the `FilterMatchesMsg` emitted by `filterItems`).
+3. Feed that message back through the model's `Update`. After this second `Update` call, `VisibleItems()` returns the refiltered slice and the `visibleSessionNames` / cursor-index assertions can run as prescribed.
+
+Without this harness adjustment the prescribed `visibleSessionNames` assertion will fail on a correctly-fixed implementation. The cursor-index assertion is less directly impacted (the pre-existing cursor index remains intact while `filteredItems` is nil because `reanchorSessionCursor` early-returns on empty `VisibleItems()`), but the helper extension is required regardless to validate the visibility assertion. Update the helper at the test-package level — do not duplicate the drain logic per-test.
+
 **Existing test left unchanged:**
 
 - `TestPreviewEscPreservesCommittedFilter` (`internal/tui/pagepreview_dismiss_test.go:121-151`) correctly asserts filter retention; it just never reached `applySessions` (no wired `SessionLister`, and `pressSpaceThenEsc` discards the refresh cmd). Its assertions are still correct — no change needed. The new `VisibleItems()` assertion in `TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh` is the one that exercises the fix end-to-end.
