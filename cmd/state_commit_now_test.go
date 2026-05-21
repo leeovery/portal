@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1158,10 +1159,13 @@ func TestStateCommitNow_DoesNotPanicOnAnyFailurePath(t *testing.T) {
 	}
 }
 
-// 27. Failure exit error must carry no message (silent stderr) so cobra/main
-// emit no Go stack trace or banner — the hook subprocess has nowhere
-// meaningful to send stderr; diagnostics route exclusively through portal.log.
-func TestStateCommitNow_FailureExitErrorHasEmptyMessage(t *testing.T) {
+// 27. Failure exit error must be detectable via errors.Is(err, errCommitNowFailed)
+// so main.go's top-level handler can suppress stderr silently — the hook
+// subprocess has nowhere meaningful to send stderr; diagnostics route
+// exclusively through portal.log. Cobra (with SilenceErrors=true) is
+// responsible for not printing the error; main.go is responsible for not
+// duplicating it.
+func TestStateCommitNow_FailureExitErrorIsDetectableSentinel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
@@ -1175,11 +1179,82 @@ func TestStateCommitNow_FailureExitErrorHasEmptyMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-zero exit")
 	}
-	if err.Error() != "" {
-		t.Errorf("failure-exit error message must be empty (cobra prints it to stderr); got %q", err.Error())
+	if !errors.Is(err, errCommitNowFailed) {
+		t.Errorf("failure-exit error must be detectable via errors.Is(err, errCommitNowFailed); got %v", err)
 	}
 	if errBuf.Len() != 0 {
-		t.Errorf("nothing should reach stderr on failure exit; got %q", errBuf.String())
+		t.Errorf("nothing should reach stderr on failure exit (cobra SilenceErrors honors); got %q", errBuf.String())
+	}
+}
+
+// 27b. failCommitNow must wrap the underlying cause via fmt.Errorf("%w: %v", ...)
+// so errors.Unwrap surfaces the cause. The empty-message convention is gone;
+// silent-exit is now driven by errors.Is, not string comparison.
+func TestStateCommitNow_FailureExitPreservesCauseViaUnwrap(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	cause := errors.New("tmux unreachable cause")
+	f := &commitNowFixture{
+		client:     &fakeCaptureClient{sessions: nil},
+		captureErr: cause,
+	}
+	installCommitNowDeps(t, f)
+
+	_, _, err := runStateCommitNow(t)
+	if err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+	if !errors.Is(err, errCommitNowFailed) {
+		t.Fatalf("err must satisfy errors.Is(err, errCommitNowFailed); got %v", err)
+	}
+	unwrapped := errors.Unwrap(err)
+	if unwrapped == nil {
+		t.Fatalf("errors.Unwrap returned nil; want a wrapped error chain")
+	}
+	// The wrapped error chain should mention the cause's text (via %v wrap).
+	if !strings.Contains(err.Error(), "tmux unreachable cause") {
+		t.Errorf("err.Error() = %q; must contain the underlying cause text", err.Error())
+	}
+}
+
+// 27c. errCommitNowFailed must carry a descriptive (non-empty) message — the
+// empty-string convention is no longer load-bearing.
+func TestErrCommitNowFailed_HasDescriptiveMessage(t *testing.T) {
+	if errCommitNowFailed.Error() == "" {
+		t.Fatal("errCommitNowFailed.Error() must be non-empty; the silent-exit contract is now driven by errors.Is, not string compare")
+	}
+}
+
+// 27d. IsSilentExitError must return true for the commit-now sentinel and
+// any error wrapping it, so main.go's stderr-suppression guard is
+// compile-time-linked to the cmd package.
+func TestIsSilentExitError_DetectsCommitNowSentinel(t *testing.T) {
+	if !IsSilentExitError(errCommitNowFailed) {
+		t.Error("IsSilentExitError(errCommitNowFailed) = false; want true")
+	}
+	wrapped := fmt.Errorf("%w: %v", errCommitNowFailed, errors.New("boom"))
+	if !IsSilentExitError(wrapped) {
+		t.Errorf("IsSilentExitError(wrapped commit-now err) = false; want true (err=%v)", wrapped)
+	}
+}
+
+// 27e. IsSilentExitError must also cover ErrStatusUnhealthy so the silent
+// stderr-suppression contract spans both subcommands.
+func TestIsSilentExitError_DetectsStatusUnhealthy(t *testing.T) {
+	if !IsSilentExitError(ErrStatusUnhealthy) {
+		t.Error("IsSilentExitError(ErrStatusUnhealthy) = false; want true")
+	}
+}
+
+// 27f. IsSilentExitError must return false for ordinary errors so the
+// suppression guard does not over-fire.
+func TestIsSilentExitError_RejectsOrdinaryErrors(t *testing.T) {
+	if IsSilentExitError(nil) {
+		t.Error("IsSilentExitError(nil) = true; want false")
+	}
+	if IsSilentExitError(errors.New("unrelated")) {
+		t.Error("IsSilentExitError(unrelated err) = true; want false")
 	}
 }
 

@@ -9,15 +9,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// errCommitNowFailed is the silent sentinel returned from commit-now's RunE on
-// any failure exit. The message is intentionally empty so cobra (with
-// SilenceErrors/SilenceUsage inherited from rootCmd) prints nothing and main.go
-// (see main.go's err.Error() == "" guard) suppresses the stderr write — the
-// tmux hook subprocess has nowhere meaningful to surface stderr, so all
-// diagnostics route through state.Logger / portal.log under
-// state.ComponentDaemon. The sentinel exists solely to drive a non-zero
-// process exit.
-var errCommitNowFailed = errors.New("")
+// errCommitNowFailed is the named sentinel returned from commit-now's RunE on
+// any failure exit. The tmux hook subprocess has nowhere meaningful to
+// surface stderr, so all diagnostics route through state.Logger / portal.log
+// under state.ComponentDaemon. Cobra (with SilenceErrors/SilenceUsage
+// inherited from rootCmd) prints nothing; main.go detects this sentinel via
+// IsSilentExitError so the stderr-suppression contract is compile-time-linked
+// across the cmd and main packages rather than relying on the prior
+// empty-message string-compare convention. The sentinel exists solely to
+// drive a non-zero process exit while preserving the underlying cause via
+// errors.Unwrap on the wrapped failure returned from failCommitNow.
+var errCommitNowFailed = errors.New("commit-now failed")
+
+// IsSilentExitError reports whether err is one of the cmd-package sentinels
+// whose stderr emission must be suppressed at the top-level error handler.
+// Both errCommitNowFailed (state commit-now, hook subprocess context) and
+// ErrStatusUnhealthy (state status, rendered output already on stdout) drive
+// non-zero process exits without printing anything to stderr. main.go calls
+// this in place of the legacy err.Error() == "" guard.
+func IsSilentExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, errCommitNowFailed) || errors.Is(err, ErrStatusUnhealthy)
+}
 
 // commitNowDeps is the DI seam for the commit-now subcommand. When nil, the
 // production implementations (state.ReadIndex / state.CaptureStructure /
@@ -235,16 +250,20 @@ func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string)
 //     (within 1s when it is alive) commits — bounded fallback recovery for the
 //     resurrection window. Touch errors are logged at WARN and never
 //     propagated; the original failure dominates.
-//  3. Return errCommitNowFailed — the empty-message sentinel that drives a
-//     non-zero process exit without printing anything to stderr. The hook
-//     subprocess has nowhere meaningful to send stderr; diagnostics route
-//     exclusively through portal.log.
+//  3. Return an error that wraps errCommitNowFailed via fmt.Errorf("%w: %v",
+//     ...). errors.Is(err, errCommitNowFailed) drives main.go's silent-exit
+//     suppression (see IsSilentExitError); errors.Unwrap surfaces the
+//     underlying cause so the error chain is preserved beyond portal.log.
+//     Cobra (SilenceErrors=true) is responsible for not printing the error;
+//     main.go's IsSilentExitError guard prevents the top-level handler from
+//     duplicating it. The hook subprocess has nowhere meaningful to send
+//     stderr; user-facing diagnostics route exclusively through portal.log.
 func failCommitNow(logger *state.Logger, dir string, touch func(string) error, stage string, cause error) error {
 	logger.Error(state.ComponentDaemon, "%s: %v", stage, cause)
 	if terr := touch(dir); terr != nil {
 		logger.Warn(state.ComponentDaemon, "touch save.requested after %s failure: %v", stage, terr)
 	}
-	return errCommitNowFailed
+	return fmt.Errorf("%w: %s: %v", errCommitNowFailed, stage, cause)
 }
 
 // loadPrevIndex returns the prior on-disk Index for use as CaptureStructure's
