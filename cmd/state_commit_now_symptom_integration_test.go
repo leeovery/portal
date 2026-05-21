@@ -437,6 +437,30 @@ func (f symptomFixture) diagnostic() string {
 	return b.String()
 }
 
+// runPortalSubprocess invokes the portal binary with the given args
+// against the fixture's tmux socket and state directory. Centralises
+// the env wiring (TMUX pointing at the test socket, PORTAL_STATE_DIR
+// pointing at the test temp dir, PATH prefixed with the staged
+// binary's dir) shared by every portal subprocess this file spawns.
+// A non-zero exit is treated as a fixture failure: the diagnostic
+// dump is included so the failure mode (missing hook, broken
+// bootstrap, etc.) can be triaged without re-running.
+func runPortalSubprocess(t *testing.T, binary string, f symptomFixture, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command(binary, args...)
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("TMUX=%s,1,0", f.sock.SocketPath()),
+		"PORTAL_STATE_DIR="+f.stateDir,
+		"PATH="+f.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("portal %s subprocess failed: %v\n--- output ---\n%s\n%s",
+			strings.Join(args, " "), err, string(out), f.diagnostic())
+	}
+}
+
 // runPortalCommitNow invokes `portal state commit-now` as a sub-
 // process against the fixture's tmux socket and state directory.
 // Used by newSymptomFixture to force a deterministic initial
@@ -452,18 +476,7 @@ func (f symptomFixture) diagnostic() string {
 // failure.
 func runPortalCommitNow(t *testing.T, binary string, f symptomFixture) {
 	t.Helper()
-
-	cmd := exec.Command(binary, "state", "commit-now")
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("TMUX=%s,1,0", f.sock.SocketPath()),
-		"PORTAL_STATE_DIR="+f.stateDir,
-		"PATH="+f.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("portal state commit-now subprocess failed: %v\n--- output ---\n%s\n%s",
-			err, string(out), f.diagnostic())
-	}
+	runPortalSubprocess(t, binary, f, "state", "commit-now")
 }
 
 // runPortalList invokes `portal list` as a subprocess against the
@@ -484,18 +497,7 @@ func runPortalCommitNow(t *testing.T, binary string, f symptomFixture) {
 // itself broke, which is a fixture failure not an assertion failure.
 func runPortalList(t *testing.T, binary string, f symptomFixture) {
 	t.Helper()
-
-	cmd := exec.Command(binary, "list")
-	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("TMUX=%s,1,0", f.sock.SocketPath()),
-		"PORTAL_STATE_DIR="+f.stateDir,
-		"PATH="+f.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("portal list subprocess failed: %v\n--- output ---\n%s\n%s",
-			err, string(out), f.diagnostic())
-	}
+	runPortalSubprocess(t, binary, f, "list")
 }
 
 // pollSessionsJSON polls sessions.json on the reentrancyPollInterval
