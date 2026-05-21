@@ -53,7 +53,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -427,7 +426,7 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 func (f symptomFixture) diagnostic() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- state directory (%s) ---\n", f.stateDir)
-	b.WriteString(dumpStateDirRaw(f.stateDir))
+	b.WriteString(dumpStateDir(f.stateDir))
 	b.WriteString("\n--- raw tmux sessions (test socket) ---\n")
 	if out, err := f.sock.TryRun("list-sessions", "-F", "#{session_name}"); err == nil {
 		b.WriteString(out)
@@ -585,7 +584,7 @@ func assertSessionsJSONHas(t *testing.T, stateDir string, mustHave, mustOmit []s
 	idx, skip, err := state.ReadIndex(stateDir)
 	if err != nil || skip {
 		t.Fatalf("assert sessions.json shape: skip=%v err=%v\n%s",
-			skip, err, dumpStateDirRaw(stateDir))
+			skip, err, dumpStateDir(stateDir))
 	}
 	present := indexSessionNameSet(idx)
 	for _, n := range mustHave {
@@ -645,51 +644,4 @@ func keysOf(set map[string]struct{}) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// dumpStateDirRaw is a sub-test-friendly variant of dumpStateDir
-// (defined in state_commit_now_reentrancy_integration_test.go) that
-// takes no fixture and writes one level of directory listing plus
-// the sessions.json bytes (capped) to a string. Shares the truncate-
-// at-2KB ceiling so failure logs stay readable. Kept here rather
-// than refactoring the sibling test because the two files are
-// idiomatically self-contained per the cmd-package test convention.
-func dumpStateDirRaw(stateDir string) string {
-	var lines []string
-	entries, err := os.ReadDir(stateDir)
-	if err != nil {
-		return fmt.Sprintf("(readdir %s: %v)", stateDir, err)
-	}
-	for _, e := range entries {
-		info, ierr := e.Info()
-		if ierr != nil {
-			lines = append(lines, fmt.Sprintf("%s (stat err: %v)", e.Name(), ierr))
-			continue
-		}
-		lines = append(lines, fmt.Sprintf("%s (size=%d, mode=%s)", e.Name(), info.Size(), info.Mode()))
-		if e.IsDir() {
-			sub, serr := os.ReadDir(filepath.Join(stateDir, e.Name()))
-			if serr != nil {
-				lines = append(lines, fmt.Sprintf("  (readdir %s: %v)", e.Name(), serr))
-				continue
-			}
-			for _, se := range sub {
-				si, sierr := se.Info()
-				if sierr != nil {
-					lines = append(lines, fmt.Sprintf("  %s (stat err: %v)", se.Name(), sierr))
-					continue
-				}
-				lines = append(lines, fmt.Sprintf("  %s (size=%d)", se.Name(), si.Size()))
-			}
-		}
-	}
-	if data, rerr := os.ReadFile(state.SessionsJSON(stateDir)); rerr == nil {
-		const capN = 2048
-		blob := string(data)
-		if len(blob) > capN {
-			blob = blob[:capN] + "...(truncated)"
-		}
-		lines = append(lines, "--- sessions.json contents ---", blob)
-	}
-	return strings.Join(lines, "\n")
 }
