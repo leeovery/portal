@@ -182,7 +182,7 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 			skip, err, fixture.diagnostic(),
 		)
 	}
-	present := indexSessionNameSet(idx)
+	present := sessionNames(idx)
 
 	t.Run("daemon's next tick after commit-now does not re-introduce the killed session by name", func(t *testing.T) {
 		if _, reintroduced := present["B"]; reintroduced {

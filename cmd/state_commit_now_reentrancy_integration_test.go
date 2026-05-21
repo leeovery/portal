@@ -46,9 +46,7 @@ package cmd_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,7 +210,7 @@ func TestCommitNowFromSessionClosedHook_NoDeadlockUnderRealTmux(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), reentrancyHookBudget)
 	defer cancel()
 
-	if err := pollSessionsJSONForKill(ctx, stateDir, "A", "B"); err != nil {
+	if err := pollSessionsJSON(ctx, stateDir, []string{"A"}, []string{"B"}); err != nil {
 		// Failure path: dump (a) state directory contents, (b) live
 		// tmux session/pane list, (c) elapsed wall time. These three
 		// signals together distinguish (i) re-entrancy deadlock (no
@@ -241,13 +239,13 @@ func TestCommitNowFromSessionClosedHook_NoDeadlockUnderRealTmux(t *testing.T) {
 	elapsed := time.Since(killStart)
 
 	// Assertion 1: the gate's primary contract — completion strictly
-	// under the 1.5s budget. pollSessionsJSONForKill returning nil
-	// means we observed two consecutive consistent reads inside the
-	// context deadline, so this is a belt-and-braces check on the
-	// elapsed wall time (the context already enforces the ceiling).
+	// under the 1.5s budget. pollSessionsJSON returning nil means we
+	// observed two consecutive consistent reads inside the context
+	// deadline, so this is a belt-and-braces check on the elapsed
+	// wall time (the context already enforces the ceiling).
 	if elapsed >= reentrancyHookBudget {
 		t.Errorf("hook subprocess elapsed %s exceeds budget %s "+
-			"(test would have timed out — pollSessionsJSONForKill returned nil but the elapsed "+
+			"(test would have timed out — pollSessionsJSON returned nil but the elapsed "+
 			"measurement disagrees, indicating a clock race or budget-edge condition)",
 			elapsed, reentrancyHookBudget)
 	}
@@ -261,87 +259,31 @@ func TestCommitNowFromSessionClosedHook_NoDeadlockUnderRealTmux(t *testing.T) {
 		t.Fatalf("post-poll ReadIndex: skip=%v err=%v", skip, err)
 	}
 	names := sessionNames(idx)
-	if !names["A"] {
-		t.Errorf("sessions.json missing surviving session %q; sessions=%v", "A", names)
+	if _, ok := names["A"]; !ok {
+		t.Errorf("sessions.json missing surviving session %q; sessions=%v", "A", keysOf(names))
 	}
-	if names["B"] {
-		t.Errorf("sessions.json still contains killed session %q; sessions=%v", "B", names)
+	if _, ok := names["B"]; ok {
+		t.Errorf("sessions.json still contains killed session %q; sessions=%v", "B", keysOf(names))
 	}
 
 	t.Logf("commit-now hook completed in %s (budget=%s, sessions=%v)",
-		elapsed, reentrancyHookBudget, names)
-}
-
-// pollSessionsJSONForKill polls sessions.json on the reentrancyPollInterval
-// cadence until ctx is cancelled or two consecutive reads observe
-// expectKept present and expectKilled absent. Returns nil on observed
-// success, ctx.Err on timeout, and a wrapped error for unexpected
-// non-ENOENT read failures.
-//
-// The two-consecutive-reads discipline guards against the race
-// between the hook subprocess's atomic temp+rename and the poll's
-// single-shot read: a single read could observe the pre-rename file
-// (stale snapshot containing B) while the rename is mid-flight.
-// Requiring two consecutive observations of the post-kill shape
-// proves the rename has fully settled. See spec § Concurrent
-// commit-now invocations for the broader race-tolerance discipline.
-//
-// File-absent (ENOENT) and skip=true both reset the consecutive
-// counter — they represent the pre-write window where the hook
-// subprocess has not yet committed. A genuine read failure (permission
-// denied, corruption) is returned wrapped so the caller's diagnostic
-// dump captures the cause.
-func pollSessionsJSONForKill(ctx context.Context, stateDir, expectKept, expectKilled string) error {
-	var consecutive int
-	ticker := time.NewTicker(reentrancyPollInterval)
-	defer ticker.Stop()
-
-	for {
-		idx, skip, err := state.ReadIndex(stateDir)
-		switch {
-		case err != nil && errors.Is(err, fs.ErrNotExist):
-			// File absent — pre-write window. Reset and keep polling.
-			consecutive = 0
-		case err != nil:
-			// Genuine read failure (corrupt JSON, permission). Surface
-			// so the caller's diagnostic dump captures the cause.
-			return fmt.Errorf("read sessions.json during poll: %w", err)
-		case skip:
-			// ReadIndex's "skip" surface — file absent or unusable.
-			// ENOENT case is caught above; this branch covers the
-			// exists-but-corrupt window (e.g. a partial write
-			// observed mid-rename, which atomic rename should make
-			// impossible but we keep the branch for defence in depth).
-			consecutive = 0
-		default:
-			names := sessionNames(idx)
-			if names[expectKept] && !names[expectKilled] {
-				consecutive++
-				if consecutive >= reentrancyConsecutiveReads {
-					return nil
-				}
-			} else {
-				consecutive = 0
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+		elapsed, reentrancyHookBudget, keysOf(names))
 }
 
 // sessionNames builds a presence set from idx.Sessions so callers can
 // assert "B is absent and A is present" without iterating the slice
 // at every call site. Underscore-prefixed sessions (e.g. `_anchor`,
 // `_portal-saver`) are filtered out at commit-now write time via
-// keepSessionNames, so they will not appear in the result.
-func sessionNames(idx state.Index) map[string]bool {
-	out := make(map[string]bool, len(idx.Sessions))
+// keepSessionNames, so they will not appear in the result. The
+// `map[string]struct{}` shape is the canonical name-set carrier
+// shared across the cmd_test integration files (symptom, daemon-
+// merge, reentrancy) — membership checks use the two-value comma-ok
+// idiom (`_, ok := names[n]`) and diagnostic prints route through
+// keysOf for a slice view.
+func sessionNames(idx state.Index) map[string]struct{} {
+	out := make(map[string]struct{}, len(idx.Sessions))
 	for _, s := range idx.Sessions {
-		out[s.Name] = true
+		out[s.Name] = struct{}{}
 	}
 	return out
 }

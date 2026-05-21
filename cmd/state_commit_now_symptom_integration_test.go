@@ -70,18 +70,12 @@ import (
 // surfaced.
 const symptomKillBudget = 1500 * time.Millisecond
 
-// symptomPollInterval is the cadence at which sessions.json is
-// re-read while waiting for the hook subprocess to commit. 25ms
-// mirrors task 1-5 — short enough that a typical 100-300ms hook
-// completion is observed within a handful of polls.
-const symptomPollInterval = 25 * time.Millisecond
-
-// symptomConsecutiveReads is the number of consecutive consistent
-// reads required before concluding a post-kill state is settled.
-// Two reads (each ≥ 25ms apart) guards against the atomic-rename
-// race documented in spec § Concurrent commit-now invocations:
-// a single read could land on the pre-rename file.
-const symptomConsecutiveReads = 2
+// Poll cadence and consecutive-read threshold are shared with the
+// re-entrancy gate (see reentrancyPollInterval / reentrancyConsecutiveReads
+// in state_commit_now_reentrancy_integration_test.go): both gates run
+// the same two-consecutive-consistent-reads discipline against
+// sessions.json on a 25ms cadence, so the constants are declared once
+// and reused across the cmd_test package.
 
 // markerSetSettle is the brief wait used in sub-test 3 to give the
 // session-closed hook subprocess time to execute when @portal-
@@ -504,8 +498,8 @@ func runPortalList(t *testing.T, binary string, f symptomFixture) {
 	}
 }
 
-// pollSessionsJSON polls sessions.json on the symptomPollInterval
-// cadence until ctx is cancelled or symptomConsecutiveReads
+// pollSessionsJSON polls sessions.json on the reentrancyPollInterval
+// cadence until ctx is cancelled or reentrancyConsecutiveReads
 // successive reads observe (a) every name in mustHave present and
 // (b) every name in mustOmit absent. Returns nil on observed
 // stabilisation, ctx.Err on timeout, and a wrapped error for non-
@@ -516,7 +510,7 @@ func runPortalList(t *testing.T, binary string, f symptomFixture) {
 // the hook subprocess (or daemon's first commit) lands a file.
 func pollSessionsJSON(ctx context.Context, stateDir string, mustHave, mustOmit []string) error {
 	var consecutive int
-	ticker := time.NewTicker(symptomPollInterval)
+	ticker := time.NewTicker(reentrancyPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -529,10 +523,10 @@ func pollSessionsJSON(ctx context.Context, stateDir string, mustHave, mustOmit [
 		case skip:
 			consecutive = 0
 		default:
-			present := indexSessionNameSet(idx)
+			present := sessionNames(idx)
 			if matchesShape(present, mustHave, mustOmit) {
 				consecutive++
-				if consecutive >= symptomConsecutiveReads {
+				if consecutive >= reentrancyConsecutiveReads {
 					return nil
 				}
 			} else {
@@ -564,16 +558,6 @@ func matchesShape(present map[string]struct{}, mustHave, mustOmit []string) bool
 	return true
 }
 
-// indexSessionNameSet builds a presence set from idx.Sessions so
-// callers can do O(1) membership checks against the expected shape.
-func indexSessionNameSet(idx state.Index) map[string]struct{} {
-	out := make(map[string]struct{}, len(idx.Sessions))
-	for _, s := range idx.Sessions {
-		out[s.Name] = struct{}{}
-	}
-	return out
-}
-
 // assertSessionsJSONHas fails the test if sessions.json does not
 // currently contain every name in mustHave or contains any name in
 // mustOmit. Used as a steady-state shape check after polling has
@@ -586,7 +570,7 @@ func assertSessionsJSONHas(t *testing.T, stateDir string, mustHave, mustOmit []s
 		t.Fatalf("assert sessions.json shape: skip=%v err=%v\n%s",
 			skip, err, dumpStateDir(stateDir))
 	}
-	present := indexSessionNameSet(idx)
+	present := sessionNames(idx)
 	for _, n := range mustHave {
 		if _, ok := present[n]; !ok {
 			t.Errorf("sessions.json missing %q; present=%v", n, keysOf(present))
