@@ -229,7 +229,18 @@ After this fix, every kill path (TUI `K`, `portal kill`, `Option-Q`, `M-q`, exte
 
 ### Discussion
 
-_(to be filled in Step 8 findings review)_
+User directional preference recorded in the inbox up front: synchronous at the kill-side path, no timeouts / retry tuning / tick-rate adjustments. Findings review confirmed the direction without contention; user said `y` to both the findings block and the fix-direction block on first presentation.
+
+Synthesis validation surfaced four gaps the investigation hadn't enumerated. All four are addressed by the chosen approach rather than redirecting it:
+
+- **`portal status` is also a stale-window reader.** Broadens the motivation for the writer-side fix; the synchronous commit benefits every consumer of `sessions.json`, not just `Restore`. No change to the fix shape.
+- **Daemon-vs-hook narrow race.** Both writers re-query live tmux via `CaptureStructure → ListSessionNames` as their first step, so both observe post-kill state in the common case. `state.Commit`'s atomic write means the final on-disk state is one of N consistent snapshots, never torn. The sub-millisecond edge window where the daemon's `ListSessionNames` returned just before tmux completed the kill is real but vanishingly narrow; spec phase will document it as an accepted residual, not a blocker.
+- **Hook re-entrancy.** The synchronous commit subprocess makes tmux client calls back into the same server from within the `session-closed` hook context. `pane-focus-out` and `session-renamed` have had historical re-entrancy quirks; `session-closed` is less suspect but not pre-validated. Plan phase needs a real-tmux integration test fixture to confirm no deadlock occurs from this hook event specifically.
+- **`_portal-saver` underscore filter.** Steady-state user-kill of `_portal-saver` triggers the hook, runs the synchronous commit; `state.CaptureStructure`'s `keepSessionNames` excludes underscore-prefixed sessions, so the resulting idx omits `_portal-saver` — same as today. Structural guarantee from the existing filter; no special-casing needed. Spec phase should call this out explicitly so the invariant is documented, not implicit.
+
+**Open design choice deferred to spec phase: V1 (new `portal state commit-now` sibling subcommand) vs V2 (`portal state notify --sync` flag on the existing entry point).** Both are mechanically equivalent for the user-visible behaviour. V1 is cleanest separation; V2 has the tighter blast radius on the cmd surface. User did not express a preference at investigation time — spec author chooses.
+
+No alternatives explored beyond the five listed under **Options Explored**. The user's directional preference closed off C (notify-and-wait IPC) and D (no-timeouts), and the inbox's explicit listing of Option-Q / M-q ruled out A (cmd-layer-only fix). The chosen direction (E with limit to `session-closed`) is the only candidate satisfying all of "synchronous", "covers all kill paths", "no timeouts", and "no new IPC".
 
 ### Testing Recommendations
 
