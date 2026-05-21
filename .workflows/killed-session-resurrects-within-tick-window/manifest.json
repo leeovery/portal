@@ -38,12 +38,13 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "killed-session-resurrects-within-tick-window-1-4",
+          "task": "killed-session-resurrects-within-tick-window-1-5",
           "task_map": {
             "killed-session-resurrects-within-tick-window-1": "tick-97ba75",
             "killed-session-resurrects-within-tick-window-1-1": "tick-9cd5b3",
             "killed-session-resurrects-within-tick-window-1-2": "tick-aae24b",
-            "killed-session-resurrects-within-tick-window-1-3": "tick-5376d9"
+            "killed-session-resurrects-within-tick-window-1-3": "tick-5376d9",
+            "killed-session-resurrects-within-tick-window-1-4": "tick-a72110"
           },
           "external_id": "tick-44c1c5"
         }
