@@ -21,7 +21,7 @@
           "date": "2026-05-21",
           "sources": {
             "killed-session-resurrects-within-tick-window": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }
