@@ -34,12 +34,16 @@
           "format": "tick",
           "spec_commit": "242564fc1248b0802405616af4391f447ec707e2",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "killed-session-resurrects-within-tick-window-1-1",
-          "task_map": {}
+          "task": "killed-session-resurrects-within-tick-window-1-2",
+          "task_map": {
+            "killed-session-resurrects-within-tick-window-1": "tick-97ba75",
+            "killed-session-resurrects-within-tick-window-1-1": "tick-9cd5b3"
+          },
+          "external_id": "tick-44c1c5"
         }
       }
     }
