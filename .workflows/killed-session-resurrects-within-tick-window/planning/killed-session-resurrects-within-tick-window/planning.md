@@ -29,7 +29,8 @@ approved_at: 2026-05-21
 - [ ] All required unit, integration, and regression tests enumerated in the spec's Testing Requirements section pass.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-21
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|

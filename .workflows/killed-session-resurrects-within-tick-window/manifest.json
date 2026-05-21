@@ -33,12 +33,12 @@
           "status": "in-progress",
           "format": "tick",
           "spec_commit": "242564fc1248b0802405616af4391f447ec707e2",
-          "task_list_gate_mode": "gated",
+          "task_list_gate_mode": "auto",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "~",
+          "task": "killed-session-resurrects-within-tick-window-1-1",
           "task_map": {}
         }
       }
