@@ -657,14 +657,15 @@ func (m Model) filteredSessions() []tmux.Session {
 // single canonical sequence shared by the SessionsMsg and
 // previewSessionsRefreshedMsg handlers; handler-specific tail logic
 // (e.g. inside-tmux title rewrite) stays at the call site.
-func (m *Model) applySessions(sessions []tmux.Session) {
+func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
 	filtered := m.filteredSessions()
-	m.sessionList.SetItems(ToListItems(filtered))
+	cmd := m.sessionList.SetItems(ToListItems(filtered))
 	// Re-apply terminal size so pagination accounts for full help height
 	if m.termWidth > 0 || m.termHeight > 0 {
 		m.sessionList.SetSize(m.termWidth, m.termHeight)
 	}
+	return cmd
 }
 
 // evaluateDefaultPage sets the active page based on loaded data.
@@ -894,7 +895,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, tea.Quit
 		}
-		m.applySessions(msg.Sessions)
+		cmd := m.applySessions(msg.Sessions)
 
 		if m.insideTmux && m.currentSession != "" {
 			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
@@ -907,12 +908,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// transitionFromLoading runs, but we do not flip sessionsLoaded here:
 		// transitionFromLoading does that as part of evaluateDefaultPage.
 		if m.activePage == PageLoading {
-			return m, nil
+			return m, cmd
 		}
 
 		m.sessionsLoaded = true
 		m.evaluateDefaultPage()
-		return m, nil
+		return m, cmd
 	case LoadingMinElapsedMsg:
 		m.minElapsed = true
 		if m.bootstrapComplete && m.activePage == PageLoading {
@@ -1018,9 +1019,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, nil
 		}
-		m.applySessions(msg.Sessions)
+		cmd := m.applySessions(msg.Sessions)
 		m.reanchorSessionCursor(msg.PreserveName)
-		return m, nil
+		return m, cmd
 	case flashTickMsg:
 		// Generation-guard: a tick scheduled for an earlier flash must
 		// not early-clear a flash that has since been replaced by a
