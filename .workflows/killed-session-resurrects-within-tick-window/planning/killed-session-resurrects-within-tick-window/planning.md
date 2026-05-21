@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Synchronous Commit On Kill
-status: draft
+status: approved
+approved_at: 2026-05-21
 
 **Goal**: Eliminate the kill→resurrection race window by making the `session-closed` tmux hook synchronously rewrite `sessions.json` before the hook subprocess exits, covering every kill path (TUI `K`, `portal kill`, `Option-Q`, `M-q`, external `tmux kill-session`) through one tmux-side seam.
 
