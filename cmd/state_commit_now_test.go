@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 )
@@ -72,6 +73,14 @@ type commitNowFixture struct {
 	readIdxSkip     bool
 	readIdxReturn   state.Index
 	readIdxOverride bool
+
+	// @portal-restoring / save.requested seams.
+	restoring     bool
+	restoringErr  error
+	restoringCals int
+	touchCalls    int
+	touchDirs     []string
+	touchErr      error
 }
 
 type commitInvocation struct {
@@ -102,6 +111,26 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			}
 			// Write a real file so on-disk assertions still pass.
 			return state.Commit(dir, idx, any, nil)
+		},
+		IsRestoring: func() (bool, error) {
+			f.restoringCals++
+			return f.restoring, f.restoringErr
+		},
+		TouchSaveRequested: func(dir string) error {
+			f.touchCalls++
+			f.touchDirs = append(f.touchDirs, dir)
+			if f.touchErr != nil {
+				return f.touchErr
+			}
+			// Mirror state notify: O_WRONLY|O_CREATE|O_TRUNC + Chtimes.
+			fp, err := os.OpenFile(state.SaveRequested(dir), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+			if err != nil {
+				return err
+			}
+			_ = fp.Close()
+			now := time.Now()
+			_ = os.Chtimes(state.SaveRequested(dir), now, now)
+			return nil
 		},
 	}
 	if f.readIdxOverride {
@@ -527,6 +556,195 @@ func TestStateCommitNow_ExitsZeroAndWritesNoBinFiles(t *testing.T) {
 	}
 	if f.commitArgs[0].AnyScrollbackChanged {
 		t.Errorf("anyScrollbackChanged passed to Commit = true, want false")
+	}
+}
+
+// --- @portal-restoring short-circuit (task 1-2) ---
+
+// 11. short-circuit: no sessions.json write while @portal-restoring is set.
+func TestStateCommitNow_ShortCircuits_DoesNotWriteSessionsJSONWhenRestoring(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Seed sessions.json with a known byte sequence so we can prove
+	// byte-equivalence pre/post invocation.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	seed := []byte(`{"sentinel":"untouched"}`)
+	sessionsPath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(sessionsPath, seed, 0o600); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	f := &commitNowFixture{
+		client:    &fakeCaptureClient{sessions: nil},
+		restoring: true,
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0, got: %v", err)
+	}
+
+	// None of the structural primitives may have fired.
+	if f.captureCalls != 0 {
+		t.Errorf("CaptureStructure called %d times; want 0", f.captureCalls)
+	}
+	if f.commitCalls != 0 {
+		t.Errorf("Commit called %d times; want 0", f.commitCalls)
+	}
+
+	got, err := os.ReadFile(sessionsPath)
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	if !bytes.Equal(got, seed) {
+		t.Errorf("sessions.json mutated during short-circuit:\nwant %q\ngot  %q", seed, got)
+	}
+}
+
+// 12. short-circuit touches save.requested so the daemon's first
+// post-restoration tick commits without waiting for the gap rule.
+func TestStateCommitNow_ShortCircuits_TouchesSaveRequested(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client:    &fakeCaptureClient{sessions: nil},
+		restoring: true,
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0, got: %v", err)
+	}
+
+	if f.touchCalls != 1 {
+		t.Errorf("TouchSaveRequested calls = %d, want 1", f.touchCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested must exist after restoring short-circuit; stat err = %v", err)
+	}
+}
+
+// 13. short-circuit emits an INFO-level structured log entry.
+func TestStateCommitNow_ShortCircuits_LogsInfoSkipEvent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+
+	f := &commitNowFixture{
+		client:    &fakeCaptureClient{sessions: nil},
+		restoring: true,
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0, got: %v", err)
+	}
+
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "INFO") {
+		t.Errorf("log missing INFO level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	}
+	if !strings.Contains(logged, "@portal-restoring") {
+		t.Errorf("log missing @portal-restoring marker mention: %q", logged)
+	}
+}
+
+// 14. exit code is 0 on the short-circuit.
+func TestStateCommitNow_ShortCircuits_ExitsZero(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client:    &fakeCaptureClient{sessions: nil},
+		restoring: true,
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0, got: %v", err)
+	}
+}
+
+// 15. short-circuit with touch failure still exits 0 and logs the touch
+// failure at WARN.
+func TestStateCommitNow_ShortCircuits_ExitsZeroWhenSaveRequestedTouchFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+
+	f := &commitNowFixture{
+		client:    &fakeCaptureClient{sessions: nil},
+		restoring: true,
+		touchErr:  errors.New("disk full"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0 even when touch fails, got: %v", err)
+	}
+
+	if f.captureCalls != 0 || f.commitCalls != 0 {
+		t.Errorf("structural primitives must not run during short-circuit (capture=%d commit=%d)",
+			f.captureCalls, f.commitCalls)
+	}
+
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("log missing WARN level entry on touch failure: %q", logged)
+	}
+	if !strings.Contains(logged, "save.requested") {
+		t.Errorf("log missing save.requested marker: %q", logged)
+	}
+	if !strings.Contains(logged, "disk full") {
+		t.Errorf("log missing underlying touch error: %q", logged)
+	}
+}
+
+// 16. marker clear: happy path proceeds unchanged.
+func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		restoring: false,
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if f.captureCalls != 1 {
+		t.Errorf("CaptureStructure calls = %d, want 1", f.captureCalls)
+	}
+	if f.commitCalls != 1 {
+		t.Errorf("Commit calls = %d, want 1", f.commitCalls)
+	}
+	if f.touchCalls != 0 {
+		t.Errorf("TouchSaveRequested must not fire on the happy path; calls = %d", f.touchCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("save.requested must remain absent on the happy path; stat err = %v", err)
 	}
 }
 

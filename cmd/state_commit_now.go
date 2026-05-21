@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -41,6 +43,20 @@ type CommitNowDeps struct {
 	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index) (state.Index, error)
 	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *state.Logger) error
 	NewClient        func() state.CaptureClient
+
+	// IsRestoring queries the @portal-restoring server option. When the
+	// marker is set, commit-now short-circuits as a no-op (the daemon's
+	// existing restoration discipline owns sessions.json during bootstrap
+	// step 5 / step 4 version-upgrade kills). Defaults to a closure that
+	// calls state.IsRestoringSet against a fresh production tmux client.
+	IsRestoring func() (bool, error)
+
+	// TouchSaveRequested creates-or-truncates save.requested under dir and
+	// bumps its mtime, mirroring the in-line touch state notify performs.
+	// Used on the @portal-restoring short-circuit so the daemon's first
+	// post-restoration tick commits without waiting for the 30s gap rule.
+	// Defaults to defaultTouchSaveRequested.
+	TouchSaveRequested func(dir string) error
 }
 
 // resolveCommitNowDeps returns the production-or-overridden function values
@@ -51,11 +67,15 @@ func resolveCommitNowDeps() (
 	captureStructure func(state.CaptureClient, map[string]struct{}, *state.Index) (state.Index, error),
 	commit func(string, state.Index, bool, *state.Logger) error,
 	newClient func() state.CaptureClient,
+	isRestoring func() (bool, error),
+	touchSaveRequested func(string) error,
 ) {
 	readIndex = state.ReadIndex
 	captureStructure = state.CaptureStructure
 	commit = state.Commit
 	newClient = func() state.CaptureClient { return tmux.DefaultClient() }
+	isRestoring = func() (bool, error) { return state.IsRestoringSet(tmux.DefaultClient()) }
+	touchSaveRequested = defaultTouchSaveRequested
 
 	if commitNowDeps == nil {
 		return
@@ -72,7 +92,32 @@ func resolveCommitNowDeps() (
 	if commitNowDeps.NewClient != nil {
 		newClient = commitNowDeps.NewClient
 	}
+	if commitNowDeps.IsRestoring != nil {
+		isRestoring = commitNowDeps.IsRestoring
+	}
+	if commitNowDeps.TouchSaveRequested != nil {
+		touchSaveRequested = commitNowDeps.TouchSaveRequested
+	}
 	return
+}
+
+// defaultTouchSaveRequested creates-or-truncates save.requested under dir and
+// bumps its mtime. Mirrors the byte-for-byte sequence state notify performs
+// in-line; kept package-local so commit-now's short-circuit can reuse it
+// without depending on cobra wiring.
+//
+// The Chtimes call is best-effort: a save.requested that exists but failed an
+// mtime bump still satisfies the daemon's dirty-flag check on the next tick.
+func defaultTouchSaveRequested(dir string) error {
+	path := state.SaveRequested(dir)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("touch save.requested: %w", err)
+	}
+	_ = f.Close()
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+	return nil
 }
 
 // stateCommitNowCmd performs a synchronous structural capture-and-commit on
@@ -119,7 +164,28 @@ var stateCommitNowCmd = &cobra.Command{
 		logger, _ := openNoRotateLogger()
 		defer func() { _ = logger.Close() }()
 
-		readIndex, captureStructure, commit, newClient := resolveCommitNowDeps()
+		readIndex, captureStructure, commit, newClient, isRestoring, touchSaveRequested := resolveCommitNowDeps()
+
+		// @portal-restoring short-circuit. Mirrors the daemon's tick() entry
+		// guard: when bootstrap step 5 Restore (or a step-4 saver
+		// version-upgrade firing session-closed mid-restore) is in progress,
+		// any structural commit would write a partial skeleton view. Skip
+		// every primitive, touch save.requested so the daemon's first
+		// post-restoration tick commits, and exit 0 — the skip is a
+		// deliberate completion, not an error.
+		//
+		// A query failure on @portal-restoring is out of scope here; per
+		// task 1-2 the production primitive deterministically returns either
+		// (false, nil) or (true, nil), with task 1-3 owning the
+		// tmux-unreachable branch.
+		restoring, err := isRestoring()
+		if err == nil && restoring {
+			logger.Info(state.ComponentDaemon, "commit-now skipped: @portal-restoring set")
+			if terr := touchSaveRequested(dir); terr != nil {
+				logger.Warn(state.ComponentDaemon, "touch save.requested during short-circuit: %v", terr)
+			}
+			return nil
+		}
 
 		prev := loadPrevIndex(dir, readIndex, logger)
 
