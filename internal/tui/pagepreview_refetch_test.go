@@ -103,12 +103,41 @@ func pressSpaceThenEscWithRefresh(t *testing.T, m Model) Model {
 		return got3
 	}
 	refreshMsg := refreshCmd()
-	updated4, _ := got3.Update(refreshMsg)
+	updated4, refilterCmd := got3.Update(refreshMsg)
 	got4, ok := updated4.(Model)
 	if !ok {
 		t.Fatalf("expected Model after refresh msg, got %T", updated4)
 	}
-	return got4
+	final, ok := drainRefilterCmd(t, got4, refilterCmd).(Model)
+	if !ok {
+		t.Fatalf("expected Model after refilter drain, got %T", final)
+	}
+	return final
+}
+
+// drainRefilterCmd round-trips the tea.Cmd returned by an Update call that
+// processed a sessions-list refresh (e.g. previewSessionsRefreshedMsg or
+// kill-refresh SessionsMsg). When the list is in list.FilterApplied state,
+// the bubbles/list SetItems call synchronously nils filteredItems and
+// returns a filterItems tea.Cmd that emits FilterMatchesMsg; only after
+// that message is fed back through Update does VisibleItems() return the
+// refiltered slice. This helper performs that round-trip so assertions
+// against VisibleItems() observe the refiltered list rather than the
+// transient empty state.
+//
+// When cmd is nil (boot path / Unfiltered list — SetItems returns nil per
+// bubbles@v1.0.0/list.go:385-397) the model is returned unchanged.
+func drainRefilterCmd(t *testing.T, m tea.Model, cmd tea.Cmd) tea.Model {
+	t.Helper()
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	if msg == nil {
+		return m
+	}
+	updated, _ := m.Update(msg)
+	return updated
 }
 
 func TestPreviewEscRefetchesSessionsList(t *testing.T) {
@@ -297,6 +326,77 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 	}
 	if got.sessionList.FilterState() != list.FilterApplied {
 		t.Errorf("expected FilterState=FilterApplied after dismiss-with-refresh, got %v", got.sessionList.FilterState())
+	}
+}
+
+// TestDrainRefilterCmdNilCmdReturnsModelUnchanged locks the boot/unfiltered
+// contract: SetItems against an Unfiltered list returns nil per
+// bubbles@v1.0.0/list.go:385-397, so the helper MUST treat nil as a no-op
+// (no panic, no perturbation of the model) and return the input model
+// untouched.
+func TestDrainRefilterCmdNilCmdReturnsModelUnchanged(t *testing.T) {
+	first := []tmux.Session{
+		{Name: "alpha", Windows: 1, Attached: false},
+		{Name: "bravo", Windows: 1, Attached: false},
+	}
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: []byte("hi")}
+	m := modelWithSeamsAndLister(first, enum, reader, &stepListerStub{steps: [][]tmux.Session{first}})
+	before := visibleSessionNames(m)
+
+	out := drainRefilterCmd(t, m, nil)
+	got, ok := out.(Model)
+	if !ok {
+		t.Fatalf("expected Model from drainRefilterCmd, got %T", out)
+	}
+	after := visibleSessionNames(got)
+	if len(before) != len(after) {
+		t.Fatalf("expected VisibleItems unchanged on nil cmd, before=%v after=%v", before, after)
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Errorf("expected VisibleItems unchanged on nil cmd at idx %d, before=%q after=%q", i, before[i], after[i])
+		}
+	}
+}
+
+// TestDrainRefilterCmdInvokesCmdAndFeedsResultThroughUpdate locks the
+// active drain path: when given a non-nil cmd, the helper MUST invoke it
+// and feed the produced message back through Update, returning the
+// post-Update model. We synthesize a tea.Cmd that emits a known message
+// and verify the message reaches Update by triggering an observable
+// state transition (a tea.KeyMsg with Esc on the preview page flips
+// activePage back to PageSessions and emits a previewDismissedMsg via
+// the returned cmd; here we use a simpler probe — a tea.WindowSizeMsg —
+// which Update consumes and stores on the model).
+func TestDrainRefilterCmdInvokesCmdAndFeedsResultThroughUpdate(t *testing.T) {
+	first := []tmux.Session{
+		{Name: "alpha", Windows: 1, Attached: false},
+	}
+	enum := &stubEnumerator{
+		groups: []tmux.WindowGroup{
+			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
+		},
+	}
+	reader := &recordingReader{bytes: []byte("hi")}
+	m := modelWithSeamsAndLister(first, enum, reader, &stepListerStub{steps: [][]tmux.Session{first}})
+
+	// Synthesize a cmd that emits a WindowSizeMsg — Update consumes this
+	// and writes to m.termWidth/m.termHeight, giving us an observable
+	// signal that the message was fed back through Update.
+	probeCmd := func() tea.Msg { return tea.WindowSizeMsg{Width: 137, Height: 41} }
+
+	out := drainRefilterCmd(t, m, probeCmd)
+	got, ok := out.(Model)
+	if !ok {
+		t.Fatalf("expected Model from drainRefilterCmd, got %T", out)
+	}
+	if got.termWidth != 137 || got.termHeight != 41 {
+		t.Errorf("expected drainRefilterCmd to feed the cmd's message back through Update (termWidth=137 termHeight=41), got termWidth=%d termHeight=%d", got.termWidth, got.termHeight)
 	}
 }
 
