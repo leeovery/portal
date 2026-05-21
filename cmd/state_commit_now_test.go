@@ -748,6 +748,378 @@ func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
 	}
 }
 
+// --- Failure-path discipline (task 1-3) ---
+//
+// On any failure of CaptureStructure or Commit, commit-now must:
+//   (a) emit an ERROR log under state.ComponentDaemon with the underlying err,
+//   (b) touch save.requested best-effort (daemon-fallback handoff),
+//   (c) exit non-zero — never panic, never print a Go stack trace.
+//
+// If the save.requested touch itself fails on a failure exit, log WARN and
+// preserve the non-zero exit (original failure dominates).
+
+// 17. CaptureStructure error → non-zero exit (sentinel empty-message error).
+func TestStateCommitNow_ExitsNonZeroWhenCaptureStructureFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client:     &fakeCaptureClient{sessions: nil},
+		captureErr: errors.New("tmux unreachable"),
+	}
+	installCommitNowDeps(t, f)
+
+	_, _, err := runStateCommitNow(t)
+	if err == nil {
+		t.Fatal("expected non-zero exit (non-nil Execute error) when CaptureStructure fails")
+	}
+	if f.commitCalls != 0 {
+		t.Errorf("Commit must not be called when CaptureStructure fails; calls = %d", f.commitCalls)
+	}
+}
+
+// 18. CaptureStructure error → touches save.requested.
+func TestStateCommitNow_TouchesSaveRequestedWhenCaptureStructureFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client:     &fakeCaptureClient{sessions: nil},
+		captureErr: errors.New("tmux unreachable"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	if f.touchCalls != 1 {
+		t.Errorf("TouchSaveRequested calls = %d, want 1", f.touchCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested must exist after CaptureStructure failure; stat err = %v", err)
+	}
+}
+
+// 19. CaptureStructure error → ERROR log under ComponentDaemon, mentions err.
+func TestStateCommitNow_LogsErrorWhenCaptureStructureFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "error")
+
+	f := &commitNowFixture{
+		client:     &fakeCaptureClient{sessions: nil},
+		captureErr: errors.New("tmux unreachable"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "ERROR") {
+		t.Errorf("log missing ERROR level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	}
+	if !strings.Contains(logged, "tmux unreachable") {
+		t.Errorf("log missing underlying capture error: %q", logged)
+	}
+}
+
+// 20. Commit error → non-zero exit.
+func TestStateCommitNow_ExitsNonZeroWhenCommitFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		commitErr: errors.New("disk full"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit when Commit fails")
+	}
+}
+
+// 21. Commit error → touches save.requested.
+func TestStateCommitNow_TouchesSaveRequestedWhenCommitFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		commitErr: errors.New("disk full"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	if f.touchCalls != 1 {
+		t.Errorf("TouchSaveRequested calls = %d, want 1", f.touchCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested must exist after Commit failure; stat err = %v", err)
+	}
+}
+
+// 22. Commit error pre-rename leaves sessions.json byte-identical.
+//
+// Mocked Commit returns an error WITHOUT calling the real state.Commit, which
+// models a Commit that fails before the atomic rename. The seeded sessions.json
+// must be untouched.
+func TestStateCommitNow_LeavesSessionsJSONByteIdenticalWhenCommitFailsBeforeRename(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	seed := []byte(`{"sentinel":"untouched"}`)
+	sessionsPath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(sessionsPath, seed, 0o600); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		// readIdxOverride avoids the seeded sentinel failing JSON decode; the
+		// seed is intentionally invalid JSON so we exercise the ReadIndex
+		// fallback path while still pinning the on-disk bytes.
+		readIdxOverride: true,
+		readIdxSkip:     true,
+		commitErr:       errors.New("disk full pre-rename"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	got, err := os.ReadFile(sessionsPath)
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	if !bytes.Equal(got, seed) {
+		t.Errorf("sessions.json mutated despite pre-rename Commit failure:\nwant %q\ngot  %q", seed, got)
+	}
+}
+
+// 23. Commit error → ERROR log.
+func TestStateCommitNow_LogsErrorWhenCommitFails(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "error")
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		commitErr: errors.New("permission denied"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "ERROR") {
+		t.Errorf("log missing ERROR level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	}
+	if !strings.Contains(logged, "permission denied") {
+		t.Errorf("log missing underlying commit error: %q", logged)
+	}
+}
+
+// 24. Both Commit and save.requested touch fail → still non-zero exit.
+func TestStateCommitNow_ExitsNonZeroWhenBothCommitAndTouchFail(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		commitErr: errors.New("disk full"),
+		touchErr:  errors.New("touch eperm"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit when both Commit and touch fail")
+	}
+
+	if f.touchCalls != 1 {
+		t.Errorf("TouchSaveRequested must still have been invoked once; calls = %d", f.touchCalls)
+	}
+}
+
+// 25. Touch failure on a failure exit → WARN log alongside the primary ERROR.
+func TestStateCommitNow_LogsWarnForTouchFailureAlongsidePrimaryError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+
+	f := &commitNowFixture{
+		client: &fakeCaptureClient{sessions: nil},
+		captureReturn: state.Index{
+			Version:  state.SchemaVersion,
+			Sessions: []state.Session{},
+		},
+		commitErr: errors.New("disk full primary"),
+		touchErr:  errors.New("touch eperm secondary"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "ERROR") {
+		t.Errorf("log missing primary ERROR entry: %q", logged)
+	}
+	if !strings.Contains(logged, "disk full primary") {
+		t.Errorf("log missing primary error text: %q", logged)
+	}
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("log missing WARN entry for touch failure: %q", logged)
+	}
+	if !strings.Contains(logged, "touch eperm secondary") {
+		t.Errorf("log missing touch failure text: %q", logged)
+	}
+	if !strings.Contains(logged, "save.requested") {
+		t.Errorf("log missing save.requested marker: %q", logged)
+	}
+}
+
+// 26. No panic on any failure path. Exercises capture-fail, commit-fail, and
+// both-fail without recover() so a panic propagates as a test failure.
+func TestStateCommitNow_DoesNotPanicOnAnyFailurePath(t *testing.T) {
+	cases := []struct {
+		name string
+		f    *commitNowFixture
+	}{
+		{
+			name: "CaptureStructure failure",
+			f: &commitNowFixture{
+				client:     &fakeCaptureClient{sessions: nil},
+				captureErr: errors.New("tmux gone"),
+			},
+		},
+		{
+			name: "Commit failure",
+			f: &commitNowFixture{
+				client: &fakeCaptureClient{sessions: nil},
+				captureReturn: state.Index{
+					Version:  state.SchemaVersion,
+					Sessions: []state.Session{},
+				},
+				commitErr: errors.New("disk full"),
+			},
+		},
+		{
+			name: "Commit + touch failure",
+			f: &commitNowFixture{
+				client: &fakeCaptureClient{sessions: nil},
+				captureReturn: state.Index{
+					Version:  state.SchemaVersion,
+					Sessions: []state.Session{},
+				},
+				commitErr: errors.New("disk full"),
+				touchErr:  errors.New("touch eperm"),
+			},
+		},
+		{
+			name: "CaptureStructure + touch failure",
+			f: &commitNowFixture{
+				client:     &fakeCaptureClient{sessions: nil},
+				captureErr: errors.New("tmux gone"),
+				touchErr:   errors.New("touch eperm"),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PORTAL_STATE_DIR", dir)
+			installCommitNowDeps(t, tc.f)
+
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("commit-now panicked on %s: %v", tc.name, r)
+				}
+			}()
+
+			// Non-zero exit is expected; we only care that no panic escaped.
+			_, _, _ = runStateCommitNow(t)
+		})
+	}
+}
+
+// 27. Failure exit error must carry no message (silent stderr) so cobra/main
+// emit no Go stack trace or banner — the hook subprocess has nowhere
+// meaningful to send stderr; diagnostics route exclusively through portal.log.
+func TestStateCommitNow_FailureExitErrorHasEmptyMessage(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	f := &commitNowFixture{
+		client:     &fakeCaptureClient{sessions: nil},
+		captureErr: errors.New("tmux unreachable"),
+	}
+	installCommitNowDeps(t, f)
+
+	_, errBuf, err := runStateCommitNow(t)
+	if err == nil {
+		t.Fatal("expected non-zero exit")
+	}
+	if err.Error() != "" {
+		t.Errorf("failure-exit error message must be empty (cobra prints it to stderr); got %q", err.Error())
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("nothing should reach stderr on failure exit; got %q", errBuf.String())
+	}
+}
+
 // 10. registered subcommand discoverability.
 func TestStateCommitNow_IsRegisteredAsStateSubcommand(t *testing.T) {
 	var found bool

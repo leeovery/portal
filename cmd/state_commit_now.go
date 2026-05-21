@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -9,6 +10,16 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
+
+// errCommitNowFailed is the silent sentinel returned from commit-now's RunE on
+// any failure exit. The message is intentionally empty so cobra (with
+// SilenceErrors/SilenceUsage inherited from rootCmd) prints nothing and main.go
+// (see main.go's err.Error() == "" guard) suppresses the stderr write — the
+// tmux hook subprocess has nowhere meaningful to surface stderr, so all
+// diagnostics route through state.Logger / portal.log under
+// state.ComponentDaemon. The sentinel exists solely to drive a non-zero
+// process exit.
+var errCommitNowFailed = errors.New("")
 
 // commitNowDeps is the DI seam for the commit-now subcommand. When nil, the
 // production implementations (state.ReadIndex / state.CaptureStructure /
@@ -150,6 +161,11 @@ var stateCommitNowCmd = &cobra.Command{
 	Short:  "Synchronously commit sessions.json from live tmux state (internal, invoked by tmux hooks)",
 	Args:   cobra.NoArgs,
 	Hidden: true,
+	// Defensive: rootCmd already sets these, but a tmux hook subprocess has
+	// nowhere meaningful to send stderr, so we restate here so any future
+	// reparenting of the command keeps the silent-failure invariant.
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := state.EnsureDir()
 		if err != nil {
@@ -176,8 +192,10 @@ var stateCommitNowCmd = &cobra.Command{
 		//
 		// A query failure on @portal-restoring is out of scope here; per
 		// task 1-2 the production primitive deterministically returns either
-		// (false, nil) or (true, nil), with task 1-3 owning the
-		// tmux-unreachable branch.
+		// (false, nil) or (true, nil). Task 1-3 also leaves the
+		// tmux-unreachable branch unimplemented per spec — current behaviour
+		// (silent fall-through to the happy path on isRestoring error) is
+		// preserved.
 		restoring, err := isRestoring()
 		if err == nil && restoring {
 			logger.Info(state.ComponentDaemon, "commit-now skipped: @portal-restoring set")
@@ -192,17 +210,37 @@ var stateCommitNowCmd = &cobra.Command{
 		client := newClient()
 		idx, err := captureStructure(client, nil, &prev)
 		if err != nil {
-			logger.Warn(state.ComponentDaemon, "capture structure: %v", err)
-			return fmt.Errorf("capture structure: %w", err)
+			return failCommitNow(logger, dir, touchSaveRequested, "capture structure", err)
 		}
 
 		if err := commit(dir, idx, false, logger); err != nil {
-			logger.Warn(state.ComponentDaemon, "commit sessions.json: %v", err)
-			return fmt.Errorf("commit sessions.json: %w", err)
+			return failCommitNow(logger, dir, touchSaveRequested, "commit sessions.json", err)
 		}
 
 		return nil
 	},
+}
+
+// failCommitNow is the shared failure-exit path for commit-now's structural
+// primitives. Per spec § commit-now Failure Behaviour and § save.requested
+// Touch Failure Handling:
+//
+//  1. Log the primary failure at ERROR under state.ComponentDaemon so the
+//     daemon-driven and hook-driven capture log streams remain unified.
+//  2. Best-effort touch save.requested so the daemon's next scheduled tick
+//     (within 1s when it is alive) commits — bounded fallback recovery for the
+//     resurrection window. Touch errors are logged at WARN and never
+//     propagated; the original failure dominates.
+//  3. Return errCommitNowFailed — the empty-message sentinel that drives a
+//     non-zero process exit without printing anything to stderr. The hook
+//     subprocess has nowhere meaningful to send stderr; diagnostics route
+//     exclusively through portal.log.
+func failCommitNow(logger *state.Logger, dir string, touch func(string) error, stage string, cause error) error {
+	logger.Error(state.ComponentDaemon, "%s: %v", stage, cause)
+	if terr := touch(dir); terr != nil {
+		logger.Warn(state.ComponentDaemon, "touch save.requested after %s failure: %v", stage, terr)
+	}
+	return errCommitNowFailed
 }
 
 // loadPrevIndex returns the prior on-disk Index for use as CaptureStructure's
