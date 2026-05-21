@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "killed-session-resurrects-within-tick-window": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
