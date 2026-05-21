@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-21
 cycle: 1
 phase: Plan Integrity Review
@@ -30,8 +30,8 @@ The first Do bullet says: "query the `@portal-restoring` server option via the e
 - In `cmd/state_commit_now.go`, before the `ReadIndex` / `CaptureStructure` / `Commit` sequence, call `state.IsRestoringSet(client)` (the canonical accessor used by the daemon's `tick()` body) to query the `@portal-restoring` server option. Wire it through `commitNowDeps` so tests can inject the `(false, nil)` / `(true, nil)` returns required by the acceptance criteria.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Auto-applied — pinned to state.IsRestoringSet(client) and DI through commitNowDeps.
 
 ---
 
@@ -82,7 +82,7 @@ The intent is clear (the timeout branch must capture diagnostic context), but th
 - `"it preserves sessions other than the killed one in sessions.json"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The runtime-untestable "diagnostic vs silent timeout" requirement is restated as a code-inspection criterion on the timeout branch's `t.Fatalf` message. The corresponding aspirational test case is removed since it cannot be expressed as a Go test without an artificial hang injection.
 
 ---

@@ -78,7 +78,7 @@ total: 7
 **Outcome**: With `@portal-restoring` set, invoking `commit-now` leaves `sessions.json` byte-identical to its pre-invocation state, touches `save.requested`, emits an INFO log, and exits 0. With the marker absent, `commit-now` runs the happy path from task 1-1 unchanged.
 
 **Do**:
-- In `cmd/state_commit_now.go`, before the `ReadIndex` / `CaptureStructure` / `Commit` sequence, query the `@portal-restoring` server option via the existing primitive used by `state.IsRestoringSet` (or call `IsRestoringSet` directly).
+- In `cmd/state_commit_now.go`, before the `ReadIndex` / `CaptureStructure` / `Commit` sequence, call `state.IsRestoringSet(client)` (the canonical accessor used by the daemon's `tick()` body) to query the `@portal-restoring` server option. Wire it through `commitNowDeps` so tests can inject the `(false, nil)` / `(true, nil)` returns required by the acceptance criteria.
 - If set: log an INFO-level event via the state logger ("commit-now skipped: `@portal-restoring` set") under the daemon's `Component` constant, then call the existing save-requested touch helper from the `state` package (whatever `state notify` uses today — reuse, do not duplicate).
 - Treat the `save.requested` touch as best-effort: if it errors, log the touch failure at WARN via the state logger and continue to exit 0. Do not nest error handling; do not propagate.
 - Return exit code 0.
@@ -263,7 +263,7 @@ total: 7
 - [ ] Test uses real tmux (via `tmuxtest` socket fixture) and a real `portal` binary (via `portalbintest`).
 - [ ] Test exercises the production `RegisterPortalHooks` path to install `commitNowCommand` on `session-closed`.
 - [ ] After `tmux kill-session -t B`, the test observes `sessions.json` reflecting the kill (B absent) within 1.5s, without hanging.
-- [ ] On hang/deadlock, the test fails with a diagnostic that distinguishes deadlock from slow progress (captures pane state and state-dir contents in the failure message).
+- [ ] The timeout branch of the test (the `context.WithTimeout` / poll-deadline path) calls `t.Fatalf` with a diagnostic string that includes (a) the current contents of the state directory, (b) the live tmux session/pane list captured via the test's tmux client, and (c) the elapsed wall time — verifiable by code inspection of the timeout branch.
 - [ ] Test does not use `t.Parallel()`.
 - [ ] Test failure is treated as a spec-level pivot signal — the task description and PR description note that hangs here block the phase and return work to specification.
 
@@ -271,7 +271,6 @@ total: 7
 - `"it does not hang when commit-now is invoked from inside the session-closed hook"` — the primary assertion (1.5s timeout)
 - `"it writes a sessions.json omitting the killed session after the hook completes"`
 - `"it preserves sessions other than the killed one in sessions.json"`
-- `"it fails with a deadlock-diagnostic message rather than a silent timeout"` — the failure-mode assertion (forced by introducing a known-failing scenario in a sub-test or by code inspection of the timeout branch)
 
 **Edge Cases**:
 - Hang/deadlock: test must fail visibly with diagnostic, not time out silently. Use `context.WithTimeout` and an explicit `t.Fatalf` with structured failure context.
