@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-21
 cycle: 1
 phase: Traceability Review
@@ -132,7 +132,7 @@ Proposing option 1: surface this as a spec gap rather than a silent plan-level d
 - `IsRestoringSet` query errors: behaviour not specified — see `[needs-info]` in Do list. Implementation blocked on spec resolution.
 ```
 
-**Resolution**: Pending
-**Notes**: Plan-level resolution is acceptable if the user explicitly endorses the fail-open choice; the finding's existence is to surface that this is a decision being made, not to mandate which direction. If endorsed, the change-type becomes "no change" and the rationale already in the task suffices.
+**Resolution**: Fixed
+**Notes**: Auto-applied — fail-open commitment removed from Task 1-3; `[needs-info]` flag installed in Do list and Edge Cases; acceptance criterion and test case for the proceed-on-error branch removed. Spec must resolve `IsRestoringSet` query failure mode before implementation can proceed.
 
 ---

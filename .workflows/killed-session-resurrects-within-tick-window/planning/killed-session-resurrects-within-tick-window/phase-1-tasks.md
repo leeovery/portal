@@ -131,7 +131,7 @@ total: 7
 **Do**:
 - In `cmd/state_commit_now.go`, wrap the `CaptureStructure` call: on error, log ERROR via the state logger under the daemon `Component` constant, touch `save.requested` (best-effort), and exit non-zero.
 - Wrap the `Commit` call: on error, same treatment — ERROR log, best-effort `save.requested` touch, non-zero exit.
-- The `IsRestoringSet` query (added in task 1-2) is also wrapped: on error, treat as "marker indeterminate" → safer default is to **proceed with the commit attempt** (we cannot prove restoration is in progress; suppressing the commit would re-open the resurrection window). If the subsequent capture/commit fails it lands in the same failure path. Document this choice in code comments. (Alternative — fail-closed and skip — would re-open the original bug on transient tmux query glitches; the spec's framing favours kill-side correctness over restoration-window safety on this narrow edge.)
+- `[needs-info]` The `IsRestoringSet` query failure mode is not addressed by the specification. The spec's `@portal-restoring` Defence section describes the read but is silent on what happens when the read itself errors. This is a non-trivial correctness decision (fail-open during a real restoration could corrupt the restore; fail-closed during a transient tmux query glitch re-opens the resurrection window). **Resolve in spec before implementation:** does `commit-now` fail-open (proceed with commit) or fail-closed (skip + touch `save.requested`) when the marker query errors? Pending resolution, this task does not implement either branch.
 - Treat the `save.requested` touch on every failure exit as best-effort: on touch error, log WARN with the touch failure, do not propagate, do not panic; the original failure's non-zero exit is preserved.
 - Never `panic`; never block; never return an error that could cause Cobra to print a stack trace to tmux's hook subprocess stderr. All exits are via explicit exit-code paths.
 
@@ -140,7 +140,6 @@ total: 7
 - [ ] When `Commit` returns an error (e.g., disk full, permission denied), `commit-now` exits non-zero, touches `save.requested`, and emits an ERROR log event. No partial or torn `sessions.json` is observable on disk (atomic rename guarantees this — verify the test does not see a partial file).
 - [ ] When both the structural commit and the `save.requested` touch fail, `commit-now` still exits non-zero (original failure dominates) and logs the touch failure at WARN in addition to the ERROR log for the primary failure.
 - [ ] `commit-now` failure does not cause `panic` and does not emit a Go stack trace; failures are reported via the state logger only.
-- [ ] When `IsRestoringSet` returns an error, `commit-now` proceeds with the commit attempt (does not silently short-circuit). If the subsequent commit fails it falls through the standard failure path.
 - [ ] The kill path (tmux's session removal) is not affected by `commit-now`'s exit code — verified by the integration test in task 1-6, but the unit-level acceptance here is that `commit-now` only sets its own exit code and writes no signal back to the caller beyond that.
 
 **Tests** (extend `cmd/state_commit_now_test.go`, no `t.Parallel()`):
@@ -153,14 +152,13 @@ total: 7
 - `"it still exits non-zero when both Commit and save.requested touch fail"`
 - `"it logs WARN for save.requested touch failure in addition to the ERROR for the primary failure"`
 - `"it does not panic on any failure path"`
-- `"it proceeds to commit when IsRestoringSet returns an error"`
 
 **Edge Cases**:
 - tmux unreachable (server socket gone mid-hook): `CaptureStructure` fails → failure path.
 - Disk full during atomic rename: `Commit` fails → failure path; atomic semantics mean no torn write.
 - Permission denied on state directory: `Commit` fails → failure path; `save.requested` touch likely also fails → both logged, non-zero exit.
 - `save.requested` touch fails on every failure exit: log WARN, do not propagate, original failure dominates.
-- `IsRestoringSet` query errors: proceed (fail-open) rather than skipping; documented in code comment.
+- `IsRestoringSet` query errors: behaviour not specified — see `[needs-info]` in Do list. Implementation blocked on spec resolution.
 - Goroutine panic inside `CaptureStructure`: out of scope — `state.CaptureStructure` is trusted by the daemon today and `commit-now` adopts the same trust level.
 
 **Context**:
