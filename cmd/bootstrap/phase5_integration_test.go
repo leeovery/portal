@@ -98,9 +98,12 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 		substring string
 	}
 	wantHooks := []hookExpect{
-		// 7 save-trigger events.
+		// 7 save-trigger events. session-closed migrates onto
+		// `portal state commit-now` following the
+		// killed-session-resurrects-within-tick-window fix; the other six
+		// save-trigger events remain on `portal state notify`.
 		{"session-created", "portal state notify"},
-		{"session-closed", "portal state notify"},
+		{"session-closed", "portal state commit-now"},
 		{"session-renamed", "portal state notify"},
 		{"window-linked", "portal state notify"},
 		{"window-unlinked", "portal state notify"},

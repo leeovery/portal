@@ -36,11 +36,29 @@ var HydrationTriggerEvents = []string{
 	"client-session-changed",
 }
 
-// notifyCommand is the exact command Portal appends to every save-trigger
-// event. The defensive `command -v portal` guard short-circuits the
-// invocation when the binary is absent so tmux does not log "command not
-// found" spam during a binary swap or after uninstall.
+// notifyCommand is the exact command Portal appends to each of the six
+// non-session-closed save-trigger events. The defensive `command -v portal`
+// guard short-circuits the invocation when the binary is absent so tmux does
+// not log "command not found" spam during a binary swap or after uninstall.
+//
+// `session-closed` is excluded: following the
+// killed-session-resurrects-within-tick-window fix it migrates onto
+// commitNowCommand (synchronous sessions.json write) instead of the shared
+// dirty-flag touch. See migrateSessionClosedHook for the migration algorithm
+// and the spec's "Hook Registration Migration" section for the rationale.
 const notifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
+
+// commitNowCommand is the exact command Portal appends to `session-closed`.
+// Unlike notifyCommand, this invokes `portal state commit-now` — a
+// synchronous sessions.json write that closes the resurrection window
+// between a kill and the daemon's next tick. `session-closed` is the single
+// tmux-side seam that fires uniformly across every kill path (TUI confirm,
+// `portal kill`, user keybindings, external `tmux kill-session`), so this
+// one registration covers them all without per-call-site changes.
+//
+// Spec reference: `.workflows/killed-session-resurrects-within-tick-window/
+// specification/.../specification.md` § Hook Registration Migration.
+const commitNowCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state commit-now"`
 
 // signalHydrateCommand is the exact command Portal appends to every
 // hydration-trigger event. Same defensive guard as notifyCommand. The
@@ -112,6 +130,11 @@ func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand strin
 // hookCategory bundles a set of tmux events with the (substring, command)
 // pair RegisterPortalHooks should append on each. Adding a new category is a
 // single table entry — no new loop, no new branch.
+//
+// `session-closed` is intentionally absent from every category here — it has
+// its own scan-and-remove + append-if-absent migration path (see
+// migrateSessionClosedHook). The six non-session-closed save-trigger events
+// retain the original substring-based append-if-absent discipline.
 type hookCategory struct {
 	events    []string
 	substring string
@@ -123,10 +146,22 @@ type hookCategory struct {
 // declaration order, and within each category events are processed in the
 // order declared on the category's events slice. The current ordering
 // (save-trigger first, then hydration-trigger) matches the spec.
+//
+// The save-trigger category's events slice is saveTriggerEvents with
+// `session-closed` filtered out by RegisterPortalHooks. The category table
+// itself stays uniform — the filter lives at the loop site so the table
+// continues to read as a single declarative truth.
 var portalHookCategories = []hookCategory{
 	{events: saveTriggerEvents, substring: notifySubstring, command: notifyCommand},
 	{events: HydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
 }
+
+// sessionClosedEvent is the single save-trigger event whose registration has
+// been migrated off the shared notifyCommand and onto commitNowCommand. The
+// constant is named (not inlined) so the (a) skip predicate in
+// RegisterPortalHooks and (b) target string inside migrateSessionClosedHook
+// reference a single source of truth.
+const sessionClosedEvent = "session-closed"
 
 // MigrationLogger is the minimal logging seam migrateHydrationHooks needs.
 // Two methods (Info, Warn) is the smallest surface that conveys the spec's
@@ -234,14 +269,91 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	return evicted, nil
 }
 
+// migrateSessionClosedHook is the dedicated registration path for the
+// `session-closed` event. Unlike the substring-based append-if-absent
+// discipline used for every other Portal hook, the session-closed migration
+// must both (a) evict any stale pre-fix notifyCommand entries left behind by
+// an older Portal install and (b) idempotently install commitNowCommand.
+//
+// Algorithm (per spec § Hook Registration Migration):
+//
+//  1. ShowGlobalHooks → filter to session-closed entries.
+//  2. Build the slice of indices whose body exact-string matches the
+//     historical notifyCommand literal. Sort descending so unset calls do
+//     not shift later indices.
+//  3. For each index: UnsetGlobalHookAt(sessionClosedEvent, idx). Per-index
+//     failure is best-effort — log WARN under ComponentBootstrap and
+//     continue to the next index.
+//  4. After eviction, if no remaining entry exact-matches commitNowCommand,
+//     AppendGlobalHook(sessionClosedEvent, commitNowCommand). The exact-
+//     match check is computed during step 2 so the post-removal scan does
+//     not require a second ShowGlobalHooks round-trip — none of the unset
+//     calls can have introduced a commitNowCommand entry, so the
+//     pre-eviction observation is authoritative.
+//
+// Exact-string match (not substring/regex) is load-bearing: an exact match
+// against the historical Portal-emitted literal cannot accidentally remove
+// user-customised hooks (e.g. `portal state notify --debug` or a script
+// wrapper invoking portal). Tolerating quoting drift would create false
+// positives.
+//
+// Returns a non-nil error only when ShowGlobalHooks fails (wrapped with
+// "show-hooks failed: %w") or when the AppendGlobalHook call fails — both
+// surface to RegisterPortalHooks as folded entries in the errors.Join
+// aggregate, consistent with other step-2 register failures.
+func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
+	raw, err := c.ShowGlobalHooks()
+	if err != nil {
+		log.Warn(state.ComponentBootstrap, "session-closed migration skipped: show-hooks failed: %v", err)
+		return fmt.Errorf("show-hooks failed: %w", err)
+	}
+
+	entries := ParseShowHooks(raw)[sessionClosedEvent]
+
+	var staleIndices []int
+	var commitNowPresent bool
+	for _, entry := range entries {
+		switch entry.Command {
+		case notifyCommand:
+			staleIndices = append(staleIndices, entry.Index)
+		case commitNowCommand:
+			commitNowPresent = true
+		}
+	}
+
+	// Descending so each unset targets the entry it identified during the
+	// pre-removal scan — ascending would shift later indices.
+	sort.Sort(sort.Reverse(sort.IntSlice(staleIndices)))
+	for _, idx := range staleIndices {
+		if err := c.UnsetGlobalHookAt(sessionClosedEvent, idx); err != nil {
+			log.Warn(state.ComponentBootstrap,
+				"failed to evict stale notify hook on %s at index %d: %v",
+				sessionClosedEvent, idx, err)
+			continue
+		}
+	}
+
+	if commitNowPresent {
+		return nil
+	}
+	if err := c.AppendGlobalHook(sessionClosedEvent, commitNowCommand); err != nil {
+		return fmt.Errorf("append commit-now hook: %w", err)
+	}
+	return nil
+}
+
 // RegisterPortalHooks idempotently registers Portal's full hook table,
-// threading a MigrationLogger through to migrateHydrationHooks so the
-// bootstrap-step *state.Logger can capture eviction diagnostics. A nil
-// log is tolerated and falls through to a no-op sink.
+// threading a MigrationLogger through to migrateHydrationHooks and
+// migrateSessionClosedHook so the bootstrap-step *state.Logger can capture
+// eviction diagnostics. A nil log is tolerated and falls through to a
+// no-op sink.
 //
 // Categories are processed in the order declared in portalHookCategories;
 // within each category, events are processed in the order declared in the
-// spec.
+// spec. The save-trigger category's `session-closed` event is filtered out
+// of the substring-based append-if-absent loop and routed instead through
+// migrateSessionClosedHook, which performs an exact-string scan-and-remove
+// for stale pre-fix notifyCommand entries before appending commitNowCommand.
 //
 // Before the per-category register loop reaches the hydration-trigger
 // category, migrateHydrationHooks runs once to evict any pre-existing
@@ -251,12 +363,12 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 // produce an error, and that error is folded into the same errors.Join
 // aggregate as register failures.
 //
-// Each registration is delegated to RegisterHookIfAbsent, which performs
-// the content-based dedupe check. A failure on one event does not
-// short-circuit the remaining events — every event is attempted. On any
-// failures the returned error is an errors.Join aggregate; each leaf error
-// names the failing event and wraps the underlying tmux error so callers
-// can use errors.Is on a sentinel.
+// Each non-session-closed registration is delegated to RegisterHookIfAbsent,
+// which performs the content-based dedupe check. A failure on one event
+// does not short-circuit the remaining events — every event is attempted.
+// On any failures the returned error is an errors.Join aggregate; each leaf
+// error names the failing event and wraps the underlying tmux error so
+// callers can use errors.Is on a sentinel.
 func RegisterPortalHooks(c *Client, log MigrationLogger) error {
 	if log == nil {
 		log = noopMigrationLogger{}
@@ -270,6 +382,12 @@ func RegisterPortalHooks(c *Client, log MigrationLogger) error {
 
 	for _, cat := range portalHookCategories {
 		for _, event := range cat.events {
+			if event == sessionClosedEvent {
+				if err := migrateSessionClosedHook(c, log); err != nil {
+					errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
+				}
+				continue
+			}
 			if err := RegisterHookIfAbsent(c, event, cat.substring, cat.command); err != nil {
 				errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
 			}

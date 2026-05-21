@@ -22,9 +22,20 @@ var expectedSaveTriggerEvents = []string{
 	"pane-focus-out",
 }
 
-// expectedNotifyCommand is the exact full command Portal registers on every
-// save-trigger event. Mirrors notifyCommand in hooks_register.go.
+// expectedNotifyCommand is the exact full command Portal registers on each of
+// the six non-session-closed save-trigger events. Mirrors notifyCommand in
+// hooks_register.go. The seventh save-trigger event (session-closed) is on
+// commitNowCommand following the killed-session-resurrects-within-tick-window
+// migration; see expectedCommitNowCommand.
 const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
+
+// expectedCommitNowCommand is the exact full command Portal registers on
+// session-closed following the killed-session-resurrects-within-tick-window
+// migration. Mirrors commitNowCommand in hooks_register.go. session-closed is
+// the single tmux-side seam that fires uniformly across every kill path; this
+// command invokes a synchronous sessions.json commit to close the resurrection
+// window between kill and the daemon's next tick.
+const expectedCommitNowCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state commit-now"`
 
 // expectedSignalHydrateCommand is the exact full command Portal registers on
 // every hydration-trigger event. Mirrors signalHydrateCommand in
@@ -40,8 +51,10 @@ const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>
 // live here.
 
 // dispatchPortalHooks builds a RunFunc that returns showOutput for every
-// "show-hooks -g" call and records "set-hook -ga" calls. setHookErrFor, when
-// non-nil, returns the configured error for matching events; nil otherwise.
+// "show-hooks -g" call and records "set-hook -ga" / "set-hook -gu" calls.
+// setHookErrFor, when non-nil, returns the configured error for matching
+// events on -ga; nil otherwise. -gu (unset) calls succeed by default — tests
+// exercising unset failures use their own RunFunc.
 func dispatchPortalHooks(t *testing.T, showOutput string, setHookErrFor map[string]error) func(args ...string) (string, error) {
 	t.Helper()
 	return func(args ...string) (string, error) {
@@ -56,10 +69,16 @@ func dispatchPortalHooks(t *testing.T, showOutput string, setHookErrFor map[stri
 			}
 			return "", nil
 		}
+		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+			return "", nil
+		}
 		t.Fatalf("unexpected command: %v", args)
 		return "", nil
 	}
 }
+
+// unsetHookCalls (set-hook -gu extractor) is shared with hooks_unregister_test.go
+// in the same package — see that file for the definition.
 
 // setHookCalls extracts the set-hook -ga calls from a MockCommander's call
 // log, in invocation order, returning each as [event, command].
@@ -74,15 +93,29 @@ func setHookCalls(calls [][]string) [][2]string {
 }
 
 // allPortalHooksRegisteredOutput builds a show-hooks -g output that contains
-// a Portal entry for every save-trigger and hydration-trigger event. The
-// migrate-rename category was deferred to v2 and is intentionally absent.
+// a Portal entry for every save-trigger and hydration-trigger event in their
+// post-migration shape: notifyCommand on the six non-session-closed
+// save-trigger events, commitNowCommand on session-closed, and
+// signalHydrateCommand on the two hydration-trigger events. The migrate-rename
+// category was deferred to v2 and is intentionally absent.
+//
+// Each line is single-outer-quoted to mirror tmux's actual show-hooks output
+// format: the Portal-emitted command bodies contain literal double quotes
+// (e.g. `run-shell "..."`), and tmux wraps them with single quotes to
+// preserve the inner double quotes verbatim. ParseShowHooks strips the outer
+// single quotes, so the parsed command equals the original literal — which
+// is what the migration's exact-string match relies on.
 func allPortalHooksRegisteredOutput() string {
 	var b strings.Builder
 	for _, e := range expectedSaveTriggerEvents {
-		fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
+		cmd := expectedNotifyCommand
+		if e == "session-closed" {
+			cmd = expectedCommitNowCommand
+		}
+		fmt.Fprintf(&b, "%s[0] => '%s'\n", e, cmd)
 	}
 	for _, e := range tmux.HydrationTriggerEvents {
-		fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+		fmt.Fprintf(&b, "%s[0] => '%s'\n", e, expectedSignalHydrateCommand)
 	}
 	return b.String()
 }
@@ -411,9 +444,11 @@ func TestRegisterPortalHooks(t *testing.T) {
 	})
 
 	t.Run("it tops up only the missing events on a partially-registered server", func(t *testing.T) {
-		// Five save-trigger events present, two missing (window-unlinked and
-		// pane-focus-out). Both hydration events present. The only top-ups
-		// are the two missing save-trigger events.
+		// Five save-trigger events present (using their post-migration command
+		// shapes — commitNowCommand on session-closed, notifyCommand on the
+		// others), two missing (window-unlinked and pane-focus-out). Both
+		// hydration events present. The only top-ups are the two missing
+		// save-trigger events.
 		var b strings.Builder
 		present := map[string]bool{
 			"session-created":       true,
@@ -423,12 +458,17 @@ func TestRegisterPortalHooks(t *testing.T) {
 			"window-layout-changed": true,
 		}
 		for _, e := range expectedSaveTriggerEvents {
-			if present[e] {
-				fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedNotifyCommand)
+			if !present[e] {
+				continue
 			}
+			cmd := expectedNotifyCommand
+			if e == "session-closed" {
+				cmd = expectedCommitNowCommand
+			}
+			fmt.Fprintf(&b, "%s[0] => '%s'\n", e, cmd)
 		}
 		for _, e := range tmux.HydrationTriggerEvents {
-			fmt.Fprintf(&b, "%s[0] => %q\n", e, expectedSignalHydrateCommand)
+			fmt.Fprintf(&b, "%s[0] => '%s'\n", e, expectedSignalHydrateCommand)
 		}
 
 		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
@@ -506,7 +546,10 @@ func TestRegisterPortalHooks(t *testing.T) {
 	t.Run("it does not double-register on two consecutive bootstraps in the same process", func(t *testing.T) {
 		// Simulate a stateful tmux: first bootstrap on empty show-hooks
 		// registers all 9. Second bootstrap sees those 9 in show-hooks
-		// output and registers nothing.
+		// output and registers nothing. The show-hooks rendering uses
+		// single-outer-quote wrapping to mirror tmux's real output format,
+		// so ParseShowHooks recovers the stored command verbatim and the
+		// session-closed migration's exact-string match hits cleanly.
 		var registered [][2]string // (event, command) in registration order
 		runFunc := func(args ...string) (string, error) {
 			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
@@ -516,12 +559,15 @@ func TestRegisterPortalHooks(t *testing.T) {
 					ev, cmd := entry[0], entry[1]
 					idx := perEventCount[ev]
 					perEventCount[ev] = idx + 1
-					fmt.Fprintf(&b, "%s[%d] => %q\n", ev, idx, cmd)
+					fmt.Fprintf(&b, "%s[%d] => '%s'\n", ev, idx, cmd)
 				}
 				return b.String(), nil
 			}
 			if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
 				registered = append(registered, [2]string{args[2], args[3]})
+				return "", nil
+			}
+			if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
 				return "", nil
 			}
 			t.Fatalf("unexpected command: %v", args)
@@ -557,13 +603,20 @@ func TestRegisterPortalHooks(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		got := setHookCalls(mock.Calls)
-		// First seven calls correspond to save-trigger events.
+		// First seven calls correspond to save-trigger events. session-closed
+		// receives commitNowCommand following the
+		// killed-session-resurrects-within-tick-window migration; the other
+		// six save-trigger events receive notifyCommand unchanged.
 		for i, ev := range expectedSaveTriggerEvents {
 			if got[i][0] != ev {
 				t.Errorf("call[%d] event = %q, want %q", i, got[i][0], ev)
 			}
-			if got[i][1] != expectedNotifyCommand {
-				t.Errorf("call[%d] command = %q, want %q", i, got[i][1], expectedNotifyCommand)
+			wantCmd := expectedNotifyCommand
+			if ev == "session-closed" {
+				wantCmd = expectedCommitNowCommand
+			}
+			if got[i][1] != wantCmd {
+				t.Errorf("call[%d] command = %q, want %q", i, got[i][1], wantCmd)
 			}
 		}
 	})
@@ -618,10 +671,475 @@ func TestRegisterPortalHooks(t *testing.T) {
 				t.Errorf("unexpected migrate-rename registration on event %q: %q", c[0], c[1])
 			}
 		}
-		// Sanity: every command body is exactly one of the two surviving commands.
+		// Sanity: every command body is exactly one of the three Portal
+		// command literals. commitNowCommand appears only on session-closed;
+		// notifyCommand on the six other save-trigger events;
+		// signalHydrateCommand on the two hydration-trigger events.
 		for _, c := range got {
-			if c[1] != expectedNotifyCommand && c[1] != expectedSignalHydrateCommand {
+			if c[1] != expectedNotifyCommand && c[1] != expectedSignalHydrateCommand && c[1] != expectedCommitNowCommand {
 				t.Errorf("unexpected command body on event %q: %q", c[0], c[1])
+			}
+		}
+	})
+}
+
+// recordingMigrationLogger captures Info / Warn invocations for assertion in
+// migration-flow tests. The format string is rendered via fmt.Sprintf so the
+// recorded line is the same shape a production *state.Logger would emit.
+type recordingMigrationLogger struct {
+	infos []string
+	warns []string
+}
+
+func (r *recordingMigrationLogger) Info(component, format string, args ...any) {
+	r.infos = append(r.infos, fmt.Sprintf("[%s] "+format, append([]any{component}, args...)...))
+}
+
+func (r *recordingMigrationLogger) Warn(component, format string, args ...any) {
+	r.warns = append(r.warns, fmt.Sprintf("[%s] "+format, append([]any{component}, args...)...))
+}
+
+// nonSessionClosedSaveTriggerEvents is the canonical save-trigger event list
+// minus session-closed — the six events that retain the notifyCommand append-
+// if-absent registration after the migration. Mirrors the implicit split in
+// hooks_register.go.
+var nonSessionClosedSaveTriggerEvents = []string{
+	"session-created",
+	"session-renamed",
+	"window-linked",
+	"window-unlinked",
+	"window-layout-changed",
+	"pane-focus-out",
+}
+
+func TestRegisterPortalHooks_SessionClosedMigration(t *testing.T) {
+	t.Run("it registers commitNowCommand on session-closed from an empty hook state", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		var sessionClosedCalls [][2]string
+		for _, c := range got {
+			if c[0] == "session-closed" {
+				sessionClosedCalls = append(sessionClosedCalls, c)
+			}
+		}
+		if len(sessionClosedCalls) != 1 {
+			t.Fatalf("expected exactly 1 set-hook -ga on session-closed, got %d: %v", len(sessionClosedCalls), sessionClosedCalls)
+		}
+		if sessionClosedCalls[0][1] != expectedCommitNowCommand {
+			t.Errorf("session-closed command = %q, want %q", sessionClosedCalls[0][1], expectedCommitNowCommand)
+		}
+		// No unset calls should fire against an empty hook state.
+		if unsets := unsetHookCalls(mock.Calls); len(unsets) != 0 {
+			t.Errorf("expected 0 set-hook -gu calls on empty state, got %d: %v", len(unsets), unsets)
+		}
+	})
+
+	t.Run("it registers notifyCommand on each of the six other save-trigger events from an empty hook state", func(t *testing.T) {
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		got := setHookCalls(mock.Calls)
+		seen := map[string]string{}
+		for _, c := range got {
+			if c[0] == "session-closed" {
+				continue
+			}
+			// Skip hydration-trigger events; they belong to a different category.
+			isHydration := false
+			for _, h := range tmux.HydrationTriggerEvents {
+				if c[0] == h {
+					isHydration = true
+					break
+				}
+			}
+			if isHydration {
+				continue
+			}
+			if prior, dup := seen[c[0]]; dup {
+				t.Errorf("event %q appended twice: prior=%q now=%q", c[0], prior, c[1])
+			}
+			seen[c[0]] = c[1]
+		}
+		for _, ev := range nonSessionClosedSaveTriggerEvents {
+			cmd, ok := seen[ev]
+			if !ok {
+				t.Errorf("expected one set-hook -ga on %q, none recorded", ev)
+				continue
+			}
+			if cmd != expectedNotifyCommand {
+				t.Errorf("event %q command = %q, want %q", ev, cmd, expectedNotifyCommand)
+			}
+		}
+	})
+
+	t.Run("it removes a stale notifyCommand from session-closed during a pre-fix upgrade", func(t *testing.T) {
+		// Pre-fix state: only the stale notifyCommand sits on session-closed.
+		// Single-outer-quote wrapping mirrors tmux's real show-hooks format —
+		// the body contains literal double quotes so tmux wraps it in singles.
+		raw := fmt.Sprintf("session-closed[0] => '%s'\n", expectedNotifyCommand)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		unsets := unsetHookCalls(mock.Calls)
+		// Exactly one unset on session-closed[0] should fire for the stale entry.
+		var sessionClosedUnsets []string
+		for _, u := range unsets {
+			if strings.HasPrefix(u, "session-closed[") {
+				sessionClosedUnsets = append(sessionClosedUnsets, u)
+			}
+		}
+		if len(sessionClosedUnsets) != 1 {
+			t.Fatalf("expected 1 set-hook -gu on session-closed, got %d: %v", len(sessionClosedUnsets), sessionClosedUnsets)
+		}
+		if sessionClosedUnsets[0] != "session-closed[0]" {
+			t.Errorf("unset target = %q, want %q", sessionClosedUnsets[0], "session-closed[0]")
+		}
+	})
+
+	t.Run("it registers commitNowCommand after removing the stale notifyCommand on session-closed", func(t *testing.T) {
+		raw := fmt.Sprintf("session-closed[0] => '%s'\n", expectedNotifyCommand)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// The session-closed append must follow the unset in invocation order
+		// — order matters so the migration is observable as "evict, then
+		// register" rather than "register, then evict" (which would create a
+		// transient duplicate).
+		unsetIdx, appendIdx := -1, -1
+		for i, c := range mock.Calls {
+			if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" && c[2] == "session-closed[0]" {
+				unsetIdx = i
+			}
+			if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" && c[3] == expectedCommitNowCommand {
+				appendIdx = i
+			}
+		}
+		if unsetIdx < 0 {
+			t.Fatalf("expected set-hook -gu session-closed[0], not found in calls: %v", mock.Calls)
+		}
+		if appendIdx < 0 {
+			t.Fatalf("expected set-hook -ga session-closed commitNowCommand, not found in calls: %v", mock.Calls)
+		}
+		if unsetIdx >= appendIdx {
+			t.Errorf("unset (call[%d]) must precede append (call[%d]) to avoid a transient duplicate window", unsetIdx, appendIdx)
+		}
+	})
+
+	t.Run("it does not duplicate commitNowCommand when run against a post-fix state", func(t *testing.T) {
+		// Post-fix state: commitNowCommand already registered on session-closed.
+		raw := fmt.Sprintf("session-closed[0] => '%s'\n", expectedCommitNowCommand)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// No unset and no append should touch session-closed.
+		for _, c := range mock.Calls {
+			if c[0] != "set-hook" {
+				continue
+			}
+			if c[1] == "-ga" && len(c) >= 4 && c[2] == "session-closed" {
+				t.Errorf("unexpected set-hook -ga on session-closed: %q (would duplicate)", c[3])
+			}
+			if c[1] == "-gu" && len(c) >= 3 && strings.HasPrefix(c[2], "session-closed[") {
+				t.Errorf("unexpected set-hook -gu on session-closed: %q (post-fix state has no stale entry)", c[2])
+			}
+		}
+	})
+
+	t.Run("it preserves a user-customised hook on session-closed that does not exact-match the Portal literals", func(t *testing.T) {
+		// User-authored hook references portal state notify but with a flag —
+		// textually different from the historical notifyCommand literal. Must
+		// be left untouched. Migration still appends commitNowCommand
+		// alongside it (the user hook is not the Portal-owned entry).
+		const userHook = `run-shell "portal state notify --debug"`
+		raw := fmt.Sprintf("session-closed[0] => '%s'\n", userHook)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// No unset call against session-closed: the user hook is preserved.
+		for _, u := range unsetHookCalls(mock.Calls) {
+			if strings.HasPrefix(u, "session-closed[") {
+				t.Errorf("unexpected unset on user-customised session-closed entry: %q", u)
+			}
+		}
+
+		// Exactly one append on session-closed and it must be commitNowCommand.
+		var appendCmd string
+		var appendCount int
+		for _, c := range mock.Calls {
+			if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" {
+				appendCount++
+				appendCmd = c[3]
+			}
+		}
+		if appendCount != 1 {
+			t.Fatalf("expected 1 append on session-closed alongside the user hook, got %d", appendCount)
+		}
+		if appendCmd != expectedCommitNowCommand {
+			t.Errorf("append command = %q, want %q", appendCmd, expectedCommitNowCommand)
+		}
+	})
+
+	t.Run("it skips the session-closed migration and logs WARN when ShowGlobalHooks fails, leaving the six other events to be processed", func(t *testing.T) {
+		// The session-closed migration's ShowGlobalHooks call is the third
+		// show-hooks call inside RegisterPortalHooks: migrateHydrationHooks
+		// makes the first; the session-created RegisterHookIfAbsent makes
+		// the second; migrateSessionClosedHook makes the third (session-
+		// closed sits at index 1 in saveTriggerEvents). Failing call #3
+		// isolates the session-closed migration failure from the hydration
+		// migration and from the six structurally-independent
+		// RegisterHookIfAbsent paths, which must still complete.
+		sentinel := errors.New("tmux show-hooks failed")
+		var showCallCount int
+		runFunc := func(args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+				showCallCount++
+				if showCallCount == 3 {
+					return "", sentinel
+				}
+				return "", nil
+			}
+			if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
+				return "", nil
+			}
+			if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+				return "", nil
+			}
+			t.Fatalf("unexpected command: %v", args)
+			return "", nil
+		}
+		mock := &MockCommander{RunFunc: runFunc}
+		client := tmux.NewClient(mock)
+
+		logger := &recordingMigrationLogger{}
+		err := tmux.RegisterPortalHooks(client, logger)
+
+		// The migration's ShowGlobalHooks failure surfaces as an aggregate
+		// error consistent with how other step-2 register failures surface
+		// (errors.Join wrapping the underlying sentinel).
+		if err == nil {
+			t.Fatal("expected aggregate error wrapping show-hooks sentinel, got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("error %v does not wrap show-hooks sentinel %v", err, sentinel)
+		}
+
+		// A WARN must have been logged under the bootstrap component.
+		if len(logger.warns) == 0 {
+			t.Errorf("expected at least one WARN log line for the show-hooks failure, got none")
+		}
+
+		// session-closed must NOT have been appended (migration skipped).
+		for _, c := range mock.Calls {
+			if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" {
+				t.Errorf("session-closed must not be appended when ShowGlobalHooks fails: %v", c)
+			}
+			if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" && strings.HasPrefix(c[2], "session-closed[") {
+				t.Errorf("session-closed must not be unset when ShowGlobalHooks fails: %v", c)
+			}
+		}
+
+		// The six non-session-closed save-trigger events and the two
+		// hydration-trigger events must all still have been processed
+		// (one set-hook -ga each).
+		gotEvents := map[string]int{}
+		for _, c := range mock.Calls {
+			if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" {
+				gotEvents[c[2]]++
+			}
+		}
+		for _, ev := range nonSessionClosedSaveTriggerEvents {
+			if gotEvents[ev] != 1 {
+				t.Errorf("event %q set-hook -ga count = %d, want 1 (must still be processed)", ev, gotEvents[ev])
+			}
+		}
+		for _, ev := range tmux.HydrationTriggerEvents {
+			if gotEvents[ev] != 1 {
+				t.Errorf("event %q set-hook -ga count = %d, want 1 (must still be processed)", ev, gotEvents[ev])
+			}
+		}
+	})
+
+	t.Run("it logs WARN and continues when UnsetGlobalHookAt fails for a specific index", func(t *testing.T) {
+		// Two stale notifyCommand entries on session-closed at indices 0 and 1.
+		// The first unset (highest index — 1) fails; the second (index 0)
+		// must still be attempted. After the partial-failure eviction pass,
+		// commitNowCommand must still be appended (the post-removal scan
+		// finds no exact-matching entry: only the stale notifyCommand at 0
+		// remains, which exact-matches notifyCommand, not commitNowCommand).
+		raw := fmt.Sprintf("session-closed[0] => '%s'\nsession-closed[1] => '%s'\n",
+			expectedNotifyCommand, expectedNotifyCommand)
+		sentinel := errors.New("tmux unset failed at index 1")
+		var unsetCallCount int
+		runFunc := func(args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+				return raw, nil
+			}
+			if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+				unsetCallCount++
+				if args[2] == "session-closed[1]" {
+					return "", sentinel
+				}
+				return "", nil
+			}
+			if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
+				return "", nil
+			}
+			t.Fatalf("unexpected command: %v", args)
+			return "", nil
+		}
+		mock := &MockCommander{RunFunc: runFunc}
+		client := tmux.NewClient(mock)
+
+		logger := &recordingMigrationLogger{}
+		// The unset failure is best-effort and must not propagate; the
+		// follow-up append is still attempted.
+		if err := tmux.RegisterPortalHooks(client, logger); err != nil {
+			t.Fatalf("unexpected error from RegisterPortalHooks: %v", err)
+		}
+
+		// Both indices must have been attempted, highest-first.
+		var sessionClosedUnsets []string
+		for _, u := range unsetHookCalls(mock.Calls) {
+			if strings.HasPrefix(u, "session-closed[") {
+				sessionClosedUnsets = append(sessionClosedUnsets, u)
+			}
+		}
+		if len(sessionClosedUnsets) != 2 {
+			t.Fatalf("expected 2 set-hook -gu calls on session-closed, got %d: %v", len(sessionClosedUnsets), sessionClosedUnsets)
+		}
+		if sessionClosedUnsets[0] != "session-closed[1]" || sessionClosedUnsets[1] != "session-closed[0]" {
+			t.Errorf("unset order = %v, want [session-closed[1] session-closed[0]] (highest-first)", sessionClosedUnsets)
+		}
+
+		// WARN must have been logged for the failure.
+		if len(logger.warns) == 0 {
+			t.Errorf("expected at least one WARN line for the per-index unset failure, got none")
+		}
+
+		// Append of commitNowCommand still happens after the partial-eviction.
+		var appended bool
+		for _, c := range mock.Calls {
+			if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" && c[3] == expectedCommitNowCommand {
+				appended = true
+				break
+			}
+		}
+		if !appended {
+			t.Errorf("expected commitNowCommand to be appended after partial-eviction, none recorded")
+		}
+	})
+
+	t.Run("it is idempotent across repeated invocations", func(t *testing.T) {
+		// Stateful tmux: first bootstrap on an empty hook table registers all
+		// 9 entries (notifyCommand on six save-trigger events + commitNowCommand
+		// on session-closed + signalHydrateCommand on two hydration events).
+		// Second bootstrap reads the same 9 entries and must produce zero
+		// appends and zero unsets.
+		var registered [][2]string
+		runFunc := func(args ...string) (string, error) {
+			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+				var b strings.Builder
+				perEventCount := map[string]int{}
+				for _, entry := range registered {
+					ev, cmd := entry[0], entry[1]
+					idx := perEventCount[ev]
+					perEventCount[ev] = idx + 1
+					fmt.Fprintf(&b, "%s[%d] => '%s'\n", ev, idx, cmd)
+				}
+				return b.String(), nil
+			}
+			if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
+				registered = append(registered, [2]string{args[2], args[3]})
+				return "", nil
+			}
+			if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+				return "", nil
+			}
+			t.Fatalf("unexpected command: %v", args)
+			return "", nil
+		}
+		mock := &MockCommander{RunFunc: runFunc}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("first bootstrap: %v", err)
+		}
+		firstAppends := len(setHookCalls(mock.Calls))
+		firstUnsets := len(unsetHookCalls(mock.Calls))
+		want := len(expectedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
+		if firstAppends != want {
+			t.Fatalf("first bootstrap append count = %d, want %d", firstAppends, want)
+		}
+		if firstUnsets != 0 {
+			t.Fatalf("first bootstrap unset count = %d, want 0 (empty initial state)", firstUnsets)
+		}
+
+		mock.Calls = nil
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("second bootstrap: %v", err)
+		}
+		if appends := setHookCalls(mock.Calls); len(appends) != 0 {
+			t.Errorf("second bootstrap appended %d entries, want 0 (idempotent): %v", len(appends), appends)
+		}
+		if unsets := unsetHookCalls(mock.Calls); len(unsets) != 0 {
+			t.Errorf("second bootstrap issued %d unsets, want 0 (idempotent): %v", len(unsets), unsets)
+		}
+	})
+
+	t.Run("it processes removal indices highest-first so earlier removals do not shift later indices", func(t *testing.T) {
+		// Three stale notifyCommand entries on session-closed at indices
+		// 0, 1, 2. They must be unset in descending order (2, 1, 0) so each
+		// removal targets the entry it identified during the pre-removal
+		// scan — an ascending order would shift later indices and either
+		// remove the wrong entry or fail.
+		raw := fmt.Sprintf("session-closed[0] => '%s'\nsession-closed[1] => '%s'\nsession-closed[2] => '%s'\n",
+			expectedNotifyCommand, expectedNotifyCommand, expectedNotifyCommand)
+		mock := &MockCommander{RunFunc: dispatchPortalHooks(t, raw, nil)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var sessionClosedUnsets []string
+		for _, u := range unsetHookCalls(mock.Calls) {
+			if strings.HasPrefix(u, "session-closed[") {
+				sessionClosedUnsets = append(sessionClosedUnsets, u)
+			}
+		}
+		want := []string{"session-closed[2]", "session-closed[1]", "session-closed[0]"}
+		if len(sessionClosedUnsets) != len(want) {
+			t.Fatalf("unset call count = %d, want %d: %v", len(sessionClosedUnsets), len(want), sessionClosedUnsets)
+		}
+		for i, got := range sessionClosedUnsets {
+			if got != want[i] {
+				t.Errorf("unset[%d] = %q, want %q (descending-index order required)", i, got, want[i])
 			}
 		}
 	})
