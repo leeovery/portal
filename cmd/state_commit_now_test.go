@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 )
@@ -122,15 +121,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			if f.touchErr != nil {
 				return f.touchErr
 			}
-			// Mirror state notify: O_WRONLY|O_CREATE|O_TRUNC + Chtimes.
-			fp, err := os.OpenFile(state.SaveRequested(dir), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-			if err != nil {
-				return err
-			}
-			_ = fp.Close()
-			now := time.Now()
-			_ = os.Chtimes(state.SaveRequested(dir), now, now)
-			return nil
+			return state.TouchSaveRequested(dir)
 		},
 	}
 	if f.readIdxOverride {

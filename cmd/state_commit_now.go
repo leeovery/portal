@@ -3,8 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -112,23 +110,13 @@ func resolveCommitNowDeps() (
 	return
 }
 
-// defaultTouchSaveRequested creates-or-truncates save.requested under dir and
-// bumps its mtime. Mirrors the byte-for-byte sequence state notify performs
-// in-line; kept package-local so commit-now's short-circuit can reuse it
-// without depending on cobra wiring.
-//
-// The Chtimes call is best-effort: a save.requested that exists but failed an
-// mtime bump still satisfies the daemon's dirty-flag check on the next tick.
+// defaultTouchSaveRequested is the production seam for commit-now's
+// save.requested touch. It delegates to state.TouchSaveRequested — the single
+// source of truth for the dirty-flag touch sequence — and is retained as a
+// named function so the CommitNowDeps.TouchSaveRequested injection point keeps
+// a stable default.
 func defaultTouchSaveRequested(dir string) error {
-	path := state.SaveRequested(dir)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("touch save.requested: %w", err)
-	}
-	_ = f.Close()
-	now := time.Now()
-	_ = os.Chtimes(path, now, now)
-	return nil
+	return state.TouchSaveRequested(dir)
 }
 
 // stateCommitNowCmd performs a synchronous structural capture-and-commit on

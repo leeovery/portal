@@ -148,7 +148,7 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 	// even after the daemon successfully ticks. Polling on
 	// save.requested deletion is the load-bearing readiness signal
 	// that the daemon's commit cycle has completed.
-	if err := os.WriteFile(state.SaveRequested(fixture.stateDir), nil, 0o600); err != nil {
+	if err := state.TouchSaveRequested(fixture.stateDir); err != nil {
 		t.Fatalf("touch save.requested to force daemon tick: %v\n%s", err, fixture.diagnostic())
 	}
 

@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
@@ -47,16 +45,10 @@ var stateNotifyCmd = &cobra.Command{
 		logger, _ := openNoRotateLogger()
 		defer func() { _ = logger.Close() }()
 
-		path := state.SaveRequested(dir)
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-		if err != nil {
-			logger.Warn(state.ComponentNotify, "touch save.requested at %s: %v", path, err)
+		if err := state.TouchSaveRequested(dir); err != nil {
+			logger.Warn(state.ComponentNotify, "touch save.requested at %s: %v", state.SaveRequested(dir), err)
 			return fmt.Errorf("touch save.requested: %w", err)
 		}
-		_ = f.Close()
-
-		now := time.Now()
-		_ = os.Chtimes(path, now, now)
 		return nil
 	},
 }

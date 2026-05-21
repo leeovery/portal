@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/xdg"
 )
@@ -71,6 +72,31 @@ func SessionsJSON(dir string) string { return filepath.Join(dir, sessionsJSONNam
 // SaveRequested returns the path to the dirty-flag file touched by
 // `portal state notify`.
 func SaveRequested(dir string) string { return filepath.Join(dir, saveRequestedName) }
+
+// TouchSaveRequested creates-or-truncates save.requested under dir and bumps
+// its mtime to wall-clock now. It is the single source of truth for the
+// dirty-flag touch sequence consumed by `portal state notify` and by
+// commit-now's @portal-restoring short-circuit / failure-path fallback.
+//
+// The open+truncate step is the load-bearing one (the daemon's tick polls
+// for the file's presence on every loop iteration). The Chtimes call is
+// best-effort: a save.requested that exists but failed an mtime bump still
+// satisfies the daemon's dirty-flag check on the next tick. The open/close
+// errors are wrapped with a "touch save.requested" prefix; Chtimes errors
+// are deliberately swallowed.
+func TouchSaveRequested(dir string) error {
+	path := SaveRequested(dir)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("touch save.requested: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("touch save.requested: %w", err)
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+	return nil
+}
 
 // DaemonPID returns the path to the daemon's PID file.
 func DaemonPID(dir string) string { return filepath.Join(dir, daemonPIDName) }
