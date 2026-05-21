@@ -178,18 +178,23 @@ var stateCommitNowCmd = &cobra.Command{
 		// post-restoration tick commits, and exit 0 — the skip is a
 		// deliberate completion, not an error.
 		//
-		// A query failure on @portal-restoring is out of scope here; per
-		// task 1-2 the production primitive deterministically returns either
-		// (false, nil) or (true, nil). Task 1-3 also leaves the
-		// tmux-unreachable branch unimplemented per spec — current behaviour
-		// (silent fall-through to the happy path on isRestoring error) is
-		// preserved.
+		// A query failure on @portal-restoring is treated symmetrically to
+		// (true, nil): if we cannot prove the marker is clear, presume it
+		// set and protect the in-flight restore. The cost is a marginally
+		// extended resurrection window on rare transient-tmux-query
+		// failures, recovered on the daemon's next tick via the
+		// save.requested touch. The risk priority — protect in-flight
+		// restore over "kill removes the session promptly" — matches the
+		// spec's @portal-restoring Defence section.
 		restoring, err := isRestoring()
-		if err == nil && restoring {
+		switch {
+		case err != nil:
+			logger.Warn(state.ComponentDaemon, "isRestoring query failed; presuming @portal-restoring marker set to protect in-flight restore: %v", err)
+			touchAfterShortCircuit(logger, dir, touchSaveRequested)
+			return nil
+		case restoring:
 			logger.Info(state.ComponentDaemon, "commit-now skipped: @portal-restoring set")
-			if terr := touchSaveRequested(dir); terr != nil {
-				logger.Warn(state.ComponentDaemon, "touch save.requested during short-circuit: %v", terr)
-			}
+			touchAfterShortCircuit(logger, dir, touchSaveRequested)
 			return nil
 		}
 
@@ -207,6 +212,17 @@ var stateCommitNowCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// touchAfterShortCircuit performs the best-effort save.requested touch shared
+// by both @portal-restoring short-circuit branches — (true, nil) and the
+// query-error "presume set" branch. A touch failure is logged at WARN under
+// state.ComponentDaemon and swallowed; the short-circuit's exit-0 status
+// dominates per spec § save.requested Touch Failure Handling.
+func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string) error) {
+	if terr := touch(dir); terr != nil {
+		logger.Warn(state.ComponentDaemon, "touch save.requested during short-circuit: %v", terr)
+	}
 }
 
 // failCommitNow is the shared failure-exit path for commit-now's structural

@@ -706,6 +706,78 @@ func TestStateCommitNow_ShortCircuits_ExitsZeroWhenSaveRequestedTouchFails(t *te
 	}
 }
 
+// 15b. IsRestoring query error → treat as marker presumed set: skip
+// structural commit, touch save.requested, exit 0, log WARN with the
+// underlying error. Risk priority: protect an in-flight restore over a
+// marginally-extended resurrection window on transient query failure.
+func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+
+	// Seed sessions.json so we can verify byte-equivalence post-invocation.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	seed := []byte(`{"sentinel":"untouched"}`)
+	sessionsPath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(sessionsPath, seed, 0o600); err != nil {
+		t.Fatalf("seed sessions.json: %v", err)
+	}
+
+	f := &commitNowFixture{
+		client:       &fakeCaptureClient{sessions: nil},
+		restoring:    false,
+		restoringErr: errors.New("tmux unreachable"),
+	}
+	installCommitNowDeps(t, f)
+
+	if _, _, err := runStateCommitNow(t); err != nil {
+		t.Fatalf("expected exit 0 on isRestoring error, got: %v", err)
+	}
+
+	// Structural primitives must NOT have fired.
+	if f.captureCalls != 0 {
+		t.Errorf("CaptureStructure called %d times; want 0", f.captureCalls)
+	}
+	if f.commitCalls != 0 {
+		t.Errorf("Commit called %d times; want 0", f.commitCalls)
+	}
+
+	// save.requested must be touched (daemon-fallback handoff).
+	if f.touchCalls != 1 {
+		t.Errorf("TouchSaveRequested calls = %d, want 1", f.touchCalls)
+	}
+	if _, err := os.Stat(state.SaveRequested(dir)); err != nil {
+		t.Errorf("save.requested must exist after isRestoring error; stat err = %v", err)
+	}
+
+	// sessions.json must be byte-identical to the seed.
+	got, err := os.ReadFile(sessionsPath)
+	if err != nil {
+		t.Fatalf("read sessions.json: %v", err)
+	}
+	if !bytes.Equal(got, seed) {
+		t.Errorf("sessions.json mutated despite isRestoring error:\nwant %q\ngot  %q", seed, got)
+	}
+
+	// WARN log entry under ComponentDaemon, mentioning the underlying error.
+	logData, err := os.ReadFile(state.PortalLog(dir))
+	if err != nil {
+		t.Fatalf("read portal.log: %v", err)
+	}
+	logged := string(logData)
+	if !strings.Contains(logged, "WARN") {
+		t.Errorf("log missing WARN level entry: %q", logged)
+	}
+	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
+		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	}
+	if !strings.Contains(logged, "tmux unreachable") {
+		t.Errorf("log missing underlying isRestoring error: %q", logged)
+	}
+}
+
 // 16. marker clear: happy path proceeds unchanged.
 func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
 	dir := t.TempDir()
