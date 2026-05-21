@@ -79,7 +79,7 @@ type CommitNowDeps struct {
 	// bumps its mtime, mirroring the in-line touch state notify performs.
 	// Used on the @portal-restoring short-circuit so the daemon's first
 	// post-restoration tick commits without waiting for the 30s gap rule.
-	// Defaults to defaultTouchSaveRequested.
+	// Defaults to state.TouchSaveRequested.
 	TouchSaveRequested func(dir string) error
 }
 
@@ -96,7 +96,7 @@ func resolveCommitNowDeps() *CommitNowDeps {
 		Commit:             state.Commit,
 		NewClient:          func() state.CaptureClient { return tmux.DefaultClient() },
 		IsRestoring:        func() (bool, error) { return state.IsRestoringSet(tmux.DefaultClient()) },
-		TouchSaveRequested: defaultTouchSaveRequested,
+		TouchSaveRequested: state.TouchSaveRequested,
 	}
 
 	if commitNowDeps == nil {
@@ -121,15 +121,6 @@ func resolveCommitNowDeps() *CommitNowDeps {
 		deps.TouchSaveRequested = commitNowDeps.TouchSaveRequested
 	}
 	return deps
-}
-
-// defaultTouchSaveRequested is the production seam for commit-now's
-// save.requested touch. It delegates to state.TouchSaveRequested — the single
-// source of truth for the dirty-flag touch sequence — and is retained as a
-// named function so the CommitNowDeps.TouchSaveRequested injection point keeps
-// a stable default.
-func defaultTouchSaveRequested(dir string) error {
-	return state.TouchSaveRequested(dir)
 }
 
 // stateCommitNowCmd performs a synchronous structural capture-and-commit on
