@@ -163,26 +163,26 @@ var portalHookCategories = []hookCategory{
 // reference a single source of truth.
 const sessionClosedEvent = "session-closed"
 
-// MigrationLogger is the minimal logging seam migrateHydrationHooks needs.
-// Two methods (Info, Warn) is the smallest surface that conveys the spec's
-// observable shape: a single INFO line summarising eviction count, plus a
-// per-failure WARN line on UnsetGlobalHookAt errors.
+// MigrationLogger is the minimal logging seam migrateHydrationHooks and
+// migrateSessionClosedHook need. Two methods (Info, Warn) is the smallest
+// surface that conveys the spec's observable shape: a single INFO line
+// summarising eviction count, plus a per-failure WARN line on
+// UnsetGlobalHookAt errors.
 //
-// *state.Logger satisfies this interface structurally; defining a local
-// interface avoids a dependency cycle (internal/state imports internal/tmux
-// transitively via its callers) while keeping the seam mockable from tests.
+// *state.Logger satisfies this interface structurally and is the production
+// implementation. The interface is retained as an in-memory test seam so
+// hooks_register_test.go and hooks_migration_test.go can assert on emitted
+// diagnostics via recordingMigrationLogger without touching the file-backed
+// *state.Logger.
+//
+// A nil MigrationLogger is tolerated by every consumer: callers (production
+// and tests alike) may pass nil and the fallback substitutes a
+// (*state.Logger)(nil) — whose Info/Warn methods are documented no-ops on
+// nil receiver — so the migration code path always has a safe sink.
 type MigrationLogger interface {
 	Info(component, format string, args ...any)
 	Warn(component, format string, args ...any)
 }
-
-// noopMigrationLogger satisfies MigrationLogger with no-op methods. Used as
-// the internal fallback when callers pass a nil MigrationLogger to
-// RegisterPortalHooks so the migration code path always has a safe sink.
-type noopMigrationLogger struct{}
-
-func (noopMigrationLogger) Info(component, format string, args ...any) {}
-func (noopMigrationLogger) Warn(component, format string, args ...any) {}
 
 // staleSignalHydratePrefix is one of the two substrings the eviction
 // predicate requires: every Portal-authored signal-hydrate hook body
@@ -231,7 +231,7 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 // the same hook table is a no-op (idempotent).
 func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	if log == nil {
-		log = noopMigrationLogger{}
+		log = (*state.Logger)(nil)
 	}
 
 	raw, err := c.ShowGlobalHooks()
@@ -371,7 +371,7 @@ func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
 // callers can use errors.Is on a sentinel.
 func RegisterPortalHooks(c *Client, log MigrationLogger) error {
 	if log == nil {
-		log = noopMigrationLogger{}
+		log = (*state.Logger)(nil)
 	}
 
 	var errs []error
