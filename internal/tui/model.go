@@ -405,7 +405,9 @@ func (m Model) WithInsideTmux(currentSession string) Model {
 	m.currentSession = currentSession
 	// Re-filter and update list items if sessions are already populated
 	filtered := m.filteredSessions()
-	m.sessionList.SetItems(ToListItems(filtered))
+	if cmd := m.sessionList.SetItems(ToListItems(filtered)); cmd != nil {
+		panic("unreachable: WithInsideTmux runs before any filter can be applied")
+	}
 	m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", currentSession)
 	return m
 }
@@ -935,9 +937,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case ProjectsLoadedMsg:
+		var setItemsCmd tea.Cmd
 		if msg.Err == nil {
 			items := ProjectsToListItems(msg.Projects)
-			m.projectList.SetItems(items)
+			setItemsCmd = m.projectList.SetItems(items)
 			// Re-apply terminal size so pagination accounts for full help height
 			if m.termWidth > 0 || m.termHeight > 0 {
 				m.projectList.SetSize(m.termWidth, m.termHeight)
@@ -945,7 +948,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projectsLoaded = true
 		m.evaluateDefaultPage()
-		return m, nil
+		return m, setItemsCmd
 	case SessionCreatedMsg:
 		m.selected = msg.SessionName
 		return m, tea.Quit
