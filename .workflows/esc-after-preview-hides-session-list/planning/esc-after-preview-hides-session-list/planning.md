@@ -33,3 +33,13 @@ approved_at: 2026-05-20
 | esc-after-preview-hides-session-list-1-4 | Add kill-refresh-under-filter regression test | real keystroke path (no hand-crafted SessionsMsg); killed row absent from post-kill slice; filter retained through killAndRefresh |
 | esc-after-preview-hides-session-list-1-5 | Sweep WithInsideTmux and ProjectsLoadedMsg SetItems discard sites | WithInsideTmux runs pre-tea.NewProgram (no dispatcher); ProjectsLoadedMsg not reachable with a committed projects filter today |
 | esc-after-preview-hides-session-list-1-6 | Audit sibling bubbles/list mutator call sites (SetItem/InsertItem/RemoveItem) | any discovered site touching a filtered list; audit outcome captured even when empty |
+
+### Phase 2: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| esc-after-preview-hides-session-list-2-1 | Rename drainRefilterCmd to drainCmdThroughUpdate | doc comment must lead with general contract; both existing consumers updated; dedicated unit test renamed and still exercises nil-cmd + WindowSizeMsg round-trip |

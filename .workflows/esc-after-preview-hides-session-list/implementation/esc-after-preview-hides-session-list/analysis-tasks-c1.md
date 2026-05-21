@@ -1,7 +1,7 @@
 # Analysis Tasks: esc-after-preview-hides-session-list (Cycle 1)
 
 ## Task 1: Rename drainRefilterCmd to drainCmdThroughUpdate
-status: pending
+status: approved
 severity: low
 sources: architecture
 
