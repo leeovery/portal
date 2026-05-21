@@ -6,7 +6,7 @@ total_proposed: 7
 # Analysis Tasks: killed-session-resurrects-within-tick-window (Cycle 1)
 
 ## Task 1: Promote save.requested touch into state package
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -37,7 +37,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Treat IsRestoring query failure as "marker presumed set"
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -67,7 +67,7 @@ sources: architecture
 ---
 
 ## Task 3: Collapse dumpStateDir / dumpStateDirRaw duplication
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -94,7 +94,7 @@ sources: duplication
 ---
 
 ## Task 4: Collapse pollSessionsJSON / pollSessionsJSONForKill duplication and sessionNames variants
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -124,7 +124,7 @@ sources: duplication
 ---
 
 ## Task 5: Replace errCommitNowFailed empty-message sentinel and preserve cause
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -155,7 +155,7 @@ sources: architecture
 ---
 
 ## Task 6: Replace resolveCommitNowDeps tuple-of-six with *Deps struct
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -182,7 +182,7 @@ sources: architecture
 ---
 
 ## Task 7: Remove redundant MigrationLogger noop fallback
-status: pending
+status: approved
 severity: low
 sources: architecture
 

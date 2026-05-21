@@ -47,7 +47,15 @@
             "killed-session-resurrects-within-tick-window-1-4": "tick-a72110",
             "killed-session-resurrects-within-tick-window-1-5": "tick-35abd9",
             "killed-session-resurrects-within-tick-window-1-6": "tick-ccb30a",
-            "killed-session-resurrects-within-tick-window-1-7": "tick-ef8750"
+            "killed-session-resurrects-within-tick-window-1-7": "tick-ef8750",
+            "killed-session-resurrects-within-tick-window-2": "tick-2080ee",
+            "killed-session-resurrects-within-tick-window-2-1": "tick-5da4df",
+            "killed-session-resurrects-within-tick-window-2-2": "tick-3caa54",
+            "killed-session-resurrects-within-tick-window-2-3": "tick-7ef6c9",
+            "killed-session-resurrects-within-tick-window-2-4": "tick-646280",
+            "killed-session-resurrects-within-tick-window-2-5": "tick-2dfddd",
+            "killed-session-resurrects-within-tick-window-2-6": "tick-8817d4",
+            "killed-session-resurrects-within-tick-window-2-7": "tick-80a45c"
           },
           "external_id": "tick-44c1c5"
         }
@@ -59,7 +67,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

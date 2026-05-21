@@ -41,3 +41,19 @@ approved_at: 2026-05-21
 | killed-session-resurrects-within-tick-window-1-5 | Real-tmux re-entrancy integration gate | hang/deadlock signals spec-level pivot (test must fail visibly, not time out silently), tmux server unreachable during test |
 | killed-session-resurrects-within-tick-window-1-6 | Real-tmux kill→bootstrap canonical symptom integration test | TUI `K`, `portal kill`, `Option-Q`, `M-q`, external `tmux kill-session` all converge through the same hook so one external kill suffices for the gate; `_portal-saver` self-kill under marker-set (byte-identical file) and marker-clear (underscore filter) |
 | killed-session-resurrects-within-tick-window-1-7 | Non-regression tests for daemon merge and six-event eventual consistency | `PrevIndex` staleness in daemon merge, `pane-focus-out` high-frequency fire path, `session-renamed` rename without kill |
+
+### Phase 2: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-session-resurrects-within-tick-window-2-1 | Promote save.requested touch into state package | ENOENT parent dir, mtime tolerance; test fake delegation; near-variant `os.WriteFile` callsite |
+| killed-session-resurrects-within-tick-window-2-2 | Treat IsRestoring query failure as marker presumed set | `(false, err)` symmetric to `(true, nil)`; WARN log with cause; existing branches unchanged |
+| killed-session-resurrects-within-tick-window-2-3 | Collapse dumpStateDir / dumpStateDirRaw duplication | single-caller rename; no other references |
+| killed-session-resurrects-within-tick-window-2-4 | Collapse pollSessionsJSON / pollSessionsJSONForKill duplication and sessionNames variants | strict-subset predicate; poll-constant dedup; `map[string]struct{}` canonical helper |
+| killed-session-resurrects-within-tick-window-2-5 | Replace errCommitNowFailed empty-message sentinel and preserve cause | `errors.Is` detection; `%w` cause wrap; subprocess exit-code/empty-stderr regression |
+| killed-session-resurrects-within-tick-window-2-6 | Replace resolveCommitNowDeps tuple-of-six with *Deps struct | nil-field fallback; struct-shape test stubs |
+| killed-session-resurrects-within-tick-window-2-7 | Remove redundant MigrationLogger noop fallback | real-cycle vs. structural-cycle branch; `(*state.Logger)(nil)` no-op contract; build/test green |
