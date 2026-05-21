@@ -57,3 +57,15 @@ approved_at: 2026-05-21
 | killed-session-resurrects-within-tick-window-2-5 | Replace errCommitNowFailed empty-message sentinel and preserve cause | `errors.Is` detection; `%w` cause wrap; subprocess exit-code/empty-stderr regression |
 | killed-session-resurrects-within-tick-window-2-6 | Replace resolveCommitNowDeps tuple-of-six with *Deps struct | nil-field fallback; struct-shape test stubs |
 | killed-session-resurrects-within-tick-window-2-7 | Remove redundant MigrationLogger noop fallback | real-cycle vs. structural-cycle branch; `(*state.Logger)(nil)` no-op contract; build/test green |
+
+### Phase 3: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-session-resurrects-within-tick-window-3-1 | Delete defaultTouchSaveRequested wrapper | symmetry with sibling CommitNowDeps defaults; tests substitute the field not the wrapper symbol |
+| killed-session-resurrects-within-tick-window-3-2 | Replace ErrStatusUnhealthy empty-string sentinel with a descriptive message | sentinel identity preserved via errors.Is; doc-comment now cites IsSilentExitError; main.go silent-exit path unchanged |
+| killed-session-resurrects-within-tick-window-3-3 | Extract runPortalSubprocess helper to consolidate runPortalCommitNow and runPortalList | t.Helper() propagation; byte-equivalent failure-message format; trampolines retain names |
