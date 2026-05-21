@@ -67,8 +67,8 @@ And add a new named assertion to the **Tests** list:
 - `"after clearing @portal-restoring on the same fixture, a subsequent kill updates sessions.json correctly"` (sub-test 3 continuation)
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Auto-applied verbatim — sub-test 3 extended to include the marker-clear continuation; acceptance criteria and Tests list updated.
 
 ---
 

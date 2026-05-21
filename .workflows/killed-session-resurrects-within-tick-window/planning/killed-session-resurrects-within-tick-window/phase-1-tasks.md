@@ -314,14 +314,16 @@ total: 7
   1. Bootstrap to stable state with user sessions A, B, and the auto-spawned `_portal-saver`.
   2. Kill `_portal-saver` via `tmux kill-session -t _portal-saver` from outside any bootstrap (marker is clear).
   3. Poll `sessions.json`; assert it contains A and B intact and omits `_portal-saver` (via existing `keepSessionNames` underscore filter).
-- Sub-test 3 — `_portal-saver` self-kill, marker set:
-  1. Bootstrap to stable state.
+- Sub-test 3 — `@portal-restoring` defence end-to-end (covers spec § Testing Requirements > "`@portal-restoring` defence under real tmux"):
+  1. Bootstrap to stable state with user sessions A and B and `_portal-saver` running.
   2. Manually set `@portal-restoring` on the tmux server via the test's tmux client (simulating the bootstrap-step-4 timeline window).
   3. Snapshot `sessions.json` bytes.
   4. Kill `_portal-saver` via `tmux kill-session -t _portal-saver`.
   5. Wait briefly (e.g., 250ms) for the hook subprocess to run and exit.
-  6. Re-read `sessions.json` bytes; assert byte-identical to the snapshot.
+  6. Re-read `sessions.json` bytes; assert byte-identical to the snapshot (the marker-set short-circuit fired).
   7. Clear `@portal-restoring`.
+  8. Kill session `B` via `tmux kill-session -t B` (a normal user kill now that the marker is clear).
+  9. Poll `sessions.json` (two-consecutive-consistent-reads, ≤1.5s budget) and assert B is absent and A is present — verifies the marker-clear path resumes the synchronous commit on the same fixture.
 - Do not enumerate all five kill paths as separate sub-tests. The spec is explicit that all kill paths converge through `session-closed`; one external kill demonstrates the seam works under real tmux. Manual verification (per spec § Testing Requirements > Manual Verification) covers the path-by-path matrix outside automated tests.
 - Test does not use `t.Parallel()`.
 
@@ -330,6 +332,7 @@ total: 7
 - [ ] Sub-test 1 demonstrates: a second bootstrap completes without reconstructing B as a skeleton pane (verified by enumerating live tmux state post-bootstrap).
 - [ ] Sub-test 2 demonstrates: `_portal-saver` self-kill in marker-clear state leaves `sessions.json` containing all user sessions intact and omitting `_portal-saver`.
 - [ ] Sub-test 3 demonstrates: `_portal-saver` self-kill in marker-set state leaves `sessions.json` byte-identical before and after the hook subprocess runs.
+- [ ] Sub-test 3 demonstrates: after clearing `@portal-restoring` on the same fixture, a subsequent `tmux kill-session -t B` results in `sessions.json` omitting B within the bounded poll window — verifies the short-circuit gate is per-invocation, not a static state captured at boot.
 - [ ] Test does not use `t.Parallel()`.
 - [ ] Test runs on the integration build tag, not on every `go test ./...`.
 - [ ] Each sub-test's diagnostic message on failure surfaces the actual file contents and tmux session list to aid post-mortem.
@@ -339,6 +342,7 @@ total: 7
 - `"a fresh bootstrap does not reconstruct the killed session"` (canonical symptom)
 - `"_portal-saver self-kill with marker clear leaves user sessions intact and omits _portal-saver"`
 - `"_portal-saver self-kill with marker set leaves sessions.json byte-identical"`
+- `"after clearing @portal-restoring on the same fixture, a subsequent kill updates sessions.json correctly"` (sub-test 3 continuation)
 
 **Edge Cases**:
 - `_portal-saver` not present at the moment of the marker-clear sub-test (bootstrap step 4 failed or was disabled in the test scaffold): skip the sub-test with a `t.Skip` and a clear message, or ensure the test scaffold guarantees `_portal-saver` presence before the kill — prefer the latter.
