@@ -116,7 +116,7 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 
 	// Feed the SessionsMsg back through Update — applySessions runs and
 	// returns the propagated filterItems cmd (because the list is in
-	// FilterApplied state). drainRefilterCmd round-trips that cmd so
+	// FilterApplied state). drainCmdThroughUpdate round-trips that cmd so
 	// VisibleItems() observes the refiltered slice rather than the
 	// transient nil filteredItems state.
 	updated3, refilterCmd := afterY.Update(sessionsMsg)
@@ -124,7 +124,7 @@ func TestKillRefreshUnderFilterPreservesFilteredList(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Model after SessionsMsg, got %T", updated3)
 	}
-	finalAny := drainRefilterCmd(t, afterRefresh, refilterCmd)
+	finalAny := drainCmdThroughUpdate(t, afterRefresh, refilterCmd)
 	got, ok := finalAny.(Model)
 	if !ok {
 		t.Fatalf("expected Model after refilter drain, got %T", finalAny)
