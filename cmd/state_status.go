@@ -12,11 +12,12 @@ import (
 
 // ErrStatusUnhealthy is returned by `portal state status` when the daemon is
 // not running, the last save is older than the staleness threshold, or
-// recent warnings exist in portal.log. The message is intentionally empty
-// so cobra (with SilenceErrors=true) prints no extra banner — the user has
-// already seen the rendered status; the error exists solely to drive a
-// non-zero process exit.
-var ErrStatusUnhealthy = errors.New("")
+// recent warnings exist in portal.log. Stderr suppression is provided by
+// IsSilentExitError (see cmd/state_commit_now.go) so the stderr-suppression
+// contract is compile-time-linked rather than relying on an empty Error()
+// string; the rendered status output has already been written to stdout, and
+// this sentinel exists solely to drive a non-zero process exit.
+var ErrStatusUnhealthy = errors.New("status unhealthy")
 
 // staleSaveThreshold is the cutoff above which the most recent save is
 // considered too old for `portal state status` to report a healthy exit.
