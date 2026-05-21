@@ -83,46 +83,44 @@ type CommitNowDeps struct {
 	TouchSaveRequested func(dir string) error
 }
 
-// resolveCommitNowDeps returns the production-or-overridden function values
-// for one commit-now invocation. Unset fields in commitNowDeps fall through to
-// the production implementation independently.
-func resolveCommitNowDeps() (
-	readIndex func(string) (state.Index, bool, error),
-	captureStructure func(state.CaptureClient, map[string]struct{}, *state.Index) (state.Index, error),
-	commit func(string, state.Index, bool, *state.Logger) error,
-	newClient func() state.CaptureClient,
-	isRestoring func() (bool, error),
-	touchSaveRequested func(string) error,
-) {
-	readIndex = state.ReadIndex
-	captureStructure = state.CaptureStructure
-	commit = state.Commit
-	newClient = func() state.CaptureClient { return tmux.DefaultClient() }
-	isRestoring = func() (bool, error) { return state.IsRestoringSet(tmux.DefaultClient()) }
-	touchSaveRequested = defaultTouchSaveRequested
+// resolveCommitNowDeps returns a fully-populated *CommitNowDeps for one
+// commit-now invocation. Unset fields in the package-level commitNowDeps fall
+// through to the production implementation independently — same per-field
+// nil-check idiom as bootstrapDeps / openDeps / hooksDeps. The returned value
+// is never nil and every field is guaranteed non-nil, so RunE can dereference
+// fields directly without further nil checks.
+func resolveCommitNowDeps() *CommitNowDeps {
+	deps := &CommitNowDeps{
+		ReadIndex:          state.ReadIndex,
+		CaptureStructure:   state.CaptureStructure,
+		Commit:             state.Commit,
+		NewClient:          func() state.CaptureClient { return tmux.DefaultClient() },
+		IsRestoring:        func() (bool, error) { return state.IsRestoringSet(tmux.DefaultClient()) },
+		TouchSaveRequested: defaultTouchSaveRequested,
+	}
 
 	if commitNowDeps == nil {
-		return
+		return deps
 	}
 	if commitNowDeps.ReadIndex != nil {
-		readIndex = commitNowDeps.ReadIndex
+		deps.ReadIndex = commitNowDeps.ReadIndex
 	}
 	if commitNowDeps.CaptureStructure != nil {
-		captureStructure = commitNowDeps.CaptureStructure
+		deps.CaptureStructure = commitNowDeps.CaptureStructure
 	}
 	if commitNowDeps.Commit != nil {
-		commit = commitNowDeps.Commit
+		deps.Commit = commitNowDeps.Commit
 	}
 	if commitNowDeps.NewClient != nil {
-		newClient = commitNowDeps.NewClient
+		deps.NewClient = commitNowDeps.NewClient
 	}
 	if commitNowDeps.IsRestoring != nil {
-		isRestoring = commitNowDeps.IsRestoring
+		deps.IsRestoring = commitNowDeps.IsRestoring
 	}
 	if commitNowDeps.TouchSaveRequested != nil {
-		touchSaveRequested = commitNowDeps.TouchSaveRequested
+		deps.TouchSaveRequested = commitNowDeps.TouchSaveRequested
 	}
-	return
+	return deps
 }
 
 // defaultTouchSaveRequested is the production seam for commit-now's
@@ -183,7 +181,7 @@ var stateCommitNowCmd = &cobra.Command{
 		logger, _ := openNoRotateLogger()
 		defer func() { _ = logger.Close() }()
 
-		readIndex, captureStructure, commit, newClient, isRestoring, touchSaveRequested := resolveCommitNowDeps()
+		deps := resolveCommitNowDeps()
 
 		// @portal-restoring short-circuit. Mirrors the daemon's tick() entry
 		// guard: when bootstrap step 5 Restore (or a step-4 saver
@@ -201,28 +199,28 @@ var stateCommitNowCmd = &cobra.Command{
 		// save.requested touch. The risk priority — protect in-flight
 		// restore over "kill removes the session promptly" — matches the
 		// spec's @portal-restoring Defence section.
-		restoring, err := isRestoring()
+		restoring, err := deps.IsRestoring()
 		switch {
 		case err != nil:
 			logger.Warn(state.ComponentDaemon, "isRestoring query failed; presuming @portal-restoring marker set to protect in-flight restore: %v", err)
-			touchAfterShortCircuit(logger, dir, touchSaveRequested)
+			touchAfterShortCircuit(logger, dir, deps.TouchSaveRequested)
 			return nil
 		case restoring:
 			logger.Info(state.ComponentDaemon, "commit-now skipped: @portal-restoring set")
-			touchAfterShortCircuit(logger, dir, touchSaveRequested)
+			touchAfterShortCircuit(logger, dir, deps.TouchSaveRequested)
 			return nil
 		}
 
-		prev := loadPrevIndex(dir, readIndex, logger)
+		prev := loadPrevIndex(dir, deps.ReadIndex, logger)
 
-		client := newClient()
-		idx, err := captureStructure(client, nil, &prev)
+		client := deps.NewClient()
+		idx, err := deps.CaptureStructure(client, nil, &prev)
 		if err != nil {
-			return failCommitNow(logger, dir, touchSaveRequested, "capture structure", err)
+			return failCommitNow(logger, dir, deps.TouchSaveRequested, "capture structure", err)
 		}
 
-		if err := commit(dir, idx, false, logger); err != nil {
-			return failCommitNow(logger, dir, touchSaveRequested, "commit sessions.json", err)
+		if err := deps.Commit(dir, idx, false, logger); err != nil {
+			return failCommitNow(logger, dir, deps.TouchSaveRequested, "commit sessions.json", err)
 		}
 
 		return nil

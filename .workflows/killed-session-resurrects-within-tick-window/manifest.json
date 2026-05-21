@@ -88,7 +88,7 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 2,
-          "current_task": "killed-session-resurrects-within-tick-window-2-6",
+          "current_task": "killed-session-resurrects-within-tick-window-2-7",
           "completed_tasks": [
             "killed-session-resurrects-within-tick-window-1-1",
             "killed-session-resurrects-within-tick-window-1-2",
@@ -101,7 +101,8 @@
             "killed-session-resurrects-within-tick-window-2-2",
             "killed-session-resurrects-within-tick-window-2-3",
             "killed-session-resurrects-within-tick-window-2-4",
-            "killed-session-resurrects-within-tick-window-2-5"
+            "killed-session-resurrects-within-tick-window-2-5",
+            "killed-session-resurrects-within-tick-window-2-6"
           ],
           "completed_phases": [
             1
