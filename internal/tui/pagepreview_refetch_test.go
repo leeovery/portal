@@ -315,6 +315,10 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 	if !m.sessionList.IsFiltered() {
 		t.Fatalf("test setup invariant: expected IsFiltered()=true before Space")
 	}
+	// Position cursor on the second filtered row ("alphabet") so the
+	// post-dismiss cursor-index assertion has a non-zero target to lock in.
+	m.sessionList.Select(1)
+	wantCursorIndex := m.sessionList.Index()
 
 	got := pressSpaceThenEscWithRefresh(t, m)
 
@@ -326,6 +330,26 @@ func TestPreviewEscFilterStatePreservedAcrossDismissWithRefresh(t *testing.T) {
 	}
 	if got.sessionList.FilterState() != list.FilterApplied {
 		t.Errorf("expected FilterState=FilterApplied after dismiss-with-refresh, got %v", got.sessionList.FilterState())
+	}
+	// Wrong-axis miss site: assert on filteredItems via VisibleItems(),
+	// not just on filter metadata. Order-sensitive slice equality is
+	// mandatory — length-only would let row-substitution regressions
+	// pass silently.
+	wantNames := []string{"alpha", "alphabet"}
+	gotNames := visibleSessionNames(got)
+	if len(gotNames) != len(wantNames) {
+		t.Errorf("expected VisibleItems=%v after dismiss-with-refresh, got %v", wantNames, gotNames)
+	} else {
+		for i := range wantNames {
+			if gotNames[i] != wantNames[i] {
+				t.Errorf("expected VisibleItems=%v after dismiss-with-refresh, got %v (mismatch at idx %d)", wantNames, gotNames, i)
+				break
+			}
+		}
+	}
+	// Cursor must still point at the previously-highlighted filtered row.
+	if gotIndex := got.sessionList.Index(); gotIndex != wantCursorIndex {
+		t.Errorf("expected sessionList.Index()=%d (previously-highlighted filtered row) after dismiss-with-refresh, got %d", wantCursorIndex, gotIndex)
 	}
 }
 

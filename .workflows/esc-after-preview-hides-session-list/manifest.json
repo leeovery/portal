@@ -79,9 +79,10 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "esc-after-preview-hides-session-list-1-1",
+          "current_task": "esc-after-preview-hides-session-list-1-2",
           "completed_tasks": [
-            "esc-after-preview-hides-session-list-1-1"
+            "esc-after-preview-hides-session-list-1-1",
+            "esc-after-preview-hides-session-list-1-2"
           ]
         }
       }
