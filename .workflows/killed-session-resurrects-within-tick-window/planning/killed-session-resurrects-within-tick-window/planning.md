@@ -27,3 +27,16 @@ approved_at: 2026-05-21
 - [ ] `portal state notify` semantics are preserved: zero tmux calls, zero `sessions.json` writes, only touches `save.requested`.
 - [ ] Real-tmux integration fixture confirms `commit-now` invoked from inside the `session-closed` hook completes without deadlock or hang within a reasonable bound (~1s).
 - [ ] All required unit, integration, and regression tests enumerated in the spec's Testing Requirements section pass.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| killed-session-resurrects-within-tick-window-1-1 | Add `portal state commit-now` happy-path subcommand | zero sessions, one session, multi-window multi-pane session, underscore-prefixed sessions filtered out, missing/corrupt `sessions.json` falls back to zero-value `PrevIndex` with WARN log |
+| killed-session-resurrects-within-tick-window-1-2 | Add `@portal-restoring` short-circuit to `commit-now` | marker present (skip + dirty-flag touch), marker absent (proceed), `save.requested` touch failure during skip (best-effort, still exit 0) |
+| killed-session-resurrects-within-tick-window-1-3 | Add `commit-now` failure-path discipline | tmux unreachable, disk error during commit, `save.requested` touch also fails (still exit non-zero, original failure dominates) |
+| killed-session-resurrects-within-tick-window-1-4 | Migrate `session-closed` hook registration to `commitNowCommand` | empty hook state, pre-fix install with `notifyCommand` on `session-closed`, post-fix install (no-op idempotent re-run), `ShowGlobalHooks` failure, per-index `UnsetGlobalHookAt` failure (best-effort WARN), exact-string match must not remove user-customised `notify`-referencing hooks |
+| killed-session-resurrects-within-tick-window-1-5 | Real-tmux re-entrancy integration gate | hang/deadlock signals spec-level pivot (test must fail visibly, not time out silently), tmux server unreachable during test |
+| killed-session-resurrects-within-tick-window-1-6 | Real-tmux kill→bootstrap canonical symptom integration test | TUI `K`, `portal kill`, `Option-Q`, `M-q`, external `tmux kill-session` all converge through the same hook so one external kill suffices for the gate; `_portal-saver` self-kill under marker-set (byte-identical file) and marker-clear (underscore filter) |
+| killed-session-resurrects-within-tick-window-1-7 | Non-regression tests for daemon merge and six-event eventual consistency | `PrevIndex` staleness in daemon merge, `pane-focus-out` high-frequency fire path, `session-renamed` rename without kill |
