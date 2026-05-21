@@ -55,15 +55,16 @@ Make the `session-closed` tmux hook **synchronously rewrite `sessions.json`** be
 
 A new minimal-cost capture-and-commit path that:
 
-1. Captures the current structural index via the existing `state.CaptureStructure` (no scrollback content, no hash work).
-2. Atomically commits it via the existing `state.Commit` primitive (temp file + rename).
-3. Short-circuits as a no-op when `@portal-restoring` is set on the tmux server (defers to the daemon's existing restoration discipline).
+1. Reads the existing `sessions.json` from disk via `state.ReadIndex` and passes it as `PrevIndex` to `state.CaptureStructure`. This preserves the scrollback-hash and per-pane content fields that `CaptureStructure` itself does not regenerate (because no scrollback work is done in this path), so live sessions retain full schema fidelity. Dead sessions are filtered out by `mergeSkippedPanes`'s live-structure rule regardless of `PrevIndex` contents.
+2. Captures the current structural index via `state.CaptureStructure` (no scrollback content, no hash work).
+3. Atomically commits via `state.Commit(dir, idx, anyScrollbackChanged=false, logger)` — the `anyScrollbackChanged` argument is hard-coded to `false` because the sync path writes no `.bin` files.
+4. Short-circuits as a no-op when `@portal-restoring` is set on the tmux server (defers to the daemon's existing restoration discipline).
 
-This path uses **only existing primitives**. `state.CaptureStructure` already takes a `CaptureClient` interface satisfied by `*tmux.Client` — it is not daemon-exclusive. `state.Commit(dir, idx, anyScrollbackChanged, logger)` is already the atomic-write primitive used by the daemon and is structurally available to any caller.
+This path uses **only existing primitives**. `state.CaptureStructure` already takes a `CaptureClient` interface satisfied by `*tmux.Client` — it is not daemon-exclusive. `state.Commit` is already the atomic-write primitive used by the daemon and is structurally available to any caller.
 
 ### Where the Synchronous Commit Lives
 
-The new path is invoked from the kill-side hook context as a short-lived `portal state ...` subprocess (matching the existing `portal state notify` pattern). The exact entry-point shape (new sibling subcommand vs new flag on `notify`) is the open design decision documented under "Entry-Point Design Decision" below.
+The new path is invoked from the kill-side hook context as a short-lived `portal state ...` subprocess (matching the existing `portal state notify` pattern). See § Entry-Point Design Decision for the resolved shape (`portal state commit-now`).
 
 ### What Stays Eventually Consistent
 
@@ -169,7 +170,17 @@ The other six save-trigger events remain on `notifyCommand` unchanged.
   1. Remove the stale `notifyCommand` registration from `session-closed`.
   2. Register `commitNowCommand` in its place.
 
-This is the same idempotency discipline `RegisterPortalHooks` already implements for adding hooks; the upgrade path extends it to migrate an event from one command to another.
+### Migration Algorithm
+
+The upgrade requires more than the existing append-if-absent idempotency — it must also remove a stale entry. Using the existing tmux-client primitives (`ShowGlobalHooks`, `AppendGlobalHook`, `UnsetGlobalHookAt`), the algorithm for `session-closed` is:
+
+1. Call `ShowGlobalHooks` (or the existing per-event variant) to enumerate the currently-registered hook entries for `session-closed`.
+2. Scan the entries. For each entry whose body matches the pre-fix `notifyCommand` pattern (any `run-shell` invoking `portal state notify` without a sibling subcommand), record its index and call `UnsetGlobalHookAt(event, index)`. Indices must be processed highest-first so removal does not shift the remaining indices.
+3. After removal, scan the resulting entries again. If none match `commitNowCommand`, call `AppendGlobalHook(event, commitNowCommand)`.
+
+For the six other save-trigger events, the existing append-if-absent discipline is unchanged — no scan-and-remove pass is needed.
+
+This algorithm is idempotent: re-running it on a post-fix install produces no changes (no stale entries to remove, `commitNowCommand` already present).
 
 ### Why `session-closed` Is The Right Hook
 
@@ -193,11 +204,27 @@ Migrating this one event covers every kill path without per-call-site changes in
 
 Rationale: during bootstrap step 5 `Restore`, the marker is set deliberately to suppress writers from racing the reconstruction. `_portal-saver` version-upgrade (bootstrap step 4) can fire `session-closed` while restoration is still in progress. A synchronous commit at that moment would write a partial skeleton state and corrupt the in-flight restore.
 
-The daemon already honours this marker in its tick loop (`tick()` returns early if `restoring`). `commit-now` adopts the identical discipline: read `@portal-restoring`, return immediately if set, log the skip at INFO under `ComponentBootstrap` or an equivalent component.
+The daemon already honours this marker in its tick loop (`tick()` returns early if `restoring`). `commit-now` adopts the identical discipline: read `@portal-restoring`, return immediately if set, log the skip at INFO via the existing `state` package structured logger.
+
+### Logging Discipline
+
+`commit-now` runs as a tmux hook subprocess. There is no attached terminal or in-process consumer for its stderr, so all `commit-now` output (info-level skips, error-level failures, structured events) goes through the **existing state-package structured logger** (file-backed, written under the state directory — the same sink the daemon uses).
+
+`commit-now` uses **the same component constant the daemon uses for `sessions.json` captures**. This keeps daemon-driven and hook-driven captures in the same log stream for diagnosis. The constant is not renamed; if it is named `ComponentDaemon` today, `commit-now` adopts it as-is.
+
+The hook subprocess's stdout/stderr are not relied upon for diagnostic information. Anything written to them is best-effort and may be discarded by tmux's hook execution context.
 
 ### `_portal-saver` Self-Kill (Documented, No Code Change)
 
-Steady-state user-kill of `_portal-saver` triggers the `session-closed` hook, which runs `commit-now`. `state.CaptureStructure`'s `keepSessionNames` filter excludes underscore-prefixed sessions, so the resulting structural index omits `_portal-saver` — same as today's daemon-driven captures.
+`_portal-saver` self-kill fires `session-closed` in two distinct timelines, each protected by a **different mechanism**. Both protections are required and orthogonal — neither subsumes the other.
+
+**Timeline 1 — Bootstrap step 4 version-upgrade (`@portal-restoring` is set):**
+
+When `_portal-saver` is killed for a version upgrade during bootstrap, the `@portal-restoring` marker is set. `commit-now`'s short-circuit fires and returns without writing `sessions.json`. The protection here is the **restoring-window short-circuit** (see `@portal-restoring` Defence above).
+
+**Timeline 2 — Steady-state user-kill (`@portal-restoring` is clear):**
+
+When the user kills `_portal-saver` outside of bootstrap (e.g. manual debugging), the marker is clear. `commit-now` proceeds normally. `state.CaptureStructure`'s `keepSessionNames` filter excludes underscore-prefixed sessions, so the resulting structural index omits `_portal-saver` — same as today's daemon-driven captures. The protection here is the **underscore-prefix filter**.
 
 **Invariant to document, not change:** the underscore-prefix filter in `keepSessionNames` is the single source of truth for which sessions are persisted to `sessions.json`. Both the daemon's tick and `commit-now` rely on it. This filter must not be moved, special-cased, or bypassed in the synchronous commit path.
 
@@ -214,11 +241,19 @@ This window is bounded by:
 
 **Accepted as residual.** Documented but not blocked on. No additional locking, no IPC, no daemon-side wait for `commit-now` to finish. This residual does not reproduce the original symptom — at worst it briefly re-stales the file, recovered on the next tick.
 
+### Concurrent `commit-now` Invocations (Safe by Atomic Rename)
+
+Rapid-fire kills — a user killing multiple sessions in quick succession, or a script-driven mass kill — fire `session-closed` multiple times within milliseconds, spawning concurrent `commit-now` subprocesses. Each subprocess independently calls `state.CaptureStructure` (tmux serialises server-side requests, so each gets a consistent view of live state at its own moment) and `state.Commit` (temp file + rename — atomic on POSIX).
+
+The atomic temp+rename pattern guarantees the on-disk `sessions.json` is **always one of N consistent snapshots**, never a torn write. Last-writer-wins, and every potential winner reflects a real moment of live tmux state with the cumulative kills already applied. No additional file-level locking is required between concurrent `commit-now` invocations.
+
 ### Hook Re-entrancy (Validate in Plan/Implementation Phase)
 
 `commit-now` makes tmux client calls (`ListSessionNames`, `list-panes -a -F …`, per-session `ShowEnvironment`) back into the same tmux server from within the `session-closed` hook context. `pane-focus-out` and `session-renamed` have historical re-entrancy quirks in the tmux server; `session-closed` is less suspect but not pre-validated for this specific call pattern.
 
-**Requirement on plan/implementation phase:** a real-tmux integration test fixture must confirm no deadlock or hang occurs when `commit-now` runs from inside the `session-closed` hook. If re-entrancy issues surface, the fix must defer the tmux calls via `tmux run-shell` or detach the subprocess differently — the user-visible behaviour must remain "kill the session, `sessions.json` is consistent before the hook subprocess returns."
+**Requirement on plan/implementation phase:** a real-tmux integration test fixture must confirm no deadlock or hang occurs when `commit-now` runs from inside the `session-closed` hook. The test must be written and passing **before** the rest of the implementation work is taken as complete.
+
+**On re-entrancy test failure:** the work unit returns to the specification phase, not the implementation phase. The chosen mechanism (synchronous tmux calls from within the hook subprocess) is structurally dependent on tmux tolerating this re-entrancy pattern; if it doesn't, the fix shape has to be redesigned (e.g., deferring the tmux work via `tmux run-shell`, or moving the synchronous write to a non-hook seam), which is a spec-level decision, not an implementation-level pivot. Pre-locking a fallback before validation would commit to a design whose merits we can't yet weigh.
 
 ### Daemon Merge Interaction (Verified Safe)
 
@@ -234,9 +269,19 @@ The daemon's next tick after a `commit-now` invocation will run `captureAndCommi
 
 If `commit-now` fails (tmux unreachable, disk error, etc.), it must:
 
-1. Exit non-zero so the failure is logged in tmux's hook subprocess context.
-2. **Not** propagate the failure back to the kill — tmux has already removed the session, the user expects the kill to be authoritative regardless of Portal's persistence success.
-3. Leave the dirty-flag fallback intact in principle: if `commit-now` fails, the daemon's next tick will still observe `save.requested` *and* the live tmux state, and commit correctly. (Note: this implies `commit-now` may also touch `save.requested` as a belt-and-braces fallback before exiting — open implementation detail flagged for the plan phase.)
+1. **Touch `save.requested` before exiting.** This is the explicit fallback that hands recovery to the daemon. Without this touch, the daemon's tick body short-circuits unless either `save.requested` is set or the 30-second `gap` has elapsed — leaving the resurrection window open for up to 30 seconds on failure. Touching the flag guarantees the daemon's next scheduled tick (within 1s) will commit.
+2. Exit non-zero so the failure is logged in tmux's hook subprocess context.
+3. **Not** propagate the failure back to the kill — tmux has already removed the session; the kill is authoritative regardless of Portal's persistence success.
+
+### `save.requested` Discipline
+
+`commit-now` touches `save.requested` on **every exit path except a successful sync commit**:
+
+- **Successful sync commit:** `sessions.json` is already current; no daemon work is needed. `save.requested` is **not** touched (avoids a redundant daemon tick).
+- **Failure exit:** `save.requested` is touched (see above).
+- **`@portal-restoring` short-circuit:** `save.requested` is touched. The daemon honours the marker too, so the flag queues a commit for the daemon's first post-restoration tick — without it, the daemon could skip ticks (via the `dirty || gap` rule) until the 30s gap is reached, briefly leaving `sessions.json` stale after restoration completes.
+
+This discipline keeps the common path (successful sync commit) free of daemon work while guaranteeing bounded recovery on every error or skip path.
 
 The fix does not introduce a kill-blocking failure mode. The kill always succeeds; persistence is best-effort with strong success in the common case.
 
@@ -289,7 +334,8 @@ The following are deliberately excluded from this bugfix. Each item below was ei
 2. **Bootstrap reconstruction suppression.** Immediately after any kill, a fresh `portal` invocation must complete bootstrap step 5 `Restore` without reconstructing the killed session as a skeleton pane in tmux.
 3. **TUI Sessions list correctness.** Immediately after any kill, a fresh `portal` invocation must not display the killed session in the TUI Sessions page.
 4. **Restoration-window safety.** When `@portal-restoring` is set, `portal state commit-now` must perform no work — `sessions.json` must remain byte-identical before and after the invocation.
-5. **`_portal-saver` self-kill safety.** The `session-closed` hook firing for `_portal-saver` (during steady-state user kill or bootstrap step 4 version-upgrade) must not corrupt `sessions.json`. The resulting file must omit `_portal-saver` and contain all other live sessions intact.
+5. **`_portal-saver` self-kill safety — steady-state (marker clear).** The `session-closed` hook firing for `_portal-saver` outside of a restoration window must result in a `sessions.json` that omits `_portal-saver` (via `keepSessionNames` filter) and contains all other live sessions intact.
+5a. **`_portal-saver` self-kill safety — bootstrap version-upgrade (marker set).** The `session-closed` hook firing for `_portal-saver` while `@portal-restoring` is set must short-circuit; `sessions.json` must be byte-identical before and after the hook subprocess runs.
 6. **Hook idempotency across upgrades.** A bootstrap from a pre-fix Portal install (with `notifyCommand` registered on `session-closed`) must result in exactly one `commitNowCommand` registration on that event and zero `notifyCommand` registrations. Repeated bootstraps must not append duplicates.
 7. **Kill non-blocking on persistence failure.** A `commit-now` failure (tmux unreachable, disk full, permission denied) must not prevent or revert the kill. The kill remains authoritative; the failure is logged and Portal proceeds.
 
@@ -300,7 +346,7 @@ The following are deliberately excluded from this bugfix. Each item below was ei
 
 ### Non-Regression
 
-10. **`daemon-merge-reintroduces-dead-sessions` invariant preserved.** The daemon's next tick after a `commit-now` invocation must produce a `sessions.json` that does not re-introduce the killed session via stale `PrevIndex` merge.
+10. **`daemon-merge-reintroduces-dead-sessions` invariant preserved.** The daemon's next tick (and every subsequent tick) after a `commit-now` invocation must produce a `sessions.json` whose set of session names does **not** contain the killed session. Byte-equivalence between `commit-now`'s output and the daemon's next-tick output is not required — the daemon legitimately enriches the schema with fields that `commit-now` preserves from prev (scrollback hashes, per-pane content references). The invariant is **semantic**: dead sessions stay out, live sessions stay in.
 11. **`killed-sessions-resurrect-on-restart` invariant preserved.** Bootstrap steps 7 (`Clear @portal-restoring`), 8 (`CleanStaleMarkers`), and 9 (`SweepOrphanFIFOs`) continue to function identically.
 12. **Existing `portal state notify` semantics preserved.** `notify` still performs zero tmux calls, zero `sessions.json` writes, and only touches `save.requested`.
 
@@ -331,7 +377,7 @@ The following are deliberately excluded from this bugfix. Each item below was ei
 
 ### Regression Tests (Required)
 
-- **Daemon merge stability after `commit-now`.** After a `commit-now` write, the daemon's next tick must produce a `sessions.json` that is byte-equivalent to the `commit-now` output. No spurious re-introduction of dead sessions via `PrevIndex` staleness.
+- **Daemon merge stability after `commit-now`.** After a `commit-now` write that omits a killed session, the daemon's next tick must produce a `sessions.json` whose session-name set still omits that session. The test asserts on the set of session names, not on byte-equivalence (the daemon legitimately repopulates scrollback-hash fields that `commit-now` carries over from prev). Verifies no spurious re-introduction of dead sessions via `PrevIndex` staleness.
 - **Six-event eventual consistency.** Fire each of the six non-`session-closed` save-trigger events; assert each one results in a `save.requested` touch and **no** `sessions.json` write within the same tick window. Verifies they remained on the cheap path.
 
 ### Manual Verification (Recommended)

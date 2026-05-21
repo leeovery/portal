@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-21
 cycle: 1
 phase: Gap Analysis
@@ -17,13 +17,13 @@ topic: killed-session-resurrects-within-tick-window
 **Affects**: § Fix Approach → "Where the Synchronous Commit Lives"
 
 **Details**:
-The "Where the Synchronous Commit Lives" subsection says: "The exact entry-point shape (new sibling subcommand vs new flag on `notify`) is the open design decision documented under 'Entry-Point Design Decision' below." But the very next top-level section resolves that decision (`portal state commit-now`). The forward-reference phrasing makes it read as if the decision is still open when in fact it's settled. A future reader skimming the Fix Approach will be confused about whether they're allowed to pick.
+The "Where the Synchronous Commit Lives" subsection said the entry-point shape was "the open design decision documented under 'Entry-Point Design Decision' below" — but the next section resolves it. Forward-reference phrasing made the resolved choice read as open.
 
 **Proposed Addition**:
-Tighten the cross-reference: replace "the open design decision documented" with something like "see § Entry-Point Design Decision for the resolved shape (`portal state commit-now`)".
+Tighten the cross-reference: "See § Entry-Point Design Decision for the resolved shape (`portal state commit-now`)."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied verbatim. Forward-reference replaced with resolved-shape pointer.
 
 ---
 
@@ -34,13 +34,13 @@ Tighten the cross-reference: replace "the open design decision documented" with 
 **Affects**: § Invariants & Edge Cases → "`commit-now` Failure Behaviour"
 
 **Details**:
-The spec says: "this implies `commit-now` may also touch `save.requested` as a belt-and-braces fallback before exiting — open implementation detail flagged for the plan phase." This is a real decision (does the synchronous path *also* set the dirty flag on failure, yes/no?) that an implementer would have to make before writing code. Per the project's discussion-vs-spec discipline, decisions should be settled in spec, not deferred to plan/implementation. The two answers have different testable consequences (acceptance 7 + the regression-test interaction with `save.requested`).
+Spec deferred to plan whether `commit-now` should also touch `save.requested` on failure. Decision had testable consequences; needed settling in spec.
 
 **Proposed Addition**:
-Resolve: either (a) `commit-now` touches `save.requested` unconditionally before its own work as a pre-commit belt-and-braces (so a panic/crash still leaves the daemon with a dirty flag to act on), or (b) `commit-now` touches `save.requested` only on its own failure exit path, or (c) `commit-now` never touches `save.requested` (the daemon's tick still re-queries tmux on schedule and would notice the stale `sessions.json` independently). Pick one; capture rationale in the spec.
+Resolved as option (b): `commit-now` touches `save.requested` only on failure or skip exit paths, not on successful sync commit. Added new "`save.requested` Discipline" subsection.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Option (b) chosen. Rationale: keeps common path (successful sync commit) free of redundant daemon work while guaranteeing bounded recovery on every error path. Without the touch on failure, the daemon's `dirty || gap` rule could delay recovery up to 30s. Subsection also addresses Finding 3 (restoring-window touch behaviour).
 
 ---
 
@@ -51,13 +51,13 @@ Resolve: either (a) `commit-now` touches `save.requested` unconditionally before
 **Affects**: § Invariants & Edge Cases → "`@portal-restoring` Defence (Required)"
 
 **Details**:
-When `commit-now` no-ops because the restoration marker is set, the spec says it returns immediately and logs. It does not say whether `save.requested` is touched in that path. If skipped, a kill that fires during restoration produces no synchronous write *and* no dirty flag — the daemon's next tick will still capture from live tmux and notice the kill, so correctness is preserved by re-query, but the dirty flag is normally what schedules an *earlier* tick. Worth being explicit about this: the no-op is total (no file work, no flag touch) and that's fine because the daemon's tick is unconditional.
+Spec didn't say whether the restoring-window no-op also skipped touching `save.requested`. Without it, the daemon could skip ticks post-restoration via the gap rule.
 
 **Proposed Addition**:
-Add one sentence to the `@portal-restoring` defence subsection clarifying whether the no-op also skips touching `save.requested`, and why that's safe (the daemon's tick runs unconditionally on its 1-second period and will pick up the post-kill state on its next pass anyway).
+Addressed by the same "`save.requested` Discipline" subsection added for Finding 2 — the restoring-window short-circuit **does** touch `save.requested` so the daemon's first post-restoration tick captures.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Co-resolved with Finding 2.
 
 ---
 
@@ -68,15 +68,13 @@ Add one sentence to the `@portal-restoring` defence subsection clarifying whethe
 **Affects**: § Invariants & Edge Cases → "Hook Re-entrancy (Validate in Plan/Implementation Phase)"
 
 **Details**:
-The spec says: "If re-entrancy issues surface, the fix must defer the tmux calls via `tmux run-shell` or detach the subprocess differently — the user-visible behaviour must remain ..." This is a conditional design decision: the spec lists two possible fallback shapes (`tmux run-shell` vs. subprocess detachment) without choosing between them, and conditions the choice on a test outcome that hasn't been run yet. An implementer hitting a re-entrancy hang would not know which fallback to reach for. Either: (a) commit to one fallback now so the implementer doesn't have to redesign mid-flight, or (b) acknowledge that on test failure the work-unit returns to the discussion/spec phase, not the implementation phase.
+Spec listed two possible fallback shapes (`tmux run-shell` vs subprocess detach) without choosing, conditioned on a test that hasn't run yet.
 
 **Proposed Addition**:
-Pick one of:
-- Specify a primary fallback shape (e.g., "`tmux run-shell` is the chosen fallback if re-entrancy issues surface; the synchronous path becomes a fire-and-forget `run-shell` invocation").
-- State explicitly that re-entrancy test failure is a re-spec trigger, not an implementation-phase pivot.
+Chose option (b): explicitly declared that re-entrancy test failure is a respec trigger, not an implementation-phase pivot. Pre-locking an unvalidated fallback would commit to a design whose merits can't yet be weighed.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Test required to pass before implementation work is considered complete.
 
 ---
 
@@ -87,13 +85,13 @@ Pick one of:
 **Affects**: § Fix Approach → "Mechanism" and § Cost Profile
 
 **Details**:
-The spec says `commit-now` "captures the current structural index via the existing `state.CaptureStructure`" and reuses `state.Commit(dir, idx, anyScrollbackChanged, logger)`. But `CaptureStructure` (as used by the daemon) takes a `PrevIndex` for dedup / merge behaviour. `commit-now` is a short-lived subprocess with no in-memory `PrevIndex` — does it pass nil? Does it read the existing `sessions.json` to seed `PrevIndex`? Does it call a variant that doesn't take one? Similarly, what value does it pass for `anyScrollbackChanged`? (Presumably `false`, since the sync path is structural-only and writes no `.bin` files — but the spec doesn't say.) An implementer would need to read daemon source to guess. Pinning these call-site details closes the gap.
+Spec didn't pin `PrevIndex` argument or `anyScrollbackChanged` value for `state.Commit`.
 
 **Proposed Addition**:
-Add to "Mechanism": specify the `CaptureStructure` call shape `commit-now` uses (PrevIndex = nil, or = freshly-loaded from disk, or = zero value), and the `state.Commit` arguments (specifically `anyScrollbackChanged` = `false` because no `.bin` writes happen in this path).
+Pinned: `PrevIndex` is loaded from existing `sessions.json` via `state.ReadIndex` (preserves scrollback-hash fields for live sessions; dead sessions still filtered by `mergeSkippedPanes`). `anyScrollbackChanged` is hard-coded `false`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reading prev from disk is the cleanest choice — preserves schema fidelity for live sessions and keeps semantic equivalence with daemon output post-fix (see Finding 11).
 
 ---
 
@@ -104,13 +102,13 @@ Add to "Mechanism": specify the `CaptureStructure` call shape `commit-now` uses 
 **Affects**: § Hook Registration Migration → "Idempotency Requirements"
 
 **Details**:
-The spec says `RegisterPortalHooks` "must remove the stale `notifyCommand` registration from `session-closed`" during upgrade. The existing `RegisterPortalHooks` only knows how to *append* idempotently — adding a "remove an existing matching hook line" operation is new logic, not "the same idempotency discipline ... extended." The codebase exposes `UnsetGlobalHookAt(event, index)` (per CLAUDE.md), which implies removal must happen by index after a scan. The spec should commit to the algorithm: scan `show-hooks -g session-closed`, identify the entry whose body matches the pre-fix `notifyCommand`, call `UnsetGlobalHookAt` for that index, then append `commitNowCommand` if absent. Otherwise an implementer might invent a different (incompatible) approach.
+"Remove stale notifyCommand" was framed as an extension of the existing append-if-absent discipline, but it's new logic. Implementer might invent an incompatible approach.
 
 **Proposed Addition**:
-In "Idempotency Requirements", spell out the migration algorithm in terms of existing tmux client methods (`ShowGlobalHooks` + match by hook body + `UnsetGlobalHookAt` + `AppendGlobalHook`), so the upgrade path is unambiguous.
+Added new "Migration Algorithm" subsection spelling out: `ShowGlobalHooks` → scan → match body against pre-fix `notifyCommand` pattern → `UnsetGlobalHookAt` (highest-index first) → re-scan → `AppendGlobalHook(commitNowCommand)` if absent.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Explicit highest-index-first ordering for `UnsetGlobalHookAt` to avoid index shift bugs.
 
 ---
 
@@ -121,17 +119,13 @@ In "Idempotency Requirements", spell out the migration algorithm in terms of exi
 **Affects**: § Invariants & Edge Cases → "`@portal-restoring` Defence" and "`commit-now` Failure Behaviour"; § Acceptance Criteria item 7
 
 **Details**:
-Two places refer to logging:
-- The `@portal-restoring` skip "log[s] at INFO under `ComponentBootstrap` or an equivalent component" — the "or an equivalent component" is vague; the implementer must pick. Production uses structured component constants; a wrong pick clutters logs.
-- Acceptance 7 says failures are "logged and Portal proceeds." But `commit-now` runs as a tmux hook subprocess — there's no attached terminal or in-process logger consumer. The spec doesn't define where its stderr/log goes (state-logger file? tmux's `display-message` buffer? lost to the void?).
-
-The fix is small but specifically: pick a component constant (likely `ComponentState` or `ComponentDaemon` — `ComponentBootstrap` is questionable since this path runs outside bootstrap), and confirm the logger destination is the existing state-logger sink (a file under the state dir), not stdio.
+"ComponentBootstrap or equivalent component" was vague; destination for hook-subprocess stderr was undefined.
 
 **Proposed Addition**:
-Specify the logger component constant `commit-now` uses (one constant, no "or equivalent") and confirm the log destination is the existing structured state logger (file-backed), not the hook subprocess's stdio. Reference this from acceptance criterion 7.
+Added new "Logging Discipline" subsection: file-backed state-package structured logger (same sink the daemon uses); same component constant the daemon uses for `sessions.json` captures (no renaming).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Deliberately not naming a specific constant; the spec defers to whichever the daemon currently uses, which is unambiguous at implementation time.
 
 ---
 
@@ -139,20 +133,16 @@ Specify the logger component constant `commit-now` uses (one constant, no "or eq
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: § Invariants & Edge Cases → "`_portal-saver` Self-Kill (Documented, No Code Change)" vs. "`@portal-restoring` Defence"
+**Affects**: § Invariants & Edge Cases → "`_portal-saver` Self-Kill"
 
 **Details**:
-The spec describes the `_portal-saver` self-kill safely in two places that imply different timelines:
-- "`@portal-restoring` Defence" rationale: "`_portal-saver` version-upgrade (bootstrap step 4) can fire `session-closed` while restoration is still in progress. A synchronous commit at that moment would write a partial skeleton state ..." → handled by short-circuit.
-- "`_portal-saver` Self-Kill" subsection: "Steady-state user-kill of `_portal-saver` triggers the `session-closed` hook, which runs `commit-now`. `state.CaptureStructure`'s `keepSessionNames` filter excludes underscore-prefixed sessions ..." → handled by filter.
-
-Both are correct but cover *different* timelines: bootstrap-time (marker set, short-circuit fires) vs. steady-state (marker clear, filter fires). A reader could mistakenly conclude one mechanism handles both, or that the two are alternatives. Worth one explicit sentence calling out the dual timeline.
+Bootstrap-time (marker set → short-circuit) and steady-state (marker clear → filter) were covered in different sections without distinguishing them as a dual timeline.
 
 **Proposed Addition**:
-In the "`_portal-saver` Self-Kill" subsection, add a sentence distinguishing the two timelines: during bootstrap step 4 the `@portal-restoring` short-circuit prevents the write; in steady-state (marker clear) the `keepSessionNames` filter ensures `_portal-saver` is omitted. Both protections are required and orthogonal.
+Restructured "`_portal-saver` Self-Kill" subsection to explicitly enumerate both timelines, each with its protecting mechanism. Stated they are orthogonal — neither subsumes the other.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Sets up clean test design — acceptance 5/5a (Finding 10) and the integration tests can target each timeline separately.
 
 ---
 
@@ -163,13 +153,13 @@ In the "`_portal-saver` Self-Kill" subsection, add a sentence distinguishing the
 **Affects**: § Invariants & Edge Cases (missing edge case)
 
 **Details**:
-Rapid-fire kills (e.g., a user killing two sessions in quick succession, or a script-driven mass kill) will fire `session-closed` twice in rapid succession, spawning two concurrent `commit-now` subprocesses. Each calls `state.CaptureStructure` (reads live tmux — fine; tmux server serializes these) and `state.Commit` (temp file + rename — atomic on POSIX). The atomic rename means the on-disk file is always one of N consistent snapshots, but the spec doesn't acknowledge this scenario at all. Worth a sentence under Invariants & Edge Cases so future readers don't worry about a "missing lock" between concurrent commit-now processes.
+Rapid-fire kills spawn concurrent `commit-now` subprocesses. Atomic temp+rename makes this safe, but spec didn't acknowledge the scenario.
 
 **Proposed Addition**:
-Add a short subsection acknowledging concurrent `commit-now` invocations: the atomic temp+rename of `state.Commit` makes concurrent writes safe (last writer wins; on-disk file is always one consistent snapshot of live tmux at some recent moment). No additional locking required.
+Added new "Concurrent `commit-now` Invocations (Safe by Atomic Rename)" subsection: last-writer-wins via atomic rename; each winner reflects a real moment of post-kill tmux state; no additional locking required.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Closes the "missing lock" question future readers might ask.
 
 ---
 
@@ -180,13 +170,13 @@ Add a short subsection acknowledging concurrent `commit-now` invocations: the at
 **Affects**: § Acceptance Criteria → item 5
 
 **Details**:
-Acceptance 5: "The `session-closed` hook firing for `_portal-saver` (during steady-state user kill or bootstrap step 4 version-upgrade) must not corrupt `sessions.json`." It bundles two scenarios with very different mechanisms (filter vs. short-circuit) into one criterion. A test author would need to write two separate tests with two different setups. The criterion should split or explicitly call out that both timelines are covered by the test plan.
+Criterion 5 bundled steady-state and bootstrap-time scenarios with different mechanisms into one acceptance.
 
 **Proposed Addition**:
-Either split into 5a (steady-state, marker clear, filter must omit `_portal-saver`) and 5b (bootstrap step 4, marker set, short-circuit no-ops), or rewrite criterion 5 to enumerate the two scenarios with their respective expected mechanisms.
+Split into 5 (steady-state, `keepSessionNames` filter) and 5a (bootstrap version-upgrade, `@portal-restoring` short-circuit asserts byte-identical pre/post).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Test author now has unambiguous separate criteria for each timeline.
 
 ---
 
@@ -197,12 +187,12 @@ Either split into 5a (steady-state, marker clear, filter must omit `_portal-save
 **Affects**: § Testing Requirements → Regression Tests → "Daemon merge stability after `commit-now`"
 
 **Details**:
-Regression test: "After a `commit-now` write, the daemon's next tick must produce a `sessions.json` that is byte-equivalent to the `commit-now` output." Byte-equivalence is a strong claim that may be false even when both writers are correct. The daemon's tick writes scrollback hashes (`anyScrollbackChanged`-related fields, content-hashes, possibly timestamps), whereas `commit-now` produces a structural-only output with no scrollback content. If the schema includes scrollback-hash fields that `commit-now` leaves empty (or zeroed), the daemon's first tick after `commit-now` *will* differ from the `commit-now` output. The spec should clarify whether: (a) the schema is uniform and `commit-now` writes the same shape, or (b) the regression test compares only structural fields, or (c) the daemon overwrites with a richer file and the symptom (killed-session-absent) is the actual invariant, not byte equivalence.
+"Byte-equivalent" claim may be false even when both writers are correct — the daemon may legitimately repopulate scrollback hashes that `commit-now` carries over from prev.
 
 **Proposed Addition**:
-Restate the regression-test invariant as "the killed session does not reappear in any subsequent tick output" (a semantic equivalence on the session set), not "byte-equivalent." If true byte-equivalence is intended, specify how `commit-now` produces a file that includes scrollback-hash fields without doing scrollback work (e.g., by reading the previous on-disk file's hash values and preserving them).
+Restated both Acceptance 10 and the corresponding regression test as **semantic equivalence on the session-name set**, not byte-equivalence. The invariant is "dead sessions stay out; live sessions stay in," not byte-for-byte file identity.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: With Finding 5's resolution (commit-now reads prev from disk), live sessions in commit-now output already carry their existing scrollback hashes — so semantic equivalence is achievable even though byte equivalence is not guaranteed across the daemon's enrichment pass.
 
 ---
