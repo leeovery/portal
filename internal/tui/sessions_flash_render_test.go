@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -45,18 +46,22 @@ func flashModelWithSessions(names ...string) Model {
 }
 
 func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
-	// Baseline contract: with flashText empty, the rendered View matches
-	// the bubbles/list.View() output verbatim — no row inserted, no
-	// existing chrome replaced.
+	// Baseline contract: with flashText empty, the Sessions page renders
+	// the bubbles/list.View() output as the list section, with the manual
+	// three-column keymap footer (see renderKeymapFooter) composed below
+	// it via lipgloss.JoinVertical. No flash row is inserted and no
+	// existing list chrome is replaced; only the manual footer is added.
 	m := flashModelWithSessions("alpha-row")
 	if m.flashText != "" {
 		t.Fatalf("setup invariant: want empty flashText, got %q", m.flashText)
 	}
 
 	got := m.View()
-	want := m.sessionList.View()
+	listView := m.sessionList.View()
+	footer := renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList))
+	want := lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 	if got != want {
-		t.Errorf("View() with empty flashText must equal list.View() verbatim\nwant:\n%s\n\ngot:\n%s", want, got)
+		t.Errorf("View() with empty flashText must equal list.View() + manual footer\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
 }
 

@@ -385,14 +385,15 @@ func (m Model) WithInitialFilter(filter string) Model {
 // WithCommand returns a copy of the Model with the given command set.
 // When command is non-empty, the TUI starts in command-pending mode:
 // the session list is skipped and the projects page is shown directly.
-// Help keys are updated to omit s, x, e, and d and show "run here" for enter.
+// The manual keymap footer (see projectFooterBindings) switches to
+// commandPendingHelpKeys when m.commandPending is true; no list-level
+// AdditionalShortHelpKeys/AdditionalFullHelpKeys are assigned because
+// the bubbles/list help renderer is disabled via SetShowHelp(false).
 func (m Model) WithCommand(command []string) Model {
 	m.command = command
 	if len(command) > 0 {
 		m.commandPending = true
 		m.activePage = PageProjects
-		m.projectList.AdditionalShortHelpKeys = commandPendingHelpKeys
-		m.projectList.AdditionalFullHelpKeys = commandPendingHelpKeys
 	}
 	return m
 }
@@ -543,16 +544,20 @@ func brightenHelpStyles(l *list.Model) {
 }
 
 // newSessionList creates and configures a new bubbles/list.Model for sessions.
+// The bubbles/list built-in help renderer is disabled via SetShowHelp(false)
+// because the sessions/projects keymap footer is rendered manually as three
+// fixed columns by viewSessionList / viewProjectList via the list's own
+// help.Model.FullHelpView (see keymapFooter helpers below). brightenHelpStyles
+// still populates l.Help.Styles.* so the manual render keeps the same colour
+// and separator palette as the previous bubbles/list-driven bar.
 func newSessionList(items []list.Item) list.Model {
 	l := list.New(items, SessionDelegate{}, 0, 0)
 	l.Title = "Sessions"
 	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
-	l.AdditionalShortHelpKeys = sessionHelpKeys
-	l.AdditionalFullHelpKeys = sessionHelpKeys
 	l.SetStatusBarItemName("session", "sessions running")
-	l.Help.ShowAll = true
+	l.SetShowHelp(false)
 	l.KeyMap.ShowFullHelp.Unbind()
 	l.KeyMap.CloseFullHelp.Unbind()
 	l.InfiniteScrolling = true
@@ -585,21 +590,118 @@ func commandPendingHelpKeys() []key.Binding {
 }
 
 // newProjectList creates and configures a bubbles/list.Model for projects.
+// See newSessionList for the rationale behind SetShowHelp(false) and the
+// retained brightenHelpStyles call.
 func newProjectList() list.Model {
 	l := list.New(nil, ProjectDelegate{}, 0, 0)
 	l.Title = "Projects"
 	l.DisableQuitKeybindings()
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
-	l.AdditionalShortHelpKeys = projectHelpKeys
-	l.AdditionalFullHelpKeys = projectHelpKeys
 	l.SetStatusBarItemName("project", "saved projects")
-	l.Help.ShowAll = true
+	l.SetShowHelp(false)
 	l.KeyMap.ShowFullHelp.Unbind()
 	l.KeyMap.CloseFullHelp.Unbind()
 	l.InfiniteScrolling = true
 	brightenHelpStyles(&l)
 	return l
+}
+
+// keymapFooterColumnSize is the fixed per-column entry count for the
+// manually-rendered sessions/projects keymap footer. The footer is split
+// into exactly three columns of this size in entry-source order; the third
+// column may be short when the total entry count does not divide evenly.
+// This constant is intentionally not dynamic — it does not branch on
+// terminal width or visible entry count. Picked at ~5 to match the natural
+// shape of the existing per-page binding sets (see specification).
+const keymapFooterColumnSize = 5
+
+// sessionFooterBindings returns the ordered key.Binding entries that feed
+// the sessions-page manual keymap footer. The order mirrors what
+// list.Model.FullHelp would surface for the sessions list: navigation keys
+// from list.KeyMap, then filter-mode bindings, then the sessions-page-
+// specific entries from sessionHelpKeys. Disabled bindings (e.g. filter
+// keys outside filter mode, or AcceptWhileFiltering with an empty filter
+// input) are filtered downstream by chunkBindingsIntoThreeColumns so the
+// visible column lengths match what the renderer emits.
+func sessionFooterBindings(l list.Model) []key.Binding {
+	bindings := []key.Binding{
+		l.KeyMap.CursorUp,
+		l.KeyMap.CursorDown,
+		l.KeyMap.NextPage,
+		l.KeyMap.PrevPage,
+		l.KeyMap.GoToStart,
+		l.KeyMap.GoToEnd,
+		l.KeyMap.Filter,
+		l.KeyMap.ClearFilter,
+		l.KeyMap.AcceptWhileFiltering,
+		l.KeyMap.CancelWhileFiltering,
+	}
+	return append(bindings, sessionHelpKeys()...)
+}
+
+// projectFooterBindings returns the ordered key.Binding entries for the
+// projects-page manual keymap footer. Mirrors sessionFooterBindings but
+// sources the page-specific entries from projectHelpKeys in normal mode
+// and commandPendingHelpKeys in command-pending mode (matches the prior
+// AdditionalFullHelpKeys swap performed by WithCommand).
+func projectFooterBindings(l list.Model, commandPending bool) []key.Binding {
+	bindings := []key.Binding{
+		l.KeyMap.CursorUp,
+		l.KeyMap.CursorDown,
+		l.KeyMap.NextPage,
+		l.KeyMap.PrevPage,
+		l.KeyMap.GoToStart,
+		l.KeyMap.GoToEnd,
+		l.KeyMap.Filter,
+		l.KeyMap.ClearFilter,
+		l.KeyMap.AcceptWhileFiltering,
+		l.KeyMap.CancelWhileFiltering,
+	}
+	if commandPending {
+		return append(bindings, commandPendingHelpKeys()...)
+	}
+	return append(bindings, projectHelpKeys()...)
+}
+
+// chunkBindingsIntoThreeColumns filters disabled bindings (so the visible
+// column count matches what the manual footer renderer emits, mirroring
+// help.Model.FullHelpView's own per-column Enabled() filter), then splits
+// the survivors into exactly three columns of keymapFooterColumnSize
+// entries in source order. The third column may be shorter when the
+// remaining entry count does not divide evenly; that is acceptable per
+// specification. Short trailing columns are not padded.
+func chunkBindingsIntoThreeColumns(bindings []key.Binding) [][]key.Binding {
+	enabled := make([]key.Binding, 0, len(bindings))
+	for _, b := range bindings {
+		if b.Enabled() {
+			enabled = append(enabled, b)
+		}
+	}
+	cols := make([][]key.Binding, 3)
+	for i := 0; i < 3; i++ {
+		start := i * keymapFooterColumnSize
+		if start >= len(enabled) {
+			cols[i] = nil
+			continue
+		}
+		end := start + keymapFooterColumnSize
+		if end > len(enabled) {
+			end = len(enabled)
+		}
+		cols[i] = enabled[start:end]
+	}
+	return cols
+}
+
+// renderKeymapFooter renders the three-column manual keymap footer for the
+// given list, using the list's own help.Model and styles so the rendered
+// strip is byte-identical to the previous bubbles/list-driven bar in colour
+// and separator characters. The list's Styles.HelpStyle is applied around
+// the rendered columns to preserve the previous vertical padding.
+func renderKeymapFooter(l list.Model, bindings []key.Binding) string {
+	cols := chunkBindingsIntoThreeColumns(bindings)
+	return l.Styles.HelpStyle.Render(l.Help.FullHelpView(cols))
 }
 
 // isRuneKey reports whether msg is a rune key matching the given character.
@@ -626,16 +728,48 @@ func New(lister SessionLister, opts ...Option) Model {
 func NewModelWithSessions(sessions []tmux.Session) Model {
 	items := ToListItems(sessions)
 	l := newSessionList(items)
-	l.SetSize(80, 24)
 	pl := newProjectList()
-	pl.SetSize(80, 24)
 	m := Model{
 		sessions:    sessions,
 		sessionList: l,
 		projectList: pl,
 		activePage:  PageSessions,
 	}
+	// Apply construction-time fallback dimensions through the size helpers
+	// so the list reserves room for the manual keymap footer at every
+	// SetSize call site (including this 80x24 test seed).
+	m.applySessionListSize(80, 24)
+	m.applyProjectListSize(80, 24)
 	return m
+}
+
+// sessionFooterHeight returns the rendered line height of the sessions-page
+// manual keymap footer for the current list state. Used to subtract footer
+// rows from the available list height at every SetSize call site, so the
+// list does not overflow under the manually-composed footer.
+func (m Model) sessionFooterHeight() int {
+	return lipgloss.Height(renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList)))
+}
+
+// projectFooterHeight is the projects-page counterpart to sessionFooterHeight.
+// Sources its binding set from projectFooterBindings (which branches on
+// commandPending to swap projectHelpKeys for commandPendingHelpKeys).
+func (m Model) projectFooterHeight() int {
+	return lipgloss.Height(renderKeymapFooter(m.projectList, projectFooterBindings(m.projectList, m.commandPending)))
+}
+
+// applySessionListSize sets the sessions-list dimensions, subtracting the
+// manual keymap footer height from the available height so the list does
+// not overflow under the footer. Width passes through unchanged because
+// the manual footer wraps inside the same width as the list view.
+func (m *Model) applySessionListSize(width, height int) {
+	m.sessionList.SetSize(width, height-m.sessionFooterHeight())
+}
+
+// applyProjectListSize is the projects-list counterpart to
+// applySessionListSize.
+func (m *Model) applyProjectListSize(width, height int) {
+	m.projectList.SetSize(width, height-m.projectFooterHeight())
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -663,9 +797,12 @@ func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
 	filtered := m.filteredSessions()
 	cmd := m.sessionList.SetItems(ToListItems(filtered))
-	// Re-apply terminal size so pagination accounts for full help height
+	// Re-apply terminal size so pagination accounts for the manual keymap
+	// footer height (see applySessionListSize). Without this re-apply the
+	// list would size itself against pre-load defaults and overflow under
+	// the footer once items populate.
 	if m.termWidth > 0 || m.termHeight > 0 {
-		m.sessionList.SetSize(m.termWidth, m.termHeight)
+		m.applySessionListSize(m.termWidth, m.termHeight)
 	}
 	return cmd
 }
@@ -882,8 +1019,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.termWidth = wsm.Width
 		m.termHeight = wsm.Height
-		m.sessionList.SetSize(wsm.Width, wsm.Height)
-		m.projectList.SetSize(wsm.Width, wsm.Height)
+		m.applySessionListSize(wsm.Width, wsm.Height)
+		m.applyProjectListSize(wsm.Width, wsm.Height)
 	}
 
 	// Handle cross-view messages regardless of view state
@@ -941,9 +1078,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil {
 			items := ProjectsToListItems(msg.Projects)
 			setItemsCmd = m.projectList.SetItems(items)
-			// Re-apply terminal size so pagination accounts for full help height
+			// Re-apply terminal size so pagination accounts for the manual
+			// keymap footer height (see applyProjectListSize).
 			if m.termWidth > 0 || m.termHeight > 0 {
-				m.projectList.SetSize(m.termWidth, m.termHeight)
+				m.applyProjectListSize(m.termWidth, m.termHeight)
 			}
 		}
 		m.projectsLoaded = true
@@ -1641,7 +1779,11 @@ func (m Model) viewLoading() string {
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, text)
 }
 
-// viewProjectList renders the project list, with optional modal overlay.
+// viewProjectList renders the project list, with optional modal overlay,
+// and composes the manual three-column keymap footer beneath the
+// list-plus-modal block. The modal overlay sits inside renderListWithModal
+// over the list view only; the manual footer must sit below the composed
+// block so the modal never overlays it.
 func (m Model) viewProjectList() string {
 	var modalContent string
 	switch m.modal {
@@ -1650,7 +1792,9 @@ func (m Model) viewProjectList() string {
 	case modalEditProject:
 		modalContent = m.renderEditProjectContent()
 	}
-	return renderListWithModal(m.projectList, modalContent)
+	listView := renderListWithModal(m.projectList, modalContent)
+	footer := renderKeymapFooter(m.projectList, projectFooterBindings(m.projectList, m.commandPending))
+	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 }
 
 // renderEditProjectContent builds the content string for the edit project modal.
@@ -1700,12 +1844,13 @@ func (m Model) renderEditProjectContent() string {
 	return b.String()
 }
 
-// viewSessionList renders the session list using bubbles/list. When an
-// inline flash is active (m.flashText != ""), one styled chrome row is
-// inserted between the bubbles/list title/filter input row and the rest
-// of the list view. No row is reserved when the flash is inactive; the
-// list sits directly under the title/filter as before (spec § Inline
-// flash — feature-local infrastructure > Render).
+// viewSessionList renders the session list using bubbles/list, composes the
+// optional inline flash row between the list's title/filter row and the
+// rest, then composes the manual three-column keymap footer beneath the
+// resulting block. When the flash is inactive the list sits directly under
+// the title/filter as before (spec § Inline flash — feature-local
+// infrastructure > Render). The manual footer sits below the composed
+// list+modal+flash block so the modal overlay never overlays it.
 func (m Model) viewSessionList() string {
 	var modalContent string
 	switch m.modal {
@@ -1715,20 +1860,21 @@ func (m Model) viewSessionList() string {
 		modalContent = m.renameInput.View()
 	}
 	listView := renderListWithModal(m.sessionList, modalContent)
-	if m.flashText == "" {
-		return listView
+	if m.flashText != "" {
+		// Split off the first line (title / filter input row) and insert
+		// the flash row between it and the remainder. Using a manual split
+		// keeps the existing list view byte-identical aside from the
+		// inserted row, satisfying "no existing chrome replaced or
+		// overlaid".
+		if idx := strings.IndexByte(listView, '\n'); idx < 0 {
+			// Single-line list view (degenerate); append the flash below.
+			listView = listView + "\n" + m.renderFlashRow()
+		} else {
+			listView = listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
+		}
 	}
-
-	// Split off the first line (title / filter input row) and insert the
-	// flash row between it and the remainder. Using a manual split keeps
-	// the existing list view byte-identical aside from the inserted row,
-	// satisfying "no existing chrome replaced or overlaid".
-	idx := strings.IndexByte(listView, '\n')
-	if idx < 0 {
-		// Single-line list view (degenerate); append the flash below.
-		return listView + "\n" + m.renderFlashRow()
-	}
-	return listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
+	footer := renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList))
+	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 }
 
 // flashRowStyle is a package-level immutable lipgloss style; lipgloss

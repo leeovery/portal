@@ -2893,12 +2893,17 @@ func TestSessionListWithBubblesList(t *testing.T) {
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 		model := updated.(tui.Model)
 
+		// Width passes through unchanged. Height is reduced by the manual
+		// three-column keymap footer height (see applySessionListSize) so
+		// the list does not overflow under the footer; the exact reduction
+		// depends on the footer's rendered shape, so we assert the
+		// relationship rather than a pinned value.
 		w, h := model.SessionListSize()
 		if w != 120 {
 			t.Errorf("list width = %d, want 120", w)
 		}
-		if h != 40 {
-			t.Errorf("list height = %d, want 40", h)
+		if h <= 0 || h >= 40 {
+			t.Errorf("list height = %d, want value reduced from 40 to make room for manual footer", h)
 		}
 	})
 
@@ -3768,12 +3773,14 @@ func TestProjectsPage(t *testing.T) {
 		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 		model := updated.(tui.Model)
 
+		// As with the sessions-list counterpart, height is reduced by the
+		// manual three-column keymap footer height (see applyProjectListSize).
 		w, h := model.ProjectListSize()
 		if w != 120 {
 			t.Errorf("project list width = %d, want 120", w)
 		}
-		if h != 40 {
-			t.Errorf("project list height = %d, want 40", h)
+		if h <= 0 || h >= 40 {
+			t.Errorf("project list height = %d, want value reduced from 40 to make room for manual footer", h)
 		}
 	})
 
