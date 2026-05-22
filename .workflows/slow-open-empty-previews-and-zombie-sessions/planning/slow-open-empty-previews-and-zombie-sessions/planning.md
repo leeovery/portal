@@ -184,3 +184,18 @@ approved_at: 2026-05-22
 - [ ] Post-bootstrap: externally killing the legitimate daemon's `_portal-saver` pane triggers self-eject within (N+1) tick intervals (Component D in live context)
 - [ ] Post-bootstrap: `_portal-saver`'s pane process is `portal state daemon` AND `tmux show-options -t _portal-saver destroy-unattached` reports `off` (Component F)
 - [ ] Test uses `portaltest.NewIsolatedStateEnv` for state-dir isolation (Phase 1 helper); no developer-state mutations on test exit
+
+#### Tasks
+status: approved
+approved_at: 2026-05-22
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-6-1 | Build composite test harness with three-daemon scenario setup | integration build tag, portaltest.NewIsolatedStateEnv reuse, daemon.pid references one orphan only, both orphan parents differ from saver pane, tmuxtest scaffolding reused, teardown kills all spawned daemons even on assertion failure |
+| slow-open-empty-previews-and-zombie-sessions-6-2 | Assert pre-fix three-daemon state reproduces under harness | pgrep canonical form matches harness spawn, scrollback oscillation observed across multiple ticks not single sample, harness avoids 0-1 boundary flake, no false-positive convergence pre-bootstrap |
+| slow-open-empty-previews-and-zombie-sessions-6-3 | Invoke bootstrap and assert pgrep convergence to 1 within 6 s | 6 s budget measured from EnsureSaver entry, surviving daemon is the saver-pane process not just any one, portalbintest binary used, bootstrap warnings drained |
+| slow-open-empty-previews-and-zombie-sessions-6-4 | Assert scrollback directory stability across 10x1 s observations post-bootstrap | legitimate per-tick .bin writes allowed, diff distinguishes update from oscillation, observation window starts after first post-bootstrap tick, polled os.ReadDir snapshots |
+| slow-open-empty-previews-and-zombie-sessions-6-5 | Assert fresh-process AcquireDaemonLock refuses with ErrDaemonLockHeld post-bootstrap | invocation from separate process, legitimate daemon.pid is fresh, pre-check path exercised not EWOULDBLOCK, no destructive coexistence on refusal |
+| slow-open-empty-previews-and-zombie-sessions-6-6 | Assert Component D self-eject in live context after external saver-pane kill | external kill via tmux respawn-pane or kill-session, daemon process wait within (N+1) tick intervals, scrollback bytes-identical across eject window, N+1 derived from selfSupervisionHysteresisTicks |
+| slow-open-empty-previews-and-zombie-sessions-6-7 | Assert Component F end-state observables on _portal-saver | pane process verified via list-panes -F '#{pane_pid}' + ps -o args=, show-options output trimmed/quoted correctly, runs after readiness barrier, runs before Component-D eject sub-scenario |
+| slow-open-empty-previews-and-zombie-sessions-6-8 | Assert portaltest cleanup fingerprint backstop reports clean on test exit | backstop via t.Cleanup so failures still report, no late-write race after assertions, harness teardown completes before fingerprint walk |
