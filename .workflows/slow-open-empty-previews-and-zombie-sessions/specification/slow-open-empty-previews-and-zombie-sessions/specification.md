@@ -214,6 +214,61 @@ If implementation measurement during the planning phase reveals real-world trans
 
 **Files affected:** `cmd/state_daemon.go` (insert self-check before `captureAndCommit`), `internal/tmux/` (may add a small `SaverPanePID(name) (int, error)` helper for testability), tests in `cmd/state_daemon_test.go` plus integration coverage.
 
+## Component E — `CaptureStructure` Per-Session Log-and-Continue
+
+**Goal:** Stop a single per-session `ShowEnvironment` error from aborting the entire tick. Today, the first failing session at the alphabetical head of the list causes `captureAndCommit` to return before writing any scrollback or committing the index — every session ordered after the failure loses capture for that tick. Latent fragility since commit `7dc990be4` (2026-04-27).
+
+**Current behaviour** (`internal/state/capture.go:86-96`):
+
+```go
+for _, name := range sortedKeys(keep) {
+    envRaw, err := c.ShowEnvironment(name)
+    if err != nil {
+        return empty, err     // aborts the whole CaptureStructure call
+    }
+    sessions = append(sessions, Session{...})
+}
+```
+
+**New behaviour:** Mirror the per-pane defensive pattern already used in `captureAndCommit` (`cmd/state_daemon.go:185-192`). For each session, attempt `ShowEnvironment`; on per-session error, log WARN and skip that session; continue to the next.
+
+```go
+for _, name := range sortedKeys(keep) {
+    envRaw, err := c.ShowEnvironment(name)
+    if err != nil {
+        logger.Warn(ComponentCapture, "show environment for session",
+            "session", name, "err", err)
+        continue
+    }
+    sessions = append(sessions, Session{
+        Name:        name,
+        Environment: parseShowEnvironment(envRaw),
+        Windows:     buildWindows(name, grouped[name]),
+    })
+}
+```
+
+**Pre-loop calls remain fail-fatal.** `ListSessionNames`, `ListAllPanesWithFormat`, and `parsePaneRows` (lines 66-83) are NOT changed — those failures indicate tmux itself is broken or returning malformed output, and continuing with partial state would produce destructive commits. The per-session loop is the only path where partial-success is meaningful.
+
+**Total-failure guard.** Add a post-loop check: if `len(keep) > 0 && len(sessions) == 0`, every individual session enumeration failed despite the pre-loop calls succeeding. This is anomalous (tmux's `list-sessions` reported names but `show-environment` failed for every one of them) and should NOT produce a commit that wipes all scrollback. Return an error wrapping the per-session failure count, causing `captureAndCommit` to skip Commit + GC for this tick (the existing error path).
+
+**Logger dependency.** `CaptureStructure` does not currently take a logger argument. To preserve the existing call-site signature without intrusive changes, the spec accepts either of the following implementation choices (planning phase decides):
+
+- Add an optional `logger *Logger` parameter (or pass through the existing `state.Logger` plumbing).
+- Add a `CaptureStructureWithLogger` variant; keep `CaptureStructure` as a thin wrapper that passes a no-op logger.
+
+Either is acceptable as long as per-session errors are logged with enough context to diagnose (session name, error). The first option is preferred for symmetry with `Commit`'s existing logger argument.
+
+**Acceptance criteria:**
+
+- **Single-session failure does not abort tick.** Stub `ShowEnvironment` to fail for session "A" and succeed for "B", "C". `CaptureStructure` returns an index containing "B" and "C" (but not "A"). `captureAndCommit` proceeds to write scrollback for both surviving sessions' panes and to Commit. Verified by unit test.
+- **All-session failure aborts tick.** Stub `ShowEnvironment` to fail for every session in a non-empty `keep` set. `CaptureStructure` returns a wrapped error; `captureAndCommit` does NOT call Commit (no destructive GC runs). Verified by unit test.
+- **Logging.** Every per-session skip emits a WARN log entry under `ComponentCapture` (or equivalent existing component constant) with the session name and the underlying error. Verified by unit test that asserts on the logger output.
+- **No regression in fail-fatal pre-loop paths.** A `ListAllPanesWithFormat` failure still causes `CaptureStructure` to return an error; `captureAndCommit` does not Commit. Verified by existing or new unit test.
+- **Empty `keep` is benign.** `len(keep) == 0` returns an empty index without error (existing behaviour preserved).
+
+**Files affected:** `internal/state/capture.go` (`CaptureStructure`), call sites in `cmd/state_daemon.go` if a signature change is chosen, tests in `internal/state/capture_test.go`.
+
 ---
 
 ## Working Notes
