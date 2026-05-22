@@ -311,6 +311,50 @@ When `BootstrapPortalSaver` encounters an existing saver with a dead daemon (lin
 
 **Files affected:** `internal/tmux/portal_saver.go` (`createPortalSaverWithRetry`, `BootstrapPortalSaver`, possibly `portalSaverCommand` constant rename/split into `portalSaverPlaceholderCommand` and `portalSaverDaemonCommand`), tests in `internal/tmux/portal_saver_test.go`.
 
+## Component G — Test Isolation Contract for `portal state daemon`
+
+**Goal:** Prevent any test that spawns `portal state daemon` (or any subprocess that could spawn the daemon transitively, e.g., a full `portal open`) from writing to the developer's real state directory. The trigger on this install — a leaked test-fixture daemon at `/tmp/test_hook_debug2/s` running against `~/.config/portal/state/` — was the direct cause of the observed end-state.
+
+**Attribution decision:** The investigation established that the fixture `/tmp/test_hook_debug2/` does **not** appear in the repo's test code (`grep test_hook_debug2 .` returns no matches). The leaked fixture was an ad-hoc developer test session, not a repo-originated test helper. Therefore the fix shape is **helper + documentation**, not lint enforcement (which would be appropriate if a repo helper were the offender). However, the helper SHOULD have a structurally-mandatory signature so future ad-hoc tests using it cannot accidentally inherit the developer's `$XDG_CONFIG_HOME`.
+
+**Fix:**
+
+1. **New test helper: `portaltest.NewIsolatedStateEnv(t)`.** Returns an `env []string` (suitable for `exec.Cmd.Env =`) and a state directory path. Both are derived from a per-test `t.TempDir()` value. The helper:
+   1. Starts from `os.Environ()`.
+   2. **Removes** any existing `XDG_CONFIG_HOME` entry.
+   3. **Sets** `XDG_CONFIG_HOME=<t.TempDir()>/config` (and `MkdirAll` that path).
+   4. Returns the constructed env slice and the resolved state directory path.
+   5. Registers `t.Cleanup` to verify on test exit that the developer's real `~/.config/portal/state/` was untouched (compare a pre-test snapshot of file mtimes; fail if any state file was modified during the test).
+
+   Placement: a new leaf package `internal/portaltest/` (or attach to the existing `portalbintest` package — planning decides), test-only (`testing.T` parameter ensures it cannot be imported into production code).
+
+2. **Audit existing test helpers.** Any helper in `internal/portalbintest`, `internal/tmuxtest`, or `internal/restoretest` that spawns `portal` or `portal state daemon` as a subprocess MUST pass the env from `portaltest.NewIsolatedStateEnv` (or equivalent isolation). Helpers currently inheriting `os.Environ()` directly are updated to require the isolated env at their call signature — no overload that omits it.
+
+3. **Contributor documentation.** Add a short section to `CLAUDE.md` under "DI / testing pattern" — or a new `TESTING.md` if planning prefers — stating:
+   - Any test that runs `portal state daemon` (directly or via `portal open`/bootstrap) MUST use `portaltest.NewIsolatedStateEnv` (or equivalent) before spawning the subprocess.
+   - The reasoning: a leaked test daemon inheriting the developer's `$XDG_CONFIG_HOME` corrupts the developer's live install (this incident is the canonical example).
+   - The post-test mtime-snapshot check is a backstop, not a substitute for the env override.
+
+4. **No lint or CI enforcement** is added in this work unit — the attribution showed no repo helper was the offender, so the rule is contributor-discipline + the structurally-mandatory helper signature. If a future incident reveals a repo helper that bypassed the contract, lint enforcement can be added in a separate work unit.
+
+**Acceptance criteria:**
+
+- **Helper exists with the documented signature.** `portaltest.NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string)` is callable; the returned env contains `XDG_CONFIG_HOME=<tempDir>/config` and does NOT contain the developer's pre-test `XDG_CONFIG_HOME` value. Verified by unit test.
+- **mtime backstop fires on violation.** Construct a test that uses the helper but then *deliberately* writes to the developer's real `~/.config/portal/state/sessions.json` (e.g., via direct file write bypassing the env). The `t.Cleanup` registered by `NewIsolatedStateEnv` fails the test with a clear error referencing the modified path. Verified by a meta-test.
+- **Existing helpers route through isolation.** Any helper in `portalbintest` / `tmuxtest` / `restoretest` that spawns `portal` or `portal state daemon` either:
+  - Takes the isolated env as a parameter (preferred), OR
+  - Calls `portaltest.NewIsolatedStateEnv` internally before spawning.
+  Verified by code-review of the audit list produced during implementation.
+- **CLAUDE.md (or TESTING.md) documents the contract.** A reviewer can locate the rule by searching for "test isolation" or "XDG_CONFIG_HOME" in the docs.
+- **Existing tests pass.** No regression in the existing integration test suite after the helpers are updated.
+
+**Out of scope for G specifically:**
+
+- Removing the leaked `/tmp/test_hook_debug2/` fixture from the reporter's machine. That is local cleanup (kill the orphan, `rm -rf /tmp/test_hook_debug2/`), not a code change.
+- Adding lint enforcement (e.g., `go vet`-style check that all subprocess spawns of `portal` set `XDG_CONFIG_HOME`). Deferred pending evidence that a repo helper has slipped through.
+
+**Files affected:** new `internal/portaltest/` package (or addition to `internal/portalbintest`), updates to `internal/portalbintest`, `internal/tmuxtest`, `internal/restoretest` helper signatures, `CLAUDE.md` or new `TESTING.md`.
+
 ---
 
 ## Working Notes
