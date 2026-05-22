@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "slow-open-empty-previews-and-zombie-sessions": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
