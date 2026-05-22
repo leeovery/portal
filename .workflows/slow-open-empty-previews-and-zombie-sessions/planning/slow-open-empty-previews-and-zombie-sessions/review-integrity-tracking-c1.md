@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-22
 cycle: 1
 phase: Plan Integrity Review
@@ -104,7 +104,7 @@ This is the load-bearing wiring step of Component D; the contradiction needs to 
     - Why `daemon.pid` is intentionally not deleted (Phase 4 Component C pre-check handles the stale value on next acquire; deleting would be racy against a concurrent pre-check and would invert the layered-enforcement contract).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -154,7 +154,7 @@ Resolve to a single canonical mechanism. The correct mechanism in the composite 
 - Verify `daemon.pid` is left in place after exit (intentional per Component D — Component C's pre-check handles the stale value on the next acquire). Do NOT delete it.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: The current task conflates Component A (SIGKILL-bypasses-final-flush) and Component D (os.Exit(0)-bypasses-final-flush) — both produce the same observable, but the mechanism the test exercises matters. Proposed text scopes the composite assertion to the observable end-state and references Phase 5 for the in-isolation D path.
 
 ---
@@ -187,7 +187,7 @@ This isn't a blocker — the floor=3 is a reasonable planning decision — but t
 - Compute `N = clamp(ceil(max_observed × 2), 3, 9)`. The floor of 3 is the spec's starting-estimate value (Component D, "Hysteresis N: 3 consecutive ticks" rationale) — NOT the spec's hard minimum. The spec's hard minimum is N >= 1 (per Task 5-9). The floor-of-3 is chosen at planning time to give the legitimate daemon at least one safety tick of headroom over the spec's stated "single tmux-command hiccup" failure mode. If a future re-measurement makes the case to lower the floor, update both this task and the in-source comment in the same commit. If `max_observed × 2 > 5` flag in the memo as "evidence of upstream defect" per the Risk Summary, but still pick the clamped value.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -260,7 +260,7 @@ This is an open decision presented to the implementer. The other 9 step fields i
 - [ ] Nil-field handling matches the prevailing convention for other mandatory step fields in `Orchestrator` (Server, Hooks, Restoring, Saver, Restorer, Hydrator, Cleanup, MarkerCleaner, FIFOSweeper). The implementer reads one of these existing fields' Run-time treatment and mirrors it for `OrphanSweeper`; the field's doc comment records the convention used.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Edge Cases section already gives this guidance correctly; the change pulls it into the load-bearing Acceptance Criteria so it's not interpretive.
 
 ---
@@ -295,7 +295,7 @@ Either (a) the test should retry the subprocess on EWOULDBLOCK to catch the pre-
 - The fresh-process subprocess is itself killed by a stray signal (e.g., OS-level OOM) — exit status would not be 42; the test logs the actual exit status and fails.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Also requires aligning the Tests list — see the line `"composite C: pre-check path exercised, not EWOULDBLOCK fallback (daemon.pid was consulted)"` which becomes best-effort. The Acceptance Criteria entry that says "Pre-check path exercised" should be downgraded to "Pre-check path exercised (best-effort — falls back to EWOULDBLOCK in rare AtomicWrite-mid-rename windows; both outcomes return ErrDaemonLockHeld and satisfy the primary assertion)" — but the proposed text already documents this. The implementer should update the Tests list and Acceptance Criteria entry consistently with the Edge Case wording above.
 
 ---
@@ -338,7 +338,7 @@ This is a deliberate refactor cycle (signature plumbing) with no behavioural cha
 - `"CaptureStructure compiles with a *state.Logger argument"` — type-level assertion via `go build`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This is a polish change to make the task's deliberate refactor-cycle nature explicit, so a future plan-reviewer doesn't flag "no tests" as a defect.
 
 ---

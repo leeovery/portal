@@ -75,8 +75,11 @@ total: 5
 - [ ] The daemon callsite at `cmd/state_daemon.go:149` passes `deps.Logger` (not a freshly constructed logger).
 
 **Tests**:
-- `"existing CaptureStructure unit tests continue to pass when invoked with a nil logger"` — the existing suite at `internal/state/capture_test.go` is the regression backstop; no new test is required for this task (the behaviour is unchanged).
-- `"CaptureStructure compiles with a *state.Logger argument"` — implicit via `go build`; no explicit test needed.
+
+This is a deliberate refactor cycle (signature plumbing) with no behavioural change and therefore no own-test addition. The existing CaptureStructure unit suite at `internal/state/capture_test.go` serves as the regression backstop: it must continue to pass after the signature update, with every test invocation passing `nil` as the trailing `*state.Logger`. `go build ./...` covers the type-level assertion that `CaptureStructure` accepts `*state.Logger` as its new trailing parameter. The behavioural assertion (per-session WARN on error) is owned by Task 2.3.
+
+- `"existing CaptureStructure unit tests continue to pass when invoked with a nil logger"` — regression backstop via the existing test suite.
+- `"CaptureStructure compiles with a *state.Logger argument"` — type-level assertion via `go build`.
 
 **Edge Cases**:
 - Nil logger guard: the existing `*Logger` methods early-return on `nil` receiver (`internal/state/logger.go:59`: "A nil *Logger is a valid no-op"). No new nil-check is added inside `CaptureStructure`.

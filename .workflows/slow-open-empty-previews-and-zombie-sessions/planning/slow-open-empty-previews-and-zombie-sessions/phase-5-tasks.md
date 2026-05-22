@@ -23,7 +23,7 @@ total: 9
   3. **`client-attached` hook**: trigger the registered `client-attached` hook (`portal state signal-hydrate`) by attaching a client. Expected worst-case = transient duration of the hook command, in ticks.
   4. **Bootstrap kill-and-recreate**: run `BootstrapPortalSaver`'s unhealthy-saver recreate path against a live setup (composes with Phase 3's placeholder-then-respawn ordering). Measure the count of consecutive ticks during which a new daemon (hypothetically existing during the gap) would have observed absence-or-mismatch.
 - Write per-scenario raw measurements (min/max/median across at least 5 runs per scenario) to `component-d-hysteresis-measurement.md` under `.workflows/slow-open-empty-previews-and-zombie-sessions/planning/slow-open-empty-previews-and-zombie-sessions/`. Include tmux version (`tmux -V`), OS (`uname -srm`), binary version (the value of the ldflag-injected `cmd.version`), date.
-- Compute `N = clamp(ceil(max_observed × 2), 3, 9)`. If `max_observed × 2 > 5` flag in the memo as "evidence of upstream defect" per the Risk Summary, but still pick the clamped value.
+- Compute `N = clamp(ceil(max_observed × 2), 3, 9)`. The floor of 3 is the spec's starting-estimate value (Component D, "Hysteresis N: 3 consecutive ticks" rationale) — NOT the spec's hard minimum. The spec's hard minimum is N >= 1 (per Task 5-9). The floor-of-3 is chosen at planning time to give the legitimate daemon at least one safety tick of headroom over the spec's stated "single tmux-command hiccup" failure mode. If a future re-measurement makes the case to lower the floor, update both this task and the in-source comment in the same commit. If `max_observed × 2 > 5` flag in the memo as "evidence of upstream defect" per the Risk Summary, but still pick the clamped value.
 - Add the constant near the top of `cmd/state_daemon.go` (above `defaultDaemonRun`):
   ```go
   // selfSupervisionHysteresisTicks is Component D's consecutive-failing-tick threshold.
@@ -160,10 +160,11 @@ total: 9
 
 **Do**:
 - Edit `cmd/state_daemon.go`:
-  - Decide counter location: prefer a closure-scoped variable inside `defaultDaemonRun` to avoid expanding `daemonDeps`'s shape. The counter is reset on every match and never persisted across daemon process lifetimes.
-  - At the top of `tick(ctx, deps)` — BEFORE the existing `IsRestoringSet` check — call the probe and update the counter. **Rationale for "before IsRestoringSet"**: a daemon that has lost saver-membership should self-eject even during a restoring window; staying alive to "respect" `@portal-restoring` is the wrong behaviour when the daemon is structurally an orphan. (If the legitimate daemon is ticking during a real restore, its probe returns true and the counter stays at 0.)
-  - Actually — re-read spec: "The check runs **before** the existing `captureAndCommit`". Place the self-check at the **start of `tick`**, before the `restoring` and `dirty`/`gap` early-returns. The `restoring` early-return must not bypass the self-check, otherwise a divergent daemon stuck during a restore window would not self-eject. Document this ordering choice in a code comment.
-  - Pseudo-code shape inside the ticker `for` loop of `defaultDaemonRun` (where the counter lives):
+  - The self-check lives in the ticker `for` loop of `defaultDaemonRun`, NOT inside `tick`. Place it in the `case <-ticker.C:` arm BEFORE the call to `tick(ctx, deps)`. This satisfies the spec's "before `captureAndCommit`" ordering (because `captureAndCommit` runs inside `tick`) AND ensures the self-check is not skipped by any early-return inside `tick` (notably the `IsRestoringSet` short-circuit) — a divergent orphan must not gain immunity by virtue of a concurrent restore window.
+  - The consecutive-failing-tick counter is a closure-scoped variable inside `defaultDaemonRun`, declared immediately before the ticker `for` loop. The counter is reset on every probe-true result and never persisted across daemon process lifetimes.
+  - Introduce a package-level seam `var osExit = os.Exit` so unit tests can intercept the eject without terminating the test process. Production wires to `os.Exit` directly. Tests overwrite via `t.Cleanup`.
+  - Add an `Info` method on `state.Logger` if one does not exist. Inspect `internal/state/logger.go`: if only `Warn` and `Error` exist, add a sibling `Info` that follows the same shape. The spec uses `INFO` explicitly — do not downgrade to WARN.
+  - Pseudo-code shape (canonical):
     ```go
     var consecutiveAbsenceTicks int
     for {
@@ -186,10 +187,9 @@ total: 9
         }
     }
     ```
-  - Introduce a package-level seam `var osExit = os.Exit` so unit tests can intercept the eject without terminating the test process. Production wires to `os.Exit` directly. Tests overwrite via `t.Cleanup`. The seam takes the same `int` argument as `os.Exit`.
-  - Add an INFO-level method on `state.Logger` if one does not exist. Inspect `internal/state/logger.go`: if only `Warn` and `Error` exist, add a sibling `Info` that follows the same shape. The spec uses `INFO` explicitly — do not downgrade to WARN.
-  - Code comment immediately above the self-check block, citing:
-    - Spec ordering "before captureAndCommit" — and the further ordering choice "before IsRestoringSet early-return" with rationale.
+  - Add a code comment immediately above the self-check block citing:
+    - Spec ordering "before `captureAndCommit`", satisfied by placement before `tick(ctx, deps)` in the ticker arm.
+    - Why the self-check is NOT inside `tick`: any early-return inside `tick` (e.g., `IsRestoringSet`) would mask a divergent orphan during a restore window.
     - Why `os.Exit(0)` (not `return ctx.Err()`-style cancellation): bypasses `daemonShutdownFunc`'s defer chain so no final `captureAndCommit` runs.
     - Why `daemon.pid` is intentionally not deleted (Phase 4 Component C pre-check handles the stale value on next acquire; deleting would be racy against a concurrent pre-check and would invert the layered-enforcement contract).
 

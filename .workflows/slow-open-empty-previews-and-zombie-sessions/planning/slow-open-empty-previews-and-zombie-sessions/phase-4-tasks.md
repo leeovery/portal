@@ -218,6 +218,7 @@ total: 10
 - [ ] `CLAUDE.md` "Server bootstrap" section reflects 11-step ordering.
 - [ ] On step error: WARN logged, orchestrator continues — never aborts and never produces a fatal `*FatalError`.
 - [ ] Existing orchestrator unit tests (e.g., `cmd/bootstrap/bootstrap_test.go`) updated to inject a no-op `OrphanSweeper` and continue to pass.
+- [ ] Nil-field handling matches the prevailing convention for other mandatory step fields in `Orchestrator` (Server, Hooks, Restoring, Saver, Restorer, Hydrator, Cleanup, MarkerCleaner, FIFOSweeper). The implementer reads one of these existing fields' Run-time treatment and mirrors it for `OrphanSweeper`; the field's doc comment records the convention used.
 
 **Tests** (in `cmd/bootstrap/bootstrap_test.go`):
 - `"orchestrator: step 4 invokes OrphanSweeper.SweepOrphanDaemons exactly once"`
