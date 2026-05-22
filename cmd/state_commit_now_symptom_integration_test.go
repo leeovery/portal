@@ -349,12 +349,12 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 	// updated. Mirrors task 1-5's binding (see
 	// state_commit_now_reentrancy_integration_test.go).
 	//
-	// t.Setenv is scoped to the parent test for the canonical-symptom
-	// run; sub-test t.Cleanup restores the prior value before the
-	// next sub-test sets a fresh stateDir. Per-sub-test isolation is
-	// preserved because each sub-test spawns its own tmux server
-	// AFTER its own setenv, so the server's env reflects that sub-
-	// test's stateDir.
+	// t.Setenv is scoped to whichever *testing.T is passed in — here
+	// the sub-test t, so its automatic Cleanup restores the prior
+	// value before the next sub-test sets a fresh stateDir. Per-sub-
+	// test isolation is preserved because each sub-test spawns its
+	// own tmux server AFTER its own setenv, so the server's env
+	// reflects that sub-test's stateDir.
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, sockPrefix)
@@ -442,7 +442,7 @@ func (f symptomFixture) diagnostic() string {
 // the env wiring (TMUX pointing at the test socket, PORTAL_STATE_DIR
 // pointing at the test temp dir, PATH prefixed with the staged
 // binary's dir) shared by every portal subprocess this file spawns.
-// A non-zero exit is treated as a fixture failure: the diagnostic
+// A non-zero exit is treated as a test failure: the diagnostic
 // dump is included so the failure mode (missing hook, broken
 // bootstrap, etc.) can be triaged without re-running.
 func runPortalSubprocess(t *testing.T, binary string, f symptomFixture, args ...string) {

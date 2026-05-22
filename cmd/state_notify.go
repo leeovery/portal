@@ -47,7 +47,7 @@ var stateNotifyCmd = &cobra.Command{
 
 		if err := state.TouchSaveRequested(dir); err != nil {
 			logger.Warn(state.ComponentNotify, "touch save.requested at %s: %v", state.SaveRequested(dir), err)
-			return fmt.Errorf("touch save.requested: %w", err)
+			return fmt.Errorf("notify: %w", err)
 		}
 		return nil
 	},

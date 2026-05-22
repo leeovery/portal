@@ -174,17 +174,19 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 	// semantic invariant (spec § Acceptance Criteria item 11) is on
 	// the SET of session names: B absent, A present. Byte-equivalence
 	// between commit-now's output and the daemon's post-tick output
-	// is NOT required.
-	idx, skip, err := state.ReadIndex(fixture.stateDir)
-	if err != nil || skip {
-		t.Fatalf(
-			"post-daemon-tick ReadIndex: skip=%v err=%v\n%s",
-			skip, err, fixture.diagnostic(),
-		)
-	}
-	present := sessionNames(idx)
+	// is NOT required. ReadIndex is performed per sub-test so a
+	// regression in the read itself (decode/skip flag) fails the
+	// affected sub-test on its own rather than fatalling both.
 
 	t.Run("daemon's next tick after commit-now does not re-introduce the killed session by name", func(t *testing.T) {
+		idx, skip, err := state.ReadIndex(fixture.stateDir)
+		if err != nil || skip {
+			t.Fatalf(
+				"post-daemon-tick ReadIndex: skip=%v err=%v\n%s",
+				skip, err, fixture.diagnostic(),
+			)
+		}
+		present := sessionNames(idx)
 		if _, reintroduced := present["B"]; reintroduced {
 			t.Fatalf(
 				"daemon-merge regression: killed session B re-introduced into sessions.json "+
@@ -196,6 +198,14 @@ func TestCommitNowDaemonMergeStability(t *testing.T) {
 	})
 
 	t.Run("daemon's next tick after commit-now retains all live sessions by name", func(t *testing.T) {
+		idx, skip, err := state.ReadIndex(fixture.stateDir)
+		if err != nil || skip {
+			t.Fatalf(
+				"post-daemon-tick ReadIndex: skip=%v err=%v\n%s",
+				skip, err, fixture.diagnostic(),
+			)
+		}
+		present := sessionNames(idx)
 		if _, ok := present["A"]; !ok {
 			t.Fatalf(
 				"daemon-merge regression: live session A dropped from sessions.json "+

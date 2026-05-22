@@ -77,7 +77,7 @@ type commitNowFixture struct {
 	// @portal-restoring / save.requested seams.
 	restoring     bool
 	restoringErr  error
-	restoringCals int
+	restoringCalls int
 	touchCalls    int
 	touchDirs     []string
 	touchErr      error
@@ -113,7 +113,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			return state.Commit(dir, idx, any, nil)
 		},
 		IsRestoring: func() (bool, error) {
-			f.restoringCals++
+			f.restoringCalls++
 			return f.restoring, f.restoringErr
 		},
 		TouchSaveRequested: func(dir string) error {
