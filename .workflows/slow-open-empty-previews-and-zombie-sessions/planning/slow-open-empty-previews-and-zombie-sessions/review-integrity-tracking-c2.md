@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-22
 cycle: 2
 phase: Plan Integrity Review
@@ -130,7 +130,7 @@ This is the canonical live-context D test mechanism: structurally re-parent or r
 - The synthetic `_portal-saver-detached` session leaks if the test panics before cleanup — the harness `t.Cleanup` from Task 6-1 tears down the tmux server entirely, which kills all sessions on the test socket regardless of name.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: This is the cleanest resolution because (a) it preserves the task's original Component-D scope (no scope expansion to A+D), (b) it leaves Acceptance Criteria, Tests, and Edge Cases internally consistent with the Do, and (c) it provides a single canonical mechanism (`break-pane` with `move-pane` fallback) rather than asking the implementer to choose. The cycle-1 proposed text accepted a scope change that the rest of the task did not absorb; this proposal undoes the scope change and provides a mechanism that actually exercises D's `os.Exit(0)` path in the composite live context.
 
 ---
