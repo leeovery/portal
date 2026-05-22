@@ -1,10 +1,23 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-22
 cycle: 2
 phase: Gap Analysis
 topic: slow-open-empty-previews-and-zombie-sessions
 ---
+
+Resolution summary: all 10 findings approved and applied in auto mode.
+
+1. Replaced substring matching with typed `tmux.ErrNoSuchSession` sentinel + `errors.Is`.
+2. Pinned daemon.pid write to `defaultDaemonRun` (cmd/state_daemon.go:70, post-line-290 acquire); added AST-walk assertion test.
+3. Component F now explicitly documents env inheritance: respawn preserves session env, no new -e overrides introduced, baseline parity with pre-F behaviour.
+4. Component A: residual recycle window acknowledged + tightened (identity-check immediately before kill); no extra mitigation required.
+5. Component G placement pinned to new `internal/portaltest/` leaf package.
+6. Component F respawn-pane precedent: addressed by Finding 3 edit (RespawnPane method signature referenced).
+7. Added "Composite End-to-End Verification" section requiring one integration test that reconstructs the three-daemon scenario.
+8. Component D: stale daemon.pid after self-eject documented as intentional; MUST NOT add cleanup.
+9. pgrep -fx form pinned as canonical (sole supported form); ps/awk alternative downgraded to illustrative.
+10. Component G audit completion criterion pinned (grep returns zero un-tagged call sites; deliverable in PR description or .workflows/ file).
 
 # Review Tracking: slow-open-empty-previews-and-zombie-sessions - Gap Analysis
 
