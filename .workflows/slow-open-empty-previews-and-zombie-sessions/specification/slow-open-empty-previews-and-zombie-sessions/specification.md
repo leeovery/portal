@@ -12,7 +12,7 @@ This bugfix addresses three user-visible symptoms produced by a single underlyin
 
 2. **Empty session previews** — Pressing `Space` on any session in the picker shows "no saved content" even though the scrollback exists inside tmux. Caused by competing daemons each running `gcOrphanScrollback` against the same state directory with divergent indexes — the scrollback directory oscillates between 0 and 1 `.bin` file as each daemon's commit deletes files referenced only by the other's view. Expected: the highlighted session's captured scrollback renders in the preview pane.
 
-3. **Killed sessions resurrect** — Sessions removed via `K` in the picker (or via the user's `Option-Q` tmux shortcut) reappear on the next `portal open` and persist indefinitely. Caused by multiple daemons independently committing `sessions.json` every tick — the legitimate daemon's post-kill commit (without the dead session) is overwritten seconds later by a competing daemon whose stale `prev` state still includes it. Restore on next bootstrap reconstructs the dead session as a skeleton pane. Expected: `K` removes the session permanently.
+3. **Killed sessions resurrect** — Sessions removed via `K` in the picker (or via the user's `Option-Q` tmux shortcut) reappear on the next `portal open` and persist indefinitely. Caused by multiple daemons independently committing `sessions.json` every tick — the legitimate daemon's post-kill commit (without the dead session) is overwritten seconds later by a competing daemon whose stale `prev` state still includes it. Restore on next bootstrap reconstructs the dead session as a skeleton pane. Expected: `K` removes the session permanently. *Pre-v0.5.6 (before the kill-barrier work in `killed-session-resurrects-within-tick-window`), killed sessions reappeared briefly within a "tick window" and then disappeared after ~5 s. Post-v0.5.6, they never disappear — the kill-barrier closed the brief-reappearance window but exposed the underlying multi-daemon overwrite as a permanent zombification.*
 
 ## Scope
 
@@ -38,11 +38,21 @@ When these are violated together, multiple daemons concurrently write `sessions.
 
 **Trigger on this install:** A test-fixture tmux server at `/tmp/test_hook_debug2/s` is still alive from the prior evening. A test binary at `/private/tmp/portalbin/portal` was launched against this socket and is still running. It inherited `XDG_CONFIG_HOME` from the user's environment because no test isolated it, so its daemon writes to the user's real state directory while enumerating sessions from the test-fixture tmux server (a single session "A"). This is the trigger but not the *cause* — the underlying defects above allow this trigger (and any unforeseen future equivalent) to produce the observed end-state.
 
+**Regression-point note:** The reporter framed the preview-empty symptom as a within-v0.5.x regression (it worked under some earlier v0.5.x build). The investigation established the `CaptureStructure` abort-on-error path as latent since `7dc990be4` (2026-04-27, present in every v0.5.x release), but did not pinpoint the precise build at which the symptom became user-visible — the manifestation depends on whether a leaked orphan daemon happened to exist on the reporter's install at any given moment. The "regression point" framing is treated as inconclusive: the underlying defects pre-date any v0.5.x build and the trigger (leaked test fixture) is ambient state, not a code change.
+
 ### Symptom → mechanism mapping
 
 - **Slow open** → kill-barrier polling an unreachable orphan PID for the full 5 s window.
-- **Empty previews** → `gcOrphanScrollback` race between divergent daemons deleting each other's `.bin` writes; further amplified by the `CaptureStructure` abort-on-error path when any single session enumeration fails.
+- **Empty previews** → `gcOrphanScrollback` race between divergent daemons deleting each other's `.bin` writes; further amplified by the `CaptureStructure` abort-on-error path when any single session enumeration fails. The "no saved content" string surfaces from `internal/tui/preview_adapter.go`, which reads `state.ScrollbackFile(stateDir, paneKey)` for the highlighted session — when the `.bin` is missing (which is most of the time under the GC race), the read returns no content and the preview adapter renders the placeholder. The TUI read site is correct; the fix is upstream in the daemon's commit/GC pipeline.
 - **Zombie sessions** → competing daemon overwrites the legitimate daemon's post-kill `sessions.json` with stale `prev` state; Restore on next bootstrap reconstructs the dead session.
+
+### Ruled Out (preserved for future reference)
+
+The investigation explicitly ruled out three plausible-looking adjacent causes. These are recorded so future investigators don't re-tread them:
+
+- **TOCTOU on `ShowEnvironment` for session "A".** Manual `tmux show-environment -t A` succeeded every attempt; the daemon-log entry `failed to show environment for session "A": no such session: A` was noise from a different daemon connected to a different/transitional tmux state, not a structural per-attempt failure. The `CaptureStructure` abort-on-error path is the real latent fragility (addressed by Component E).
+- **Merge-filter regression from `daemon-merge-reintroduces-dead-sessions`.** Fix Component A from that bugfix is intact in current code (`mergeSkippedPanes` calls `buildLiveStructure` and applies a three-level filter). Zombie sessions are caused by competing daemons rewriting `sessions.json`, NOT by merge-filter regression. The merge filter operates only on its own daemon's `prev`; it cannot defend against a competing daemon's stale `prev` being committed seconds later.
+- **Missing ctx-cancellable fix from `saver-kill-respawn-loop-leaks-daemons`.** The fix shipped in v0.5.4 and is present in current code (`cmd/state_daemon.go` has three `<-ctx.Done()` observation points in `captureAndCommit`). The legitimate daemon exits promptly on signal; orphan daemons survive because they are no longer reachable from the saver-side kill path (addressed by Component A's direct-signal escalation), not because they fail to honour cancellation.
 
 ## Component A — Kill-Barrier Escalation
 
@@ -124,6 +134,8 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Files affected:** `cmd/bootstrap/` (new step + orchestrator wiring), `internal/bootstrapadapter/` (production adapter for pgrep + identity-check + kill seam), `CLAUDE.md` (bootstrap step ordering documentation).
 
+**`portal clean` interaction:** Out of scope for this bugfix. `portal clean` is the user's manual escape hatch and does NOT run the bootstrap orchestrator. The orphan-sweep step is intentionally bootstrap-only: every `portal open` invocation already runs bootstrap and will sweep orphans, so adding sweep logic to `portal clean` would be redundant. Users who want to force-sweep without invoking `portal open` can use the transitional recovery snippet documented in the End-State Verification section (`pkill -9 -x 'portal state daemon'`).
+
 ## Component C — Stabilise the `daemon.lock` Singleton Against Inode Replacement
 
 **Goal:** Close the inode-replacement gap so the daemon-singleton invariant cannot be silently broken when `daemon.lock`'s path is unlinked + recreated between two daemon spawns.
@@ -150,6 +162,8 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
    4. If `fd_inode == path_inode`: lock acquired, proceed.
 4. **Post-acquire daemon.pid write.** After successful acquire (and after the existing FD_CLOEXEC step), the caller writes `daemon.pid` atomically with the current process's PID via `state.WritePIDFile` (existing helper). The acquire helper itself does not write the PID file — that remains the daemon's responsibility, preserving the current call-site contract — but the **daemon must write `daemon.pid` before exiting `main`'s lock-acquire path**, so that any subsequent acquirer's pre-check sees an identity-checkable recorded PID.
 
+**Deviation from investigation:** The investigation's described shape was "Open with `O_EXCL|O_CREAT`, then `fstat` the fd and `stat` the path, and refuse if inodes differ". The spec deviates by retaining `O_RDWR|O_CREAT` and introducing the pre-acquire `daemon.pid` liveness check as the primary singleton enforcer instead. Reasoning: `O_EXCL|O_CREAT` would require every daemon to unlink `daemon.lock` on clean shutdown (and a crash-cleanup story for un-unlinked files), inverting the lockfile's "stable across lifetimes" contract. The `daemon.pid` check achieves the same correctness guarantee without changing the lockfile lifecycle — what matters for singleton enforcement is whether a live identity-checkable daemon is recorded, not which inode the lockfile currently resolves to. The inode cross-check is retained as a secondary defence against open-vs-flock races.
+
 **Why this closes the bug class:**
 
 - The pre-check makes `daemon.pid` (a stable file whose content we control) authoritative for singleton membership, sidestepping `flock`'s per-inode limitation. Even if `daemon.lock` has been unlinked + recreated 100 times, what matters is whether `daemon.pid` references a live identity-checkable daemon.
@@ -169,6 +183,7 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 - **Inode-mismatch retry.** Stub the post-flock inode comparison to return mismatch for the first attempt then match: `AcquireDaemonLock` succeeds on the second attempt. Verified via unit test through the existing `lockAcquire` seam plus a new stat seam.
 - **Inode-mismatch retry bound.** Stub mismatch for all attempts: `AcquireDaemonLock` returns a wrapped error after 3 attempts, with bounded total delay (<100 ms). Verified via unit test.
 - **No regression in EWOULDBLOCK path.** A second `AcquireDaemonLock` against the same `daemon.lock` with the original holder still alive returns `ErrDaemonLockHeld` (either via pre-check, or via the existing EWOULDBLOCK path if daemon.pid is missing). Verified via existing daemon-lock integration test.
+- **Upgrade-path scenario.** Simulate the real-world upgrade landmine: spawn a v(N) `portal state daemon` that holds the lock, then invoke a v(N+1) binary bootstrap (the existing in-flight daemon was launched by the prior binary; the new binary's bootstrap spawns its own daemon). With Components A+B+C, the new bootstrap's daemon either acquires cleanly (because A/B swept the prior daemon and `daemon.pid` is no longer live) or refuses cleanly via the pre-check (no destructive coexistence). Verified by integration test that constructs the two-binary scenario.
 
 **Files affected:** `internal/state/daemon_lock.go` (augment `AcquireDaemonLock`), `internal/state/daemon_state.go` (no changes to `WritePIDFile`/`ReadPIDFile` — used as-is), tests in `internal/state/daemon_lock_test.go`. New test seams may be added: identity-check function pointer and stat function pointer.
 
@@ -362,8 +377,9 @@ After all seven components ship, the following should hold on the reporter's ins
 - **`portal open` is sub-second** under steady state (no orphan daemons, healthy saver). With an orphan present at bootstrap, total bootstrap time is bounded by Component A's escalation budget (~6 s including the existing 5 s session-kill poll), and is bounded by Component B's `pgrep`-based fast-kill (sub-second) when the orphan is reachable via direct SIGKILL.
 - **Session previews render the session's captured scrollback** for every session in the picker. The scrollback directory contains one `.bin` per live pane keyed by paneKey, and is stable across daemon ticks (no oscillation).
 - **`K` permanently kills sessions.** `portal open` after a kill does NOT reconstruct the killed session. `sessions.json` no longer contains the killed session and is not overwritten by a competing daemon.
-- **Daemon log is quiet under steady state.** No `"another daemon holds the lock"` entries, no `"prior daemon did not exit within 5s"` entries, no `"no such session: _portal-saver"` entries.
+- **Daemon log is quiet under steady state.** No `"another daemon holds the lock"` entries, no `"prior daemon did not exit within 5s"` entries, no `"no such session: _portal-saver"` entries, and no hydrate-side `"scrollback file not found for --hook-key=…"` warnings (these surface when the GC race has deleted the `.bin` a hydrate helper expected to find).
 - **`pgrep -xc 'portal state daemon'` returns 1** at all times under steady state (after the legitimate daemon spawned by `EnsureSaver` has come up). After bootstrap, never more.
+- **`daemon.version` file content matches the running binary's version.** On the reporter's install, `daemon.version` was `0.5.5` after a 0.5.6 upgrade — direct evidence that `EnsurePortalSaverVersion` was not running cleanly because the kill-barrier was timing out. Post-fix, `daemon.version` should track the running binary on every bootstrap.
 - **Orphan daemon lifetime, if one somehow appears between bootstraps, is bounded by Component D's hysteresis** (~3–4 s with the current ~1 s tick interval) plus the per-tick check itself.
 
 ## Transitional Recovery for the Reporter's Install
@@ -392,7 +408,7 @@ This is a one-shot manual procedure. It is not part of the shipped fix and does 
 
 - **Components A, B, E, F, G** are mechanical or test-infrastructure changes with low regression risk.
 - **Component C** introduces a new pre-check that could in principle refuse to acquire when it shouldn't (false positive). The identity check on the recorded PID is the mitigation — if the recorded PID is alive but is not a `portal state daemon`, the check ignores it. Worst-case false-positive consequence is "this bootstrap's saver pane process exits as lock-loser with a WARN" — degraded but not destructive.
-- **Component D's hysteresis (N=3)** is the only tuning knob. Planning phase should verify empirically that the legitimate daemon does NOT observe N consecutive saver-absences during any normal operation (steady-state ticking, attach/detach cycles, hook-driven `client-attached` events). If a real-world transient is found to span 3 ticks, N is raised — the spec target is "single-digit ticks" not a fixed value.
+- **Component D's hysteresis (N=3)** is the only tuning knob. Planning phase **MUST** empirically measure the legitimate `_portal-saver` create/recreate transient duration before locking N — this is a required mitigation, not optional. Measurement covers: steady-state ticking, attach/detach cycles, hook-driven `client-attached` events, and the bootstrap kill-and-recreate sequence. The measured worst-case transient duration plus a safety factor of 2× sets the lower bound for N. The spec default of 3 ticks is a starting estimate; the measurement may revise it upward. Target ceiling remains "single-digit ticks" — if the measured transient exceeds ~5 ticks, treat that as evidence of an upstream defect (e.g., slow tmux command latency or a real recreate-spanning-window) rather than tuning N higher.
 
 ---
 
