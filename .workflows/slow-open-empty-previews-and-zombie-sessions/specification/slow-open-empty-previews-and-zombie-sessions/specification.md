@@ -269,6 +269,48 @@ Either is acceptable as long as per-session errors are logged with enough contex
 
 **Files affected:** `internal/state/capture.go` (`CaptureStructure`), call sites in `cmd/state_daemon.go` if a signature change is chosen, tests in `internal/state/capture_test.go`.
 
+## Component F — Saver Creation Sets `destroy-unattached=off` BEFORE Daemon Starts
+
+**Goal:** Eliminate the race in which a newly-created `_portal-saver` session is destroyed by tmux before its `destroy-unattached=off` option can be set, producing the observed `no such session: _portal-saver` log noise and the recovery doom-loop where each bootstrap creates the saver, the daemon exits as lock-loser (because A/B haven't yet swept), the session self-destroys, and the next bootstrap finds it absent again.
+
+**Current behaviour** (`internal/tmux/portal_saver.go:266-288` `BootstrapPortalSaver`):
+
+```go
+if !sessionPresent {
+    if err := createPortalSaverWithRetry(c); err != nil { return err }  // initial cmd = "portal state daemon"
+}
+if err := c.SetSessionOption(PortalSaverName, "destroy-unattached", "off"); err != nil {
+    return fmt.Errorf("bootstrap _portal-saver: set destroy-unattached: %w", err)
+}
+```
+
+`createPortalSaverWithRetry` (lines 396-416) creates the session with `portalSaverCommand = "portal state daemon"` as the initial command. The daemon starts running inside the new pane immediately. If the daemon is going to exit cleanly (e.g., lock-loser case), it can exit between step 1 (create) and step 2 (`SetSessionOption`). With `destroy-unattached` defaulting to "on" (or set on globally in the user's tmux config), tmux destroys the session as soon as its only pane's process exits. `SetSessionOption` then runs against a session that no longer exists → `exit status 1: no such session: _portal-saver`.
+
+**New behaviour:** Decouple session creation from daemon launch.
+
+1. **Create the saver with a benign placeholder command.** Replace `portalSaverCommand = "portal state daemon"` (or override at the create call site) with `"sh -c 'sleep infinity'"` for the initial-creation step. The placeholder process runs indefinitely and does NOT trigger session self-destruction.
+2. **Set `destroy-unattached=off`** on the now-stable session (existing `SetSessionOption` call). This call is now safe — the session is guaranteed to exist because the placeholder is keeping it alive.
+3. **Respawn the pane with the real command:** `tmux respawn-pane -k -t {PortalSaverName} 'portal state daemon'`. The `-k` flag kills the current process (the placeholder `sh -c 'sleep infinity'`) and replaces it with the daemon. The pane survives the respawn; only its process changes. Even if the daemon exits immediately as lock-loser, `destroy-unattached=off` is already in effect, so the session persists for the next bootstrap to evaluate.
+
+**Why this ordering is safe:**
+
+- The placeholder is structurally incapable of running portal logic — it cannot write to the state directory or contend for the lock. The window between create and respawn is bounded by two tmux command latencies (likely <50 ms) during which no portal-daemon work happens.
+- `respawn-pane -k` is already used elsewhere in the codebase (the hydrate-helper path during Restore — see CLAUDE.md restore section), so the primitive and its `Commander` plumbing exist.
+- The placeholder choice (`sh -c 'sleep infinity'`) is portable across macOS and Linux. It does NOT block on stdin and does NOT exit on terminal signal artefacts; it lives until killed by `respawn-pane -k` or `tmux kill-session`.
+
+**Interaction with kill-barrier (Components A and B):**
+
+When `BootstrapPortalSaver` encounters an existing saver with a dead daemon (lines 269-275 — `BootstrapAliveCheck` returns false), it calls `killSaverAndWaitForDaemonFn` and falls through to recreate. With Components A and B in place, the kill phase is reliable, and the recreate path now uses the placeholder-then-respawn ordering. The net effect is that no bootstrap leaves the saver in a partial-state with `destroy-unattached` unset.
+
+**Acceptance criteria:**
+
+- **No "no such session" log line on create.** A clean bootstrap (no prior saver) produces a `_portal-saver` session with `destroy-unattached=off` and a `portal state daemon` pane process, with zero `"no such session: _portal-saver"` log entries. Verified by integration test.
+- **destroy-unattached=off is set before daemon process can exit.** After `BootstrapPortalSaver` returns successfully, `tmux show-options -t _portal-saver destroy-unattached` reports `off`, AND the pane process is `portal state daemon` (verified via `tmux list-panes -t _portal-saver -F '#{pane_pid}'` and `ps -o args= -p <pid>`).
+- **Lock-loser daemon does not destroy the session.** Simulate a lock-loser scenario (another daemon already holds the singleton): the new bootstrap creates `_portal-saver`, applies `destroy-unattached=off`, respawns the daemon, and the daemon exits cleanly as lock-loser — `_portal-saver` remains present after the daemon exits. Verified by integration test.
+- **No regression for the happy path.** Existing daemon-saver integration tests pass without modification — the daemon comes up healthy, acquires the lock, and ticks normally.
+
+**Files affected:** `internal/tmux/portal_saver.go` (`createPortalSaverWithRetry`, `BootstrapPortalSaver`, possibly `portalSaverCommand` constant rename/split into `portalSaverPlaceholderCommand` and `portalSaverDaemonCommand`), tests in `internal/tmux/portal_saver_test.go`.
+
 ---
 
 ## Working Notes
