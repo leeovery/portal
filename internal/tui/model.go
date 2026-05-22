@@ -736,8 +736,8 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 	// Apply construction-time fallback dimensions through the size helper
 	// so each list reserves room for the manual keymap footer at every
 	// SetSize call site (including this 80x24 test seed).
-	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), 80, 24)
-	m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), 80, 24)
+	m.applySessionListSize(80, 24)
+	m.applyProjectListSize(80, 24)
 	return m
 }
 
@@ -745,11 +745,27 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 // manual keymap footer height (computed from the supplied bindings) from
 // the available height so the list does not overflow under the footer.
 // Width passes through unchanged because the manual footer wraps inside
-// the same width as the list view. Used by every SetSize call site for
-// both sessions and projects pages — callers pass the appropriate
-// sessionFooterBindings / projectFooterBindings result.
+// the same width as the list view. Shared sizing core consumed by the
+// per-page wrappers (applySessionListSize / applyProjectListSize), which
+// own the list+bindings pairing invariant — callers should invoke a
+// wrapper, not this core directly.
 func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, height int) {
 	l.SetSize(width, height-lipgloss.Height(renderKeymapFooter(l, bindings)))
+}
+
+// applySessionListSize is the per-page wrapper that owns the
+// (&m.sessionList, sessionFooterBindings(&m.sessionList)) pairing so call
+// sites cannot pair the wrong list with the wrong bindings function.
+func (m *Model) applySessionListSize(width, height int) {
+	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), width, height)
+}
+
+// applyProjectListSize is the per-page wrapper that owns the
+// (&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
+// pairing — including the m.commandPending branch consumed by the bindings
+// builder — so call sites cannot drift on either input.
+func (m *Model) applyProjectListSize(width, height int) {
+	m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), width, height)
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -782,7 +798,7 @@ func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	// would size itself against pre-load defaults and overflow under the
 	// footer once items populate.
 	if m.termWidth > 0 || m.termHeight > 0 {
-		m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), m.termWidth, m.termHeight)
+		m.applySessionListSize(m.termWidth, m.termHeight)
 	}
 	return cmd
 }
@@ -999,8 +1015,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.termWidth = wsm.Width
 		m.termHeight = wsm.Height
-		m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), wsm.Width, wsm.Height)
-		m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), wsm.Width, wsm.Height)
+		m.applySessionListSize(wsm.Width, wsm.Height)
+		m.applyProjectListSize(wsm.Width, wsm.Height)
 	}
 
 	// Handle cross-view messages regardless of view state
@@ -1061,7 +1077,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Re-apply terminal size so pagination accounts for the manual
 			// keymap footer height (see applyListSize).
 			if m.termWidth > 0 || m.termHeight > 0 {
-				m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), m.termWidth, m.termHeight)
+				m.applyProjectListSize(m.termWidth, m.termHeight)
 			}
 		}
 		m.projectsLoaded = true
