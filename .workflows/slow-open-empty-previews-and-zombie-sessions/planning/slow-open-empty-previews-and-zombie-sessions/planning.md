@@ -20,7 +20,8 @@ approved_at: 2026-05-22
 - [ ] Existing integration test suite passes after helper updates
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
