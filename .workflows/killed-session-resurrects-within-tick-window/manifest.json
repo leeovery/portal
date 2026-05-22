@@ -123,7 +123,7 @@
     "review": {
       "items": {
         "killed-session-resurrects-within-tick-window": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "killed-session-resurrects-within-tick-window-1-1",
             "killed-session-resurrects-within-tick-window-1-2",
