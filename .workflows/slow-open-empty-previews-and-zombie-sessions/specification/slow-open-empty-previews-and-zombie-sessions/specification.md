@@ -355,6 +355,45 @@ When `BootstrapPortalSaver` encounters an existing saver with a dead daemon (lin
 
 **Files affected:** new `internal/portaltest/` package (or addition to `internal/portalbintest`), updates to `internal/portalbintest`, `internal/tmuxtest`, `internal/restoretest` helper signatures, `CLAUDE.md` or new `TESTING.md`.
 
+## End-State Verification
+
+After all seven components ship, the following should hold on the reporter's install and any equivalent install:
+
+- **`portal open` is sub-second** under steady state (no orphan daemons, healthy saver). With an orphan present at bootstrap, total bootstrap time is bounded by Component A's escalation budget (~6 s including the existing 5 s session-kill poll), and is bounded by Component B's `pgrep`-based fast-kill (sub-second) when the orphan is reachable via direct SIGKILL.
+- **Session previews render the session's captured scrollback** for every session in the picker. The scrollback directory contains one `.bin` per live pane keyed by paneKey, and is stable across daemon ticks (no oscillation).
+- **`K` permanently kills sessions.** `portal open` after a kill does NOT reconstruct the killed session. `sessions.json` no longer contains the killed session and is not overwritten by a competing daemon.
+- **Daemon log is quiet under steady state.** No `"another daemon holds the lock"` entries, no `"prior daemon did not exit within 5s"` entries, no `"no such session: _portal-saver"` entries.
+- **`pgrep -xc 'portal state daemon'` returns 1** at all times under steady state (after the legitimate daemon spawned by `EnsureSaver` has come up). After bootstrap, never more.
+- **Orphan daemon lifetime, if one somehow appears between bootstraps, is bounded by Component D's hysteresis** (~3–4 s with the current ~1 s tick interval) plus the per-tick check itself.
+
+## Transitional Recovery for the Reporter's Install
+
+The reporter's live install is in the broken state at the time of this bugfix being authored. The code fix does NOT automatically clean up the existing orphans on first run — Component B's sweep will only run when the user invokes `portal open` against the new binary. Once that invocation happens, B sweeps the existing orphans and A handles the recorded one; the install converges to the healthy end state from that single invocation.
+
+If the user wants to recover before the fix ships:
+
+```bash
+pkill -9 -x 'portal state daemon'
+rm -f ~/.config/portal/state/daemon.lock ~/.config/portal/state/daemon.pid ~/.config/portal/state/daemon.version
+# Optionally also kill the leaked test-fixture tmux server:
+tmux -S /tmp/test_hook_debug2/s kill-server 2>/dev/null || true
+rm -rf /tmp/test_hook_debug2/
+```
+
+This is a one-shot manual procedure. It is not part of the shipped fix and does not need to be documented for end users; included here for completeness of the bugfix narrative.
+
+## Release Approach
+
+- **Regular release.** No hotfix. Local recovery is available (see above) and the failure mode degrades only the dogfooding install at this stage — there is no evidence of broader user impact.
+- **Tagged release follows the existing goreleaser flow.** ldflags-injected version constant moves to the next v0.5.x or v0.6.0 (planning decides version bump based on whether any user-visible flag/behaviour changes — currently none, so v0.5.x patch bump is appropriate).
+- **No migration prompt required at startup.** Component C's `daemon.pid` pre-check is backward-compatible: a missing/stale `daemon.pid` is treated as "no holder" and acquire proceeds. Component F's saver-creation ordering is fully internal. No state-file schema changes.
+
+## Risk Summary
+
+- **Components A, B, E, F, G** are mechanical or test-infrastructure changes with low regression risk.
+- **Component C** introduces a new pre-check that could in principle refuse to acquire when it shouldn't (false positive). The identity check on the recorded PID is the mitigation — if the recorded PID is alive but is not a `portal state daemon`, the check ignores it. Worst-case false-positive consequence is "this bootstrap's saver pane process exits as lock-loser with a WARN" — degraded but not destructive.
+- **Component D's hysteresis (N=3)** is the only tuning knob. Planning phase should verify empirically that the legitimate daemon does NOT observe N consecutive saver-absences during any normal operation (steady-state ticking, attach/detach cycles, hook-driven `client-attached` events). If a real-world transient is found to span 3 ticks, N is raised — the spec target is "single-digit ticks" not a fixed value.
+
 ---
 
 ## Working Notes
