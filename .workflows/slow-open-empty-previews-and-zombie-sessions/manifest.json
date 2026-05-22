@@ -37,8 +37,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 4,
-          "task": "slow-open-empty-previews-and-zombie-sessions-4-1",
+          "phase": 5,
+          "task": "~",
           "task_map": {
             "slow-open-empty-previews-and-zombie-sessions-1": "tick-53e717",
             "slow-open-empty-previews-and-zombie-sessions-1-1": "tick-e53092",
@@ -56,7 +56,17 @@
             "slow-open-empty-previews-and-zombie-sessions-3-3": "tick-8320c6",
             "slow-open-empty-previews-and-zombie-sessions-3-4": "tick-56baaf",
             "slow-open-empty-previews-and-zombie-sessions-3-5": "tick-60af3f",
-            "slow-open-empty-previews-and-zombie-sessions-3-6": "tick-bfc152"
+            "slow-open-empty-previews-and-zombie-sessions-3-6": "tick-bfc152",
+            "slow-open-empty-previews-and-zombie-sessions-4-1": "tick-8d9dea",
+            "slow-open-empty-previews-and-zombie-sessions-4-2": "tick-47c72f",
+            "slow-open-empty-previews-and-zombie-sessions-4-3": "tick-f51726",
+            "slow-open-empty-previews-and-zombie-sessions-4-4": "tick-0ed34e",
+            "slow-open-empty-previews-and-zombie-sessions-4-5": "tick-2da460",
+            "slow-open-empty-previews-and-zombie-sessions-4-6": "tick-1bb17f",
+            "slow-open-empty-previews-and-zombie-sessions-4-7": "tick-69c450",
+            "slow-open-empty-previews-and-zombie-sessions-4-8": "tick-2cd2c5",
+            "slow-open-empty-previews-and-zombie-sessions-4-9": "tick-7f818e",
+            "slow-open-empty-previews-and-zombie-sessions-4-10": "tick-13fd93"
           },
           "external_id": "tick-7da549"
         }
