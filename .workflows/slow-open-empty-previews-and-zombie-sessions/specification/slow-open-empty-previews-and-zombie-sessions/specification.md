@@ -172,6 +172,48 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Files affected:** `internal/state/daemon_lock.go` (augment `AcquireDaemonLock`), `internal/state/daemon_state.go` (no changes to `WritePIDFile`/`ReadPIDFile` — used as-is), tests in `internal/state/daemon_lock_test.go`. New test seams may be added: identity-check function pointer and stat function pointer.
 
+## Component D — Daemon Self-Supervision Against the Saver Session
+
+**Goal:** Bound orphan-daemon lifetime to ~3–4 seconds even when no `portal` invocation runs. A and B sweep orphans at bootstrap time; D makes the daemon self-eject when its connection to `_portal-saver` no longer holds, without needing an external sweep.
+
+**Current behaviour:** The daemon ticks forever after acquiring `daemon.lock` until it receives SIGHUP (from `tmux kill-session _portal-saver`) or a context cancellation. There is no per-tick check that the daemon is still bound to a live saver pane.
+
+**New behaviour:** Add a per-tick "saver-membership self-check" to the daemon's main loop in `cmd/state_daemon.go`. The check runs **before** the existing `captureAndCommit`, so a failing check exits before any commit/GC writes.
+
+**Self-check sequence:**
+
+1. **Query saver existence:** `tmux has-session -t _portal-saver`. Treat any error (not just "session not found") as "absent" for this tick — tmux command failures are evidence the daemon's view is unreliable.
+2. **If absent:** increment the in-process consecutive-absence counter.
+3. **If present:** query the saver pane's pid via `tmux list-panes -t _portal-saver -F '#{pane_pid}'`. If the result errors or yields a pid that doesn't match `os.Getpid()`: increment the counter. If the pane pid matches `os.Getpid()`: reset the counter to 0 (this daemon is still legitimately the saver pane process).
+4. **If counter ≥ N (see hysteresis below):**
+   1. Log INFO under `ComponentDaemon`: `"self-supervision: saver-membership lost for N consecutive ticks, exiting"`.
+   2. **Skip the final flush.** Exit immediately via `os.Exit(0)` (bypassing any deferred shutdown handler) so the divergent-view daemon does NOT execute one more `captureAndCommit` / `gcOrphanScrollback` cycle on its way out — same reasoning as Component A's straight-to-SIGKILL choice.
+5. **If counter < N:** continue to the existing tick body (`captureAndCommit`).
+
+**Hysteresis N:** **3 consecutive ticks.** Rationale:
+
+- The legitimate daemon never observes a transient "saver absent" condition. The bootstrap path that kills `_portal-saver` SIGHUPs the saver pane process — i.e., the legitimate daemon itself — so the OLD legitimate daemon stops ticking before its next self-check. The NEW legitimate daemon spawned by the recreated saver only starts ticking AFTER the saver exists. There is no in-between window where a legitimate daemon would see absence.
+- The only realistic source of false-positive absence is transient tmux command failure (mid-tick `has-session` returning an unexpected error during, e.g., a heavy tmux server moment). N=3 absorbs this without significantly extending orphan lifetime.
+- With the daemon's current ~1 s tick interval, N=3 caps orphan lifetime at ~3–4 s of additional drift after the saver-membership condition first fails — well inside the user's "bound to one tick *between* bootstraps" target framing.
+- N=1 was considered but rejected: a single tmux-command hiccup would unnecessarily kill the legitimate daemon mid-session (extremely rare but possible).
+
+If implementation measurement during the planning phase reveals real-world transient durations longer than ~3 ticks, N can be increased — but the spec target is "single-digit ticks", not "tens of ticks".
+
+**Why this composes with A, B, and C:**
+
+- A+B run only at bootstrap. Between invocations (the user closes their laptop, comes back hours later), orphans accumulate freely under the current design — the reporter's install had a 13-hour orphan-lifetime from yesterday 21:39 to detection today 10:39. D shrinks the inter-bootstrap orphan window from "hours" to "~3 seconds".
+- C makes the lock-acquire path refuse the singleton on observable divergence. D makes the lock-holder self-eject when its membership becomes invalid post-acquire. Together they enforce the singleton invariant at both ends of a daemon's lifetime.
+
+**Acceptance criteria:**
+
+- **Self-eject on absent saver.** Spawn `portal state daemon` against a tmux server that has no `_portal-saver` session. The daemon exits within (N + 1) tick intervals. Verified by integration test.
+- **Self-eject on saver pane pid mismatch.** Spawn the daemon, then externally replace the `_portal-saver` pane process (e.g., `respawn-pane` to a different process). Daemon exits within (N + 1) tick intervals. Verified by integration test.
+- **No false-positive exit on legitimate transient.** Stub the saver-existence check to return "absent" for k < N consecutive ticks then "present": daemon does NOT exit, counter resets. Verified by unit test through a `saverMembershipProbe` seam.
+- **No final flush on self-eject.** After the daemon self-ejects, the scrollback directory shows no new `.bin` writes from the killed daemon's PID. Verified by integration test that monitors scrollback writes around the eject event.
+- **Skipped check on first tick is benign.** The legitimate daemon, ticking for the first time inside a freshly-created `_portal-saver`, passes the self-check on tick 1 (pane pid matches its pid). Verified by integration test in the existing daemon-saver suite.
+
+**Files affected:** `cmd/state_daemon.go` (insert self-check before `captureAndCommit`), `internal/tmux/` (may add a small `SaverPanePID(name) (int, error)` helper for testability), tests in `cmd/state_daemon_test.go` plus integration coverage.
+
 ---
 
 ## Working Notes
