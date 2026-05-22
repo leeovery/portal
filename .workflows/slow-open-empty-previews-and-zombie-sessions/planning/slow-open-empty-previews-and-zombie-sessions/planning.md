@@ -48,6 +48,18 @@ approved_at: 2026-05-22
 - [ ] Unit tests cover: single-session failure with surviving siblings; all-anomalous abort with no Commit; all-natural-churn proceeds with empty Commit; pre-loop failure still aborts; logger receives WARN with session name and underlying error
 - [ ] Logger plumbing through `CaptureStructure` chosen between the two spec-accepted options (parameter vs `WithLogger` variant); rationale captured in code or PR
 
+#### Tasks
+status: approved
+approved_at: 2026-05-22
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-2-1 | Introduce tmux.ErrNoSuchSession sentinel and wrap ShowEnvironment at the tmux boundary | stderr substring vs exact match, mixed-case "No such session", error already wrapped, non-zero exit without that substring, EOF/empty stderr |
+| slow-open-empty-previews-and-zombie-sessions-2-2 | Thread logger parameter into CaptureStructure (no behaviour change) | nil logger guard, restore-package call sites in integration tests, daemon call site in cmd/state_daemon.go, capture_test.go fixtures |
+| slow-open-empty-previews-and-zombie-sessions-2-3 | Replace abort-on-error with per-session log-and-continue plus natural-churn discriminator | mixed natural-churn + anomalous in same tick, single anomalous among many natural-churn, all sessions succeed (no discriminator path), empty keep short-circuit preserved, parseShowEnvironment of empty env |
+| slow-open-empty-previews-and-zombie-sessions-2-4 | Lock in fail-fatal pre-loop regression coverage | malformed pane row vs tmux exec failure, partial pane output, keep populated but pane list call fails, empty keep skipping pre-loop pane fetch |
+| slow-open-empty-previews-and-zombie-sessions-2-5 | Wire daemon call site to pass real ComponentDaemon logger | logger not yet initialised at very first tick, log entries during all-natural-churn tick, nil session name guard, log level filtering disabled |
+
 ### Phase 3: Saver Creation Ordering (Component F)
 status: approved
 approved_at: 2026-05-22
