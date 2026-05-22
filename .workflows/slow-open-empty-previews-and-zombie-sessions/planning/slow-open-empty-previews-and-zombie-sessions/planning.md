@@ -113,6 +113,23 @@ approved_at: 2026-05-22
 - [ ] Component C: unit tests cover pre-check refuses on live recorded daemon, ignores stale PID, ignores wrong-identity PID, retry-on-mismatch succeeds on second attempt, retry-bound returns wrapped error with bounded total delay <100 ms, EWOULDBLOCK fallback still works, upgrade-path two-binary scenario converges to a single live daemon
 - [ ] Composition: bootstrap against three concurrent daemons (1 legitimate + 2 orphans) converges to `pgrep -fxc 'portal state daemon' == 1` within ~6 s (A's escalation budget + B's sweep latency)
 
+#### Tasks
+status: approved
+approved_at: 2026-05-22
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-4-1 | Add SIGKILL escalation to killSaverAndWaitForDaemon with identity-check | PID recycled between poll and check, IdentifyDead mid-escalation, IdentifyNotPortalDaemon, transient identity error skips kill, identity-check immediately precedes kill(2), legitimate SIGHUP path unaffected, 50 ms poll cadence + 1 s budget, persistent aliveness logs WARN and proceeds |
+| slow-open-empty-previews-and-zombie-sessions-4-2 | Add no-final-flush snapshot test for escalation-killed orphans | bytes-identical scrollback dir pre-SIGKILL vs 200 ms post-exit, real orphan spawned against isolated state dir, no defaultShutdownFlush invocation observable |
+| slow-open-empty-previews-and-zombie-sessions-4-3 | Implement SweepOrphanDaemons core (pgrep + legitimate-set + identity + kill) | pgrep -fx '^portal state daemon( \|$)' canonical form, _portal-saver absent yields empty legitimate set, list-panes failure logs WARN and treats legitimate set as empty, identity-check transient skips PID, kill failure logged WARN swallowed, INFO log per killed PID, never SIGTERM first |
+| slow-open-empty-previews-and-zombie-sessions-4-4 | Wire SweepOrphanDaemons as orchestrator step 4 between Set @portal-restoring and EnsureSaver | 11-step ordering preserved, CLAUDE.md bootstrap section updated, bootstrapadapter wiring for pgrep + identity + kill seam, best-effort warnings via existing warning channel, all errors swallowed |
+| slow-open-empty-previews-and-zombie-sessions-4-5 | Integration test for SweepOrphanDaemons (3 daemons converge to 1, clean state sends zero signals) | uses portaltest.NewIsolatedStateEnv, 1 saver-pane + 2 orphans converges to pgrep -fxc == 1, clean state produces zero "sweep: killed orphan daemon" entries, recycled-PID identity refusal exercised, real subprocess fixtures |
+| slow-open-empty-previews-and-zombie-sessions-4-6 | Add pre-acquire daemon.pid liveness check to AcquireDaemonLock | daemon.pid absent → proceed, dead recorded PID → proceed, wrong-identity PID → proceed, live identity-checked daemon → return ErrDaemonLockHeld without opening daemon.lock, ReadPIDFile error treated as absent, identity transient → proceed, pre-check runs before O_RDWR\|O_CREAT open |
+| slow-open-empty-previews-and-zombie-sessions-4-7 | Add post-flock fstat-vs-stat inode cross-check with bounded retry | mismatch releases flock + closes fd before retry, 3-attempt bound with 10 ms sleeps (<100 ms total delay), persistent mismatch returns wrapped error → daemon exits status 1, ErrDaemonLockHeld path preserved, match on first attempt is happy path, retry succeeds on second attempt, EWOULDBLOCK fallback unchanged |
+| slow-open-empty-previews-and-zombie-sessions-4-8 | AST-walking test asserts WritePIDFile immediately follows acquireDaemonLock in defaultDaemonRun | source parsed via go/parser + go/ast, statement-level adjacency check, guarded-equivalent (if err != nil { return } sandwich permitted), comments permitted, no other production call site of AcquireDaemonLock exists, test fails if any new statement intrudes |
+| slow-open-empty-previews-and-zombie-sessions-4-9 | Integration test for Component C upgrade-path two-binary scenario | v(N) daemon holds lock, v(N+1) bootstrap spawns own daemon, new daemon acquires cleanly or refuses via pre-check, no destructive coexistence, uses portaltest.NewIsolatedStateEnv, real subprocesses via portalbintest |
+| slow-open-empty-previews-and-zombie-sessions-4-10 | Composite integration test: A+B+C converge to pgrep -fxc == 1 within 6 s | 1 legitimate + 2 orphans (one with daemon.pid reference, one without), AcquireDaemonLock from fresh process refuses with ErrDaemonLockHeld post-bootstrap, scrollback dir stable across 10×1 s observations, uses portaltest.NewIsolatedStateEnv, integration build tag |
+
 ### Phase 5: Daemon Self-Supervision (Component D)
 status: approved
 approved_at: 2026-05-22
