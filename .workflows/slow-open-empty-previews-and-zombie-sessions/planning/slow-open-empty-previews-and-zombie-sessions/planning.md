@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Foundations — Daemon Identity Primitive & Test Isolation
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Land the shared daemon-identity check used by Components A/B/C and the test-isolation helper required to safely test all daemon-spawning fixes without corrupting the developer's real state directory.
 
@@ -19,7 +20,8 @@ status: draft
 - [ ] Existing integration test suite passes after helper updates
 
 ### Phase 2: Capture Pipeline Hardening (Component E)
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Stop a single per-session `ShowEnvironment` failure from aborting the whole tick and poisoning capture for every later session in the same tick.
 
@@ -35,7 +37,8 @@ status: draft
 - [ ] Logger plumbing through `CaptureStructure` chosen between the two spec-accepted options (parameter vs `WithLogger` variant); rationale captured in code or PR
 
 ### Phase 3: Saver Creation Ordering (Component F)
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Decouple `_portal-saver` session creation from daemon launch so `destroy-unattached=off` is in effect before any daemon process can exit, eliminating the `"no such session: _portal-saver"` log noise and the recovery doom-loop.
 
@@ -52,7 +55,8 @@ status: draft
 - [ ] Existing daemon-saver integration tests pass without modification
 
 ### Phase 4: Daemon Singleton Enforcement (Components A + B + C)
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Make Portal's daemon-singleton invariant enforceable end-to-end through three composing defences: kill-barrier escalation that deterministically reaches any prior daemon (A), bootstrap-time orphan sweep that handles the full pgrep set (B), and inode-replacement-resistant `AcquireDaemonLock` with a `daemon.pid` pre-check that closes the structural mechanism (C).
 
@@ -73,7 +77,8 @@ status: draft
 - [ ] Composition: bootstrap against three concurrent daemons (1 legitimate + 2 orphans) converges to `pgrep -fxc 'portal state daemon' == 1` within ~6 s (A's escalation budget + B's sweep latency)
 
 ### Phase 5: Daemon Self-Supervision (Component D)
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Bound inter-bootstrap orphan-daemon lifetime to single-digit ticks by adding a per-tick saver-membership self-check to the daemon loop that self-ejects via `os.Exit(0)` (no final flush) when membership is lost for N consecutive ticks.
 
@@ -93,7 +98,8 @@ status: draft
 - [ ] Integration test: legitimate first-tick self-check inside a freshly-created `_portal-saver` passes (pane pid matches `os.Getpid()`)
 
 ### Phase 6: Composite End-to-End Verification
-status: draft
+status: approved
+approved_at: 2026-05-22
 
 **Goal**: Land the spec-mandated single composite integration test that reconstructs the reporter's failure scenario end-to-end and asserts the converged healthy state across A+B+C+D+E+F composition.
 
