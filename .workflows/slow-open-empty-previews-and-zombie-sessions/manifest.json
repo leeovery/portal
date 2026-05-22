@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "slow-open-empty-previews-and-zombie-sessions": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-05-22",
+          "sources": {
+            "slow-open-empty-previews-and-zombie-sessions": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
