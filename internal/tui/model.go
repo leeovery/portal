@@ -616,6 +616,27 @@ func newProjectList() list.Model {
 // shape of the existing per-page binding sets (see specification).
 const keymapFooterColumnSize = 5
 
+// listNavAndFilterBindings returns the shared navigation + filter-mode
+// binding prefix common to both the sessions-page and projects-page manual
+// keymap footers. Sourced directly from the list's KeyMap so future drift
+// in the bubbles/list nav/filter binding set can never silently diverge
+// between the two pages. Returned slice is freshly allocated so callers
+// may safely append page-specific tail entries without aliasing.
+func listNavAndFilterBindings(l *list.Model) []key.Binding {
+	return []key.Binding{
+		l.KeyMap.CursorUp,
+		l.KeyMap.CursorDown,
+		l.KeyMap.NextPage,
+		l.KeyMap.PrevPage,
+		l.KeyMap.GoToStart,
+		l.KeyMap.GoToEnd,
+		l.KeyMap.Filter,
+		l.KeyMap.ClearFilter,
+		l.KeyMap.AcceptWhileFiltering,
+		l.KeyMap.CancelWhileFiltering,
+	}
+}
+
 // sessionFooterBindings returns the ordered key.Binding entries that feed
 // the sessions-page manual keymap footer. The order mirrors what
 // list.Model.FullHelp would surface for the sessions list: navigation keys
@@ -624,20 +645,8 @@ const keymapFooterColumnSize = 5
 // keys outside filter mode, or AcceptWhileFiltering with an empty filter
 // input) are filtered downstream by chunkBindingsIntoThreeColumns so the
 // visible column lengths match what the renderer emits.
-func sessionFooterBindings(l list.Model) []key.Binding {
-	bindings := []key.Binding{
-		l.KeyMap.CursorUp,
-		l.KeyMap.CursorDown,
-		l.KeyMap.NextPage,
-		l.KeyMap.PrevPage,
-		l.KeyMap.GoToStart,
-		l.KeyMap.GoToEnd,
-		l.KeyMap.Filter,
-		l.KeyMap.ClearFilter,
-		l.KeyMap.AcceptWhileFiltering,
-		l.KeyMap.CancelWhileFiltering,
-	}
-	return append(bindings, sessionHelpKeys()...)
+func sessionFooterBindings(l *list.Model) []key.Binding {
+	return append(listNavAndFilterBindings(l), sessionHelpKeys()...)
 }
 
 // projectFooterBindings returns the ordered key.Binding entries for the
@@ -645,19 +654,8 @@ func sessionFooterBindings(l list.Model) []key.Binding {
 // sources the page-specific entries from projectHelpKeys in normal mode
 // and commandPendingHelpKeys in command-pending mode (matches the prior
 // AdditionalFullHelpKeys swap performed by WithCommand).
-func projectFooterBindings(l list.Model, commandPending bool) []key.Binding {
-	bindings := []key.Binding{
-		l.KeyMap.CursorUp,
-		l.KeyMap.CursorDown,
-		l.KeyMap.NextPage,
-		l.KeyMap.PrevPage,
-		l.KeyMap.GoToStart,
-		l.KeyMap.GoToEnd,
-		l.KeyMap.Filter,
-		l.KeyMap.ClearFilter,
-		l.KeyMap.AcceptWhileFiltering,
-		l.KeyMap.CancelWhileFiltering,
-	}
+func projectFooterBindings(l *list.Model, commandPending bool) []key.Binding {
+	bindings := listNavAndFilterBindings(l)
 	if commandPending {
 		return append(bindings, commandPendingHelpKeys()...)
 	}
@@ -699,7 +697,7 @@ func chunkBindingsIntoThreeColumns(bindings []key.Binding) [][]key.Binding {
 // strip is byte-identical to the previous bubbles/list-driven bar in colour
 // and separator characters. The list's Styles.HelpStyle is applied around
 // the rendered columns to preserve the previous vertical padding.
-func renderKeymapFooter(l list.Model, bindings []key.Binding) string {
+func renderKeymapFooter(l *list.Model, bindings []key.Binding) string {
 	cols := chunkBindingsIntoThreeColumns(bindings)
 	return l.Styles.HelpStyle.Render(l.Help.FullHelpView(cols))
 }
@@ -747,15 +745,15 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 // manual keymap footer for the current list state. Used to subtract footer
 // rows from the available list height at every SetSize call site, so the
 // list does not overflow under the manually-composed footer.
-func (m Model) sessionFooterHeight() int {
-	return lipgloss.Height(renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList)))
+func sessionFooterHeight(l *list.Model) int {
+	return lipgloss.Height(renderKeymapFooter(l, sessionFooterBindings(l)))
 }
 
 // projectFooterHeight is the projects-page counterpart to sessionFooterHeight.
 // Sources its binding set from projectFooterBindings (which branches on
 // commandPending to swap projectHelpKeys for commandPendingHelpKeys).
-func (m Model) projectFooterHeight() int {
-	return lipgloss.Height(renderKeymapFooter(m.projectList, projectFooterBindings(m.projectList, m.commandPending)))
+func projectFooterHeight(l *list.Model, commandPending bool) int {
+	return lipgloss.Height(renderKeymapFooter(l, projectFooterBindings(l, commandPending)))
 }
 
 // applySessionListSize sets the sessions-list dimensions, subtracting the
@@ -763,13 +761,13 @@ func (m Model) projectFooterHeight() int {
 // not overflow under the footer. Width passes through unchanged because
 // the manual footer wraps inside the same width as the list view.
 func (m *Model) applySessionListSize(width, height int) {
-	m.sessionList.SetSize(width, height-m.sessionFooterHeight())
+	m.sessionList.SetSize(width, height-sessionFooterHeight(&m.sessionList))
 }
 
 // applyProjectListSize is the projects-list counterpart to
 // applySessionListSize.
 func (m *Model) applyProjectListSize(width, height int) {
-	m.projectList.SetSize(width, height-m.projectFooterHeight())
+	m.projectList.SetSize(width, height-projectFooterHeight(&m.projectList, m.commandPending))
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -1793,7 +1791,7 @@ func (m Model) viewProjectList() string {
 		modalContent = m.renderEditProjectContent()
 	}
 	listView := renderListWithModal(m.projectList, modalContent)
-	footer := renderKeymapFooter(m.projectList, projectFooterBindings(m.projectList, m.commandPending))
+	footer := renderKeymapFooter(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending))
 	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 }
 
@@ -1873,7 +1871,7 @@ func (m Model) viewSessionList() string {
 			listView = listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
 		}
 	}
-	footer := renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList))
+	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
 	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 }
 

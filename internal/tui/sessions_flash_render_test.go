@@ -58,7 +58,7 @@ func TestSessionsView_NoFlashRow_WhenFlashTextEmpty(t *testing.T) {
 
 	got := m.View()
 	listView := m.sessionList.View()
-	footer := renderKeymapFooter(m.sessionList, sessionFooterBindings(m.sessionList))
+	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
 	want := lipgloss.JoinVertical(lipgloss.Left, listView, footer)
 	if got != want {
 		t.Errorf("View() with empty flashText must equal list.View() + manual footer\nwant:\n%s\n\ngot:\n%s", want, got)
