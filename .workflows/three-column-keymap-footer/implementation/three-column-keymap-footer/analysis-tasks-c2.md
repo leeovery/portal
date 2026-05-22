@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: three-column-keymap-footer (Cycle 2)
 
 ## Task 1: Add per-page wrappers over applyListSize to own the list+bindings pairing invariant
-status: pending
+status: approved
 severity: low
 sources: architecture
 
