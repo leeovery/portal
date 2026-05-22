@@ -1,7 +1,7 @@
 {
   "name": "three-column-keymap-footer",
   "work_type": "quick-fix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-22",
   "description": "Restructure the sessions and projects list keymap footer from two columns to three columns with a fixed per-column entry count, no behavioural changes.",
   "phases": {
@@ -85,5 +85,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-22"
 }
