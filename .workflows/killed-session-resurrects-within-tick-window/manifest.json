@@ -1,7 +1,7 @@
 {
   "name": "killed-session-resurrects-within-tick-window",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-21",
   "description": "Killed tmux session reappears in Portal list and is reconstructed within a ~2-5s window after kill, due to async daemon-tick persistence.",
   "phases": {
@@ -146,5 +146,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-22"
 }
