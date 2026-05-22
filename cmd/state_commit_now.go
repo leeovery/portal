@@ -239,14 +239,16 @@ func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string)
 //     (within 1s when it is alive) commits — bounded fallback recovery for the
 //     resurrection window. Touch errors are logged at WARN and never
 //     propagated; the original failure dominates.
-//  3. Return an error that wraps errCommitNowFailed via fmt.Errorf("%w: %v",
-//     ...). errors.Is(err, errCommitNowFailed) drives main.go's silent-exit
-//     suppression (see IsSilentExitError); errors.Unwrap surfaces the
-//     underlying cause so the error chain is preserved beyond portal.log.
-//     Cobra (SilenceErrors=true) is responsible for not printing the error;
-//     main.go's IsSilentExitError guard prevents the top-level handler from
-//     duplicating it. The hook subprocess has nowhere meaningful to send
-//     stderr; user-facing diagnostics route exclusively through portal.log.
+//  3. Return an error that wraps errCommitNowFailed via fmt.Errorf("%w: %s:
+//     %v", ...). errors.Is(err, errCommitNowFailed) drives main.go's silent-
+//     exit suppression (see IsSilentExitError). The cause is preserved as
+//     interpolated text in the error message only — errors.Unwrap surfaces
+//     errCommitNowFailed (the sole %w arg), not the cause. portal.log is
+//     the authoritative diagnostic sink. Cobra (SilenceErrors=true) is
+//     responsible for not printing the error; main.go's IsSilentExitError
+//     guard prevents the top-level handler from duplicating it. The hook
+//     subprocess has nowhere meaningful to send stderr; user-facing
+//     diagnostics route exclusively through portal.log.
 func failCommitNow(logger *state.Logger, dir string, touch func(string) error, stage string, cause error) error {
 	logger.Error(state.ComponentDaemon, "%s: %v", stage, cause)
 	if terr := touch(dir); terr != nil {

@@ -104,7 +104,11 @@ func TestNotifyCommand_TouchesSaveRequestedAndWritesNoSessionsJSON(t *testing.T)
 		// 1s ticker period, so an observed sessions.json could only
 		// come from notify itself. The test polls every 25ms inside
 		// the window — if any read at any sample point observes a
-		// sessions.json, that is a regression.
+		// sessions.json, that is a regression. notify is synchronous
+		// today (it returns before this loop runs), so in principle a
+		// single post-call stat would suffice; the polling loop is a
+		// defensive guard against a future regression where notify
+		// spawns a goroutine to write sessions.json out-of-band.
 		sessionsJSONPath := filepath.Join(dir, "sessions.json")
 		deadline := time.Now().Add(sixEventFiringWindow)
 		const pollInterval = 25 * time.Millisecond

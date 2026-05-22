@@ -302,6 +302,10 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 // surface to RegisterPortalHooks as folded entries in the errors.Join
 // aggregate, consistent with other step-2 register failures.
 func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
+	if log == nil {
+		log = (*state.Logger)(nil)
+	}
+
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
 		log.Warn(state.ComponentBootstrap, "session-closed migration skipped: show-hooks failed: %v", err)

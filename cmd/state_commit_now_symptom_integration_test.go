@@ -459,6 +459,9 @@ func runPortalSubprocess(t *testing.T, binary string, f symptomFixture, args ...
 		t.Fatalf("portal %s subprocess failed: %v\n--- output ---\n%s\n%s",
 			strings.Join(args, " "), err, string(out), f.diagnostic())
 	}
+	if testing.Verbose() && len(out) > 0 {
+		t.Logf("portal %s subprocess output:\n%s", strings.Join(args, " "), string(out))
+	}
 }
 
 // runPortalCommitNow invokes `portal state commit-now` as a sub-

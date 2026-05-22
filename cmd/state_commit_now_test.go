@@ -147,10 +147,13 @@ func readSessionsJSON(t *testing.T, dir string) state.Index {
 	return idx
 }
 
-// sessionNames extracts the set of session names from an Index in declaration
-// order — used in assertions that care about identity but not ordering of
-// other fields.
-func sessionNames(idx state.Index) []string {
+// sessionNamesSlice extracts session names from an Index in declaration order
+// — used in assertions that care about identity but not ordering of other
+// fields. Returns []string so reflect.DeepEqual / slice comparisons work.
+// The cmd_test integration files declare a different sessionNames helper
+// returning map[string]struct{} for presence-set assertions; the two helpers
+// have intentionally distinct shapes and live in different packages.
+func sessionNamesSlice(idx state.Index) []string {
 	out := make([]string, 0, len(idx.Sessions))
 	for _, s := range idx.Sessions {
 		out = append(out, s.Name)
@@ -221,7 +224,7 @@ func TestStateCommitNow_WritesSessionWithWindowsAndPanes(t *testing.T) {
 	}
 
 	got := readSessionsJSON(t, dir)
-	names := sessionNames(got)
+	names := sessionNamesSlice(got)
 	if len(names) != 1 || names[0] != "work" {
 		t.Fatalf("sessions = %v, want [work]", names)
 	}
@@ -344,7 +347,7 @@ func TestStateCommitNow_PassesPrevIndexFromDiskToCaptureStructure(t *testing.T) 
 	// Post-commit file still contains "work" with its pane fields preserved.
 	out := readSessionsJSON(t, dir)
 	if len(out.Sessions) != 1 || out.Sessions[0].Name != "work" {
-		t.Fatalf("post-commit sessions = %v, want [work]", sessionNames(out))
+		t.Fatalf("post-commit sessions = %v, want [work]", sessionNamesSlice(out))
 	}
 	pane := out.Sessions[0].Windows[0].Panes[0]
 	if pane.CurrentCommand != "zsh" || pane.CWD != "/home/u" {
@@ -390,7 +393,7 @@ func TestStateCommitNow_OmitsUnderscorePrefixedSessions(t *testing.T) {
 		}
 	}
 	if len(got.Sessions) != 1 || got.Sessions[0].Name != "work" {
-		t.Errorf("sessions = %v, want [work]", sessionNames(got))
+		t.Errorf("sessions = %v, want [work]", sessionNamesSlice(got))
 	}
 }
 
@@ -735,6 +738,12 @@ func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) 
 
 	if _, _, err := runStateCommitNow(t); err != nil {
 		t.Fatalf("expected exit 0 on isRestoring error, got: %v", err)
+	}
+
+	// IsRestoring is queried exactly once per invocation — no retry, no
+	// double-read.
+	if f.restoringCalls != 1 {
+		t.Errorf("IsRestoring calls = %d, want 1", f.restoringCalls)
 	}
 
 	// Structural primitives must NOT have fired.
