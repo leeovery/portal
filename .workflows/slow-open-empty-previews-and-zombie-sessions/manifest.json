@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "slow-open-empty-previews-and-zombie-sessions": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "c092b83a236dd3ad862002be4ccef2ab81713191",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
