@@ -151,6 +151,22 @@ approved_at: 2026-05-22
 - [ ] Integration test: scrollback-dir snapshots at the first failing tick and immediately post-`os.Exit(0)` are bytes-identical
 - [ ] Integration test: legitimate first-tick self-check inside a freshly-created `_portal-saver` passes (pane pid matches `os.Getpid()`)
 
+#### Tasks
+status: approved
+approved_at: 2026-05-22
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-5-1 | Measure legitimate transient durations and lock in selfSupervisionHysteresisTicks with in-source provenance | four scenarios (steady-state, attach/detach, client-attached, kill-and-recreate), 2x safety factor, single-digit-ticks ceiling, memo path referenced from in-source comment, binary version and measurement date captured |
+| slow-open-empty-previews-and-zombie-sessions-5-2 | Extract saverMembershipProbe seam and add tmux.SaverPanePID helper | has-session non-"not found" error treated as absent, list-panes error treated as absent, pid parse failure treated as mismatch, multi-pane defensive handling, empty pane list, seam swappable for tests |
+| slow-open-empty-previews-and-zombie-sessions-5-3 | Integrate per-tick self-check before captureAndCommit with os.Exit(0) eject | counter resets on match not just decrements, runs before captureAndCommit not after, INFO log under ComponentDaemon emitted before exit, no defer cleanup of daemon.pid, bypasses defaultShutdownFlush, stale daemon.pid left for Component C pre-check |
+| slow-open-empty-previews-and-zombie-sessions-5-4 | Unit test counter reset on transient-then-recover via stubbed probe | k<N absent then present does not exit, counter clears fully on first present tick, repeated absent-then-present cycles, k=N-1 boundary, probe returning transient errors counted as absent |
+| slow-open-empty-previews-and-zombie-sessions-5-5 | Integration test self-eject when _portal-saver absent | uses portaltest.NewIsolatedStateEnv, staged with no daemon.pid so C pre-check proceeds, bypasses bootstrap orchestrator so B does not sweep, exit observed via process wait within (N+1) tick intervals |
+| slow-open-empty-previews-and-zombie-sessions-5-6 | Integration test self-eject on saver pane pid mismatch via respawn-pane -k | daemon spawned then saver pane replaced with sh -c 'exec tail -f /dev/null', staged with known-dead PID in daemon.pid, exit within (N+1) tick intervals, real tmux server via tmuxtest |
+| slow-open-empty-previews-and-zombie-sessions-5-7 | Integration test bytes-identical scrollback dir snapshot across self-eject | snapshot at first failing tick before increment-to-N, snapshot immediately post-os.Exit(0), no new .bin / no deletions / no mtime or size changes, empty pre-snapshot still valid |
+| slow-open-empty-previews-and-zombie-sessions-5-8 | Integration test legitimate first-tick self-check inside fresh _portal-saver | pane pid matches os.Getpid() on tick 1, counter stays 0, daemon continues ticking normally, composes with Phase 3 placeholder-then-respawn ordering |
+| slow-open-empty-previews-and-zombie-sessions-5-9 | Unit test selfSupervisionHysteresisTicks >= 1 | compile-time constant lower bound, fails loudly on accidental zero, no t.Parallel per cmd-package convention |
+
 ### Phase 6: Composite End-to-End Verification
 status: approved
 approved_at: 2026-05-22
