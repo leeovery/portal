@@ -256,9 +256,86 @@ If the prior PID is not the saver pane's process (e.g. it's an orphan with a dif
 
 ---
 
+## Root Cause
+
+**Root cause statement:** Portal's daemon-singleton contract is not enforced end-to-end — `daemon.lock` excludes per-inode rather than per-path, the kill-barrier can only reach daemons bound to the saver pane process, and `CaptureStructure` is not per-session-error-tolerant. When any of these assumptions is violated (here: a leaked test-fixture daemon connected to a different tmux server is still running, holding a flock on a stale `daemon.lock` inode that the legitimate daemon's lock attempt does not see), multiple daemons concurrently write `sessions.json` and execute destructive scrollback GC against the same directory. The three user-visible symptoms (slow open, empty previews, zombie sessions) are three different downstream manifestations of the same broken-singleton state.
+
+**Why this happens:**
+
+1. `state.AcquireDaemonLock` opens whatever inode `daemon.lock` currently resolves to and flocks it. There is no defence against the inode having been replaced since a prior daemon opened it — so two daemons can each "hold the lock" on different inodes simultaneously and both proceed into their tick loops.
+2. `killSaverAndWaitForDaemon` polls the recorded `daemon.pid` for death after issuing `tmux kill-session _portal-saver`. If the recorded daemon is not the saver pane's process (orphan from a prior bootstrap, leaked test daemon, etc.), the kill is structurally unreachable and the barrier always times out at 5 s.
+3. `CaptureStructure` (`internal/state/capture.go:87-89`) propagates any per-session `ShowEnvironment` error as a whole-tick error. The downstream `captureAndCommit` then returns before writing scrollback or calling `Commit` — a single bad session at the alphabetical head poisons capture for everything.
+4. `gcOrphanScrollback` (`internal/state/commit.go:102-138`) deletes any `.bin` not referenced by the just-committed index. With multiple daemons committing different views, files are constantly being deleted and rewritten.
+
+### Contributing Factors
+
+See the Analysis section's *Contributing Factors* block for the full list. The most load-bearing items:
+
+- `daemon.lock` inode-replacement gap (the singleton's foundational weakness).
+- Kill-barrier has no escalation past `tmux kill-session`.
+- No bootstrap-time orphan sweep (`pgrep -x 'portal state daemon'` cross-check is absent).
+- No `XDG_CONFIG_HOME` isolation contract for daemon-spawning tests.
+
+### Why It Wasn't Caught
+
+See the Analysis section's *Why It Wasn't Caught* block.
+
+---
+
 ## Fix Direction
 
-*To be populated after root cause synthesis and findings review.*
+### Chosen Approach
+
+*To be populated after findings review with the user.*
+
+### Options Explored
+
+Candidate components surfaced during analysis (to be discussed and prioritised with the user):
+
+**A. Kill-barrier escalates to direct signal.** When `kill-session` + 5 s poll doesn't make the recorded `daemon.pid` die, send `SIGTERM` to the PID directly, re-poll briefly, then `SIGKILL`. Closes the "orphan daemon unreachable from session kill" hole. **Highest single-component leverage** — combined with the existing singleton, this makes bootstrap deterministically recover from any prior-daemon state, regardless of how the orphan was spawned.
+
+**B. Bootstrap-time orphan sweep.** Before `EnsureSaver`, enumerate `pgrep -x 'portal state daemon'`. Compare against the legitimate set (saver pane process + recorded `daemon.pid`). For any extras, signal them away. Composes with (A); closes the gap during the same bootstrap that observes the problem.
+
+**C. Stabilise the `daemon.lock` singleton against inode replacement.** Options:
+- Open with `O_EXCL|O_CREAT`, then `fstat` the fd and `stat` the path, and refuse if inodes differ (with a `stat` retry loop bounded by a small number of attempts).
+- Flock a file that exists for other reasons (e.g. `sessions.json` itself) so there is no "lock file" for anyone to swap.
+- Pair the lock with a cross-check at startup: enumerate `portal state daemon` processes; if more than the lock-holder is alive, refuse to start until the others are signalled away.
+
+**D. Daemon self-supervises against the saver session.** Each tick (or via a lightweight watchdog), verify `_portal-saver` exists and contains a pane whose pid is this daemon's pid (or its parent). If not, exit cleanly. Bounds the lifetime of any orphaned daemon to one tick — even when no `portal` invocation is happening to trigger bootstrap.
+
+**E. Make `CaptureStructure`'s per-session loop log-and-continue.** Adopt the same defensive pattern the per-pane loop in `captureAndCommit` already uses (lines 185-192). A single bad session no longer poisons all subsequent panes' scrollback capture. Latent fragility independent of the multi-daemon trigger; worth fixing on its own merits.
+
+**F. Saver creation sets `destroy-unattached=off` before the daemon starts.** Today, the saver is created with `portal state daemon` as the initial command; if that daemon exits immediately (lock-loser), the session is destroyed before `set destroy-unattached=off` can run, producing the observed `no such session: _portal-saver` log noise and a doom-loop in the recovery path. Use a placeholder command + `respawn-pane -k` so the option is set first, OR use `set -g destroy-unattached off` globally during the create window.
+
+**G. Test isolation contract for daemon-spawning tests.** No test that spawns `portal state daemon` may inherit the developer's `XDG_CONFIG_HOME`. Enforce via either a CI lint that bans `portal state daemon` invocation without an explicit env override, or a tmuxtest helper that always sets `XDG_CONFIG_HOME` to a temp dir.
+
+### Discussion
+
+*To be populated during findings review with the user.*
+
+### Testing Recommendations
+
+*To be populated after fix direction is agreed.* Provisional candidates:
+
+- Real-OS integration test for kill-barrier escalation: spawn a `portal state daemon` subprocess detached from the tmux session, assert `EnsurePortalSaverVersion` makes it dead within bounded time without timing out.
+- Bootstrap orphan-sweep unit + integration: stub `pgrep` returns N extras, assert each receives SIGTERM, assert `EnsureSaver` proceeds.
+- `AcquireDaemonLock` inode-replacement defence: simulate `daemon.lock` unlink + recreate between two acquire calls, assert the singleton is preserved.
+- `CaptureStructure` resilience: stub `ShowEnvironment` to fail for session "A" while succeeding for "B", "C"; assert "B" and "C" are still in the returned index and that the per-pane scrollback writes happen for them.
+- Test-isolation lint: any new test invocation of `portal state daemon` (subprocess or in-process) must set `XDG_CONFIG_HOME` to a per-test temp dir.
+
+### Risk Assessment
+
+- **Fix complexity:** Medium. (A) is small. (B) is small. (E) is trivial. (C) is the most architecturally interesting and has the most ways to get wrong. (D) requires care to avoid false-positive exits during legitimate transients. (F) is mechanical. (G) is test-suite hygiene with no production-code change.
+- **Regression risk:** Low–Medium. The current daemons are clearly fragile under the wrong conditions; tightening the singleton has more upside than downside. The main regression risk is in (D) — false-positive daemon exits during transient `_portal-saver` instability.
+- **Recommended approach:** Regular release. No hotfix needed — local recovery is available (kill the orphans). The set of fixes constitutes hardening of an already-shipped subsystem; deserves a normal review and full test cycle.
+
+---
+
+## Notes
+
+- The reporter's local diagnosis was largely correct but slightly off on the *trigger*: it framed orphaning as a process-reparenting / SIGHUP-handling problem. The actual trigger here is more mundane — a leaked test-fixture daemon writing to the developer's real state dir. The structural defects (kill-barrier reach, daemon.lock inode robustness, capture abort-on-error) are real and worth fixing regardless of how the orphan was spawned.
+- The "no such session: A" daemon log entry was likely noise from a transient cross-daemon race rather than the per-session abort being the active daily mechanism. The abort-on-error path is still a latent fragility worth fixing on its own merits.
+- The `_portal-saver` session being briefly observed as absent (reported in the inbox) and now alive again is consistent with the lock-loser path closing the saver session window when the new daemon exits status 0 — the saver is created and destroyed across bootstraps every few minutes when the lock-loser race fires.
 
 ---
 
