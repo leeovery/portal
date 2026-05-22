@@ -86,6 +86,44 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Files affected:** `internal/tmux/portal_saver.go` (`killSaverAndWaitForDaemon`). May introduce a small helper in `internal/state/` or a new package for the identity-check / signal primitive depending on testability needs.
 
+## Component B — Bootstrap-Time Orphan Sweep
+
+**Goal:** During every bootstrap, proactively detect and kill any `portal state daemon` process that isn't the saver pane's process. Composes with Component A but closes the gap earlier in the bootstrap sequence — orphan daemons stop writing to the state directory *before* `EnsureSaver` runs, so the new saver's daemon doesn't compete with an existing one for the lock or the state dir.
+
+**Current behaviour:** No orphan sweep exists. Orphan daemons are only addressed indirectly through the kill-barrier's poll-and-wait on `priorPID`, which (per Component A) is the kill-barrier's single recorded PID, not the full pgrep set.
+
+**New bootstrap step: `SweepOrphanDaemons`.** Inserted as a new step between `Set @portal-restoring` (current step 3) and `EnsureSaver` (current step 4). All steps from `EnsureSaver` onward shift up by one (EnsureSaver → 5, Restore → 6, etc.).
+
+**Behaviour:**
+
+1. Enumerate candidate orphan PIDs: `pgrep -x 'portal state daemon'` (the `-x` matches the exact command name; portable across macOS/Linux).
+2. Build the legitimate set:
+   - The pane process PID of `_portal-saver`'s only pane, if `_portal-saver` exists (via `tmux list-panes -t _portal-saver -F '#{pane_pid}'`).
+   - Empty set if `_portal-saver` does not exist (fresh server, post-server-restart, etc.).
+3. For each candidate PID NOT in the legitimate set:
+   1. **Identity-check** (same primitive as Component A): accept only if executable is `portal` and argv contains `state daemon`. Skip if the check fails.
+   2. **SIGKILL** the PID. Do NOT send SIGTERM first (same reasoning as Component A — orphan view is untrusted, no final flush).
+   3. Log INFO under `ComponentBootstrap`: `"sweep: killed orphan daemon pid=%d"`.
+4. Return. Step is **best-effort**; any `pgrep` / `ps` / `kill` error is logged WARN and swallowed. Never escalates to a fatal abort.
+
+**Why this composes with Component A and is not redundant:**
+
+- Component A handles the *single* daemon the kill-barrier knows about (`priorPID` from the kill-barrier file). It cannot handle multiple orphans because the barrier only records one PID.
+- Component B sweeps the *full* pgrep set. On the reporter's install (three concurrent daemons), B kills the two orphans the barrier doesn't know about and A handles the recorded one — together they make the post-bootstrap state singleton.
+- B runs before `EnsureSaver` so the new saver-pane daemon's first tick is uncontested. A runs *inside* the new `EnsureSaver` flow as part of the kill-barrier escalation.
+
+**Concurrency note:** B is non-atomic — a new `portal state daemon` could in principle appear between the `pgrep` and the `kill` step. In practice, the only legitimate spawner of `portal state daemon` is the saver pane process via `EnsureSaver`, which has not yet run at this bootstrap step. Out-of-band spawns (manual `portal state daemon` invocation, test fixture starting between the two calls) are rare and B is best-effort anyway — the next bootstrap will sweep them.
+
+**Acceptance criteria:**
+
+- Given N concurrent `portal state daemon` processes where N-1 are orphans (parent ≠ saver pane process; or no saver session exists), bootstrap step `SweepOrphanDaemons` kills N-1 of them. Verified by `pgrep -xc 'portal state daemon'` returning 1 (the legitimate saver-pane daemon) after the step completes.
+- Given only the legitimate saver-pane daemon, the sweep sends zero signals. Verified by audit log: no `"sweep: killed orphan daemon"` entries on a clean-state bootstrap.
+- Identity check prevents signalling an unrelated process if the PID has been recycled.
+- Step is best-effort: any underlying error (pgrep failure, kill failure) logs WARN and does not abort bootstrap.
+- Step ordering is documented in `CLAUDE.md` bootstrap section to match the new sequence.
+
+**Files affected:** `cmd/bootstrap/` (new step + orchestrator wiring), `internal/bootstrapadapter/` (production adapter for pgrep + identity-check + kill seam), `CLAUDE.md` (bootstrap step ordering documentation).
+
 ---
 
 ## Working Notes
