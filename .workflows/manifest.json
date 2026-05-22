@@ -83,6 +83,9 @@
     },
     "three-column-keymap-footer": {
       "work_type": "quick-fix"
+    },
+    "slow-open-empty-previews-and-zombie-sessions": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
