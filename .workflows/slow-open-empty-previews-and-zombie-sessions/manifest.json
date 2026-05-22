@@ -38,11 +38,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "slow-open-empty-previews-and-zombie-sessions-1-3",
+          "task": "slow-open-empty-previews-and-zombie-sessions-1-4",
           "task_map": {
             "slow-open-empty-previews-and-zombie-sessions-1": "tick-53e717",
             "slow-open-empty-previews-and-zombie-sessions-1-1": "tick-e53092",
-            "slow-open-empty-previews-and-zombie-sessions-1-2": "tick-e52aa4"
+            "slow-open-empty-previews-and-zombie-sessions-1-2": "tick-e52aa4",
+            "slow-open-empty-previews-and-zombie-sessions-1-3": "tick-05681f"
           },
           "external_id": "tick-7da549"
         }
