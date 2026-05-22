@@ -78,6 +78,19 @@ approved_at: 2026-05-22
 - [ ] Environment-inheritance acceptance: post-F `tmux show-environment -t _portal-saver` output for daemon-relevant vars (`XDG_CONFIG_HOME`, `HOME`, `PATH`) is identical to pre-F baseline
 - [ ] Existing daemon-saver integration tests pass without modification
 
+#### Tasks
+status: approved
+approved_at: 2026-05-22
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-3-1 | Split saver command constants into placeholder and daemon variants | macOS BSD sleep infinity rejection rationale captured in-source, PortalSaverName export untouched, no behaviour change in this task (constants only) |
+| slow-open-empty-previews-and-zombie-sessions-3-2 | Reorder BootstrapPortalSaver to create-placeholder, set-option, respawn-daemon | createPortalSaverWithRetry passes placeholder, RespawnPane reused without signature change, SetSessionOption call site preserved, lock-loser exit no longer destroys session, concurrent-bootstrap HasSession success path preserved |
+| slow-open-empty-previews-and-zombie-sessions-3-3 | Add post-respawn readiness barrier polling daemon.pid + state.IdentifyDaemon | daemon.pid missing in early ticks treated as not-ready, IdentifyDaemon transient ps failure retried, IdentifyNotPortalDaemon resolves only via timeout, IdentifyDead retried, 2 s ceiling via deadline at 50 ms cadence, timeout WARN per spec, best-effort return on timeout |
+| slow-open-empty-previews-and-zombie-sessions-3-4 | Compose unhealthy-saver recreate path with new ordering | placeholder-only saver from a crashed prior bootstrap presents as unhealthy and is recycled, kill-session targets the placeholder, no persistent placeholder leak across crashes, EnsurePortalSaverVersion still delegates through BootstrapPortalSaver unchanged |
+| slow-open-empty-previews-and-zombie-sessions-3-5 | Integration test for clean bootstrap end-state and lock-loser persistence | uses portaltest.NewIsolatedStateEnv from Phase 1, zero "no such session: _portal-saver" log entries during bootstrap window, pane process verified via list-panes -F '#{pane_pid}' + ps -o args=, destroy-unattached=off via show-options, lock-loser simulation seeds competing daemon, session persists after lock-loser exit |
+| slow-open-empty-previews-and-zombie-sessions-3-6 | Integration test for environment inheritance parity across respawn | tmux show-environment -t _portal-saver output identical to pre-F baseline for XDG_CONFIG_HOME / HOME / PATH, NewDetachedSessionNoCwd still passes no -e overrides, respawn-pane inherits session env, baseline computed from pre-F control |
+
 ### Phase 4: Daemon Singleton Enforcement (Components A + B + C)
 status: approved
 approved_at: 2026-05-22
