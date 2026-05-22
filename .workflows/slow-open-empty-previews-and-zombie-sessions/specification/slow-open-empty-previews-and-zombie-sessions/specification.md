@@ -44,6 +44,48 @@ When these are violated together, multiple daemons concurrently write `sessions.
 - **Empty previews** → `gcOrphanScrollback` race between divergent daemons deleting each other's `.bin` writes; further amplified by the `CaptureStructure` abort-on-error path when any single session enumeration fails.
 - **Zombie sessions** → competing daemon overwrites the legitimate daemon's post-kill `sessions.json` with stale `prev` state; Restore on next bootstrap reconstructs the dead session.
 
+## Component A — Kill-Barrier Escalation
+
+**Goal:** Make the bootstrap kill-barrier deterministically reach any prior daemon, regardless of whether the daemon is the saver pane process.
+
+**Current behaviour** (`internal/tmux/portal_saver.go:212-248` `killSaverAndWaitForDaemon`):
+1. Read `priorPID` from the kill-barrier file.
+2. If `priorPID` is not alive: `tmux kill-session _portal-saver`; return.
+3. Else: `tmux kill-session _portal-saver`; poll `killBarrierIsAlive(priorPID)` every 50 ms for up to 5 s; return after process death or timeout.
+
+If `priorPID` is alive but not the saver pane's process (orphan with a different parent tmux server), `tmux kill-session` cannot reach it. The barrier polls for an exit that never happens, times out at 5 s, and proceeds.
+
+**New behaviour:**
+
+1. Existing steps 1–3 run unchanged.
+2. **Post-poll escalation:** if `priorPID` is still alive after the 5 s session-kill poll:
+   1. **Identity-check the PID.** Verify the process at `priorPID` is a `portal state daemon` — accept only if executable name is `portal` AND argv contains `state daemon`. Implementation uses `ps -o comm=,args= -p <pid>` (macOS-compatible; portable across Linux). If the check fails (PID recycled to an unrelated process, or process gone since the last poll), treat as success and return.
+   2. **Send SIGKILL directly to `priorPID`.** Do NOT send SIGTERM first.
+   3. Poll `killBarrierIsAlive(priorPID)` for a bounded short window (1 s).
+   4. If still alive after the SIGKILL poll, log WARN under `ComponentBootstrap` and proceed — bootstrap is best-effort at this stage.
+
+**Why SIGKILL, not SIGTERM-with-marker:**
+
+The daemon's signal handler at `cmd/state_daemon.go:340-345` runs `defaultShutdownFlush` → `captureAndCommit` → one final destructive GC cycle on shutdown. For an orphan being deliberately killed *because its view of state is divergent*, that final flush is exactly the destructive operation we're escaping from. SIGKILL bypasses the handler entirely — no chance of one more destructive commit on the way out.
+
+The "SIGTERM with skip-final-flush marker" alternative would require plumbing a marker through to `defaultShutdownFlush` and auditing that no future addition to the shutdown handler can fire a write. SIGKILL achieves the same guarantee structurally with no maintenance burden.
+
+The legitimate daemon's normal saver-kill path is **unchanged**: `tmux kill-session _portal-saver` SIGHUPs the saver pane process, its handler runs, the final flush is correct because that daemon's view is correct.
+
+**Identity-check rationale:**
+
+Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. Between the kill-barrier writing `priorPID` and bootstrap escalating to SIGKILL, the OS could recycle the PID to an unrelated process. The identity check refuses to signal anything that isn't recognisably a `portal state daemon`.
+
+**Acceptance criteria:**
+
+- A leaked orphan daemon (parent ≠ saver pane process; `tmux kill-session` cannot reach it) is dead within ~6 s of bootstrap entering `killSaverAndWaitForDaemon` (5 s session-kill poll + 1 s SIGKILL poll).
+- The bootstrap kill-barrier no longer adds a 5 s ceiling to `portal open` when an orphan is present — under steady-state-with-orphan, total bootstrap time is reduced by ~5 s.
+- Identity check prevents signalling an unrelated process if `priorPID` has been recycled.
+- No final-flush GC cycle runs on orphans being escalation-killed (verified by observing scrollback dir across an escalation event — no new `.bin` writes from the killed daemon).
+- The legitimate daemon's normal shutdown path is unaffected — SIGHUP from `tmux kill-session` still triggers `defaultShutdownFlush` as before.
+
+**Files affected:** `internal/tmux/portal_saver.go` (`killSaverAndWaitForDaemon`). May introduce a small helper in `internal/state/` or a new package for the identity-check / signal primitive depending on testability needs.
+
 ---
 
 ## Working Notes
