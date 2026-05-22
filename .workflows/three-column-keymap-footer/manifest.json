@@ -71,10 +71,12 @@
           "current_task": "~",
           "completed_tasks": [
             "three-column-keymap-footer-1-1",
-            "three-column-keymap-footer-2-1"
+            "three-column-keymap-footer-2-1",
+            "three-column-keymap-footer-2-2"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }

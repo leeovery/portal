@@ -2894,7 +2894,7 @@ func TestSessionListWithBubblesList(t *testing.T) {
 		model := updated.(tui.Model)
 
 		// Width passes through unchanged. Height is reduced by the manual
-		// three-column keymap footer height (see applySessionListSize) so
+		// three-column keymap footer height (see applyListSize) so
 		// the list does not overflow under the footer; the exact reduction
 		// depends on the footer's rendered shape, so we assert the
 		// relationship rather than a pinned value.
@@ -3774,7 +3774,7 @@ func TestProjectsPage(t *testing.T) {
 		model := updated.(tui.Model)
 
 		// As with the sessions-list counterpart, height is reduced by the
-		// manual three-column keymap footer height (see applyProjectListSize).
+		// manual three-column keymap footer height (see applyListSize).
 		w, h := model.ProjectListSize()
 		if w != 120 {
 			t.Errorf("project list width = %d, want 120", w)

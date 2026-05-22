@@ -733,41 +733,23 @@ func NewModelWithSessions(sessions []tmux.Session) Model {
 		projectList: pl,
 		activePage:  PageSessions,
 	}
-	// Apply construction-time fallback dimensions through the size helpers
-	// so the list reserves room for the manual keymap footer at every
+	// Apply construction-time fallback dimensions through the size helper
+	// so each list reserves room for the manual keymap footer at every
 	// SetSize call site (including this 80x24 test seed).
-	m.applySessionListSize(80, 24)
-	m.applyProjectListSize(80, 24)
+	m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), 80, 24)
+	m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), 80, 24)
 	return m
 }
 
-// sessionFooterHeight returns the rendered line height of the sessions-page
-// manual keymap footer for the current list state. Used to subtract footer
-// rows from the available list height at every SetSize call site, so the
-// list does not overflow under the manually-composed footer.
-func sessionFooterHeight(l *list.Model) int {
-	return lipgloss.Height(renderKeymapFooter(l, sessionFooterBindings(l)))
-}
-
-// projectFooterHeight is the projects-page counterpart to sessionFooterHeight.
-// Sources its binding set from projectFooterBindings (which branches on
-// commandPending to swap projectHelpKeys for commandPendingHelpKeys).
-func projectFooterHeight(l *list.Model, commandPending bool) int {
-	return lipgloss.Height(renderKeymapFooter(l, projectFooterBindings(l, commandPending)))
-}
-
-// applySessionListSize sets the sessions-list dimensions, subtracting the
-// manual keymap footer height from the available height so the list does
-// not overflow under the footer. Width passes through unchanged because
-// the manual footer wraps inside the same width as the list view.
-func (m *Model) applySessionListSize(width, height int) {
-	m.sessionList.SetSize(width, height-sessionFooterHeight(&m.sessionList))
-}
-
-// applyProjectListSize is the projects-list counterpart to
-// applySessionListSize.
-func (m *Model) applyProjectListSize(width, height int) {
-	m.projectList.SetSize(width, height-projectFooterHeight(&m.projectList, m.commandPending))
+// applyListSize sets the given list's dimensions, subtracting the rendered
+// manual keymap footer height (computed from the supplied bindings) from
+// the available height so the list does not overflow under the footer.
+// Width passes through unchanged because the manual footer wraps inside
+// the same width as the list view. Used by every SetSize call site for
+// both sessions and projects pages — callers pass the appropriate
+// sessionFooterBindings / projectFooterBindings result.
+func (m *Model) applyListSize(l *list.Model, bindings []key.Binding, width, height int) {
+	l.SetSize(width, height-lipgloss.Height(renderKeymapFooter(l, bindings)))
 }
 
 // filteredSessions returns sessions with the current session excluded when inside tmux.
@@ -796,11 +778,11 @@ func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	filtered := m.filteredSessions()
 	cmd := m.sessionList.SetItems(ToListItems(filtered))
 	// Re-apply terminal size so pagination accounts for the manual keymap
-	// footer height (see applySessionListSize). Without this re-apply the
-	// list would size itself against pre-load defaults and overflow under
-	// the footer once items populate.
+	// footer height (see applyListSize). Without this re-apply the list
+	// would size itself against pre-load defaults and overflow under the
+	// footer once items populate.
 	if m.termWidth > 0 || m.termHeight > 0 {
-		m.applySessionListSize(m.termWidth, m.termHeight)
+		m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), m.termWidth, m.termHeight)
 	}
 	return cmd
 }
@@ -1017,8 +999,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wsm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.termWidth = wsm.Width
 		m.termHeight = wsm.Height
-		m.applySessionListSize(wsm.Width, wsm.Height)
-		m.applyProjectListSize(wsm.Width, wsm.Height)
+		m.applyListSize(&m.sessionList, sessionFooterBindings(&m.sessionList), wsm.Width, wsm.Height)
+		m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), wsm.Width, wsm.Height)
 	}
 
 	// Handle cross-view messages regardless of view state
@@ -1077,9 +1059,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			items := ProjectsToListItems(msg.Projects)
 			setItemsCmd = m.projectList.SetItems(items)
 			// Re-apply terminal size so pagination accounts for the manual
-			// keymap footer height (see applyProjectListSize).
+			// keymap footer height (see applyListSize).
 			if m.termWidth > 0 || m.termHeight > 0 {
-				m.applyProjectListSize(m.termWidth, m.termHeight)
+				m.applyListSize(&m.projectList, projectFooterBindings(&m.projectList, m.commandPending), m.termWidth, m.termHeight)
 			}
 		}
 		m.projectsLoaded = true
