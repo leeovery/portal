@@ -124,6 +124,54 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Files affected:** `cmd/bootstrap/` (new step + orchestrator wiring), `internal/bootstrapadapter/` (production adapter for pgrep + identity-check + kill seam), `CLAUDE.md` (bootstrap step ordering documentation).
 
+## Component C — Stabilise the `daemon.lock` Singleton Against Inode Replacement
+
+**Goal:** Close the inode-replacement gap so the daemon-singleton invariant cannot be silently broken when `daemon.lock`'s path is unlinked + recreated between two daemon spawns.
+
+**Current behaviour** (`internal/state/daemon_lock.go:55-77` `AcquireDaemonLock`):
+1. `os.OpenFile(daemon.lock, O_RDWR|O_CREATE, 0o600)` — opens whatever inode is at the path.
+2. `flock(LOCK_EX|LOCK_NB)` on that fd.
+3. Set `FD_CLOEXEC`. Return.
+
+`flock` excludes per-**inode**, not per-path. If two daemons end up with fds to different inodes for the same path (because the file was unlinked + recreated between their opens), both `flock`s succeed and both daemons run.
+
+**New behaviour:** Augment `AcquireDaemonLock` with two cross-checks that use the already-existing `daemon.pid` file and an inode invariant.
+
+1. **Pre-acquire daemon.pid liveness check.** Before opening `daemon.lock`:
+   1. Read `daemon.pid` via `state.ReadPIDFile`. If absent: skip; proceed.
+   2. If present: check the recorded PID is alive AND identity-checks as a `portal state daemon` (same primitive as Component A — `ps -o comm=,args= -p <pid>`; accept only when executable is `portal` and argv contains `state daemon`).
+   3. If both checks pass: return `ErrDaemonLockHeld`. Another `portal state daemon` already owns the singleton, regardless of whatever inode `daemon.lock` currently resolves to.
+   4. If the recorded PID is dead or doesn't identity-check: proceed to step 2.
+2. **Existing open + flock** (steps 1–3 of current behaviour) run unchanged.
+3. **Post-flock inode cross-check.** After `flock` succeeds:
+   1. `fstat` the fd to get `fd_inode`.
+   2. `stat` the path to get `path_inode`.
+   3. If `fd_inode != path_inode`: the file was replaced between our open and our flock. Release the flock (close the fd) and retry the whole acquire (steps 1–3). Bounded to **3 retries** with a 10 ms sleep between attempts. On persistent mismatch after the bound, return a wrapped error (treated as fatal misconfiguration — caller logs WARN and exits).
+   4. If `fd_inode == path_inode`: lock acquired, proceed.
+4. **Post-acquire daemon.pid write.** After successful acquire (and after the existing FD_CLOEXEC step), the caller writes `daemon.pid` atomically with the current process's PID via `state.WritePIDFile` (existing helper). The acquire helper itself does not write the PID file — that remains the daemon's responsibility, preserving the current call-site contract — but the **daemon must write `daemon.pid` before exiting `main`'s lock-acquire path**, so that any subsequent acquirer's pre-check sees an identity-checkable recorded PID.
+
+**Why this closes the bug class:**
+
+- The pre-check makes `daemon.pid` (a stable file whose content we control) authoritative for singleton membership, sidestepping `flock`'s per-inode limitation. Even if `daemon.lock` has been unlinked + recreated 100 times, what matters is whether `daemon.pid` references a live identity-checkable daemon.
+- The inode cross-check absorbs the small race window where a third party replaces the file between our `open` and our `flock`. Bounded retry handles transient turbulence (e.g., another daemon coming up and aborting cleanly); persistent mismatch indicates a stuck-broken state that should fail loudly.
+- The identity check on the recorded PID prevents a recycled-PID coincidence from blocking legitimate succession (e.g., shell pid coincidentally matches the prior daemon's PID).
+
+**Composition with Components A and B:**
+
+- A+B ensure that by the time the new saver-pane daemon calls `AcquireDaemonLock`, no other `portal state daemon` is alive — so the pre-check sees a dead recorded PID and proceeds.
+- C is the structural defence: if A and B both somehow miss an orphan (unforeseen future trigger), the pre-check still refuses to acquire, and the loser exits cleanly via the existing `ErrDaemonLockHeld` path. Worst case becomes "saver pane process exits 0 with a WARN; bootstrap proceeds without a healthy daemon", which is degraded but not destructive — the existing `EnsureSaver` flow already surfaces a `SaverDownWarning` for that state.
+
+**Acceptance criteria:**
+
+- **Pre-check refuses on live recorded daemon.** Given a live identity-checkable `portal state daemon` referenced by `daemon.pid`, `AcquireDaemonLock` returns `ErrDaemonLockHeld` without opening `daemon.lock`. Verified via unit test with a real subprocess as the "live" daemon.
+- **Pre-check ignores stale daemon.pid.** Given a `daemon.pid` whose recorded PID is dead, `AcquireDaemonLock` proceeds. Verified via unit test (write daemon.pid with a known-dead PID; assert acquire succeeds).
+- **Pre-check ignores wrong-identity PID.** Given a `daemon.pid` whose recorded PID is alive but identity-check fails (e.g., the PID was recycled to `sleep`), `AcquireDaemonLock` proceeds. Verified via unit test (stub identity-check seam to return false).
+- **Inode-mismatch retry.** Stub the post-flock inode comparison to return mismatch for the first attempt then match: `AcquireDaemonLock` succeeds on the second attempt. Verified via unit test through the existing `lockAcquire` seam plus a new stat seam.
+- **Inode-mismatch retry bound.** Stub mismatch for all attempts: `AcquireDaemonLock` returns a wrapped error after 3 attempts, with bounded total delay (<100 ms). Verified via unit test.
+- **No regression in EWOULDBLOCK path.** A second `AcquireDaemonLock` against the same `daemon.lock` with the original holder still alive returns `ErrDaemonLockHeld` (either via pre-check, or via the existing EWOULDBLOCK path if daemon.pid is missing). Verified via existing daemon-lock integration test.
+
+**Files affected:** `internal/state/daemon_lock.go` (augment `AcquireDaemonLock`), `internal/state/daemon_state.go` (no changes to `WritePIDFile`/`ReadPIDFile` — used as-is), tests in `internal/state/daemon_lock_test.go`. New test seams may be added: identity-check function pointer and stat function pointer.
+
 ---
 
 ## Working Notes
