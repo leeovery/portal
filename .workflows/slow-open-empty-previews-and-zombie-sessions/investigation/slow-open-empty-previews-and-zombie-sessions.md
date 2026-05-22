@@ -68,6 +68,11 @@ WARN | daemon | tick: capture structure: failed to show environment for session 
 - **Scope:** This install confirmed; potentially affects any user whose state directory has accumulated stale daemons across upgrades.
 - **Business impact:** Tool-author dogfooding; degrades core workflow value of session preview and session hygiene.
 
+### Constraints & Confirmed Context
+
+- **Live state preserved.** The broken state on the reporter's machine (three stale daemons, dead `_portal-saver`, sparse scrollback dir) is to be kept intact while investigation proceeds, so the live system can be used as an evidence source alongside code analysis.
+- **Regression window is within the v0.5.x line.** Reporter is confident the session preview was working under some v0.5.x version. Investigation should establish the precise within-v0.5.x regression point rather than treating this as a long-standing latent fragility.
+
 ### References
 
 - Inbox report (archived): `.workflows/.inbox/.archived/bugs/2026-05-22--slow-open-empty-previews-and-zombie-sessions.md`
