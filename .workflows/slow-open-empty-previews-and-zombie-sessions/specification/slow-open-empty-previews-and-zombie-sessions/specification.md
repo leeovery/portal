@@ -54,6 +54,33 @@ The investigation explicitly ruled out three plausible-looking adjacent causes. 
 - **Merge-filter regression from `daemon-merge-reintroduces-dead-sessions`.** Fix Component A from that bugfix is intact in current code (`mergeSkippedPanes` calls `buildLiveStructure` and applies a three-level filter). Zombie sessions are caused by competing daemons rewriting `sessions.json`, NOT by merge-filter regression. The merge filter operates only on its own daemon's `prev`; it cannot defend against a competing daemon's stale `prev` being committed seconds later.
 - **Missing ctx-cancellable fix from `saver-kill-respawn-loop-leaks-daemons`.** The fix shipped in v0.5.4 and is present in current code (`cmd/state_daemon.go` has three `<-ctx.Done()` observation points in `captureAndCommit`). The legitimate daemon exits promptly on signal; orphan daemons survive because they are no longer reachable from the saver-side kill path (addressed by Component A's direct-signal escalation), not because they fail to honour cancellation.
 
+## Shared Primitive — Daemon Identity Check
+
+Components A, B, and C all need the same primitive: "is PID `p` a live `portal state daemon`?" This primitive is defined once and reused.
+
+**Location:** `internal/state/daemon_identity.go` (new file), exporting `state.IdentifyDaemon(pid int) (IdentifyResult, error)`.
+
+**Return contract:**
+
+```go
+type IdentifyResult int
+const (
+    IdentifyIsPortalDaemon  IdentifyResult = iota // pid is alive AND argv matches "portal state daemon"
+    IdentifyNotPortalDaemon                       // pid is alive but is NOT a portal state daemon (recycled, different binary)
+    IdentifyDead                                  // pid does not exist (gone since last observation, or never existed)
+)
+```
+
+- **`err == nil` with one of the three results above** is the definitive answer. Callers branch on the result.
+- **`err != nil`** means the identity check itself failed transiently (e.g., `ps` exec failure, malformed output). This is the "we can't tell" case. Caller semantics:
+  - **Component A (kill-barrier escalation):** treat transient error as "skip SIGKILL" (do not signal a PID we can't identify; bootstrap is best-effort).
+  - **Component B (orphan sweep):** treat transient error as "skip this PID" (do not signal a PID we can't identify; next bootstrap will sweep).
+  - **Component C (lock-acquire pre-check):** treat transient error as "not a portal daemon" — proceed with acquire. Rationale: the flock EWOULDBLOCK fallback still catches real contention; biasing toward "let legitimate succession proceed" is safer than spuriously blocking startup.
+
+**Implementation:** `ps -o comm=,args= -p <pid>` (or `ps -p <pid> -o comm=,args=`). Parse the output: trim, split into comm and args. Match comm against `"portal"` AND match args against a regex anchored to `"^portal state daemon( |$)"`. Any non-zero exit from `ps`, parse error, or empty output that's not "PID not found" is a transient error.
+
+---
+
 ## Component A — Kill-Barrier Escalation
 
 **Goal:** Make the bootstrap kill-barrier deterministically reach any prior daemon, regardless of whether the daemon is the saver pane process.
@@ -71,7 +98,7 @@ If `priorPID` is alive but not the saver pane's process (orphan with a different
 2. **Post-poll escalation:** if `priorPID` is still alive after the 5 s session-kill poll:
    1. **Identity-check the PID.** Verify the process at `priorPID` is a `portal state daemon` — accept only if executable name is `portal` AND argv contains `state daemon`. Implementation uses `ps -o comm=,args= -p <pid>` (macOS-compatible; portable across Linux). If the check fails (PID recycled to an unrelated process, or process gone since the last poll), treat as success and return.
    2. **Send SIGKILL directly to `priorPID`.** Do NOT send SIGTERM first.
-   3. Poll `killBarrierIsAlive(priorPID)` for a bounded short window (1 s).
+   3. Poll `killBarrierIsAlive(priorPID)` for a bounded short window (1 s total) at **50 ms cadence**, matching the existing session-kill poll cadence in `killSaverAndWaitForDaemon`.
    4. If still alive after the SIGKILL poll, log WARN under `ComponentBootstrap` and proceed — bootstrap is best-effort at this stage.
 
 **Why SIGKILL, not SIGTERM-with-marker:**
@@ -91,7 +118,7 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 - A leaked orphan daemon (parent ≠ saver pane process; `tmux kill-session` cannot reach it) is dead within ~6 s of bootstrap entering `killSaverAndWaitForDaemon` (5 s session-kill poll + 1 s SIGKILL poll).
 - The bootstrap kill-barrier no longer adds a 5 s ceiling to `portal open` when an orphan is present — under steady-state-with-orphan, total bootstrap time is reduced by ~5 s.
 - Identity check prevents signalling an unrelated process if `priorPID` has been recycled.
-- No final-flush GC cycle runs on orphans being escalation-killed (verified by observing scrollback dir across an escalation event — no new `.bin` writes from the killed daemon).
+- No final-flush GC cycle runs on orphans being escalation-killed. Verified by snapshotting the scrollback directory immediately before SIGKILL and again 200 ms after the orphan exits; the two snapshots must be identical (no new `.bin` files, no deleted `.bin` files, no mtime/size changes on existing `.bin` files). The observation harness uses fsnotify or a polled `os.ReadDir` snapshot; either is acceptable.
 - The legitimate daemon's normal shutdown path is unaffected — SIGHUP from `tmux kill-session` still triggers `defaultShutdownFlush` as before.
 
 **Files affected:** `internal/tmux/portal_saver.go` (`killSaverAndWaitForDaemon`). May introduce a small helper in `internal/state/` or a new package for the identity-check / signal primitive depending on testability needs.
@@ -102,11 +129,25 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Current behaviour:** No orphan sweep exists. Orphan daemons are only addressed indirectly through the kill-barrier's poll-and-wait on `priorPID`, which (per Component A) is the kill-barrier's single recorded PID, not the full pgrep set.
 
-**New bootstrap step: `SweepOrphanDaemons`.** Inserted as a new step between `Set @portal-restoring` (current step 3) and `EnsureSaver` (current step 4). All steps from `EnsureSaver` onward shift up by one (EnsureSaver → 5, Restore → 6, etc.).
+**New bootstrap step: `SweepOrphanDaemons`.** Inserted as a new step between `Set @portal-restoring` (current step 3) and `EnsureSaver` (current step 4). All steps from `EnsureSaver` onward shift up by one. Post-insertion the full 11-step orchestrator is:
+
+1. EnsureServer
+2. RegisterPortalHooks
+3. Set `@portal-restoring`
+4. **SweepOrphanDaemons** *(new)*
+5. EnsureSaver
+6. Restore
+7. EagerSignalHydrate
+8. Clear `@portal-restoring`
+9. CleanStaleMarkers
+10. SweepOrphanFIFOs
+11. CleanStale
+
+The existing inter-step invariants (e.g., "Clear must precede CleanStaleMarkers", "EagerSignalHydrate runs while `@portal-restoring` is still set") are preserved by this insertion — `SweepOrphanDaemons` runs *before* `EnsureSaver` and does not interact with `@portal-restoring`, `client-attached` hooks, or any post-Restore state. Component F's saver-creation sub-steps (placeholder → set option → respawn) are internal to `BootstrapPortalSaver` and do NOT introduce new orchestrator-visible steps; the CLAUDE.md update for F is limited to a one-line note in the EnsureSaver step description.
 
 **Behaviour:**
 
-1. Enumerate candidate orphan PIDs: `pgrep -x 'portal state daemon'` (the `-x` matches the exact command name; portable across macOS/Linux).
+1. Enumerate candidate orphan PIDs. On macOS, `pgrep -x` matches against the process short name (`comm`), which for the daemon is `portal` — so `pgrep -x 'portal state daemon'` matches nothing. The portable enumeration form is **`pgrep -fx '^portal state daemon( |$)'`** (the `-f` flag matches against the full argv string, the `-x` requires an exact match, and the anchored regex prevents false positives from e.g. `portal state daemon-foo`). An equivalent `ps`-based enumeration (`ps -axo pid=,args= | awk '$2=="portal" && $3=="state" && $4=="daemon" {print $1}'`) is acceptable if the implementer prefers a non-pgrep dependency.
 2. Build the legitimate set:
    - The pane process PID of `_portal-saver`'s only pane, if `_portal-saver` exists (via `tmux list-panes -t _portal-saver -F '#{pane_pid}'`).
    - Empty set if `_portal-saver` does not exist (fresh server, post-server-restart, etc.).
@@ -126,7 +167,7 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 **Acceptance criteria:**
 
-- Given N concurrent `portal state daemon` processes where N-1 are orphans (parent ≠ saver pane process; or no saver session exists), bootstrap step `SweepOrphanDaemons` kills N-1 of them. Verified by `pgrep -xc 'portal state daemon'` returning 1 (the legitimate saver-pane daemon) after the step completes.
+- Given N concurrent `portal state daemon` processes where N-1 are orphans (parent ≠ saver pane process; or no saver session exists), bootstrap step `SweepOrphanDaemons` kills N-1 of them. Verified by `pgrep -fxc 'portal state daemon'` returning 1 (the legitimate saver-pane daemon) after the step completes.
 - Given only the legitimate saver-pane daemon, the sweep sends zero signals. Verified by audit log: no `"sweep: killed orphan daemon"` entries on a clean-state bootstrap.
 - Identity check prevents signalling an unrelated process if the PID has been recycled.
 - Step is best-effort: any underlying error (pgrep failure, kill failure) logs WARN and does not abort bootstrap.
@@ -158,9 +199,11 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 3. **Post-flock inode cross-check.** After `flock` succeeds:
    1. `fstat` the fd to get `fd_inode`.
    2. `stat` the path to get `path_inode`.
-   3. If `fd_inode != path_inode`: the file was replaced between our open and our flock. Release the flock (close the fd) and retry the whole acquire (steps 1–3). Bounded to **3 retries** with a 10 ms sleep between attempts. On persistent mismatch after the bound, return a wrapped error (treated as fatal misconfiguration — caller logs WARN and exits).
+   3. If `fd_inode != path_inode`: the file was replaced between our open and our flock. Release the flock (close the fd) and retry the whole acquire (steps 1–3). Bounded to **3 retries** with a 10 ms sleep between attempts. On persistent mismatch after the bound, return a wrapped error. **Exit semantics:** the daemon's `runDaemonE` (or equivalent) treats this wrapped error like any other open(2)/flock failure today — log WARN under `ComponentDaemon` and exit with **status 1** (matching the existing "wrapped error" treatment in `AcquireDaemonLock`'s docstring; distinct from the `ErrDaemonLockHeld` path which exits status 0). The lock-loser status 0 path is retained for the pre-check `ErrDaemonLockHeld` case. Because the daemon's pane is configured with `destroy-unattached=off` (Component F), a status 1 exit does NOT trigger a restart loop — `_portal-saver` persists with a dead pane process and the next bootstrap evaluates the unhealthy-saver path normally. The WARN is surfaced via `internal/state/logger.go`; it does NOT propagate to the user-facing `warning` package because lock-acquire failures are daemon-internal.
    4. If `fd_inode == path_inode`: lock acquired, proceed.
-4. **Post-acquire daemon.pid write.** After successful acquire (and after the existing FD_CLOEXEC step), the caller writes `daemon.pid` atomically with the current process's PID via `state.WritePIDFile` (existing helper). The acquire helper itself does not write the PID file — that remains the daemon's responsibility, preserving the current call-site contract — but the **daemon must write `daemon.pid` before exiting `main`'s lock-acquire path**, so that any subsequent acquirer's pre-check sees an identity-checkable recorded PID.
+4. **Post-acquire daemon.pid write.** After successful acquire (and after the existing FD_CLOEXEC step), the caller writes `daemon.pid` atomically with the current process's PID via `state.WritePIDFile` (existing helper). The acquire helper itself does not write the PID file — that remains the daemon's responsibility, preserving the current call-site contract. The **daemon must write `daemon.pid` as the next statement after the successful `AcquireDaemonLock` return** in `cmd/state_daemon.go`'s `runDaemonE` (or whichever existing function hosts the acquire call), and BEFORE entering the tick loop. This minimises the startup window during which a second acquirer's pre-check would observe a stale (or missing) `daemon.pid`.
+
+**Layered enforcement note.** The pre-check is the *primary* singleton enforcer for steady-state contention. For the small startup window between `AcquireDaemonLock` returning and `WritePIDFile` completing, the existing `flock` EWOULDBLOCK path is the fallback enforcer: a second daemon would observe a stale/dead pre-check, proceed to open `daemon.lock`, and fail at `flock` with EWOULDBLOCK because the legitimate daemon still holds it. This layered behaviour is intentional — the pre-check covers the case where `flock` is structurally bypassed (inode replacement), and `flock` covers the case where the pre-check has no `daemon.pid` to consult yet.
 
 **Deviation from investigation:** The investigation's described shape was "Open with `O_EXCL|O_CREAT`, then `fstat` the fd and `stat` the path, and refuse if inodes differ". The spec deviates by retaining `O_RDWR|O_CREAT` and introducing the pre-acquire `daemon.pid` liveness check as the primary singleton enforcer instead. Reasoning: `O_EXCL|O_CREAT` would require every daemon to unlink `daemon.lock` on clean shutdown (and a crash-cleanup story for un-unlinked files), inverting the lockfile's "stable across lifetimes" contract. The `daemon.pid` check achieves the same correctness guarantee without changing the lockfile lifecycle — what matters for singleton enforcement is whether a live identity-checkable daemon is recorded, not which inode the lockfile currently resolves to. The inode cross-check is retained as a secondary defence against open-vs-flock races.
 
@@ -209,7 +252,7 @@ Direct signalling introduces PID-recycle risk that `tmux kill-session` did not. 
 
 - The legitimate daemon never observes a transient "saver absent" condition. The bootstrap path that kills `_portal-saver` SIGHUPs the saver pane process — i.e., the legitimate daemon itself — so the OLD legitimate daemon stops ticking before its next self-check. The NEW legitimate daemon spawned by the recreated saver only starts ticking AFTER the saver exists. There is no in-between window where a legitimate daemon would see absence.
 - The only realistic source of false-positive absence is transient tmux command failure (mid-tick `has-session` returning an unexpected error during, e.g., a heavy tmux server moment). N=3 absorbs this without significantly extending orphan lifetime.
-- With the daemon's current ~1 s tick interval, N=3 caps orphan lifetime at ~3–4 s of additional drift after the saver-membership condition first fails — well inside the user's "bound to one tick *between* bootstraps" target framing.
+- With the daemon's current tick interval (`stateDaemonTickInterval` in `cmd/state_daemon.go`, currently ~1 s), N=3 caps orphan lifetime at ~3–4 s of additional drift after the saver-membership condition first fails — well inside the user's "bound to one tick *between* bootstraps" target framing. Acceptance criteria that reference "tick intervals" refer to this same constant.
 - N=1 was considered but rejected: a single tmux-command hiccup would unnecessarily kill the legitimate daemon mid-session (extremely rare but possible).
 
 If implementation measurement during the planning phase reveals real-world transient durations longer than ~3 ticks, N can be increased — but the spec target is "single-digit ticks", not "tens of ticks".
@@ -224,8 +267,11 @@ If implementation measurement during the planning phase reveals real-world trans
 - **Self-eject on absent saver.** Spawn `portal state daemon` against a tmux server that has no `_portal-saver` session. The daemon exits within (N + 1) tick intervals. Verified by integration test.
 - **Self-eject on saver pane pid mismatch.** Spawn the daemon, then externally replace the `_portal-saver` pane process (e.g., `respawn-pane` to a different process). Daemon exits within (N + 1) tick intervals. Verified by integration test.
 - **No false-positive exit on legitimate transient.** Stub the saver-existence check to return "absent" for k < N consecutive ticks then "present": daemon does NOT exit, counter resets. Verified by unit test through a `saverMembershipProbe` seam.
-- **No final flush on self-eject.** After the daemon self-ejects, the scrollback directory shows no new `.bin` writes from the killed daemon's PID. Verified by integration test that monitors scrollback writes around the eject event.
+- **No final flush on self-eject.** Snapshot the scrollback directory at the moment the daemon's self-check first registers a failing tick, and again immediately after `os.Exit(0)`. The two snapshots must be identical (no new files, no deletions, no mtime/size changes). Verified by integration test that uses fsnotify or a polled `os.ReadDir` snapshot during the eject window.
 - **Skipped check on first tick is benign.** The legitimate daemon, ticking for the first time inside a freshly-created `_portal-saver`, passes the self-check on tick 1 (pane pid matches its pid). Verified by integration test in the existing daemon-saver suite.
+- **Measurement artefact for N.** The chosen value of N is documented in-source as a constant (e.g., `selfSupervisionHysteresisTicks`) with a comment block citing: (i) the measured worst-case transient duration in ticks across the scenarios listed in the Risk Summary (steady-state, attach/detach, `client-attached`, bootstrap kill-and-recreate), (ii) the 2× safety factor applied, and (iii) the date of measurement and binary version. If the measurement memo is stored separately (e.g., as a note in `.workflows/`), the source comment references it. A unit test asserts `selfSupervisionHysteresisTicks >= 1` to prevent accidental zeroing; the actual value-vs-measurement justification is enforced by code review, not test.
+
+**Test staging note.** D's integration tests intentionally violate the saver-pane-process invariant; to reach the tick loop, they must satisfy Component C's lock-acquire pre-check. Tests stage the state directory with either (i) no `daemon.pid` file (pre-check skips and proceeds), or (ii) a `daemon.pid` referencing a known-dead PID. The tests spawn the daemon directly (bypassing the bootstrap orchestrator) so Component B's sweep does not preempt the test setup. The replacement of `_portal-saver`'s pane process for the "pid mismatch" case is performed via `tmux respawn-pane -k -t _portal-saver 'sh -c "exec tail -f /dev/null"'` (or equivalent) between daemon spawn and the daemon's first self-check tick.
 
 **Files affected:** `cmd/state_daemon.go` (insert self-check before `captureAndCommit`), `internal/tmux/` (may add a small `SaverPanePID(name) (int, error)` helper for testability), tests in `cmd/state_daemon_test.go` plus integration coverage.
 
@@ -251,7 +297,7 @@ for _, name := range sortedKeys(keep) {
 for _, name := range sortedKeys(keep) {
     envRaw, err := c.ShowEnvironment(name)
     if err != nil {
-        logger.Warn(ComponentCapture, "show environment for session",
+        logger.Warn(ComponentDaemon, "show environment for session",
             "session", name, "err", err)
         continue
     }
@@ -265,7 +311,14 @@ for _, name := range sortedKeys(keep) {
 
 **Pre-loop calls remain fail-fatal.** `ListSessionNames`, `ListAllPanesWithFormat`, and `parsePaneRows` (lines 66-83) are NOT changed — those failures indicate tmux itself is broken or returning malformed output, and continuing with partial state would produce destructive commits. The per-session loop is the only path where partial-success is meaningful.
 
-**Total-failure guard.** Add a post-loop check: if `len(keep) > 0 && len(sessions) == 0`, every individual session enumeration failed despite the pre-loop calls succeeding. This is anomalous (tmux's `list-sessions` reported names but `show-environment` failed for every one of them) and should NOT produce a commit that wipes all scrollback. Return an error wrapping the per-session failure count, causing `captureAndCommit` to skip Commit + GC for this tick (the existing error path).
+**Total-failure guard.** Add a post-loop check that distinguishes natural session churn from anomalous tmux failure:
+
+- **Per-session error classification.** During the loop, classify each `ShowEnvironment` error as either `natural-churn` (the error message indicates the session no longer exists — e.g., `"no such session"` substring match, or `errors.Is` against a known sentinel if tmux exposes one) or `anomalous` (any other error).
+- **Post-loop discriminator.** If `len(keep) > 0 && len(sessions) == 0`:
+  - **If all per-session errors were `natural-churn`:** the sessions tmux enumerated in the pre-loop call were all destroyed by the user mid-tick. Proceed with the empty index — Commit + GC writes a `sessions.json` reflecting the new reality (sessions are gone) and reclaims orphan scrollback. This is the legitimate "user killed the last session" case.
+  - **If any per-session error was `anomalous`:** at least one session enumeration failed for a non-recoverable reason. Return an error wrapping the count and types, causing `captureAndCommit` to skip Commit + GC for this tick (the existing error path) — refuse to wipe scrollback on evidence of a broken capture.
+
+The natural-churn predicate must be conservative: any error that isn't unambiguously "session no longer exists" is treated as anomalous. This errs on the side of preserving scrollback at the cost of one tick's delay in propagating a kill, which is acceptable because the next tick's enumeration will see the same state and commit cleanly.
 
 **Logger dependency.** `CaptureStructure` does not currently take a logger argument. To preserve the existing call-site signature without intrusive changes, the spec accepts either of the following implementation choices (planning phase decides):
 
@@ -277,8 +330,9 @@ Either is acceptable as long as per-session errors are logged with enough contex
 **Acceptance criteria:**
 
 - **Single-session failure does not abort tick.** Stub `ShowEnvironment` to fail for session "A" and succeed for "B", "C". `CaptureStructure` returns an index containing "B" and "C" (but not "A"). `captureAndCommit` proceeds to write scrollback for both surviving sessions' panes and to Commit. Verified by unit test.
-- **All-session failure aborts tick.** Stub `ShowEnvironment` to fail for every session in a non-empty `keep` set. `CaptureStructure` returns a wrapped error; `captureAndCommit` does NOT call Commit (no destructive GC runs). Verified by unit test.
-- **Logging.** Every per-session skip emits a WARN log entry under `ComponentCapture` (or equivalent existing component constant) with the session name and the underlying error. Verified by unit test that asserts on the logger output.
+- **All-session anomalous failure aborts tick.** Stub `ShowEnvironment` to return a non-"no such session" error (e.g., a generic exec failure) for every session in a non-empty `keep` set. `CaptureStructure` returns a wrapped error; `captureAndCommit` does NOT call Commit (no destructive GC runs). Verified by unit test.
+- **All-session natural-churn proceeds with empty commit.** Stub `ShowEnvironment` to return a "no such session" error for every session in a non-empty `keep` set (simulating the user killing the last session mid-tick). `CaptureStructure` returns an empty index without error; `captureAndCommit` proceeds to Commit a `sessions.json` reflecting zero sessions. Verified by unit test.
+- **Logging.** Every per-session skip emits a WARN log entry with the session name and the underlying error. The log uses the existing `ComponentDaemon` constant from `internal/state/logger.go` (matching the convention used by `gcOrphanScrollback` in `internal/state/commit.go:53` for capture-pipeline failures). A new component constant is NOT introduced. Verified by unit test that asserts on the logger output.
 - **No regression in fail-fatal pre-loop paths.** A `ListAllPanesWithFormat` failure still causes `CaptureStructure` to return an error; `captureAndCommit` does not Commit. Verified by existing or new unit test.
 - **Empty `keep` is benign.** `len(keep) == 0` returns an empty index without error (existing behaviour preserved).
 
@@ -303,19 +357,28 @@ if err := c.SetSessionOption(PortalSaverName, "destroy-unattached", "off"); err 
 
 **New behaviour:** Decouple session creation from daemon launch.
 
-1. **Create the saver with a benign placeholder command.** Replace `portalSaverCommand = "portal state daemon"` (or override at the create call site) with `"sh -c 'sleep infinity'"` for the initial-creation step. The placeholder process runs indefinitely and does NOT trigger session self-destruction.
+1. **Create the saver with a benign placeholder command.** Replace `portalSaverCommand = "portal state daemon"` (or override at the create call site) with `"sh -c 'exec tail -f /dev/null'"` for the initial-creation step. The placeholder process runs indefinitely and does NOT trigger session self-destruction.
 2. **Set `destroy-unattached=off`** on the now-stable session (existing `SetSessionOption` call). This call is now safe — the session is guaranteed to exist because the placeholder is keeping it alive.
-3. **Respawn the pane with the real command:** `tmux respawn-pane -k -t {PortalSaverName} 'portal state daemon'`. The `-k` flag kills the current process (the placeholder `sh -c 'sleep infinity'`) and replaces it with the daemon. The pane survives the respawn; only its process changes. Even if the daemon exits immediately as lock-loser, `destroy-unattached=off` is already in effect, so the session persists for the next bootstrap to evaluate.
+3. **Respawn the pane with the real command:** `tmux respawn-pane -k -t {PortalSaverName} 'portal state daemon'`. The `-k` flag kills the current process (the placeholder `sh -c 'exec tail -f /dev/null'`) and replaces it with the daemon. The pane survives the respawn; only its process changes. Even if the daemon exits immediately as lock-loser, `destroy-unattached=off` is already in effect, so the session persists for the next bootstrap to evaluate.
+4. **Readiness barrier.** After `respawn-pane`, `BootstrapPortalSaver` polls for `daemon.pid` to exist AND for `state.IdentifyDaemon` against its contents to return `IdentifyIsPortalDaemon`. Bounded to **2 s total** with **50 ms poll cadence**. On timeout: log WARN (`"saver respawn: daemon did not come up within 2s"`) and return — best-effort, the bootstrap continues. On success: return. This barrier guarantees subsequent bootstrap steps (Restore, EagerSignalHydrate, etc.) observe a healthy daemon rather than racing the respawn.
 
 **Why this ordering is safe:**
 
 - The placeholder is structurally incapable of running portal logic — it cannot write to the state directory or contend for the lock. The window between create and respawn is bounded by two tmux command latencies (likely <50 ms) during which no portal-daemon work happens.
 - `respawn-pane -k` is already used elsewhere in the codebase (the hydrate-helper path during Restore — see CLAUDE.md restore section), so the primitive and its `Commander` plumbing exist.
-- The placeholder choice (`sh -c 'sleep infinity'`) is portable across macOS and Linux. It does NOT block on stdin and does NOT exit on terminal signal artefacts; it lives until killed by `respawn-pane -k` or `tmux kill-session`.
+- The placeholder choice (`sh -c 'exec tail -f /dev/null'`) is portable across macOS and Linux. `sleep infinity` was considered and rejected because macOS' BSD `sleep` requires a numeric argument and exits immediately when given `infinity` — which would recreate exactly the race this component is meant to close. `tail -f /dev/null` blocks indefinitely on both platforms, does NOT exit on terminal-signal artefacts, and is widely available; it lives until killed by `respawn-pane -k` or `tmux kill-session`.
 
 **Interaction with kill-barrier (Components A and B):**
 
 When `BootstrapPortalSaver` encounters an existing saver with a dead daemon (lines 269-275 — `BootstrapAliveCheck` returns false), it calls `killSaverAndWaitForDaemonFn` and falls through to recreate. With Components A and B in place, the kill phase is reliable, and the recreate path now uses the placeholder-then-respawn ordering. The net effect is that no bootstrap leaves the saver in a partial-state with `destroy-unattached` unset.
+
+**New state introduced by F — "saver exists with placeholder still running":**
+
+F introduces a transient state where `_portal-saver` exists with the `tail -f /dev/null` placeholder as its pane process (between F's steps 1 and 3, or persistently if a prior bootstrap crashed mid-respawn). Composition checks:
+
+- **Component B's sweep** enumerates `portal state daemon` processes only. The placeholder is `sh -c 'exec tail -f /dev/null'` — not a portal daemon — so B's sweep correctly ignores it.
+- **`BootstrapAliveCheck`** (called by `BootstrapPortalSaver` when `sessionPresent=true`) inspects `daemon.pid` aliveness. With the placeholder running and no daemon writing `daemon.pid`, the alive check reports unhealthy → existing kill-and-recreate path runs → `killSaverAndWaitForDaemonFn` kills the placeholder via `tmux kill-session` → recreate with the new placeholder-then-respawn ordering. The unhealthy-saver path already handles this case; no new alive-check logic is needed.
+- **No persistent placeholder leak.** Even if a bootstrap crashes between F's steps 2 and 3, the next bootstrap sees the unhealthy saver (no live daemon.pid) and recovers via the existing path.
 
 **Acceptance criteria:**
 
@@ -339,7 +402,10 @@ When `BootstrapPortalSaver` encounters an existing saver with a dead daemon (lin
    2. **Removes** any existing `XDG_CONFIG_HOME` entry.
    3. **Sets** `XDG_CONFIG_HOME=<t.TempDir()>/config` (and `MkdirAll` that path).
    4. Returns the constructed env slice and the resolved state directory path.
-   5. Registers `t.Cleanup` to verify on test exit that the developer's real `~/.config/portal/state/` was untouched (compare a pre-test snapshot of file mtimes; fail if any state file was modified during the test).
+   5. Registers `t.Cleanup` to verify on test exit that the developer's real `~/.config/portal/state/` was untouched. The pre-test snapshot is a `map[string]fileFingerprint` keyed by path, where `fileFingerprint` captures (a) existence, (b) size, (c) mtime nanoseconds, (d) ctime nanoseconds, and (e) a SHA-256 of file contents for files ≤ 1 MiB. The cleanup walks the same directory and compares; **any** delta (new file, removed file, changed size/mtime/ctime/content) fails the test with a clear error citing the changed path and the type of delta. Edge cases:
+      - If the directory does not exist at snapshot time, the pre-test snapshot is empty; any file or subdirectory created during the test counts as a delta and fails the test.
+      - Symlink mutations (target change, new symlink) are detected via `lstat`; the snapshot uses lstat semantics throughout.
+      - The walk follows `~/.config/portal/state/` only; sibling directories (e.g., `~/.config/portal/projects.json`) are out of scope for the backstop because they are not written by the daemon.
 
    Placement: a new leaf package `internal/portaltest/` (or attach to the existing `portalbintest` package — planning decides), test-only (`testing.T` parameter ensures it cannot be imported into production code).
 
@@ -378,8 +444,8 @@ After all seven components ship, the following should hold on the reporter's ins
 - **Session previews render the session's captured scrollback** for every session in the picker. The scrollback directory contains one `.bin` per live pane keyed by paneKey, and is stable across daemon ticks (no oscillation).
 - **`K` permanently kills sessions.** `portal open` after a kill does NOT reconstruct the killed session. `sessions.json` no longer contains the killed session and is not overwritten by a competing daemon.
 - **Daemon log is quiet under steady state.** No `"another daemon holds the lock"` entries, no `"prior daemon did not exit within 5s"` entries, no `"no such session: _portal-saver"` entries, and no hydrate-side `"scrollback file not found for --hook-key=…"` warnings (these surface when the GC race has deleted the `.bin` a hydrate helper expected to find).
-- **`pgrep -xc 'portal state daemon'` returns 1** at all times under steady state (after the legitimate daemon spawned by `EnsureSaver` has come up). After bootstrap, never more.
-- **`daemon.version` file content matches the running binary's version.** On the reporter's install, `daemon.version` was `0.5.5` after a 0.5.6 upgrade — direct evidence that `EnsurePortalSaverVersion` was not running cleanly because the kill-barrier was timing out. Post-fix, `daemon.version` should track the running binary on every bootstrap.
+- **`pgrep -fxc 'portal state daemon'` returns 1** at all times under steady state (after the legitimate daemon spawned by `EnsureSaver` has come up). After bootstrap, never more.
+- **`daemon.version` file content matches the running binary's version.** On the reporter's install, `daemon.version` was `0.5.5` after a 0.5.6 upgrade — direct evidence that `EnsurePortalSaverVersion` was not running cleanly because the kill-barrier was timing out. Post-fix, `daemon.version` should track the running binary on every bootstrap. **This is observation-only, not a direct test of any single component** — it is a downstream consequence of Components A and B unblocking the kill-barrier so `EnsurePortalSaverVersion` can recycle the saver when the version marker is stale. No component takes explicit ownership of this acceptance; if it fails on a real install, the diagnostic path is to check whether A's escalation or B's sweep ran successfully.
 - **Orphan daemon lifetime, if one somehow appears between bootstraps, is bounded by Component D's hysteresis** (~3–4 s with the current ~1 s tick interval) plus the per-tick check itself.
 
 ## Transitional Recovery for the Reporter's Install

@@ -1,10 +1,30 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-22
 cycle: 1
 phase: Gap Analysis
 topic: slow-open-empty-previews-and-zombie-sessions
 ---
+
+Resolution summary: all 17 findings approved and applied to the specification in auto mode. Resolution fields below remain marked Pending in the per-item blocks — the authoritative status is the file-level `status: complete` plus the consolidated summary here. Highlights:
+
+1. pgrep -fx with anchored regex (macOS compat); acceptance criteria updated to use `pgrep -fxc`.
+2. New "Shared Primitive — Daemon Identity Check" section added with IdentifyResult contract and per-component error semantics.
+3. Placeholder switched to `sh -c 'exec tail -f /dev/null'`; sleep infinity rejection rationale recorded.
+4. Acceptance criteria for A/D reframed to scrollback-directory snapshot/delta comparison (no writer-PID attribution).
+5. Component E total-failure guard now classifies per-session errors into natural-churn vs anomalous; natural-churn proceeds, anomalous skips commit.
+6. Test staging note added to Component D specifying direct-spawn and state-dir prep.
+7. daemon.pid write location pinned to "next statement after AcquireDaemonLock returns"; layered enforcement note added.
+8. Bootstrap step ordering: full 11-step post-insertion list enumerated.
+9. Component F: readiness barrier (2 s @ 50 ms cadence polling daemon.pid + identity-check) added as step 4.
+10. ComponentDaemon constant confirmed (no new constant); code snippet updated.
+11. Component D measurement-artefact acceptance criterion added (in-source comment citing measured value + 2× factor).
+12. Component G mtime backstop: full fileFingerprint shape (exists/size/mtime/ctime/sha256 for ≤1MiB) specified; lstat semantics + scope.
+13. Component C exit semantics: status 1 with WARN under ComponentDaemon for persistent-mismatch; ErrDaemonLockHeld retains status 0.
+14. Component F + placeholder/B-sweep interaction note added.
+15. Component A SIGKILL poll cadence pinned at 50 ms.
+16. Tick-interval reference to stateDaemonTickInterval added.
+17. daemon.version verification noted as observation-only downstream consequence of A+B.
 
 # Review Tracking: slow-open-empty-previews-and-zombie-sessions - Gap Analysis
 
