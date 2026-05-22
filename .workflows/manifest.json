@@ -80,6 +80,9 @@
     },
     "killed-session-resurrects-within-tick-window": {
       "work_type": "bugfix"
+    },
+    "three-column-keymap-footer": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
