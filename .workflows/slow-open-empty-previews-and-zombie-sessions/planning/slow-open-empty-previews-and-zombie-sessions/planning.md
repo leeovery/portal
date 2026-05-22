@@ -19,6 +19,17 @@ approved_at: 2026-05-22
 - [ ] `CLAUDE.md` (or new `TESTING.md`) documents the test-isolation contract under "DI / testing pattern", locatable via search for "test isolation" or "XDG_CONFIG_HOME"
 - [ ] Existing integration test suite passes after helper updates
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-1-1 | Implement state.IdentifyDaemon primitive | dead PID, recycled PID, unrelated process, ps exec failure, malformed/empty ps output, whitespace in comm/args |
+| slow-open-empty-previews-and-zombie-sessions-1-2 | Implement portaltest.NewIsolatedStateEnv helper | pre-existing XDG_CONFIG_HOME unset, HOME preserved, env usable for exec.Cmd.Env, test-only signature via *testing.T |
+| slow-open-empty-previews-and-zombie-sessions-1-3 | Add fingerprint-diff t.Cleanup backstop to isolation helper | missing pre-test state dir, symlink target change via lstat, files >1 MiB (skip content hash), nested file changes, sibling dirs out of scope |
+| slow-open-empty-previews-and-zombie-sessions-1-4 | Audit and migrate existing test helpers to isolated env | helpers building but not spawning (out of scope tag b), indirect spawn wrappers, inline subprocess calls outside helpers |
+| slow-open-empty-previews-and-zombie-sessions-1-5 | Document test-isolation contract in CLAUDE.md | section searchable for "test isolation" / "XDG_CONFIG_HOME", no lint claim |
+
 ### Phase 2: Capture Pipeline Hardening (Component E)
 status: approved
 approved_at: 2026-05-22
