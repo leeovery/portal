@@ -25,7 +25,10 @@
           "phase": 1,
           "task": "~",
           "task_map": {
-            "three-column-keymap-footer-1-1": "tick-6ca74a"
+            "three-column-keymap-footer-1-1": "tick-6ca74a",
+            "three-column-keymap-footer-2": "tick-894882",
+            "three-column-keymap-footer-2-1": "tick-e52394",
+            "three-column-keymap-footer-2-2": "tick-8a59ee"
           },
           "external_id": "tick-1658ca"
         }
@@ -44,7 +47,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

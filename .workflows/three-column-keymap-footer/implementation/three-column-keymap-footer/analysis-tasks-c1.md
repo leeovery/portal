@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: three-column-keymap-footer (Cycle 1)
 
 ## Task 1: Extract shared nav+filter binding prefix and switch footer helpers to *list.Model
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -36,7 +36,7 @@ sources: duplication, architecture
 - No new tests required — pure refactor under full coverage from pinned tests.
 
 ## Task 2: Consolidate pairwise-duplicate list-size helpers into a single applyListSize
-status: pending
+status: approved
 severity: low
 sources: duplication
 
