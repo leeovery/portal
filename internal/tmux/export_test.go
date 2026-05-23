@@ -49,6 +49,23 @@ func BarrierPollIntervalSeam() *time.Duration { return &killBarrierPollInterval 
 // BarrierTimeoutSeam returns a pointer to the killBarrierTimeout seam.
 func BarrierTimeoutSeam() *time.Duration { return &killBarrierTimeout }
 
+// BarrierEscalationTimeoutSeam returns a pointer to the
+// killBarrierEscalationTimeout seam so escalation-path tests can shrink the
+// post-SIGKILL poll budget.
+func BarrierEscalationTimeoutSeam() *time.Duration { return &killBarrierEscalationTimeout }
+
+// BarrierIdentifyDaemonSeam returns a pointer to the killBarrierIdentifyDaemon
+// seam so escalation-path tests can deterministically drive identity-check
+// outcomes without shelling out to ps.
+func BarrierIdentifyDaemonSeam() *func(int) (state.IdentifyResult, error) {
+	return &killBarrierIdentifyDaemon
+}
+
+// BarrierSendSIGKILLSeam returns a pointer to the killBarrierSendSIGKILL seam
+// so escalation-path tests can record invocations and inject errors without
+// signalling real processes.
+func BarrierSendSIGKILLSeam() *func(int) error { return &killBarrierSendSIGKILL }
+
 // BarrierLoggerSeam returns a pointer to the killBarrierLogger seam so tests
 // can install a recording fake satisfying the BarrierLogger interface.
 func BarrierLoggerSeam() *BarrierLogger { return &killBarrierLogger }

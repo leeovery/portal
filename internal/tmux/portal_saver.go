@@ -3,6 +3,7 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"syscall"
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
@@ -163,6 +164,38 @@ var killBarrierPollInterval = 50 * time.Millisecond
 // sweeps. Exported as a var so tests can shrink it.
 var killBarrierTimeout = 5 * time.Second
 
+// killBarrierEscalationTimeout is the upper bound on the post-SIGKILL poll
+// window in the escalation path. After the session-kill poll loop times out
+// (killBarrierTimeout) and the prior PID identity-checks as a portal state
+// daemon, killSaverAndWaitForDaemon sends SIGKILL directly and then polls
+// killBarrierIsAlive at killBarrierPollInterval cadence for up to this
+// duration. Sized to a single second — SIGKILL is unblockable, so the
+// process should be reaped almost immediately on any healthy system; the
+// budget exists only to surface persistently-undead processes via a single
+// WARN. Exported as a var so tests can shrink it.
+var killBarrierEscalationTimeout = 1 * time.Second
+
+// killBarrierIdentifyDaemon is the function used by killSaverAndWaitForDaemon's
+// escalation path to identity-check the prior PID immediately before sending
+// SIGKILL. Defaults to state.IdentifyDaemon — the shared three-result primitive
+// that classifies whether a PID is a live `portal state daemon`. A
+// package-level seam so kill-barrier unit tests can deterministically drive
+// the IdentifyIsPortalDaemon / IdentifyNotPortalDaemon / IdentifyDead /
+// transient-error branches without shelling out to ps.
+var killBarrierIdentifyDaemon = state.IdentifyDaemon
+
+// killBarrierSendSIGKILL is the function used by killSaverAndWaitForDaemon's
+// escalation path to send SIGKILL directly to the prior PID after the
+// identity-check has succeeded. Defaults to syscall.Kill(pid, SIGKILL). A
+// package-level seam so kill-barrier unit tests can record invocations and
+// inject errors without signalling real processes. Routing through the seam
+// also makes the "no SIGTERM ever sent" invariant trivially verifiable: only
+// SIGKILL flows through this seam, and tests can confirm no other signal
+// emission happens.
+var killBarrierSendSIGKILL = func(pid int) error {
+	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
 // BarrierLogger is the minimal logging seam killSaverAndWaitForDaemon needs.
 // A single Warn method is the smallest surface that conveys the spec's
 // observable shape: one WARN-level event on barrier timeout.
@@ -275,11 +308,26 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 //     equivalent to "already absent" for our purposes). Then enter the poll
 //     loop: re-probe killBarrierIsAlive every killBarrierPollInterval until
 //     it returns false or killBarrierTimeout elapses.
-//  4. On timeout → emit exactly one WARN via killBarrierLogger and return
-//     nil. The new daemon's lock acquisition is the safety net for the
-//     genuinely-stuck case.
+//  4. On session-kill poll timeout → escalate (spec § Component A —
+//     Kill-Barrier Escalation):
+//     (a) Identity-check the prior PID via killBarrierIdentifyDaemon. If the
+//     result is anything other than IdentifyIsPortalDaemon (recycled PID,
+//     transient ps error, IdentifyDead) → emit one WARN and return nil
+//     without signalling. Safety bias: never signal a PID we cannot
+//     positively identify as a portal state daemon.
+//     (b) IMMEDIATELY (no intervening statements that could let the PID
+//     recycle between check and signal) send SIGKILL via
+//     killBarrierSendSIGKILL. SIGKILL is unblockable and bypasses the
+//     daemon's shutdown handler — we explicitly do NOT want the orphan to
+//     execute one final destructive captureAndCommit on its way out.
+//     (c) Post-SIGKILL poll: probe killBarrierIsAlive at
+//     killBarrierPollInterval cadence (50ms by default) for up to
+//     killBarrierEscalationTimeout (1s by default). On exit → return nil.
+//     On persistent aliveness → emit one WARN and return nil.
 //
-// The helper never writes to the state directory.
+// The helper never writes to the state directory. WARN is emitted at most
+// once per invocation across the entire flow; the new daemon's lock
+// acquisition is the safety net for genuinely-stuck cases.
 func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	priorPID, readErr := killBarrierReadPID(stateDir)
 	if readErr != nil {
@@ -297,24 +345,69 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	// Prior daemon alive — issue kill-session once and wait for exit.
 	_ = c.KillSession(PortalSaverName)
 
+	if waitForPriorPIDExit(priorPID, killBarrierTimeout) {
+		return nil
+	}
+
+	// Session-kill poll exhausted with the prior daemon still alive.
+	// Escalate via identity-check + direct SIGKILL.
+	return escalateKillToSIGKILL(priorPID)
+}
+
+// waitForPriorPIDExit polls killBarrierIsAlive(pid) at killBarrierPollInterval
+// cadence until it returns false or budget elapses. Returns true on observed
+// exit, false on timeout. Used by killSaverAndWaitForDaemon's session-kill
+// wait stage; the post-SIGKILL wait stage shares the same probe primitive via
+// an inline loop tuned to the escalation budget.
+func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 	ticker := time.NewTicker(killBarrierPollInterval)
 	defer ticker.Stop()
 
-	deadline := time.Now().Add(killBarrierTimeout)
+	deadline := time.Now().Add(budget)
 	for range ticker.C {
-		if !killBarrierIsAlive(priorPID) {
-			return nil
+		if !killBarrierIsAlive(pid) {
+			return true
 		}
 		if !time.Now().Before(deadline) {
-			killBarrierLogger.Warn(
-				state.ComponentBootstrap,
-				"prior daemon (pid=%d) did not exit within %v",
-				priorPID,
-				killBarrierTimeout,
-			)
-			return nil
+			return false
 		}
 	}
+	return false
+}
+
+// escalateKillToSIGKILL runs the Component A escalation: identity-check
+// priorPID and, only on IdentifyIsPortalDaemon, send SIGKILL via the seam as
+// the IMMEDIATELY-following statement. Then poll killBarrierIsAlive at
+// killBarrierPollInterval cadence for up to killBarrierEscalationTimeout.
+// All exit paths emit at most one WARN and return nil — bootstrap is
+// best-effort at this stage and the new daemon's lock acquisition is the
+// structural safety net.
+//
+// The identity-check → SIGKILL pairing is the spec's load-bearing
+// residual-recycle-window invariant: no work (other than the syscall itself)
+// runs between the check and the signal. The two seam calls are deliberately
+// adjacent in source.
+func escalateKillToSIGKILL(priorPID int) error {
+	result, err := killBarrierIdentifyDaemon(priorPID)
+	if err != nil || result != state.IdentifyIsPortalDaemon {
+		killBarrierLogger.Warn(
+			state.ComponentBootstrap,
+			"prior daemon (pid=%d) not identity-checked as portal state daemon; skipping SIGKILL",
+			priorPID,
+		)
+		return nil
+	}
+	_ = killBarrierSendSIGKILL(priorPID)
+
+	if waitForPriorPIDExit(priorPID, killBarrierEscalationTimeout) {
+		return nil
+	}
+	killBarrierLogger.Warn(
+		state.ComponentBootstrap,
+		"prior daemon (pid=%d) survived SIGKILL escalation within %v",
+		priorPID,
+		killBarrierEscalationTimeout,
+	)
 	return nil
 }
 

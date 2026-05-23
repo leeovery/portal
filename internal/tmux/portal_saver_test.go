@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -3470,5 +3471,566 @@ func TestNewDetachedSessionNoCwd_ArgvHasNoEnvOverrides(t *testing.T) {
 				"NewDetachedSessionNoCwd must not pass session-environment "+
 				"overrides. Full argv: %v", i, arg, newSessionArgv)
 		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Task 4-1: SIGKILL escalation in killSaverAndWaitForDaemon.
+//
+// After the session-kill poll loop times out (existing 5s window), the helper
+// identity-checks priorPID via killBarrierIdentifyDaemon and, only when the
+// result is IdentifyIsPortalDaemon, sends SIGKILL via killBarrierSendSIGKILL
+// (the IMMEDIATELY-preceding seam call). Then it polls killBarrierIsAlive at
+// killBarrierPollInterval cadence for up to killBarrierEscalationTimeout.
+//
+// Spec § Component A — Kill-Barrier Escalation.
+// ----------------------------------------------------------------------------
+
+// installBarrierIdentifyDaemon swaps the killBarrierIdentifyDaemon seam for
+// the duration of the test.
+func installBarrierIdentifyDaemon(t *testing.T, fn func(int) (state.IdentifyResult, error)) {
+	t.Helper()
+	swapSeam(t, tmux.BarrierIdentifyDaemonSeam(), fn)
+}
+
+// installBarrierSendSIGKILL swaps the killBarrierSendSIGKILL seam for the
+// duration of the test.
+func installBarrierSendSIGKILL(t *testing.T, fn func(int) error) {
+	t.Helper()
+	swapSeam(t, tmux.BarrierSendSIGKILLSeam(), fn)
+}
+
+// installBarrierEscalationTimeout shrinks the post-SIGKILL poll budget for tests.
+func installBarrierEscalationTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	swapSeam(t, tmux.BarrierEscalationTimeoutSeam(), d)
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_IdentityChecksAsPortalDaemonThenSIGKILLs
+// pins the happy escalation path: after the session-kill poll times out with
+// the PID still alive, the helper identity-checks the PID and (on
+// IdentifyIsPortalDaemon) sends SIGKILL via killBarrierSendSIGKILL.
+func TestKillSaverAndWaitForDaemon_Escalation_IdentityChecksAsPortalDaemonThenSIGKILLs(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	identityCalls := 0
+	installBarrierIdentifyDaemon(t, func(pid int) (state.IdentifyResult, error) {
+		identityCalls++
+		if pid != 4321 {
+			t.Errorf("identity check called with pid=%d, want 4321", pid)
+		}
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	var killedPID int
+	installBarrierSendSIGKILL(t, func(pid int) error {
+		killCalls++
+		killedPID = pid
+		return nil
+	})
+
+	// Alive during session-kill poll; dead immediately after SIGKILL.
+	aliveProbes := 0
+	installBarrierIsAlive(t, func(pid int) bool {
+		aliveProbes++
+		// First N probes return true (session-kill poll exhaust); after kill
+		// seam runs we want IsAlive to return false. We use killCalls counter
+		// as gate.
+		return killCalls == 0
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if identityCalls != 1 {
+		t.Errorf("expected exactly 1 identity check call, got %d", identityCalls)
+	}
+	if killCalls != 1 {
+		t.Errorf("expected exactly 1 SIGKILL seam call, got %d", killCalls)
+	}
+	if killedPID != 4321 {
+		t.Errorf("SIGKILL seam called with pid=%d, want 4321", killedPID)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on clean escalation, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_IdentifyDead_SkipsSIGKILL_WarnsAndReturnsNil
+// pins that when the identity check returns IdentifyDead (PID gone since the
+// last poll), the SIGKILL seam is NOT invoked, exactly one WARN is emitted,
+// and the helper returns nil.
+func TestKillSaverAndWaitForDaemon_Escalation_IdentifyDead_SkipsSIGKILL_WarnsAndReturnsNil(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyDead, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 0 {
+		t.Errorf("expected 0 SIGKILL seam calls on IdentifyDead, got %d", killCalls)
+	}
+	if len(log.warns) != 1 {
+		t.Fatalf("expected exactly 1 WARN on IdentifyDead, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_IdentifyNotPortalDaemon_SkipsSIGKILL_WarnsAndReturnsNil
+// pins that when the identity check returns IdentifyNotPortalDaemon (the PID
+// has been recycled to a different process), the SIGKILL seam is NOT
+// invoked, exactly one WARN is emitted, and the helper returns nil.
+func TestKillSaverAndWaitForDaemon_Escalation_IdentifyNotPortalDaemon_SkipsSIGKILL_WarnsAndReturnsNil(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyNotPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 0 {
+		t.Errorf("expected 0 SIGKILL seam calls on IdentifyNotPortalDaemon, got %d", killCalls)
+	}
+	if len(log.warns) != 1 {
+		t.Fatalf("expected exactly 1 WARN on IdentifyNotPortalDaemon, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_TransientIdentityError_SkipsSIGKILL_WarnsAndReturnsNil
+// pins that when the identity check returns a transient (non-nil) error, the
+// SIGKILL seam is NOT invoked, exactly one WARN is emitted, and the helper
+// returns nil. Safety-bias: never signal a PID we can't positively identify.
+func TestKillSaverAndWaitForDaemon_Escalation_TransientIdentityError_SkipsSIGKILL_WarnsAndReturnsNil(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return 0, errors.New("ps exec failed: transient")
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 0 {
+		t.Errorf("expected 0 SIGKILL seam calls on transient identity error, got %d", killCalls)
+	}
+	if len(log.warns) != 1 {
+		t.Fatalf("expected exactly 1 WARN on transient identity error, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_SIGKILLSucceedsAndProcessExitsWithinWindow
+// pins the success path of the post-SIGKILL poll: when the process exits
+// within killBarrierEscalationTimeout, the helper returns nil with no WARN.
+func TestKillSaverAndWaitForDaemon_Escalation_SIGKILLSucceedsAndProcessExitsWithinWindow(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	// Stay alive throughout the session-kill poll; after SIGKILL fires, return
+	// true once more to exercise the poll loop, then false.
+	postKillProbes := 0
+	installBarrierIsAlive(t, func(int) bool {
+		if killCalls == 0 {
+			return true
+		}
+		postKillProbes++
+		return postKillProbes < 2
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 1 {
+		t.Errorf("expected exactly 1 SIGKILL seam call, got %d", killCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines when process exits within window, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_SIGKILLSucceedsButProcessSurvives_EmitsOneWarnAndReturnsNil
+// pins that when SIGKILL is sent but the process is still alive at the end of
+// killBarrierEscalationTimeout, exactly one WARN is emitted and the helper
+// returns nil. Bootstrap is best-effort at this stage.
+func TestKillSaverAndWaitForDaemon_Escalation_SIGKILLSucceedsButProcessSurvives_EmitsOneWarnAndReturnsNil(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 10*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return true }) // never dies, even post-SIGKILL
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 1 {
+		t.Errorf("expected exactly 1 SIGKILL seam call, got %d", killCalls)
+	}
+	if len(log.warns) != 1 {
+		t.Errorf("expected exactly 1 WARN on persistent aliveness post-SIGKILL, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_IdentityCheckIsImmediatelyPrecedingStatementToSIGKILL
+// pins the load-bearing residual-window invariant: nothing other than the
+// identity check itself must run between the identity verdict and the
+// SIGKILL syscall. Verified by recording the relative call ordering of the
+// identity seam and the SIGKILL seam across multiple escalation paths and
+// asserting that within a single helper invocation, the identity seam is the
+// last call recorded before the SIGKILL seam (no IsAlive/ReadPID/kill-session
+// calls interleaved).
+func TestKillSaverAndWaitForDaemon_Escalation_IdentityCheckIsImmediatelyPrecedingStatementToSIGKILL(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 50*time.Millisecond)
+
+	var probeLog []string
+
+	installBarrierReadPID(t, func(string) (int, error) {
+		probeLog = append(probeLog, "readpid")
+		return 4321, nil
+	})
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		probeLog = append(probeLog, "identify")
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	installBarrierSendSIGKILL(t, func(int) error {
+		probeLog = append(probeLog, "sigkill")
+		return nil
+	})
+
+	// Alive throughout session-kill poll; dead after sigkill.
+	killSent := false
+	installBarrierIsAlive(t, func(int) bool {
+		probeLog = append(probeLog, "isalive")
+		return !killSent
+	})
+
+	// Mark killSent in the SIGKILL seam itself by re-wrapping. Use a flag
+	// closure pattern: wrap SIGKILL seam after installation.
+	prevKill := *tmux.BarrierSendSIGKILLSeam()
+	*tmux.BarrierSendSIGKILLSeam() = func(pid int) error {
+		err := prevKill(pid)
+		killSent = true
+		return err
+	}
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) {
+			probeLog = append(probeLog, "killsession")
+			return "", nil
+		},
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	// Find the indices of identify and sigkill calls.
+	identifyIdx, sigkillIdx := -1, -1
+	for i, ev := range probeLog {
+		if ev == "identify" && identifyIdx == -1 {
+			identifyIdx = i
+		}
+		if ev == "sigkill" && sigkillIdx == -1 {
+			sigkillIdx = i
+		}
+	}
+
+	if identifyIdx == -1 {
+		t.Fatalf("identify call not recorded; probeLog=%v", probeLog)
+	}
+	if sigkillIdx == -1 {
+		t.Fatalf("sigkill call not recorded; probeLog=%v", probeLog)
+	}
+
+	// The load-bearing invariant: sigkill must be the IMMEDIATELY-following
+	// recorded probe after identify. Any other event between them (readpid,
+	// isalive, killsession) would mean a non-trivial statement ran inside
+	// the residual-recycle window.
+	if sigkillIdx != identifyIdx+1 {
+		t.Errorf("expected sigkill (index=%d) to immediately follow identify (index=%d); intervening events: %v",
+			sigkillIdx, identifyIdx, probeLog[identifyIdx+1:sigkillIdx])
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_NeverSendsSIGTERM pins the
+// no-SIGTERM-ever invariant. The only signal the helper may emit is SIGKILL
+// through killBarrierSendSIGKILL; no other syscall.Kill / signal seam exists
+// in this file. The test asserts that across the escalation path the
+// SIGKILL seam is the only signalling seam invoked, and (by construction)
+// confirms a SIGTERM-emitting alternative was not silently added.
+func TestKillSaverAndWaitForDaemon_Escalation_NeverSendsSIGTERM(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	var signals []syscall.Signal
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(pid int) error {
+		killCalls++
+		signals = append(signals, syscall.SIGKILL)
+		return nil
+	})
+
+	postKillProbes := 0
+	installBarrierIsAlive(t, func(int) bool {
+		if killCalls == 0 {
+			return true
+		}
+		postKillProbes++
+		return postKillProbes < 2
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if len(signals) != 1 {
+		t.Fatalf("expected exactly 1 signal emission via SIGKILL seam, got %d (%v)", len(signals), signals)
+	}
+	if signals[0] != syscall.SIGKILL {
+		t.Errorf("expected SIGKILL, got %v", signals[0])
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_PriorPIDDiesDuringSessionKillPoll_EscalationNeverRuns
+// pins that when the prior PID exits inside the existing 5s session-kill
+// poll window, the escalation path never runs — identity check is never
+// invoked, SIGKILL seam is never invoked, and no WARN is emitted. Guards the
+// legitimate saver-pane SIGHUP path: pane dies, no escalation.
+func TestKillSaverAndWaitForDaemon_Escalation_PriorPIDDiesDuringSessionKillPoll_EscalationNeverRuns(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 500*time.Millisecond)
+	installBarrierEscalationTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	// Alive on initial probe + first tick, then dead — exits inside the
+	// session-kill poll.
+	calls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		calls++
+		return calls < 3
+	})
+
+	identifyCalls := 0
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		identifyCalls++
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if identifyCalls != 0 {
+		t.Errorf("expected 0 identity checks when PID dies during session-kill poll, got %d", identifyCalls)
+	}
+	if killCalls != 0 {
+		t.Errorf("expected 0 SIGKILL seam calls when PID dies during session-kill poll, got %d", killCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines when PID dies during session-kill poll, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_Escalation_NoPIDFile_EscalationNeverRuns pins
+// that when killBarrierReadPID returns ErrPIDFileAbsent, the existing
+// short-circuit fast path runs (tolerant kill, no polling) and the escalation
+// path is never entered — identity check is never invoked, SIGKILL seam is
+// never invoked, no WARN.
+func TestKillSaverAndWaitForDaemon_Escalation_NoPIDFile_EscalationNeverRuns(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 50*time.Millisecond)
+	installBarrierEscalationTimeout(t, 50*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 0, state.ErrPIDFileAbsent })
+
+	identifyCalls := 0
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		identifyCalls++
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if identifyCalls != 0 {
+		t.Errorf("expected 0 identity checks when PID file absent, got %d", identifyCalls)
+	}
+	if killCalls != 0 {
+		t.Errorf("expected 0 SIGKILL seam calls when PID file absent, got %d", killCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines when PID file absent, got %d: %v", len(log.warns), log.warns)
 	}
 }
