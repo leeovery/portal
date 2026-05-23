@@ -26,11 +26,42 @@ const PortalSaverName = "_portal-saver"
 // other code MUST NOT create or re-use a session with this name.
 const PortalBootstrapName = "_portal-bootstrap"
 
-// portalSaverCommand is the shell command run as the saver session's initial
-// process. tmux owns the daemon's lifecycle: when this session is killed (or
-// the server dies), the kernel delivers SIGHUP to the daemon for graceful
-// shutdown.
-const portalSaverCommand = "portal state daemon"
+// portalSaverPlaceholderCommand is the shell command run as the saver
+// session's initial pane process at session-creation time, before
+// destroy-unattached=off has been applied. It is intentionally inert:
+//
+//  1. `exec tail -f /dev/null` blocks indefinitely on both macOS and Linux
+//     without consuming CPU — `tail` waits on inotify/kqueue for a file that
+//     never changes.
+//  2. The more idiomatic-looking `sleep infinity` is NOT used because the
+//     BSD `sleep(1)` shipped with macOS rejects the literal "infinity" with a
+//     parse error. `tail -f /dev/null` is portable across both platforms with
+//     no behavioural difference.
+//  3. The placeholder is structurally incapable of writing to the state
+//     directory or contending for the daemon lock — it never opens
+//     `daemon.lock`, never writes `daemon.pid`, never writes
+//     `daemon.version`. This is the whole point of running it before the
+//     real daemon: Component F applies destroy-unattached=off to the
+//     placeholder session, then `respawn-pane -k` swaps in the daemon, so
+//     the daemon never sees a session that could auto-destroy out from under
+//     it.
+//  4. The placeholder process lives until either `respawn-pane -k`
+//     terminates it (the normal Component F handoff) or `tmux kill-session`
+//     tears down `_portal-saver` outright. tmux does not deliver SIGHUP to
+//     this process when the server dies in any way that requires graceful
+//     shutdown — the placeholder has no state to flush.
+const portalSaverPlaceholderCommand = "sh -c 'exec tail -f /dev/null'"
+
+// portalSaverDaemonCommand is the real saver pane process — the long-running
+// `portal state daemon` invocation that owns sessions.json capture, FIFO
+// sweeps, and the daemon lock. It is installed into the saver pane by
+// `respawn-pane -k` after destroy-unattached=off has been applied to the
+// session by Component F's reorder; running it as the initial pane process
+// (the pre-Component-F shape) would race the destroy-unattached default
+// against the daemon's startup. tmux owns the daemon's lifecycle: when this
+// session is killed (or the server dies), the kernel delivers SIGHUP to the
+// daemon for graceful shutdown.
+const portalSaverDaemonCommand = "portal state daemon"
 
 // BootstrapAliveCheck is the function used to test whether a daemon is alive
 // for a given state directory. It is a package-level seam so tests can stub
@@ -396,7 +427,7 @@ func shouldKillSaverOnVersionDecision(stored, currentVersion string, readErr err
 func createPortalSaverWithRetry(c *Client) error {
 	var lastErr error
 	for attempt := 1; attempt <= portalSaverMaxAttempts; attempt++ {
-		err := c.NewDetachedSessionNoCwd(PortalSaverName, portalSaverCommand)
+		err := c.NewDetachedSessionNoCwd(PortalSaverName, portalSaverDaemonCommand)
 		if err == nil {
 			return nil
 		}

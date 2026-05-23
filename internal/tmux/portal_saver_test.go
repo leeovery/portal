@@ -2348,3 +2348,26 @@ func TestEnsurePortalSaverVersion_NotAlive_Absent_DoesNotInvokeDefensiveWrite(t 
 		t.Errorf("expected 0 defensive write calls when daemon not alive, got %d", writeCalls)
 	}
 }
+
+// TestPortalSaverPlaceholderCommand_LiteralValue pins the placeholder command
+// constant to its exact literal so an accidental drift (e.g. switching to
+// `sleep infinity`, which BSD sleep rejects on macOS) cannot land silently.
+// The placeholder is the create-time pane process used in Component F before
+// destroy-unattached=off has been applied; it is structurally incapable of
+// writing to the state directory or contending for the daemon lock.
+func TestPortalSaverPlaceholderCommand_LiteralValue(t *testing.T) {
+	const want = "sh -c 'exec tail -f /dev/null'"
+	if got := tmux.PortalSaverPlaceholderCommand; got != want {
+		t.Errorf("PortalSaverPlaceholderCommand = %q, want %q", got, want)
+	}
+}
+
+// TestPortalSaverDaemonCommand_LiteralValue pins the daemon command constant
+// to its exact literal. This is the real saver pane process installed by
+// respawn-pane -k once destroy-unattached=off is in effect.
+func TestPortalSaverDaemonCommand_LiteralValue(t *testing.T) {
+	const want = "portal state daemon"
+	if got := tmux.PortalSaverDaemonCommand; got != want {
+		t.Errorf("PortalSaverDaemonCommand = %q, want %q", got, want)
+	}
+}

@@ -14,6 +14,20 @@ import (
 // KillSaverAndWaitForDaemon re-exports killSaverAndWaitForDaemon for tests.
 var KillSaverAndWaitForDaemon = killSaverAndWaitForDaemon
 
+// PortalSaverPlaceholderCommand re-exports portalSaverPlaceholderCommand so
+// the external tmux_test package can pin its literal value. The placeholder
+// is the create-time pane process used in Component F before
+// destroy-unattached=off has been applied; see portal_saver.go for the full
+// rationale (macOS BSD sleep rejects "infinity", placeholder cannot contend
+// for the daemon lock, etc.).
+const PortalSaverPlaceholderCommand = portalSaverPlaceholderCommand
+
+// PortalSaverDaemonCommand re-exports portalSaverDaemonCommand so the
+// external tmux_test package can pin its literal value. This is the real
+// saver pane process installed by `respawn-pane -k` once
+// destroy-unattached=off is in effect on the session.
+const PortalSaverDaemonCommand = portalSaverDaemonCommand
+
 // ShouldKillSaverOnVersionDecision re-exports the
 // shouldKillSaverOnVersionDecision predicate so the external tmux_test
 // package can drive its truth matrix directly. The predicate encodes the
