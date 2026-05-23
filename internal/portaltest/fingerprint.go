@@ -23,37 +23,47 @@ import (
 // test cleanup.
 const hashSizeCap = 1 << 20 // 1 MiB
 
-// fileFingerprint captures everything needed to detect mutation of
-// a single filesystem entry under the developer's state directory.
+// Fingerprint captures everything needed to detect mutation of a
+// single filesystem entry under a directory tree.
 //
 // All stats are gathered via os.Lstat so symlink mutations (target
 // change, file-to-symlink swap) are visible at the snapshot layer.
 //
-// hashed reports whether sha256 was populated; for files >hashSizeCap
+// Hashed reports whether Sha256 was populated; for files >hashSizeCap
 // and for non-regular entries (symlinks, directories) it is false and
-// the snapshot relies on size/mtime/ctime (and symlinkTarget for
-// symlinks) to detect change.
-type fileFingerprint struct {
-	exists        bool
-	size          int64
-	mtimeNanos    int64
-	ctimeNanos    int64
-	sha256        [32]byte
-	hashed        bool
-	isSymlink     bool
-	symlinkTarget string
+// the snapshot relies on Size/MtimeNanos/CtimeNanos (and SymlinkTarget
+// for symlinks) to detect change.
+//
+// Exported (with exported fields) so out-of-package integration tests
+// can take a directory snapshot at a caller-chosen point in time and
+// compare two snapshots field-by-field. The shared shape keeps the
+// in-package backstop and out-of-package callers from drifting.
+type Fingerprint struct {
+	Exists        bool
+	Size          int64
+	MtimeNanos    int64
+	CtimeNanos    int64
+	Sha256        [32]byte
+	Hashed        bool
+	IsSymlink     bool
+	SymlinkTarget string
 }
 
-// snapshotStateDir walks root and returns a map keyed by path
+// SnapshotStateDir walks root and returns a map keyed by path
 // relative to root. A non-existent root yields an empty map and
-// nil error — any post-test content then counts as "created".
+// nil error — any post-snapshot content then counts as "created".
 //
 // Walk uses os.Lstat (NOT Stat) so symlinks at any depth report
 // their own inode metadata, not the target's. WalkDir does not
 // follow symlinks by default. Sub-symlinks pointing into the
 // directory are recorded as entries but not descended into.
-func snapshotStateDir(root string) (map[string]fileFingerprint, error) {
-	out := make(map[string]fileFingerprint)
+//
+// Exported for integration tests that need to compare two
+// snapshots at caller-chosen points (e.g. before/after a SIGKILL).
+// The in-package backstop in isolated_env.go consumes the same
+// function so the two paths cannot drift.
+func SnapshotStateDir(root string) (map[string]Fingerprint, error) {
+	out := make(map[string]Fingerprint)
 
 	if _, err := os.Lstat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -92,34 +102,35 @@ func snapshotStateDir(root string) (map[string]fileFingerprint, error) {
 	return out, nil
 }
 
-// fingerprintEntry stats path via Lstat, fills size/mtime/ctime/
-// symlinkTarget/sha256, and returns the populated fingerprint.
-func fingerprintEntry(path string) (fileFingerprint, error) {
-	fp := fileFingerprint{exists: true}
+// fingerprintEntry stats path via Lstat, fills Size/MtimeNanos/
+// CtimeNanos/SymlinkTarget/Sha256, and returns the populated
+// Fingerprint.
+func fingerprintEntry(path string) (Fingerprint, error) {
+	fp := Fingerprint{Exists: true}
 
 	info, err := os.Lstat(path)
 	if err != nil {
-		return fileFingerprint{}, err
+		return Fingerprint{}, err
 	}
-	fp.size = info.Size()
-	fp.mtimeNanos, fp.ctimeNanos = statNanos(info)
+	fp.Size = info.Size()
+	fp.MtimeNanos, fp.CtimeNanos = statNanos(info)
 
 	mode := info.Mode()
 	switch {
 	case mode&os.ModeSymlink != 0:
-		fp.isSymlink = true
+		fp.IsSymlink = true
 		target, readErr := os.Readlink(path)
 		if readErr != nil {
-			return fileFingerprint{}, readErr
+			return Fingerprint{}, readErr
 		}
-		fp.symlinkTarget = target
+		fp.SymlinkTarget = target
 	case mode.IsRegular() && info.Size() <= hashSizeCap:
 		sum, hashErr := hashFile(path)
 		if hashErr != nil {
-			return fileFingerprint{}, hashErr
+			return Fingerprint{}, hashErr
 		}
-		fp.sha256 = sum
-		fp.hashed = true
+		fp.Sha256 = sum
+		fp.Hashed = true
 	}
 	return fp, nil
 }
@@ -157,8 +168,8 @@ type errorReporter func(format string, args ...any)
 //
 // All deltas surface against the same path with the format
 // "portaltest backstop: developer state dir mutated at %s: %s".
-func reportStateDirDelta(report errorReporter, root string, pre map[string]fileFingerprint) {
-	post, err := snapshotStateDir(root)
+func reportStateDirDelta(report errorReporter, root string, pre map[string]Fingerprint) {
+	post, err := SnapshotStateDir(root)
 	if err != nil {
 		report("portaltest backstop: post-test snapshot of %s failed: %v", root, err)
 		return
@@ -189,33 +200,33 @@ const deltaFmt = "portaltest backstop: developer state dir mutated at %s: %s"
 // before and after for a path that exists in both snapshots.
 // Order is fixed (became-symlink first, then symlink target, then
 // size/mtime/ctime/content) so multi-field failures read cleanly.
-func emitFieldDeltas(report errorReporter, path string, before, after fileFingerprint) {
-	if before.isSymlink != after.isSymlink {
+func emitFieldDeltas(report errorReporter, path string, before, after Fingerprint) {
+	if before.IsSymlink != after.IsSymlink {
 		report(deltaFmt, path, "became-symlink")
 		// Other field-level deltas on a type swap are noise;
 		// surfacing one clear cause is sufficient.
 		return
 	}
-	if before.isSymlink && after.isSymlink && before.symlinkTarget != after.symlinkTarget {
+	if before.IsSymlink && after.IsSymlink && before.SymlinkTarget != after.SymlinkTarget {
 		report(deltaFmt, path, "symlink-target-changed")
 		return
 	}
-	if before.size != after.size {
+	if before.Size != after.Size {
 		report(deltaFmt, path, "size-changed")
 	}
-	if before.mtimeNanos != after.mtimeNanos {
+	if before.MtimeNanos != after.MtimeNanos {
 		report(deltaFmt, path, "mtime-changed")
 	}
-	if before.ctimeNanos != after.ctimeNanos {
+	if before.CtimeNanos != after.CtimeNanos {
 		report(deltaFmt, path, "ctime-changed")
 	}
-	if before.hashed && after.hashed && before.sha256 != after.sha256 {
+	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
 		report(deltaFmt, path, "content-changed")
 	}
 }
 
 // unionPaths returns the sorted union of map keys.
-func unionPaths(a, b map[string]fileFingerprint) []string {
+func unionPaths(a, b map[string]Fingerprint) []string {
 	seen := make(map[string]struct{}, len(a)+len(b))
 	for k := range a {
 		seen[k] = struct{}{}

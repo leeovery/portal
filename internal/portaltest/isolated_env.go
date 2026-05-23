@@ -45,9 +45,9 @@ func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string) {
 	// about to construct. A failure to snapshot is fatal: a silently
 	// degraded backstop is worse than no backstop.
 	devStateDir := resolveDevStateDir()
-	var preSnapshot map[string]fileFingerprint
+	var preSnapshot map[string]Fingerprint
 	if devStateDir != "" {
-		snap, err := snapshotStateDir(devStateDir)
+		snap, err := SnapshotStateDir(devStateDir)
 		if err != nil {
 			t.Fatalf("portaltest: snapshot dev state dir %s: %v", devStateDir, err)
 		}
@@ -95,7 +95,7 @@ type backstopT interface {
 // devStateDir on test exit and calls t.Errorf for every delta
 // against pre. Pure wiring — the diff logic lives in
 // reportStateDirDelta and is exercised independently.
-func installBackstopCleanup(t backstopT, devStateDir string, pre map[string]fileFingerprint) {
+func installBackstopCleanup(t backstopT, devStateDir string, pre map[string]Fingerprint) {
 	t.Cleanup(func() {
 		reportStateDirDelta(t.Errorf, devStateDir, pre)
 	})

@@ -1,0 +1,475 @@
+package tmux_test
+
+// Real-tmux integration test for spec § Component A acceptance bullet 4:
+// the "no final-flush GC cycle on escalation-killed orphans" invariant.
+//
+// Component A escalates the kill-barrier to SIGKILL on a recorded prior
+// PID that survived the session-kill poll, deliberately bypassing the
+// daemon's signal handler (`defaultShutdownFlush`) so the orphan does
+// NOT execute one more captureAndCommit / gcOrphanScrollback cycle on
+// its way out. The spec's verifiable shape: snapshot the scrollback
+// directory immediately before SIGKILL and again 200 ms after the
+// orphan exits — the two snapshots must be byte-equal across all five
+// fingerprint fields (existence, size, mtime ns, ctime ns, SHA-256 for
+// files ≤ 1 MiB; lstat semantics for symlinks).
+//
+// Test choreography (mirrors the "divergent-view orphan" scenario the
+// spec calls out — orphan is a live `portal state daemon` writing to
+// the test's state directory but is NOT the saver pane process):
+//
+//  1. tmuxtest.SkipIfNoTmux + applyHostNoiseMitigation + isolated state
+//     dir via portaltest.NewIsolatedStateEnv. PORTAL_STATE_DIR is
+//     pushed to the test process env so any subprocess we spawn
+//     inherits it.
+//  2. Stand up an isolated tmux server via tmuxtest.New. Create a
+//     regular `work` session so the daemon's captureAndCommit has at
+//     least one pane to enumerate (otherwise the daemon ticks but
+//     writes no scrollback and the precondition for the equality
+//     assertion fails as "snapshot never taken").
+//  3. Spawn the orphan: `portal state daemon` with PORTAL_STATE_DIR =
+//     stateDir. Because no `_portal-saver` session exists on this
+//     server, the orphan's per-tick saver-membership probe
+//     (defaultSaverMembershipProbe → c.HasSession) returns false on
+//     every tick — the orphan is structurally a divergent-view daemon.
+//     It will self-eject after selfSupervisionHysteresisTicks (3) ticks
+//     ≈ 3 s; the test must complete its snapshot + SIGKILL within that
+//     window.
+//  4. Touch save.requested under stateDir so the orphan's tick captures
+//     immediately (instead of waiting up to maxGap = 30 s).
+//  5. Poll until ≥1 .bin appears in <stateDir>/scrollback/, bounded
+//     3 s. On timeout the test fails loudly ("snapshot never taken")
+//     so it can never silently pass against an empty pre-snapshot.
+//  6. Snapshot the scrollback directory via portaltest.SnapshotStateDir.
+//  7. syscall.Kill(orphan.PID, syscall.SIGKILL).
+//  8. Poll syscall.Kill(orphan.PID, 0) until ESRCH (orphan reaped),
+//     bounded 3 s.
+//  9. time.Sleep(200 * time.Millisecond) — the no-final-flush window
+//     the spec demands the post-exit snapshot is taken in.
+// 10. Snapshot the scrollback directory again.
+// 11. Assert byte-equal across the two maps: same keys, same field-
+//     by-field Fingerprint per key. On any delta, print a diagnostic
+//     citing the key and the field(s) that differ, both values.
+//
+// Why no _portal-saver session is created: the orphan's view is
+// already divergent by construction (no saver to be bound to). The
+// "divergent view" branch in the spec is exactly what this test
+// mirrors — a `portal state daemon` writing to the state dir while
+// NOT being the saver pane process. Creating a sibling _portal-saver
+// session with a placeholder would not change the orphan's
+// pid-mismatch outcome (probe still returns false) but would
+// introduce noise into the equality assertion (the placeholder's
+// daemon, were one to start, would also write — but no daemon is
+// the placeholder, it's `tail -f /dev/null`, so this is academic).
+// The minimal divergent-view shape is the cleanest fixture.
+//
+// Race window: from orphan-Start to self-eject is ≈ 3 s. The test
+// budget — snapshot + SIGKILL + ESRCH poll — must fit comfortably
+// inside that window. Empirical timing (darwin/arm64, tmux 3.6b):
+// first .bin appears ~1.0–1.2 s post-Start; SnapshotStateDir of a
+// scrollback dir with one .bin takes <5 ms; SIGKILL → ESRCH takes
+// <50 ms; 200 ms sleep is the dominant cost. Comfortable margin.
+//
+// If the orphan self-ejects before our SIGKILL syscall lands (e.g.
+// the host is under load and the 3-tick hysteresis fires before
+// step 7), the SIGKILL returns ESRCH and the post-exit snapshot is
+// still valid — the spec's invariant is "no final-flush after
+// escalation kill"; a self-eject is also a no-final-flush path
+// (cmd/state_daemon.go's osExit(0) call bypasses
+// daemonShutdownFunc just as SIGKILL bypasses the signal handler).
+// The equality assertion holds either way; the test diagnostic
+// includes the SIGKILL errno so a self-eject is observable in the
+// run log without changing the pass/fail outcome.
+//
+// No t.Parallel: the cmd-package convention applies here too —
+// mock-injection via package-level mutable state cleaned up by
+// t.Cleanup.
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/portalbintest"
+	"github.com/leeovery/portal/internal/portaltest"
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmuxtest"
+)
+
+// scrollbackEmergenceTimeout bounds the poll window for the orphan
+// to write at least one .bin file under <stateDir>/scrollback/.
+// Sized to cover daemon cold-start + ticker.NewTicker first-fire
+// (1 s) + captureAndCommit wall time with margin on slow CI.
+const scrollbackEmergenceTimeout = 3 * time.Second
+
+// scrollbackEmergencePollTick is the cadence at which the .bin-
+// emergence poll re-scans the scrollback dir. 50 ms matches the
+// existing readiness-barrier cadence so the test composes cleanly
+// with the rest of the integration-test suite.
+const scrollbackEmergencePollTick = 50 * time.Millisecond
+
+// orphanExitTimeout bounds the wait for the SIGKILLed orphan to
+// reach an ESRCH-yielding state via syscall.Kill(pid, 0). The
+// process is unreaped (we never call Wait until cleanup, see below),
+// but kill(pid, 0) on a defunct unreaped child still succeeds on
+// most platforms until the child is waited; therefore the
+// "process gone" semantics we rely on is the kernel having actually
+// torn the process down. Concretely we wait until syscall.Kill
+// returns syscall.ESRCH.
+const orphanExitTimeout = 3 * time.Second
+
+// orphanExitPollTick mirrors scrollbackEmergencePollTick for the
+// same reasons — short enough to observe sub-second SIGKILL-to-exit
+// latency without busy-spinning.
+const orphanExitPollTick = 20 * time.Millisecond
+
+// postExitSettleWindow is the spec-mandated 200 ms gap between
+// "process death observed" and the post-exit snapshot. Any final
+// flush the orphan attempted to do would have completed inside
+// this window — taking the snapshot here is the load-bearing
+// evidence that no such flush occurred.
+const postExitSettleWindow = 200 * time.Millisecond
+
+// TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit pins
+// the Component A acceptance criterion that an escalation-killed
+// orphan does not mutate the scrollback directory on the way out.
+// See the file-header comment for the full choreography rationale.
+func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+	_ = portalbintest.StagePortalBinary(t)
+
+	applyHostNoiseMitigation(t)
+
+	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	sock := tmuxtest.New(t, "ptl-killesc-")
+	client := sock.Client()
+
+	// Give the daemon something to capture. Without at least one
+	// non-internal session, CaptureStructure enumerates zero panes
+	// and the orphan ticks indefinitely without ever writing a .bin
+	// — the precondition for the snapshot-equality assertion would
+	// then fail as "snapshot never taken" (which is the correct
+	// failure shape per spec, but masks the actual invariant under
+	// test).
+	if err := client.NewDetachedSessionNoCwd(
+		"work", "sh -c 'exec tail -f /dev/null'",
+	); err != nil {
+		t.Fatalf("create work session: %v", err)
+	}
+
+	// Spawn the orphan: a `portal state daemon` subprocess whose
+	// PORTAL_STATE_DIR points at the isolated state dir. With no
+	// `_portal-saver` session on this tmux server, the daemon's
+	// saver-membership probe returns false on every tick — the
+	// orphan is structurally divergent-view from the moment it
+	// starts. It will self-eject after 3 ticks (≈ 3 s); the test
+	// budget below fits comfortably inside that window.
+	orphanEnv := append([]string{}, envSlice...)
+	orphanEnv = append(orphanEnv, "PORTAL_STATE_DIR="+stateDir)
+	orphan := exec.Command("portal", "state", "daemon")
+	orphan.Env = orphanEnv
+	if err := orphan.Start(); err != nil {
+		t.Fatalf("start orphan daemon: %v", err)
+	}
+	orphanPID := orphan.Process.Pid
+
+	// Reap the orphan in a background goroutine. Without this, an
+	// unreaped child stays kernel-resident as a zombie after SIGKILL
+	// — kill(pid, 0) returns 0 (not ESRCH) until reaping completes,
+	// so the ESRCH poll below would deadlock against the OS lifecycle
+	// rules. Reaping is best-effort and signalled via reaped so the
+	// main flow can observe the exit deterministically.
+	reaped := make(chan struct{})
+	go func() {
+		_, _ = orphan.Process.Wait()
+		close(reaped)
+	}()
+	t.Cleanup(func() {
+		// Belt-and-braces cleanup. If the test failed early the
+		// orphan may still be running; SIGKILL is the only signal
+		// guaranteed to terminate a self-ejecting daemon that has
+		// already entered its osExit path or is otherwise
+		// unresponsive. Errors are swallowed — the typical case is
+		// "process already exited" by the time cleanup runs.
+		_ = orphan.Process.Kill()
+		// Wait via the reaper goroutine; do not call Wait here as
+		// that would race with the goroutine on the same Process.
+		<-reaped
+	})
+
+	// Force a tick to capture immediately rather than waiting up to
+	// maxGap = 30 s. The daemon's tick loop reads save.requested as
+	// a dirty flag and triggers a save on the very next ticker
+	// fire when it is present.
+	if err := state.TouchSaveRequested(stateDir); err != nil {
+		t.Fatalf("touch save.requested: %v", err)
+	}
+
+	// Wait for the orphan to write ≥1 .bin under scrollback/. This
+	// is the precondition for the equality assertion — without a
+	// non-empty pre-snapshot the test would silently green-pass on
+	// a no-op orphan, which is the exact failure mode the spec
+	// names ("snapshot never taken — orphan did not write
+	// scrollback within 3 s").
+	scrollbackDir := state.ScrollbackDir(stateDir)
+	if !tmuxtest.PollUntil(t, scrollbackEmergenceTimeout, scrollbackEmergencePollTick, func() bool {
+		return countBinFiles(scrollbackDir) >= 1
+	}) {
+		t.Fatalf("snapshot never taken — orphan did not write scrollback within %s\n"+
+			"  scrollback dir: %s\n"+
+			"  contents: %v",
+			scrollbackEmergenceTimeout, scrollbackDir, listDirSafe(scrollbackDir))
+	}
+
+	// LOAD-BEARING STEP 1: pre-SIGKILL snapshot. Captured at the
+	// caller-chosen point in time (immediately before SIGKILL); a
+	// t.Cleanup-driven snapshot cannot achieve this granularity.
+	pre, err := portaltest.SnapshotStateDir(scrollbackDir)
+	if err != nil {
+		t.Fatalf("pre-SIGKILL snapshot: %v", err)
+	}
+	if !hasAnyBin(pre) {
+		t.Fatalf("snapshot never taken — pre-SIGKILL snapshot contained no .bin entries\n"+
+			"  scrollback dir: %s\n"+
+			"  pre keys: %v",
+			scrollbackDir, sortedKeys(pre))
+	}
+
+	// LOAD-BEARING STEP 2: SIGKILL the orphan. Direct kill(2) syscall
+	// — no SIGTERM first, no waiting on signal handlers. This is the
+	// production escalation primitive (cmd/bootstrap → Component A's
+	// escalateKillToSIGKILL → killBarrierSendSIGKILL → syscall.Kill).
+	// SIGKILL is delivered atomically by the kernel; the orphan's
+	// signal handler (defaultShutdownFlush) is bypassed by the
+	// kernel itself, which is the structural guarantee under test.
+	killErr := syscall.Kill(orphanPID, syscall.SIGKILL)
+	// We tolerate ESRCH here: if the orphan self-ejected between
+	// the .bin poll and this syscall the equality invariant still
+	// holds (osExit(0) also bypasses defaultShutdownFlush). Other
+	// errors are diagnostic noise only — observability, not gating.
+	if killErr != nil && !errors.Is(killErr, syscall.ESRCH) {
+		t.Logf("SIGKILL syscall returned %v (proceeding; orphan may have already exited)", killErr)
+	}
+
+	// Wait for the reaper goroutine to observe the process exit AND
+	// poll syscall.Kill(pid, 0) until it returns ESRCH — the kernel's
+	// canonical "process does not exist" signal. Reaping happens
+	// first so kill(pid, 0) is not racing against an unreaped zombie
+	// (which would return 0, not ESRCH, indefinitely).
+	select {
+	case <-reaped:
+	case <-time.After(orphanExitTimeout):
+		t.Fatalf("orphan PID %d was not reaped within %s; "+
+			"the no-final-flush window cannot be timed from process death",
+			orphanPID, orphanExitTimeout)
+	}
+	exited := tmuxtest.PollUntil(t, orphanExitTimeout, orphanExitPollTick, func() bool {
+		err := syscall.Kill(orphanPID, 0)
+		return errors.Is(err, syscall.ESRCH)
+	})
+	if !exited {
+		t.Fatalf("orphan PID %d did not reach ESRCH within %s after reap; "+
+			"the no-final-flush window cannot be timed from process death",
+			orphanPID, orphanExitTimeout)
+	}
+
+	// LOAD-BEARING STEP 3: spec-mandated 200 ms settle window. Any
+	// final flush the orphan attempted would have completed inside
+	// this window — taking the snapshot here is the load-bearing
+	// evidence that no such flush occurred.
+	time.Sleep(postExitSettleWindow)
+
+	// LOAD-BEARING STEP 4: post-exit snapshot.
+	post, err := portaltest.SnapshotStateDir(scrollbackDir)
+	if err != nil {
+		t.Fatalf("post-exit snapshot: %v", err)
+	}
+
+	// EQUALITY ASSERTION: every key in pre must be present in post
+	// with byte-equal Fingerprint, and vice versa. The diagnostic
+	// cites the path, the field(s) that differ, and both values so
+	// a regression is debuggable in one run.
+	assertSnapshotsEqual(t, scrollbackDir, pre, post)
+}
+
+// countBinFiles returns the number of regular .bin files directly
+// under dir. Directories and non-.bin entries are ignored. A
+// missing dir yields 0 — the orphan may not have created
+// scrollback/ yet on its first tick.
+func countBinFiles(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Type().IsRegular() && filepath.Ext(e.Name()) == ".bin" {
+			n++
+		}
+	}
+	return n
+}
+
+// listDirSafe returns directory entries for failure diagnostics.
+// Missing dirs yield a stub message rather than an error so the
+// caller's t.Fatalf format string stays readable.
+func listDirSafe(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return []string{fmt.Sprintf("(ReadDir failed: %v)", err)}
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hasAnyBin reports whether snap contains at least one .bin entry.
+// Used to guard the pre-snapshot precondition: an empty snapshot
+// would silently green-pass the equality assertion.
+func hasAnyBin(snap map[string]portaltest.Fingerprint) bool {
+	for k := range snap {
+		if filepath.Ext(k) == ".bin" {
+			return true
+		}
+	}
+	return false
+}
+
+// sortedKeys returns snap's keys in lexicographic order for stable
+// failure diagnostics.
+func sortedKeys(snap map[string]portaltest.Fingerprint) []string {
+	out := make([]string, 0, len(snap))
+	for k := range snap {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// assertSnapshotsEqual compares two scrollback-dir Fingerprint maps
+// across every key in the union (pre ∪ post) and every field of
+// the Fingerprint struct (Exists, Size, MtimeNanos, CtimeNanos,
+// Sha256, Hashed, IsSymlink, SymlinkTarget). On any delta the test
+// fails with a diagnostic citing path, field, and both values so
+// the regression's source is unambiguous.
+//
+// The walk order is deterministic (sorted keys) so re-runs produce
+// identical failure messages.
+func assertSnapshotsEqual(t *testing.T, root string, pre, post map[string]portaltest.Fingerprint) {
+	t.Helper()
+	keys := make(map[string]struct{}, len(pre)+len(post))
+	for k := range pre {
+		keys[k] = struct{}{}
+	}
+	for k := range post {
+		keys[k] = struct{}{}
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+
+	var diags []string
+	for _, key := range sorted {
+		before, hadBefore := pre[key]
+		after, hasAfter := post[key]
+		switch {
+		case !hadBefore && hasAfter:
+			diags = append(diags, fmt.Sprintf(
+				"  %s: created after SIGKILL (post=%s)", key, formatFP(after)))
+		case hadBefore && !hasAfter:
+			diags = append(diags, fmt.Sprintf(
+				"  %s: deleted after SIGKILL (pre=%s)", key, formatFP(before)))
+		case hadBefore && hasAfter:
+			diags = append(diags, fingerprintFieldDeltas(key, before, after)...)
+		}
+	}
+
+	if len(diags) > 0 {
+		t.Fatalf("scrollback dir mutated between pre-SIGKILL snapshot and "+
+			"200 ms post-exit snapshot (spec § Component A: no final-flush "+
+			"GC cycle on escalation-killed orphans)\n"+
+			"  scrollback dir: %s\n"+
+			"  pre keys (%d): %v\n"+
+			"  post keys (%d): %v\n"+
+			"  delta(s):\n%s",
+			root, len(pre), sortedKeys(pre), len(post), sortedKeys(post),
+			joinLines(diags))
+	}
+}
+
+// fingerprintFieldDeltas returns a per-field delta diagnostic for a
+// path that exists in both snapshots. Returns empty when the two
+// fingerprints are byte-equal. Field order matches Fingerprint's
+// declaration so a multi-field delta reads cleanly top-to-bottom.
+func fingerprintFieldDeltas(key string, before, after portaltest.Fingerprint) []string {
+	var out []string
+	if before.Exists != after.Exists {
+		out = append(out, fmt.Sprintf("  %s.Exists: pre=%v post=%v", key, before.Exists, after.Exists))
+	}
+	if before.Size != after.Size {
+		out = append(out, fmt.Sprintf("  %s.Size: pre=%d post=%d", key, before.Size, after.Size))
+	}
+	if before.MtimeNanos != after.MtimeNanos {
+		out = append(out, fmt.Sprintf("  %s.MtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			key, before.MtimeNanos, after.MtimeNanos, after.MtimeNanos-before.MtimeNanos))
+	}
+	if before.CtimeNanos != after.CtimeNanos {
+		out = append(out, fmt.Sprintf("  %s.CtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			key, before.CtimeNanos, after.CtimeNanos, after.CtimeNanos-before.CtimeNanos))
+	}
+	if before.Hashed != after.Hashed {
+		out = append(out, fmt.Sprintf("  %s.Hashed: pre=%v post=%v", key, before.Hashed, after.Hashed))
+	}
+	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
+		out = append(out, fmt.Sprintf("  %s.Sha256: pre=%x post=%x", key, before.Sha256, after.Sha256))
+	}
+	if before.IsSymlink != after.IsSymlink {
+		out = append(out, fmt.Sprintf("  %s.IsSymlink: pre=%v post=%v", key, before.IsSymlink, after.IsSymlink))
+	}
+	if before.SymlinkTarget != after.SymlinkTarget {
+		out = append(out, fmt.Sprintf("  %s.SymlinkTarget: pre=%q post=%q",
+			key, before.SymlinkTarget, after.SymlinkTarget))
+	}
+	return out
+}
+
+// formatFP renders a Fingerprint compactly for the created/deleted
+// delta diagnostics where the entire fingerprint must be shown
+// because there is no peer to diff against.
+func formatFP(fp portaltest.Fingerprint) string {
+	if fp.IsSymlink {
+		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
+			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
+	}
+	if fp.Hashed {
+		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
+			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
+	}
+	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
+		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
+}
+
+// joinLines concatenates lines with newline separators for use in
+// multi-line failure diagnostics.
+func joinLines(lines []string) string {
+	var b []byte
+	for i, l := range lines {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, l...)
+	}
+	return string(b)
+}

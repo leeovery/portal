@@ -1,8 +1,10 @@
 // White-box tests for the fingerprint-diff backstop.
 //
 // These tests intentionally live in `package portaltest` (not
-// `_test`) so they can drive the unexported snapshotStateDir /
-// reportStateDirDelta surface. The diff logic is exercised against
+// `_test`) so they can drive the unexported reportStateDirDelta
+// surface (alongside the exported SnapshotStateDir helper, which
+// is also exercised by out-of-package integration tests). The
+// diff logic is exercised against
 // a controlled t.TempDir() root — never the developer's real
 // state directory — so a bug in the backstop cannot itself corrupt
 // the host install.
@@ -67,12 +69,12 @@ func containsAny(msgs []string, fragment string) bool {
 	return false
 }
 
-// --- snapshotStateDir contract tests -----------------------------
+// --- SnapshotStateDir contract tests -----------------------------
 
 func TestSnapshotStateDir_NonexistentRoot_ReturnsEmptyMap(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "absent")
 
-	snap, err := snapshotStateDir(root)
+	snap, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -85,7 +87,7 @@ func TestSnapshotStateDir_RecordsRegularFile(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "sessions.json"), "alpha")
 
-	snap, err := snapshotStateDir(root)
+	snap, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -93,10 +95,10 @@ func TestSnapshotStateDir_RecordsRegularFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected sessions.json entry, got keys: %v", keys(snap))
 	}
-	if fp.size != 5 {
-		t.Errorf("size = %d, want 5", fp.size)
+	if fp.Size != 5 {
+		t.Errorf("size = %d, want 5", fp.Size)
 	}
-	if !fp.hashed {
+	if !fp.Hashed {
 		t.Errorf("expected hashed=true for small regular file")
 	}
 }
@@ -110,7 +112,7 @@ func TestSnapshotStateDir_RecordsSymlinkViaLstat(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	snap, err := snapshotStateDir(root)
+	snap, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -118,15 +120,15 @@ func TestSnapshotStateDir_RecordsSymlinkViaLstat(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected link entry; keys: %v", keys(snap))
 	}
-	if !fp.isSymlink {
+	if !fp.IsSymlink {
 		t.Errorf("link not recorded as symlink")
 	}
-	if fp.symlinkTarget != target {
-		t.Errorf("symlinkTarget = %q, want %q", fp.symlinkTarget, target)
+	if fp.SymlinkTarget != target {
+		t.Errorf("symlinkTarget = %q, want %q", fp.SymlinkTarget, target)
 	}
 	// hashed must remain false for symlinks — symlink hashing would
 	// follow the target via os.ReadFile, defeating lstat semantics.
-	if fp.hashed {
+	if fp.Hashed {
 		t.Errorf("symlink should not be hashed")
 	}
 }
@@ -141,16 +143,84 @@ func TestSnapshotStateDir_LargeFile_SkipsHash(t *testing.T) {
 	if err := os.WriteFile(path, big, 0o600); err != nil {
 		t.Fatalf("write big: %v", err)
 	}
-	snap, err := snapshotStateDir(root)
+	snap, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 	fp := snap["big.bin"]
-	if fp.hashed {
+	if fp.Hashed {
 		t.Errorf("expected hashed=false for file >hashSizeCap")
 	}
-	if fp.size != int64(hashSizeCap+1) {
-		t.Errorf("size = %d, want %d", fp.size, hashSizeCap+1)
+	if fp.Size != int64(hashSizeCap+1) {
+		t.Errorf("size = %d, want %d", fp.Size, hashSizeCap+1)
+	}
+}
+
+// TestSnapshotStateDir_DetectsModifiedBinFile is the spec-mandated
+// meta-test guarding the snapshot-diff implementation: write a .bin
+// file, snapshot, mutate the file's content with size preserved and
+// mtime force-reset to the pre-snapshot value, snapshot again, and
+// assert the two Fingerprint maps differ on the .bin path. Without
+// this guard a regression where SnapshotStateDir silently returned
+// identical maps for divergent content would slip past the
+// kill-barrier-escalation no-final-flush integration test (which
+// compares two snapshots taken across SIGKILL and would silently
+// green-pass if the helper itself were a no-op).
+//
+// The test exercises the content-hash channel in isolation by
+// pinning size and mtime to the pre-snapshot values; the hash field
+// is the sole remaining delta signal and must catch it.
+func TestSnapshotStateDir_DetectsModifiedBinFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "scrollback", "pane__0.0.bin")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir scrollback: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("alpha"), 0o600); err != nil {
+		t.Fatalf("write .bin: %v", err)
+	}
+
+	pre, err := SnapshotStateDir(root)
+	if err != nil {
+		t.Fatalf("pre snapshot: %v", err)
+	}
+	prePath := filepath.Join("scrollback", "pane__0.0.bin")
+	preFP, ok := pre[prePath]
+	if !ok {
+		t.Fatalf("expected pre to contain %s; keys=%v", prePath, keys(pre))
+	}
+
+	// Mutate content with size preserved. Then pin mtime back to the
+	// pre value so the test isolates the hash channel: any equality
+	// the snapshot still reports would have to come from a no-op
+	// content read.
+	if err := os.WriteFile(path, []byte("betaX"), 0o600); err != nil {
+		t.Fatalf("rewrite .bin: %v", err)
+	}
+	resetTimes(t, path, preFP.MtimeNanos)
+
+	post, err := SnapshotStateDir(root)
+	if err != nil {
+		t.Fatalf("post snapshot: %v", err)
+	}
+	postFP, ok := post[prePath]
+	if !ok {
+		t.Fatalf("expected post to contain %s; keys=%v", prePath, keys(post))
+	}
+
+	if preFP.Sha256 == postFP.Sha256 {
+		t.Fatalf("SnapshotStateDir returned identical Sha256 across content mutation\n"+
+			"  pre.Size=%d post.Size=%d\n"+
+			"  pre.Hashed=%v post.Hashed=%v\n"+
+			"  pre.Sha256=%x\n"+
+			"  post.Sha256=%x",
+			preFP.Size, postFP.Size,
+			preFP.Hashed, postFP.Hashed,
+			preFP.Sha256, postFP.Sha256)
+	}
+	if !preFP.Hashed || !postFP.Hashed {
+		t.Errorf("expected both fingerprints Hashed=true (file ≤ 1 MiB); pre=%v post=%v",
+			preFP.Hashed, postFP.Hashed)
 	}
 }
 
@@ -160,7 +230,7 @@ func TestReportStateDirDelta_NoChange_PassesCleanup(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "sessions.json"), "alpha")
 
-	pre, err := snapshotStateDir(root)
+	pre, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -174,7 +244,7 @@ func TestReportStateDirDelta_NoChange_PassesCleanup(t *testing.T) {
 
 func TestReportStateDirDelta_FileCreated_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Mutate AFTER snapshot: simulate a stray test that bypassed
 	// the env override and wrote into the dev state dir.
@@ -192,7 +262,7 @@ func TestReportStateDirDelta_FileDeleted_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.json")
 	writeFile(t, path, "alpha")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove: %v", err)
@@ -209,7 +279,7 @@ func TestReportStateDirDelta_SizeChanged_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.json")
 	writeFile(t, path, "alpha")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Rewrite with a larger payload; mtime will also bump but the
 	// size delta must be reported independently.
@@ -227,7 +297,7 @@ func TestReportStateDirDelta_ContentChanged_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.json")
 	writeFile(t, path, "alpha")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Same size, different content — only the hash catches this.
 	// We must also clamp mtime/ctime back to the pre-value so the
@@ -237,7 +307,7 @@ func TestReportStateDirDelta_ContentChanged_FailsCleanup(t *testing.T) {
 	resetTimes(t, path, preMtime)
 	// Re-snapshot pre so its mtime/ctime reflect the reset baseline
 	// (the test cares about the content channel in isolation).
-	pre2, _ := snapshotStateDir(root)
+	pre2, _ := SnapshotStateDir(root)
 	// Now mutate content again with size + mtime preserved.
 	if err := os.WriteFile(path, []byte("gamma"), 0o600); err != nil {
 		t.Fatalf("rewrite: %v", err)
@@ -258,7 +328,7 @@ func TestReportStateDirDelta_MtimeBumped_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.json")
 	writeFile(t, path, "alpha")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Bump mtime without changing size/content.
 	future := time.Now().Add(2 * time.Hour)
@@ -277,7 +347,7 @@ func TestReportStateDirDelta_BecameSymlink_FailsCleanup(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "sessions.json")
 	writeFile(t, path, "alpha")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Replace the regular file with a symlink pointing elsewhere.
 	target := filepath.Join(root, "other.txt")
@@ -306,7 +376,7 @@ func TestReportStateDirDelta_SymlinkTargetChanged_FailsCleanup(t *testing.T) {
 	if err := os.Symlink(targetA, link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	if err := os.Remove(link); err != nil {
 		t.Fatalf("remove link: %v", err)
@@ -329,8 +399,8 @@ func TestReportStateDirDelta_LargeFile_DetectsSizeWithoutHash(t *testing.T) {
 	if err := os.WriteFile(path, big, 0o600); err != nil {
 		t.Fatalf("write big: %v", err)
 	}
-	pre, _ := snapshotStateDir(root)
-	if pre["big.bin"].hashed {
+	pre, _ := SnapshotStateDir(root)
+	if pre["big.bin"].Hashed {
 		t.Fatalf("large file should not be hashed in pre-snapshot")
 	}
 
@@ -352,7 +422,7 @@ func TestReportStateDirDelta_ReportsAllDeltas_NotJustFirst(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "keep.json"), "k")
 	writeFile(t, filepath.Join(root, "doomed.json"), "d")
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Three independent deltas at three different paths.
 	if err := os.Remove(filepath.Join(root, "doomed.json")); err != nil {
@@ -387,7 +457,7 @@ func TestReportStateDirDelta_WalksOnlyRoot_NotSiblings(t *testing.T) {
 	// Sibling file outside root — must be invisible to snapshot.
 	writeFile(t, filepath.Join(parent, "projects.json"), "p")
 
-	pre, _ := snapshotStateDir(root)
+	pre, _ := SnapshotStateDir(root)
 
 	// Mutate sibling AFTER snapshot. The backstop must not notice.
 	writeFile(t, filepath.Join(parent, "projects.json"), "p-changed-and-bigger")
@@ -403,7 +473,7 @@ func TestReportStateDirDelta_WalksOnlyRoot_NotSiblings(t *testing.T) {
 func TestReportStateDirDelta_NonexistentRoot_EmptyPreSnapshot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "absent")
 
-	pre, err := snapshotStateDir(root)
+	pre, err := SnapshotStateDir(root)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
@@ -485,7 +555,7 @@ func (f *fakeBackstopT) runCleanups() {
 // and "created" delta type.
 func TestBackstopCleanupFiresOnExternalMutation(t *testing.T) {
 	devStateDir := t.TempDir() // controlled stand-in for ~/.config/portal/state
-	pre, err := snapshotStateDir(devStateDir)
+	pre, err := SnapshotStateDir(devStateDir)
 	if err != nil {
 		t.Fatalf("pre-snapshot: %v", err)
 	}
@@ -512,7 +582,7 @@ func TestBackstopCleanupFiresOnExternalMutation(t *testing.T) {
 // only escalates real deltas, never false positives.
 func TestBackstopCleanupSilentOnClean(t *testing.T) {
 	devStateDir := t.TempDir()
-	pre, _ := snapshotStateDir(devStateDir)
+	pre, _ := SnapshotStateDir(devStateDir)
 
 	fake := &fakeBackstopT{}
 	installBackstopCleanup(fake, devStateDir, pre)
@@ -526,7 +596,7 @@ func TestBackstopCleanupSilentOnClean(t *testing.T) {
 
 // --- helpers -----------------------------------------------------
 
-func keys(m map[string]fileFingerprint) []string {
+func keys(m map[string]Fingerprint) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -535,13 +605,13 @@ func keys(m map[string]fileFingerprint) []string {
 }
 
 // lookupMtimes returns the pre-recorded mtime/ctime for rel.
-func lookupMtimes(t *testing.T, root, rel string, snap map[string]fileFingerprint) (mtime int64, ctime int64) {
+func lookupMtimes(t *testing.T, root, rel string, snap map[string]Fingerprint) (mtime int64, ctime int64) {
 	t.Helper()
 	fp, ok := snap[rel]
 	if !ok {
 		t.Fatalf("snap missing %s", rel)
 	}
-	return fp.mtimeNanos, fp.ctimeNanos
+	return fp.MtimeNanos, fp.CtimeNanos
 }
 
 // resetTimes sets atime+mtime on path to the supplied nano value.
