@@ -709,7 +709,12 @@ func (c *Client) ListAllPanesWithFormat(format string) (string, error) {
 func (c *Client) ShowEnvironment(session string) (string, error) {
 	out, err := c.cmd.Run("show-environment", "-t", session)
 	if err != nil {
-		return "", fmt.Errorf("failed to show environment for session %q: %w", session, err)
+		// Classify "no such session" at this boundary so daemon-layer
+		// callers can discriminate natural session churn via
+		// errors.Is(err, ErrNoSuchSession). Wrap BEFORE the outer
+		// fmt.Errorf so the sentinel remains reachable through the
+		// chain; errors.As(err, &*CommandError) also still succeeds.
+		return "", fmt.Errorf("failed to show environment for session %q: %w", session, wrapNoSuchSession(err))
 	}
 	return out, nil
 }
