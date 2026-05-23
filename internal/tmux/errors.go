@@ -26,6 +26,32 @@ import (
 // nothing else.
 var ErrNoSuchSession = errors.New("no such session")
 
+// ErrEmptyPaneList is the typed sentinel returned (wrapped) by SaverPanePID
+// when the underlying `tmux list-panes -t =<session> -F '#{pane_pid}'`
+// invocation succeeds (no exec error, no "no such session" stderr) but
+// produces stdout with no non-empty lines. The shape is observably distinct
+// from ErrNoSuchSession: the session exists, but tmux reported zero panes —
+// an unusual but possible transient (e.g., a pane mid-respawn).
+//
+// Callers consume this sentinel via errors.Is(err, ErrEmptyPaneList).
+// Component D's saverMembershipProbe collapses this — like every other
+// SaverPanePID failure mode — to "absent" so the daemon's self-supervision
+// counter increments without coupling to the underlying classification.
+var ErrEmptyPaneList = errors.New("empty pane list")
+
+// ErrPanePIDParse is the typed sentinel returned (wrapped) by SaverPanePID
+// when the underlying tmux invocation succeeds with a non-empty first line
+// that cannot be parsed as a base-10 integer via strconv.Atoi. Observed in
+// practice when tmux's format expansion emits an unexpected token (e.g., a
+// future format-string regression upstream) rather than a numeric pane_pid.
+//
+// Callers consume this sentinel via errors.Is(err, ErrPanePIDParse).
+// Like ErrEmptyPaneList, Component D's saverMembershipProbe collapses this
+// to "absent" — the daemon cannot prove membership without a valid pid, and
+// any classification it cannot interpret is, by the spec's "treat any error
+// as absent" rule, equivalent to the saver being gone.
+var ErrPanePIDParse = errors.New("pane pid parse")
+
 // noSuchSessionStderrSubstr is the case-sensitive substring used to detect
 // tmux's "no such session" stderr phrasing. tmux emits the lowercase form;
 // matching is intentionally case-sensitive so we never absorb unrelated

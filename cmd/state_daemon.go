@@ -49,6 +49,47 @@ var (
 // Production callers leave it at the default.
 var acquireDaemonLock = state.AcquireDaemonLock
 
+// saverMembershipProbe is the package-level seam consumed by Component D's
+// per-tick saver-membership self-check (integrated into the tick loop by
+// Task 5-3). Tests swap this var to inject deterministic
+// absent/present/mismatch sequences without spinning up a real tmux server.
+// Production callers leave it at defaultSaverMembershipProbe.
+//
+// Signature: (c *tmux.Client, selfPID int) → bool. true means "this daemon
+// is bound to the live saver pane"; false means "absent" — which the spec
+// explicitly broadens to cover every failure mode (HasSession returning
+// false, SaverPanePID returning any error, pid mismatch). The Component D
+// hysteresis counter increments on every false and resets on every true.
+var saverMembershipProbe = defaultSaverMembershipProbe
+
+// defaultSaverMembershipProbe is the production implementation of the
+// saverMembershipProbe seam. It executes the spec § Component D self-check
+// sequence steps 1–3:
+//
+//  1. has-session -t =_portal-saver. Any falsy / errored result → "absent".
+//  2. list-panes -t =_portal-saver -F '#{pane_pid}' (via tmux.SaverPanePID).
+//     Any error (including ErrNoSuchSession from the HasSession→list-panes
+//     race, ErrEmptyPaneList, ErrPanePIDParse, or a generic exec failure) →
+//     "absent". Per the spec's "treat any error as absent" rule the probe
+//     never tries to discriminate further than "non-nil error".
+//  3. Compare the returned pid to selfPID. Match → true ("legitimate
+//     daemon"); mismatch → false ("orphan daemon — another process owns
+//     the saver pane").
+//
+// The probe is intentionally pure observation — it never writes to tmux,
+// never writes to the state directory, never logs. Logging and the
+// self-eject decision live in the tick-loop integration (Task 5-3).
+func defaultSaverMembershipProbe(c *tmux.Client, selfPID int) bool {
+	if !c.HasSession(tmux.PortalSaverName) {
+		return false
+	}
+	pid, err := tmux.SaverPanePID(c, tmux.PortalSaverName)
+	if err != nil {
+		return false
+	}
+	return pid == selfPID
+}
+
 // daemonLockFile retains the daemon's advisory-lock fd for the entire lifetime
 // of the process. Storing the *os.File in a package-level var prevents Go's
 // finalizer from closing the fd (which would silently release the kernel-side

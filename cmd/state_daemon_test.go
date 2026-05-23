@@ -721,3 +721,125 @@ func TestSelfSupervisionHysteresisTicks_ClampInvariant(t *testing.T) {
 			selfSupervisionHysteresisTicks)
 	}
 }
+
+// membershipFakeCommander scripts the two tmux subprocesses the
+// defaultSaverMembershipProbe issues per call: `has-session` and `list-panes`.
+// It records all args for diagnostic prints on failure but assertions key off
+// the returned bool, so call-shape pinning lives in the SaverPanePID test
+// suite, not here.
+//
+// hasSessionErr models the HasSession failure branch (non-zero tmux exit on
+// `has-session -t =<name>`). listOutput / listErr drive SaverPanePID.
+type membershipFakeCommander struct {
+	calls         [][]string
+	hasSessionErr error
+	listPanesOut  string
+	listPanesErr  error
+}
+
+func (f *membershipFakeCommander) Run(args ...string) (string, error) {
+	f.calls = append(f.calls, append([]string(nil), args...))
+	if len(args) >= 1 && args[0] == "has-session" {
+		if f.hasSessionErr != nil {
+			return "", f.hasSessionErr
+		}
+		return "", nil
+	}
+	if len(args) >= 1 && args[0] == "list-panes" {
+		return f.listPanesOut, f.listPanesErr
+	}
+	return "", nil
+}
+
+func (f *membershipFakeCommander) RunRaw(args ...string) (string, error) {
+	return f.Run(args...)
+}
+
+// TestDefaultSaverMembershipProbe pins the four observable shapes of the
+// production probe that Component D's tick-loop integration (Task 5-3) will
+// consume:
+//
+//  1. HasSession false → false. SaverPanePID is never invoked.
+//  2. HasSession true, SaverPanePID errors → false. The spec mandates "treat
+//     any error as absent" so the daemon's hysteresis counter increments
+//     uniformly across race-induced ErrNoSuchSession, ErrEmptyPaneList,
+//     ErrPanePIDParse, and generic exec failures.
+//  3. HasSession true, SaverPanePID returns pid == selfPID → true. The
+//     legitimate daemon's happy path; counter resets in Task 5-3.
+//  4. HasSession true, SaverPanePID returns pid != selfPID → false. The
+//     orphan-daemon condition — bound by Component A/B sweeps at bootstrap
+//     and by Component D's self-eject between bootstraps.
+//
+// The probe is not invoked from the tick loop in this task — Task 5-3 owns
+// that integration.
+func TestDefaultSaverMembershipProbe(t *testing.T) {
+	t.Run("it returns false when HasSession is false", func(t *testing.T) {
+		fc := &membershipFakeCommander{hasSessionErr: fmt.Errorf("exit status 1")}
+		client := tmux.NewClient(fc)
+
+		if defaultSaverMembershipProbe(client, os.Getpid()) {
+			t.Errorf("probe = true, want false when HasSession returns false")
+		}
+		// SaverPanePID must not have been invoked — short-circuit on HasSession.
+		for _, call := range fc.calls {
+			if len(call) >= 1 && call[0] == "list-panes" {
+				t.Errorf("list-panes invoked despite HasSession false; calls = %v", fc.calls)
+			}
+		}
+	})
+
+	t.Run("it returns false when SaverPanePID errors", func(t *testing.T) {
+		// HasSession returns nil → present; SaverPanePID then sees a
+		// "no such session" stderr (the documented race) — probe must
+		// classify as absent.
+		fc := &membershipFakeCommander{
+			listPanesErr: &tmux.CommandError{
+				Stderr: "no such session: _portal-saver",
+				Err:    fmt.Errorf("exit status 1"),
+			},
+		}
+		client := tmux.NewClient(fc)
+
+		if defaultSaverMembershipProbe(client, os.Getpid()) {
+			t.Errorf("probe = true, want false when SaverPanePID errors")
+		}
+	})
+
+	t.Run("it returns true when the pid matches selfPID", func(t *testing.T) {
+		const selfPID = 4242
+		fc := &membershipFakeCommander{listPanesOut: fmt.Sprintf("%d\n", selfPID)}
+		client := tmux.NewClient(fc)
+
+		if !defaultSaverMembershipProbe(client, selfPID) {
+			t.Errorf("probe = false, want true when pid matches selfPID")
+		}
+	})
+
+	t.Run("it returns false when the pid does not match selfPID", func(t *testing.T) {
+		fc := &membershipFakeCommander{listPanesOut: "9999\n"}
+		client := tmux.NewClient(fc)
+
+		if defaultSaverMembershipProbe(client, 4242) {
+			t.Errorf("probe = true, want false when pid != selfPID (orphan daemon)")
+		}
+	})
+}
+
+// TestSaverMembershipProbeSeam_DefaultsToProduction guards the wiring
+// invariant: production must reach defaultSaverMembershipProbe through the
+// saverMembershipProbe seam. A regression here (e.g., a future refactor that
+// silently overrides the default at init time) would break Task 5-3's
+// integration without triggering the per-behaviour cases above.
+func TestSaverMembershipProbeSeam_DefaultsToProduction(t *testing.T) {
+	// Function-value equality is not defined in Go, so we exercise the seam
+	// against the same fakeCommander shape the default uses and assert the
+	// observable behaviour matches. A mis-wired seam would either short
+	// HasSession or return true on a pid mismatch.
+	const selfPID = 4242
+	fc := &membershipFakeCommander{listPanesOut: fmt.Sprintf("%d\n", selfPID)}
+	client := tmux.NewClient(fc)
+
+	if !saverMembershipProbe(client, selfPID) {
+		t.Errorf("saverMembershipProbe seam returned false; want true (default probe should pass)")
+	}
+}
