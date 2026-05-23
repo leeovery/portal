@@ -699,3 +699,17 @@ func TestSelfSupervisionCounter_IncrementsUniformlyOnProbeFalse(t *testing.T) {
 			got, wantCalls)
 	}
 }
+
+// TestSelfSupervisionHysteresisTicks_LowerBound is the spec-mandated
+// deliberately-weak guard against accidental zeroing of the hysteresis
+// constant (spec § Component D: "A unit test asserts
+// selfSupervisionHysteresisTicks >= 1 to prevent accidental zeroing").
+// The stronger clamp envelope (3 ≤ N ≤ 9) is asserted separately by
+// TestSelfSupervisionHysteresisTicks_ClampInvariant; this test exists
+// as a distinct cheap floor so future tuning decisions can relax the
+// clamp without removing the load-bearing >= 1 invariant.
+func TestSelfSupervisionHysteresisTicks_LowerBound(t *testing.T) {
+	if selfSupervisionHysteresisTicks < 1 {
+		t.Fatalf("selfSupervisionHysteresisTicks must be >= 1, got %d", selfSupervisionHysteresisTicks)
+	}
+}
