@@ -2,6 +2,7 @@ package state
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,26 @@ func withLockAcquireFake(t *testing.T, fake func(fd int, how int) error) {
 	prev := lockAcquire
 	lockAcquire = fake
 	t.Cleanup(func() { lockAcquire = prev })
+}
+
+// withLockAcquireIdentifyDaemonFake swaps lockAcquireIdentifyDaemon for the
+// duration of the test and restores it via t.Cleanup. Tests must not use
+// t.Parallel — package-level mutable state is shared across the test binary.
+func withLockAcquireIdentifyDaemonFake(t *testing.T, fake func(pid int) (IdentifyResult, error)) {
+	t.Helper()
+	prev := lockAcquireIdentifyDaemon
+	lockAcquireIdentifyDaemon = fake
+	t.Cleanup(func() { lockAcquireIdentifyDaemon = prev })
+}
+
+// withLockAcquireReadPIDFileFake swaps lockAcquireReadPIDFile for the duration
+// of the test and restores it via t.Cleanup. Tests must not use t.Parallel —
+// package-level mutable state is shared across the test binary.
+func withLockAcquireReadPIDFileFake(t *testing.T, fake func(dir string) (int, error)) {
+	t.Helper()
+	prev := lockAcquireReadPIDFile
+	lockAcquireReadPIDFile = fake
+	t.Cleanup(func() { lockAcquireReadPIDFile = prev })
 }
 
 func TestAcquireDaemonLock_ReturnsErrDaemonLockHeldOnEWOULDBLOCK(t *testing.T) {
@@ -190,6 +211,218 @@ func TestAcquireDaemonLock_KernelReleasesOnFDClose(t *testing.T) {
 		t.Fatal("third AcquireDaemonLock returned nil *os.File")
 	}
 	t.Cleanup(func() { _ = f3.Close() })
+}
+
+// TestAcquireDaemonLock_PreCheck_PIDFileAbsent_Proceeds asserts that when
+// daemon.pid does not exist, the pre-check returns "no holder" and acquire
+// proceeds (opens daemon.lock, runs flock, returns the locked fd).
+func TestAcquireDaemonLock_PreCheck_PIDFileAbsent_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	// No daemon.pid is written: ReadPIDFile will return ErrPIDFileAbsent.
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		t.Fatalf("lockAcquireIdentifyDaemon must not be called when daemon.pid is absent; got pid=%d", pid)
+		return 0, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
+
+	f, err := AcquireDaemonLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireDaemonLock: %v", err)
+	}
+	if f == nil {
+		t.Fatal("AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f.Close() })
+}
+
+// TestAcquireDaemonLock_PreCheck_DeadPID_Proceeds asserts that when daemon.pid
+// records a PID that identity-checks as dead, the pre-check proceeds to the
+// normal open + flock path.
+func TestAcquireDaemonLock_PreCheck_DeadPID_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePIDFile(dir, 99999); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	identifyCalled := false
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		identifyCalled = true
+		if pid != 99999 {
+			t.Errorf("lockAcquireIdentifyDaemon pid = %d; want 99999", pid)
+		}
+		return IdentifyDead, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
+
+	f, err := AcquireDaemonLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireDaemonLock: %v", err)
+	}
+	if f == nil {
+		t.Fatal("AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f.Close() })
+
+	if !identifyCalled {
+		t.Errorf("lockAcquireIdentifyDaemon was not called")
+	}
+}
+
+// TestAcquireDaemonLock_PreCheck_LivePortalDaemon_ReturnsErrDaemonLockHeld
+// asserts that when daemon.pid records a live PID that identity-checks as a
+// portal state daemon, the pre-check returns ErrDaemonLockHeld WITHOUT opening
+// daemon.lock.
+func TestAcquireDaemonLock_PreCheck_LivePortalDaemon_ReturnsErrDaemonLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePIDFile(dir, 4242); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		if pid != 4242 {
+			t.Errorf("lockAcquireIdentifyDaemon pid = %d; want 4242", pid)
+		}
+		return IdentifyIsPortalDaemon, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error {
+		t.Fatal("lockAcquire must not be called when pre-check identifies a live portal daemon")
+		return nil
+	})
+
+	f, err := AcquireDaemonLock(dir)
+	if f != nil {
+		_ = f.Close()
+		t.Fatalf("expected nil *os.File on pre-check refusal, got %v", f)
+	}
+	if !errors.Is(err, ErrDaemonLockHeld) {
+		t.Fatalf("err = %v; want errors.Is ErrDaemonLockHeld", err)
+	}
+
+	// Crucially: daemon.lock must NOT have been created (open was never called).
+	if _, statErr := os.Stat(DaemonLock(dir)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("daemon.lock exists after pre-check refusal; stat err = %v; want os.ErrNotExist", statErr)
+	}
+}
+
+// TestAcquireDaemonLock_PreCheck_LiveNonPortalPID_Proceeds asserts that when
+// daemon.pid records a live PID whose identity check says "not a portal
+// daemon", the pre-check proceeds to the normal open + flock path.
+func TestAcquireDaemonLock_PreCheck_LiveNonPortalPID_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePIDFile(dir, 5151); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		return IdentifyNotPortalDaemon, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
+
+	f, err := AcquireDaemonLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireDaemonLock: %v", err)
+	}
+	if f == nil {
+		t.Fatal("AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f.Close() })
+}
+
+// TestAcquireDaemonLock_PreCheck_TransientIdentifyError_Proceeds asserts that
+// when the identity check returns a transient error, the pre-check treats it
+// as "not a portal daemon" and proceeds to the normal open + flock path. The
+// flock EWOULDBLOCK path remains the fallback for real contention.
+func TestAcquireDaemonLock_PreCheck_TransientIdentifyError_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePIDFile(dir, 6262); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		return 0, fmt.Errorf("transient ps failure")
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
+
+	f, err := AcquireDaemonLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireDaemonLock: %v", err)
+	}
+	if f == nil {
+		t.Fatal("AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f.Close() })
+}
+
+// TestAcquireDaemonLock_PreCheck_ReadPIDFileNonAbsentError_Proceeds asserts
+// that when ReadPIDFile fails with an error that is NOT IsNotExist (e.g. parse
+// error), the pre-check treats it as "no holder" and proceeds.
+func TestAcquireDaemonLock_PreCheck_ReadPIDFileNonAbsentError_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	withLockAcquireReadPIDFileFake(t, func(d string) (int, error) {
+		return 0, fmt.Errorf("parse daemon.pid: malformed")
+	})
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		t.Fatalf("lockAcquireIdentifyDaemon must not be called when ReadPIDFile errors; got pid=%d", pid)
+		return 0, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error { return nil })
+
+	f, err := AcquireDaemonLock(dir)
+	if err != nil {
+		t.Fatalf("AcquireDaemonLock: %v", err)
+	}
+	if f == nil {
+		t.Fatal("AcquireDaemonLock returned nil *os.File")
+	}
+	t.Cleanup(func() { _ = f.Close() })
+}
+
+// TestAcquireDaemonLock_PreCheck_DoesNotOpenLockFile_OnRefusal pins the
+// invariant that pre-check refusal does NOT touch daemon.lock at all: neither
+// open(2) nor lockAcquire is invoked. lockAcquire is stubbed to fail-fast on
+// any call.
+func TestAcquireDaemonLock_PreCheck_DoesNotOpenLockFile_OnRefusal(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePIDFile(dir, 7373); err != nil {
+		t.Fatalf("WritePIDFile: %v", err)
+	}
+
+	withLockAcquireIdentifyDaemonFake(t, func(pid int) (IdentifyResult, error) {
+		return IdentifyIsPortalDaemon, nil
+	})
+	withLockAcquireFake(t, func(_ int, _ int) error {
+		t.Fatal("lockAcquire must NOT be called when pre-check returns ErrDaemonLockHeld")
+		return nil
+	})
+
+	_, err := AcquireDaemonLock(dir)
+	if !errors.Is(err, ErrDaemonLockHeld) {
+		t.Fatalf("err = %v; want errors.Is ErrDaemonLockHeld", err)
+	}
+	if _, statErr := os.Stat(DaemonLock(dir)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("daemon.lock exists after pre-check refusal; stat err = %v; want os.ErrNotExist", statErr)
+	}
+}
+
+// TestAcquireDaemonLock_EWOULDBLOCK_PreCheckSeesNoHolder_FlockFallback is the
+// regression guard for the layered-enforcement contract: when the pre-check
+// finds no holder (no daemon.pid), the existing EWOULDBLOCK path remains the
+// fallback that returns ErrDaemonLockHeld on real contention.
+func TestAcquireDaemonLock_EWOULDBLOCK_PreCheckSeesNoHolder_FlockFallback(t *testing.T) {
+	dir := t.TempDir()
+	// No daemon.pid → pre-check skips, proceeds.
+	withLockAcquireFake(t, func(_ int, _ int) error {
+		return unix.EWOULDBLOCK
+	})
+
+	f, err := AcquireDaemonLock(dir)
+	if f != nil {
+		_ = f.Close()
+		t.Fatalf("expected nil *os.File on contention, got %v", f)
+	}
+	if !errors.Is(err, ErrDaemonLockHeld) {
+		t.Fatalf("err = %v; want errors.Is ErrDaemonLockHeld", err)
+	}
 }
 
 func TestAcquireDaemonLock_AcceptsArbitraryStateDirParameter(t *testing.T) {

@@ -96,7 +96,7 @@
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 3,
+          "fix_attempts": 0,
           "analysis_cycle": 0,
           "linters": [
             {
@@ -125,7 +125,8 @@
             "slow-open-empty-previews-and-zombie-sessions-3-2",
             "slow-open-empty-previews-and-zombie-sessions-3-3",
             "slow-open-empty-previews-and-zombie-sessions-4-3",
-            "slow-open-empty-previews-and-zombie-sessions-4-4"
+            "slow-open-empty-previews-and-zombie-sessions-4-4",
+            "slow-open-empty-previews-and-zombie-sessions-4-6"
           ]
         }
       }
