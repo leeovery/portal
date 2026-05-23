@@ -22,6 +22,13 @@ type captureMock struct {
 	envBySession  map[string]string
 	envErrs       map[string]error
 	t             *testing.T
+
+	// Call counters — zero-valued by default so existing tests are unaffected.
+	// Used by TestCaptureStructurePreLoopFailFatal to assert which pre-loop
+	// commands run (and which do not) after each fail-fatal path.
+	listSessionsCalls int
+	listPanesCalls    int
+	showEnvCalls      int
 }
 
 func (m *captureMock) Run(args ...string) (string, error) {
@@ -30,10 +37,13 @@ func (m *captureMock) Run(args ...string) (string, error) {
 	}
 	switch args[0] {
 	case "list-sessions":
+		m.listSessionsCalls++
 		return m.listSessions, m.listSessionsE
 	case "list-panes":
+		m.listPanesCalls++
 		return m.listPanes, m.listPanesE
 	case "show-environment":
+		m.showEnvCalls++
 		// args == [show-environment, -t, <session>]
 		if len(args) < 3 {
 			m.t.Fatalf("show-environment called with insufficient args: %v", args)
@@ -1472,6 +1482,143 @@ func TestCaptureStructureMergeSkippedPanes(t *testing.T) {
 		p := findPane(idx, "zeta", 0, 0)
 		if p == nil || p.CWD != "/prev" || p.CurrentCommand != "vim" {
 			t.Errorf("zeta:0.0 = %+v, want prev's /prev + vim", p)
+		}
+	})
+}
+
+// failFastCaptureClient is a CaptureClient implementation that lets a test
+// drive an error from ListSessionNames without going through *tmux.Client
+// (which swallows list-sessions exec errors). ListAllPanesWithFormat and
+// ShowEnvironment t.Fatalf if invoked — they MUST NOT run after a pre-loop
+// fail-fatal on ListSessionNames.
+type failFastCaptureClient struct {
+	t                   *testing.T
+	listSessionNames    []string
+	listSessionNamesErr error
+}
+
+func (f *failFastCaptureClient) ListSessionNames() ([]string, error) {
+	return f.listSessionNames, f.listSessionNamesErr
+}
+
+func (f *failFastCaptureClient) ListAllPanesWithFormat(format string) (string, error) {
+	f.t.Fatalf("ListAllPanesWithFormat unexpectedly called with format %q", format)
+	return "", nil
+}
+
+func (f *failFastCaptureClient) ShowEnvironment(session string) (string, error) {
+	f.t.Fatalf("ShowEnvironment unexpectedly called for session %q", session)
+	return "", nil
+}
+
+// TestCaptureStructurePreLoopFailFatal pins the invariant from spec § Component
+// E (lines 315, 339): the pre-loop tmux calls — ListSessionNames,
+// ListAllPanesWithFormat, and parsePaneRows — MUST remain fail-fatal. A
+// regression that relaxed any of these to log-and-continue would silently
+// produce partial or empty indexes that the daemon would then Commit, wiping
+// scrollback. These tests are orthogonal to the per-session log-and-continue
+// behaviour exercised by TestCaptureStructurePerSessionLogAndContinue: they
+// assert the pre-loop discipline that protects the per-session loop from ever
+// running on a broken capture.
+func TestCaptureStructurePreLoopFailFatal(t *testing.T) {
+	t.Run("it returns an error when ListSessionNames fails and does not call show-environment", func(t *testing.T) {
+		// Bypass tmux.NewClient — *tmux.Client.ListSessions swallows the
+		// underlying exec error (returns []Session{}, nil) so it cannot
+		// drive a ListSessionNames failure path. The CaptureStructure /
+		// CaptureClient contract is what we're pinning here: if the client
+		// returns an error from ListSessionNames, CaptureStructure must
+		// fail-fatal and skip downstream commands.
+		client := &failFastCaptureClient{
+			t:                   t,
+			listSessionNamesErr: errors.New("exec: tmux broken"),
+		}
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected error from ListSessionNames failure, got nil")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions on pre-loop fail-fatal, got %d", len(idx.Sessions))
+		}
+		// Pre-loop fail-fatal on dispatch: tmux is broken, so no downstream
+		// commands run. The failFastCaptureClient t.Fatalfs if either is
+		// invoked.
+	})
+
+	t.Run("it returns an error when ListAllPanesWithFormat fails with non-empty keep", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("work", "side"),
+			listPanesE:   errors.New("list-panes failed"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected error from ListAllPanesWithFormat failure, got nil")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions on pre-loop fail-fatal, got %d", len(idx.Sessions))
+		}
+		// list-panes was attempted (and failed); the per-session loop must
+		// not have been entered.
+		if mock.listPanesCalls != 1 {
+			t.Errorf("list-panes calls = %d, want 1", mock.listPanesCalls)
+		}
+		if mock.showEnvCalls != 0 {
+			t.Errorf("show-environment calls = %d, want 0 (must not run after ListAllPanesWithFormat failure)", mock.showEnvCalls)
+		}
+	})
+
+	t.Run("it returns an error when parsePaneRows hits a malformed row", func(t *testing.T) {
+		// Malformed row: too few "|||"-separated fields. captureFormat
+		// expects 10; this emits 3. parsePaneRows must return an error and
+		// CaptureStructure must propagate it before the per-session loop.
+		mock := &captureMock{
+			listSessions: listSessionsFor("work"),
+			listPanes:    "work|||0|||main",
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected error from parsePaneRows on malformed row, got nil")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions on pre-loop fail-fatal, got %d", len(idx.Sessions))
+		}
+		if mock.showEnvCalls != 0 {
+			t.Errorf("show-environment calls = %d, want 0 (must not run after parsePaneRows failure)", mock.showEnvCalls)
+		}
+	})
+
+	t.Run("it returns an empty index with nil error when keep is empty after filtering", func(t *testing.T) {
+		// Only internal-prefixed sessions present: keep is empty after the
+		// internalSessionPrefix filter. The pre-loop list-panes call is
+		// skipped (gated on len(keep) > 0) and the per-session loop never
+		// runs. Result is the canonical empty index with nil err.
+		mock := &captureMock{
+			listSessions: listSessionsFor("_portal-saver"),
+			t:            t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error when keep is empty: %v", err)
+		}
+		if idx.Sessions == nil {
+			t.Fatal("Sessions is nil; want non-nil empty slice")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("got %d sessions, want 0", len(idx.Sessions))
+		}
+		if mock.listPanesCalls != 0 {
+			t.Errorf("list-panes calls = %d, want 0 (must skip when keep is empty)", mock.listPanesCalls)
+		}
+		if mock.showEnvCalls != 0 {
+			t.Errorf("show-environment calls = %d, want 0 (must skip when keep is empty)", mock.showEnvCalls)
 		}
 	})
 }
