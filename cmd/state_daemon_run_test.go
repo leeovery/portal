@@ -1239,3 +1239,60 @@ func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
 	// PrevIndex pointer replaced.
 	assertCommitReplacedPrev(t, deps, sentinelPrev, dir)
 }
+
+// TestDefaultDaemonRun_WritesVersionFileFromDepsVersion is the regression guard
+// for the WriteVersionFile move (RunE → defaultDaemonRun). It invokes
+// defaultDaemonRun directly (bypassing RunE entirely) with a daemonDeps whose
+// Version field is set to a sentinel value, and asserts that daemon.version
+// lands on disk with the sentinel content.
+//
+// Pins the contract: defaultDaemonRun is the sole production write site for
+// daemon.version, sourcing the value from deps.Version. A regression that
+// moves WriteVersionFile back into RunE would fail this test because RunE is
+// not on the call path here.
+func TestDefaultDaemonRun_WritesVersionFileFromDepsVersion(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	// Short-circuit the tick loop so defaultDaemonRun returns immediately
+	// after its startup write sequence; pre-cancel the ctx as a belt-and-
+	// braces in case the seam swap is bypassed.
+	prevLoop := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
+	t.Cleanup(func() { daemonTickLoopFunc = prevLoop })
+
+	prevLock := daemonLockFile
+	daemonLockFile = nil
+	t.Cleanup(func() { daemonLockFile = prevLock })
+
+	logger, err := state.OpenLogger(state.PortalLog(dir), false)
+	if err != nil {
+		t.Fatalf("OpenLogger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+
+	const want = "regression-sentinel-1.2.3"
+	deps := &daemonDeps{
+		Dir:          dir,
+		Version:      want,
+		Logger:       logger,
+		TickerPeriod: time.Hour,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := defaultDaemonRun(ctx, deps); err != nil {
+		t.Fatalf("defaultDaemonRun: %v", err)
+	}
+
+	got, err := state.ReadVersionFile(dir)
+	if err != nil {
+		t.Fatalf("ReadVersionFile after defaultDaemonRun: %v", err)
+	}
+	if got != want {
+		t.Errorf("daemon.version = %q; want %q (WriteVersionFile must run from defaultDaemonRun using deps.Version)", got, want)
+	}
+}

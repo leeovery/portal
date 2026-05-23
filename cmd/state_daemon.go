@@ -24,6 +24,7 @@ import (
 // LastSaveAt is updated by tick when a capture-and-commit succeeds.
 type daemonDeps struct {
 	Dir          string
+	Version      string
 	Logger       *state.Logger
 	Client       *tmux.Client
 	HashMap      state.HashMap
@@ -187,6 +188,16 @@ const selfSupervisionHysteresisTicks = 3
 //     a concurrent pre-check and would invert the layered-enforcement
 //     contract — Component C is the authoritative cleanup site.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
+	// Startup write sequence (load-bearing order):
+	//   1. acquireDaemonLock     — singleton flock (spec § Component C step 4)
+	//   2. WritePIDFile          — must be the immediately-next statement after
+	//                              the acquire err-guard (AST-pinned by
+	//                              TestDaemonAcquireLockOrdering_WritePIDFollowsAcquire)
+	//   3. WriteVersionFile      — recorded post-pidfile so EnsurePortalSaverVersion's
+	//                              version-mismatch detection has a fresh marker; the
+	//                              AST adjacency invariant only forbids work BETWEEN
+	//                              acquire and pidfile-write, so versionfile-write is
+	//                              permitted (and required) AFTER the pidfile if-stmt.
 	lockFile, err := acquireDaemonLock(deps.Dir)
 	if err != nil {
 		if errors.Is(err, state.ErrDaemonLockHeld) {
@@ -202,6 +213,9 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 	}
 	if err := state.WritePIDFile(deps.Dir, os.Getpid()); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
+	}
+	if err := state.WriteVersionFile(deps.Dir, deps.Version, deps.Logger); err != nil {
+		return fmt.Errorf("write version file: %w", err)
 	}
 	daemonLockFile = lockFile
 
@@ -436,16 +450,13 @@ var stateDaemonCmd = &cobra.Command{
 		// Daemon Startup.
 		_ = os.Remove(state.SaveRequested(dir))
 
-		// Singleton-lock acquisition + WritePIDFile have moved into
-		// defaultDaemonRun (spec § Component C step 4 — adjacency invariant
-		// is enforced by an AST-walking test against the run-func body).
+		// Singleton-lock acquisition, WritePIDFile, and WriteVersionFile have
+		// all moved into defaultDaemonRun (spec § Component C step 4 — adjacency
+		// invariant is enforced by an AST-walking test against the run-func body).
 		// daemonShutdownFunc / final-flush sequencing is unaffected: the
 		// run func still returns via daemonShutdownFunc on ctx-cancel, and
 		// the lock-held / lock-error paths short-circuit before reaching
 		// the ticker loop.
-		if err := state.WriteVersionFile(dir, version, logger); err != nil {
-			return fmt.Errorf("write version file: %w", err)
-		}
 
 		// Seed the per-pane content-hash map from any existing scrollback
 		// files so the first cycle dedupes against what is already on disk.
@@ -468,6 +479,7 @@ var stateDaemonCmd = &cobra.Command{
 		client := tmux.DefaultClient()
 		deps := &daemonDeps{
 			Dir:          dir,
+			Version:      version,
 			Logger:       logger,
 			Client:       client,
 			HashMap:      hm,
