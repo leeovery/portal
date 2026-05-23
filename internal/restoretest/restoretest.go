@@ -158,11 +158,22 @@ func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sess
 // PORTAL_HOOKS_FILE so the binary's state.EnsureDir and hooks store
 // resolve to the test's isolated config locations.
 //
+// env is the isolated baseline env — callers MUST obtain it via
+// portaltest.NewIsolatedStateEnv(t) (or an equivalent helper that strips
+// any inherited XDG_CONFIG_HOME and substitutes a per-test temp-dir
+// value). This parameter is mandatory and has no env-less overload: it
+// is the structural guarantee that the spawned binary cannot inherit
+// the developer's real XDG_CONFIG_HOME (Component G of the
+// slow-open-empty-previews-and-zombie-sessions work unit). The
+// per-spawn overrides below are appended on top; exec.Cmd honours
+// last-write-wins for duplicate keys, so any matching key in env is
+// shadowed by the explicit override.
+//
 // On per-session failure (build missing, exit non-zero, output drift) the
 // test fails via t.Errorf — every session's invocation is reported
 // independently so a failing test pinpoints which session's hook pipeline
 // regressed.
-func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDir, hooksFile string, sessions []string) {
+func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDir, hooksFile string, sessions []string, env []string) {
 	t.Helper()
 	binary := filepath.Join(portalBinaryDir, "portal")
 	for _, session := range sessions {
@@ -179,11 +190,13 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 		// before runSignalHydrate runs. With `--`, every following token
 		// is treated as a positional argument regardless of leading dashes.
 		cmd := exec.Command(binary, "state", "signal-hydrate", "--", session)
-		// Env construction: prepend os.Environ() then append overrides.
-		// exec.Cmd honours last-write-wins for duplicate keys, so any
-		// inherited TMUX/PORTAL_STATE_DIR/PORTAL_HOOKS_FILE/PATH from the
-		// outer test process is shadowed by the explicit values below.
-		cmd.Env = append(os.Environ(),
+		// Env construction: start from the caller's isolated baseline
+		// (XDG_CONFIG_HOME scoped to a per-test temp dir) and append the
+		// per-spawn overrides below. exec.Cmd honours last-write-wins
+		// for duplicate keys, so any TMUX/PORTAL_STATE_DIR/
+		// PORTAL_HOOKS_FILE/PATH already present in env is shadowed by
+		// the explicit value here.
+		cmd.Env = append(append([]string{}, env...),
 			// TMUX is the only documented mechanism by which a tmux CLI
 			// invocation without -S/-L can target a non-default socket.
 			// Format: <socket-path>,<server-pid>,<session-id>; only the
@@ -197,14 +210,33 @@ func DriveSignalHydrateBinary(t *testing.T, portalBinaryDir, socketPath, stateDi
 			"PORTAL_HOOKS_FILE="+hooksFile,
 			// PATH: keep prepended portalBinaryDir so any sub-exec the
 			// binary performs (none today, but defensive) resolves the
-			// same `portal` we just spawned.
-			"PATH="+portalBinaryDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+			// same `portal` we just spawned. Reads PATH from the caller-
+			// supplied env (which preserves the test process's PATH
+			// verbatim) rather than os.Getenv so the composition stays
+			// consistent with the isolated baseline.
+			"PATH="+portalBinaryDir+string(os.PathListSeparator)+pathFromEnv(env),
 		)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Errorf("portal state signal-hydrate %q: %v\n%s", session, err, out)
 		}
 	}
+}
+
+// pathFromEnv returns the PATH value embedded in env, or empty if env
+// does not contain a PATH entry. exec.Cmd does not auto-inherit PATH
+// when cmd.Env is set, so DriveSignalHydrateBinary composes a PATH
+// override using the caller-supplied env's PATH value rather than the
+// live os.Getenv("PATH") — keeping the composition consistent with the
+// isolated baseline.
+func pathFromEnv(env []string) string {
+	const prefix = "PATH="
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return e[len(prefix):]
+		}
+	}
+	return ""
 }
 
 // openAndSignalFIFO opens path O_WRONLY|O_NONBLOCK, retries ENXIO and

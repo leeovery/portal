@@ -65,6 +65,7 @@ import (
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -178,6 +179,15 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	restoretest.PrependPATH(t, binDir)
 
 	stateDir := newIntegrationStateDir(t)
+
+	// Isolated baseline env for any subprocess spawn that needs an
+	// XDG_CONFIG_HOME scoped away from the developer's real
+	// ~/.config/portal/ — see Component G of
+	// slow-open-empty-previews-and-zombie-sessions. The stateDir is
+	// still wired via PORTAL_STATE_DIR (newIntegrationStateDir above),
+	// the env baseline below merely guarantees XDG_CONFIG_HOME does
+	// not leak.
+	env, _ := portaltest.NewIsolatedStateEnv(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
@@ -387,7 +397,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// on-resume hook, and exec's $SHELL.
 	if cfg.useBinary {
 		restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
-			stateDir, hooksPath, []string{"alpha", "beta"})
+			stateDir, hooksPath, []string{"alpha", "beta"}, env)
 	} else {
 		restoretest.DriveSignalHydrate(t, client, stateDir,
 			[]string{"alpha", "beta"})
@@ -890,6 +900,11 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 
 	stateDir := newIntegrationStateDir(t)
 
+	// Isolated baseline env for DriveSignalHydrateBinary subprocess
+	// spawns — see Component G of
+	// slow-open-empty-previews-and-zombie-sessions.
+	env, _ := portaltest.NewIsolatedStateEnv(t)
+
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
 
@@ -978,7 +993,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	// afterwards, mirroring the production sequence where attaching to
 	// alpha hydrates only alpha's panes.
 	restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
-		stateDir, hooksPath, []string{"alpha"})
+		stateDir, hooksPath, []string{"alpha"}, env)
 
 	// Wait for alpha's marker to clear, then assert beta's is still
 	// pending. This sequencing is the structural distinction between
@@ -1002,7 +1017,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	// only the trigger event differs in production, which is opaque to
 	// the binary and therefore not exercised differently here.
 	restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
-		stateDir, hooksPath, []string{"beta"})
+		stateDir, hooksPath, []string{"beta"}, env)
 
 	// Both sessions must now have all skeleton markers cleared — the
 	// two-step pipeline drove every restored pane to hydration
@@ -1119,6 +1134,11 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 
 	stateDir := newIntegrationStateDir(t)
 
+	// Isolated baseline env for DriveSignalHydrateBinary subprocess
+	// spawns — see Component G of
+	// slow-open-empty-previews-and-zombie-sessions.
+	env, _ := portaltest.NewIsolatedStateEnv(t)
+
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
 
@@ -1215,7 +1235,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// run-shell. DriveSignalHydrateBinary wraps the session arg with `--`
 	// internally so the leading-dash session reaches runSignalHydrate.
 	restoretest.DriveSignalHydrateBinary(t, binDir, ts.SocketPath(),
-		stateDir, hooksPath, []string{sessionName})
+		stateDir, hooksPath, []string{sessionName}, env)
 
 	// Wait for every helper's @portal-skeleton-<paneKey> marker to
 	// clear. A timeout means the helper either crashed before unsetting
