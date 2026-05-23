@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -36,6 +37,26 @@ var lockAcquireReadPIDFile = ReadPIDFile
 // (live portal daemon, dead, not portal, transient error) without forking
 // real processes.
 var lockAcquireIdentifyDaemon = IdentifyDaemon
+
+// lockAcquireFstat is the test seam over unix.Fstat used by the post-flock
+// inode cross-check. Production code uses unix.Fstat unchanged; tests swap
+// this seam to drive deterministic inode sequences across retry attempts.
+var lockAcquireFstat = unix.Fstat
+
+// lockAcquireStat is the test seam over unix.Stat used by the post-flock
+// inode cross-check. Production code uses unix.Stat unchanged; tests swap
+// this seam to drive deterministic inode sequences across retry attempts.
+var lockAcquireStat = unix.Stat
+
+// lockAcquireInodeRetryAttempts bounds the post-flock inode cross-check at 3
+// attempts. After 3 mismatches the helper returns a wrapped error (NOT
+// ErrDaemonLockHeld) which the daemon treats as ERROR-and-exit-status-1.
+const lockAcquireInodeRetryAttempts = 3
+
+// lockAcquireInodeRetrySleep is the fixed sleep between inode-mismatch retry
+// attempts. 3 attempts × 10ms = ≤30ms baseline + syscall overhead < 100ms
+// total. Fixed sleep; no jitter.
+const lockAcquireInodeRetrySleep = 10 * time.Millisecond
 
 // AcquireDaemonLock opens <stateDir>/daemon.lock and attempts to acquire an
 // exclusive, non-blocking advisory lock on it via unix.Flock. It is the
@@ -92,31 +113,66 @@ var lockAcquireIdentifyDaemon = IdentifyDaemon
 // The lock file is created with mode 0600 to match the file mode of other
 // portal state files.
 func AcquireDaemonLock(stateDir string) (*os.File, error) {
-	if preAcquirePIDIdentifiesLiveDaemon(stateDir) {
-		return nil, ErrDaemonLockHeld
-	}
-
 	path := DaemonLock(stateDir)
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open daemon.lock %s: %w", path, err)
-	}
-
-	if err := lockAcquire(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		_ = f.Close()
-		if errors.Is(err, unix.EWOULDBLOCK) {
+	for attempt := 1; attempt <= lockAcquireInodeRetryAttempts; attempt++ {
+		// Pre-check runs at the head of every attempt so a slow daemon that
+		// wins the lock mid-retry is still detected on the next iteration.
+		if preAcquirePIDIdentifiesLiveDaemon(stateDir) {
 			return nil, ErrDaemonLockHeld
 		}
-		return nil, fmt.Errorf("flock daemon.lock %s: %w", path, err)
+
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("open daemon.lock %s: %w", path, err)
+		}
+
+		if err := lockAcquire(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+			_ = f.Close()
+			if errors.Is(err, unix.EWOULDBLOCK) {
+				return nil, ErrDaemonLockHeld
+			}
+			return nil, fmt.Errorf("flock daemon.lock %s: %w", path, err)
+		}
+
+		// Post-flock inode cross-check: ensure the inode we flock'd is still
+		// the inode at the path. If the file was unlinked + recreated between
+		// our open and our flock, the two diverge and a second daemon can
+		// flock a different inode for the same path. Bounded retry handles
+		// transient turbulence; persistent mismatch returns a wrapped error.
+		var fdStat unix.Stat_t
+		if err := lockAcquireFstat(int(f.Fd()), &fdStat); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("fstat daemon.lock %s: %w", path, err)
+		}
+		var pathStat unix.Stat_t
+		if err := lockAcquireStat(path, &pathStat); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("stat daemon.lock %s: %w", path, err)
+		}
+
+		if fdStat.Ino != pathStat.Ino {
+			// Release the flock by closing the fd, sleep, and retry the whole
+			// acquire (pre-check + open + flock + inode check).
+			_ = f.Close()
+			if attempt < lockAcquireInodeRetryAttempts {
+				time.Sleep(lockAcquireInodeRetrySleep)
+				continue
+			}
+			return nil, fmt.Errorf("daemon.lock %s inode mismatch after %d attempts: fd inode != path inode", path, lockAcquireInodeRetryAttempts)
+		}
+
+		if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, unix.FD_CLOEXEC); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("set FD_CLOEXEC on daemon.lock %s: %w", path, err)
+		}
+
+		return f, nil
 	}
 
-	if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, unix.FD_CLOEXEC); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("set FD_CLOEXEC on daemon.lock %s: %w", path, err)
-	}
-
-	return f, nil
+	// Unreachable: the loop body either returns or continues; the final
+	// iteration's mismatch branch returns the bounded-retry error.
+	return nil, fmt.Errorf("daemon.lock %s inode mismatch after %d attempts: fd inode != path inode", path, lockAcquireInodeRetryAttempts)
 }
 
 // preAcquirePIDIdentifiesLiveDaemon reports whether <stateDir>/daemon.pid
