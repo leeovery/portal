@@ -1243,11 +1243,12 @@ func swapSeam[T any](t *testing.T, ptr *T, v T) {
 	t.Cleanup(func() { *ptr = prev })
 }
 
-// installBarrierReadPID swaps the killBarrierReadPID seam for the duration of
-// the test and restores it via t.Cleanup.
+// installBarrierReadPID swaps the saverReadPID seam (shared with the
+// readiness barrier) for the duration of the test and restores it via
+// t.Cleanup.
 func installBarrierReadPID(t *testing.T, fn func(string) (int, error)) {
 	t.Helper()
-	swapSeam(t, tmux.BarrierReadPIDSeam(), fn)
+	swapSeam(t, tmux.SaverReadPIDSeam(), fn)
 }
 
 // installBarrierIsAlive swaps the killBarrierIsAlive seam for the test.
@@ -2659,16 +2660,18 @@ func TestPortalSaverDaemonCommand_LiteralValue(t *testing.T) {
 // exercise the real loop independent of the waitForSaverDaemonReadyFn seam.
 // ----------------------------------------------------------------------------
 
-// installReadinessReadPID swaps the saverReadinessReadPID seam for the test.
+// installReadinessReadPID swaps the saverReadPID seam (shared with the kill
+// barrier) for the test.
 func installReadinessReadPID(t *testing.T, fn func(string) (int, error)) {
 	t.Helper()
-	swapSeam(t, tmux.SaverReadinessReadPIDSeam(), fn)
+	swapSeam(t, tmux.SaverReadPIDSeam(), fn)
 }
 
-// installReadinessIdentify swaps the saverReadinessIdentify seam for the test.
+// installReadinessIdentify swaps the saverIdentifyDaemon seam (shared with
+// the kill barrier's escalation path) for the test.
 func installReadinessIdentify(t *testing.T, fn func(int) (state.IdentifyResult, error)) {
 	t.Helper()
-	swapSeam(t, tmux.SaverReadinessIdentifySeam(), fn)
+	swapSeam(t, tmux.SaverIdentifyDaemonSeam(), fn)
 }
 
 // installReadinessPollInterval shrinks the readiness poll cadence for the test.
@@ -3478,7 +3481,7 @@ func TestNewDetachedSessionNoCwd_ArgvHasNoEnvOverrides(t *testing.T) {
 // Task 4-1: SIGKILL escalation in killSaverAndWaitForDaemon.
 //
 // After the session-kill poll loop times out (existing 5s window), the helper
-// identity-checks priorPID via killBarrierIdentifyDaemon and, only when the
+// identity-checks priorPID via saverIdentifyDaemon and, only when the
 // result is IdentifyIsPortalDaemon, sends SIGKILL via killBarrierSendSIGKILL
 // (the IMMEDIATELY-preceding seam call). Then it polls killBarrierIsAlive at
 // killBarrierPollInterval cadence for up to killBarrierEscalationTimeout.
@@ -3486,11 +3489,12 @@ func TestNewDetachedSessionNoCwd_ArgvHasNoEnvOverrides(t *testing.T) {
 // Spec § Component A — Kill-Barrier Escalation.
 // ----------------------------------------------------------------------------
 
-// installBarrierIdentifyDaemon swaps the killBarrierIdentifyDaemon seam for
+// installBarrierIdentifyDaemon swaps the saverIdentifyDaemon seam (shared
+// with the readiness barrier) for
 // the duration of the test.
 func installBarrierIdentifyDaemon(t *testing.T, fn func(int) (state.IdentifyResult, error)) {
 	t.Helper()
-	swapSeam(t, tmux.BarrierIdentifyDaemonSeam(), fn)
+	swapSeam(t, tmux.SaverIdentifyDaemonSeam(), fn)
 }
 
 // installBarrierSendSIGKILL swaps the killBarrierSendSIGKILL seam for the
@@ -3989,7 +3993,7 @@ func TestKillSaverAndWaitForDaemon_Escalation_PriorPIDDiesDuringSessionKillPoll_
 }
 
 // TestKillSaverAndWaitForDaemon_Escalation_NoPIDFile_EscalationNeverRuns pins
-// that when killBarrierReadPID returns ErrPIDFileAbsent, the existing
+// that when saverReadPID returns ErrPIDFileAbsent, the existing
 // short-circuit fast path runs (tolerant kill, no polling) and the escalation
 // path is never entered — identity check is never invoked, SIGKILL seam is
 // never invoked, no WARN.

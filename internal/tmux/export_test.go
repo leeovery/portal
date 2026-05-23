@@ -36,9 +36,10 @@ const PortalSaverDaemonCommand = portalSaverDaemonCommand
 // TestShouldKillSaverOnVersionDecision_PredicateMatrix.
 var ShouldKillSaverOnVersionDecision = shouldKillSaverOnVersionDecision
 
-// BarrierReadPIDSeam returns a pointer to the killBarrierReadPID seam so tests
-// can swap and restore it via t.Cleanup.
-func BarrierReadPIDSeam() *func(string) (int, error) { return &killBarrierReadPID }
+// SaverReadPIDSeam returns a pointer to the saverReadPID seam so tests can
+// swap and restore it via t.Cleanup. The seam is shared between the kill
+// barrier (priorPID read) and the readiness barrier (poll-for-PID-file).
+func SaverReadPIDSeam() *func(string) (int, error) { return &saverReadPID }
 
 // BarrierIsAliveSeam returns a pointer to the killBarrierIsAlive seam.
 func BarrierIsAliveSeam() *func(int) bool { return &killBarrierIsAlive }
@@ -54,11 +55,13 @@ func BarrierTimeoutSeam() *time.Duration { return &killBarrierTimeout }
 // post-SIGKILL poll budget.
 func BarrierEscalationTimeoutSeam() *time.Duration { return &killBarrierEscalationTimeout }
 
-// BarrierIdentifyDaemonSeam returns a pointer to the killBarrierIdentifyDaemon
-// seam so escalation-path tests can deterministically drive identity-check
-// outcomes without shelling out to ps.
-func BarrierIdentifyDaemonSeam() *func(int) (state.IdentifyResult, error) {
-	return &killBarrierIdentifyDaemon
+// SaverIdentifyDaemonSeam returns a pointer to the saverIdentifyDaemon seam
+// so tests can deterministically drive identity-check outcomes without
+// shelling out to ps. The seam is shared between the kill barrier's
+// escalation path (pre-SIGKILL identity check) and the readiness barrier
+// (post-respawn classification of daemon.pid).
+func SaverIdentifyDaemonSeam() *func(int) (state.IdentifyResult, error) {
+	return &saverIdentifyDaemon
 }
 
 // BarrierSendSIGKILLSeam returns a pointer to the killBarrierSendSIGKILL seam
@@ -100,21 +103,6 @@ func VersionWriterLoggerSeam() **state.Logger { return &versionWriterLogger }
 // WaitForSaverDaemonReady re-exports waitForSaverDaemonReady for tests that
 // exercise the readiness barrier directly.
 var WaitForSaverDaemonReady = waitForSaverDaemonReady
-
-// SaverReadinessReadPIDSeam returns a pointer to the saverReadinessReadPID
-// seam so readiness-barrier tests can simulate ErrPIDFileAbsent / transient
-// read errors / clean PID reads without touching the filesystem.
-func SaverReadinessReadPIDSeam() *func(string) (int, error) {
-	return &saverReadinessReadPID
-}
-
-// SaverReadinessIdentifySeam returns a pointer to the saverReadinessIdentify
-// seam so readiness-barrier tests can simulate IdentifyDead /
-// IdentifyNotPortalDaemon / IdentifyIsPortalDaemon and transient ps errors
-// without shelling out to ps.
-func SaverReadinessIdentifySeam() *func(int) (state.IdentifyResult, error) {
-	return &saverReadinessIdentify
-}
 
 // SaverReadinessPollIntervalSeam returns a pointer to the
 // saverReadinessPollInterval seam so tests can shrink the poll cadence to

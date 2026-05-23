@@ -138,12 +138,14 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
 
-// killBarrierReadPID is the function used to read the prior daemon's PID from
-// the state directory before a kill-respawn cycle. It is a package-level seam
-// so kill-barrier unit tests can simulate "no PID file", "corrupted PID file",
-// or "unreadable PID file" cases without touching the filesystem. Defaults to
-// state.ReadPIDFile.
-var killBarrierReadPID = state.ReadPIDFile
+// saverReadPID is the function used to read the saver daemon's PID file. It
+// is shared by BOTH the kill-barrier (reading the prior daemon's PID before a
+// kill-respawn cycle) and the readiness barrier (polling for the freshly-
+// respawned daemon's PID file to appear). Exposed as a package-level seam so
+// unit tests can simulate "no PID file", "corrupted PID file", "unreadable PID
+// file", and "absent then present" cases without touching the filesystem.
+// Defaults to state.ReadPIDFile.
+var saverReadPID = state.ReadPIDFile
 
 // killBarrierIsAlive is the function used by the kill barrier to probe whether
 // the prior daemon is still running. It is a package-level seam so tests can
@@ -175,14 +177,16 @@ var killBarrierTimeout = 5 * time.Second
 // WARN. Exported as a var so tests can shrink it.
 var killBarrierEscalationTimeout = 1 * time.Second
 
-// killBarrierIdentifyDaemon is the function used by killSaverAndWaitForDaemon's
-// escalation path to identity-check the prior PID immediately before sending
-// SIGKILL. Defaults to state.IdentifyDaemon — the shared three-result primitive
-// that classifies whether a PID is a live `portal state daemon`. A
-// package-level seam so kill-barrier unit tests can deterministically drive
-// the IdentifyIsPortalDaemon / IdentifyNotPortalDaemon / IdentifyDead /
-// transient-error branches without shelling out to ps.
-var killBarrierIdentifyDaemon = state.IdentifyDaemon
+// saverIdentifyDaemon is the function used to classify whether a given PID is
+// a live `portal state daemon`. It is shared by BOTH the kill-barrier
+// escalation path (identity-checking the prior PID immediately before sending
+// SIGKILL) and the readiness barrier (classifying the PID read from
+// daemon.pid after the create-branch respawn). Defaults to state.IdentifyDaemon
+// — the shared three-result primitive. Exposed as a package-level seam so unit
+// tests can deterministically drive the IdentifyIsPortalDaemon /
+// IdentifyNotPortalDaemon / IdentifyDead / transient-error branches without
+// shelling out to ps.
+var saverIdentifyDaemon = state.IdentifyDaemon
 
 // killBarrierSendSIGKILL is the function used by killSaverAndWaitForDaemon's
 // escalation path to send SIGKILL directly to the prior PID after the
@@ -238,21 +242,6 @@ func SetBarrierLogger(l BarrierLogger) {
 	killBarrierLogger = l
 }
 
-// saverReadinessReadPID is the function used by waitForSaverDaemonReady to
-// read the daemon's PID file while polling for readiness after the create-
-// branch respawn-pane. It is a package-level seam so readiness-barrier unit
-// tests can simulate "absent then present", "absent forever", or
-// "transient read error" without touching the filesystem. Defaults to
-// state.ReadPIDFile.
-var saverReadinessReadPID = state.ReadPIDFile
-
-// saverReadinessIdentify is the function used by waitForSaverDaemonReady to
-// classify the PID read from daemon.pid. It is a package-level seam so
-// readiness-barrier unit tests can simulate transient ps failures, dead
-// PIDs, recycled-PID misidentification, and the success case without
-// shelling out to ps. Defaults to state.IdentifyDaemon.
-var saverReadinessIdentify = state.IdentifyDaemon
-
 // saverReadinessPollInterval is the cadence at which the readiness barrier
 // re-probes ReadPIDFile + IdentifyDaemon after the create-branch respawn.
 // Exported as a var so tests can shrink it. Defaults to 50ms — chosen
@@ -298,7 +287,7 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 //
 // Flow:
 //
-//  1. Read the prior PID via killBarrierReadPID. On any error (file absent,
+//  1. Read the prior PID via saverReadPID. On any error (file absent,
 //     unreadable, corrupted) → tolerant kill, return nil immediately. Polling
 //     is skipped because there is no prior PID to wait for.
 //  2. If the prior PID is already dead (killBarrierIsAlive returns false on
@@ -310,7 +299,7 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 //     it returns false or killBarrierTimeout elapses.
 //  4. On session-kill poll timeout → escalate (spec § Component A —
 //     Kill-Barrier Escalation):
-//     (a) Identity-check the prior PID via killBarrierIdentifyDaemon. If the
+//     (a) Identity-check the prior PID via saverIdentifyDaemon. If the
 //     result is anything other than IdentifyIsPortalDaemon (recycled PID,
 //     transient ps error, IdentifyDead) → emit one WARN and return nil
 //     without signalling. Safety bias: never signal a PID we cannot
@@ -329,7 +318,7 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 // once per invocation across the entire flow; the new daemon's lock
 // acquisition is the safety net for genuinely-stuck cases.
 func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
-	priorPID, readErr := killBarrierReadPID(stateDir)
+	priorPID, readErr := saverReadPID(stateDir)
 	if readErr != nil {
 		// No usable prior PID. Tolerant kill, no polling.
 		_ = c.KillSession(PortalSaverName)
@@ -388,7 +377,7 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 // runs between the check and the signal. The two seam calls are deliberately
 // adjacent in source.
 func escalateKillToSIGKILL(priorPID int) error {
-	result, err := killBarrierIdentifyDaemon(priorPID)
+	result, err := saverIdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
 		killBarrierLogger.Warn(
 			state.ComponentBootstrap,
@@ -420,8 +409,8 @@ func escalateKillToSIGKILL(priorPID int) error {
 //
 // Contract:
 //
-//   - Returns nil immediately the first time saverReadinessReadPID returns a
-//     PID AND saverReadinessIdentify returns IdentifyIsPortalDaemon. This is
+//   - Returns nil immediately the first time saverReadPID returns a
+//     PID AND saverIdentifyDaemon returns IdentifyIsPortalDaemon. This is
 //     the success path.
 //   - Returns nil on timeout AFTER emitting exactly one WARN through
 //     killBarrierLogger under state.ComponentBootstrap containing the literal
@@ -465,11 +454,11 @@ func waitForSaverDaemonReady(stateDir string) error {
 // identify error, IdentifyDead, IdentifyNotPortalDaemon) returns false so
 // the caller continues polling.
 func isSaverDaemonReady(stateDir string) bool {
-	pid, err := saverReadinessReadPID(stateDir)
+	pid, err := saverReadPID(stateDir)
 	if err != nil {
 		return false
 	}
-	result, err := saverReadinessIdentify(pid)
+	result, err := saverIdentifyDaemon(pid)
 	if err != nil {
 		return false
 	}
