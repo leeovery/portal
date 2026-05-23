@@ -1,0 +1,447 @@
+// Tests in this file mutate package-level state via the saverMembershipProbe
+// and osExit seams and MUST NOT use t.Parallel.
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
+)
+
+// withSaverMembershipProbeFake swaps the package-level saverMembershipProbe
+// seam for the duration of the test and restores it via t.Cleanup.
+func withSaverMembershipProbeFake(t *testing.T, fake func(*tmux.Client, int) bool) {
+	t.Helper()
+	prev := saverMembershipProbe
+	saverMembershipProbe = fake
+	t.Cleanup(func() { saverMembershipProbe = prev })
+}
+
+// withOsExitFake swaps the package-level osExit seam for the duration of the
+// test. The supplied function is invoked in place of os.Exit; tests typically
+// record the call and then panic with the supplied sentinel to abort the
+// ticker for-loop (since osExit returning would let the loop continue, which
+// is not the production behaviour we're modelling).
+func withOsExitFake(t *testing.T, fake func(int)) {
+	t.Helper()
+	prev := osExit
+	osExit = fake
+	t.Cleanup(func() { osExit = prev })
+}
+
+// withDaemonShutdownFuncFake swaps daemonShutdownFunc for the duration of the
+// test and restores via t.Cleanup. Tests use this to record whether the
+// shutdown path ran during a self-eject (it must not).
+func withDaemonShutdownFuncFake(t *testing.T, fake func(*daemonDeps) error) {
+	t.Helper()
+	prev := daemonShutdownFunc
+	daemonShutdownFunc = fake
+	t.Cleanup(func() { daemonShutdownFunc = prev })
+}
+
+// runDaemonLoopUntilEject runs defaultDaemonRun in a goroutine and returns a
+// channel that closes when the daemon returns (which happens either via the
+// supplied osExit fake panicking to unwind the loop, or via ctx-cancel).
+//
+// The deps.TickerPeriod should be sub-millisecond so the ticker fires fast
+// enough to keep the test wall time bounded.
+//
+// The osExit fake is expected to panic after recording so the loop unwinds
+// even though the real os.Exit would have terminated the process.
+func runDaemonLoopUntilEject(t *testing.T, deps *daemonDeps, ctx context.Context) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }()
+		_ = defaultDaemonRun(ctx, deps)
+	}()
+	return done
+}
+
+// TestDaemonLoop_SelfCheckBypassesShutdownOnEject asserts the load-bearing
+// invariant of the eject: osExit fires AND daemonShutdownFunc does NOT run.
+// This proves the eject bypasses the deferred final-flush path — the spec is
+// explicit that a divergent-view daemon must not execute one more
+// captureAndCommit cycle on its way out.
+func TestDaemonLoop_SelfCheckBypassesShutdownOnEject(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Probe always returns false → counter climbs every tick.
+	var probeCalls int32
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
+		atomic.AddInt32(&probeCalls, 1)
+		return false
+	})
+
+	var exitCalls int32
+	var exitCode int32 = -1
+	withOsExitFake(t, func(code int) {
+		atomic.StoreInt32(&exitCode, int32(code))
+		atomic.AddInt32(&exitCalls, 1)
+		panic("osExit invoked — abort loop")
+	})
+
+	// daemonShutdownFunc must not run on the eject path; record if it does.
+	var shutdownCalls int32
+	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error {
+		atomic.AddInt32(&shutdownCalls, 1)
+		return nil
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+	deps.LastSaveAt = time.Now() // gap=false so tick body is a no-op fast path
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	if atomic.LoadInt32(&exitCalls) != 1 {
+		t.Fatalf("osExit invoked %d times; want 1", exitCalls)
+	}
+	if got := atomic.LoadInt32(&exitCode); got != 0 {
+		t.Errorf("osExit code = %d; want 0", got)
+	}
+	if got := atomic.LoadInt32(&shutdownCalls); got != 0 {
+		t.Errorf("daemonShutdownFunc invoked %d times on eject path; want 0", got)
+	}
+	if probe := atomic.LoadInt32(&probeCalls); probe < int32(selfSupervisionHysteresisTicks) {
+		t.Errorf("probe invoked %d times; want at least %d before eject", probe, selfSupervisionHysteresisTicks)
+	}
+}
+
+// TestDaemonLoop_SelfCheckSkipsCaptureOnEjectTick asserts that on the eject
+// tick itself (the N-th consecutive probe-false), captureAndCommit is NOT
+// invoked. Below-threshold ticks DO run captureAndCommit (the self-check is
+// non-disruptive until divergence is confirmed). The proof: with the dirty
+// flag set ONCE, only ONE tick reaches list-sessions (the first), but the
+// counter still climbs to N over subsequent no-op-fast-path ticks and ejects;
+// captureAndCommit is never invoked on the eject tick because the eject
+// short-circuits before tick().
+//
+// Concretely: tick 1 runs (probe-false → counter=1; tick body fires; flag
+// cleared); ticks 2 and 3 run with no dirty flag → tick body is fast-path
+// no-op but still counter increments. On tick 3 (=N), eject fires BEFORE
+// tick(). Net: exactly one list-sessions call total, regardless of N.
+func TestDaemonLoop_SelfCheckSkipsCaptureOnEjectTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
+	withOsExitFake(t, func(_ int) { panic("osExit invoked") })
+
+	fc := &daemonFakeCommander{
+		sessionsOut: "work|1|0",
+		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+	deps.LastSaveAt = time.Now() // gap=false; only dirty flag drives tick body
+	touchSaveRequested(t, dir)   // arm exactly once
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	// At most one list-sessions call — the first dirty tick. The eject tick
+	// (and any no-op ticks in between) must NOT add a second call. If the
+	// eject were placed AFTER tick (incorrect ordering), a re-arming dirty
+	// flag scenario would produce > 1 call. The single-arm scenario here
+	// pins the simpler invariant: the eject tick does not run captureAndCommit.
+	gotList := len(fc.callsContaining("list-sessions"))
+	if gotList > 1 {
+		t.Errorf("list-sessions invoked %d times; want ≤ 1 (eject tick must not run captureAndCommit)", gotList)
+	}
+}
+
+// TestDaemonLoop_SelfCheckRunsBeforeIsRestoringSet asserts that the self-check
+// fires even when @portal-restoring is set. If the self-check were placed
+// inside tick (after IsRestoringSet), the restoring early-return would mask
+// the divergence; the spec explicitly forbids this ordering.
+func TestDaemonLoop_SelfCheckRunsBeforeIsRestoringSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
+
+	var exitCalls int32
+	withOsExitFake(t, func(_ int) {
+		atomic.AddInt32(&exitCalls, 1)
+		panic("osExit invoked")
+	})
+
+	// @portal-restoring is set — if the self-check were inside tick after the
+	// restoring early-return, the eject would never fire.
+	fc := &daemonFakeCommander{
+		optionByName: map[string]string{state.RestoringMarkerName: "1"},
+	}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	if atomic.LoadInt32(&exitCalls) != 1 {
+		t.Errorf("osExit invoked %d times despite @portal-restoring; want 1", exitCalls)
+	}
+}
+
+// TestDaemonLoop_SelfCheckDoesNotDeleteDaemonPID asserts that the eject path
+// leaves daemon.pid on disk — Component C's pre-check on the next acquire
+// handles cleanup. Deleting here would be racy and would invert the
+// layered-enforcement contract.
+func TestDaemonLoop_SelfCheckDoesNotDeleteDaemonPID(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Seed daemon.pid so we can verify it survives the eject.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("seed dir: %v", err)
+	}
+	if err := state.WritePIDFile(dir, 12345); err != nil {
+		t.Fatalf("seed daemon.pid: %v", err)
+	}
+
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
+	withOsExitFake(t, func(_ int) {
+		panic("osExit invoked")
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	// daemon.pid must still exist post-eject.
+	got, err := state.ReadPIDFile(dir)
+	if err != nil {
+		t.Fatalf("daemon.pid missing after eject; ReadPIDFile: %v", err)
+	}
+	if got != 12345 {
+		t.Errorf("daemon.pid = %d; want 12345 (must not have been touched)", got)
+	}
+}
+
+// TestDaemonLoop_SelfCheckResetsCounterOnProbeTrue asserts the canonical
+// hysteresis: two consecutive false returns followed by a true reset the
+// counter, so no eject happens even after many subsequent ticks (assuming
+// they stay true).
+func TestDaemonLoop_SelfCheckResetsCounterOnProbeTrue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Sequence: false, false, true, true, true, ... — must NOT eject.
+	var tickIdx int32
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
+		idx := atomic.AddInt32(&tickIdx, 1)
+		return idx >= 3 // first two false, then true forever
+	})
+
+	var exitCalls int32
+	withOsExitFake(t, func(_ int) {
+		atomic.AddInt32(&exitCalls, 1)
+		panic("osExit invoked unexpectedly")
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+	deps.LastSaveAt = time.Now() // gap=false → no tick body work either way
+
+	// Bound the loop so we let many ticks fire and then cancel.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	t.Cleanup(cancel)
+
+	// Replace shutdown with a no-op so ctx-cancel exits cleanly.
+	withDaemonShutdownFuncFake(t, func(_ *daemonDeps) error { return nil })
+
+	if err := defaultDaemonRun(ctx, deps); err != nil {
+		t.Fatalf("defaultDaemonRun returned: %v", err)
+	}
+
+	if exitCalls != 0 {
+		t.Errorf("osExit invoked %d times despite reset; want 0", exitCalls)
+	}
+	// Sanity: probe ran enough times to have triggered an eject if the
+	// counter hadn't reset.
+	if got := atomic.LoadInt32(&tickIdx); got < int32(selfSupervisionHysteresisTicks)+2 {
+		t.Errorf("probe invoked %d times; want at least %d to make the test meaningful",
+			got, selfSupervisionHysteresisTicks+2)
+	}
+}
+
+// TestDaemonLoop_SelfCheckEjectsExactlyOnNthFalse asserts that exactly N
+// consecutive false probes trigger eject. The probe records each call and
+// returns false N times; the eject must fire on the N-th probe, not earlier
+// and not later.
+func TestDaemonLoop_SelfCheckEjectsExactlyOnNthFalse(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	var probeCalls int32
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
+		atomic.AddInt32(&probeCalls, 1)
+		return false
+	})
+
+	var exitCalls int32
+	withOsExitFake(t, func(_ int) {
+		atomic.AddInt32(&exitCalls, 1)
+		panic("osExit invoked")
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	if atomic.LoadInt32(&exitCalls) != 1 {
+		t.Fatalf("osExit invoked %d times; want exactly 1", exitCalls)
+	}
+	if got := atomic.LoadInt32(&probeCalls); got != int32(selfSupervisionHysteresisTicks) {
+		t.Errorf("probe invoked %d times before eject; want exactly %d",
+			got, selfSupervisionHysteresisTicks)
+	}
+}
+
+// TestDaemonLoop_SelfCheckResetOnEachTrue asserts the spec's reset semantics:
+// the counter resets to 0 (not decrement) on every probe-true. Sequence:
+// false × (N-1), true, false × (N-1), true, false × N → eject only on the
+// final N-th consecutive false.
+func TestDaemonLoop_SelfCheckResetOnEachTrue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	// Pre-compute the script.
+	N := selfSupervisionHysteresisTicks
+	// pattern: (false × N-1, true) × 2, then false × N → eject on final false
+	script := make([]bool, 0, 3*N)
+	for i := 0; i < N-1; i++ {
+		script = append(script, false)
+	}
+	script = append(script, true)
+	for i := 0; i < N-1; i++ {
+		script = append(script, false)
+	}
+	script = append(script, true)
+	for i := 0; i < N; i++ {
+		script = append(script, false)
+	}
+
+	var probeCalls int32
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool {
+		idx := atomic.AddInt32(&probeCalls, 1)
+		i := int(idx) - 1
+		if i >= len(script) {
+			// After the script, return true so we don't accidentally eject
+			// past the planned event.
+			return true
+		}
+		return script[i]
+	})
+
+	var exitCalls int32
+	withOsExitFake(t, func(_ int) {
+		atomic.AddInt32(&exitCalls, 1)
+		panic("osExit invoked")
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	if atomic.LoadInt32(&exitCalls) != 1 {
+		t.Errorf("osExit invoked %d times; want 1", exitCalls)
+	}
+	// Eject should occur on the final consecutive false at script index
+	// 2*N − 1 (1-based: 2*N), so probeCalls should equal len(script) when the
+	// eject fires (modulo the final extra-true tail we never reach).
+	gotProbes := atomic.LoadInt32(&probeCalls)
+	wantProbes := int32(len(script))
+	if gotProbes != wantProbes {
+		t.Errorf("probe invoked %d times; want %d (reset must happen on each true)",
+			gotProbes, wantProbes)
+	}
+}
+
+// TestDaemonLoop_SelfCheckLogsInfoOnEject asserts that the INFO log entry is
+// emitted under ComponentDaemon containing the literal
+// "self-supervision: saver-membership lost for" prefix and the consecutive
+// count.
+func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
+	// INFO is below the default WARN threshold; bump explicitly.
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
+	withOsExitFake(t, func(_ int) {
+		panic("osExit invoked")
+	})
+
+	fc := &daemonFakeCommander{}
+	deps := makeDeps(t, dir, fc)
+	deps.TickerPeriod = 1 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	done := runDaemonLoopUntilEject(t, deps, ctx)
+	<-done
+
+	// Force the log file to flush by closing the logger.
+	_ = deps.Logger.Close()
+
+	logBytes, err := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	got := string(logBytes)
+	if !strings.Contains(got, "INFO") {
+		t.Errorf("expected INFO log line; got:\n%s", got)
+	}
+	if !strings.Contains(got, state.ComponentDaemon) {
+		t.Errorf("expected ComponentDaemon = %q in log; got:\n%s", state.ComponentDaemon, got)
+	}
+	if !strings.Contains(got, "self-supervision: saver-membership lost for") {
+		t.Errorf("expected self-supervision log prefix; got:\n%s", got)
+	}
+	want := fmt.Sprintf("%d consecutive", selfSupervisionHysteresisTicks)
+	if !strings.Contains(got, want) {
+		t.Errorf("expected consecutive-count %q in log; got:\n%s", want, got)
+	}
+}

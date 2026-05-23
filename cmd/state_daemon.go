@@ -49,6 +49,15 @@ var (
 // Production callers leave it at the default.
 var acquireDaemonLock = state.AcquireDaemonLock
 
+// osExit is the package-level seam over os.Exit, used exclusively by the
+// Component D self-eject path. Tests swap this var to a recorder so the test
+// process is not actually terminated when the eject fires.
+//
+// Production callers leave it at os.Exit. Direct use of os.Exit anywhere in
+// this package is forbidden — always go through osExit so the eject path is
+// observable in tests.
+var osExit = os.Exit
+
 // saverMembershipProbe is the package-level seam consumed by Component D's
 // per-tick saver-membership self-check (integrated into the tick loop by
 // Task 5-3). Tests swap this var to inject deterministic
@@ -135,12 +144,55 @@ const selfSupervisionHysteresisTicks = 3
 // Per-tick errors are logged and swallowed — the loop never aborts on a
 // transient failure (disk full, tmux glitch). See spec § Failure Modes
 // → Disk full during save and § In-Flight Capture Atomicity.
+//
+// Component D — Saver-membership self-supervision (spec § Component D
+// self-check sequence steps 4-5): on every ticker fire, before tick runs,
+// invoke saverMembershipProbe. False (any failure mode — absent saver, pid
+// mismatch, transient tmux error) increments a consecutive-absence counter.
+// True resets the counter to 0 (NOT decrement — the spec mandates reset, so
+// any single successful probe re-establishes legitimacy).
+//
+// The self-check lives in the ticker for-loop, NOT inside tick. Placing it
+// inside tick would route it through IsRestoringSet's early-return — and the
+// spec is explicit that a divergent-view daemon must self-eject regardless
+// of @portal-restoring state. Restoring is a legitimate condition for
+// suppressing capture work; it is NOT a license to ignore membership
+// divergence. Keeping the check above tick guarantees it observes every
+// tick uniformly.
+//
+// On reaching selfSupervisionHysteresisTicks, the daemon logs INFO and calls
+// osExit(0) directly. The eject bypasses daemonShutdownFunc / defaultShutdownFlush
+// intentionally:
+//
+//   - Same reasoning as Component A's straight-to-SIGKILL choice: a daemon
+//     whose view diverges from tmux's view must NOT execute one more
+//     captureAndCommit / gcOrphanScrollback cycle on its way out.
+//   - daemon.pid is left on disk on purpose. Phase 4 Component C's pre-check
+//     on the next AcquireDaemonLock detects the stale value (the recorded PID
+//     is dead) and proceeds. Deleting daemon.pid here would be racy against
+//     a concurrent pre-check and would invert the layered-enforcement
+//     contract — Component C is the authoritative cleanup site.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 	ticker := time.NewTicker(deps.TickerPeriod)
 	defer ticker.Stop()
+	// consecutiveAbsenceTicks is closure-scoped: it lives for the lifetime
+	// of this daemon process only and is reset to zero on every probe-true.
+	var consecutiveAbsenceTicks int
 	for {
 		select {
 		case <-ticker.C:
+			if saverMembershipProbe(deps.Client, os.Getpid()) {
+				consecutiveAbsenceTicks = 0
+			} else {
+				consecutiveAbsenceTicks++
+				if consecutiveAbsenceTicks >= selfSupervisionHysteresisTicks {
+					deps.Logger.Info(state.ComponentDaemon,
+						"self-supervision: saver-membership lost for %d consecutive ticks, exiting",
+						consecutiveAbsenceTicks)
+					osExit(0)
+					return nil
+				}
+			}
 			tick(ctx, deps)
 		case <-ctx.Done():
 			return daemonShutdownFunc(deps)
