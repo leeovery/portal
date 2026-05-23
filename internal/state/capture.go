@@ -59,7 +59,15 @@ const internalSessionPrefix = "_"
 // slice and a wrapped error — never a partial index. This matches the spec's
 // "all reads run to completion before any writes" discipline: a downstream
 // writer keying off the returned error will not commit a half-built state.
-func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index) (Index, error) {
+//
+// logger is reserved for the forthcoming per-session WARN entries introduced by
+// the log-and-continue change in spec § Component E (see lines 326-331). It is
+// currently unused by the function body — this signature plumb exists so the
+// behavioural change does not also have to alter the signature. A nil logger is
+// a valid no-op: *Logger methods early-return on nil receiver, so callers may
+// pass nil without guarding.
+func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *Logger) (Index, error) {
+	_ = logger // reserved for Task 2.3's per-session WARN entries; see godoc.
 	savedAt := time.Now().UTC()
 	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
 

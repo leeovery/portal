@@ -94,7 +94,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	prev := commitNowDeps
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureClient { return f.client },
-		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index) (state.Index, error) {
+		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *state.Logger) (state.Index, error) {
 			f.captureCalls++
 			f.capturePrevs = append(f.capturePrevs, p)
 			f.captureSkipSets = append(f.captureSkipSets, skipSet)

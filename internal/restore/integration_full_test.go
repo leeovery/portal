@@ -144,7 +144,7 @@ func TestPhase3Integration_FullRoundTrip(t *testing.T) {
 
 	// Capture + commit. Skeleton-marker skip-set is empty on a fresh
 	// server — these are all live, never-been-restored panes.
-	idx, err := state.CaptureStructure(client, nil, nil)
+	idx, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}

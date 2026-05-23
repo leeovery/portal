@@ -329,7 +329,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 	ts.WaitForSession(t, sessionName, 2*time.Second)
 
 	// CAPTURE.
-	idx, err := state.CaptureStructure(client, nil, nil)
+	idx, err := state.CaptureStructure(client, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CaptureStructure: %v", err)
 	}
