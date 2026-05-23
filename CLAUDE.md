@@ -66,6 +66,10 @@ All config files (`projects.json`, `aliases`, `hooks.json`) resolve via `configF
 
 All external dependencies use small interfaces (1-3 methods). Commands expose package-level `*Deps` structs (e.g., `bootstrapDeps`, `openDeps`, `hooksDeps`) — tests set these to mock implementations and restore via `t.Cleanup()`. Integration tests in `cmd/root_integration_test.go` build the binary and test via subprocess execution.
 
+#### Test isolation for daemon-spawning tests
+
+Any test that runs `portal state daemon` directly OR via `portal open` / bootstrap MUST call `portaltest.NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string)` (in `internal/portaltest/isolated_env.go`) and apply the returned env to every spawned subprocess (`cmd.Env = env`). Without this, the spawned daemon inherits the developer's `$XDG_CONFIG_HOME` and writes to the real `~/.config/portal/state/` — the slow-open / empty-previews / zombie-session incident is the canonical example of how a leaked test daemon corrupts the live install. The helper also registers a `t.Cleanup` fingerprint-diff backstop that walks the developer's state dir post-test and fails on any delta; the backstop is **defence-in-depth, not a substitute** for the env override. No lint or CI enforcement exists — the rule is contributor-discipline plus the structurally-mandatory `*testing.T` parameter (which prevents importing the helper from non-`*_test.go` code).
+
 ### Server bootstrap
 
 `PersistentPreRunE` runs an eleven-step `bootstrap.Orchestrator` (in `cmd/bootstrap/`) for commands needing tmux (all except version, init, help, alias, clean). Step ordering is load-bearing; "Return" is the post-step boundary, not a numbered step:
