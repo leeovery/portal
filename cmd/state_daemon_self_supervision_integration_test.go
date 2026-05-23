@@ -66,6 +66,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -672,3 +673,353 @@ func applyHostNoiseMitigation(t *testing.T) {
 // Compile-time guard: ensure selfEjectExitPollTick is referenced so a
 // future refactor that adds a poll-loop body cannot silently drop it.
 var _ = selfEjectExitPollTick
+
+// firstFailingTickObservationWindow is the wall-time gap between
+// daemon Start and the snapBefore capture. Sized so the snapshot
+// lands AFTER probe 1 has returned false (the daemon's saver probe
+// fires on the first ticker tick at ~TickerPeriod = 1 s) but BEFORE
+// the hysteresis counter reaches N=3 (which fires at ~3 s). The
+// 1.2 s value mirrors the spec-cited window and matches the
+// scrollbackEmergencePollTick + ticker first-fire envelope.
+//
+// 200 ms of slack beyond the 1 s nominal ticker fire absorbs
+// process-start latency (lock acquire + WritePIDFile +
+// tmux.DefaultClient construction) on darwin/arm64 CI hardware.
+const firstFailingTickObservationWindow = 1200 * time.Millisecond
+
+// TestSelfEject_NoScrollbackDeltaAcrossEject pins spec § Component D
+// acceptance bullet "No final flush on self-eject":
+//
+//	Snapshot the scrollback directory at the moment the daemon's
+//	self-check first registers a failing tick, and again
+//	immediately after os.Exit(0). The two snapshots must be
+//	identical (no new files, no deletions, no mtime/size changes).
+//
+// The structural guarantee under test: cmd/state_daemon.go's
+// defaultDaemonRun calls osExit(0) DIRECTLY on hysteresis trip,
+// bypassing daemonShutdownFunc / defaultShutdownFlush. The
+// equivalent guarantee for the externally-SIGKILLed orphan path is
+// covered by Task 4-2's
+// TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit in
+// internal/tmux/kill_barrier_escalation_no_final_flush_integration_test.go;
+// this test is its Component D self-eject twin.
+//
+// Choreography (mirrors TestSelfEject_PortalSaverAbsent_ExitsCleanly's
+// absent-saver setup but pivots on the scrollback dir snapshot
+// rather than the exit-code / log-marker assertions):
+//
+//  1. SkipIfNoTmux + StagePortalBinary + applyHostNoiseMitigation +
+//     isolated state dir. daemon.pid staged absent (Component C's
+//     pre-check proceeds).
+//  2. Stand up an isolated tmux server WITHOUT _portal-saver — the
+//     per-tick saver-membership probe will return false on every
+//     tick from probe 1 onward.
+//  3. Spawn `portal state daemon` directly (bypass orchestrator) with
+//     env wiring matching the sibling tests (PORTAL_STATE_DIR, TMUX,
+//     PATH, PORTAL_LOG_LEVEL=INFO).
+//  4. Sleep firstFailingTickObservationWindow (1.2 s) — lands AFTER
+//     the first failing tick observation but BEFORE the counter
+//     reaches N=3.
+//  5. Capture snapBefore via portaltest.SnapshotStateDir(scrollbackDir).
+//  6. Wait for the subprocess to exit (within
+//     selfEjectExitBudget = (N+1)*TickerPeriod + 2s = 6 s).
+//  7. Capture snapAfter via portaltest.SnapshotStateDir(scrollbackDir).
+//  8. Assert snapBefore == snapAfter across all Fingerprint fields
+//     (Exists, Size, MtimeNanos, CtimeNanos, Sha256, Hashed,
+//     IsSymlink, SymlinkTarget). On any delta, dump full diagnostics
+//     (portal.log, stderr, both snapshot key sets, field-level deltas).
+//  9. Assert exit code == 0.
+//
+// Empty pre-snapshot is a valid baseline. Unlike Task 4-2 which
+// pre-creates a `work` session so the daemon has at least one pane
+// to capture, this test creates no sessions — the daemon ticks
+// against an empty enumeration and writes zero scrollback files
+// before self-ejecting. snapBefore is then empty; snapAfter must
+// ALSO be empty (no eject-time flush). Both-empty is a legitimate
+// pass: the load-bearing assertion is "no delta", not "non-empty
+// pre-snapshot". This is the spec's stronger shape — proves the
+// eject path writes nothing even when there was nothing to write,
+// closing any scenario where a defensive "flush only if non-empty"
+// branch might mask the regression under test.
+func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	binDir := portalbintest.StagePortalBinary(t)
+	binary, err := exec.LookPath("portal")
+	if err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+
+	applyHostNoiseMitigation(t)
+
+	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	// No _portal-saver session: the daemon's saver-membership probe
+	// returns false on every tick from probe 1 — first failing tick
+	// observation arrives at ~TickerPeriod (1 s) after Start.
+	sock := tmuxtest.New(t, "ptl-selfeject-noflush-")
+
+	// Pre-state staging (mirrors the sibling absent-saver test):
+	// daemon.pid absent so Component C's pre-check proceeds and the
+	// daemon reaches its tick loop.
+	if _, statErr := os.Stat(state.DaemonPID(stateDir)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("pre-state: %s expected absent; got err=%v",
+			state.DaemonPID(stateDir), statErr)
+	}
+
+	daemonEnv := append([]string{}, envSlice...)
+	daemonEnv = append(daemonEnv,
+		"PORTAL_STATE_DIR="+stateDir,
+		fmt.Sprintf("TMUX=%s,1,0", sock.SocketPath()),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PORTAL_LOG_LEVEL=INFO",
+	)
+
+	daemon := exec.Command(binary, "state", "daemon")
+	daemon.Env = daemonEnv
+	var stderr strings.Builder
+	daemon.Stderr = &stderr
+
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("start portal state daemon: %v", err)
+	}
+	startInstant := time.Now()
+	daemonPID := daemon.Process.Pid
+
+	t.Cleanup(func() {
+		if daemon.ProcessState != nil {
+			return
+		}
+		if daemon.Process == nil {
+			return
+		}
+		_ = daemon.Process.Signal(syscall.SIGKILL)
+		_, _ = daemon.Process.Wait()
+	})
+
+	// Start the Wait reaper goroutine BEFORE the snapBefore window so
+	// the subprocess is reaped deterministically when it self-ejects
+	// — the deadline-bounded select below blocks on the same channel.
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- daemon.Wait()
+	}()
+
+	// Snap window 1: sleep into the post-first-failing-tick window.
+	// The simple-sleep approach is more deterministic than polling
+	// portal.log because (a) portal.log is buffered and an INFO line
+	// for tick activity is not guaranteed at this point in the loop,
+	// (b) the spec window (post-probe-1, pre-counter-N) is well-defined
+	// in wall-clock terms relative to TickerPeriod.
+	time.Sleep(firstFailingTickObservationWindow)
+
+	scrollbackDir := state.ScrollbackDir(stateDir)
+	snapBefore, err := portaltest.SnapshotStateDir(scrollbackDir)
+	if err != nil {
+		t.Fatalf("snapBefore SnapshotStateDir(%s): %v", scrollbackDir, err)
+	}
+
+	// Wait for the subprocess to self-eject within budget. Same
+	// envelope as the sibling tests in this file.
+	var waitErr error
+	var exitInstant time.Time
+	deadline := time.NewTimer(selfEjectExitBudget)
+	defer deadline.Stop()
+	select {
+	case waitErr = <-waitDone:
+		exitInstant = time.Now()
+	case <-deadline.C:
+		logBlob := readPortalLogSafe(stateDir)
+		t.Fatalf("daemon did not exit within %s of Start (pid=%d); spec § Component D "+
+			"requires self-eject within (N+1)*TickerPeriod = ~4 s for N=3, "+
+			"TickerPeriod=1 s\n--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			selfEjectExitBudget, daemonPID, logBlob, stderr.String())
+	}
+
+	exitLatency := exitInstant.Sub(startInstant)
+	t.Logf("daemon self-eject latency: %s (budget=%s, pid=%d)",
+		exitLatency, selfEjectExitBudget, daemonPID)
+
+	logBlob := readPortalLogSafe(stateDir)
+
+	// snapAfter: captured immediately after Wait returns. The kernel
+	// has already reaped the process at this point — any final flush
+	// the daemon attempted would have already completed (osExit(0)
+	// is synchronous from the daemon's perspective, and Wait does
+	// not return until the kernel finalizes process teardown).
+	snapAfter, err := portaltest.SnapshotStateDir(scrollbackDir)
+	if err != nil {
+		t.Fatalf("snapAfter SnapshotStateDir(%s): %v\n--- portal.log ---\n%s",
+			scrollbackDir, err, logBlob)
+	}
+
+	// Exit code == 0 (osExit(0) on self-eject). Asserted alongside the
+	// snapshot equality so a non-zero exit (which would indicate the
+	// daemon took a different path entirely) is debuggable in the
+	// same run as the no-final-flush invariant.
+	if waitErr != nil {
+		t.Errorf("daemon Wait returned non-nil error (expected clean exit 0): %v\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			waitErr, logBlob, stderr.String())
+	}
+	if daemon.ProcessState == nil || !daemon.ProcessState.Success() {
+		stateStr := "<nil>"
+		exitCode := -1
+		if daemon.ProcessState != nil {
+			stateStr = daemon.ProcessState.String()
+			exitCode = daemon.ProcessState.ExitCode()
+		}
+		t.Errorf("daemon ProcessState not successful: %s (ExitCode=%d); spec § Component D "+
+			"requires osExit(0) on self-eject\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			stateStr, exitCode, logBlob, stderr.String())
+	}
+
+	// EQUALITY ASSERTION. Empty-both is a legitimate pass — the
+	// load-bearing invariant is "no delta", not "non-empty
+	// pre-snapshot". On any delta the diagnostic dumps the full
+	// key sets of both snapshots, the per-field delta, portal.log,
+	// and stderr so a regression's source is unambiguous.
+	assertScrollbackSnapshotsEqual(t, scrollbackDir, snapBefore, snapAfter, logBlob, stderr.String())
+}
+
+// assertScrollbackSnapshotsEqual compares two Fingerprint maps from
+// SnapshotStateDir and fails the test on any per-key, per-field
+// delta. The diagnostic dumps both snapshot key sets, the field-
+// level delta, portal.log, and stderr so the regression's source
+// is unambiguous from one run.
+//
+// Inlined in this file (rather than imported from the Task 4-2
+// helper in package tmux_test) because that helper is unexported
+// and lives in a different test package. The two helpers share
+// the same diff shape — any future refactor that promotes one
+// to a shared portaltest helper should consolidate them.
+func assertScrollbackSnapshotsEqual(
+	t *testing.T,
+	root string,
+	pre, post map[string]portaltest.Fingerprint,
+	logBlob, stderrText string,
+) {
+	t.Helper()
+
+	keys := make(map[string]struct{}, len(pre)+len(post))
+	for k := range pre {
+		keys[k] = struct{}{}
+	}
+	for k := range post {
+		keys[k] = struct{}{}
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+
+	var diags []string
+	for _, key := range sorted {
+		before, hadBefore := pre[key]
+		after, hasAfter := post[key]
+		switch {
+		case !hadBefore && hasAfter:
+			diags = append(diags, fmt.Sprintf(
+				"  %s: created during eject window (post=%s)", key, formatFingerprint(after)))
+		case hadBefore && !hasAfter:
+			diags = append(diags, fmt.Sprintf(
+				"  %s: deleted during eject window (pre=%s)", key, formatFingerprint(before)))
+		case hadBefore && hasAfter:
+			diags = append(diags, fingerprintFieldDeltasSelfEject(key, before, after)...)
+		}
+	}
+
+	if len(diags) > 0 {
+		t.Fatalf("scrollback dir mutated between snapBefore (post-first-failing-tick) "+
+			"and snapAfter (post-self-eject) — spec § Component D requires "+
+			"NO final flush on self-eject\n"+
+			"  scrollback dir: %s\n"+
+			"  pre keys  (%d): %v\n"+
+			"  post keys (%d): %v\n"+
+			"  delta(s):\n%s\n"+
+			"--- portal.log ---\n%s\n"+
+			"--- daemon stderr ---\n%s",
+			root, len(pre), sortedSnapKeys(pre), len(post), sortedSnapKeys(post),
+			joinSnapLines(diags), logBlob, stderrText)
+	}
+}
+
+// fingerprintFieldDeltasSelfEject returns a per-field delta
+// diagnostic for a path present in both snapshots. Returns empty
+// when the two fingerprints are byte-equal. Field order matches
+// Fingerprint's struct declaration so a multi-field delta reads
+// cleanly top-to-bottom.
+func fingerprintFieldDeltasSelfEject(key string, before, after portaltest.Fingerprint) []string {
+	var out []string
+	if before.Exists != after.Exists {
+		out = append(out, fmt.Sprintf("  %s.Exists: pre=%v post=%v", key, before.Exists, after.Exists))
+	}
+	if before.Size != after.Size {
+		out = append(out, fmt.Sprintf("  %s.Size: pre=%d post=%d", key, before.Size, after.Size))
+	}
+	if before.MtimeNanos != after.MtimeNanos {
+		out = append(out, fmt.Sprintf("  %s.MtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			key, before.MtimeNanos, after.MtimeNanos, after.MtimeNanos-before.MtimeNanos))
+	}
+	if before.CtimeNanos != after.CtimeNanos {
+		out = append(out, fmt.Sprintf("  %s.CtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			key, before.CtimeNanos, after.CtimeNanos, after.CtimeNanos-before.CtimeNanos))
+	}
+	if before.Hashed != after.Hashed {
+		out = append(out, fmt.Sprintf("  %s.Hashed: pre=%v post=%v", key, before.Hashed, after.Hashed))
+	}
+	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
+		out = append(out, fmt.Sprintf("  %s.Sha256: pre=%x post=%x", key, before.Sha256, after.Sha256))
+	}
+	if before.IsSymlink != after.IsSymlink {
+		out = append(out, fmt.Sprintf("  %s.IsSymlink: pre=%v post=%v", key, before.IsSymlink, after.IsSymlink))
+	}
+	if before.SymlinkTarget != after.SymlinkTarget {
+		out = append(out, fmt.Sprintf("  %s.SymlinkTarget: pre=%q post=%q",
+			key, before.SymlinkTarget, after.SymlinkTarget))
+	}
+	return out
+}
+
+// formatFingerprint renders a Fingerprint compactly for created/
+// deleted delta diagnostics (where the entire fingerprint must be
+// shown because there is no peer to diff against).
+func formatFingerprint(fp portaltest.Fingerprint) string {
+	if fp.IsSymlink {
+		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
+			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
+	}
+	if fp.Hashed {
+		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
+			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
+	}
+	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
+		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
+}
+
+// sortedSnapKeys returns a Fingerprint map's keys in lexicographic
+// order so failure diagnostics are stable across re-runs.
+func sortedSnapKeys(snap map[string]portaltest.Fingerprint) []string {
+	out := make([]string, 0, len(snap))
+	for k := range snap {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// joinSnapLines concatenates lines with newline separators for use
+// in multi-line failure diagnostics.
+func joinSnapLines(lines []string) string {
+	var b []byte
+	for i, l := range lines {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, l...)
+	}
+	return string(b)
+}
