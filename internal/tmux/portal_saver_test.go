@@ -3421,3 +3421,54 @@ func TestBootstrapPortalSaver_NoPersistentPlaceholderLeakAcrossSingleRecovery(t 
 			tmux.PortalSaverPlaceholderCommand)
 	}
 }
+
+// TestNewDetachedSessionNoCwd_ArgvHasNoEnvOverrides pins the spec §
+// "Component F — Environment inheritance across respawn" contract at the
+// argv level: NewDetachedSessionNoCwd must NOT emit any tmux "-e KEY=VAL"
+// session-environment override. Any such override would shadow the
+// inherited tmux server environment for that session, which would in turn
+// shadow what the respawned daemon observes via getenv(). The session
+// must inherit the tmux server env verbatim — the same shape every other
+// detached session on the same server sees.
+//
+// This is the unit-level companion to
+// TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn in
+// portal_saver_endstate_integration_test.go: the integration test
+// verifies the observable end-state (show-environment parity); this test
+// pins the argv shape so a regression that introduces an env override at
+// create time is caught even when the integration test cannot run (no
+// tmux on PATH in CI containers).
+func TestNewDetachedSessionNoCwd_ArgvHasNoEnvOverrides(t *testing.T) {
+	var newSessionArgv []string
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "new-session" {
+				newSessionArgv = append([]string{}, args...)
+			}
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	if err := client.NewDetachedSessionNoCwd("_some-session", "sh -c 'exec tail -f /dev/null'"); err != nil {
+		t.Fatalf("NewDetachedSessionNoCwd returned error: %v", err)
+	}
+
+	if newSessionArgv == nil {
+		t.Fatalf("new-session was not invoked; Calls=%v", mock.Calls)
+	}
+
+	// The load-bearing assertion: NO argv element may begin with "-e".
+	// tmux accepts "-e KEY=VAL" as two argv elements OR "-eKEY=VAL" as one
+	// element on the affected versions; HasPrefix covers both shapes
+	// without coupling to a specific tmux argv-parsing rule. The first
+	// element ("new-session") is the subcommand, not a flag, and does
+	// not start with "-e", so the scan is uniform.
+	for i, arg := range newSessionArgv {
+		if strings.HasPrefix(arg, "-e") {
+			t.Errorf("new-session argv[%d] = %q starts with \"-e\"; "+
+				"NewDetachedSessionNoCwd must not pass session-environment "+
+				"overrides. Full argv: %v", i, arg, newSessionArgv)
+		}
+	}
+}

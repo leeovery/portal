@@ -436,6 +436,201 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 	}
 }
 
+// TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn exercises
+// spec § Component F — "Environment inheritance across respawn":
+// `NewDetachedSessionNoCwd` does NOT pass `-e KEY=VAL` overrides, so the
+// `_portal-saver` session inherits the tmux server's environment
+// verbatim. After Component F's create-with-placeholder → set-option →
+// respawn ordering completes, `tmux show-environment -t _portal-saver`
+// must be identical (for any env var the daemon reads) to the
+// pre-F-shape baseline: a sibling detached session created against the
+// same tmux server with no env overrides.
+//
+// Flow:
+//  1. Skip if tmux not on PATH or portal binary build fails.
+//  2. Host-noise mitigation (HOME=<tempdir>) + isolated state dir +
+//     PORTAL_STATE_DIR. Same scaffolding as the other tests in this file.
+//  3. Stand up an isolated tmux server via tmuxtest.New. The server is
+//     forked from the test process and inherits the test process's env
+//     (HOME, XDG_CONFIG_HOME, PATH, PORTAL_STATE_DIR).
+//  4. Pre-F baseline: create `_env-baseline` via NewDetachedSessionNoCwd
+//     with the same placeholder shape the saver uses, read
+//     `show-environment -t _env-baseline` verbatim, parse for
+//     XDG_CONFIG_HOME / HOME / PATH, then kill the baseline session
+//     BEFORE invoking BootstrapPortalSaver so it cannot influence the
+//     saver bootstrap path.
+//  5. Post-F observed: invoke BootstrapPortalSaver, read
+//     `show-environment -t _portal-saver` verbatim, parse the same three
+//     keys.
+//  6. Assert per-key parity (both unset is equal; both set must have
+//     byte-equal values).
+//
+// Verbatim semantics: tmux show-environment uses leading "-NAME" (no
+// "=") to represent variables explicitly removed from the session
+// environment. Trimming the output would not strip those prefixes
+// (they're mid-line, not surrounding whitespace), but the test uses
+// CombinedOutput via sock.TryRun for fidelity with the spec's literal
+// "verbatim" requirement.
+func TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+	_ = portalbintest.StagePortalBinary(t)
+
+	applyHostNoiseMitigation(t)
+
+	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	sock := tmuxtest.New(t, "ptl-envparity-")
+	client := sock.Client()
+
+	// Pre-F baseline: a sibling detached session created against the same
+	// tmux server with the same placeholder shape the saver uses. This is
+	// what Component F's spec calls "the pre-F baseline" — an
+	// environment-inheritance reference unaffected by the
+	// create-then-set-option-then-respawn cycle.
+	const baselineName = "_env-baseline"
+	if err := client.NewDetachedSessionNoCwd(
+		baselineName, "sh -c 'exec tail -f /dev/null'",
+	); err != nil {
+		t.Fatalf("create baseline session: %v", err)
+	}
+
+	baselineRaw, err := sock.TryRun("show-environment", "-t", baselineName)
+	if err != nil {
+		t.Fatalf("show-environment baseline: %v\n%s", err, baselineRaw)
+	}
+	baseline := parseShowEnvironmentKeys(baselineRaw, "XDG_CONFIG_HOME", "HOME", "PATH")
+
+	// Kill the baseline BEFORE the saver bootstrap fires so the saver's
+	// create path runs in the same observable shape it would in
+	// production (no sibling _env-* session affecting tmux's internal
+	// session-environment list).
+	if err := client.KillSession(baselineName); err != nil {
+		t.Fatalf("kill baseline session: %v", err)
+	}
+
+	// Post-F observed: drive the create-with-placeholder → set-option →
+	// respawn cycle via BootstrapPortalSaver. After readiness completes,
+	// read `_portal-saver`'s session environment via the same verbatim
+	// path used for the baseline.
+	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
+		t.Fatalf("BootstrapPortalSaver: %v", err)
+	}
+
+	observedRaw, err := sock.TryRun("show-environment", "-t", tmux.PortalSaverName)
+	if err != nil {
+		t.Fatalf("show-environment %s: %v\n%s", tmux.PortalSaverName, err, observedRaw)
+	}
+	observed := parseShowEnvironmentKeys(observedRaw, "XDG_CONFIG_HOME", "HOME", "PATH")
+
+	// Per-key parity. The spec's acceptance scenario is byte-equality
+	// per key, with "unset" treated symmetrically (both unset is equal).
+	// parseShowEnvironmentKeys encodes "unset" as envValue{unset:true},
+	// so == on the struct does both branches correctly.
+	for _, key := range []string{"XDG_CONFIG_HOME", "HOME", "PATH"} {
+		if baseline[key] != observed[key] {
+			t.Fatalf("environment-inheritance parity violated for key %q\n"+
+				"  baseline: %s\n"+
+				"  observed: %s\n"+
+				"--- full baseline map (3 keys) ---\n%s\n"+
+				"--- full observed map (3 keys) ---\n%s\n"+
+				"--- raw show-environment %s ---\n%s\n"+
+				"--- raw show-environment %s ---\n%s",
+				key,
+				baseline[key],
+				observed[key],
+				dumpEnvMap(baseline),
+				dumpEnvMap(observed),
+				baselineName, baselineRaw,
+				tmux.PortalSaverName, observedRaw,
+			)
+		}
+	}
+}
+
+// envValue captures one parsed line of `tmux show-environment` output.
+// `tmux show-environment -t <session>` emits "NAME=value" for set
+// entries and "-NAME" (leading dash, no "=") for entries explicitly
+// removed from the session environment. envValue distinguishes the
+// two so equality checks treat "both unset" as equal without
+// conflating with the empty string set case.
+type envValue struct {
+	unset bool
+	value string
+}
+
+// String renders envValue in a human-readable form for failure
+// diagnostics. Unset entries render as "(unset)" so the diff message
+// is unambiguous.
+func (v envValue) String() string {
+	if v.unset {
+		return "(unset)"
+	}
+	return strconv.Quote(v.value)
+}
+
+// parseShowEnvironmentKeys scans `tmux show-environment` output for the
+// supplied keys and returns a map from key → envValue. Keys not
+// present in the output are not added to the map; both call sites
+// pre-declare the three keys of interest so equality compare proceeds
+// per-key regardless of insertion shape.
+//
+// Line shapes recognised:
+//   - "NAME=value" → envValue{unset: false, value: value}
+//   - "-NAME"      → envValue{unset: true}
+//
+// Trailing CR is stripped per line; empty lines are skipped. Any
+// other line shape is ignored — show-environment does not emit
+// comments or directives.
+func parseShowEnvironmentKeys(raw string, keys ...string) map[string]envValue {
+	want := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		want[k] = struct{}{}
+	}
+	out := map[string]envValue{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "-") {
+			name := line[1:]
+			if _, ok := want[name]; ok {
+				out[name] = envValue{unset: true}
+			}
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		name := line[:eq]
+		val := line[eq+1:]
+		if _, ok := want[name]; ok {
+			out[name] = envValue{value: val}
+		}
+	}
+	return out
+}
+
+// dumpEnvMap renders an envValue map in a deterministic, line-per-key
+// format for failure diagnostics. The output is the three keys of
+// interest in a stable order; missing keys render as "(absent)" so the
+// diff message distinguishes "absent from show-environment output"
+// from "present and unset" (envValue{unset:true}).
+func dumpEnvMap(m map[string]envValue) string {
+	var b strings.Builder
+	for _, k := range []string{"XDG_CONFIG_HOME", "HOME", "PATH"} {
+		v, ok := m[k]
+		if !ok {
+			fmt.Fprintf(&b, "  %s: (absent)\n", k)
+			continue
+		}
+		fmt.Fprintf(&b, "  %s: %s\n", k, v)
+	}
+	return b.String()
+}
+
 // psArgsForPID returns the `args` field for pid via `ps -o args= -p
 // <pid>`. The acceptance criteria specifies the byte-level shape used
 // by operators inspecting the live state — `ps -o args= -p <pid>` —
