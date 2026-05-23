@@ -166,6 +166,7 @@ type StaleCleaner interface {
 // as well as on stderr at the top-level Execute path.
 type Logger interface {
 	Debug(component, format string, args ...any)
+	Info(component, format string, args ...any)
 	Warn(component, format string, args ...any)
 	Error(component, format string, args ...any)
 }
@@ -179,6 +180,9 @@ type noopLogger struct{}
 
 // Debug is a no-op.
 func (noopLogger) Debug(component, format string, args ...any) {}
+
+// Info is a no-op.
+func (noopLogger) Info(component, format string, args ...any) {}
 
 // Warn is a no-op.
 func (noopLogger) Warn(component, format string, args ...any) {}

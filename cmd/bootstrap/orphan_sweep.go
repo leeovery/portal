@@ -1,0 +1,182 @@
+package bootstrap
+
+import (
+	"os"
+	"syscall"
+
+	"github.com/leeovery/portal/internal/state"
+)
+
+// defaultKill is the production default for OrphanSweepCore.Kill: sends
+// SIGKILL to the supplied PID. SIGKILL (not SIGTERM) is the spec-mandated
+// signal per Component B — the orphan view is untrusted, so no final
+// flush is permitted (same reasoning as Component A's escalation).
+func defaultKill(pid int) error {
+	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
+// OrphanSweeper is the orchestrator step seam for Component B: it enumerates
+// every live `portal state daemon` process, builds the legitimate set from
+// the `_portal-saver` pane's PID, and SIGKILLs every non-legitimate identity-
+// checked candidate. Best-effort: SweepOrphanDaemons never returns a non-nil
+// error — every failure path is logged via Logger.Warn under
+// state.ComponentBootstrap and swallowed.
+//
+// The concrete *OrphanSweepCore in this file satisfies this interface and is
+// the production implementation. Adapter wiring (production Pgrep /
+// SaverPanePID / Identify / Kill seam closures) lives in
+// internal/bootstrapadapter — out of scope for this file.
+type OrphanSweeper interface {
+	SweepOrphanDaemons() error
+}
+
+// OrphanSweepCore is the dependency-injected sweeper that implements
+// Component B's bootstrap-time orphan daemon enumeration and kill loop.
+//
+// Each seam is a function field (rather than an interface) because each
+// dependency is a single-arity primitive — wrapping each in an interface
+// would add naming overhead without separating concerns the way
+// MarkerCleanupCore's multi-call dependencies (ListSkeletonMarkers,
+// ListAllPanesWithFormat, UnsetServerOption) do.
+//
+// Production wiring (Task 4-4) supplies non-nil values for Pgrep and
+// SaverPanePID. Identify and Kill default to state.IdentifyDaemon and a
+// syscall.Kill(pid, SIGKILL) closure respectively when nil — sensible
+// production defaults that test code overrides via struct fields.
+//
+// Logger is optional; SweepOrphanDaemons substitutes a no-op default at
+// entry so call sites can dispatch unconditionally (mirrors the contract
+// of MarkerCleanupCore and EagerSignalCore).
+type OrphanSweepCore struct {
+	// Pgrep enumerates candidate PIDs that match the canonical form
+	// `pgrep -fx '^portal state daemon( |$)'`. Production adapter (Task
+	// 4-4) wraps os/exec; a missing seam at runtime causes
+	// SweepOrphanDaemons to short-circuit at entry — no defaulting here
+	// because the production behaviour requires shelling out and the
+	// bootstrap package must not import os/exec to avoid pulling
+	// process-management surface into a pure-orchestration package.
+	Pgrep func() ([]int, error)
+
+	// SaverPanePID returns the pane PID of `_portal-saver`. On
+	// `_portal-saver` absent (or any tmux error), the production adapter
+	// returns (0, err) — SweepOrphanDaemons treats both (0, nil) and
+	// (any, err) as "legitimate set empty" so the sweep proceeds against
+	// the full pgrep set. No default here; production wiring must inject
+	// the tmux adapter.
+	SaverPanePID func() (int, error)
+
+	// Identify defaults to state.IdentifyDaemon when nil — the same
+	// primitive Component A uses for its kill-barrier identity check.
+	// Tests override to stub canned identity outcomes per PID.
+	Identify func(pid int) (state.IdentifyResult, error)
+
+	// Kill defaults to a syscall.Kill(pid, SIGKILL) closure when nil.
+	// SIGKILL (not SIGTERM) is the spec-mandated signal — orphan view is
+	// untrusted; no final flush; same reasoning as Component A.
+	Kill func(pid int) error
+
+	// Logger is optional; nil tolerated. SweepOrphanDaemons substitutes a
+	// no-op default at entry so call sites can dispatch unconditionally.
+	Logger Logger
+}
+
+var _ OrphanSweeper = (*OrphanSweepCore)(nil)
+
+// SweepOrphanDaemons enumerates candidate `portal state daemon` PIDs via the
+// Pgrep seam, builds the legitimate set from the SaverPanePID seam, then for
+// each non-legitimate candidate identity-checks via Identify and SIGKILLs via
+// Kill. Best-effort: every failure path emits Logger.Warn under
+// state.ComponentBootstrap and is swallowed. The method returns nil
+// unconditionally.
+//
+// Algorithm:
+//  1. Substitute a no-op Logger when none was injected so call sites can
+//     dispatch logger.Debug / .Info / .Warn unconditionally.
+//  2. Apply production defaults for Identify and Kill when those seams are
+//     nil. (Pgrep and SaverPanePID have no defaults — production wiring
+//     must supply them; absence indicates a programmer error.)
+//  3. Invoke Pgrep. On error: WARN ("sweep: pgrep failed: %v") and return
+//     nil — best-effort posture forbids escalation.
+//  4. Invoke SaverPanePID. On error: WARN ("sweep: list-panes _portal-saver
+//     failed, legitimate set empty: %v") and treat the legitimate set as
+//     empty; sweep proceeds against ALL pgrep results. (0, nil) — meaning
+//     `_portal-saver` is absent — also yields an empty legitimate set
+//     without a warning.
+//  5. For each candidate PID that is NOT in the legitimate set AND NOT
+//     equal to os.Getpid() (defensive self-skip):
+//     a. Invoke Identify. On error: WARN ("sweep: identity-check pid=%d
+//     failed, skipping: %v") and continue to the next PID.
+//     b. On result != IdentifyIsPortalDaemon: DEBUG ("sweep: pid=%d not
+//     identity-checked as portal daemon, skipping") and continue.
+//     c. Invoke Kill. On error: WARN ("sweep: kill pid=%d failed: %v")
+//     and continue. On success: INFO ("sweep: killed orphan daemon
+//     pid=%d") under state.ComponentBootstrap.
+//  6. Return nil unconditionally.
+//
+// SweepOrphanDaemons never returns a non-nil error — Component B is a best-
+// effort step and the orchestrator's Warn-and-swallow site at step 4 would
+// surface a returned error as a redundant Warn line. The nil return is the
+// canonical "step completed" signal regardless of internal failures.
+func (c *OrphanSweepCore) SweepOrphanDaemons() error {
+	logger := c.Logger
+	if logger == nil {
+		logger = noopLogger{}
+	}
+	identify := c.Identify
+	if identify == nil {
+		identify = state.IdentifyDaemon
+	}
+	kill := c.Kill
+	if kill == nil {
+		kill = defaultKill
+	}
+
+	candidates, err := c.Pgrep()
+	if err != nil {
+		logger.Warn(state.ComponentBootstrap, "sweep: pgrep failed: %v", err)
+		return nil
+	}
+
+	legitimate := map[int]struct{}{}
+	saverPID, saverErr := c.SaverPanePID()
+	switch {
+	case saverErr != nil:
+		logger.Warn(state.ComponentBootstrap,
+			"sweep: list-panes _portal-saver failed, legitimate set empty: %v", saverErr)
+	case saverPID > 0:
+		legitimate[saverPID] = struct{}{}
+	}
+
+	ownPID := os.Getpid()
+	for _, pid := range candidates {
+		if pid == ownPID {
+			// Defensive self-skip — should never appear in pgrep output
+			// for `portal state daemon` because the orchestrator is
+			// running under a different argv, but the guard is cheap and
+			// the consequences of a false positive (killing ourselves) are
+			// fatal.
+			continue
+		}
+		if _, isLegit := legitimate[pid]; isLegit {
+			continue
+		}
+		res, err := identify(pid)
+		if err != nil {
+			logger.Warn(state.ComponentBootstrap,
+				"sweep: identity-check pid=%d failed, skipping: %v", pid, err)
+			continue
+		}
+		if res != state.IdentifyIsPortalDaemon {
+			logger.Debug(state.ComponentBootstrap,
+				"sweep: pid=%d not identity-checked as portal daemon, skipping", pid)
+			continue
+		}
+		if err := kill(pid); err != nil {
+			logger.Warn(state.ComponentBootstrap,
+				"sweep: kill pid=%d failed: %v", pid, err)
+			continue
+		}
+		logger.Info(state.ComponentBootstrap, "sweep: killed orphan daemon pid=%d", pid)
+	}
+	return nil
+}

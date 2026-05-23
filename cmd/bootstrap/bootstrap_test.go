@@ -92,6 +92,8 @@ func (r *stepRecorder) CleanStale() error {
 type recordingLogger struct {
 	debugs          []string
 	debugComponents []string
+	infos           []string
+	infoComponents  []string
 	warnings        []string
 	warnComponents  []string
 	errors          []string
@@ -101,6 +103,11 @@ type recordingLogger struct {
 func (l *recordingLogger) Debug(component, format string, args ...any) {
 	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
 	l.debugComponents = append(l.debugComponents, component)
+}
+
+func (l *recordingLogger) Info(component, format string, args ...any) {
+	l.infos = append(l.infos, fmt.Sprintf(format, args...))
+	l.infoComponents = append(l.infoComponents, component)
 }
 
 func (l *recordingLogger) Warn(component, format string, args ...any) {
