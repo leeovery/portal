@@ -141,8 +141,8 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	//    multiple `portal state daemon` processes the orchestrator
 	//    must see and kill — while staying compatible with Component
 	//    C's singleton guarantee on the saver's state dir.
-	orphan1 := spawnOrphanDaemonIsolated(t, envSlice)
-	orphan2 := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan1, _ := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan2, _ := spawnOrphanDaemonIsolated(t, envSlice)
 
 	// 3. Precondition: pgrep -fxc must reach 3 before we invoke the
 	//    sweep. Without this barrier the sweep can race the orphan
@@ -434,36 +434,6 @@ func skipIfNoPgrep(t *testing.T) {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		t.Skipf("pgrep not available; skipping orphan-sweep integration test: %v", err)
 	}
-}
-
-// spawnOrphanDaemonIsolated launches an orphan `portal state daemon`
-// subprocess with its OWN per-orphan PORTAL_STATE_DIR (a fresh
-// t.TempDir). Used by Scenario A so multiple orphans can coexist with
-// the saver-pane daemon without colliding on `daemon.lock` /
-// `daemon.pid` — see the call-site comment for the rationale.
-//
-// pgrep is system-wide and argv-anchored, so the orphans still appear
-// in `pgrep -fx '^portal state daemon( |$)'` alongside the saver-pane
-// daemon. Component B's identity check passes (real `portal state
-// daemon` argv), the saver-pane PID legitimate-set check skips them
-// (they are not the saver's pane process), and the sweep SIGKILLs
-// them as designed.
-//
-// Cleanup is registered via registerSubprocessCleanup — SIGKILL +
-// Wait on test exit. Returns the *exec.Cmd for callers that need
-// Process.Pid for diagnostics.
-func spawnOrphanDaemonIsolated(t *testing.T, envSlice []string) *exec.Cmd {
-	t.Helper()
-	orphanStateDir := t.TempDir()
-	env := append([]string{}, envSlice...)
-	env = append(env, "PORTAL_STATE_DIR="+orphanStateDir)
-	cmd := exec.Command("portal", "state", "daemon")
-	cmd.Env = env
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start isolated orphan daemon (stateDir=%s): %v", orphanStateDir, err)
-	}
-	registerSubprocessCleanup(t, cmd)
-	return cmd
 }
 
 // registerSubprocessCleanup arranges a guaranteed SIGKILL + Wait for
