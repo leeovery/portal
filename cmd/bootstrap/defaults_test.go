@@ -66,6 +66,9 @@ func TestNewWithDefaults_DefaultsAllDegradableStepsToNoOp(t *testing.T) {
 	if _, ok := o.Hooks.(bootstrap.NoOpHooks); !ok {
 		t.Errorf("Hooks type = %T; want bootstrap.NoOpHooks", o.Hooks)
 	}
+	if _, ok := o.OrphanSweeper.(bootstrap.NoOpOrphanSweeper); !ok {
+		t.Errorf("OrphanSweeper type = %T; want bootstrap.NoOpOrphanSweeper", o.OrphanSweeper)
+	}
 	if _, ok := o.Saver.(bootstrap.NoOpSaver); !ok {
 		t.Errorf("Saver type = %T; want bootstrap.NoOpSaver", o.Saver)
 	}
@@ -90,7 +93,7 @@ func TestNewWithDefaults_DefaultsAllDegradableStepsToNoOp(t *testing.T) {
 // mandatory positional inputs (server, stateDir, logger, restoring) are
 // preserved verbatim onto the constructed Orchestrator. server fans out
 // to Orchestrator.Server (step 1); restoring fans out to Orchestrator.
-// Restoring (steps 3 and 7); logger is propagated as-is (nil tolerated).
+// Restoring (steps 3 and 8); logger is propagated as-is (nil tolerated).
 func TestNewWithDefaults_WiresPositionalSeams(t *testing.T) {
 	server := stubServerSeam{}
 	restoring := stubRestoringMarker{}
@@ -115,6 +118,7 @@ func TestNewWithDefaults_WiresPositionalSeams(t *testing.T) {
 // than slipping through with the existing default.
 func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 	hooks := stubHooks{}
+	orphanSweeper := stubOrphanSweeper{}
 	saver := stubSaver{}
 	restore := stubRestorer{}
 	eager := stubEager{}
@@ -124,6 +128,7 @@ func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 
 	o := bootstrap.NewWithDefaults(stubServerSeam{}, "", nil, stubRestoringMarker{},
 		bootstrap.WithHooks(hooks),
+		bootstrap.WithOrphanSweeper(orphanSweeper),
 		bootstrap.WithSaver(saver),
 		bootstrap.WithRestore(restore),
 		bootstrap.WithEagerSignaler(eager),
@@ -134,6 +139,9 @@ func TestNewWithDefaults_HonorsAllWithOptions(t *testing.T) {
 
 	if o.Hooks != hooks {
 		t.Errorf("Hooks = %v; want stubHooks{}", o.Hooks)
+	}
+	if o.OrphanSweeper != orphanSweeper {
+		t.Errorf("OrphanSweeper = %v; want stubOrphanSweeper{}", o.OrphanSweeper)
 	}
 	if o.Saver != saver {
 		t.Errorf("Saver = %v; want stubSaver{}", o.Saver)
@@ -236,6 +244,10 @@ func TestNewWithDefaults_RunCallableSmokeTest(t *testing.T) {
 type stubHooks struct{}
 
 func (stubHooks) RegisterPortalHooks() error { return nil }
+
+type stubOrphanSweeper struct{}
+
+func (stubOrphanSweeper) SweepOrphanDaemons() error { return nil }
 
 type stubSaver struct{}
 

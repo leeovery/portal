@@ -11,14 +11,14 @@
 //
 //   - Builds the portal binary so each restored pane's `portal state hydrate`
 //     helper resolves on PATH (the helper is spawned via respawn-pane -k by
-//     restore step 5 and must execute to dump scrollback + unset its marker).
+//     restore step 6 and must execute to dump scrollback + unset its marker).
 //   - Seeds sessions.json with N>=2 saved sessions, each with a single
 //     window + single pane.
 //   - Runs the bootstrap.Orchestrator wired with the production
 //     RestoreAdapter (skeleton-creates each session, sets each pane's
 //     @portal-skeleton-* marker, arms each FIFO) AND the production
 //     EagerHydrateSignaler adapter (writes the FIFO byte to every armed
-//     pane during step 6 of bootstrap).
+//     pane during step 7 of bootstrap).
 //   - Polls state.ListSkeletonMarkers every 50ms with a 2-second deadline.
 //     Pass: empty marker set within the window.
 //
@@ -29,10 +29,10 @@
 //     a binary or direct FIFO write — that test exercises the full
 //     reboot pipeline but does NOT pin the 2-second eager-signal contract,
 //     and explicitly drives signal-hydrate as a post-bootstrap step.
-//   - This test asserts that the orchestrator's own step 6 drives every
+//   - This test asserts that the orchestrator's own step 7 drives every
 //     marker's helper to clear within 2 seconds, with NO client attach,
 //     NO post-bootstrap signal-hydrate invocation, and NO switch-client.
-//     A regression that wires NoOpEagerHydrateSignaler{} (or removes step 6)
+//     A regression that wires NoOpEagerHydrateSignaler{} (or removes step 7)
 //     surfaces here as a 2s timeout failure.
 //
 // Build & run:
@@ -178,7 +178,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	}
 
 	// Pre-condition: none of the saved sessions are live yet — Restore
-	// will skeleton-create them as part of step 5. If a session were
+	// will skeleton-create them as part of step 6. If a session were
 	// already live, Restore's idempotent path would short-circuit and the
 	// marker would never be set, masking the AC1 contract.
 	for _, name := range sessions {
@@ -203,7 +203,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
 
-	// Sanity: every saved session must now be live (Restore step 5
+	// Sanity: every saved session must now be live (Restore step 6
 	// skeleton-created them). If Restore silently no-op'd, the marker set
 	// would be empty for an unrelated reason — the AC1 poll below would
 	// be vacuously true. Surfacing this as a separate fatal distinguishes
@@ -220,7 +220,7 @@ func runEagerSignalMultiSessionAC1(t *testing.T, binDir string, sessions []strin
 	// AC1 contract: poll state.ListSkeletonMarkers every 50ms for up to
 	// 2 seconds. Pass condition is empty marker set within the window.
 	// NO client attach, NO switch-client, NO signal-hydrate invocation —
-	// the orchestrator's step 6 must have driven every helper to clear
+	// the orchestrator's step 7 must have driven every helper to clear
 	// its marker on its own.
 	//
 	// On failure, dump portal.log so the diagnostic includes the
@@ -329,7 +329,7 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 		t.Fatalf("Orchestrator.Run: %v", err)
 	}
 
-	// Sanity: every saved session must now be live (Restore step 5
+	// Sanity: every saved session must now be live (Restore step 6
 	// skeleton-created them). If beta were missing, the daemon-tick
 	// capture below would be vacuously skip-save-free for beta — a
 	// false-positive AC4 pass.

@@ -12,7 +12,7 @@
 //   - The Phase 3 round-trip (TestPhase3Integration_SaveRestoreRoundTrip)
 //     proves the in-package skeleton-restore primitive works against a
 //     fresh server. It does NOT exercise the bootstrap orchestrator's
-//     ten-step wiring nor the in-pane hydrate helper.
+//     eleven-step wiring nor the in-pane hydrate helper.
 //   - This test wires the full bootstrap.Orchestrator with the production
 //     RestoreAdapter so step ordering, marker lifecycle, and FIFO arming
 //     are all exercised. It then drives the FIFO byte-write that

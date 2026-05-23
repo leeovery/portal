@@ -14,7 +14,8 @@ package cmd
 //     *tmux.Client, the *restore.Orchestrator, the state directory, the
 //     *state.Logger. Test suites import these directly so production-shape
 //     wirings are reusable without pulling in the rest of cmd/. Currently:
-//     HookRegistrar, RestoringMarker, RestoreAdapter, FIFOSweeper.
+//     HookRegistrar, RestoringMarker, NewOrphanSweeper (Component B),
+//     RestoreAdapter, FIFOSweeper.
 //
 //   - cmd/bootstrap_production.go (camelCase, unexported): adapters that
 //     compose dependencies test code cannot reach in this package's
@@ -47,7 +48,7 @@ import (
 // saverAdapter wraps tmux.EnsurePortalSaverVersion to satisfy
 // bootstrap.SaverBootstrapper. Carries the binary's ldflags-injected
 // version so the version-marker upgrade protocol kicks in on release-
-// build mismatches. Step 4 of the bootstrap sequence.
+// build mismatches. Step 5 of the bootstrap sequence.
 type saverAdapter struct {
 	client   *tmux.Client
 	stateDir string
@@ -60,7 +61,7 @@ func (a *saverAdapter) EnsureSaver() error {
 }
 
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
-// structural key no longer matches a live tmux pane. Step 10 of the
+// structural key no longer matches a live tmux pane. Step 11 of the
 // bootstrap sequence; best-effort per spec.
 type cleanStaleAdapter struct {
 	client *tmux.Client
@@ -123,11 +124,12 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	}
 
 	orch := &bootstrap.Orchestrator{
-		Server:    client,
-		Hooks:     &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
-		Restoring: &bootstrapadapter.RestoringMarker{Client: client},
-		Saver:     &saverAdapter{client: client, stateDir: stateDir},
-		Restore:   &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
+		Server:        client,
+		Hooks:         &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
+		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
+		OrphanSweeper: bootstrapadapter.NewOrphanSweeper(client, logger),
+		Saver:         &saverAdapter{client: client, stateDir: stateDir},
+		Restore:       &bootstrapadapter.RestoreAdapter{Inner: restoreInner},
 		// EagerSignaler is constructed inline (mirroring MarkerCleanupCore)
 		// because every seam field is satisfiable directly: *tmux.Client
 		// implements state.ServerOptionLister via ShowAllServerOptions, and

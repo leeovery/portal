@@ -90,7 +90,7 @@ var portalSaverReadVersionFile = state.ReadVersionFile
 // Wiring-order invariant: callers that fire this wrapper before bootstrap
 // step 2 (RegisterPortalHooks) has run will silently drop the breadcrumb,
 // because versionWriterLogger is still nil. Today the only production
-// producer is EnsurePortalSaverVersion (bootstrap step 4), which always
+// producer is EnsurePortalSaverVersion (bootstrap step 5), which always
 // runs after step 2 installs the logger — so the breadcrumb is reliable.
 // Adding a new caller from an earlier step (or from outside the bootstrap
 // orchestrator) requires installing the logger first.

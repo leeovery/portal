@@ -67,7 +67,7 @@
 //     Orchestrator would not exercise that contract. We wire a real
 //     bootstrap.Orchestrator with NoOp shims for the steps incidental
 //     to this scenario (Hooks, Saver, Sweeper, Clean) and real
-//     RestoringMarker + RestoreAdapter so step 5 actually runs.
+//     RestoringMarker + RestoreAdapter so step 6 actually runs.
 //
 // Why we build the portal binary on PATH:
 //   - Restore arms each created pane via `respawn-pane -k 'portal
@@ -141,7 +141,7 @@ func ensurePortalOnPATH(t *testing.T) {
 
 // buildReattachOrchestrator constructs a bootstrap.Orchestrator wired
 // for the reattach integration scenario: real RestoringMarker
-// (Set/Clear) and real RestoreAdapter (so step 5 actually creates the
+// (Set/Clear) and real RestoreAdapter (so step 6 actually creates the
 // skeleton from sessions.json), with NoOp shims for the steps
 // incidental to this scenario (Hooks, Saver, StaleMarkers, Sweeper,
 // Clean). The same adapter shape used by Phase 5's
@@ -613,7 +613,7 @@ func TestReattachIntegration_UnknownNameNotFoundError(t *testing.T) {
 // the `portal open` half of planning task 5-10's acceptance bullet:
 // when invoked with no positional arg, `portal open` launches the TUI
 // — and by the time the TUI's session lister consults tmux, every
-// saved name has already been skeleton-restored by bootstrap step 5.
+// saved name has already been skeleton-restored by bootstrap step 6.
 //
 // We override openTUIFunc to capture its inputs without launching a
 // real Bubble Tea program (the TUI requires a TTY which test harnesses
@@ -694,7 +694,7 @@ func TestReattachIntegration_OpenLaunchesTUIAfterRestoredSkeleton(t *testing.T) 
 // What this case uniquely contributes (vs the no-arg sibling): it
 // proves the cmd-layer resolver chain reaches openPath when alias
 // resolution succeeds, AND that by the time openPath would dispatch,
-// bootstrap step 5 has already skeleton-restored the saved-only
+// bootstrap step 6 has already skeleton-restored the saved-only
 // session on the live tmux server (queryable via has-session). This
 // is the path-arg analogue of the "skeleton is created before the
 // command's own attach logic runs" guarantee.

@@ -71,7 +71,7 @@ type CommitNowDeps struct {
 	// IsRestoring queries the @portal-restoring server option. When the
 	// marker is set, commit-now short-circuits as a no-op (the daemon's
 	// existing restoration discipline owns sessions.json during bootstrap
-	// step 5 / step 4 version-upgrade kills). Defaults to a closure that
+	// step 6 / step 5 version-upgrade kills). Defaults to a closure that
 	// calls state.IsRestoringSet against a fresh production tmux client.
 	IsRestoring func() (bool, error)
 
@@ -175,7 +175,7 @@ var stateCommitNowCmd = &cobra.Command{
 		deps := resolveCommitNowDeps()
 
 		// @portal-restoring short-circuit. Mirrors the daemon's tick() entry
-		// guard: when bootstrap step 5 Restore (or a step-4 saver
+		// guard: when bootstrap step 6 Restore (or a step-5 saver
 		// version-upgrade firing session-closed mid-restore) is in progress,
 		// any structural commit would write a partial skeleton view. Skip
 		// every primitive, touch save.requested so the daemon's first

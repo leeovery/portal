@@ -1,9 +1,9 @@
 package bootstrap
 
 // Canonical no-op implementations exist only for the Orchestrator steps the
-// spec permits to degrade-and-continue: Hooks, Saver, Restore,
+// spec permits to degrade-and-continue: Hooks, OrphanSweeper, Saver, Restore,
 // EagerHydrateSignaler, MarkerCleaner, FIFOSweeper, and StaleCleaner. Server
-// and RestoringMarker are fatal-on-failure (steps 1, 3, and 7); they
+// and RestoringMarker are fatal-on-failure (steps 1, 3, and 8); they
 // intentionally have no NoOp because reaching for a "default" would silently
 // violate the bootstrap contract.
 //
@@ -27,6 +27,14 @@ type NoOpHooks struct{}
 
 // RegisterPortalHooks always returns nil.
 func (NoOpHooks) RegisterPortalHooks() error { return nil }
+
+// NoOpOrphanSweeper satisfies OrphanSweeper. SweepOrphanDaemons always
+// reports success. Useful for tests / production fallbacks where the
+// orphan-sweep step is irrelevant to the scenario under test.
+type NoOpOrphanSweeper struct{}
+
+// SweepOrphanDaemons always returns nil.
+func (NoOpOrphanSweeper) SweepOrphanDaemons() error { return nil }
 
 // NoOpSaver satisfies SaverBootstrapper. EnsureSaver always reports
 // success. Useful for tests / production fallbacks.

@@ -22,9 +22,9 @@ package bootstrap
 // Defaulting policy (mirrors the legacy buildIntegrationOrchestrator
 // contract):
 //
-//   - Hooks, Saver, Restore, StaleMarkers, Sweeper, Clean: default to
-//     their canonical NoOp form when the corresponding With* option is
-//     not supplied.
+//   - Hooks, OrphanSweeper, Saver, Restore, StaleMarkers, Sweeper, Clean:
+//     default to their canonical NoOp form when the corresponding With*
+//     option is not supplied.
 //   - EagerSignaler: defaults to a real *EagerSignalCore wired with the
 //     helper's positional server / stateDir / logger ONLY when the
 //     caller supplied WithRestore with a non-nil Restorer (the T4-2
@@ -32,7 +32,7 @@ package bootstrap
 //     Otherwise defaults to NoOpEagerHydrateSignaler{}. An explicit
 //     WithEagerSignaler(NoOp...) always wins (manual-harness opt-out).
 //   - Server, Restoring: positional; mandatory; have no NoOp form because
-//     they back fatal-on-failure steps (1, 3, 7) of the bootstrap
+//     they back fatal-on-failure steps (1, 3, 8) of the bootstrap
 //     sequence and silently degrading would violate the contract.
 //   - Logger: positional; nil tolerated (Run substitutes its internal
 //     noopLogger at entry).
@@ -65,6 +65,7 @@ type Option func(*defaultsConfig)
 // signature.
 type defaultsConfig struct {
 	hooks         HookRegistrar
+	orphanSweeper OrphanSweeper
 	saver         SaverBootstrapper
 	restore       Restorer
 	eagerSignaler EagerHydrateSignaler
@@ -94,12 +95,17 @@ func WithHooks(h HookRegistrar) Option {
 	return func(c *defaultsConfig) { c.hooks = h }
 }
 
-// WithSaver supplies a real SaverBootstrapper for step 4.
+// WithOrphanSweeper supplies a real OrphanSweeper for step 4.
+func WithOrphanSweeper(s OrphanSweeper) Option {
+	return func(c *defaultsConfig) { c.orphanSweeper = s }
+}
+
+// WithSaver supplies a real SaverBootstrapper for step 5.
 func WithSaver(s SaverBootstrapper) Option {
 	return func(c *defaultsConfig) { c.saver = s }
 }
 
-// WithRestore supplies a real Restorer for step 5. Setting this also
+// WithRestore supplies a real Restorer for step 6. Setting this also
 // flips the EagerSignaler default to a real *EagerSignalCore (T4-2).
 func WithRestore(r Restorer) Option {
 	return func(c *defaultsConfig) {
@@ -108,7 +114,7 @@ func WithRestore(r Restorer) Option {
 	}
 }
 
-// WithEagerSignaler supplies a real EagerHydrateSignaler for step 6.
+// WithEagerSignaler supplies a real EagerHydrateSignaler for step 7.
 // Passing bootstrap.NoOpEagerHydrateSignaler{} is the manual-harness
 // opt-out: it suppresses the conditional real default that WithRestore
 // would otherwise trigger.
@@ -119,17 +125,17 @@ func WithEagerSignaler(s EagerHydrateSignaler) Option {
 	}
 }
 
-// WithStaleMarkers supplies a real MarkerCleaner for step 8.
+// WithStaleMarkers supplies a real MarkerCleaner for step 9.
 func WithStaleMarkers(m MarkerCleaner) Option {
 	return func(c *defaultsConfig) { c.staleMarkers = m }
 }
 
-// WithSweeper supplies a real FIFOSweeper for step 9.
+// WithSweeper supplies a real FIFOSweeper for step 10.
 func WithSweeper(s FIFOSweeper) Option {
 	return func(c *defaultsConfig) { c.sweeper = s }
 }
 
-// WithClean supplies a real StaleCleaner for step 10.
+// WithClean supplies a real StaleCleaner for step 11.
 func WithClean(s StaleCleaner) Option {
 	return func(c *defaultsConfig) { c.clean = s }
 }
@@ -146,13 +152,13 @@ func WithClean(s StaleCleaner) Option {
 //   - logger: optional; nil tolerated. Propagated verbatim to
 //     Orchestrator.Logger and (when applicable) the conditional real
 //     EagerSignalCore default's Logger field.
-//   - restoring: backs steps 3 (Set) and 7 (Clear) of the bootstrap
+//   - restoring: backs steps 3 (Set) and 8 (Clear) of the bootstrap
 //     sequence. Mandatory because both steps are fatal-on-failure and
 //     no NoOp form exists.
 //
 // Variadic With* options override individual seams; see WithHooks,
-// WithSaver, WithRestore, WithEagerSignaler, WithStaleMarkers,
-// WithSweeper, WithClean.
+// WithOrphanSweeper, WithSaver, WithRestore, WithEagerSignaler,
+// WithStaleMarkers, WithSweeper, WithClean.
 //
 // The returned *Orchestrator never has a nil step seam — Run is callable
 // without immediate panic on the happy NoOp path. Step ordering lives in
@@ -171,6 +177,9 @@ func NewWithDefaults(
 
 	if cfg.hooks == nil {
 		cfg.hooks = NoOpHooks{}
+	}
+	if cfg.orphanSweeper == nil {
+		cfg.orphanSweeper = NoOpOrphanSweeper{}
 	}
 	if cfg.saver == nil {
 		cfg.saver = NoOpSaver{}
@@ -208,6 +217,7 @@ func NewWithDefaults(
 		Server:        server,
 		Hooks:         cfg.hooks,
 		Restoring:     restoring,
+		OrphanSweeper: cfg.orphanSweeper,
 		Saver:         cfg.saver,
 		Restore:       cfg.restore,
 		EagerSignaler: cfg.eagerSignaler,

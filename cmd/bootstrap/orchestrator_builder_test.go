@@ -13,10 +13,10 @@ package bootstrap_test
 // file (they pass through any unhandled options via the same With* shape).
 //
 // Defaults policy: every step that the spec permits to degrade-and-continue
-// defaults to its NoOp form (Hooks, Saver, Restore, EagerSignaler,
-// StaleMarkers, Sweeper, Clean). RestoringMarker is always real because step
-// 3 / step 7 are fatal-on-failure and the marker contract is exercised in
-// every Run path.
+// defaults to its NoOp form (Hooks, OrphanSweeper, Saver, Restore,
+// EagerSignaler, StaleMarkers, Sweeper, Clean). RestoringMarker is always
+// real because step 3 / step 8 are fatal-on-failure and the marker contract
+// is exercised in every Run path.
 
 import (
 	"testing"
@@ -34,6 +34,7 @@ import (
 // *bootstrap.EagerSignalCore when Restore is wired real).
 type orchestratorOpts struct {
 	Hooks         bootstrap.HookRegistrar
+	OrphanSweeper bootstrap.OrphanSweeper
 	Saver         bootstrap.SaverBootstrapper
 	Restore       bootstrap.Restorer
 	EagerSignaler bootstrap.EagerHydrateSignaler
@@ -69,6 +70,9 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 	var withOpts []bootstrap.Option
 	if opts.Hooks != nil {
 		withOpts = append(withOpts, bootstrap.WithHooks(opts.Hooks))
+	}
+	if opts.OrphanSweeper != nil {
+		withOpts = append(withOpts, bootstrap.WithOrphanSweeper(opts.OrphanSweeper))
 	}
 	if opts.Saver != nil {
 		withOpts = append(withOpts, bootstrap.WithSaver(opts.Saver))

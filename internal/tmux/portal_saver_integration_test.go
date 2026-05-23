@@ -581,7 +581,7 @@ func waitForVersionFile(t *testing.T, dir string, timeout time.Duration) {
 
 // assertNoForbiddenLogSubstrings reads portal.log in dir and fails the
 // test if any of the three forbidden WARN substrings (kill-barrier
-// timeout, lock contention, or step-4 EnsureSaver failure) appear.
+// timeout, lock contention, or step-5 EnsureSaver failure) appear.
 // Absence of portal.log is acceptable — the assertion holds trivially
 // because none of the forbidden substrings can be present.
 //
@@ -602,7 +602,7 @@ func assertNoForbiddenLogSubstrings(t *testing.T, dir string) {
 	forbidden := []string{
 		"prior daemon (pid=",
 		"another daemon holds the lock; exiting",
-		"step 4 (EnsureSaver) failed:",
+		"step 5 (EnsureSaver) failed:",
 	}
 	for _, sub := range forbidden {
 		if strings.Contains(contents, sub) {

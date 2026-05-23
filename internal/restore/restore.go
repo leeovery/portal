@@ -25,7 +25,7 @@ import (
 // All stderr emission was moved to cmd/bootstrap_warnings.go in Phase 6
 // task 6-9; this package now only returns and logs. The PersistentPreRunE
 // caller wraps this with the @portal-restoring marker (see spec, Bootstrap
-// Flow step 5).
+// Flow step 6).
 type Orchestrator struct {
 	Client   *tmux.Client
 	StateDir string

@@ -148,7 +148,7 @@ func TestCommitNowSymptom(t *testing.T) {
 		}
 
 		// Sub-test 1 step 5: second bootstrap via a fresh portal list
-		// subprocess. This re-runs the full bootstrap including step 5
+		// subprocess. This re-runs the full bootstrap including step 6
 		// Restore. Restore reads sessions.json (now omitting B) and
 		// MUST NOT create a skeleton session for B. The assertion is
 		// on live tmux state — enumerate sessions and confirm B is
@@ -485,7 +485,7 @@ func runPortalCommitNow(t *testing.T, binary string, f symptomFixture) {
 // runPortalList invokes `portal list` as a subprocess against the
 // fixture's tmux socket and state directory. This is the canonical
 // trigger for the full bootstrap orchestrator from outside the test
-// process: PersistentPreRunE runs all ten steps before list itself
+// process: PersistentPreRunE runs all eleven steps before list itself
 // emits anything, so the side effects (hook registration, saver
 // spawn, first sessions.json) are in place by the time the
 // subprocess exits.

@@ -82,7 +82,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 	probeFile := filepath.Join(t.TempDir(), "session-created.events")
 
 	// Seed sessions.json with a single saved session whose name is not yet
-	// live on the isolated server. Restore step 5 will skeleton-create it
+	// live on the isolated server. Restore step 6 will skeleton-create it
 	// — that new-session call is what fires session-created during the
 	// @portal-restoring window. The pre-run saved_at is captured below so
 	// assertion (b) can compare timestamps after Run.
@@ -122,7 +122,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Sanity check: Restore step 5 must have actually created the saved
+	// Sanity check: Restore step 6 must have actually created the saved
 	// session. If skeleton restoration silently no-op'd, the probe will be
 	// empty for an unrelated reason and the non-vacuity assertion below
 	// would mask the real failure. Surfacing this as a separate fatal
@@ -165,7 +165,7 @@ func TestPhase5_RestoringMarkerSuppressesCaptures_NonVacuous(t *testing.T) {
 			preRunSavedAt, postIdx.SavedAt)
 	}
 
-	// @portal-restoring must be cleared by step 7 — same guarantee the
+	// @portal-restoring must be cleared by step 8 — same guarantee the
 	// original test made; preserved here so this file fully replaces
 	// the marker-lifecycle coverage.
 	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {

@@ -1,6 +1,6 @@
 package bootstrap_test
 
-// Phase 5 integration tests exercise the ten-step bootstrap.Orchestrator
+// Phase 5 integration tests exercise the eleven-step bootstrap.Orchestrator
 // against a real tmux server using the same isolated-socket pattern as
 // internal/restore/integration_test.go (Phase 3, task 3-13). Each test runs an
 // isolated tmux instance via `tmux -S <abs-socket-path>` rooted in a per-test
@@ -141,8 +141,8 @@ func TestPhase5_OrchestratorEndToEndSmoke(t *testing.T) {
 // Overlap note: TestPhase3Integration_SaveRestoreRoundTrip already exercises
 // the capture→persist→kill→restore round-trip. The unique coverage here is
 // that the bootstrap.Orchestrator (not just restore.Orchestrator) wires the
-// Restore step correctly — i.e. step 5 actually creates the missing session
-// when invoked through the ten-step sequence.
+// Restore step correctly — i.e. step 6 actually creates the missing session
+// when invoked through the eleven-step sequence.
 func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
@@ -173,14 +173,14 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		// Opt out of the integration builder's real-EagerSignaler default
 		// (task 4-2): this test asserts the post-Run skeleton marker is
 		// still present as evidence that ApplySkeletonMarkers ran during
-		// step 5. With the real eager signaler firing in step 6, the
+		// step 6. With the real eager signaler firing in step 7, the
 		// in-pane helper would race to unset the marker (and even if
 		// the helper fails for lack of `portal` on PATH, the 500ms FIFO
 		// retry budget is enough for tmux to reap the dead pane and for
-		// step 8's CleanStaleMarkers to unset the now-paneless marker).
+		// step 9's CleanStaleMarkers to unset the now-paneless marker).
 		// The eager pipeline is covered end-to-end by
 		// TestPhase1Integration_EagerSignalHydrate_*; here we only
-		// verify the step-5 marker-setting contract.
+		// verify the step-6 marker-setting contract.
 		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
 	})
 
@@ -188,13 +188,13 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Post-condition: missing-foo must be live, created by step 5.
+	// Post-condition: missing-foo must be live, created by step 6.
 	out := ts.Run(t, "list-sessions", "-F", "#{session_name}")
 	if !strings.Contains(out, "missing-foo") {
 		t.Errorf("expected missing-foo in list-sessions; got %q", out)
 	}
 
-	// @portal-restoring must be cleared by step 7.
+	// @portal-restoring must be cleared by step 8.
 	if val, found, err := client.TryGetServerOption(state.RestoringMarkerName); err != nil {
 		t.Fatalf("TryGetServerOption: %v", err)
 	} else if found {
@@ -211,13 +211,13 @@ func TestPhase5_RestoreCreatesMissingSession(t *testing.T) {
 	}
 }
 
-// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 9
+// TestPhase5_FIFOSweeperRemovesOrphansAfterRestore proves that step 10
 // (FIFOSweeper) removes orphan hydrate-*.fifo files whose paneKey is not
 // represented by a live `@portal-skeleton-*` marker, while preserving
-// FIFOs whose paneKey corresponds to a marker freshly set by step 5
+// FIFOs whose paneKey corresponds to a marker freshly set by step 6
 // (Restore). This is the integration-level guarantee that the sweep
 // observes the post-Restore marker set, not the pre-Restore one — i.e.
-// step 9 runs strictly after step 5.
+// step 10 runs strictly after step 6.
 //
 // Wiring: real RestoringMarker, real restore.Orchestrator wrapped in
 // bootstrapadapter.RestoreAdapter (so Restore actually creates the
@@ -237,7 +237,7 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	// Pre-create two FIFOs in stateDir:
 	//   - liveKey matches the paneKey Restore will mark live.
 	//   - orphanKey is not represented in sessions.json, so no skeleton
-	//     marker will be set for it; step 9 must remove it.
+	//     marker will be set for it; step 10 must remove it.
 	liveKey := state.SanitizePaneKey("swept-foo", 0, 0)
 	orphanKey := state.SanitizePaneKey("ghost-bar", 0, 0)
 	livePath := state.FIFOPath(stateDir, liveKey)
@@ -265,11 +265,11 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 		},
 		// Opt out of the integration builder's real-EagerSignaler default
 		// (task 4-2): the assertion below is that the live FIFO survives
-		// step 9 because step 5's skeleton marker still pins it. With
-		// the real eager signaler firing in step 6, its 500ms FIFO retry
+		// step 10 because step 6's skeleton marker still pins it. With
+		// the real eager signaler firing in step 7, its 500ms FIFO retry
 		// budget gives tmux time to reap the helper-less pane (no
-		// `portal` binary on PATH here), step 8 unsets the now-paneless
-		// marker, and step 9 sweeps the live FIFO as orphan — defeating
+		// `portal` binary on PATH here), step 9 unsets the now-paneless
+		// marker, and step 10 sweeps the live FIFO as orphan — defeating
 		// the test's structural assertion. The eager pipeline is covered
 		// end-to-end by TestPhase1Integration_EagerSignalHydrate_*; here
 		// we only verify the Restore → Sweep marker-handoff contract.
@@ -281,13 +281,13 @@ func TestPhase5_FIFOSweeperRemovesOrphansAfterRestore(t *testing.T) {
 	}
 
 	// Live FIFO MUST survive — its paneKey corresponds to the skeleton
-	// marker step 5 set on the live tmux server.
+	// marker step 6 set on the live tmux server.
 	if _, err := os.Lstat(livePath); err != nil {
 		t.Errorf("live FIFO removed (paneKey=%q): %v", liveKey, err)
 	}
 
 	// Orphan FIFO MUST be removed — no skeleton marker exists for its
-	// paneKey, so step 9 swept it.
+	// paneKey, so step 10 swept it.
 	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {
 		t.Errorf("orphan FIFO not removed (paneKey=%q): lstat err = %v", orphanKey, err)
 	}

@@ -14,7 +14,7 @@
 //
 //   - Builds the portal binary so each restored pane's `portal state
 //     hydrate` helper resolves on PATH (the helper is spawned via
-//     respawn-pane -k by restore step 5 and must execute to dump
+//     respawn-pane -k by restore step 6 and must execute to dump
 //     scrollback + unset its marker + exec $SHELL).
 //   - Captures a single saved session with one window and one pane,
 //     persists sessions.json, kills the server, restores against a

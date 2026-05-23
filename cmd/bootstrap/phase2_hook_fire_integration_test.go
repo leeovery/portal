@@ -13,7 +13,7 @@
 //
 //   - Builds the portal binary so each restored pane's `portal state hydrate`
 //     helper resolves on PATH (the helper is spawned via respawn-pane -k by
-//     restore step 5 and must execute to fire its on-resume hook).
+//     restore step 6 and must execute to fire its on-resume hook).
 //   - Seeds sessions.json with TWO saved sessions (alpha, beta), each with
 //     a single window/single pane. The on-resume hook is registered against
 //     beta's pane — beta is the deterministic Symptom B repro (the
@@ -162,7 +162,7 @@ func TestPhase2_HookFiresOnNonAttachedSession_AC2(t *testing.T) {
 	//   - RestoreAdapter: skeleton-creates sessions, arms FIFOs, sets
 	//     @portal-skeleton-* markers, spawns the in-pane helper.
 	//   - EagerHydrateSignaler: writes the FIFO byte to every armed pane
-	//     during step 6 — the success path that AC2 mostly observes. We
+	//     during step 7 — the success path that AC2 mostly observes. We
 	//     rely on buildIntegrationOrchestrator's auto-default (real
 	//     EagerSignalCore when Restore is real) instead of restating the
 	//     literal here — see task 4-2 (defaults.go default-selection
