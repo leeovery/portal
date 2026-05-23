@@ -76,6 +76,7 @@ import (
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
@@ -1022,4 +1023,330 @@ func joinSnapLines(lines []string) string {
 		b = append(b, l...)
 	}
 	return string(b)
+}
+
+// legitimateColdStartHysteresisMirror mirrors cmd.selfSupervisionHysteresisTicks
+// (= 3 from Task 5-1's hardware measurement) so the observation-window
+// arithmetic in this _test file (package cmd_test, no access to the
+// unexported production const) reads cleanly.
+//
+// Duplicating the value here is acceptable because (a) the production
+// const is stable (rationale pinned by the 5-1 measurement memo at
+// .workflows/.../component-d-hysteresis-measurement.md) and (b) any
+// drift between the two does NOT produce a false-positive failure:
+// this test asserts the legitimate-cold-start path NEVER ejects
+// regardless of N, so a larger production N just means more headroom
+// inside the same observation window. The mirror value MUST track
+// production if N is ever revised — fail loudly on the test side via
+// a deliberate over-mirroring to (newN+2)*TickerPeriod.
+const legitimateColdStartHysteresisMirror = 3
+
+// legitimateColdStartObservationWindow is the wall-time gap between
+// BootstrapPortalSaver's readiness-barrier return and the post-window
+// assertions. Sized as (N + 2) * TickerPeriod so the daemon has run
+// at least N+2 ticks of its self-supervision probe — strictly larger
+// than the hysteresis threshold (N=3), so any false-positive eject
+// would have already fired.
+//
+// N=3 and TickerPeriod=1 s (cmd/state_daemon.go defaults) → 5 s.
+// Combined with BootstrapPortalSaver's readiness barrier
+// (≤ saverReadinessTimeout = 2 s) the total wall time of this test
+// budget sits well under the orchestrator's 7-8 s ceiling.
+const legitimateColdStartObservationWindow = (legitimateColdStartHysteresisMirror + 2) * time.Second
+
+// legitimateColdStartLockAcquireBudget bounds the post-
+// BootstrapPortalSaver poll for daemon.pid to be populated.
+// BootstrapPortalSaver's readiness barrier (saverReadinessTimeout =
+// 2 s) already polls IdentifyDaemon until the daemon is observably
+// up, so under normal conditions daemon.pid is non-empty the moment
+// BootstrapPortalSaver returns. The extra 1.5 s budget here is
+// belt-and-braces for slow CI hardware where the barrier may WARN-
+// and-return on timeout rather than success.
+const legitimateColdStartLockAcquireBudget = 1500 * time.Millisecond
+
+// TestSelfEject_LegitimateColdStartDoesNotFalsePositive pins spec §
+// Component D acceptance — "legitimate first-tick self-check":
+//
+//	A daemon spawned via the production BootstrapPortalSaver path
+//	(placeholder → set destroy-unattached=off → respawn-pane to
+//	`portal state daemon` → readiness barrier) MUST NOT self-eject
+//	during the immediate post-readiness window. The first-tick
+//	saver-membership probe must observe HasSession=true AND
+//	SaverPanePID == os.Getpid() because the daemon IS the saver
+//	pane's process.
+//
+// This is the no-false-positive complement to the three eject-path
+// tests above (PortalSaverAbsent, PortalSaverPaneMismatch,
+// NoScrollbackDeltaAcrossEject). Those tests pin that the eject
+// path FIRES under divergent-view conditions; this test pins that
+// the eject path does NOT fire under legitimate conditions.
+//
+// Choreography:
+//
+//  1. SkipIfNoTmux + StagePortalBinary + applyHostNoiseMitigation +
+//     isolated state dir via portaltest.NewIsolatedStateEnv. The
+//     PORTAL_STATE_DIR + PORTAL_LOG_LEVEL env vars are set on the
+//     test process so the tmux server (auto-started by the first
+//     sock.Run invocation downstream) inherits them, and panes
+//     spawned by tmux's respawn-pane therefore see them too.
+//  2. Stand up an isolated tmux server via tmuxtest.New.
+//  3. Call tmux.BootstrapPortalSaver(client, stateDir) — the
+//     production cold-start path. This runs Phase 3 placeholder →
+//     set destroy-unattached=off → respawn-pane to the daemon, then
+//     blocks on the readiness barrier until daemon.pid + IdentifyDaemon
+//     report success.
+//  4. Confirm daemon.pid matches _portal-saver's pane PID — the
+//     structural invariant that the daemon IS the saver pane process.
+//  5. Sleep legitimateColdStartObservationWindow ((N+2) * TickerPeriod
+//     = 5 s) so the daemon ticks at least N+2 times. During this
+//     window the per-tick saver-membership probe MUST return true on
+//     every fire (the daemon IS the saver pane process) and the
+//     hysteresis counter MUST stay at 0.
+//  6. Post-window assertions:
+//     A. daemon.pid still exists (file present on disk).
+//     B. state.IdentifyDaemon(daemonPID) == IdentifyIsPortalDaemon
+//     — proves the daemon process is alive and is recognisably
+//     a `portal state daemon`.
+//     C. daemon.pid contents == _portal-saver pane PID (re-read
+//     from tmux). Confirms the pane-process binding did not
+//     drift mid-window (which would be evidence of an internal
+//     respawn or some other regression).
+//     D. portal.log under stateDir does NOT contain the self-
+//     supervision marker. Any presence of the marker would mean
+//     the daemon ejected at least once during the window — a
+//     false positive.
+//
+// Cleanup: t.Cleanup tears down the saver session via tmux kill-
+// session so the daemon receives SIGHUP and exits cleanly before
+// tmuxtest.New's t.Cleanup kills the server. portaltest's backstop
+// then runs.
+func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	binDir := portalbintest.StagePortalBinary(t)
+	if _, err := exec.LookPath("portal"); err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+
+	// Host-noise mitigation BEFORE NewIsolatedStateEnv so the backstop
+	// targets a quiet tempdir rather than the developer's live state.
+	applyHostNoiseMitigation(t)
+
+	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+
+	// Env propagation: t.Setenv on the test process applies to every
+	// subprocess spawned by os/exec (including the tmux server auto-
+	// started by the first sock.Run downstream). tmux's respawn-pane
+	// payload inherits the server's process env, so the daemon spawned
+	// by Phase 3's respawn sees PORTAL_STATE_DIR and PORTAL_LOG_LEVEL
+	// correctly.
+	//
+	// PORTAL_STATE_DIR pins the daemon's state writes to the isolated
+	// stateDir (verbatim, no suffix appended per internal/state/paths.go
+	// resolution order).
+	//
+	// PORTAL_LOG_LEVEL=INFO surfaces the self-supervision INFO marker
+	// into portal.log if (hypothetically) the daemon ejected. Without
+	// this, *state.Logger defaults to LevelWarn and Assertion D's
+	// negative log-marker check would be trivially satisfied even on a
+	// regression.
+	//
+	// PATH ensures the tmux-respawned daemon can resolve `portal` from
+	// the staged binDir. StagePortalBinary already prepended binDir to
+	// the test process PATH; re-set here defensively so the explicit
+	// value is visible in test diagnostics.
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	t.Setenv("PORTAL_LOG_LEVEL", "INFO")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Stand up the isolated tmux server. The first sock.Run / Client
+	// invocation below auto-starts the server, which inherits the env
+	// configured above.
+	sock := tmuxtest.New(t, "ptl-selfeject-legit-")
+	client := sock.Client()
+
+	// Cleanup ordering: kill _portal-saver explicitly BEFORE tmuxtest's
+	// own kill-server cleanup runs, so the daemon receives SIGHUP and
+	// flushes cleanly. tmuxtest registers its cleanup first (during
+	// tmuxtest.New); t.Cleanup runs in LIFO order so this one fires
+	// first. Tolerant of "session already gone" — the test body itself
+	// never kills the saver, so this is the only teardown path.
+	t.Cleanup(func() {
+		_, _ = sock.TryRun("kill-session", "-t", tmux.PortalSaverName)
+	})
+
+	// Run the production cold-start path. BootstrapPortalSaver:
+	//  - probes has-session (false: fresh server)
+	//  - creates _portal-saver with the placeholder command
+	//  - applies destroy-unattached=off
+	//  - respawn-pane swaps in `portal state daemon`
+	//  - blocks on waitForSaverDaemonReadyFn until the daemon
+	//    publishes daemon.pid and identifies as a portal state daemon
+	//    (or saverReadinessTimeout = 2 s elapses with a WARN).
+	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
+		t.Fatalf("BootstrapPortalSaver: %v\n--- portal.log ---\n%s",
+			err, readPortalLogSafe(stateDir))
+	}
+
+	// Read daemon.pid post-bootstrap. The readiness barrier should have
+	// already observed it populated, but on a slow CI host the barrier
+	// may have WARN-timed-out and returned nil. Poll up to
+	// legitimateColdStartLockAcquireBudget to absorb that case.
+	pidPath := state.DaemonPID(stateDir)
+	var daemonPID int
+	lockDeadline := time.Now().Add(legitimateColdStartLockAcquireBudget)
+	for time.Now().Before(lockDeadline) {
+		data, readErr := os.ReadFile(pidPath)
+		if readErr == nil {
+			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil && pid > 0 {
+				daemonPID = pid
+				break
+			}
+		}
+		time.Sleep(selfEjectExitPollTick)
+	}
+	if daemonPID == 0 {
+		t.Fatalf("daemon.pid never populated within %s of BootstrapPortalSaver return; "+
+			"the legitimate cold-start path requires the daemon to publish its PID "+
+			"before the observation window opens\n--- portal.log ---\n%s",
+			legitimateColdStartLockAcquireBudget, readPortalLogSafe(stateDir))
+	}
+
+	// Confirm the structural binding: daemon.pid == _portal-saver pane
+	// PID. This is the precondition for the saver-membership probe to
+	// return true on every tick — without it the test is exercising the
+	// wrong code path.
+	panePIDStrPre := strings.TrimSpace(sock.Run(t, "list-panes",
+		"-t", tmux.PortalSaverName, "-F", "#{pane_pid}"))
+	panePIDPre, err := strconv.Atoi(panePIDStrPre)
+	if err != nil {
+		t.Fatalf("parse pre-window pane pid %q: %v", panePIDStrPre, err)
+	}
+	if daemonPID != panePIDPre {
+		t.Fatalf("pre-window divergence: daemon.pid (%d) != _portal-saver pane PID (%d)\n"+
+			"  the legitimate cold-start path requires the daemon to BE the saver "+
+			"pane process; any mismatch here means BootstrapPortalSaver's respawn-pane "+
+			"+ readiness barrier did not produce the expected structural binding\n"+
+			"--- portal.log ---\n%s",
+			daemonPID, panePIDPre, readPortalLogSafe(stateDir))
+	}
+	t.Logf("pre-window: daemon.pid=%d == _portal-saver pane PID=%d (structural binding confirmed)",
+		daemonPID, panePIDPre)
+
+	// Observation window: sleep (N+2) * TickerPeriod so the daemon
+	// ticks at least N+2 times. If any tick observed a failing probe,
+	// the hysteresis counter would reach N within the window and the
+	// daemon would have ejected before we wake.
+	t.Logf("opening observation window: %s ((N+2) * TickerPeriod, N=%d)",
+		legitimateColdStartObservationWindow, legitimateColdStartHysteresisMirror)
+	time.Sleep(legitimateColdStartObservationWindow)
+
+	// Post-window assertions.
+
+	// Read portal.log up front so every assertion's diagnostic can cite
+	// it. The daemon is still running (assertion A confirms below); the
+	// logger flushes per-line under LevelInfo so any INFO marker emitted
+	// during the window is already visible without needing the daemon
+	// to exit.
+	logBlob := readPortalLogSafe(stateDir)
+
+	// Assertion A: daemon.pid still exists. A regression that ejected
+	// the daemon during the window would leave daemon.pid behind
+	// (spec § Component D bullet 4.iii: stale-stays-stale), so file
+	// presence alone is not proof of liveness — assertion B handles
+	// that. But absence here would be a separate regression (some
+	// cleanup path deleted the pidfile).
+	pidData, readErr := os.ReadFile(pidPath)
+	if errors.Is(readErr, os.ErrNotExist) {
+		t.Fatalf("daemon.pid absent post-window; spec § Component D bullet 4.iii "+
+			"forbids any cleanup logic deleting daemon.pid — file absence here "+
+			"signals an unrelated regression in the pidfile lifecycle\n"+
+			"--- portal.log ---\n%s", logBlob)
+	}
+	if readErr != nil {
+		t.Fatalf("read daemon.pid post-window: %v\n--- portal.log ---\n%s",
+			readErr, logBlob)
+	}
+	recordedPID, parseErr := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if parseErr != nil {
+		t.Fatalf("parse daemon.pid contents %q: %v\n--- portal.log ---\n%s",
+			string(pidData), parseErr, logBlob)
+	}
+	if recordedPID != daemonPID {
+		t.Errorf("daemon.pid post-window = %d; want pre-window PID %d "+
+			"(rewrite mid-window would be a regression)\n--- portal.log ---\n%s",
+			recordedPID, daemonPID, logBlob)
+	}
+
+	// Assertion B: state.IdentifyDaemon(daemonPID) == IdentifyIsPortalDaemon.
+	// Proves the daemon process is alive AND is still recognisable as
+	// a portal state daemon. A self-ejected daemon would not pass
+	// IdentifyDaemon (the process would be dead, IdentifyDead).
+	result, identifyErr := state.IdentifyDaemon(daemonPID)
+	if identifyErr != nil {
+		t.Errorf("IdentifyDaemon(%d) returned transient error: %v\n"+
+			"  the legitimate cold-start path requires the daemon to remain "+
+			"identifiable throughout the observation window\n"+
+			"--- portal.log ---\n%s",
+			daemonPID, identifyErr, logBlob)
+	}
+	if result != state.IdentifyIsPortalDaemon {
+		t.Errorf("IdentifyDaemon(%d) = %v; want IdentifyIsPortalDaemon\n"+
+			"  the daemon spawned by BootstrapPortalSaver MUST remain alive "+
+			"and identifiable across the (N+2) * TickerPeriod observation "+
+			"window — any other classification means the daemon self-ejected "+
+			"(false positive) or was killed externally\n"+
+			"--- portal.log ---\n%s",
+			daemonPID, result, logBlob)
+	}
+
+	// Assertion C: daemon.pid contents still == _portal-saver pane PID.
+	// Re-read the pane PID from tmux. Drift here would mean either the
+	// pane was respawned mid-window (some external actor) or the
+	// daemon was replaced — either case is evidence the daemon under
+	// test is not the same legitimate daemon we observed pre-window.
+	panePIDStrPost := strings.TrimSpace(sock.Run(t, "list-panes",
+		"-t", tmux.PortalSaverName, "-F", "#{pane_pid}"))
+	panePIDPost, err := strconv.Atoi(panePIDStrPost)
+	if err != nil {
+		t.Errorf("parse post-window pane pid %q: %v\n--- portal.log ---\n%s",
+			panePIDStrPost, err, logBlob)
+	} else if panePIDPost != daemonPID {
+		t.Errorf("post-window divergence: daemon.pid (%d) != _portal-saver pane PID (%d)\n"+
+			"  the structural binding must hold throughout the observation window\n"+
+			"--- portal.log ---\n%s",
+			daemonPID, panePIDPost, logBlob)
+	}
+
+	// Assertion D: portal.log does NOT contain the self-supervision
+	// marker. Any presence means the daemon ejected during the window
+	// — a false positive in the spec's "legitimate first-tick self-
+	// check" acceptance bullet.
+	//
+	// This assertion depends on PORTAL_LOG_LEVEL=INFO being honoured
+	// by the daemon (set above on the test process before tmux server
+	// start). If a future logger refactor breaks env propagation, this
+	// check degrades silently to a trivial pass — assertions A-C
+	// independently prove the no-false-positive invariant.
+	if strings.Contains(logBlob, selfEjectLogMarker) {
+		t.Errorf("portal.log contains self-eject marker %q during legitimate cold-start "+
+			"observation window — the daemon self-ejected when it should not have "+
+			"(spec § Component D: legitimate first-tick self-check)\n"+
+			"--- portal.log ---\n%s",
+			selfEjectLogMarker, logBlob)
+	}
+
+	t.Logf("legitimate cold-start completed without self-eject: "+
+		"daemon alive (pid=%d), pane PID matches, no self-supervision marker in log",
+		daemonPID)
+
+	// Belt-and-braces: confirm portal.log path resolves to the
+	// isolated stateDir (paranoia check against an env-propagation
+	// regression that would silently route logs elsewhere — in which
+	// case Assertion D would be trivially satisfied and useless).
+	expectedLogPath := filepath.Join(stateDir, "portal.log")
+	if state.PortalLog(stateDir) != expectedLogPath {
+		t.Errorf("internal: state.PortalLog(%s) = %s; want %s",
+			stateDir, state.PortalLog(stateDir), expectedLogPath)
+	}
 }
