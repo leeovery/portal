@@ -284,13 +284,33 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 //  1. Probe has-session for _portal-saver.
 //  2. If present, verify daemon liveness via BootstrapAliveCheck (state dir's
 //     daemon.pid + signal-0 probe).
-//  3. If the session is present but the daemon is dead, kill the orphan
-//     (tolerantly) and fall through to the create path.
-//  4. Create _portal-saver with retry on transient failures. After each
-//     failed new-session, re-probe has-session — a concurrent bootstrap may
-//     have won the race, in which case treat the present session as success.
-//  5. Always set destroy-unattached=off on the session (defensive against
-//     users with destroy-unattached on globally in their tmux.conf).
+//  3. If the session is present but the daemon is dead, kill the orphan via
+//     the synchronous barrier and fall through to the create path.
+//  4. Create branch (entered when the session is absent, or after the kill in
+//     step 3) — three load-bearing sub-steps in this exact order:
+//     (a) createPortalSaverWithRetry creates _portal-saver with a benign
+//     placeholder command (`sh -c 'exec tail -f /dev/null'`). Retry/race
+//     logic is preserved; a concurrent-bootstrap race that finds the
+//     session already present via the post-error has-session re-probe is
+//     still treated as success.
+//     (b) SetSessionOption applies destroy-unattached=off against the now
+//     guaranteed-alive placeholder session. This is the load-bearing
+//     reorder: previously the option was set AFTER the daemon was already
+//     running as the initial pane process, so a lock-loser daemon exiting
+//     between new-session and set-option would let tmux self-destroy the
+//     session before destroy-unattached=off applied — producing "no such
+//     session" log noise and a recovery doom-loop. With the placeholder
+//     keeping the session alive unconditionally, set-option is safe.
+//     (c) RespawnPane replaces the placeholder with `portal state daemon`
+//     via `respawn-pane -k`. -k atomically kills the placeholder and
+//     installs the daemon in its place; the pane survives, only the
+//     process changes. Even if the daemon exits immediately as a
+//     lock-loser, destroy-unattached=off is already in effect so the
+//     session persists for the next bootstrap to evaluate.
+//  5. Session-present-and-alive happy path: SetSessionOption still runs as
+//     defence against users with destroy-unattached on globally, but
+//     RespawnPane does NOT — the existing daemon is healthy and recycling
+//     its pane process would be unnecessary churn.
 //
 // Does not touch @portal-restoring or version-marker logic — those are owned
 // by adjacent bootstrap stages.
@@ -305,14 +325,29 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 		sessionPresent = false
 	}
 
+	createdSession := false
 	if !sessionPresent {
 		if err := createPortalSaverWithRetry(c); err != nil {
 			return err
 		}
+		createdSession = true
 	}
 
 	if err := c.SetSessionOption(PortalSaverName, "destroy-unattached", "off"); err != nil {
 		return fmt.Errorf("bootstrap _portal-saver: set destroy-unattached: %w", err)
+	}
+
+	if createdSession {
+		if err := c.RespawnPane(PortalSaverName, portalSaverDaemonCommand); err != nil {
+			return fmt.Errorf("bootstrap _portal-saver: respawn daemon: %w", err)
+		}
+		// TODO(Task 3-3): readiness barrier — after respawn-pane, poll for
+		// daemon.pid existence AND state.IdentifyDaemon ==
+		// IdentifyIsPortalDaemon (bounded to 2s total at 50ms cadence; on
+		// timeout log a WARN under ComponentBootstrap and return nil — best
+		// effort). The barrier closes the gap where subsequent bootstrap
+		// steps (Restore, EagerSignalHydrate, …) would otherwise observe a
+		// not-yet-up daemon racing the respawn.
 	}
 
 	return nil
@@ -424,10 +459,18 @@ func shouldKillSaverOnVersionDecision(stored, currentVersion string, readErr err
 // attempts. After a failure it re-probes has-session to detect concurrent
 // bootstraps that may already have created the session — that is treated as
 // success so we do not stack duplicate-creation errors.
+//
+// The session is created with portalSaverPlaceholderCommand as its initial
+// pane process, NOT the real daemon command. The placeholder is structurally
+// incapable of contending for the daemon lock or writing to the state
+// directory; BootstrapPortalSaver's caller swaps it for the real daemon via
+// respawn-pane AFTER applying destroy-unattached=off. See the
+// portalSaverPlaceholderCommand docstring for why `tail -f /dev/null` is
+// portable while `sleep infinity` is not.
 func createPortalSaverWithRetry(c *Client) error {
 	var lastErr error
 	for attempt := 1; attempt <= portalSaverMaxAttempts; attempt++ {
-		err := c.NewDetachedSessionNoCwd(PortalSaverName, portalSaverDaemonCommand)
+		err := c.NewDetachedSessionNoCwd(PortalSaverName, portalSaverPlaceholderCommand)
 		if err == nil {
 			return nil
 		}

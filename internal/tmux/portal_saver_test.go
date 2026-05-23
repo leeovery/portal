@@ -43,10 +43,12 @@ type portalSaverScript struct {
 	newSession   func(call int) (string, error) // tmux new-session -d -s <name> [cmd]
 	killSession  func(call int) (string, error) // tmux kill-session -t <name>
 	setOption    func(call int) (string, error) // tmux set-option -t <sess> <name> <value>
+	respawnPane  func(call int) (string, error) // tmux respawn-pane -k -t <target> <cmd>
 	hasSessionN  int
 	newSessionN  int
 	killSessionN int
 	setOptionN   int
+	respawnPaneN int
 }
 
 func (s *portalSaverScript) run(t *testing.T) func(args ...string) (string, error) {
@@ -85,6 +87,13 @@ func (s *portalSaverScript) run(t *testing.T) func(args ...string) (string, erro
 				return "", nil
 			}
 			return s.setOption(s.setOptionN)
+		case "respawn-pane":
+			s.respawnPaneN++
+			if s.respawnPane == nil {
+				t.Fatalf("unexpected respawn-pane call: %v", args)
+				return "", nil
+			}
+			return s.respawnPane(s.respawnPaneN)
 		default:
 			t.Fatalf("unexpected command: %v", args)
 			return "", nil
@@ -187,8 +196,9 @@ func TestBootstrapPortalSaver_CreatesOnFreshServer(t *testing.T) {
 			// Only one has-session expected: pre-create check returns false (absent).
 			return "", errors.New("can't find session: _portal-saver")
 		},
-		newSession: func(call int) (string, error) { return "", nil },
-		setOption:  func(call int) (string, error) { return "", nil },
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -203,19 +213,230 @@ func TestBootstrapPortalSaver_CreatesOnFreshServer(t *testing.T) {
 	if got := countCalls(mock.Calls, "set-option"); got != 1 {
 		t.Errorf("expected exactly 1 set-option call, got %d (calls: %v)", got, mock.Calls)
 	}
+	if got := countCalls(mock.Calls, "respawn-pane"); got != 1 {
+		t.Errorf("expected exactly 1 respawn-pane call, got %d (calls: %v)", got, mock.Calls)
+	}
 	if got := countCalls(mock.Calls, "kill-session"); got != 0 {
 		t.Errorf("expected 0 kill-session calls, got %d", got)
 	}
 
-	// Verify new-session argv shape (no -c).
+	// Verify new-session argv shape — must use placeholder command, not the
+	// real daemon command. The daemon command is installed via respawn-pane
+	// after destroy-unattached=off has been set.
+	wantNewSession := "new-session -d -s _portal-saver " + tmux.PortalSaverPlaceholderCommand
 	for _, c := range mock.Calls {
 		if c[0] != "new-session" {
 			continue
 		}
 		joined := strings.Join(c, " ")
-		if joined != "new-session -d -s _portal-saver portal state daemon" {
-			t.Errorf("new-session argv = %q, want %q", joined, "new-session -d -s _portal-saver portal state daemon")
+		if joined != wantNewSession {
+			t.Errorf("new-session argv = %q, want %q", joined, wantNewSession)
 		}
+	}
+
+	// Verify respawn-pane argv shape: target=_portal-saver, command=daemon.
+	wantRespawn := "respawn-pane -k -t _portal-saver " + tmux.PortalSaverDaemonCommand
+	for _, c := range mock.Calls {
+		if c[0] != "respawn-pane" {
+			continue
+		}
+		joined := strings.Join(c, " ")
+		if joined != wantRespawn {
+			t.Errorf("respawn-pane argv = %q, want %q", joined, wantRespawn)
+		}
+	}
+}
+
+// TestBootstrapPortalSaver_CreateOrderingIsCreateThenSetOptionThenRespawn pins
+// the load-bearing three-step ordering of the create branch: new-session must
+// precede set-option, and set-option must precede respawn-pane. This guards
+// against a regression to the pre-Component-F shape where new-session created
+// the session with the real daemon as its initial process AND destroy-unattached
+// was set afterwards — a sequence in which a lock-loser daemon exit between
+// the two calls causes tmux to self-destroy the session before the option
+// applies.
+func TestBootstrapPortalSaver_CreateOrderingIsCreateThenSetOptionThenRespawn(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	script := &portalSaverScript{
+		hasSession: func(call int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	newIdx, setIdx, respawnIdx := -1, -1, -1
+	for i, c := range mock.Calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		case "set-option":
+			if setIdx == -1 {
+				setIdx = i
+			}
+		case "respawn-pane":
+			if respawnIdx == -1 {
+				respawnIdx = i
+			}
+		}
+	}
+	if newIdx == -1 || setIdx == -1 || respawnIdx == -1 {
+		t.Fatalf("missing call: new=%d set=%d respawn=%d (calls=%v)", newIdx, setIdx, respawnIdx, mock.Calls)
+	}
+	if newIdx >= setIdx || setIdx >= respawnIdx {
+		t.Errorf("expected create-then-set-option-then-respawn ordering; got new=%d set=%d respawn=%d (calls=%v)", newIdx, setIdx, respawnIdx, mock.Calls)
+	}
+}
+
+// TestBootstrapPortalSaver_PropagatesRespawnPaneFailureWithRespawnDaemonContext
+// pins that a RespawnPane error on the create branch surfaces as a wrapped
+// "respawn daemon" error and that BootstrapPortalSaver returns the error to
+// the caller — the respawn is structurally required, not best-effort.
+func TestBootstrapPortalSaver_PropagatesRespawnPaneFailureWithRespawnDaemonContext(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	script := &portalSaverScript{
+		hasSession: func(call int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", errors.New("pane vanished mid-flight") },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state")
+	if err == nil {
+		t.Fatal("expected error from respawn-pane failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "respawn daemon") {
+		t.Errorf("error %q should contain \"respawn daemon\" context", err.Error())
+	}
+	if !strings.Contains(err.Error(), "_portal-saver") {
+		t.Errorf("error %q should reference session name _portal-saver", err.Error())
+	}
+	if !strings.Contains(err.Error(), "pane vanished mid-flight") {
+		t.Errorf("error %q should wrap underlying tmux error", err.Error())
+	}
+}
+
+// TestCreatePortalSaverWithRetry_UsesPlaceholderCommand pins the contract that
+// createPortalSaverWithRetry passes the placeholder command (not the real
+// daemon command) to NewDetachedSessionNoCwd. Drives this assertion via the
+// create branch of BootstrapPortalSaver since createPortalSaverWithRetry is
+// unexported. The new-session argv string is checked verbatim.
+func TestCreatePortalSaverWithRetry_UsesPlaceholderCommand(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	var newSessionArgv []string
+	script := &portalSaverScript{
+		hasSession: func(call int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "new-session" {
+				newSessionArgv = append([]string{}, args...)
+			}
+			return script.run(t)(args...)
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	want := []string{"new-session", "-d", "-s", "_portal-saver", tmux.PortalSaverPlaceholderCommand}
+	if len(newSessionArgv) != len(want) {
+		t.Fatalf("new-session argv = %v, want %v", newSessionArgv, want)
+	}
+	for i, a := range want {
+		if newSessionArgv[i] != a {
+			t.Errorf("new-session arg[%d] = %q, want %q", i, newSessionArgv[i], a)
+		}
+	}
+	// And reject any accidental embedding of "portal state daemon" in new-session.
+	if strings.Contains(strings.Join(newSessionArgv, " "), tmux.PortalSaverDaemonCommand) {
+		t.Errorf("new-session argv unexpectedly contains daemon command: %v", newSessionArgv)
+	}
+}
+
+// TestBootstrapPortalSaver_ConcurrentRaceTreatsExistingSessionAsSuccess_AndStillRespawns
+// pins the concurrent-bootstrap race contract: if NewDetachedSessionNoCwd
+// fails but HasSession then reports true (another bootstrap won the race),
+// createPortalSaverWithRetry returns nil. BootstrapPortalSaver still goes on
+// to apply set-option AND respawn-pane against the now-existing session — the
+// respawn is unconditional on the create-needed path.
+func TestBootstrapPortalSaver_ConcurrentRaceTreatsExistingSessionAsSuccess_AndStillRespawns(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	hasSessionCall := 0
+	newSessionCall := 0
+	respawnPaneCall := 0
+	setOptionCall := 0
+
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			switch args[0] {
+			case "has-session":
+				hasSessionCall++
+				if hasSessionCall == 1 {
+					return "", errors.New("can't find session")
+				}
+				// Concurrent bootstrap won the race.
+				return "", nil
+			case "new-session":
+				newSessionCall++
+				return "", errors.New("duplicate session: _portal-saver")
+			case "set-option":
+				setOptionCall++
+				return "", nil
+			case "respawn-pane":
+				respawnPaneCall++
+				return "", nil
+			default:
+				t.Fatalf("unexpected command: %v", args)
+				return "", nil
+			}
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("expected concurrent-bootstrap race to be treated as success, got: %v", err)
+	}
+
+	if newSessionCall != 1 {
+		t.Errorf("expected exactly 1 new-session attempt before race detected, got %d", newSessionCall)
+	}
+	if setOptionCall != 1 {
+		t.Errorf("expected exactly 1 set-option call after race detected, got %d", setOptionCall)
+	}
+	if respawnPaneCall != 1 {
+		t.Errorf("expected respawn-pane to still run on the create-needed path after race resolution, got %d", respawnPaneCall)
 	}
 }
 
@@ -254,6 +475,7 @@ func TestBootstrapPortalSaver_KillsAndRecreatesWhenSessionExistsButDaemonDead(t 
 		killSession: func(call int) (string, error) { return "", nil },
 		newSession:  func(call int) (string, error) { return "", nil },
 		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -293,8 +515,9 @@ func TestBootstrapPortalSaver_RecoversFromFlockLoserEmptySession(t *testing.T) {
 			// Loser closed the session on exit; bootstrap observes it absent.
 			return "", errors.New("can't find session: _portal-saver")
 		},
-		newSession: func(call int) (string, error) { return "", nil },
-		setOption:  func(call int) (string, error) { return "", nil },
+		newSession:  func(call int) (string, error) { return "", nil },
+		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -332,6 +555,7 @@ func TestBootstrapPortalSaver_RecoversFromFlockLoserDeadPaneSession(t *testing.T
 		killSession: func(call int) (string, error) { return "", nil },
 		newSession:  func(call int) (string, error) { return "", nil },
 		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -437,6 +661,8 @@ func TestBootstrapPortalSaver_RetriesNewSessionUpTo3TimesOnTransientFailure(t *t
 				return "", nil // success on 3rd attempt
 			case "set-option":
 				return "", nil
+			case "respawn-pane":
+				return "", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
 				return "", nil
@@ -455,6 +681,9 @@ func TestBootstrapPortalSaver_RetriesNewSessionUpTo3TimesOnTransientFailure(t *t
 	if got := countCalls(mock.Calls, "set-option"); got != 1 {
 		t.Errorf("expected 1 set-option call after retry success, got %d", got)
 	}
+	if got := countCalls(mock.Calls, "respawn-pane"); got != 1 {
+		t.Errorf("expected 1 respawn-pane call after retry success, got %d", got)
+	}
 }
 
 func TestBootstrapPortalSaver_ReturnsWrappedErrorAfterRetryExhaustion(t *testing.T) {
@@ -470,6 +699,9 @@ func TestBootstrapPortalSaver_ReturnsWrappedErrorAfterRetryExhaustion(t *testing
 				return "", errors.New("persistent tmux failure")
 			case "set-option":
 				t.Fatalf("set-option must not be called when create exhausts retries")
+				return "", nil
+			case "respawn-pane":
+				t.Fatalf("respawn-pane must not be called when create exhausts retries")
 				return "", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
@@ -496,6 +728,9 @@ func TestBootstrapPortalSaver_ReturnsWrappedErrorAfterRetryExhaustion(t *testing
 	if got := countCalls(mock.Calls, "set-option"); got != 0 {
 		t.Errorf("set-option must not run after retry exhaustion, got %d calls", got)
 	}
+	if got := countCalls(mock.Calls, "respawn-pane"); got != 0 {
+		t.Errorf("respawn-pane must not run after retry exhaustion, got %d calls", got)
+	}
 }
 
 func TestBootstrapPortalSaver_ToleratesKillSessionFailureWhenTransitioningFromOrphan(t *testing.T) {
@@ -507,6 +742,7 @@ func TestBootstrapPortalSaver_ToleratesKillSessionFailureWhenTransitioningFromOr
 		killSession: func(call int) (string, error) { return "", errors.New("session vanished mid-flight") },
 		newSession:  func(call int) (string, error) { return "", nil },
 		setOption:   func(call int) (string, error) { return "", nil },
+		respawnPane: func(call int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -575,6 +811,8 @@ func TestBootstrapPortalSaver_NoRedundantCreateOnConcurrentBootstrapRace(t *test
 				return "", errors.New("duplicate session: _portal-saver")
 			case "set-option":
 				return "", nil
+			case "respawn-pane":
+				return "", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
 				return "", nil
@@ -605,11 +843,13 @@ type versionScenario struct {
 	killSessionErr error
 	newSessionErr  error
 	setOptionErr   error
+	respawnPaneErr error
 
 	hasSessionCalls  int
 	killSessionCalls int
 	newSessionCalls  int
 	setOptionCalls   int
+	respawnPaneCalls int
 }
 
 func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error) {
@@ -642,6 +882,9 @@ func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error)
 		case "set-option":
 			s.setOptionCalls++
 			return "", s.setOptionErr
+		case "respawn-pane":
+			s.respawnPaneCalls++
+			return "", s.respawnPaneErr
 		default:
 			t.Fatalf("unexpected command: %v", args)
 			return "", nil
@@ -1399,9 +1642,10 @@ func TestBootstrapPortalSaver_InvokesBarrierHelperOnStaleDaemon(t *testing.T) {
 	})
 
 	script := &portalSaverScript{
-		hasSession: func(int) (string, error) { return "", nil }, // present
-		newSession: func(int) (string, error) { return "", nil },
-		setOption:  func(int) (string, error) { return "", nil },
+		hasSession:  func(int) (string, error) { return "", nil }, // present
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -1441,8 +1685,9 @@ func TestBootstrapPortalSaver_DoesNotInvokeBarrierHelperWhenSessionAbsent(t *tes
 		hasSession: func(int) (string, error) {
 			return "", errors.New("can't find session: _portal-saver")
 		},
-		newSession: func(int) (string, error) { return "", nil },
-		setOption:  func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -1503,6 +1748,7 @@ func TestBootstrapPortalSaver_PreservesKillSessionWhenRealHelperRuns(t *testing.
 		killSession: func(int) (string, error) { return "", nil },
 		newSession:  func(int) (string, error) { return "", nil },
 		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -1534,6 +1780,7 @@ func TestBootstrapPortalSaver_PreservesKillBeforeNewSessionOrderThroughBarrier(t
 		killSession: func(int) (string, error) { return "", nil },
 		newSession:  func(int) (string, error) { return "", nil },
 		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
@@ -1565,6 +1812,7 @@ func TestBootstrapPortalSaver_ToleratesBarrierWarnOnTimeoutPath(t *testing.T) {
 		killSession: func(int) (string, error) { return "", nil },
 		newSession:  func(int) (string, error) { return "", nil },
 		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
 	}
 	mock := &MockCommander{RunFunc: script.run(t)}
 	client := tmux.NewClient(mock)
