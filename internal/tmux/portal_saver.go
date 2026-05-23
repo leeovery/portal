@@ -205,6 +205,46 @@ func SetBarrierLogger(l BarrierLogger) {
 	killBarrierLogger = l
 }
 
+// saverReadinessReadPID is the function used by waitForSaverDaemonReady to
+// read the daemon's PID file while polling for readiness after the create-
+// branch respawn-pane. It is a package-level seam so readiness-barrier unit
+// tests can simulate "absent then present", "absent forever", or
+// "transient read error" without touching the filesystem. Defaults to
+// state.ReadPIDFile.
+var saverReadinessReadPID = state.ReadPIDFile
+
+// saverReadinessIdentify is the function used by waitForSaverDaemonReady to
+// classify the PID read from daemon.pid. It is a package-level seam so
+// readiness-barrier unit tests can simulate transient ps failures, dead
+// PIDs, recycled-PID misidentification, and the success case without
+// shelling out to ps. Defaults to state.IdentifyDaemon.
+var saverReadinessIdentify = state.IdentifyDaemon
+
+// saverReadinessPollInterval is the cadence at which the readiness barrier
+// re-probes ReadPIDFile + IdentifyDaemon after the create-branch respawn.
+// Exported as a var so tests can shrink it. Defaults to 50ms — chosen
+// alongside saverReadinessTimeout so the median ready path completes in
+// well under a second on a healthy host.
+var saverReadinessPollInterval = 50 * time.Millisecond
+
+// saverReadinessTimeout is the upper bound on waitForSaverDaemonReady's
+// wait for the freshly respawned daemon to publish daemon.pid AND be
+// identifiable as `portal state daemon`. Sized to cover normal daemon
+// startup latency (fork + exec + flock + PID-file write) with margin while
+// keeping the bootstrap step bounded. Exported as a var so tests can shrink
+// it.
+var saverReadinessTimeout = 2 * time.Second
+
+// waitForSaverDaemonReadyFn is the package-level seam that the
+// BootstrapPortalSaver create-branch call routes through. It defaults to
+// the production helper; unit tests swap it with a no-op via the
+// WaitForSaverDaemonReadyFnSeam test export so existing create-branch
+// tests do not incur the full poll-loop wall time. The pattern mirrors
+// killSaverAndWaitForDaemonFn — a single fn-seam lets tests that do not
+// care about the readiness barrier skip it cheaply, while leaving the
+// real helper available for tests that exercise it directly.
+var waitForSaverDaemonReadyFn = waitForSaverDaemonReady
+
 // killSaverAndWaitForDaemonFn is the package-level seam that both
 // production kill call sites route through. It defaults to the production
 // helper; unit tests swap it with a recorder or a no-op via the
@@ -278,6 +318,71 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	return nil
 }
 
+// waitForSaverDaemonReady polls daemon.pid + state.IdentifyDaemon until the
+// freshly-respawned saver daemon has come up, bounded to saverReadinessTimeout
+// total wall-clock at saverReadinessPollInterval cadence. It closes the
+// race between the create-branch respawn-pane (which atomically swaps the
+// placeholder for `portal state daemon`) and subsequent bootstrap steps
+// (Restore, EagerSignalHydrate, ...) that assume a healthy daemon.
+//
+// Contract:
+//
+//   - Returns nil immediately the first time saverReadinessReadPID returns a
+//     PID AND saverReadinessIdentify returns IdentifyIsPortalDaemon. This is
+//     the success path.
+//   - Returns nil on timeout AFTER emitting exactly one WARN through
+//     killBarrierLogger under state.ComponentBootstrap containing the literal
+//     "saver respawn: daemon did not come up within". This is best-effort —
+//     the daemon's own lock acquisition is the structural safety net for the
+//     truly-stuck case, and the WARN gives operators a grep anchor without
+//     escalating to a fatal bootstrap abort.
+//   - Treats every not-yet-ready signal as a continue: ErrPIDFileAbsent,
+//     transient PID-file read errors, transient IdentifyDaemon ps failures,
+//     IdentifyDead (PID has not yet been re-published after fork), and
+//     IdentifyNotPortalDaemon (recycled PID still being observed) all loop
+//     until the deadline.
+//   - Never writes to the state directory.
+//   - The deadline is computed once at entry so the 2s ceiling is enforced
+//     regardless of how many transient errors occur inside the loop.
+func waitForSaverDaemonReady(stateDir string) error {
+	deadline := time.Now().Add(saverReadinessTimeout)
+
+	ticker := time.NewTicker(saverReadinessPollInterval)
+	defer ticker.Stop()
+
+	for {
+		if isSaverDaemonReady(stateDir) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			killBarrierLogger.Warn(
+				state.ComponentBootstrap,
+				"saver respawn: daemon did not come up within %v",
+				saverReadinessTimeout,
+			)
+			return nil
+		}
+		<-ticker.C
+	}
+}
+
+// isSaverDaemonReady is one tick of the readiness barrier: read daemon.pid,
+// identify it, and return true iff the PID is alive AND identifies as a
+// portal state daemon. Any other observable shape (read error, transient
+// identify error, IdentifyDead, IdentifyNotPortalDaemon) returns false so
+// the caller continues polling.
+func isSaverDaemonReady(stateDir string) bool {
+	pid, err := saverReadinessReadPID(stateDir)
+	if err != nil {
+		return false
+	}
+	result, err := saverReadinessIdentify(pid)
+	if err != nil {
+		return false
+	}
+	return result == state.IdentifyIsPortalDaemon
+}
+
 // BootstrapPortalSaver ensures the _portal-saver session exists and is hosting
 // a live daemon, idempotently. The flow:
 //
@@ -341,13 +446,15 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 		if err := c.RespawnPane(PortalSaverName, portalSaverDaemonCommand); err != nil {
 			return fmt.Errorf("bootstrap _portal-saver: respawn daemon: %w", err)
 		}
-		// TODO(Task 3-3): readiness barrier — after respawn-pane, poll for
-		// daemon.pid existence AND state.IdentifyDaemon ==
-		// IdentifyIsPortalDaemon (bounded to 2s total at 50ms cadence; on
-		// timeout log a WARN under ComponentBootstrap and return nil — best
-		// effort). The barrier closes the gap where subsequent bootstrap
-		// steps (Restore, EagerSignalHydrate, …) would otherwise observe a
-		// not-yet-up daemon racing the respawn.
+		// Readiness barrier: poll daemon.pid + IdentifyDaemon until the
+		// freshly-respawned daemon is observably up, bounded to
+		// saverReadinessTimeout. Routed through waitForSaverDaemonReadyFn so
+		// unit tests not exercising the barrier can stub it out cheaply.
+		// Always returns nil today — WARN-on-timeout is logged inside the
+		// helper. The barrier closes the gap where subsequent bootstrap
+		// steps (Restore, EagerSignalHydrate, ...) would otherwise observe
+		// a not-yet-up daemon racing the respawn.
+		_ = waitForSaverDaemonReadyFn(stateDir)
 	}
 
 	return nil

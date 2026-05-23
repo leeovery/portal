@@ -33,6 +33,28 @@ func shrinkRetryDelay(t *testing.T) {
 	t.Cleanup(func() { tmux.PortalSaverRetryDelay = prev })
 }
 
+// stubReadinessReady installs a no-op for the waitForSaverDaemonReadyFn seam
+// so create-branch tests that do not exercise the readiness barrier directly
+// skip its real poll loop. Without this, tests hitting BootstrapPortalSaver's
+// create branch with default seams would block for ~2s (ErrPIDFileAbsent on
+// every tick until saverReadinessTimeout elapses). Restored via t.Cleanup.
+func stubReadinessReady(t *testing.T) {
+	t.Helper()
+	swapSeam(t, tmux.WaitForSaverDaemonReadyFnSeam(), func(string) error { return nil })
+}
+
+// init shrinks the package-level readiness-barrier defaults to test-friendly
+// values for the entire tmux_test package, so create-branch tests that do
+// not explicitly stub waitForSaverDaemonReadyFn do not pay the production 2s
+// timeout. Tests that exercise the readiness barrier directly (via
+// tmux.WaitForSaverDaemonReady) install their own values for poll interval
+// and timeout via swapSeam, which restores via t.Cleanup — leaving these
+// package-test defaults in place between tests.
+func init() {
+	*tmux.SaverReadinessPollIntervalSeam() = 1 * time.Millisecond
+	*tmux.SaverReadinessTimeoutSeam() = 5 * time.Millisecond
+}
+
 // portalSaverScript builds a RunFunc dispatching on argv[0] using the supplied
 // per-command response handlers. Each handler receives a 1-indexed call
 // counter so tests can vary behavior across repeated calls of the same
@@ -1798,6 +1820,7 @@ func TestBootstrapPortalSaver_PreservesKillBeforeNewSessionOrderThroughBarrier(t
 func TestBootstrapPortalSaver_ToleratesBarrierWarnOnTimeoutPath(t *testing.T) {
 	stubAliveCheck(t, false)
 	shrinkRetryDelay(t)
+	stubReadinessReady(t) // isolate kill-barrier WARN; readiness barrier is exercised separately
 	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
 	installBarrierIsAlive(t, func(int) bool { return true }) // never dies → timeout
 	installBarrierPollInterval(t, 1*time.Millisecond)
@@ -2617,5 +2640,438 @@ func TestPortalSaverDaemonCommand_LiteralValue(t *testing.T) {
 	const want = "portal state daemon"
 	if got := tmux.PortalSaverDaemonCommand; got != want {
 		t.Errorf("PortalSaverDaemonCommand = %q, want %q", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Task 3-3: post-respawn readiness barrier — waitForSaverDaemonReady.
+//
+// These tests pin the readiness contract from § Component F:
+//   - return nil immediately on PID present + IdentifyIsPortalDaemon,
+//   - continue polling on every not-ready shape (absent PID file, transient
+//     read error, transient ps error, IdentifyDead, IdentifyNotPortalDaemon),
+//   - bound wall-clock by saverReadinessTimeout,
+//   - on timeout, emit exactly one WARN via killBarrierLogger under
+//     state.ComponentBootstrap with the literal grep-anchor and return nil.
+//
+// Tests use the directly-exported helper tmux.WaitForSaverDaemonReady so they
+// exercise the real loop independent of the waitForSaverDaemonReadyFn seam.
+// ----------------------------------------------------------------------------
+
+// installReadinessReadPID swaps the saverReadinessReadPID seam for the test.
+func installReadinessReadPID(t *testing.T, fn func(string) (int, error)) {
+	t.Helper()
+	swapSeam(t, tmux.SaverReadinessReadPIDSeam(), fn)
+}
+
+// installReadinessIdentify swaps the saverReadinessIdentify seam for the test.
+func installReadinessIdentify(t *testing.T, fn func(int) (state.IdentifyResult, error)) {
+	t.Helper()
+	swapSeam(t, tmux.SaverReadinessIdentifySeam(), fn)
+}
+
+// installReadinessPollInterval shrinks the readiness poll cadence for the test.
+func installReadinessPollInterval(t *testing.T, d time.Duration) {
+	t.Helper()
+	swapSeam(t, tmux.SaverReadinessPollIntervalSeam(), d)
+}
+
+// installReadinessTimeout shrinks the readiness timeout for the test.
+func installReadinessTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	swapSeam(t, tmux.SaverReadinessTimeoutSeam(), d)
+}
+
+func TestWaitForSaverDaemonReady_ReturnsNilImmediatelyWhenPIDPresentAndIdentifies(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	readPIDCalls := 0
+	installReadinessReadPID(t, func(string) (int, error) {
+		readPIDCalls++
+		return 4321, nil
+	})
+	identifyCalls := 0
+	installReadinessIdentify(t, func(pid int) (state.IdentifyResult, error) {
+		identifyCalls++
+		if pid != 4321 {
+			t.Errorf("IdentifyDaemon called with pid=%d; want 4321", pid)
+		}
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if readPIDCalls != 1 {
+		t.Errorf("expected exactly 1 ReadPIDFile call on immediate success, got %d", readPIDCalls)
+	}
+	if identifyCalls != 1 {
+		t.Errorf("expected exactly 1 IdentifyDaemon call on immediate success, got %d", identifyCalls)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on immediate success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_RetriesWhilePIDFileAbsentThenSucceeds(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	// Absent for first 2 ticks, then present.
+	readCall := 0
+	installReadinessReadPID(t, func(string) (int, error) {
+		readCall++
+		if readCall < 3 {
+			return 0, state.ErrPIDFileAbsent
+		}
+		return 9999, nil
+	})
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if readCall < 3 {
+		t.Errorf("expected at least 3 ReadPIDFile calls (2 absent + 1 success), got %d", readCall)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on eventual success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_RetriesOnTransientIdentifyDaemonPSFailure(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	installReadinessReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	// Transient ps error for first 2 ticks, then clean success.
+	identifyCall := 0
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		identifyCall++
+		if identifyCall < 3 {
+			return 0, errors.New("ps: transient exec failure")
+		}
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if identifyCall < 3 {
+		t.Errorf("expected at least 3 IdentifyDaemon calls (2 transient + 1 success), got %d", identifyCall)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on eventual success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_RetriesOnIdentifyDeadUntilNextPIDWrite(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	// PID file present throughout, but identify returns IdentifyDead twice
+	// (daemon hasn't actually started yet / pid file was rewritten with a
+	// not-yet-running pid) before flipping to IdentifyIsPortalDaemon.
+	installReadinessReadPID(t, func(string) (int, error) { return 4321, nil })
+	identifyCall := 0
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		identifyCall++
+		if identifyCall < 3 {
+			return state.IdentifyDead, nil
+		}
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if identifyCall < 3 {
+		t.Errorf("expected at least 3 IdentifyDaemon calls (2 dead + 1 success), got %d", identifyCall)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on eventual success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_RetriesOnIdentifyNotPortalDaemon(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	// Recycled PID — present and alive but not a portal state daemon for
+	// first 2 ticks. Then resolves to the real daemon.
+	installReadinessReadPID(t, func(string) (int, error) { return 4321, nil })
+	identifyCall := 0
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		identifyCall++
+		if identifyCall < 3 {
+			return state.IdentifyNotPortalDaemon, nil
+		}
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if identifyCall < 3 {
+		t.Errorf("expected at least 3 IdentifyDaemon calls (2 not-portal + 1 success), got %d", identifyCall)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on eventual success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_TimesOutAndEmitsWarnWhenDaemonNeverIdentifies(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 20*time.Millisecond)
+
+	installReadinessReadPID(t, func(string) (int, error) { return 4321, nil })
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyDead, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if len(log.warns) != 1 {
+		t.Fatalf("expected exactly 1 WARN line on timeout, got %d: %v", len(log.warns), log.warns)
+	}
+	want := state.ComponentBootstrap + " | saver respawn: daemon did not come up within"
+	if !strings.HasPrefix(log.warns[0], want) {
+		t.Errorf("WARN line %q must begin with %q", log.warns[0], want)
+	}
+}
+
+func TestWaitForSaverDaemonReady_WallClockBoundedByTimeoutSeam(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 20*time.Millisecond)
+
+	// Force the timeout path: ReadPIDFile always succeeds, IdentifyDaemon
+	// always returns IdentifyDead, so the loop never short-circuits.
+	installReadinessReadPID(t, func(string) (int, error) { return 4321, nil })
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyDead, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	start := time.Now()
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// Bound wall-clock by timeout plus generous slack. The contract is that
+	// the timeout caps the loop, not that it terminates exactly at the
+	// timeout — 1s of slack accommodates CI scheduler jitter without
+	// hiding regressions to e.g. the 2s production default.
+	if elapsed > 1*time.Second {
+		t.Errorf("readiness barrier exceeded wall-time budget: elapsed=%v (timeout=20ms)", elapsed)
+	}
+	if len(log.warns) != 1 {
+		t.Errorf("expected exactly 1 WARN on timeout, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+func TestWaitForSaverDaemonReady_TreatsTransientReadPIDErrorAsNotReady(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 500*time.Millisecond)
+
+	// Non-absent read error for first 2 ticks (e.g. permission denied),
+	// then a clean read with successful identification.
+	readCall := 0
+	installReadinessReadPID(t, func(string) (int, error) {
+		readCall++
+		if readCall < 3 {
+			return 0, errors.New("read daemon.pid: permission denied")
+		}
+		return 4321, nil
+	})
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	if err := tmux.WaitForSaverDaemonReady(t.TempDir()); err != nil {
+		t.Fatalf("WaitForSaverDaemonReady returned error: %v", err)
+	}
+
+	if readCall < 3 {
+		t.Errorf("expected at least 3 ReadPIDFile calls (2 transient + 1 success), got %d", readCall)
+	}
+	if len(log.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on eventual success, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// TestBootstrapPortalSaver_InvokesReadinessBarrierAfterRespawnOnCreatePath pins
+// that the create branch routes through the waitForSaverDaemonReadyFn seam
+// AFTER RespawnPane. The session-present-and-alive happy path must NOT invoke
+// the barrier (no respawn ran).
+func TestBootstrapPortalSaver_InvokesReadinessBarrierAfterRespawnOnCreatePath(t *testing.T) {
+	stubAliveCheck(t, false) // session absent → pure create path
+	shrinkRetryDelay(t)
+
+	readinessCalls := 0
+	var orderTrace []string
+	swapSeam(t, tmux.WaitForSaverDaemonReadyFnSeam(), func(string) error {
+		readinessCalls++
+		orderTrace = append(orderTrace, "readiness")
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession: func(int) (string, error) { return "", nil },
+		setOption:  func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) {
+			orderTrace = append(orderTrace, "respawn-pane")
+			return "", nil
+		},
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if readinessCalls != 1 {
+		t.Errorf("expected exactly 1 readiness-barrier invocation on create path, got %d", readinessCalls)
+	}
+	if len(orderTrace) != 2 || orderTrace[0] != "respawn-pane" || orderTrace[1] != "readiness" {
+		t.Errorf("expected ordering [respawn-pane, readiness]; got %v", orderTrace)
+	}
+}
+
+func TestBootstrapPortalSaver_DoesNotInvokeReadinessBarrierOnSessionPresentAndAliveHappyPath(t *testing.T) {
+	stubAliveCheck(t, true) // session present AND daemon alive → no create, no respawn
+	shrinkRetryDelay(t)
+
+	readinessCalls := 0
+	swapSeam(t, tmux.WaitForSaverDaemonReadyFnSeam(), func(string) error {
+		readinessCalls++
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) { return "", nil }, // present
+		setOption:  func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, "/tmp/portal-state"); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if readinessCalls != 0 {
+		t.Errorf("expected 0 readiness-barrier invocations on session-present-and-alive path, got %d", readinessCalls)
+	}
+}
+
+// TestBootstrapPortalSaver_ReadinessBarrierStateDirThreadedFromCaller pins that
+// the stateDir argument supplied to BootstrapPortalSaver is forwarded to the
+// readiness-barrier seam unchanged.
+func TestBootstrapPortalSaver_ReadinessBarrierStateDirThreadedFromCaller(t *testing.T) {
+	stubAliveCheck(t, false)
+	shrinkRetryDelay(t)
+
+	const wantDir = "/test/threaded-state-dir"
+	var observed string
+	swapSeam(t, tmux.WaitForSaverDaemonReadyFnSeam(), func(dir string) error {
+		observed = dir
+		return nil
+	})
+
+	script := &portalSaverScript{
+		hasSession: func(int) (string, error) {
+			return "", errors.New("can't find session: _portal-saver")
+		},
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, wantDir); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if observed != wantDir {
+		t.Errorf("readiness barrier received stateDir=%q; want %q", observed, wantDir)
+	}
+}
+
+// TestWaitForSaverDaemonReady_DeadlineComputedOnceAtEntry pins that the 2s
+// ceiling is enforced by a single deadline computed at function entry. If the
+// implementation reset the deadline on every loop iteration, an unbounded
+// stream of transient errors could push wall-clock arbitrarily high — this
+// test forces transient errors throughout and asserts wall-clock stays
+// bounded by the timeout seam.
+func TestWaitForSaverDaemonReady_DeadlineComputedOnceAtEntry(t *testing.T) {
+	installReadinessPollInterval(t, 1*time.Millisecond)
+	installReadinessTimeout(t, 15*time.Millisecond)
+
+	// Mix of transient errors: ReadPIDFile alternates between absent and
+	// non-absent errors; Identify alternates between transient ps error,
+	// IdentifyDead, and IdentifyNotPortalDaemon.
+	readCall := 0
+	installReadinessReadPID(t, func(string) (int, error) {
+		readCall++
+		if readCall%2 == 0 {
+			return 0, state.ErrPIDFileAbsent
+		}
+		return 4321, nil
+	})
+	identifyCall := 0
+	installReadinessIdentify(t, func(int) (state.IdentifyResult, error) {
+		identifyCall++
+		switch identifyCall % 3 {
+		case 0:
+			return 0, errors.New("transient ps")
+		case 1:
+			return state.IdentifyDead, nil
+		default:
+			return state.IdentifyNotPortalDaemon, nil
+		}
+	})
+	log := &recordingBarrierLogger{}
+	installBarrierLogger(t, log)
+
+	start := time.Now()
+	_ = tmux.WaitForSaverDaemonReady(t.TempDir())
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("deadline appears to reset on transient errors: elapsed=%v (timeout=15ms)", elapsed)
+	}
+	if len(log.warns) != 1 {
+		t.Errorf("expected exactly 1 WARN on timeout, got %d: %v", len(log.warns), log.warns)
 	}
 }

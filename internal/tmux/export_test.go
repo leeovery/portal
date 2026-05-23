@@ -79,3 +79,43 @@ func PortalSaverWriteVersionFileSeam() *func(string, string) error {
 // package-level sink so tests can install a capturing *state.Logger via
 // SetVersionWriterLogger and restore the prior value via t.Cleanup.
 func VersionWriterLoggerSeam() **state.Logger { return &versionWriterLogger }
+
+// WaitForSaverDaemonReady re-exports waitForSaverDaemonReady for tests that
+// exercise the readiness barrier directly.
+var WaitForSaverDaemonReady = waitForSaverDaemonReady
+
+// SaverReadinessReadPIDSeam returns a pointer to the saverReadinessReadPID
+// seam so readiness-barrier tests can simulate ErrPIDFileAbsent / transient
+// read errors / clean PID reads without touching the filesystem.
+func SaverReadinessReadPIDSeam() *func(string) (int, error) {
+	return &saverReadinessReadPID
+}
+
+// SaverReadinessIdentifySeam returns a pointer to the saverReadinessIdentify
+// seam so readiness-barrier tests can simulate IdentifyDead /
+// IdentifyNotPortalDaemon / IdentifyIsPortalDaemon and transient ps errors
+// without shelling out to ps.
+func SaverReadinessIdentifySeam() *func(int) (state.IdentifyResult, error) {
+	return &saverReadinessIdentify
+}
+
+// SaverReadinessPollIntervalSeam returns a pointer to the
+// saverReadinessPollInterval seam so tests can shrink the poll cadence to
+// keep wall-clock bounded.
+func SaverReadinessPollIntervalSeam() *time.Duration {
+	return &saverReadinessPollInterval
+}
+
+// SaverReadinessTimeoutSeam returns a pointer to the saverReadinessTimeout
+// seam so tests can shrink the total readiness budget to keep wall-clock
+// bounded.
+func SaverReadinessTimeoutSeam() *time.Duration {
+	return &saverReadinessTimeout
+}
+
+// WaitForSaverDaemonReadyFnSeam returns a pointer to the
+// waitForSaverDaemonReadyFn seam so create-branch tests can stub the
+// readiness barrier with a no-op without exercising the full poll flow.
+func WaitForSaverDaemonReadyFnSeam() *func(string) error {
+	return &waitForSaverDaemonReadyFn
+}
