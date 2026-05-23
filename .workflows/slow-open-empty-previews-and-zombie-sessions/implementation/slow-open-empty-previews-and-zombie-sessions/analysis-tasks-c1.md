@@ -6,7 +6,7 @@ total_proposed: 6
 # Analysis Tasks: slow-open-empty-previews-and-zombie-sessions (Cycle 1)
 
 ## Task 1: Consolidate fingerprint diff/format/sort helpers into internal/portaltest
-status: pending
+status: approved
 severity: high
 sources: duplication-c1#finding-1
 
@@ -37,7 +37,7 @@ sources: duplication-c1#finding-1
 - Existing integration tests must continue to pass unchanged in semantics.
 
 ## Task 2: Collapse spawnOrphanDaemonIsolated and spawnOrphanDaemonIsolatedNamed
-status: pending
+status: approved
 severity: medium
 sources: duplication-c1#finding-2
 
@@ -62,7 +62,7 @@ sources: duplication-c1#finding-2
 - Existing `cmd/bootstrap` integration tests must continue to pass.
 
 ## Task 3: Promote applyHostNoiseMitigation into internal/portaltest
-status: pending
+status: approved
 severity: medium
 sources: duplication-c1#finding-3, architecture-c1#finding-1
 
@@ -91,7 +91,7 @@ sources: duplication-c1#finding-3, architecture-c1#finding-1
 - If exposed as a separate function, add a basic unit test confirming env vars are cleared/reset under `t.Cleanup`.
 
 ## Task 4: Collapse duplicated identify/read-PID seam pairs in portal_saver.go
-status: pending
+status: approved
 severity: medium
 sources: architecture-c1#finding-2
 
@@ -119,7 +119,7 @@ sources: architecture-c1#finding-2
 - Add or adjust at least one test demonstrating the unified seam can stage distinct outcomes across the two code paths via sequential staging.
 
 ## Task 5: Colocate WriteVersionFile with WritePIDFile in defaultDaemonRun
-status: pending
+status: approved
 severity: low
 sources: architecture-c1#finding-3
 
@@ -146,7 +146,7 @@ sources: architecture-c1#finding-3
 - Add a regression test asserting `WriteVersionFile` is called during `defaultDaemonRun` (check the version file exists after a successful run in an isolated state dir).
 
 ## Task 6: Document the bootstrap.Logger four-method contract
-status: pending
+status: approved
 severity: low
 sources: architecture-c1#finding-4
 

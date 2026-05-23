@@ -83,7 +83,14 @@
             "slow-open-empty-previews-and-zombie-sessions-6-5": "tick-699cb3",
             "slow-open-empty-previews-and-zombie-sessions-6-6": "tick-604167",
             "slow-open-empty-previews-and-zombie-sessions-6-7": "tick-de57c1",
-            "slow-open-empty-previews-and-zombie-sessions-6-8": "tick-ce0b05"
+            "slow-open-empty-previews-and-zombie-sessions-6-8": "tick-ce0b05",
+            "slow-open-empty-previews-and-zombie-sessions-7": "tick-8c26ab",
+            "slow-open-empty-previews-and-zombie-sessions-7-1": "tick-f2e8c4",
+            "slow-open-empty-previews-and-zombie-sessions-7-2": "tick-51eebd",
+            "slow-open-empty-previews-and-zombie-sessions-7-3": "tick-f1093d",
+            "slow-open-empty-previews-and-zombie-sessions-7-4": "tick-cfd9ea",
+            "slow-open-empty-previews-and-zombie-sessions-7-5": "tick-cc3701",
+            "slow-open-empty-previews-and-zombie-sessions-7-6": "tick-44c0b1"
           },
           "external_id": "tick-7da549"
         }
@@ -95,7 +102,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

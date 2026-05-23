@@ -199,3 +199,18 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-6-6 | Assert Component D self-eject in live context after external saver-pane kill | external kill via tmux respawn-pane or kill-session, daemon process wait within (N+1) tick intervals, scrollback bytes-identical across eject window, N+1 derived from selfSupervisionHysteresisTicks |
 | slow-open-empty-previews-and-zombie-sessions-6-7 | Assert Component F end-state observables on _portal-saver | pane process verified via list-panes -F '#{pane_pid}' + ps -o args=, show-options output trimmed/quoted correctly, runs after readiness barrier, runs before Component-D eject sub-scenario |
 | slow-open-empty-previews-and-zombie-sessions-6-8 | Assert portaltest cleanup fingerprint backstop reports clean on test exit | backstop via t.Cleanup so failures still report, no late-write race after assertions, harness teardown completes before fingerprint walk |
+
+### Phase 7: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-7-1 | Consolidate fingerprint diff/format/sort helpers into internal/portaltest | identical maps, additions-only, removals-only, field-mutation, mixed; stable output ordering; parity across three integration-test files; ≥250 LOC net reduction |
+| slow-open-empty-previews-and-zombie-sessions-7-2 | Collapse spawnOrphanDaemonIsolated and spawnOrphanDaemonIsolatedNamed | Named superset retained, caller signature update with `_`, ≥10 LOC reduction, integration tests pass |
+| slow-open-empty-previews-and-zombie-sessions-7-3 | Promote applyHostNoiseMitigation into internal/portaltest | folded into NewIsolatedStateEnv preferred, ordering invariant in godoc, zero inlined copies, rationale comment exists once |
+| slow-open-empty-previews-and-zombie-sessions-7-4 | Collapse duplicated identify/read-PID seam pairs in portal_saver.go | 4 seams → 2, package-level seam count 12 → 10, kill-barrier and readiness-barrier scenarios stage distinct outcomes through unified seam |
+| slow-open-empty-previews-and-zombie-sessions-7-5 | Colocate WriteVersionFile with WritePIDFile in defaultDaemonRun | AST adjacency invariant preserved, lock → pidfile → versionfile sequence, error-handling parity, regression test for versionfile presence |
+| slow-open-empty-previews-and-zombie-sessions-7-6 | Document the bootstrap.Logger four-method contract | godoc above Logger interface, explicit warning against adding fifth method without emission site, `go vet` passes |
