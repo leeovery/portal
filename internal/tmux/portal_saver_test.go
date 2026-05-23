@@ -3075,3 +3075,349 @@ func TestWaitForSaverDaemonReady_DeadlineComputedOnceAtEntry(t *testing.T) {
 		t.Errorf("expected exactly 1 WARN on timeout, got %d: %v", len(log.warns), log.warns)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Task 3-4: Compose unhealthy-saver recreate path with new ordering.
+//
+// These tests pin that the unhealthy-saver branch of BootstrapPortalSaver
+// (session present + dead daemon, e.g. placeholder-only-lingering saver from
+// a crashed prior bootstrap) falls through cleanly to the 3-2 / 3-3 four-step
+// ordering:
+//
+//	kill-session → new-session (placeholder) → set-option (destroy-unattached=off)
+//	  → respawn-pane (daemon) [→ readiness barrier]
+//
+// And that EnsurePortalSaverVersion's delegation to BootstrapPortalSaver
+// inherits the new ordering both on alive=true + version-mismatch (kill row of
+// the matrix) and on alive=false (no-kill row).
+// ----------------------------------------------------------------------------
+
+// assertKillNewSetRespawnOrdering scans calls and asserts the load-bearing
+// four-step recreate ordering: kill-session BEFORE new-session BEFORE
+// set-option BEFORE respawn-pane. Fails the test if any of the four is
+// missing or if any pair is out of order.
+func assertKillNewSetRespawnOrdering(t *testing.T, calls [][]string) {
+	t.Helper()
+	killIdx, newIdx, setIdx, respawnIdx := -1, -1, -1, -1
+	for i, c := range calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "kill-session":
+			if killIdx == -1 {
+				killIdx = i
+			}
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		case "set-option":
+			if setIdx == -1 {
+				setIdx = i
+			}
+		case "respawn-pane":
+			if respawnIdx == -1 {
+				respawnIdx = i
+			}
+		}
+	}
+	if killIdx == -1 || newIdx == -1 || setIdx == -1 || respawnIdx == -1 {
+		t.Fatalf("missing call: kill=%d new=%d set=%d respawn=%d (calls=%v)",
+			killIdx, newIdx, setIdx, respawnIdx, calls)
+	}
+	if !(killIdx < newIdx && newIdx < setIdx && setIdx < respawnIdx) {
+		t.Errorf("expected ordering kill < new < set < respawn; got kill=%d new=%d set=%d respawn=%d (calls=%v)",
+			killIdx, newIdx, setIdx, respawnIdx, calls)
+	}
+}
+
+// TestBootstrapPortalSaver_RecyclesPlaceholderOnlySaverViaNewOrdering pins
+// Test 1 of Task 3-4. A prior bootstrap crashed mid-respawn leaving a
+// placeholder-only saver behind: the _portal-saver session exists with the
+// `tail -f /dev/null` placeholder as its only pane process, no daemon writing
+// daemon.pid. BootstrapAliveCheck reports unhealthy (stubbed false), so the
+// unhealthy-saver branch fires: tolerant kill → fall through to the create
+// path → placeholder new-session → set destroy-unattached=off → respawn-pane
+// with the daemon command → readiness barrier.
+//
+// The full four-step argv ordering (kill < new-placeholder < set < respawn-daemon)
+// is asserted via assertKillNewSetRespawnOrdering, and the new-session /
+// respawn-pane argv literals are pinned so a regression to e.g. embedding the
+// daemon command in new-session would fail loudly.
+func TestBootstrapPortalSaver_RecyclesPlaceholderOnlySaverViaNewOrdering(t *testing.T) {
+	stubAliveCheck(t, false) // placeholder-only saver: daemon.pid absent/stale
+	shrinkRetryDelay(t)
+	stubReadinessReady(t)
+
+	script := &portalSaverScript{
+		hasSession:  func(int) (string, error) { return "", nil }, // present (placeholder lingering)
+		killSession: func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, t.TempDir()); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	if got := countCalls(mock.Calls, "kill-session"); got != 1 {
+		t.Errorf("expected exactly 1 kill-session call, got %d (calls: %v)", got, mock.Calls)
+	}
+	if got := countCalls(mock.Calls, "new-session"); got != 1 {
+		t.Errorf("expected exactly 1 new-session call, got %d", got)
+	}
+	if got := countCalls(mock.Calls, "set-option"); got != 1 {
+		t.Errorf("expected exactly 1 set-option call, got %d", got)
+	}
+	if got := countCalls(mock.Calls, "respawn-pane"); got != 1 {
+		t.Errorf("expected exactly 1 respawn-pane call, got %d", got)
+	}
+
+	// Load-bearing ordering: kill BEFORE new-session-with-placeholder BEFORE
+	// set destroy-unattached=off BEFORE respawn-pane with the daemon.
+	assertKillNewSetRespawnOrdering(t, mock.Calls)
+
+	// Pin new-session argv: must use the placeholder, NOT the daemon command.
+	// A regression putting the daemon command back into new-session would
+	// reintroduce the pre-Component-F lock-loser race.
+	wantNew := "new-session -d -s _portal-saver " + tmux.PortalSaverPlaceholderCommand
+	for _, c := range mock.Calls {
+		if c[0] != "new-session" {
+			continue
+		}
+		if joined := strings.Join(c, " "); joined != wantNew {
+			t.Errorf("new-session argv = %q, want %q", joined, wantNew)
+		}
+	}
+
+	// Pin respawn-pane argv: target _portal-saver, command = daemon. The pane
+	// process AFTER respawn must be the daemon, not the placeholder.
+	wantRespawn := "respawn-pane -k -t _portal-saver " + tmux.PortalSaverDaemonCommand
+	for _, c := range mock.Calls {
+		if c[0] != "respawn-pane" {
+			continue
+		}
+		if joined := strings.Join(c, " "); joined != wantRespawn {
+			t.Errorf("respawn-pane argv = %q, want %q", joined, wantRespawn)
+		}
+	}
+}
+
+// TestEnsurePortalSaverVersion_AliveMismatch_FlowsThroughNewBootstrapOrdering
+// pins Test 2 of Task 3-4. EnsurePortalSaverVersion with alive=true and a
+// genuine version mismatch (neither side dev) hits the kill row of the
+// kill-decision matrix and then delegates to BootstrapPortalSaver — which
+// observes the session as present-and-killed (the kill stub mutates the
+// scenario), then no-ops since alive=true would short-circuit... we instead
+// route the kill through the real KillSession in the mock so the scenario
+// flips sessionPresent=false and BootstrapPortalSaver falls into its full
+// create path with the new ordering.
+//
+// Asserts: kill-session fires (kill row of the matrix), followed by the
+// full create-with-new-ordering sequence on the same mock — proving
+// EnsurePortalSaverVersion inherits the new ordering via composition.
+func TestEnsurePortalSaverVersion_AliveMismatch_FlowsThroughNewBootstrapOrdering(t *testing.T) {
+	stubAliveCheck(t, true) // alive=true → matrix consults version
+	shrinkRetryDelay(t)
+	stubReadinessReady(t)
+
+	dir := t.TempDir()
+	writeVersion(t, dir, "v0.4.1") // mismatch with "v0.4.2"; neither dev → kill row
+
+	// Use the versionScenario so kill-session flips sessionPresent=false and
+	// BootstrapPortalSaver re-creates with the new ordering.
+	scenario, mock, client := newVersionScenarioClient(t, true)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 1 {
+		t.Errorf("expected exactly 1 kill-session on alive+mismatch (kill row), got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session after kill, got %d", scenario.newSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option, got %d", scenario.setOptionCalls)
+	}
+	if scenario.respawnPaneCalls != 1 {
+		t.Errorf("expected exactly 1 respawn-pane after set-option, got %d", scenario.respawnPaneCalls)
+	}
+
+	// The full ordering must be preserved through the delegation: kill
+	// (from EnsurePortalSaverVersion's matrix) → new-session (placeholder) →
+	// set-option (destroy-unattached=off) → respawn-pane (daemon).
+	assertKillNewSetRespawnOrdering(t, mock.Calls)
+
+	// new-session must carry the placeholder, not the daemon command — pins
+	// that delegation does not bypass the placeholder-first ordering.
+	wantNew := "new-session -d -s _portal-saver " + tmux.PortalSaverPlaceholderCommand
+	for _, c := range mock.Calls {
+		if c[0] != "new-session" {
+			continue
+		}
+		if joined := strings.Join(c, " "); joined != wantNew {
+			t.Errorf("new-session argv = %q, want %q", joined, wantNew)
+		}
+	}
+}
+
+// TestEnsurePortalSaverVersion_NotAlive_SkipsKillAndStillUsesNewOrdering pins
+// Test 3 of Task 3-4. EnsurePortalSaverVersion with alive=false hits the
+// "no kill" row of the matrix (row 1: alive=no → no kill, regardless of
+// version). It then delegates to BootstrapPortalSaver; with the session
+// absent BootstrapPortalSaver does NOT consult the unhealthy-saver branch
+// and falls straight into the create path with the new ordering
+// (new-session placeholder → set-option → respawn-pane daemon → readiness).
+//
+// Asserts: zero kill-session calls (the caller never fires; BootstrapPortalSaver
+// never fires because the session is absent); the full create sequence runs
+// with new-session → set-option → respawn-pane ordering.
+func TestEnsurePortalSaverVersion_NotAlive_SkipsKillAndStillUsesNewOrdering(t *testing.T) {
+	stubAliveCheck(t, false) // alive=false → kill matrix row 1 (no kill)
+	shrinkRetryDelay(t)
+	stubReadinessReady(t)
+
+	dir := t.TempDir() // no daemon.version → ErrVersionFileAbsent (irrelevant under alive=false)
+
+	// sessionPresent=false isolates the assertion: BootstrapPortalSaver's
+	// stale-daemon branch cannot fire because the session is absent. The
+	// only path from kill is EnsurePortalSaverVersion's own matrix.
+	scenario, mock, client := newVersionScenarioClient(t, false)
+
+	if err := tmux.EnsurePortalSaverVersion(client, dir, "v0.4.2"); err != nil {
+		t.Fatalf("EnsurePortalSaverVersion returned error: %v", err)
+	}
+
+	if scenario.killSessionCalls != 0 {
+		t.Errorf("expected 0 kill-session calls on alive=false (matrix row 1), got %d", scenario.killSessionCalls)
+	}
+	if scenario.newSessionCalls != 1 {
+		t.Errorf("expected exactly 1 new-session call, got %d", scenario.newSessionCalls)
+	}
+	if scenario.setOptionCalls != 1 {
+		t.Errorf("expected exactly 1 set-option call, got %d", scenario.setOptionCalls)
+	}
+	if scenario.respawnPaneCalls != 1 {
+		t.Errorf("expected exactly 1 respawn-pane call, got %d", scenario.respawnPaneCalls)
+	}
+
+	// Pin the new ordering on the no-kill path: new-session BEFORE set-option
+	// BEFORE respawn-pane.
+	newIdx, setIdx, respawnIdx := -1, -1, -1
+	for i, c := range mock.Calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "new-session":
+			if newIdx == -1 {
+				newIdx = i
+			}
+		case "set-option":
+			if setIdx == -1 {
+				setIdx = i
+			}
+		case "respawn-pane":
+			if respawnIdx == -1 {
+				respawnIdx = i
+			}
+		}
+	}
+	if newIdx == -1 || setIdx == -1 || respawnIdx == -1 {
+		t.Fatalf("missing call: new=%d set=%d respawn=%d (calls=%v)", newIdx, setIdx, respawnIdx, mock.Calls)
+	}
+	if !(newIdx < setIdx && setIdx < respawnIdx) {
+		t.Errorf("expected ordering new < set < respawn on no-kill path; got new=%d set=%d respawn=%d (calls=%v)",
+			newIdx, setIdx, respawnIdx, mock.Calls)
+	}
+
+	// Pin new-session argv: placeholder, not daemon.
+	wantNew := "new-session -d -s _portal-saver " + tmux.PortalSaverPlaceholderCommand
+	for _, c := range mock.Calls {
+		if c[0] != "new-session" {
+			continue
+		}
+		if joined := strings.Join(c, " "); joined != wantNew {
+			t.Errorf("new-session argv = %q, want %q", joined, wantNew)
+		}
+	}
+}
+
+// TestBootstrapPortalSaver_NoPersistentPlaceholderLeakAcrossSingleRecovery is
+// Test 4 of Task 3-4 — the regression guard for spec § Component F's
+// "No persistent placeholder leak" property. After a single
+// BootstrapPortalSaver invocation against a placeholder-only-lingering saver
+// (prior bootstrap crashed mid-respawn), the FINAL pane process in the
+// recorded argv stream must be the daemon command, not the placeholder.
+//
+// Implementation: scan mock.Calls in source order. The "final" pane process
+// is set by whichever of new-session (with placeholder) or respawn-pane
+// (with daemon) appears LAST. If the chain terminates on a stray new-session
+// (which it should not), the placeholder would be the final process — a
+// persistent leak. The recovery cycle's contract is that respawn-pane with
+// the daemon command is the last argv affecting the pane process.
+func TestBootstrapPortalSaver_NoPersistentPlaceholderLeakAcrossSingleRecovery(t *testing.T) {
+	stubAliveCheck(t, false) // placeholder-only lingering
+	shrinkRetryDelay(t)
+	stubReadinessReady(t)
+
+	script := &portalSaverScript{
+		hasSession:  func(int) (string, error) { return "", nil }, // present
+		killSession: func(int) (string, error) { return "", nil },
+		newSession:  func(int) (string, error) { return "", nil },
+		setOption:   func(int) (string, error) { return "", nil },
+		respawnPane: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.BootstrapPortalSaver(client, t.TempDir()); err != nil {
+		t.Fatalf("BootstrapPortalSaver returned error: %v", err)
+	}
+
+	// Find the LAST argv that mutates the saver pane process. Of new-session
+	// (placeholder) and respawn-pane (daemon), whichever comes last wins —
+	// that determines the persistent state of the pane process after the
+	// recovery cycle.
+	lastPaneMutator := ""
+	lastPaneCommand := ""
+	for _, c := range mock.Calls {
+		if len(c) == 0 {
+			continue
+		}
+		switch c[0] {
+		case "new-session":
+			lastPaneMutator = "new-session"
+			// new-session argv shape: new-session -d -s _portal-saver <cmd>
+			// where <cmd> is args[4]. Reassemble the trailing command.
+			if len(c) >= 5 {
+				lastPaneCommand = strings.Join(c[4:], " ")
+			}
+		case "respawn-pane":
+			lastPaneMutator = "respawn-pane"
+			// respawn-pane argv shape: respawn-pane -k -t _portal-saver <cmd>
+			if len(c) >= 5 {
+				lastPaneCommand = strings.Join(c[4:], " ")
+			}
+		}
+	}
+
+	if lastPaneMutator != "respawn-pane" {
+		t.Errorf("final pane mutator = %q, want %q — placeholder leaked past recovery cycle (calls: %v)",
+			lastPaneMutator, "respawn-pane", mock.Calls)
+	}
+	if lastPaneCommand != tmux.PortalSaverDaemonCommand {
+		t.Errorf("final pane command = %q, want %q (daemon) — placeholder leak detected (calls: %v)",
+			lastPaneCommand, tmux.PortalSaverDaemonCommand, mock.Calls)
+	}
+	if lastPaneCommand == tmux.PortalSaverPlaceholderCommand {
+		t.Errorf("final pane command is still the placeholder %q — persistent placeholder leak across recovery cycle",
+			tmux.PortalSaverPlaceholderCommand)
+	}
+}
