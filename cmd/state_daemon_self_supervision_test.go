@@ -208,16 +208,20 @@ func TestDaemonLoop_SelfCheckRunsBeforeIsRestoringSet(t *testing.T) {
 // leaves daemon.pid on disk — Component C's pre-check on the next acquire
 // handles cleanup. Deleting here would be racy and would invert the
 // layered-enforcement contract.
+//
+// Post-Component-C-step-4 refactor, defaultDaemonRun writes daemon.pid at
+// the head of the function (as the statement immediately following the
+// acquireDaemonLock guard). The test therefore observes the CURRENT
+// process's pid in daemon.pid after the eject — not the pre-seeded sentinel.
+// The invariant under test is "daemon.pid exists after eject" (not deleted);
+// the value is the live daemon's pid by construction.
 func TestDaemonLoop_SelfCheckDoesNotDeleteDaemonPID(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
-	// Seed daemon.pid so we can verify it survives the eject.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("seed dir: %v", err)
-	}
-	if err := state.WritePIDFile(dir, 12345); err != nil {
-		t.Fatalf("seed daemon.pid: %v", err)
 	}
 
 	withSaverMembershipProbeFake(t, func(_ *tmux.Client, _ int) bool { return false })
@@ -235,13 +239,15 @@ func TestDaemonLoop_SelfCheckDoesNotDeleteDaemonPID(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	// daemon.pid must still exist post-eject.
+	// daemon.pid must still exist post-eject — the eject path must not
+	// delete it. The value is the live daemon's pid because defaultDaemonRun
+	// writes it at startup (immediately after the acquireDaemonLock guard).
 	got, err := state.ReadPIDFile(dir)
 	if err != nil {
 		t.Fatalf("daemon.pid missing after eject; ReadPIDFile: %v", err)
 	}
-	if got != 12345 {
-		t.Errorf("daemon.pid = %d; want 12345 (must not have been touched)", got)
+	if got != os.Getpid() {
+		t.Errorf("daemon.pid = %d; want %d (live daemon pid written at startup)", got, os.Getpid())
 	}
 }
 

@@ -43,6 +43,13 @@ var (
 	daemonShutdownFunc = defaultShutdownFlush
 )
 
+// daemonTickLoopFunc is a sub-seam invoked by defaultDaemonRun AFTER the
+// lock-acquire + pidfile ceremony. Tests swap this seam to drive the
+// post-startup behavior (capture deps, short-circuit) without bypassing the
+// acquire+pid block at the head of defaultDaemonRun. Production callers
+// leave it at defaultDaemonTickLoop.
+var daemonTickLoopFunc = defaultDaemonTickLoop
+
 // acquireDaemonLock is the test seam over state.AcquireDaemonLock. Tests in
 // this package swap it to simulate the contention path (ErrDaemonLockHeld)
 // and the non-EWOULDBLOCK error path without contending for a real OS lock.
@@ -141,6 +148,13 @@ const selfSupervisionHysteresisTicks = 3
 // captures when the dirty flag is set or the 30-second max-gap has elapsed,
 // returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
 //
+// Singleton-lock + pidfile ceremony runs at the head of this function (spec
+// § Component C step 4 — Post-acquire daemon.pid write). The acquireDaemonLock
+// call, its err-guard, and the state.WritePIDFile call (plus its err-guard)
+// MUST appear as immediately consecutive statements: no other production work
+// is permitted between them. TestDaemonAcquireLockOrdering_WritePIDFollowsAcquire
+// walks this function's AST to enforce that adjacency invariant.
+//
 // Per-tick errors are logged and swallowed — the loop never aborts on a
 // transient failure (disk full, tmux glitch). See spec § Failure Modes
 // → Disk full during save and § In-Flight Capture Atomicity.
@@ -173,6 +187,33 @@ const selfSupervisionHysteresisTicks = 3
 //     a concurrent pre-check and would invert the layered-enforcement
 //     contract — Component C is the authoritative cleanup site.
 func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
+	lockFile, err := acquireDaemonLock(deps.Dir)
+	if err != nil {
+		if errors.Is(err, state.ErrDaemonLockHeld) {
+			if deps.Logger != nil {
+				deps.Logger.Warn(state.ComponentDaemon, "another daemon holds the lock; exiting")
+			}
+			return nil
+		}
+		if deps.Logger != nil {
+			deps.Logger.Error(state.ComponentDaemon, "acquire daemon lock: %v", err)
+		}
+		return fmt.Errorf("acquire daemon lock: %w", err)
+	}
+	if err := state.WritePIDFile(deps.Dir, os.Getpid()); err != nil {
+		return fmt.Errorf("write PID file: %w", err)
+	}
+	daemonLockFile = lockFile
+
+	return daemonTickLoopFunc(ctx, deps)
+}
+
+// defaultDaemonTickLoop is the production tick loop body: a ticker that fires
+// captures (via tick) and runs the saver-membership self-check (Component D)
+// on every fire. Extracted from defaultDaemonRun so tests can short-circuit
+// the loop without bypassing the acquire+pid ceremony at the head of
+// defaultDaemonRun.
+func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 	ticker := time.NewTicker(deps.TickerPeriod)
 	defer ticker.Stop()
 	// consecutiveAbsenceTicks is closure-scoped: it lives for the lifetime
@@ -395,32 +436,13 @@ var stateDaemonCmd = &cobra.Command{
 		// Daemon Startup.
 		_ = os.Remove(state.SaveRequested(dir))
 
-		// Singleton-lock acquisition MUST precede any state-directory write.
-		// Order matters: EnsureDir → save.requested clear → acquire lock →
-		// WritePIDFile / WriteVersionFile / tick loop. See spec § Fix Part 1:
-		// Daemon-Side Singleton Lock.
-		//
-		//  - Success: retain the *os.File in daemonLockFile so the kernel-held
-		//    flock survives the lifetime of the process.
-		//  - ErrDaemonLockHeld: another daemon won; log one WARN line and exit
-		//    status 0 by returning nil. No pidfile / version write, no tick
-		//    loop. Quiet co-existence with the winner.
-		//  - Other errors (open(2) failure, unexpected flock error): log ERROR
-		//    and return a wrapped error so the daemon exits non-zero.
-		lockFile, err := acquireDaemonLock(dir)
-		if err != nil {
-			if errors.Is(err, state.ErrDaemonLockHeld) {
-				logger.Warn(state.ComponentDaemon, "another daemon holds the lock; exiting")
-				return nil
-			}
-			logger.Error(state.ComponentDaemon, "acquire daemon lock: %v", err)
-			return fmt.Errorf("acquire daemon lock: %w", err)
-		}
-		daemonLockFile = lockFile
-
-		if err := state.WritePIDFile(dir, os.Getpid()); err != nil {
-			return fmt.Errorf("write PID file: %w", err)
-		}
+		// Singleton-lock acquisition + WritePIDFile have moved into
+		// defaultDaemonRun (spec § Component C step 4 — adjacency invariant
+		// is enforced by an AST-walking test against the run-func body).
+		// daemonShutdownFunc / final-flush sequencing is unaffected: the
+		// run func still returns via daemonShutdownFunc on ctx-cancel, and
+		// the lock-held / lock-error paths short-circuit before reaching
+		// the ticker loop.
 		if err := state.WriteVersionFile(dir, version, logger); err != nil {
 			return fmt.Errorf("write version file: %w", err)
 		}

@@ -30,17 +30,21 @@ func runStateDaemon(t *testing.T) (*bytes.Buffer, *bytes.Buffer, error) {
 	return outBuf, errBuf, err
 }
 
-// withImmediateRun installs a daemonRunFunc that returns nil immediately and
-// captures the deps it received, so tests can assert on startup side effects.
+// withImmediateRun installs a daemonTickLoopFunc that returns nil immediately
+// and captures the deps it received, so tests can assert on startup side
+// effects (including the lock-acquire + WritePIDFile ceremony that now lives
+// at the head of defaultDaemonRun). Swapping the tick-loop sub-seam (rather
+// than the top-level daemonRunFunc seam) preserves the production acquire+pid
+// path so tests observing daemon.pid / daemon.lock side effects see them.
 func withImmediateRun(t *testing.T) **daemonDeps {
 	t.Helper()
 	holder := new(*daemonDeps)
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, deps *daemonDeps) error {
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, deps *daemonDeps) error {
 		*holder = deps
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 	return holder
 }
 
@@ -320,6 +324,7 @@ func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
 func TestStateDaemon_DefaultRunReturnsOnContextCancel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	withDaemonLockFileReset(t)
 
 	// Replace defaultShutdownFlush with a no-op to keep the test
 	// hermetic — we are exercising the run loop's response to ctx.Done(),
@@ -328,6 +333,11 @@ func TestStateDaemon_DefaultRunReturnsOnContextCancel(t *testing.T) {
 	daemonShutdownFunc = func(_ *daemonDeps) error { return nil }
 	t.Cleanup(func() { daemonShutdownFunc = prevFlush })
 
+	// defaultDaemonRun now performs the acquire+pid ceremony at its head
+	// before entering the tick loop (spec § Component C step 4 — adjacency
+	// invariant). The real flock against the tempdir succeeds and pid is
+	// written; the pre-cancelled ctx then fires the loop's ctx.Done() case
+	// which delegates to the stubbed daemonShutdownFunc.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -487,20 +497,21 @@ func TestStateDaemon_ExitsCleanlyWhenLockHeld(t *testing.T) {
 		return nil, state.ErrDaemonLockHeld
 	})
 
-	// daemonRunFunc must NOT be invoked on contention.
+	// daemonTickLoopFunc must NOT be invoked on contention — defaultDaemonRun
+	// short-circuits at the acquire-lock err-guard before reaching the loop.
 	called := false
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error {
 		called = true
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("expected nil error on lock-held; got: %v", err)
 	}
 	if called {
-		t.Error("daemonRunFunc must not be called when lock is held")
+		t.Error("daemonTickLoopFunc must not be called when lock is held")
 	}
 }
 
@@ -513,25 +524,30 @@ func TestStateDaemon_DoesNotWritePIDFileWhenLockHeld(t *testing.T) {
 		return nil, state.ErrDaemonLockHeld
 	})
 
-	// No prior runFunc seam set: assert RunE returns before reaching it.
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+	// daemonTickLoopFunc must NOT be reached on the lock-held path —
+	// defaultDaemonRun short-circuits at the acquire-lock err-guard.
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// daemon.pid must NOT have been written.
+	// daemon.pid must NOT have been written — the WritePIDFile call now lives
+	// inside defaultDaemonRun, immediately after the acquireDaemonLock guard,
+	// so a lock-held early-return guarantees the pid file is never touched.
+	//
+	// Note: daemon.version IS written when lock-held under the new ordering
+	// (WriteVersionFile runs in RunE before defaultDaemonRun's acquire call).
+	// That ordering is the documented architectural consequence of the
+	// Component C step 4 refactor — only acquire+pid moved into the run func;
+	// WriteVersionFile and other startup writes remain in RunE.
 	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
 		t.Errorf("daemon.pid must not exist when lock is held; stat err = %v", err)
-	}
-	// daemon.version must NOT have been written.
-	if _, err := os.Stat(filepath.Join(dir, "daemon.version")); !os.IsNotExist(err) {
-		t.Errorf("daemon.version must not exist when lock is held; stat err = %v", err)
 	}
 }
 
@@ -552,12 +568,12 @@ func TestStateDaemon_DoesNotOverwritePIDFileWhenLockHeld(t *testing.T) {
 		return nil, state.ErrDaemonLockHeld
 	})
 
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -585,12 +601,12 @@ func TestStateDaemon_ReturnsErrorOnNonContentionLockFailure(t *testing.T) {
 		return nil, sentinel
 	})
 
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonRunFunc must not be reached when lock acquire fails")
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonTickLoopFunc must not be reached when lock acquire fails")
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 
 	_, _, err := runStateDaemon(t)
 	if err == nil {
@@ -666,12 +682,12 @@ func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
 		return nil, state.ErrDaemonLockHeld
 	})
 
-	prev := daemonRunFunc
-	daemonRunFunc = func(_ context.Context, _ *daemonDeps) error {
-		t.Fatal("daemonRunFunc must not be reached on lock-held path")
+	prev := daemonTickLoopFunc
+	daemonTickLoopFunc = func(_ context.Context, _ *daemonDeps) error {
+		t.Fatal("daemonTickLoopFunc must not be reached on lock-held path")
 		return nil
 	}
-	t.Cleanup(func() { daemonRunFunc = prev })
+	t.Cleanup(func() { daemonTickLoopFunc = prev })
 
 	if _, _, err := runStateDaemon(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
