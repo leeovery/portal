@@ -368,6 +368,273 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 	}
 }
 
+// TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly pins spec § Component D
+// acceptance bullet "Self-eject on saver pane pid mismatch":
+//
+//	Spawn the daemon, then externally replace the `_portal-saver` pane
+//	process (e.g., `respawn-pane` to a different process). Daemon exits
+//	within (N + 1) tick intervals.
+//
+// Strategy (complement to TestSelfEject_PortalSaverAbsent_ExitsCleanly):
+//
+//  1. Stage daemon.pid with a known-dead PID (NOT absent — the absent
+//     case is the sibling test). Component C's pre-check resolves the
+//     recorded PID as dead (via IdentifyDaemon → IdentifyDead) and lets
+//     the new daemon acquire the lock cleanly.
+//  2. Pre-create _portal-saver with a placeholder pane process
+//     (`sh -c 'exec tail -f /dev/null'`) before spawning the daemon. The
+//     daemon's saverMembershipProbe will then see HasSession=true but
+//     SaverPanePID=<placeholder pid> != os.Getpid() — the structural
+//     "pid mismatch" branch of the probe.
+//  3. Set destroy-unattached=off on _portal-saver so the session
+//     survives the daemon's self-eject (assertion 4 below depends on
+//     the session still existing post-exit).
+//  4. Spawn `portal state daemon` directly (bypass orchestrator) and
+//     wait for daemon.pid to contain the subprocess PID — this confirms
+//     the daemon reached its tick loop (lock acquired, pidfile
+//     written).
+//  5. Pre-action verification: daemon subprocess PID != _portal-saver
+//     pane PID. This is the structural divergence required for the
+//     mismatch path under test. If the kernel coincidentally assigns
+//     the daemon subprocess the same PID as the placeholder pane, the
+//     mismatch branch of the probe will NOT fire and the test would
+//     hang — fail loudly instead.
+//  6. Wait for daemon exit within (N+1)*TickerPeriod + 2s budget.
+//
+// Assertions:
+//
+//	A. Exit code == 0 (osExit(0) — the spec-mandated eject primitive).
+//	B. No panic / stack trace on stderr.
+//	C. portal.log contains the self-eject INFO marker.
+//	D. _portal-saver session still exists post-exit
+//	   (destroy-unattached=off keeps it alive).
+//
+// Cleanup: t.Cleanup ensures the daemon subprocess is reaped before
+// the tmux server teardown registered by tmuxtest.New runs.
+func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	binDir := portalbintest.StagePortalBinary(t)
+	binary, err := exec.LookPath("portal")
+	if err != nil {
+		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
+	}
+
+	applyHostNoiseMitigation(t)
+
+	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	t.Setenv("PORTAL_STATE_DIR", stateDir)
+
+	sock := tmuxtest.New(t, "ptl-selfeject-mismatch-")
+
+	// Stage daemon.pid with a known-dead PID. The `exec.Command("true");
+	// cmd.Run()` pattern is deterministic on POSIX: Run waits for the
+	// child to exit AND reaps it, so by the time Run returns the kernel
+	// has released the PID (modulo the trivially-vanishing PID-reuse
+	// window). Component C's pre-check will resolve this PID as
+	// IdentifyDead → proceed; the daemon under test acquires the lock.
+	dead := exec.Command("true")
+	if err := dead.Run(); err != nil {
+		t.Fatalf("stage dead PID via exec.Command(true).Run: %v", err)
+	}
+	deadPID := dead.Process.Pid
+	if err := state.WritePIDFile(stateDir, deadPID); err != nil {
+		t.Fatalf("stage daemon.pid with dead PID %d: %v", deadPID, err)
+	}
+
+	// Pre-create _portal-saver with a placeholder pane process. The
+	// `sh -c "exec tail -f /dev/null"` payload is the spec's canonical
+	// placeholder for "anything other than the daemon" — it's long-lived
+	// (won't exit before the daemon's self-check) and its PID is owned
+	// by tmux's pty, not by the test process.
+	sock.Run(t, "new-session", "-d", "-s", "_portal-saver",
+		"sh", "-c", "exec tail -f /dev/null")
+	// destroy-unattached=off so the session survives even when no
+	// client is attached AND so it survives the daemon's eject (the
+	// eject doesn't touch the saver session, but a transient client
+	// detach in a flaky test environment would otherwise reap it).
+	sock.Run(t, "set-option", "-t", "_portal-saver", "destroy-unattached", "off")
+
+	// Read the placeholder pane PID up front; used for the pre-action
+	// divergence assertion and for the diagnostic on regression.
+	panePIDStr := strings.TrimSpace(sock.Run(t, "list-panes",
+		"-t", "_portal-saver", "-F", "#{pane_pid}"))
+	panePID, err := strconv.Atoi(panePIDStr)
+	if err != nil {
+		t.Fatalf("parse placeholder pane pid %q: %v", panePIDStr, err)
+	}
+
+	// Spawn the daemon subprocess. Env wiring matches the sibling test
+	// (PORTAL_STATE_DIR, isolated XDG_CONFIG_HOME via envSlice,
+	// TMUX pointing at the test socket, PATH including the staged
+	// binary dir, PORTAL_LOG_LEVEL=INFO so the eject marker reaches
+	// portal.log).
+	daemonEnv := append([]string{}, envSlice...)
+	daemonEnv = append(daemonEnv,
+		"PORTAL_STATE_DIR="+stateDir,
+		fmt.Sprintf("TMUX=%s,1,0", sock.SocketPath()),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"PORTAL_LOG_LEVEL=INFO",
+	)
+
+	daemon := exec.Command(binary, "state", "daemon")
+	daemon.Env = daemonEnv
+	var stderr strings.Builder
+	daemon.Stderr = &stderr
+
+	if err := daemon.Start(); err != nil {
+		t.Fatalf("start portal state daemon: %v", err)
+	}
+	startInstant := time.Now()
+	daemonPID := daemon.Process.Pid
+
+	t.Cleanup(func() {
+		if daemon.ProcessState != nil {
+			return
+		}
+		if daemon.Process == nil {
+			return
+		}
+		_ = daemon.Process.Signal(syscall.SIGKILL)
+		_, _ = daemon.Process.Wait()
+	})
+
+	// Poll daemon.pid until it equals the subprocess PID — confirms the
+	// daemon reached its tick loop (lock acquired, WritePIDFile
+	// returned). Bound to 2 s so a regression in the acquire path
+	// surfaces fast rather than racing the exit budget below.
+	const lockAcquireBudget = 2 * time.Second
+	lockDeadline := time.Now().Add(lockAcquireBudget)
+	pidPath := state.DaemonPID(stateDir)
+	var recordedPID int
+	for time.Now().Before(lockDeadline) {
+		data, readErr := os.ReadFile(pidPath)
+		if readErr == nil {
+			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(data))); parseErr == nil && pid == daemonPID {
+				recordedPID = pid
+				break
+			}
+		}
+		time.Sleep(selfEjectExitPollTick)
+	}
+	if recordedPID != daemonPID {
+		t.Fatalf("daemon did not write its PID %d into %s within %s "+
+			"(post-poll recorded=%d); spec § Component D requires the daemon "+
+			"to reach its tick loop before self-eject can fire\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			daemonPID, pidPath, lockAcquireBudget, recordedPID,
+			readPortalLogSafe(stateDir), stderr.String())
+	}
+
+	// Pre-action structural divergence check. If the kernel coincidentally
+	// assigned the daemon subprocess the same PID as the placeholder pane
+	// (vanishingly unlikely — distinct fork chains), the mismatch branch
+	// of the probe will NOT fire and the test would hang. Fail loudly with
+	// the diagnostic so the rare PID-coincidence flake is unambiguous.
+	if daemonPID == panePID {
+		t.Fatalf("PID coincidence: daemon subprocess PID (%d) == _portal-saver "+
+			"pane PID (%d); spec § Component D's pid-mismatch path requires "+
+			"structural divergence between daemon PID and saver pane PID "+
+			"(re-run the test to break the coincidence)", daemonPID, panePID)
+	}
+
+	// Wait for the daemon to self-eject within the (N+1)*TickerPeriod + 2s
+	// budget. Same envelope as the sibling test.
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- daemon.Wait()
+	}()
+
+	var waitErr error
+	var exitInstant time.Time
+	deadline := time.NewTimer(selfEjectExitBudget)
+	defer deadline.Stop()
+	select {
+	case waitErr = <-waitDone:
+		exitInstant = time.Now()
+	case <-deadline.C:
+		logBlob := readPortalLogSafe(stateDir)
+		t.Fatalf("daemon did not exit within %s of Start (pid=%d, panePID=%d); "+
+			"spec § Component D requires self-eject within (N+1)*TickerPeriod "+
+			"= ~4 s for N=3, TickerPeriod=1 s\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			selfEjectExitBudget, daemonPID, panePID, logBlob, stderr.String())
+	}
+
+	exitLatency := exitInstant.Sub(startInstant)
+	t.Logf("daemon self-eject latency: %s (budget=%s, daemonPID=%d, panePID=%d)",
+		exitLatency, selfEjectExitBudget, daemonPID, panePID)
+
+	logBlob := readPortalLogSafe(stateDir)
+
+	// Assertion A: exit code == 0.
+	if waitErr != nil {
+		t.Errorf("daemon Wait returned non-nil error (expected clean exit 0): %v\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			waitErr, logBlob, stderr.String())
+	}
+	if daemon.ProcessState == nil || !daemon.ProcessState.Success() {
+		stateStr := "<nil>"
+		exitCode := -1
+		if daemon.ProcessState != nil {
+			stateStr = daemon.ProcessState.String()
+			exitCode = daemon.ProcessState.ExitCode()
+		}
+		t.Errorf("daemon ProcessState not successful: %s (ExitCode=%d); spec § Component D "+
+			"requires osExit(0) on self-eject\n"+
+			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
+			stateStr, exitCode, logBlob, stderr.String())
+	}
+
+	// Assertion B: no panic / stack trace on stderr.
+	stderrText := stderr.String()
+	if strings.Contains(stderrText, "panic:") {
+		t.Errorf("daemon stderr contains \"panic:\" — eject path panicked\n"+
+			"--- daemon stderr ---\n%s\n--- portal.log ---\n%s",
+			stderrText, logBlob)
+	}
+	if strings.Contains(stderrText, "goroutine ") && strings.Contains(stderrText, "[running]:") {
+		t.Errorf("daemon stderr contains a Go runtime stack trace — eject path crashed\n"+
+			"--- daemon stderr ---\n%s\n--- portal.log ---\n%s",
+			stderrText, logBlob)
+	}
+	if stderrText != "" {
+		t.Logf("daemon stderr (informational; no panic / stack trace detected):\n%s", stderrText)
+	}
+
+	// Assertion C: portal.log contains the self-eject INFO marker.
+	if !strings.Contains(logBlob, selfEjectLogMarker) {
+		t.Errorf("portal.log missing self-eject marker %q\n"+
+			"  spec § Component D: the eject path MUST emit this INFO line\n"+
+			"--- portal.log ---\n%s",
+			selfEjectLogMarker, logBlob)
+	}
+
+	// Assertion D: _portal-saver session still exists post-eject. The
+	// daemon's self-eject must NOT touch the saver session — the spec is
+	// explicit that the eject is osExit(0), nothing more. With
+	// destroy-unattached=off set above, the session is guaranteed to
+	// persist across a client-less window, so any absence here is a
+	// regression in the eject path (or in tmux teardown ordering).
+	if out, hasErr := sock.TryRun("has-session", "-t", "=_portal-saver"); hasErr != nil {
+		t.Errorf("_portal-saver session missing post-eject: %v\n"+
+			"  spec § Component D: the eject path is osExit(0); the saver "+
+			"session MUST NOT be killed as a side effect\n"+
+			"--- tmux has-session output ---\n%s\n--- portal.log ---\n%s",
+			hasErr, out, logBlob)
+	}
+
+	// Belt-and-braces sanity floor: same 2s floor as the sibling test —
+	// the hysteresis counter cannot increment faster than the ticker
+	// fires, so sub-2 s exit indicates a structural regression.
+	if exitLatency < 2*time.Second {
+		t.Errorf("daemon exit latency %s < 2 s floor; spec § Component D requires "+
+			"N=3 consecutive failing ticks before eject, so exit cannot fire "+
+			"in less than ~2-3 s of Start\n--- portal.log ---\n%s",
+			exitLatency, logBlob)
+	}
+}
+
 // readPortalLogSafe reads portal.log under stateDir and returns its
 // contents as a string, or a placeholder describing the read failure.
 // Used in failure diagnostics so the daemon's audit trail is always
