@@ -1,12 +1,15 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
 // CaptureClient is the narrow interface CaptureStructure needs from a tmux
@@ -60,14 +63,27 @@ const internalSessionPrefix = "_"
 // "all reads run to completion before any writes" discipline: a downstream
 // writer keying off the returned error will not commit a half-built state.
 //
-// logger is reserved for the forthcoming per-session WARN entries introduced by
-// the log-and-continue change in spec § Component E (see lines 326-331). It is
-// currently unused by the function body — this signature plumb exists so the
-// behavioural change does not also have to alter the signature. A nil logger is
-// a valid no-op: *Logger methods early-return on nil receiver, so callers may
-// pass nil without guarding.
+// logger receives WARN entries when a per-session ShowEnvironment call fails:
+// the failing session is skipped (rather than aborting the whole capture) and
+// one WARN line per skip is written under ComponentDaemon, naming the session
+// and the underlying error. A nil logger is a valid no-op: *Logger methods
+// early-return on nil receiver, so callers may pass nil without guarding.
+//
+// The per-session error is classified for the post-loop total-failure
+// discriminator: errors that errors.Is to tmuxerr.ErrNoSuchSession are
+// natural churn (the session was destroyed between the pre-loop enumeration
+// and the per-session call); everything else is anomalous. When every
+// non-internal session in keep fails AND at least one failure was anomalous,
+// CaptureStructure returns a wrapped error so the daemon's captureAndCommit
+// skips Commit + GC for this tick — refusing to wipe scrollback on evidence
+// of a broken capture. An all-natural-churn total failure returns the empty
+// index with a nil error so the daemon proceeds to Commit a sessions.json
+// reflecting the new reality. Any mix that still produces ≥1 successful
+// session returns the partial index with a nil error.
+//
+// See specification → Component E (CaptureStructure Per-Session
+// Log-and-Continue).
 func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *Logger) (Index, error) {
-	_ = logger // reserved for Task 2.3's per-session WARN entries; see godoc.
 	savedAt := time.Now().UTC()
 	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
 
@@ -91,16 +107,38 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 	}
 
 	sessions := make([]Session, 0, len(keep))
+	var anomalousErrs []error
+	naturalChurnCount := 0
 	for _, name := range sortedKeys(keep) {
 		envRaw, err := c.ShowEnvironment(name)
 		if err != nil {
-			return empty, err
+			if errors.Is(err, tmuxerr.ErrNoSuchSession) {
+				naturalChurnCount++
+				logger.Warn(ComponentDaemon,
+					"capture: skipping vanished session %q: %v", name, err)
+				continue
+			}
+			anomalousErrs = append(anomalousErrs, err)
+			logger.Warn(ComponentDaemon,
+				"capture: anomalous error for session %q: %v", name, err)
+			continue
 		}
 		sessions = append(sessions, Session{
 			Name:        name,
 			Environment: parseShowEnvironment(envRaw),
 			Windows:     buildWindows(name, grouped[name]),
 		})
+	}
+
+	// Total-failure discriminator: when every session in a non-empty keep
+	// set produced an error, distinguish "user killed everything mid-tick"
+	// (all natural churn — proceed with empty Commit) from "tmux returned an
+	// unrecoverable error for at least one enumeration" (refuse to Commit).
+	if len(keep) > 0 && len(sessions) == 0 && len(anomalousErrs) > 0 {
+		return empty, fmt.Errorf(
+			"capture: all %d sessions failed (%d anomalous, %d natural): %w",
+			len(keep), len(anomalousErrs), naturalChurnCount,
+			errors.Join(anomalousErrs...))
 	}
 
 	idx := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: sessions}

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/leeovery/portal/internal/tmuxerr"
 )
 
 // ErrNoSuchSession is the typed sentinel returned (wrapped) by per-session
@@ -24,7 +26,13 @@ import (
 // classification belongs here, behind a single sentinel, so a future tmux
 // rephrasing requires a one-line change to the boundary discriminator and
 // nothing else.
-var ErrNoSuchSession = errors.New("no such session")
+//
+// This is a re-export of tmuxerr.ErrNoSuchSession — the two symbols are
+// identity-equal. The underlying value lives in the dependency-free leaf
+// package internal/tmuxerr so that internal/state (which cannot import
+// internal/tmux without closing an import cycle) can perform errors.Is
+// classification against the same sentinel.
+var ErrNoSuchSession = tmuxerr.ErrNoSuchSession
 
 // ErrEmptyPaneList is the typed sentinel returned (wrapped) by SaverPanePID
 // when the underlying `tmux list-panes -t =<session> -F '#{pane_pid}'`

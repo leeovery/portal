@@ -500,6 +500,255 @@ func TestCaptureStructure(t *testing.T) {
 	})
 }
 
+// noSuchSessionErr returns a *tmux.CommandError whose stderr carries tmux's
+// canonical lowercase "no such session" phrasing. The tmux client's
+// ShowEnvironment wraps such errors via wrapNoSuchSession so callers see an
+// errors.Is(err, tmux.ErrNoSuchSession) match. Anomalous failures (any other
+// shape) are not wrapped and must fall into the non-natural-churn branch of
+// the per-session loop.
+func noSuchSessionErr(session string) error {
+	return &tmux.CommandError{
+		Stderr: "no such session: " + session,
+		Err:    errors.New("exit status 1"),
+	}
+}
+
+// TestCaptureStructurePerSessionLogAndContinue exercises the per-session
+// log-and-continue behaviour introduced by spec § Component E: a single
+// failing session must not abort the whole capture. The post-loop
+// discriminator returns the partial index unchanged when at least one session
+// succeeded, the empty index with nil err when every failure was natural
+// churn, and a wrapped error only when zero sessions succeeded and at least
+// one failure was anomalous.
+func TestCaptureStructurePerSessionLogAndContinue(t *testing.T) {
+	t.Run("it skips a failing session and captures the survivors", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo", "charlie"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+				paneLine("charlie", 0, "m", "L", false, true, 0, "/c", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": errors.New("boom"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 2 {
+			t.Fatalf("got %d sessions, want 2 (alpha skipped)", len(idx.Sessions))
+		}
+		if idx.Sessions[0].Name != "bravo" || idx.Sessions[1].Name != "charlie" {
+			t.Errorf("Sessions = [%s, %s], want [bravo, charlie]",
+				idx.Sessions[0].Name, idx.Sessions[1].Name)
+		}
+	})
+
+	t.Run("it proceeds with empty index when every session is natural churn", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": noSuchSessionErr("alpha"),
+				"bravo": noSuchSessionErr("bravo"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("expected nil error for natural-churn-only, got %v", err)
+		}
+		if idx.Sessions == nil {
+			t.Fatal("Sessions is nil; want non-nil empty slice")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("got %d sessions, want 0 (all natural churn)", len(idx.Sessions))
+		}
+	})
+
+	t.Run("it returns an error when every session fails with anomalous errors", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": errors.New("alpha boom"),
+				"bravo": errors.New("bravo boom"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected non-nil error for all-anomalous, got nil")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions on total-failure error, got %d", len(idx.Sessions))
+		}
+	})
+
+	t.Run("it returns an error when failure set is mixed natural+anomalous and no session succeeded", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": noSuchSessionErr("alpha"),
+				"bravo": errors.New("anomalous"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err == nil {
+			t.Fatal("expected non-nil error for mixed natural+anomalous with 0 successes, got nil")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("expected empty Sessions, got %d", len(idx.Sessions))
+		}
+	})
+
+	t.Run("it returns nil error and partial index when some sessions succeed despite mixed failures", func(t *testing.T) {
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo", "charlie"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+				paneLine("charlie", 0, "m", "L", false, true, 0, "/c", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": noSuchSessionErr("alpha"),
+				"bravo": errors.New("anomalous"),
+				// charlie succeeds
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("expected nil error when ≥1 session succeeded, got %v", err)
+		}
+		if len(idx.Sessions) != 1 || idx.Sessions[0].Name != "charlie" {
+			t.Fatalf("Sessions = %+v, want only [charlie]", idx.Sessions)
+		}
+	})
+
+	t.Run("it emits a WARN log entry per failing session naming the session and error", func(t *testing.T) {
+		dir := t.TempDir()
+		logger, logPath := openTestLogger(t, dir)
+
+		mock := &captureMock{
+			listSessions: listSessionsFor("alpha", "bravo", "charlie"),
+			listPanes: strings.Join([]string{
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("bravo", 0, "m", "L", false, true, 0, "/b", true, "zsh"),
+				paneLine("charlie", 0, "m", "L", false, true, 0, "/c", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"alpha": noSuchSessionErr("alpha"),
+				"bravo": errors.New("bravo-boom-sentinel"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		_, err := state.CaptureStructure(client, nil, nil, logger)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		log := readLogBody(t, logPath)
+		// Exactly two WARN entries: one per failing session.
+		warnCount := strings.Count(log, "| WARN | "+state.ComponentDaemon+" |")
+		if warnCount != 2 {
+			t.Errorf("WARN entries under ComponentDaemon = %d, want 2; log:\n%s", warnCount, log)
+		}
+		// Each warn line names its session and includes the underlying error.
+		if !strings.Contains(log, `"alpha"`) {
+			t.Errorf("expected WARN for session alpha; log:\n%s", log)
+		}
+		if !strings.Contains(log, `"bravo"`) {
+			t.Errorf("expected WARN for session bravo; log:\n%s", log)
+		}
+		if !strings.Contains(log, "bravo-boom-sentinel") {
+			t.Errorf("expected anomalous error text in WARN body; log:\n%s", log)
+		}
+	})
+
+	t.Run("it does not invoke the per-session loop when keep is empty", func(t *testing.T) {
+		// keep is empty because the only session is internal-prefixed. The
+		// per-session loop must not run (so any envErr for the internal session
+		// would never fire); the result is the existing empty-Sessions slice.
+		mock := &captureMock{
+			listSessions: listSessionsFor("_portal-saver"),
+			envErrs: map[string]error{
+				"_portal-saver": errors.New("would fail if iterated"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if idx.Sessions == nil {
+			t.Fatal("Sessions is nil; want non-nil empty slice")
+		}
+		if len(idx.Sessions) != 0 {
+			t.Errorf("got %d sessions, want 0", len(idx.Sessions))
+		}
+	})
+
+	t.Run("it preserves canonical ordering of surviving sessions", func(t *testing.T) {
+		// Skipping "bravo" must not perturb the alpha→charlie ordering. Mock
+		// returns listSessions out of order to confirm the survivor set itself
+		// is canonicalised.
+		mock := &captureMock{
+			listSessions: listSessionsFor("zeta", "alpha", "mike"),
+			listPanes: strings.Join([]string{
+				paneLine("zeta", 0, "m", "L", false, true, 0, "/z", true, "zsh"),
+				paneLine("alpha", 0, "m", "L", false, true, 0, "/a", true, "zsh"),
+				paneLine("mike", 0, "m", "L", false, true, 0, "/m", true, "zsh"),
+			}, "\n"),
+			envErrs: map[string]error{
+				"mike": noSuchSessionErr("mike"),
+			},
+			t: t,
+		}
+		client := tmux.NewClient(mock)
+
+		idx, err := state.CaptureStructure(client, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(idx.Sessions) != 2 {
+			t.Fatalf("got %d sessions, want 2", len(idx.Sessions))
+		}
+		if idx.Sessions[0].Name != "alpha" || idx.Sessions[1].Name != "zeta" {
+			t.Errorf("Sessions = [%s, %s], want [alpha, zeta] (canonical ascending)",
+				idx.Sessions[0].Name, idx.Sessions[1].Name)
+		}
+	})
+}
+
 // findPane locates the pane in idx by session name, window index, and pane
 // index. Returns nil when the path is missing — tests use that to assert
 // presence/absence after the merge.
