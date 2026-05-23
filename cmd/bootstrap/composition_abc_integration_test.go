@@ -74,8 +74,8 @@ package bootstrap_test
 
 import (
 	"errors"
-	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,8 +270,19 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 			t.Fatalf("scrollback snapshot %d/%d: %v",
 				i, compositionScrollbackObservations, snapErr)
 		}
-		assertSnapshotsEqualOrFail(t, scrollbackDir, first, current,
-			fmt.Sprintf("observation %d/%d", i, compositionScrollbackObservations))
+		if deltas := portaltest.DiffFingerprints(first, current); len(deltas) > 0 {
+			lines := make([]string, len(deltas))
+			for k, d := range deltas {
+				lines[k] = "  " + portaltest.FormatDelta(d)
+			}
+			t.Fatalf("scrollback dir oscillated between first snapshot and "+
+				"observation %d/%d (spec § Composite End-to-End Verification "+
+				"bullet 6: \"no .bin file deletions or unexpected new files\")\n"+
+				"  scrollback dir: %s\n"+
+				"  delta(s):\n%s",
+				i, compositionScrollbackObservations, scrollbackDir,
+				strings.Join(lines, "\n"))
+		}
 	}
 
 	// 8. Fresh-process Component C pre-check: from the test goroutine,
@@ -295,154 +306,6 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 			"convergence elapsed: %s)",
 			acquireErr, currentSaverPID, convergenceElapsed)
 	}
-}
-
-// assertSnapshotsEqualOrFail compares two scrollback-dir Fingerprint
-// maps and fails the test on any delta, with a diagnostic citing the
-// observation label, the offending path, and the field(s) that differ.
-// Reuses assertSnapshotsEqual's per-field diff helpers from the
-// kill-barrier escalation test by inlining the comparison loop here —
-// that function lives in package tmux_test (different package), so the
-// composition test needs its own thin wrapper.
-//
-// The label parameter is the human-readable observation index
-// ("observation 7/10") so a multi-observation failure log makes the
-// timing of the deviation obvious.
-func assertSnapshotsEqualOrFail(t *testing.T, root string, first, current map[string]portaltest.Fingerprint, label string) {
-	t.Helper()
-	keys := unionFingerprintKeys(first, current)
-
-	var diags []string
-	for _, key := range keys {
-		before, hadBefore := first[key]
-		after, hasAfter := current[key]
-		switch {
-		case !hadBefore && hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: created since first snapshot (current=%s)",
-				key, formatFingerprint(after)))
-		case hadBefore && !hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: deleted since first snapshot (first=%s)",
-				key, formatFingerprint(before)))
-		case hadBefore && hasAfter:
-			diags = append(diags, fingerprintDeltas(key, before, after)...)
-		}
-	}
-
-	if len(diags) > 0 {
-		t.Fatalf("scrollback dir oscillated between first snapshot and %s "+
-			"(spec § Composite End-to-End Verification bullet 6: "+
-			"\"no .bin file deletions or unexpected new files\")\n"+
-			"  scrollback dir: %s\n"+
-			"  delta(s):\n%s",
-			label, root, joinFingerprintDiags(diags))
-	}
-}
-
-// unionFingerprintKeys returns the sorted union of map keys for stable
-// failure diagnostics. Mirrors the helper in
-// kill_barrier_escalation_no_final_flush_integration_test.go but lives
-// here because that helper is in package tmux_test.
-func unionFingerprintKeys(a, b map[string]portaltest.Fingerprint) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	for k := range a {
-		seen[k] = struct{}{}
-	}
-	for k := range b {
-		seen[k] = struct{}{}
-	}
-	out := make([]string, 0, len(seen))
-	for k := range seen {
-		out = append(out, k)
-	}
-	sortStrings(out)
-	return out
-}
-
-// sortStrings is a thin wrapper to keep imports minimal and make the
-// sort intent local to this file. Using sort.Strings directly is
-// equivalent; the wrapper isolates the import to one symbol use.
-func sortStrings(s []string) {
-	// Manual insertion sort — N is small (entries in a scrollback dir
-	// for the saver session only, typically 0-1), and avoiding the
-	// sort import keeps the test file's import graph tighter.
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j-1], s[j] = s[j], s[j-1]
-		}
-	}
-}
-
-// fingerprintDeltas returns per-field delta diagnostics for a path
-// present in both snapshots. Returns nil when the two fingerprints
-// are byte-equal. Field order matches Fingerprint's declaration so a
-// multi-field delta reads cleanly top-to-bottom.
-func fingerprintDeltas(key string, before, after portaltest.Fingerprint) []string {
-	var out []string
-	if before.Exists != after.Exists {
-		out = append(out, fmt.Sprintf("  %s.Exists: first=%v current=%v",
-			key, before.Exists, after.Exists))
-	}
-	if before.Size != after.Size {
-		out = append(out, fmt.Sprintf("  %s.Size: first=%d current=%d",
-			key, before.Size, after.Size))
-	}
-	if before.MtimeNanos != after.MtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.MtimeNanos: first=%d current=%d (Δ=%d ns)",
-			key, before.MtimeNanos, after.MtimeNanos, after.MtimeNanos-before.MtimeNanos))
-	}
-	if before.CtimeNanos != after.CtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.CtimeNanos: first=%d current=%d (Δ=%d ns)",
-			key, before.CtimeNanos, after.CtimeNanos, after.CtimeNanos-before.CtimeNanos))
-	}
-	if before.Hashed != after.Hashed {
-		out = append(out, fmt.Sprintf("  %s.Hashed: first=%v current=%v",
-			key, before.Hashed, after.Hashed))
-	}
-	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
-		out = append(out, fmt.Sprintf("  %s.Sha256: first=%x current=%x",
-			key, before.Sha256, after.Sha256))
-	}
-	if before.IsSymlink != after.IsSymlink {
-		out = append(out, fmt.Sprintf("  %s.IsSymlink: first=%v current=%v",
-			key, before.IsSymlink, after.IsSymlink))
-	}
-	if before.SymlinkTarget != after.SymlinkTarget {
-		out = append(out, fmt.Sprintf("  %s.SymlinkTarget: first=%q current=%q",
-			key, before.SymlinkTarget, after.SymlinkTarget))
-	}
-	return out
-}
-
-// formatFingerprint renders a Fingerprint compactly for the created/
-// deleted delta diagnostics where the entire fingerprint must be
-// shown because there is no peer to diff against.
-func formatFingerprint(fp portaltest.Fingerprint) string {
-	if fp.IsSymlink {
-		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
-			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
-	}
-	if fp.Hashed {
-		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
-			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
-	}
-	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
-		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
-}
-
-// joinFingerprintDiags concatenates delta lines with newline separators
-// for use in multi-line failure diagnostics. Manual join to keep the
-// import surface area minimal.
-func joinFingerprintDiags(lines []string) string {
-	var b []byte
-	for i, l := range lines {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, l...)
-	}
-	return string(b)
 }
 
 // Compile-time guard: ensure exec is imported for orphan PID diagnostics

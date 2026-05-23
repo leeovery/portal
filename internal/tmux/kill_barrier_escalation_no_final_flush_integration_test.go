@@ -91,6 +91,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -292,11 +293,23 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 		t.Fatalf("post-exit snapshot: %v", err)
 	}
 
-	// EQUALITY ASSERTION: every key in pre must be present in post
-	// with byte-equal Fingerprint, and vice versa. The diagnostic
-	// cites the path, the field(s) that differ, and both values so
-	// a regression is debuggable in one run.
-	assertSnapshotsEqual(t, scrollbackDir, pre, post)
+	// EQUALITY ASSERTION via portaltest.DiffFingerprints: every key
+	// in pre must be present in post with byte-equal Fingerprint.
+	if deltas := portaltest.DiffFingerprints(pre, post); len(deltas) > 0 {
+		lines := make([]string, len(deltas))
+		for i, d := range deltas {
+			lines[i] = "  " + portaltest.FormatDelta(d)
+		}
+		t.Fatalf("scrollback dir mutated between pre-SIGKILL snapshot and "+
+			"200 ms post-exit snapshot (spec § Component A: no final-flush "+
+			"GC cycle on escalation-killed orphans)\n"+
+			"  scrollback dir: %s\n"+
+			"  pre keys (%d): %v\n"+
+			"  post keys (%d): %v\n"+
+			"  delta(s):\n%s",
+			scrollbackDir, len(pre), sortedKeys(pre), len(post), sortedKeys(post),
+			strings.Join(lines, "\n"))
+	}
 }
 
 // countBinFiles returns the number of regular .bin files directly
@@ -354,122 +367,4 @@ func sortedKeys(snap map[string]portaltest.Fingerprint) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// assertSnapshotsEqual compares two scrollback-dir Fingerprint maps
-// across every key in the union (pre ∪ post) and every field of
-// the Fingerprint struct (Exists, Size, MtimeNanos, CtimeNanos,
-// Sha256, Hashed, IsSymlink, SymlinkTarget). On any delta the test
-// fails with a diagnostic citing path, field, and both values so
-// the regression's source is unambiguous.
-//
-// The walk order is deterministic (sorted keys) so re-runs produce
-// identical failure messages.
-func assertSnapshotsEqual(t *testing.T, root string, pre, post map[string]portaltest.Fingerprint) {
-	t.Helper()
-	keys := make(map[string]struct{}, len(pre)+len(post))
-	for k := range pre {
-		keys[k] = struct{}{}
-	}
-	for k := range post {
-		keys[k] = struct{}{}
-	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-
-	var diags []string
-	for _, key := range sorted {
-		before, hadBefore := pre[key]
-		after, hasAfter := post[key]
-		switch {
-		case !hadBefore && hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: created after SIGKILL (post=%s)", key, formatFP(after)))
-		case hadBefore && !hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: deleted after SIGKILL (pre=%s)", key, formatFP(before)))
-		case hadBefore && hasAfter:
-			diags = append(diags, fingerprintFieldDeltas(key, before, after)...)
-		}
-	}
-
-	if len(diags) > 0 {
-		t.Fatalf("scrollback dir mutated between pre-SIGKILL snapshot and "+
-			"200 ms post-exit snapshot (spec § Component A: no final-flush "+
-			"GC cycle on escalation-killed orphans)\n"+
-			"  scrollback dir: %s\n"+
-			"  pre keys (%d): %v\n"+
-			"  post keys (%d): %v\n"+
-			"  delta(s):\n%s",
-			root, len(pre), sortedKeys(pre), len(post), sortedKeys(post),
-			joinLines(diags))
-	}
-}
-
-// fingerprintFieldDeltas returns a per-field delta diagnostic for a
-// path that exists in both snapshots. Returns empty when the two
-// fingerprints are byte-equal. Field order matches Fingerprint's
-// declaration so a multi-field delta reads cleanly top-to-bottom.
-func fingerprintFieldDeltas(key string, before, after portaltest.Fingerprint) []string {
-	var out []string
-	if before.Exists != after.Exists {
-		out = append(out, fmt.Sprintf("  %s.Exists: pre=%v post=%v", key, before.Exists, after.Exists))
-	}
-	if before.Size != after.Size {
-		out = append(out, fmt.Sprintf("  %s.Size: pre=%d post=%d", key, before.Size, after.Size))
-	}
-	if before.MtimeNanos != after.MtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.MtimeNanos: pre=%d post=%d (Δ=%d ns)",
-			key, before.MtimeNanos, after.MtimeNanos, after.MtimeNanos-before.MtimeNanos))
-	}
-	if before.CtimeNanos != after.CtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.CtimeNanos: pre=%d post=%d (Δ=%d ns)",
-			key, before.CtimeNanos, after.CtimeNanos, after.CtimeNanos-before.CtimeNanos))
-	}
-	if before.Hashed != after.Hashed {
-		out = append(out, fmt.Sprintf("  %s.Hashed: pre=%v post=%v", key, before.Hashed, after.Hashed))
-	}
-	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
-		out = append(out, fmt.Sprintf("  %s.Sha256: pre=%x post=%x", key, before.Sha256, after.Sha256))
-	}
-	if before.IsSymlink != after.IsSymlink {
-		out = append(out, fmt.Sprintf("  %s.IsSymlink: pre=%v post=%v", key, before.IsSymlink, after.IsSymlink))
-	}
-	if before.SymlinkTarget != after.SymlinkTarget {
-		out = append(out, fmt.Sprintf("  %s.SymlinkTarget: pre=%q post=%q",
-			key, before.SymlinkTarget, after.SymlinkTarget))
-	}
-	return out
-}
-
-// formatFP renders a Fingerprint compactly for the created/deleted
-// delta diagnostics where the entire fingerprint must be shown
-// because there is no peer to diff against.
-func formatFP(fp portaltest.Fingerprint) string {
-	if fp.IsSymlink {
-		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
-			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
-	}
-	if fp.Hashed {
-		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
-			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
-	}
-	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
-		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
-}
-
-// joinLines concatenates lines with newline separators for use in
-// multi-line failure diagnostics.
-func joinLines(lines []string) string {
-	var b []byte
-	for i, l := range lines {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, l...)
-	}
-	return string(b)
 }

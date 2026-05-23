@@ -7,6 +7,7 @@ package portaltest
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -150,79 +151,183 @@ func hashFile(path string) ([32]byte, error) {
 // testing.T with intentional failures.
 type errorReporter func(format string, args ...any)
 
-// reportStateDirDelta snapshots root and reports any delta against
-// pre via report. Every changed path generates exactly one report
-// call; the function does not stop after the first delta — the
-// caller receives the full picture so a single test surfacing
-// multiple violations is debuggable in one run.
+// FingerprintDelta captures a single per-(path, field) change between
+// two snapshots. Path is the relative path within the snapshot root;
+// Field is one of the canonical change classes (see DiffFingerprints).
+// Pre is the zero value when Field == "created"; Post is the zero
+// value when Field == "deleted".
+type FingerprintDelta struct {
+	Path  string
+	Field string
+	Pre   Fingerprint
+	Post  Fingerprint
+}
+
+// Canonical Field values returned by DiffFingerprints.
+const (
+	fieldCreated       = "created"
+	fieldDeleted       = "deleted"
+	fieldSize          = "size"
+	fieldMtime         = "mtime"
+	fieldCtime         = "ctime"
+	fieldContent       = "content"
+	fieldHashed        = "hashed"
+	fieldSymlinkTarget = "symlink-target"
+	fieldBecameSymlink = "became-symlink"
+)
+
+// DiffFingerprints returns the set of deltas between pre and post.
+// The returned slice is sorted by (Path, Field) so diagnostics built
+// on top of it are reproducible across re-runs.
 //
-// Delta types reported:
-//   - "created" — path is absent from pre but present now
-//   - "deleted" — path is present in pre but absent now
-//   - "size-changed"
-//   - "mtime-changed"
-//   - "ctime-changed"
-//   - "content-changed"
-//   - "became-symlink" — non-symlink → symlink (or vice versa)
-//   - "symlink-target-changed"
+// Per-path semantics: a path missing from one side yields a single
+// "created" or "deleted" delta; an IsSymlink flip yields a single
+// "became-symlink" delta (other channels are noise on a type swap);
+// otherwise zero or more field deltas (size, mtime, ctime, content,
+// hashed, symlink-target). "hashed" fires when the Hashed flag
+// flipped (file crossed hashSizeCap); "content" only when both
+// sides were Hashed and Sha256 differs.
+func DiffFingerprints(pre, post map[string]Fingerprint) []FingerprintDelta {
+	paths := unionPaths(pre, post)
+	out := make([]FingerprintDelta, 0, len(paths))
+	for _, path := range paths {
+		before, hadBefore := pre[path]
+		after, hasAfter := post[path]
+		switch {
+		case !hadBefore && hasAfter:
+			out = append(out, FingerprintDelta{Path: path, Field: fieldCreated, Post: after})
+		case hadBefore && !hasAfter:
+			out = append(out, FingerprintDelta{Path: path, Field: fieldDeleted, Pre: before})
+		case hadBefore && hasAfter:
+			out = append(out, fieldDeltas(path, before, after)...)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Field < out[j].Field
+	})
+	return out
+}
+
+// fieldDeltas returns per-field deltas for a path in both snapshots.
+// A type swap short-circuits to the became-symlink signal alone.
+func fieldDeltas(path string, before, after Fingerprint) []FingerprintDelta {
+	mk := func(field string) FingerprintDelta {
+		return FingerprintDelta{Path: path, Field: field, Pre: before, Post: after}
+	}
+	if before.IsSymlink != after.IsSymlink {
+		return []FingerprintDelta{mk(fieldBecameSymlink)}
+	}
+	if before.IsSymlink && after.IsSymlink && before.SymlinkTarget != after.SymlinkTarget {
+		return []FingerprintDelta{mk(fieldSymlinkTarget)}
+	}
+
+	var out []FingerprintDelta
+	if before.Size != after.Size {
+		out = append(out, mk(fieldSize))
+	}
+	if before.MtimeNanos != after.MtimeNanos {
+		out = append(out, mk(fieldMtime))
+	}
+	if before.CtimeNanos != after.CtimeNanos {
+		out = append(out, mk(fieldCtime))
+	}
+	if before.Hashed != after.Hashed {
+		out = append(out, mk(fieldHashed))
+	}
+	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
+		out = append(out, mk(fieldContent))
+	}
+	return out
+}
+
+// FormatFingerprint renders fp compactly for error diagnostics where
+// the full fingerprint must be shown (created / deleted deltas).
+func FormatFingerprint(fp Fingerprint) string {
+	if fp.IsSymlink {
+		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
+			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
+	}
+	if fp.Hashed {
+		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
+			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
+	}
+	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
+		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
+}
+
+// FormatDelta renders d as a single line for t.Errorf / t.Fatalf.
+// Created / deleted variants embed FormatFingerprint of the surviving
+// side; field-mutation variants embed pre and post values for the field.
+func FormatDelta(d FingerprintDelta) string {
+	switch d.Field {
+	case fieldCreated:
+		return fmt.Sprintf("%s: created (post=%s)", d.Path, FormatFingerprint(d.Post))
+	case fieldDeleted:
+		return fmt.Sprintf("%s: deleted (pre=%s)", d.Path, FormatFingerprint(d.Pre))
+	case fieldBecameSymlink:
+		return fmt.Sprintf("%s.IsSymlink: pre=%v post=%v", d.Path, d.Pre.IsSymlink, d.Post.IsSymlink)
+	case fieldSymlinkTarget:
+		return fmt.Sprintf("%s.SymlinkTarget: pre=%q post=%q",
+			d.Path, d.Pre.SymlinkTarget, d.Post.SymlinkTarget)
+	case fieldSize:
+		return fmt.Sprintf("%s.Size: pre=%d post=%d", d.Path, d.Pre.Size, d.Post.Size)
+	case fieldMtime:
+		return fmt.Sprintf("%s.MtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			d.Path, d.Pre.MtimeNanos, d.Post.MtimeNanos, d.Post.MtimeNanos-d.Pre.MtimeNanos)
+	case fieldCtime:
+		return fmt.Sprintf("%s.CtimeNanos: pre=%d post=%d (Δ=%d ns)",
+			d.Path, d.Pre.CtimeNanos, d.Post.CtimeNanos, d.Post.CtimeNanos-d.Pre.CtimeNanos)
+	case fieldHashed:
+		return fmt.Sprintf("%s.Hashed: pre=%v post=%v", d.Path, d.Pre.Hashed, d.Post.Hashed)
+	case fieldContent:
+		return fmt.Sprintf("%s.Sha256: pre=%x post=%x", d.Path, d.Pre.Sha256, d.Post.Sha256)
+	default:
+		return fmt.Sprintf("%s.%s: pre=%+v post=%+v", d.Path, d.Field, d.Pre, d.Post)
+	}
+}
+
+// reportStateDirDelta snapshots root and reports every delta against
+// pre via report (one call per delta — the caller receives the full
+// picture). Delegates to DiffFingerprints and translates the canonical
+// Field names to the legacy backstop strings the in-package consumers
+// (isolated_env.go t.Cleanup hooks) already match on.
 //
-// All deltas surface against the same path with the format
-// "portaltest backstop: developer state dir mutated at %s: %s".
+// Format: "portaltest backstop: developer state dir mutated at %s: %s"
 func reportStateDirDelta(report errorReporter, root string, pre map[string]Fingerprint) {
 	post, err := SnapshotStateDir(root)
 	if err != nil {
 		report("portaltest backstop: post-test snapshot of %s failed: %v", root, err)
 		return
 	}
-
-	// Build the union of paths and walk in deterministic order so
-	// failures are reproducible across runs.
-	paths := unionPaths(pre, post)
-
-	for _, path := range paths {
-		before, hadBefore := pre[path]
-		after, hasAfter := post[path]
-
-		switch {
-		case !hadBefore && hasAfter:
-			report(deltaFmt, path, "created")
-		case hadBefore && !hasAfter:
-			report(deltaFmt, path, "deleted")
-		case hadBefore && hasAfter:
-			emitFieldDeltas(report, path, before, after)
-		}
+	for _, d := range DiffFingerprints(pre, post) {
+		report(deltaFmt, d.Path, backstopFieldLabel(d.Field))
 	}
 }
 
 const deltaFmt = "portaltest backstop: developer state dir mutated at %s: %s"
 
-// emitFieldDeltas reports every field-level difference between
-// before and after for a path that exists in both snapshots.
-// Order is fixed (became-symlink first, then symlink target, then
-// size/mtime/ctime/content) so multi-field failures read cleanly.
-func emitFieldDeltas(report errorReporter, path string, before, after Fingerprint) {
-	if before.IsSymlink != after.IsSymlink {
-		report(deltaFmt, path, "became-symlink")
-		// Other field-level deltas on a type swap are noise;
-		// surfacing one clear cause is sufficient.
-		return
+// backstopFieldLabels maps a canonical DiffFingerprints Field to the
+// legacy backstop string. Existing meta-tests assert exact equality
+// against these, so the legacy "-changed" suffix must be preserved.
+// created / deleted / became-symlink pass through verbatim and are
+// absent from the map.
+var backstopFieldLabels = map[string]string{
+	fieldSize:          "size-changed",
+	fieldMtime:         "mtime-changed",
+	fieldCtime:         "ctime-changed",
+	fieldContent:       "content-changed",
+	fieldHashed:        "hashed-changed",
+	fieldSymlinkTarget: "symlink-target-changed",
+}
+
+func backstopFieldLabel(field string) string {
+	if label, ok := backstopFieldLabels[field]; ok {
+		return label
 	}
-	if before.IsSymlink && after.IsSymlink && before.SymlinkTarget != after.SymlinkTarget {
-		report(deltaFmt, path, "symlink-target-changed")
-		return
-	}
-	if before.Size != after.Size {
-		report(deltaFmt, path, "size-changed")
-	}
-	if before.MtimeNanos != after.MtimeNanos {
-		report(deltaFmt, path, "mtime-changed")
-	}
-	if before.CtimeNanos != after.CtimeNanos {
-		report(deltaFmt, path, "ctime-changed")
-	}
-	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
-		report(deltaFmt, path, "content-changed")
-	}
+	return field
 }
 
 // unionPaths returns the sorted union of map keys.

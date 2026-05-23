@@ -877,63 +877,13 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 			stateStr, exitCode, logBlob, stderr.String())
 	}
 
-	// EQUALITY ASSERTION. Empty-both is a legitimate pass — the
-	// load-bearing invariant is "no delta", not "non-empty
-	// pre-snapshot". On any delta the diagnostic dumps the full
-	// key sets of both snapshots, the per-field delta, portal.log,
-	// and stderr so a regression's source is unambiguous.
-	assertScrollbackSnapshotsEqual(t, scrollbackDir, snapBefore, snapAfter, logBlob, stderr.String())
-}
-
-// assertScrollbackSnapshotsEqual compares two Fingerprint maps from
-// SnapshotStateDir and fails the test on any per-key, per-field
-// delta. The diagnostic dumps both snapshot key sets, the field-
-// level delta, portal.log, and stderr so the regression's source
-// is unambiguous from one run.
-//
-// Inlined in this file (rather than imported from the Task 4-2
-// helper in package tmux_test) because that helper is unexported
-// and lives in a different test package. The two helpers share
-// the same diff shape — any future refactor that promotes one
-// to a shared portaltest helper should consolidate them.
-func assertScrollbackSnapshotsEqual(
-	t *testing.T,
-	root string,
-	pre, post map[string]portaltest.Fingerprint,
-	logBlob, stderrText string,
-) {
-	t.Helper()
-
-	keys := make(map[string]struct{}, len(pre)+len(post))
-	for k := range pre {
-		keys[k] = struct{}{}
-	}
-	for k := range post {
-		keys[k] = struct{}{}
-	}
-	sorted := make([]string, 0, len(keys))
-	for k := range keys {
-		sorted = append(sorted, k)
-	}
-	sort.Strings(sorted)
-
-	var diags []string
-	for _, key := range sorted {
-		before, hadBefore := pre[key]
-		after, hasAfter := post[key]
-		switch {
-		case !hadBefore && hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: created during eject window (post=%s)", key, formatFingerprint(after)))
-		case hadBefore && !hasAfter:
-			diags = append(diags, fmt.Sprintf(
-				"  %s: deleted during eject window (pre=%s)", key, formatFingerprint(before)))
-		case hadBefore && hasAfter:
-			diags = append(diags, fingerprintFieldDeltasSelfEject(key, before, after)...)
+	// EQUALITY ASSERTION via portaltest.DiffFingerprints. Empty-both
+	// is a legitimate pass — the invariant is "no delta".
+	if deltas := portaltest.DiffFingerprints(snapBefore, snapAfter); len(deltas) > 0 {
+		lines := make([]string, len(deltas))
+		for i, d := range deltas {
+			lines[i] = "  " + portaltest.FormatDelta(d)
 		}
-	}
-
-	if len(diags) > 0 {
 		t.Fatalf("scrollback dir mutated between snapBefore (post-first-failing-tick) "+
 			"and snapAfter (post-self-eject) — spec § Component D requires "+
 			"NO final flush on self-eject\n"+
@@ -943,62 +893,10 @@ func assertScrollbackSnapshotsEqual(
 			"  delta(s):\n%s\n"+
 			"--- portal.log ---\n%s\n"+
 			"--- daemon stderr ---\n%s",
-			root, len(pre), sortedSnapKeys(pre), len(post), sortedSnapKeys(post),
-			joinSnapLines(diags), logBlob, stderrText)
+			scrollbackDir, len(snapBefore), sortedSnapKeys(snapBefore),
+			len(snapAfter), sortedSnapKeys(snapAfter),
+			strings.Join(lines, "\n"), logBlob, stderr.String())
 	}
-}
-
-// fingerprintFieldDeltasSelfEject returns a per-field delta
-// diagnostic for a path present in both snapshots. Returns empty
-// when the two fingerprints are byte-equal. Field order matches
-// Fingerprint's struct declaration so a multi-field delta reads
-// cleanly top-to-bottom.
-func fingerprintFieldDeltasSelfEject(key string, before, after portaltest.Fingerprint) []string {
-	var out []string
-	if before.Exists != after.Exists {
-		out = append(out, fmt.Sprintf("  %s.Exists: pre=%v post=%v", key, before.Exists, after.Exists))
-	}
-	if before.Size != after.Size {
-		out = append(out, fmt.Sprintf("  %s.Size: pre=%d post=%d", key, before.Size, after.Size))
-	}
-	if before.MtimeNanos != after.MtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.MtimeNanos: pre=%d post=%d (Δ=%d ns)",
-			key, before.MtimeNanos, after.MtimeNanos, after.MtimeNanos-before.MtimeNanos))
-	}
-	if before.CtimeNanos != after.CtimeNanos {
-		out = append(out, fmt.Sprintf("  %s.CtimeNanos: pre=%d post=%d (Δ=%d ns)",
-			key, before.CtimeNanos, after.CtimeNanos, after.CtimeNanos-before.CtimeNanos))
-	}
-	if before.Hashed != after.Hashed {
-		out = append(out, fmt.Sprintf("  %s.Hashed: pre=%v post=%v", key, before.Hashed, after.Hashed))
-	}
-	if before.Hashed && after.Hashed && before.Sha256 != after.Sha256 {
-		out = append(out, fmt.Sprintf("  %s.Sha256: pre=%x post=%x", key, before.Sha256, after.Sha256))
-	}
-	if before.IsSymlink != after.IsSymlink {
-		out = append(out, fmt.Sprintf("  %s.IsSymlink: pre=%v post=%v", key, before.IsSymlink, after.IsSymlink))
-	}
-	if before.SymlinkTarget != after.SymlinkTarget {
-		out = append(out, fmt.Sprintf("  %s.SymlinkTarget: pre=%q post=%q",
-			key, before.SymlinkTarget, after.SymlinkTarget))
-	}
-	return out
-}
-
-// formatFingerprint renders a Fingerprint compactly for created/
-// deleted delta diagnostics (where the entire fingerprint must be
-// shown because there is no peer to diff against).
-func formatFingerprint(fp portaltest.Fingerprint) string {
-	if fp.IsSymlink {
-		return fmt.Sprintf("symlink(target=%q, mtime=%d ns, ctime=%d ns)",
-			fp.SymlinkTarget, fp.MtimeNanos, fp.CtimeNanos)
-	}
-	if fp.Hashed {
-		return fmt.Sprintf("file(size=%d, mtime=%d ns, ctime=%d ns, sha256=%x)",
-			fp.Size, fp.MtimeNanos, fp.CtimeNanos, fp.Sha256)
-	}
-	return fmt.Sprintf("entry(size=%d, mtime=%d ns, ctime=%d ns, hashed=false)",
-		fp.Size, fp.MtimeNanos, fp.CtimeNanos)
 }
 
 // sortedSnapKeys returns a Fingerprint map's keys in lexicographic
@@ -1010,19 +908,6 @@ func sortedSnapKeys(snap map[string]portaltest.Fingerprint) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// joinSnapLines concatenates lines with newline separators for use
-// in multi-line failure diagnostics.
-func joinSnapLines(lines []string) string {
-	var b []byte
-	for i, l := range lines {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, l...)
-	}
-	return string(b)
 }
 
 // legitimateColdStartHysteresisMirror mirrors cmd.selfSupervisionHysteresisTicks
