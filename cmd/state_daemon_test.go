@@ -693,3 +693,31 @@ func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
 		t.Errorf("expected exactly one contention WARN line; got %d in:\n%s", n, got)
 	}
 }
+
+// TestSelfSupervisionHysteresisTicks_ClampInvariant pins the spec
+// § Component D acceptance criteria: "A unit test asserts
+// selfSupervisionHysteresisTicks >= 1 to prevent accidental zeroing".
+// The full clamp envelope (3 ≤ N ≤ 9) is the explicit lower-floor /
+// upper-ceiling from the task body, which the measurement memo
+// records and the integration harness re-verifies whenever it runs.
+//
+// This test is the cheap default-lane guard against the
+// constant being accidentally edited out of the safe envelope (e.g.
+// a refactor that introduces a different value, or a mistaken `var`
+// → `const` swap that defaults to zero). Without it, the only check
+// would be the integration-tagged harness — which most developer
+// runs skip.
+func TestSelfSupervisionHysteresisTicks_ClampInvariant(t *testing.T) {
+	if selfSupervisionHysteresisTicks < 3 {
+		t.Errorf("selfSupervisionHysteresisTicks=%d below clamp floor of 3 "+
+			"(spec § Component D rationale: N=1 would risk single-tmux-hiccup "+
+			"false-positive self-eject; spec floor is 3)",
+			selfSupervisionHysteresisTicks)
+	}
+	if selfSupervisionHysteresisTicks > 9 {
+		t.Errorf("selfSupervisionHysteresisTicks=%d above clamp ceiling of 9 "+
+			"(spec § Risk Summary: max × 2 > 9 indicates upstream defect, "+
+			"not a tuning-knob increase)",
+			selfSupervisionHysteresisTicks)
+	}
+}

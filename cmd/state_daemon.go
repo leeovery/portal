@@ -60,6 +60,33 @@ var acquireDaemonLock = state.AcquireDaemonLock
 // kernel on process exit; no explicit close is required or desired.
 var daemonLockFile *os.File
 
+// selfSupervisionHysteresisTicks is the number of consecutive ticks
+// the daemon must observe a failing saver-membership probe before
+// self-ejecting (Component D, spec § Component D — Daemon
+// Self-Supervision Against the Saver Session).
+//
+// Scenarios measured (real tmux 3.6b, real `portal state daemon`
+// subprocess on darwin/arm64, 5 runs each, sampled at 1s TickerPeriod):
+//
+//  1. Steady-state (no interaction, 30s window)       max=0 ticks
+//  2. Attach/detach cycles (15s window)               max=0 ticks
+//  3. client-attached hook fires (15s window)         max=0 ticks
+//  4. Bootstrap kill-and-recreate (10s window)        max=0 ticks
+//
+// max-observed × 2 safety factor                       → 0 ticks
+// Clamped to [3, 9]                                    → 3 ticks
+// upstream-defect flag (max×2 > 5)                     → false
+//
+// Measured 2026-05-23, binary version "dev" (from `go build .`).
+// Memo path (relative to repo root):
+//
+//	.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/component-d-hysteresis-measurement.md
+//
+// Harness: cmd/state_daemon_hysteresis_measurement_test.go (build tag
+// `integration`, re-runnable to verify the safety-factor invariant;
+// assertion fires loudly on regression).
+const selfSupervisionHysteresisTicks = 3
+
 // defaultDaemonRun is the production daemon body: a 1-second ticker that fires
 // captures when the dirty flag is set or the 30-second max-gap has elapsed,
 // returning to delegate the final flush to daemonShutdownFunc on ctx-cancel.
