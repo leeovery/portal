@@ -10,8 +10,9 @@
 // but exercises the self-eject path rather than the externally-SIGKILLed
 // path):
 //
-//  1. SkipIfNoTmux + StagePortalBinary + applyHostNoiseMitigation +
-//     isolated state dir via portaltest.NewIsolatedStateEnv. The
+//  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
+//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot). The
 //     PORTAL_STATE_DIR env override pins the daemon's state writes to
 //     the per-test temp dir.
 //  2. Stand up an isolated tmux server via tmuxtest.New. Crucially we do
@@ -117,13 +118,10 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	// Host-noise mitigation MUST run BEFORE portaltest.NewIsolatedStateEnv
-	// so the backstop targets a quiet tempdir rather than the
-	// developer's live ~/.config/portal/state/. See the twin helper in
-	// cmd/bootstrap/orphan_sweep_integration_test.go for the full
-	// rationale.
-	applyHostNoiseMitigation(t)
-
+	// portaltest.NewIsolatedStateEnv folds in the HOME=<tempdir> /
+	// XDG_CONFIG_HOME="" host-noise scrub before its pre-snapshot, so
+	// the backstop targets a quiet tempdir rather than the developer's
+	// live ~/.config/portal/state/.
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -422,8 +420,6 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	applyHostNoiseMitigation(t)
-
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -650,27 +646,6 @@ func readPortalLogSafe(stateDir string) string {
 	return string(data)
 }
 
-// applyHostNoiseMitigation re-points HOME at a fresh tempdir and clears
-// XDG_CONFIG_HOME from the test process env BEFORE
-// portaltest.NewIsolatedStateEnv runs its pre-snapshot. Without this,
-// a developer's live `portal state daemon` writing to
-// ~/.config/portal/state/ during the test window would mutate the
-// snapshot's pre-state and false-positive-trip the backstop's
-// post-test delta check.
-//
-// Inlined here rather than imported because the canonical twin helpers
-// live in `package bootstrap_test` and `package tmux_test`
-// (cmd/bootstrap/orphan_sweep_integration_test.go,
-// internal/tmux/portal_saver_endstate_integration_test.go) — both
-// unexported, neither accessible from `package cmd_test`. This file is
-// the first cmd_test consumer of portaltest.NewIsolatedStateEnv and
-// owns its own copy of the helper.
-func applyHostNoiseMitigation(t *testing.T) {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
-}
-
 // Compile-time guard: ensure selfEjectExitPollTick is referenced so a
 // future refactor that adds a poll-loop body cannot silently drop it.
 var _ = selfEjectExitPollTick
@@ -709,9 +684,10 @@ const firstFailingTickObservationWindow = 1200 * time.Millisecond
 // absent-saver setup but pivots on the scrollback dir snapshot
 // rather than the exit-code / log-marker assertions):
 //
-//  1. SkipIfNoTmux + StagePortalBinary + applyHostNoiseMitigation +
-//     isolated state dir. daemon.pid staged absent (Component C's
-//     pre-check proceeds).
+//  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
+//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot).
+//     daemon.pid staged absent (Component C's pre-check proceeds).
 //  2. Stand up an isolated tmux server WITHOUT _portal-saver — the
 //     per-tick saver-membership probe will return false on every
 //     tick from probe 1 onward.
@@ -750,8 +726,6 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 	if err != nil {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
-
-	applyHostNoiseMitigation(t)
 
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -968,8 +942,9 @@ const legitimateColdStartLockAcquireBudget = 1500 * time.Millisecond
 //
 // Choreography:
 //
-//  1. SkipIfNoTmux + StagePortalBinary + applyHostNoiseMitigation +
-//     isolated state dir via portaltest.NewIsolatedStateEnv. The
+//  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
+//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot). The
 //     PORTAL_STATE_DIR + PORTAL_LOG_LEVEL env vars are set on the
 //     test process so the tmux server (auto-started by the first
 //     sock.Run invocation downstream) inherits them, and panes
@@ -1013,10 +988,10 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	// Host-noise mitigation BEFORE NewIsolatedStateEnv so the backstop
-	// targets a quiet tempdir rather than the developer's live state.
-	applyHostNoiseMitigation(t)
-
+	// NewIsolatedStateEnv folds in the HOME=<tempdir> /
+	// XDG_CONFIG_HOME="" host-noise scrub before its pre-snapshot so
+	// the backstop targets a quiet tempdir rather than the developer's
+	// live state.
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 
 	// Env propagation: t.Setenv on the test process applies to every

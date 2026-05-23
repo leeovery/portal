@@ -126,28 +126,50 @@ func TestRemovesEmptyPreExistingXDGConfigHome(t *testing.T) {
 	}
 }
 
-// TestPreservesHomeAndPath spot-checks that unrelated env entries
-// (HOME, PATH) are preserved from os.Environ(). The helper must only
-// touch XDG_CONFIG_HOME.
-func TestPreservesHomeAndPath(t *testing.T) {
-	wantHome := os.Getenv("HOME")
+// TestPreservesPath spot-checks that unrelated env entries (PATH) are
+// preserved verbatim from os.Environ(). HOME is intentionally NOT
+// preserved — the folded-in host-noise mitigation re-points HOME at
+// a fresh t.TempDir(); see TestNeutralizesHomeAndXDGConfigHome for
+// the assertion of the new contract.
+func TestPreservesPath(t *testing.T) {
 	wantPath := os.Getenv("PATH")
 
 	env, _ := portaltest.NewIsolatedStateEnv(t)
 
-	gotHome, okHome := envValue(env, "HOME")
-	if !okHome {
-		t.Fatalf("HOME missing from returned env")
-	}
-	if gotHome != wantHome {
-		t.Errorf("HOME mutated: got %q want %q", gotHome, wantHome)
-	}
 	gotPath, okPath := envValue(env, "PATH")
 	if !okPath {
 		t.Fatalf("PATH missing from returned env")
 	}
 	if gotPath != wantPath {
 		t.Errorf("PATH mutated: got %q want %q", gotPath, wantPath)
+	}
+}
+
+// TestNeutralizesHomeAndXDGConfigHome asserts the folded-in host-noise
+// mitigation: NewIsolatedStateEnv must re-point HOME at a fresh
+// tempdir (NOT the developer's real HOME) and the t.Setenv contract
+// guarantees the prior value is restored on cleanup. This pins the
+// "callers cannot forget the ordering invariant" guarantee that
+// motivated folding the mitigation into the helper.
+func TestNeutralizesHomeAndXDGConfigHome(t *testing.T) {
+	priorHome := os.Getenv("HOME")
+
+	_, _ = portaltest.NewIsolatedStateEnv(t)
+
+	// HOME on the test process env (where the backstop's
+	// resolveDevStateDir reads from) must NOT equal the prior HOME —
+	// the helper has scrubbed it to a fresh t.TempDir.
+	gotHome := os.Getenv("HOME")
+	if gotHome == priorHome {
+		t.Fatalf("HOME not scrubbed: still %q (helper must re-point at a fresh tempdir)", gotHome)
+	}
+	if gotHome == "" {
+		t.Fatalf("HOME scrubbed to empty; helper must point at a tempdir, not unset")
+	}
+	// XDG_CONFIG_HOME on the test process env must be empty (cleared)
+	// so resolveDevStateDir falls back to $HOME/.config.
+	if got := os.Getenv("XDG_CONFIG_HOME"); got != "" {
+		t.Fatalf("XDG_CONFIG_HOME not cleared on test process env: got %q", got)
 	}
 }
 

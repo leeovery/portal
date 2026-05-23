@@ -17,10 +17,11 @@ package tmux_test
 // spec calls out — orphan is a live `portal state daemon` writing to
 // the test's state directory but is NOT the saver pane process):
 //
-//  1. tmuxtest.SkipIfNoTmux + applyHostNoiseMitigation + isolated state
-//     dir via portaltest.NewIsolatedStateEnv. PORTAL_STATE_DIR is
-//     pushed to the test process env so any subprocess we spawn
-//     inherits it.
+//  1. tmuxtest.SkipIfNoTmux + isolated state dir via
+//     portaltest.NewIsolatedStateEnv (which folds in the host-noise
+//     scrub — HOME=<tempdir>, XDG_CONFIG_HOME="" — before its
+//     pre-snapshot). PORTAL_STATE_DIR is pushed to the test process
+//     env so any subprocess we spawn inherits it.
 //  2. Stand up an isolated tmux server via tmuxtest.New. Create a
 //     regular `work` session so the daemon's captureAndCommit has at
 //     least one pane to enumerate (otherwise the daemon ticks but
@@ -143,8 +144,6 @@ const postExitSettleWindow = 200 * time.Millisecond
 func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)

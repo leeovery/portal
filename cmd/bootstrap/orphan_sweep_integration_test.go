@@ -33,12 +33,12 @@
 //   daemons. On a dev box running a live `portal state daemon`
 //   against `~/.config/portal/state/`, that live daemon mutates
 //   files in the snapshot window — producing a false-positive
-//   backstop failure that has nothing to do with the test. We
-//   neutralise via `applyHostNoiseMitigation` (HOME=<tempdir>,
-//   XDG_CONFIG_HOME="") BEFORE NewIsolatedStateEnv so the backstop
-//   targets a quiet tempdir. PORTAL_STATE_DIR is then set on the
-//   test process so every subprocess (tmux server, daemons) inherits
-//   the per-test isolated dir.
+//   backstop failure that has nothing to do with the test. The
+//   helper folds the HOME=<tempdir> / XDG_CONFIG_HOME="" scrub in
+//   internally (BEFORE its pre-snapshot) so the backstop targets a
+//   quiet tempdir. PORTAL_STATE_DIR is then set on the test process
+//   so every subprocess (tmux server, daemons) inherits the per-test
+//   isolated dir.
 //
 // No t.Parallel: the cmd-package convention (mock-injection via
 // package-level mutable state cleaned up by t.Cleanup) applies here
@@ -103,8 +103,6 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	tmuxtest.SkipIfNoTmux(t)
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -208,8 +206,6 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	applyHostNoiseMitigation(t)
-
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -284,8 +280,6 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -407,23 +401,6 @@ func (l *captureLogger) allEntries() []string {
 		out = append(out, "ERROR: "+m)
 	}
 	return out
-}
-
-// applyHostNoiseMitigation re-points HOME at a fresh tempdir and
-// removes XDG_CONFIG_HOME from the test process env BEFORE
-// portaltest.NewIsolatedStateEnv runs its pre-snapshot. See the
-// twin helper in internal/tmux/portal_saver_endstate_integration_test.go
-// for the full rationale: this prevents a live host daemon (the
-// developer's real `portal state daemon`) from false-positive-
-// tripping the backstop by mutating the host's real state dir
-// during the test window.
-//
-// Inlined here rather than imported because that twin lives in
-// `package tmux_test` — unexported.
-func applyHostNoiseMitigation(t *testing.T) {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
 }
 
 // skipIfNoPgrep skips the test cleanly when `pgrep` is not on PATH.

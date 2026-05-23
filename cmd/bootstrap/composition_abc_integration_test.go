@@ -64,9 +64,10 @@
 // Tmux teardown is automatic via tmuxtest.New's t.Cleanup hook.
 // Fingerprint-diff backstop runs automatically via portaltest.
 //
-// Host-noise mitigation: applyHostNoiseMitigation runs BEFORE
-// portaltest.NewIsolatedStateEnv so the backstop targets a quiet
-// tempdir rather than the developer's live state dir.
+// Host-noise mitigation: portaltest.NewIsolatedStateEnv folds the
+// HOME=<tempdir> / XDG_CONFIG_HOME="" scrub in internally (BEFORE
+// its pre-snapshot) so the backstop targets a quiet tempdir rather
+// than the developer's live state dir.
 //
 // No t.Parallel: the cmd-package convention applies.
 
@@ -118,8 +119,6 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)

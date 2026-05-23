@@ -25,7 +25,7 @@
 //
 // Shared scaffolding reused from composition_abc / orphan_sweep /
 // upgrade_path tests in this same _test package:
-//   - applyHostNoiseMitigation, skipIfNoPgrep, registerSubprocessCleanup
+//   - skipIfNoPgrep, registerSubprocessCleanup
 //   - waitForSaverPanePID, waitForDaemonPID, waitForPgrepCount
 //   - pgrepPortalDaemonPIDs, pidAlive
 //
@@ -163,17 +163,19 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	//
 	// Ordering note: portalbintest.StagePortalBinary runs `go build`,
 	// which resolves the Go module cache from $HOME/go/pkg/mod when
-	// GOMODCACHE is unset. applyHostNoiseMitigation re-points HOME at
-	// a fresh t.TempDir, so staging BEFORE host-noise mitigation keeps
+	// GOMODCACHE is unset. portaltest.NewIsolatedStateEnv re-points
+	// HOME at a fresh t.TempDir internally (as part of its folded-in
+	// host-noise scrub), so staging BEFORE NewIsolatedStateEnv keeps
 	// `go build` against the developer's real (writable, populated)
 	// module cache. Staging AFTER would populate a read-only module
 	// cache under the tempdir that t.TempDir cleanup cannot remove.
 	tmuxtest.SkipIfNoTmux(t)
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
-	applyHostNoiseMitigation(t)
 
-	// Step 2: isolated env + stateDir. The portaltest backstop fires
+	// Step 2: isolated env + stateDir. NewIsolatedStateEnv folds in
+	// the HOME=<tempdir> / XDG_CONFIG_HOME="" host-noise scrub before
+	// snapshotting the dev state dir. The portaltest backstop fires
 	// post-test to catch any leakage from the spawned daemons.
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)

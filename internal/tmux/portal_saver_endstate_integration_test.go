@@ -43,9 +43,9 @@ package tmux_test
 // test — producing a false-positive backstop failure that has nothing
 // to do with the test's own behaviour.
 //
-// We mitigate by `t.Setenv("HOME", <tempdir>)` BEFORE calling
-// `NewIsolatedStateEnv`. With HOME re-pointed at a fresh tempdir and
-// XDG_CONFIG_HOME unset, `resolveDevStateDir` resolves to
+// `NewIsolatedStateEnv` folds in the mitigation: it `t.Setenv`s HOME
+// to a fresh tempdir and clears XDG_CONFIG_HOME BEFORE its
+// pre-snapshot, so `resolveDevStateDir` resolves to
 // `<tempdir>/.config/portal/state` — a path no other process knows
 // about and therefore cannot mutate during the test window. The
 // isolation guarantee (`PORTAL_STATE_DIR` on the test process and
@@ -101,26 +101,6 @@ const endStatePollTick = 50 * time.Millisecond
 // BootstrapPortalSaver has returned) is observed.
 const lockLoserCascadeWindow = 2500 * time.Millisecond
 
-// applyHostNoiseMitigation re-points HOME at a fresh tempdir and
-// removes XDG_CONFIG_HOME from the test process env BEFORE
-// portaltest.NewIsolatedStateEnv runs its pre-snapshot. See the
-// file-header comment for the rationale: this prevents a live host
-// daemon (the developer's real `portal state daemon`) from
-// false-positive-tripping the backstop by mutating the host's real
-// state directory during the test window.
-//
-// Order matters: HOME and XDG_CONFIG_HOME must be re-pointed BEFORE
-// NewIsolatedStateEnv is called so resolveDevStateDir sees the
-// neutralised env. Calling this after the helper has snapshotted is
-// a no-op for the backstop's target path.
-func applyHostNoiseMitigation(t *testing.T) {
-	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
-	// t.Setenv to "" is functionally equivalent to "unset" for the
-	// resolveDevStateDir precedence (`if xdg != ""`).
-}
-
 // TestBootstrapPortalSaver_CleanBootstrap_EndState exercises spec §
 // Component F Acceptance criteria bullets 1–2: a clean bootstrap (no
 // prior saver, no competing daemon) produces a `_portal-saver` session
@@ -130,16 +110,16 @@ func applyHostNoiseMitigation(t *testing.T) {
 //
 // Flow:
 //  1. Skip if tmux not on PATH or portal binary build fails.
-//  2. Apply host-noise mitigation (HOME=<tempdir>) BEFORE staging the
-//     isolated state env, so the backstop snapshots a quiet tempdir
-//     path rather than the developer's live ~/.config/portal/state/.
-//  3. Stage isolated state dir via portaltest.NewIsolatedStateEnv. Set
+//  2. Stage isolated state dir via portaltest.NewIsolatedStateEnv
+//     (which folds in the HOME=<tempdir> / XDG_CONFIG_HOME="" scrub
+//     before its pre-snapshot, so the backstop targets a quiet
+//     tempdir rather than the developer's live state). Set
 //     PORTAL_STATE_DIR on the test process so the tmux server (and
 //     the daemon it spawns) inherits the isolated dir.
-//  4. Stand up an isolated tmux server via tmuxtest.New.
-//  5. Pre-condition: assert _portal-saver is absent.
-//  6. Invoke BootstrapPortalSaver(client, stateDir). Must return nil.
-//  7. Poll observable end-state (≤2s):
+//  3. Stand up an isolated tmux server via tmuxtest.New.
+//  4. Pre-condition: assert _portal-saver is absent.
+//  5. Invoke BootstrapPortalSaver(client, stateDir). Must return nil.
+//  6. Poll observable end-state (≤2s):
 //     - HasSession(PortalSaverName) returns true.
 //     - show-options destroy-unattached contains "off".
 //     - pane PID resolves to a `portal state daemon` argv via ps.
@@ -149,14 +129,13 @@ func TestBootstrapPortalSaver_CleanBootstrap_EndState(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	applyHostNoiseMitigation(t)
-
-	// Isolated state dir + backstop. The returned env slice is not used
-	// because the daemon is spawned by the tmux server (not directly by
-	// the test), so PORTAL_STATE_DIR on the test process env is the
-	// propagation channel that reaches both. The backstop registered by
-	// NewIsolatedStateEnv still fires on test exit — now targeted at the
-	// quiet tempdir HOME, not the developer's live state dir.
+	// Isolated state dir + backstop. NewIsolatedStateEnv folds in the
+	// HOME=<tempdir> / XDG_CONFIG_HOME="" host-noise scrub before its
+	// pre-snapshot, so the backstop targets a quiet tempdir rather
+	// than the developer's live state dir. The returned env slice is
+	// not used because the daemon is spawned by the tmux server (not
+	// directly by the test), so PORTAL_STATE_DIR on the test process
+	// env is the propagation channel that reaches both.
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -300,8 +279,6 @@ func TestBootstrapPortalSaver_CleanBootstrap_EndState(t *testing.T) {
 func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
@@ -474,8 +451,6 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 func TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)

@@ -16,11 +16,22 @@ import (
 // the spawned process resolves XDG_CONFIG_HOME — and therefore all
 // portal state paths — under the isolated temp directory.
 //
-// The returned env is derived from os.Environ(), filtered to remove
-// any inherited XDG_CONFIG_HOME entry (including XDG_CONFIG_HOME="")
-// and with a single XDG_CONFIG_HOME=<tempDir>/config appended. All
-// other inherited variables (HOME, PATH, etc.) are preserved
-// verbatim.
+// Host-noise mitigation: this helper neutralizes host env noise by
+// re-pointing HOME at a fresh t.TempDir() and clearing
+// XDG_CONFIG_HOME on the test process BEFORE snapshotting the
+// developer's state dir. Without this, a live host `portal state
+// daemon` (the developer's real ~/.config/portal/state/ writer)
+// could mutate the snapshot's pre-state during the test window and
+// false-positive-trip the backstop's post-test delta check. The
+// ordering invariant (env scrub → snapshot → env construction) is
+// folded in here so callers cannot forget it; doing this from the
+// caller is no longer required.
+//
+// The returned env is derived from os.Environ() (post-scrub),
+// filtered to remove any inherited XDG_CONFIG_HOME entry (including
+// XDG_CONFIG_HOME="") and with a single XDG_CONFIG_HOME=<tempDir>/config
+// appended. Other inherited variables (PATH, etc.) are preserved
+// verbatim. HOME in the returned env reflects the scrubbed value.
 //
 // stateDir resolves to <XDG_CONFIG_HOME>/portal/state and is
 // MkdirAll'd before return (0o700) so callers that immediately stat
@@ -38,11 +49,21 @@ import (
 func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
 
+	// Host-noise mitigation: re-point HOME at a fresh tempdir and
+	// clear XDG_CONFIG_HOME on the test process BEFORE the snapshot
+	// runs. t.Setenv registers a Cleanup that restores the prior
+	// values, so the dev's real env is intact after the test exits.
+	// Setting XDG_CONFIG_HOME to "" is functionally equivalent to
+	// "unset" for resolveDevStateDir's precedence (`if xdg != ""`).
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+
 	// Capture the developer's real state-dir path and snapshot it
-	// BEFORE mutating any env. The snapshot resolves XDG_CONFIG_HOME
-	// via the live test-process env so the backstop targets the
-	// developer's actual install — not the temp dir the helper is
-	// about to construct. A failure to snapshot is fatal: a silently
+	// AFTER the host-noise scrub but BEFORE constructing the
+	// isolated env. With HOME re-pointed at a fresh tempdir and
+	// XDG_CONFIG_HOME cleared, resolveDevStateDir returns
+	// <tempdir>/.config/portal/state — a quiet path no live host
+	// daemon writes to. A failure to snapshot is fatal: a silently
 	// degraded backstop is worse than no backstop.
 	devStateDir := resolveDevStateDir()
 	var preSnapshot map[string]Fingerprint

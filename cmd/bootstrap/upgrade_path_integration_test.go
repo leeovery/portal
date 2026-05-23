@@ -132,8 +132,6 @@ func TestUpgradePath_TwoBinary_AllComponentsCompose(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	applyHostNoiseMitigation(t)
-
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -262,8 +260,6 @@ func TestUpgradePath_ComponentC_IsolatedRefusesCleanly(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	applyHostNoiseMitigation(t)
-
 	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
@@ -338,8 +334,6 @@ func TestUpgradePath_PostBootstrap_FreshAcquireDaemonLockRefuses(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
-
-	applyHostNoiseMitigation(t)
 
 	_, stateDir := portaltest.NewIsolatedStateEnv(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
