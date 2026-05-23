@@ -168,6 +168,13 @@ type StaleCleaner interface {
 // failures emit via Error before the orchestrator returns the wrapped
 // *FatalError so the same line lands in portal.log via ComponentBootstrap
 // as well as on stderr at the top-level Execute path.
+// The four methods correspond exactly to the severities the Orchestrator
+// itself emits at step boundaries — step-entry Debug, best-effort INFO
+// (notably Component B's "sweep: killed orphan daemon pid=%d" entry),
+// degrade-and-continue Warn, fatal Error. Adding a fifth method (Trace,
+// Fatal, etc.) requires a corresponding new emission site inside Run; do
+// not widen this interface speculatively because every implementer
+// (noopLogger, *state.Logger, test recorders) must satisfy the full set.
 type Logger interface {
 	Debug(component, format string, args ...any)
 	Info(component, format string, args ...any)
