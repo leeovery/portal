@@ -38,6 +38,22 @@ import (
 func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
 
+	// Capture the developer's real state-dir path and snapshot it
+	// BEFORE mutating any env. The snapshot resolves XDG_CONFIG_HOME
+	// via the live test-process env so the backstop targets the
+	// developer's actual install — not the temp dir the helper is
+	// about to construct. A failure to snapshot is fatal: a silently
+	// degraded backstop is worse than no backstop.
+	devStateDir := resolveDevStateDir()
+	var preSnapshot map[string]fileFingerprint
+	if devStateDir != "" {
+		snap, err := snapshotStateDir(devStateDir)
+		if err != nil {
+			t.Fatalf("portaltest: snapshot dev state dir %s: %v", devStateDir, err)
+		}
+		preSnapshot = snap
+	}
+
 	tempDir := t.TempDir()
 	configDir := filepath.Join(tempDir, "config")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
@@ -52,7 +68,37 @@ func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string) {
 	env = filterXDGConfigHome(os.Environ())
 	env = append(env, "XDG_CONFIG_HOME="+configDir)
 
+	// Backstop: on test exit, walk the dev state dir again and fail
+	// the host *testing.T if anything diverged from the pre-snapshot.
+	// Skips when devStateDir was unresolvable (HOME unset) — the
+	// env override is then the sole defence, which is acceptable in
+	// CI containers that have no $HOME.
+	if devStateDir != "" {
+		installBackstopCleanup(t, devStateDir, preSnapshot)
+	}
+
 	return env, stateDir
+}
+
+// backstopT narrows the *testing.T surface to exactly what
+// installBackstopCleanup needs: Cleanup(fn) to register the
+// post-test hook, and Errorf(format, args...) to surface a
+// detected mutation. The narrow interface lets a fake recorder
+// drive installBackstopCleanup in unit tests without constructing
+// a real *testing.T.
+type backstopT interface {
+	Cleanup(fn func())
+	Errorf(format string, args ...any)
+}
+
+// installBackstopCleanup registers a t.Cleanup that re-snapshots
+// devStateDir on test exit and calls t.Errorf for every delta
+// against pre. Pure wiring — the diff logic lives in
+// reportStateDirDelta and is exercised independently.
+func installBackstopCleanup(t backstopT, devStateDir string, pre map[string]fileFingerprint) {
+	t.Cleanup(func() {
+		reportStateDirDelta(t.Errorf, devStateDir, pre)
+	})
 }
 
 // filterXDGConfigHome returns a copy of env with every entry whose

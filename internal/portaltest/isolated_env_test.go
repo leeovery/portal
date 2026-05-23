@@ -17,6 +17,30 @@ import (
 	"github.com/leeovery/portal/internal/portaltest"
 )
 
+// TestMain redirects HOME and XDG_CONFIG_HOME at process start so
+// the fingerprint backstop registered by NewIsolatedStateEnv targets
+// a hermetic temp directory, never the developer's real
+// ~/.config/portal/state/. Without this hook, running this package's
+// own test suite on a machine with a live `portal state daemon`
+// would race the daemon's tick writes and the backstop would flag
+// legitimate dev-install mutation as a test failure.
+//
+// Per-test t.Setenv would also work but is fragile — TestMain
+// applies the redirect once for the whole binary, including any
+// future tests added to the package.
+func TestMain(m *testing.M) {
+	sandbox, err := os.MkdirTemp("", "portaltest-self-sandbox-*")
+	if err != nil {
+		panic("portaltest: mkdir sandbox: " + err.Error())
+	}
+	defer func() { _ = os.RemoveAll(sandbox) }()
+
+	_ = os.Setenv("HOME", sandbox)
+	_ = os.Setenv("XDG_CONFIG_HOME", filepath.Join(sandbox, "config"))
+
+	os.Exit(m.Run())
+}
+
 // envValue extracts the value for KEY from an env slice, returning
 // ("", false) when the key is absent. Used to assert presence/absence
 // and exact value of XDG_CONFIG_HOME without leaking ordering details.
