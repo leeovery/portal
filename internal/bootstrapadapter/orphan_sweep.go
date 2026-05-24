@@ -11,8 +11,6 @@ package bootstrapadapter
 // to a single file lets the rest of internal/bootstrapadapter stay focused.
 
 import (
-	"errors"
-
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -43,7 +41,7 @@ func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.Orpha
 }
 
 // saverPanePID reads the first pane PID of `_portal-saver` via
-// tmux.SaverPanePID.
+// tmux.SaverPanePIDOrAbsent.
 //
 // Three observable shapes:
 //
@@ -51,23 +49,27 @@ func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.Orpha
 //   - (0, nil) when `_portal-saver` is absent on the live tmux server
 //     (tmux.ErrNoSuchSession) OR present but reports zero panes
 //     (tmux.ErrEmptyPaneList). The orphan-sweep core treats both as
-//     "legitimate set empty" and sweeps the full pgrep result.
+//     "legitimate set empty" and sweeps the full pgrep result. The
+//     sentinel collapse is centralized in tmux.SaverPanePIDOrAbsent so
+//     this adapter and Component D's saver-membership probe share one
+//     definition of "absent".
 //   - (0, err) on any other failure path (generic exec failure,
 //     tmux.ErrPanePIDParse). The core logs the wrapped error via
 //     Logger.Warn and proceeds against the full pgrep result.
 //
 // The HasSession pre-check is intentionally omitted: tmux.SaverPanePID
 // classifies absent-session errors as tmux.ErrNoSuchSession via the
-// wrapNoSuchSession helper, which we collapse to (0, nil) here. Skipping
-// the pre-check also closes the small HasSession→list-panes race window
-// in which the saver could be destroyed between the two calls.
+// wrapNoSuchSession helper, which SaverPanePIDOrAbsent collapses to
+// (0, false, nil). Skipping the pre-check also closes the small
+// HasSession→list-panes race window in which the saver could be
+// destroyed between the two calls.
 func saverPanePID(client *tmux.Client) (int, error) {
-	pid, err := tmux.SaverPanePID(client, tmux.PortalSaverName)
+	pid, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
 	if err != nil {
-		if errors.Is(err, tmux.ErrNoSuchSession) || errors.Is(err, tmux.ErrEmptyPaneList) {
-			return 0, nil
-		}
 		return 0, err
+	}
+	if !present {
+		return 0, nil
 	}
 	return pid, nil
 }

@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -61,4 +62,35 @@ func SaverPanePID(c *Client, sessionName string) (int, error) {
 		return pid, nil
 	}
 	return 0, fmt.Errorf("list-panes -t %s: %w", sessionName, ErrEmptyPaneList)
+}
+
+// SaverPanePIDOrAbsent is a thin wrapper over SaverPanePID that centralizes
+// the "session absent or pane list empty → absent" sentinel collapse used by
+// both bootstrap step 4's orphan-sweep adapter and Component D's
+// saver-membership probe.
+//
+// Return shape:
+//
+//   - (pid, true, nil)  — SaverPanePID succeeded.
+//   - (0,   false, nil) — SaverPanePID returned ErrNoSuchSession or
+//     ErrEmptyPaneList. Both shapes are observably equivalent ("no live
+//     pane to bind to") and both legitimate.
+//   - (0,   false, err) — any other error. Callers decide policy: bootstrap's
+//     orphan-sweep adapter surfaces the error (logged WARN, then proceeds
+//     against the full pgrep result); Component D's probe treats it as
+//     absent (per spec § Component D self-check sequence "treat any error
+//     as absent").
+//
+// The helper exists so the two callers do not independently re-derive the
+// sentinel set — a future addition (e.g., a new "session in teardown"
+// sentinel) is then applied in one place.
+func SaverPanePIDOrAbsent(c *Client, sessionName string) (pid int, present bool, err error) {
+	pid, err = SaverPanePID(c, sessionName)
+	if err != nil {
+		if errors.Is(err, ErrNoSuchSession) || errors.Is(err, ErrEmptyPaneList) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return pid, true, nil
 }

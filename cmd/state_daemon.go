@@ -84,11 +84,14 @@ var saverMembershipProbe = defaultSaverMembershipProbe
 // sequence steps 1–3:
 //
 //  1. has-session -t =_portal-saver. Any falsy / errored result → "absent".
-//  2. list-panes -t =_portal-saver -F '#{pane_pid}' (via tmux.SaverPanePID).
-//     Any error (including ErrNoSuchSession from the HasSession→list-panes
-//     race, ErrEmptyPaneList, ErrPanePIDParse, or a generic exec failure) →
-//     "absent". Per the spec's "treat any error as absent" rule the probe
-//     never tries to discriminate further than "non-nil error".
+//  2. list-panes -t =_portal-saver -F '#{pane_pid}' (via
+//     tmux.SaverPanePIDOrAbsent — the shared helper that centralizes the
+//     "ErrNoSuchSession / ErrEmptyPaneList → absent" sentinel collapse for
+//     both this probe and bootstrap step 4's orphan-sweep adapter). Per the
+//     spec's "treat any error as absent" rule the probe broadens further:
+//     a non-nil err return (e.g., ErrPanePIDParse, a generic exec failure)
+//     is also treated as "absent". The helper's (pid, present, err) shape
+//     is collapsed here into a single bool.
 //  3. Compare the returned pid to selfPID. Match → true ("legitimate
 //     daemon"); mismatch → false ("orphan daemon — another process owns
 //     the saver pane").
@@ -100,8 +103,8 @@ func defaultSaverMembershipProbe(c *tmux.Client, selfPID int) bool {
 	if !c.HasSession(tmux.PortalSaverName) {
 		return false
 	}
-	pid, err := tmux.SaverPanePID(c, tmux.PortalSaverName)
-	if err != nil {
+	pid, present, err := tmux.SaverPanePIDOrAbsent(c, tmux.PortalSaverName)
+	if err != nil || !present {
 		return false
 	}
 	return pid == selfPID
