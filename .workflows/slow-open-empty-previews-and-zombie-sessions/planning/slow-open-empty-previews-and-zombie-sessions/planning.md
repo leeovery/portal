@@ -214,3 +214,21 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-7-4 | Collapse duplicated identify/read-PID seam pairs in portal_saver.go | 4 seams → 2, package-level seam count 12 → 10, kill-barrier and readiness-barrier scenarios stage distinct outcomes through unified seam |
 | slow-open-empty-previews-and-zombie-sessions-7-5 | Colocate WriteVersionFile with WritePIDFile in defaultDaemonRun | AST adjacency invariant preserved, lock → pidfile → versionfile sequence, error-handling parity, regression test for versionfile presence |
 | slow-open-empty-previews-and-zombie-sessions-7-6 | Document the bootstrap.Logger four-method contract | godoc above Logger interface, explicit warning against adding fifth method without emission site, `go vet` passes |
+
+### Phase 8: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-8-1 | Replace local fingerprint helpers in composition_e2e_self_eject_integration_test.go with portaltest helpers | five local helpers removed, call site uses portaltest.DiffFingerprints + portaltest.FormatDelta, integration test passes, ≥100 LOC net reduction |
+| slow-open-empty-previews-and-zombie-sessions-8-2 | Collapse SaverPanePID and FirstPanePIDInSession into one helper | -s flag load-bearing audit, FirstPanePIDInSession removed, orphan_sweep uses errors.Is for ErrNoSuchSession/ErrEmptyPaneList, redundant HasSession pre-check removed |
+| slow-open-empty-previews-and-zombie-sessions-8-3 | Unify the pgrep-portal-daemon regex pattern and enumeration helper | exported state.PortalDaemonArgvPattern, regex declared exactly once, portaltest.PgrepPortalDaemons mirrors exit-1+empty-stdout, test local helpers deleted |
+| slow-open-empty-previews-and-zombie-sessions-8-4 | Unify recordingLogger and captureLogger into a single Logger fake | allEntries() spans four level slices, captureLogger deleted, all call sites migrated, ~-45 LOC |
+| slow-open-empty-previews-and-zombie-sessions-8-5 | Replace sorted-map-keys helpers with slices.Sorted + maps.Keys | three helpers removed across three integration test files, idiomatic Go 1.21+ usage |
+| slow-open-empty-previews-and-zombie-sessions-8-6 | Consolidate portal_saver.go seams into seam structs with one setter idiom | identify clusters (kill-barrier, readiness, version), bundle into structs, single uniform setter idiom, tests swap structs atomically |
+| slow-open-empty-previews-and-zombie-sessions-8-7 | Rename killBarrierLogger to saverBarrierLogger | rename setter and interface in lockstep, update bootstrapadapter wiring, no killBarrierLogger references remain |
+| slow-open-empty-previews-and-zombie-sessions-8-8 | Replace fmt.Sprintf with strconv.Itoa in identifyPS | drop fmt import if no other usage, add strconv import, tests pass |
+| slow-open-empty-previews-and-zombie-sessions-8-9 | Document or split NewIsolatedStateEnv to reflect parent-env mutation | option (a) rename to SetupIsolatedStateEnv preferred for minimal disruption, all callers migrated, tests pass under new name |

@@ -6,7 +6,7 @@ total_proposed: 9
 # Analysis Tasks: slow-open-empty-previews-and-zombie-sessions (Cycle 2)
 
 ## Task 1: Replace local fingerprint helpers in composition_e2e_self_eject_integration_test.go with portaltest helpers
-status: pending
+status: approved
 severity: high
 sources: duplication-c2#1
 
@@ -31,7 +31,7 @@ sources: duplication-c2#1
 **Tests**: Existing self-eject integration test must continue to pass.
 
 ## Task 2: Collapse SaverPanePID and FirstPanePIDInSession into one helper
-status: pending
+status: approved
 severity: medium
 sources: duplication-c2#3, architecture-c2#1
 
@@ -56,7 +56,7 @@ sources: duplication-c2#3, architecture-c2#1
 **Tests**: Existing orphan-sweep and saver-membership tests must continue to pass.
 
 ## Task 3: Unify the pgrep-portal-daemon regex pattern and enumeration helper
-status: pending
+status: approved
 severity: medium
 sources: duplication-c2#2
 
@@ -81,7 +81,7 @@ sources: duplication-c2#2
 **Tests**: Existing orphan-sweep tests must continue to pass.
 
 ## Task 4: Unify recordingLogger and captureLogger into a single Logger fake
-status: pending
+status: approved
 severity: low
 sources: duplication-c2#4
 
@@ -101,7 +101,7 @@ sources: duplication-c2#4
 **Tests**: Existing tests using either fake must continue to pass.
 
 ## Task 5: Replace sorted-map-keys helpers with slices.Sorted + maps.Keys
-status: pending
+status: approved
 severity: low
 sources: duplication-c2#5
 
@@ -120,7 +120,7 @@ sources: duplication-c2#5
 **Tests**: Existing tests must continue to pass.
 
 ## Task 6: Consolidate portal_saver.go seams into seam structs with one setter idiom
-status: pending
+status: approved
 severity: low
 sources: architecture-c2#2
 
@@ -141,7 +141,7 @@ sources: architecture-c2#2
 **Tests**: All existing tests must continue to pass.
 
 ## Task 7: Rename killBarrierLogger to saverBarrierLogger
-status: pending
+status: approved
 severity: low
 sources: architecture-c2#3
 
@@ -162,7 +162,7 @@ sources: architecture-c2#3
 **Tests**: All existing tests must continue to pass.
 
 ## Task 8: Replace fmt.Sprintf("%d", pid) with strconv.Itoa(pid) in identifyPS
-status: pending
+status: approved
 severity: low
 sources: architecture-c2#4
 
@@ -181,7 +181,7 @@ sources: architecture-c2#4
 **Tests**: Existing daemon_identity tests must continue to pass.
 
 ## Task 9: Document or split NewIsolatedStateEnv to reflect parent-env mutation
-status: pending
+status: approved
 severity: low
 sources: architecture-c2#5
 
