@@ -112,7 +112,7 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 	signaler := &statetest.RecordingFIFOSignaler{
 		ErrOn: map[string]error{failPath: sentinel},
 	}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 
 	c := &EagerSignalCore{
 		Markers:  lister,

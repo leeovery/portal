@@ -50,7 +50,6 @@ package bootstrap_test
 
 import (
 	"errors"
-	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -231,7 +230,7 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 		t.Fatalf("NewOrphanSweeper returned %T; want *bootstrap.OrphanSweepCore "+
 			"(needed to inject a recording Logger)", sweeper)
 	}
-	logger := &captureLogger{}
+	logger := &bootstrap.RecordingLogger{}
 	core.Logger = logger
 
 	// 3. Invoke the sweep.
@@ -243,12 +242,12 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 	//    entries. The spec is explicit — this is the load-bearing
 	//    clean-state assertion.
 	const forbidden = "sweep: killed orphan daemon"
-	for _, entry := range logger.allEntries() {
+	for _, entry := range logger.AllEntries() {
 		if strings.Contains(entry, forbidden) {
 			t.Fatalf("clean-state sweep emitted forbidden log entry containing %q\n"+
 				"  entry: %s\n"+
 				"  all entries:\n%s",
-				forbidden, entry, strings.Join(logger.allEntries(), "\n"))
+				forbidden, entry, strings.Join(logger.AllEntries(), "\n"))
 		}
 	}
 
@@ -342,59 +341,6 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 	// Belt-and-braces: the cleanup hook below will SIGKILL the
 	// sleeper. Force-close via the reaper channel to ensure no leak.
 	_ = reaped
-}
-
-// captureLogger is a minimal bootstrap.Logger implementation that
-// records every formatted message and its component tag so tests can
-// assert on the absence (or presence) of specific log entries. It is
-// the same shape as cmd/bootstrap/bootstrap_test.go's recordingLogger
-// but lives here so this _test package does not need to reach across
-// the bootstrap / bootstrap_test package boundary.
-type captureLogger struct {
-	debugs []string
-	infos  []string
-	warns  []string
-	errors []string
-}
-
-// Debug records the formatted DEBUG message.
-func (l *captureLogger) Debug(component, format string, args ...any) {
-	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
-}
-
-// Info records the formatted INFO message.
-func (l *captureLogger) Info(component, format string, args ...any) {
-	l.infos = append(l.infos, fmt.Sprintf(format, args...))
-}
-
-// Warn records the formatted WARN message.
-func (l *captureLogger) Warn(component, format string, args ...any) {
-	l.warns = append(l.warns, fmt.Sprintf(format, args...))
-}
-
-// Error records the formatted ERROR message.
-func (l *captureLogger) Error(component, format string, args ...any) {
-	l.errors = append(l.errors, fmt.Sprintf(format, args...))
-}
-
-// allEntries returns every recorded log entry across all levels in
-// "<level>: <msg>" form, used by failure diagnostics to surface the
-// full audit trail in a single output stream.
-func (l *captureLogger) allEntries() []string {
-	out := make([]string, 0, len(l.debugs)+len(l.infos)+len(l.warns)+len(l.errors))
-	for _, m := range l.debugs {
-		out = append(out, "DEBUG: "+m)
-	}
-	for _, m := range l.infos {
-		out = append(out, "INFO: "+m)
-	}
-	for _, m := range l.warns {
-		out = append(out, "WARN: "+m)
-	}
-	for _, m := range l.errors {
-		out = append(out, "ERROR: "+m)
-	}
-	return out
 }
 
 // skipIfNoPgrep skips the test cleanly when `pgrep` is not on PATH.
@@ -507,6 +453,7 @@ func pidAlive(pid int) bool {
 	return !errors.Is(err, syscall.ESRCH)
 }
 
-// Compile-time guard: captureLogger must satisfy bootstrap.Logger so
-// the Scenario B injection compiles even if the interface gains methods.
-var _ bootstrap.Logger = (*captureLogger)(nil)
+// Compile-time guard: bootstrap.RecordingLogger must satisfy
+// bootstrap.Logger so the Scenario B injection compiles even if the
+// interface gains methods.
+var _ bootstrap.Logger = (*bootstrap.RecordingLogger)(nil)

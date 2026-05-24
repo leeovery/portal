@@ -402,8 +402,8 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		// orchestrator's error channel exclusively carries genuine failures;
 		// the deferral signal moves to portal.log under ComponentBootstrap
 		// via Logger.Warn — asserted in-memory via the package's
-		// recordingLogger fake.
-		logger := &recordingLogger{}
+		// RecordingLogger fake.
+		logger := &RecordingLogger{}
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"protected__0.0": {},
 			"another__1.2":   {},
@@ -761,7 +761,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		// Logger.Warn (component=bootstrap) and CleanStaleMarkers returns
 		// nil — the genuine-failure error channel must not carry the
 		// soft-deferral signal.
-		logger := &recordingLogger{}
+		logger := &RecordingLogger{}
 		lister := &fakeMarkerLister{markers: map[string]struct{}{
 			"a__0.0": {},
 			"b__0.0": {},

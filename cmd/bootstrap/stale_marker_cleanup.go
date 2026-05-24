@@ -53,7 +53,7 @@ const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
 // unconditionally. This mirrors the Orchestrator's Logger contract;
 // the field's interface type matches every other orchestrator step seam
 // (HookRegistrar, FIFOSweeper et al.) so tests inject the same
-// recordingLogger fake used elsewhere in the package.
+// RecordingLogger fake used elsewhere in the package.
 type MarkerCleanupCore struct {
 	// Markers mirrors FIFOSweeper.Client — *tmux.Client satisfies
 	// state.ServerOptionLister directly via ShowAllServerOptions, so no

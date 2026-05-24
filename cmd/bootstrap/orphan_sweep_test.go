@@ -102,7 +102,7 @@ func TestSweepOrphanDaemons_saverAbsentKillsAllIdentifying(t *testing.T) {
 }
 
 func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	sentinel := errors.New("pgrep boom")
 	kill := &recordingKill{}
 
@@ -135,7 +135,7 @@ func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
 }
 
 func TestSweepOrphanDaemons_listPanesErrorTreatsLegitimateEmpty(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	sentinel := errors.New("list-panes boom")
 	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
 	kill := &recordingKill{}
@@ -205,7 +205,7 @@ func TestSweepOrphanDaemons_identifyNotPortalDaemonSkipped(t *testing.T) {
 }
 
 func TestSweepOrphanDaemons_identifyTransientErrorSkipped(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	transient := errors.New("ps malformed output")
 	identify := &recordingIdentify{def: identifyOutcome{err: transient}}
 	kill := &recordingKill{}
@@ -236,7 +236,7 @@ func TestSweepOrphanDaemons_identifyTransientErrorSkipped(t *testing.T) {
 }
 
 func TestSweepOrphanDaemons_killErrorLogsWarnContinues(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
 	killSentinel := errors.New("kill: no such process")
 	kill := &recordingKill{errs: map[int]error{8001: killSentinel}}
@@ -268,7 +268,7 @@ func TestSweepOrphanDaemons_killErrorLogsWarnContinues(t *testing.T) {
 
 func TestSweepOrphanDaemons_cleanStateZeroInfo(t *testing.T) {
 	const legitPID = 9000
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
 	kill := &recordingKill{}
 
@@ -364,7 +364,7 @@ func TestSweepOrphanDaemons_defensiveOwnPIDSkip(t *testing.T) {
 // pgrep returning an empty slice (e.g., exit status 1 with zero matches) must
 // be a clean no-op — no kill calls, no INFO entries, no warnings.
 func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	kill := &recordingKill{}
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{}, nil },
@@ -390,7 +390,7 @@ func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
 // TestSweepOrphanDaemons_emitsKilledOrphanInfo pins acceptance criterion that
 // each successful kill emits the canonical INFO message.
 func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
 	kill := &recordingKill{}
 

@@ -74,9 +74,11 @@
 //     orphan_sweep_integration_test.go) and clean-skips with a
 //     diagnostic reason.
 //
-// Host-noise mitigation, isolated state env, pgrep helpers, captureLogger,
-// and registerSubprocessCleanup are all shared with
+// Host-noise mitigation, isolated state env, pgrep helpers, and
+// registerSubprocessCleanup are all shared with
 // orphan_sweep_integration_test.go in the same `bootstrap_test` package.
+// Logger capture uses `bootstrap.RecordingLogger` (exported from the
+// internal `package bootstrap` test file).
 //
 // No t.Parallel: the cmd-package convention (mock-injection via package-
 // level mutable state cleaned up by t.Cleanup) applies here too.

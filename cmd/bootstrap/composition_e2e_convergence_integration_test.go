@@ -27,12 +27,13 @@
 // Logger capture mechanism:
 //   The production `bootstrapadapter.NewOrphanSweeper(client, *state.Logger)`
 //   takes a concrete `*state.Logger`, not the `bootstrap.Logger`
-//   interface — so we cannot pass a `captureLogger` directly into the
-//   adapter constructor. Instead we mirror the pattern from
-//   TestSweepOrphanDaemons_Integration_CleanStateZeroSignals (this same
-//   _test package): call `NewOrphanSweeper(client, nil)`, type-assert to
-//   `*bootstrap.OrphanSweepCore`, and overwrite the `Logger` field with
-//   a `captureLogger`. The production fields the adapter set (`Pgrep`,
+//   interface — so we cannot pass a `bootstrap.RecordingLogger`
+//   directly into the adapter constructor. Instead we mirror the pattern
+//   from TestSweepOrphanDaemons_Integration_CleanStateZeroSignals (this
+//   same _test package): call `NewOrphanSweeper(client, nil)`,
+//   type-assert to `*bootstrap.OrphanSweepCore`, and overwrite the
+//   `Logger` field with a `bootstrap.RecordingLogger`. The production
+//   fields the adapter set (`Pgrep`,
 //   `SaverPanePID`) are preserved — only the Logger seam is swapped.
 //   `BootstrapPortalSaver` itself does not take a logger (it writes
 //   directly to the package's default state.Logger via portal.log) and
@@ -83,7 +84,7 @@ func TestCompositeBootstrap_ConvergesPgrepToOneWithin6s(t *testing.T) {
 			"(needed to inject a recording Logger for the forbidden-string assertion)",
 			sweeper)
 	}
-	logger := &captureLogger{}
+	logger := &bootstrap.RecordingLogger{}
 	core.Logger = logger
 
 	// Capture `start` IMMEDIATELY before the bootstrap slice fires. The
@@ -171,20 +172,20 @@ func TestCompositeBootstrap_ConvergesPgrepToOneWithin6s(t *testing.T) {
 	// under steady state.
 	const forbiddenNoSuchSession = "no such session: _portal-saver"
 	const forbiddenPriorDaemonExit = "prior daemon did not exit"
-	for _, entry := range logger.allEntries() {
+	for _, entry := range logger.AllEntries() {
 		if strings.Contains(entry, forbiddenNoSuchSession) {
 			t.Fatalf("bootstrap logger emitted forbidden entry containing %q\n"+
 				"  entry: %s\n"+
 				"  all entries:\n%s",
 				forbiddenNoSuchSession, entry,
-				strings.Join(logger.allEntries(), "\n"))
+				strings.Join(logger.AllEntries(), "\n"))
 		}
 		if strings.Contains(entry, forbiddenPriorDaemonExit) {
 			t.Fatalf("bootstrap logger emitted forbidden entry containing %q\n"+
 				"  entry: %s\n"+
 				"  all entries:\n%s",
 				forbiddenPriorDaemonExit, entry,
-				strings.Join(logger.allEntries(), "\n"))
+				strings.Join(logger.AllEntries(), "\n"))
 		}
 	}
 }

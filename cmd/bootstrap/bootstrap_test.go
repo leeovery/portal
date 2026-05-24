@@ -86,16 +86,15 @@ func (r *stepRecorder) CleanStale() error {
 	return r.CleanStaleErr
 }
 
-// recordingLogger captures Debug / Warn / Error invocations so tests can
-// assert that step-entry diagnostics land at DEBUG, best-effort failures land
-// via Warn, and fatal failures land via Error before the orchestrator
-// returns. Entries are the fully formatted message so tests can verify
-// wrapped causes (e.g. step-10 Sweep error) flow through to portal.log
-// unchanged. The parallel component slices (warnComponents, errorComponents,
-// debugComponents) record the component label supplied at each call site so
-// tests can pin component routing (e.g. ComponentBootstrap) without spinning
-// up a real on-disk *state.Logger.
-type recordingLogger struct {
+// RecordingLogger captures Debug / Info / Warn / Error invocations so
+// tests can assert that step-entry diagnostics land at DEBUG, best-effort
+// failures via Warn, and fatal failures via Error. Entries are the fully
+// formatted message so tests can verify wrapped causes flow through to
+// portal.log unchanged. The parallel component slices record the
+// component label supplied at each call site so tests can pin component
+// routing (e.g. ComponentBootstrap) without a real on-disk *state.Logger.
+// Exported so external `package bootstrap_test` tests can share it.
+type RecordingLogger struct {
 	debugs          []string
 	debugComponents []string
 	infos           []string
@@ -106,24 +105,45 @@ type recordingLogger struct {
 	errorComponents []string
 }
 
-func (l *recordingLogger) Debug(component, format string, args ...any) {
+func (l *RecordingLogger) Debug(component, format string, args ...any) {
 	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
 	l.debugComponents = append(l.debugComponents, component)
 }
 
-func (l *recordingLogger) Info(component, format string, args ...any) {
+func (l *RecordingLogger) Info(component, format string, args ...any) {
 	l.infos = append(l.infos, fmt.Sprintf(format, args...))
 	l.infoComponents = append(l.infoComponents, component)
 }
 
-func (l *recordingLogger) Warn(component, format string, args ...any) {
+func (l *RecordingLogger) Warn(component, format string, args ...any) {
 	l.warnings = append(l.warnings, fmt.Sprintf(format, args...))
 	l.warnComponents = append(l.warnComponents, component)
 }
 
-func (l *recordingLogger) Error(component, format string, args ...any) {
+func (l *RecordingLogger) Error(component, format string, args ...any) {
 	l.errors = append(l.errors, fmt.Sprintf(format, args...))
 	l.errorComponents = append(l.errorComponents, component)
+}
+
+// AllEntries returns every recorded log entry across all four levels in
+// "<LEVEL>: <msg>" form for diagnostic output. Levels are emitted in
+// fixed order (DEBUG, INFO, WARN, ERROR), not chronological — sufficient
+// for the audit-log substring assertions that are this method's sole use.
+func (l *RecordingLogger) AllEntries() []string {
+	out := make([]string, 0, len(l.debugs)+len(l.infos)+len(l.warnings)+len(l.errors))
+	for _, m := range l.debugs {
+		out = append(out, "DEBUG: "+m)
+	}
+	for _, m := range l.infos {
+		out = append(out, "INFO: "+m)
+	}
+	for _, m := range l.warnings {
+		out = append(out, "WARN: "+m)
+	}
+	for _, m := range l.errors {
+		out = append(out, "ERROR: "+m)
+	}
+	return out
 }
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
@@ -186,7 +206,7 @@ func TestOrchestratorRun_executesStepsInSpecOrder(t *testing.T) {
 func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 	sentinel := errors.New("server boom")
 	r := &stepRecorder{EnsureServerErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -219,7 +239,7 @@ func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 	sentinel := errors.New("register boom")
 	r := &stepRecorder{RegisterErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -252,7 +272,7 @@ func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testing.T) {
 	sentinel := errors.New("set marker boom")
 	r := &stepRecorder{SetErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -300,7 +320,7 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *testing.T) {
 	sentinel := errors.New("saver boom")
 	r := &stepRecorder{EnsureSaverErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, warnings, err := o.Run(context.Background())
@@ -352,7 +372,7 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *tes
 func TestOrchestratorRun_continuesPastEagerSignalHydrateFailure(t *testing.T) {
 	sentinel := errors.New("eager-signal boom")
 	r := &stepRecorder{EagerSignalHydrateErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -438,7 +458,7 @@ func TestOrchestratorRun_clearsRestoringEvenWhenRestoreFails(t *testing.T) {
 func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 	sentinel := errors.New("clear boom")
 	r := &stepRecorder{ClearErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -467,7 +487,7 @@ func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 func TestOrchestratorRun_continuesPastCleanStaleFailure(t *testing.T) {
 	sentinel := errors.New("clean boom")
 	r := &stepRecorder{CleanStaleErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -567,7 +587,7 @@ func TestOrchestratorRun_doesNotCallEnsureSaverWhenSetFails(t *testing.T) {
 func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T) {
 	sentinel := errors.New("saver boom")
 	r := &stepRecorder{EnsureSaverErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, warnings, err := o.Run(context.Background())
@@ -684,7 +704,7 @@ func TestOrchestratorRun_doesNotReturnFatalErrorForCorruptIndex(t *testing.T) {
 func TestOrchestratorRun_doesNotEscalateNonCorruptRestoreError(t *testing.T) {
 	sentinel := errors.New("restore boom")
 	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -777,7 +797,7 @@ func TestOrchestratorRun_runsSweepBetweenClearAndCleanStale(t *testing.T) {
 func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	sentinel := errors.New("sweep boom")
 	r := &stepRecorder{SweepErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -868,7 +888,7 @@ func TestOrchestratorRun_runsCleanStaleMarkersBetweenClearAndSweep(t *testing.T)
 func TestOrchestratorRun_continuesPastCleanStaleMarkersFailure(t *testing.T) {
 	sentinel := errors.New("clean stale markers boom")
 	r := &stepRecorder{CleanStaleMarkersErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -930,7 +950,7 @@ var _ Runner = (*Orchestrator)(nil)
 // here as well.
 func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
 	r := &stepRecorder{}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	if _, _, err := o.Run(context.Background()); err != nil {
@@ -1039,7 +1059,7 @@ func TestOrchestratorRun_runsSweepOrphanDaemonsBetweenSetAndEnsureSaver(t *testi
 func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
 	sentinel := errors.New("orphan-sweep boom")
 	r := &stepRecorder{SweepOrphanDaemonsErr: sentinel}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	_, _, err := o.Run(context.Background())
@@ -1092,7 +1112,7 @@ func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
 // best-effort steps.
 func TestOrchestratorRun_sweepOrphanDaemonsHappyPathEmitsNoWarn(t *testing.T) {
 	r := &stepRecorder{}
-	logger := &recordingLogger{}
+	logger := &RecordingLogger{}
 	o := newOrchestrator(r, logger)
 
 	if _, _, err := o.Run(context.Background()); err != nil {
