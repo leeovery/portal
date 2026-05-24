@@ -88,9 +88,11 @@ package tmux_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -239,7 +241,7 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 		t.Fatalf("snapshot never taken — pre-SIGKILL snapshot contained no .bin entries\n"+
 			"  scrollback dir: %s\n"+
 			"  pre keys: %v",
-			scrollbackDir, sortedKeys(pre))
+			scrollbackDir, slices.Sorted(maps.Keys(pre)))
 	}
 
 	// LOAD-BEARING STEP 2: SIGKILL the orphan. Direct kill(2) syscall
@@ -306,7 +308,7 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 			"  pre keys (%d): %v\n"+
 			"  post keys (%d): %v\n"+
 			"  delta(s):\n%s",
-			scrollbackDir, len(pre), sortedKeys(pre), len(post), sortedKeys(post),
+			scrollbackDir, len(pre), slices.Sorted(maps.Keys(pre)), len(post), slices.Sorted(maps.Keys(post)),
 			strings.Join(lines, "\n"))
 	}
 }
@@ -357,13 +359,3 @@ func hasAnyBin(snap map[string]portaltest.Fingerprint) bool {
 	return false
 }
 
-// sortedKeys returns snap's keys in lexicographic order for stable
-// failure diagnostics.
-func sortedKeys(snap map[string]portaltest.Fingerprint) []string {
-	out := make([]string, 0, len(snap))
-	for k := range snap {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}

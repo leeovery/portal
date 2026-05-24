@@ -45,8 +45,10 @@ package bootstrap_test
 
 import (
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -202,7 +204,7 @@ func assertPathSetEqual(t *testing.T, baseline, observation map[string]struct{},
 		observationIndex, stabilityObservationCount,
 		len(baseline), len(observation),
 		added, removed,
-		sortedKeys(baseline), sortedKeys(observation),
+		slices.Sorted(maps.Keys(baseline)), slices.Sorted(maps.Keys(observation)),
 		scrollbackDir)
 }
 
@@ -219,13 +221,3 @@ func setDifference(a, b map[string]struct{}) []string {
 	return out
 }
 
-// sortedKeys returns the sorted keys of m. Sorted for deterministic
-// diagnostic output.
-func sortedKeys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}

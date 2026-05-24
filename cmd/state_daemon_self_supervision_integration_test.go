@@ -64,10 +64,11 @@ package cmd_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -867,21 +868,10 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 			"  delta(s):\n%s\n"+
 			"--- portal.log ---\n%s\n"+
 			"--- daemon stderr ---\n%s",
-			scrollbackDir, len(snapBefore), sortedSnapKeys(snapBefore),
-			len(snapAfter), sortedSnapKeys(snapAfter),
+			scrollbackDir, len(snapBefore), slices.Sorted(maps.Keys(snapBefore)),
+			len(snapAfter), slices.Sorted(maps.Keys(snapAfter)),
 			strings.Join(lines, "\n"), logBlob, stderr.String())
 	}
-}
-
-// sortedSnapKeys returns a Fingerprint map's keys in lexicographic
-// order so failure diagnostics are stable across re-runs.
-func sortedSnapKeys(snap map[string]portaltest.Fingerprint) []string {
-	out := make([]string, 0, len(snap))
-	for k := range snap {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // legitimateColdStartHysteresisMirror mirrors cmd.selfSupervisionHysteresisTicks
