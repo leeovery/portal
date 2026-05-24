@@ -552,45 +552,6 @@ func (c *Client) ListPanesInSession(session string) ([]PaneCoord, error) {
 	return coords, nil
 }
 
-// FirstPanePIDInSession returns the process PID of the first pane in the
-// named session via `list-panes -s -t =<session> -F '#{pane_pid}'`. Used
-// by the orphan-daemon sweep adapter (Component B of the
-// slow-open-empty-previews-and-zombie-sessions bugfix) to identify the
-// legitimate `_portal-saver` daemon PID.
-//
-// Three observable shapes:
-//
-//   - (pid, nil) when the session exists with at least one pane whose
-//     pane_pid parses as an integer.
-//   - (0, nil) when the session exists but list-panes returns no panes
-//     (an unusual but possible state — e.g. a session whose only pane is
-//     mid-respawn).
-//   - (0, err) when the underlying tmux call fails (session absent,
-//     transport error) OR the first pane's pane_pid output cannot be
-//     parsed. Callers should treat err as soft: log + degrade rather than
-//     escalate.
-//
-// The "=" prefix forces tmux's exact-match target resolution (see
-// PaneTargetExact / HasSession godoc for the prefix-collision rationale).
-func (c *Client) FirstPanePIDInSession(session string) (int, error) {
-	out, err := c.cmd.Run("list-panes", "-s", "-t", "="+session, "-F", "#{pane_pid}")
-	if err != nil {
-		return 0, fmt.Errorf("list-panes -t %s: %w", session, err)
-	}
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		pid, parseErr := strconv.Atoi(line)
-		if parseErr != nil {
-			return 0, fmt.Errorf("list-panes -t %s: parse pane_pid %q: %w", session, line, parseErr)
-		}
-		return pid, nil
-	}
-	return 0, nil
-}
-
 // WindowGroup is a window's enumeration shape: its raw tmux window_index, its
 // window name (#W), and the raw pane_index values of every pane in the window
 // in ascending order. Returned by ListWindowsAndPanesInSession to give callers

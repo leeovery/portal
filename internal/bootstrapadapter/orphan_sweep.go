@@ -3,9 +3,8 @@ package bootstrapadapter
 // Production adapter for the bootstrap.OrphanSweeper interface — step 4 of
 // the eleven-step bootstrap sequence. The adapter is a thin wrapper that
 // pins the canonical Pgrep form (`pgrep -fx '^portal state daemon( |$)'`)
-// and wires the *tmux.Client's HasSession + FirstPanePIDInSession surface
-// into the (saverPID int, err error) seam shape consumed by
-// *bootstrap.OrphanSweepCore.
+// and wires tmux.SaverPanePID into the (saverPID int, err error) seam
+// shape consumed by *bootstrap.OrphanSweepCore.
 //
 // Lives in its own file (sibling to adapters.go) because the orphan-sweep
 // adapter pulls in os/exec (for the pgrep shell-out) — keeping that import
@@ -109,21 +108,32 @@ func pgrepPortalDaemons() ([]int, error) {
 	return pids, nil
 }
 
-// saverPanePID reads the first pane PID of `_portal-saver` via the
-// *tmux.Client.
+// saverPanePID reads the first pane PID of `_portal-saver` via
+// tmux.SaverPanePID.
 //
 // Three observable shapes:
 //
 //   - (pid, nil) when `_portal-saver` is present with at least one pane.
 //   - (0, nil) when `_portal-saver` is absent on the live tmux server
-//     (HasSession returns false). The orphan-sweep core treats this as
+//     (tmux.ErrNoSuchSession) OR present but reports zero panes
+//     (tmux.ErrEmptyPaneList). The orphan-sweep core treats both as
 //     "legitimate set empty" and sweeps the full pgrep result.
-//   - (0, err) on any other failure path (FirstPanePIDInSession surface
-//     error, pane PID parse failure). The core logs the wrapped error via
+//   - (0, err) on any other failure path (generic exec failure,
+//     tmux.ErrPanePIDParse). The core logs the wrapped error via
 //     Logger.Warn and proceeds against the full pgrep result.
+//
+// The HasSession pre-check is intentionally omitted: tmux.SaverPanePID
+// classifies absent-session errors as tmux.ErrNoSuchSession via the
+// wrapNoSuchSession helper, which we collapse to (0, nil) here. Skipping
+// the pre-check also closes the small HasSession→list-panes race window
+// in which the saver could be destroyed between the two calls.
 func saverPanePID(client *tmux.Client) (int, error) {
-	if !client.HasSession(tmux.PortalSaverName) {
-		return 0, nil
+	pid, err := tmux.SaverPanePID(client, tmux.PortalSaverName)
+	if err != nil {
+		if errors.Is(err, tmux.ErrNoSuchSession) || errors.Is(err, tmux.ErrEmptyPaneList) {
+			return 0, nil
+		}
+		return 0, err
 	}
-	return client.FirstPanePIDInSession(tmux.PortalSaverName)
+	return pid, nil
 }
