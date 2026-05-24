@@ -227,7 +227,7 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 		// and stderr in the failure diagnostic so the failure mode (no
 		// log marker, wrong log marker, looping tick loop, etc.) is
 		// debuggable in one run. SIGKILL via t.Cleanup.
-		logBlob := readPortalLogSafe(stateDir)
+		logBlob := portaltest.ReadPortalLogSafe(stateDir)
 		t.Fatalf("daemon did not exit within %s of Start (pid=%d); spec § Component D "+
 			"requires self-eject within (N+1)*TickerPeriod = ~4 s for N=3, "+
 			"TickerPeriod=1 s\n--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
@@ -241,7 +241,7 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 	// Read portal.log up front so every assertion's diagnostic can cite
 	// it. The daemon's logger flushes on Close at the bottom of RunE; by
 	// the time Wait returned the log file is fully populated.
-	logBlob := readPortalLogSafe(stateDir)
+	logBlob := portaltest.ReadPortalLogSafe(stateDir)
 
 	// Assertion A: exit code == 0. osExit(0) is the spec-mandated eject
 	// primitive (Component D bullet 4.ii). exec.Cmd.Wait returns nil on
@@ -522,7 +522,7 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 			"to reach its tick loop before self-eject can fire\n"+
 			"--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
 			daemonPID, pidPath, lockAcquireBudget, recordedPID,
-			readPortalLogSafe(stateDir), stderr.String())
+			portaltest.ReadPortalLogSafe(stateDir), stderr.String())
 	}
 
 	// Pre-action structural divergence check. If the kernel coincidentally
@@ -552,7 +552,7 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 	case waitErr = <-waitDone:
 		exitInstant = time.Now()
 	case <-deadline.C:
-		logBlob := readPortalLogSafe(stateDir)
+		logBlob := portaltest.ReadPortalLogSafe(stateDir)
 		t.Fatalf("daemon did not exit within %s of Start (pid=%d, panePID=%d); "+
 			"spec § Component D requires self-eject within (N+1)*TickerPeriod "+
 			"= ~4 s for N=3, TickerPeriod=1 s\n"+
@@ -564,7 +564,7 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 	t.Logf("daemon self-eject latency: %s (budget=%s, daemonPID=%d, panePID=%d)",
 		exitLatency, selfEjectExitBudget, daemonPID, panePID)
 
-	logBlob := readPortalLogSafe(stateDir)
+	logBlob := portaltest.ReadPortalLogSafe(stateDir)
 
 	// Assertion A: exit code == 0.
 	if waitErr != nil {
@@ -632,19 +632,6 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 			"in less than ~2-3 s of Start\n--- portal.log ---\n%s",
 			exitLatency, logBlob)
 	}
-}
-
-// readPortalLogSafe reads portal.log under stateDir and returns its
-// contents as a string, or a placeholder describing the read failure.
-// Used in failure diagnostics so the daemon's audit trail is always
-// surfaced in test output without forcing the call site to branch on
-// the read error.
-func readPortalLogSafe(stateDir string) string {
-	data, err := os.ReadFile(state.PortalLog(stateDir))
-	if err != nil {
-		return fmt.Sprintf("(read portal.log failed: %v)", err)
-	}
-	return string(data)
 }
 
 // Compile-time guard: ensure selfEjectExitPollTick is referenced so a
@@ -806,7 +793,7 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 	case waitErr = <-waitDone:
 		exitInstant = time.Now()
 	case <-deadline.C:
-		logBlob := readPortalLogSafe(stateDir)
+		logBlob := portaltest.ReadPortalLogSafe(stateDir)
 		t.Fatalf("daemon did not exit within %s of Start (pid=%d); spec § Component D "+
 			"requires self-eject within (N+1)*TickerPeriod = ~4 s for N=3, "+
 			"TickerPeriod=1 s\n--- portal.log ---\n%s\n--- daemon stderr ---\n%s",
@@ -817,7 +804,7 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 	t.Logf("daemon self-eject latency: %s (budget=%s, pid=%d)",
 		exitLatency, selfEjectExitBudget, daemonPID)
 
-	logBlob := readPortalLogSafe(stateDir)
+	logBlob := portaltest.ReadPortalLogSafe(stateDir)
 
 	// snapAfter: captured immediately after Wait returns. The kernel
 	// has already reaped the process at this point — any final flush
@@ -1035,7 +1022,7 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 	//    (or saverReadinessTimeout = 2 s elapses with a WARN).
 	if err := tmux.BootstrapPortalSaver(client, stateDir); err != nil {
 		t.Fatalf("BootstrapPortalSaver: %v\n--- portal.log ---\n%s",
-			err, readPortalLogSafe(stateDir))
+			err, portaltest.ReadPortalLogSafe(stateDir))
 	}
 
 	// Read daemon.pid post-bootstrap. The readiness barrier should have
@@ -1059,7 +1046,7 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 		t.Fatalf("daemon.pid never populated within %s of BootstrapPortalSaver return; "+
 			"the legitimate cold-start path requires the daemon to publish its PID "+
 			"before the observation window opens\n--- portal.log ---\n%s",
-			legitimateColdStartLockAcquireBudget, readPortalLogSafe(stateDir))
+			legitimateColdStartLockAcquireBudget, portaltest.ReadPortalLogSafe(stateDir))
 	}
 
 	// Confirm the structural binding: daemon.pid == _portal-saver pane
@@ -1078,7 +1065,7 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 			"pane process; any mismatch here means BootstrapPortalSaver's respawn-pane "+
 			"+ readiness barrier did not produce the expected structural binding\n"+
 			"--- portal.log ---\n%s",
-			daemonPID, panePIDPre, readPortalLogSafe(stateDir))
+			daemonPID, panePIDPre, portaltest.ReadPortalLogSafe(stateDir))
 	}
 	t.Logf("pre-window: daemon.pid=%d == _portal-saver pane PID=%d (structural binding confirmed)",
 		daemonPID, panePIDPre)
@@ -1098,7 +1085,7 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 	// logger flushes per-line under LevelInfo so any INFO marker emitted
 	// during the window is already visible without needing the daemon
 	// to exit.
-	logBlob := readPortalLogSafe(stateDir)
+	logBlob := portaltest.ReadPortalLogSafe(stateDir)
 
 	// Assertion A: daemon.pid still exists. A regression that ejected
 	// the daemon during the window would leave daemon.pid behind

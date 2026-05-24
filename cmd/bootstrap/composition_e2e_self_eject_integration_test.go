@@ -302,7 +302,7 @@ func TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject(t *testing.T) {
 	// have only its PID, not a *os.Process to Wait on.
 	exited, exitLatency := pollForPIDExit(survivorPID, mismatchInstant, selfEjectComposite_ExitBudget, selfEjectComposite_ExitPollTick)
 	if !exited {
-		logBlob := readPortalLogSafeBootstrap(h.StateDir)
+		logBlob := portaltest.ReadPortalLogSafe(h.StateDir)
 		t.Fatalf("daemon (PID %d) did not exit within %s of external mismatch event; "+
 			"spec § Component D requires self-eject within (N+1)*TickerPeriod "+
 			"= %s for N=%d (TickerPeriod=%s) plus slack\n"+
@@ -322,7 +322,7 @@ func TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject(t *testing.T) {
 	// Read portal.log once for the assertions below — they all cite
 	// it on failure and re-reading would risk inconsistent diagnostic
 	// dumps across multiple failed assertions.
-	logBlob := readPortalLogSafeBootstrap(h.StateDir)
+	logBlob := portaltest.ReadPortalLogSafe(h.StateDir)
 
 	// Post-eject scrollback fingerprint. snapAfter is captured
 	// IMMEDIATELY after exit observation so the eject-window is as
@@ -417,25 +417,6 @@ func pollForPIDExit(pid int, startInstant time.Time, budget, tick time.Duration)
 		}
 		time.Sleep(tick)
 	}
-}
-
-// readPortalLogSafeBootstrap reads portal.log under stateDir and
-// returns its contents as a string, or a placeholder describing the
-// read failure. Used in failure diagnostics so the daemon's audit
-// trail is always surfaced in test output without forcing the call
-// site to branch on the read error.
-//
-// Suffixed `Bootstrap` to disambiguate from the unexported
-// `readPortalLogSafe` in cmd/state_daemon_self_supervision_integration_test.go
-// (different test package, cannot share). The two helpers share an
-// identical shape; any future promotion to a shared portaltest helper
-// should consolidate them.
-func readPortalLogSafeBootstrap(stateDir string) string {
-	data, err := os.ReadFile(state.PortalLog(stateDir))
-	if err != nil {
-		return fmt.Sprintf("(read portal.log failed: %v)", err)
-	}
-	return string(data)
 }
 
 // Compile-time guards: keep `syscall` and `errors` imports anchored
