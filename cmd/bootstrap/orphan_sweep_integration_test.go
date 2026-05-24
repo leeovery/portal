@@ -27,7 +27,7 @@
 //      safety invariant.
 //
 // Host-noise mitigation:
-//   `portaltest.NewIsolatedStateEnv` registers a backstop that
+//   `portaltest.IsolateStateForTest` registers a backstop that
 //   snapshots the developer's real state directory on entry and
 //   re-snapshots on test exit to catch any leakage from the spawned
 //   daemons. On a dev box running a live `portal state daemon`
@@ -97,7 +97,7 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-sweep3-")
@@ -199,7 +199,7 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-sweepclean-")
@@ -274,7 +274,7 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-sweeprecycle-")

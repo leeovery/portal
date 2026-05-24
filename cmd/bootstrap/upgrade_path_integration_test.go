@@ -134,7 +134,7 @@ func TestUpgradePath_TwoBinary_AllComponentsCompose(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-upgrade-abc-")
@@ -262,7 +262,7 @@ func TestUpgradePath_ComponentC_IsolatedRefusesCleanly(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	// Note: a tmux server is not strictly required for this scenario
@@ -337,7 +337,7 @@ func TestUpgradePath_PostBootstrap_FreshAcquireDaemonLockRefuses(t *testing.T) {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-upgrade-fresh-")

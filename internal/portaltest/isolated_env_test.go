@@ -18,7 +18,7 @@ import (
 )
 
 // TestMain redirects HOME and XDG_CONFIG_HOME at process start so
-// the fingerprint backstop registered by NewIsolatedStateEnv targets
+// the fingerprint backstop registered by IsolateStateForTest targets
 // a hermetic temp directory, never the developer's real
 // ~/.config/portal/state/. Without this hook, running this package's
 // own test suite on a machine with a live `portal state daemon`
@@ -72,7 +72,7 @@ func envCount(env []string, key string) int {
 // XDG_CONFIG_HOME into the returned env and the value resolves under
 // the per-test t.TempDir() — the core isolation guarantee.
 func TestSetsXDGConfigHomeInsideTempDir(t *testing.T) {
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	got, ok := envValue(env, "XDG_CONFIG_HOME")
 	if !ok {
@@ -96,7 +96,7 @@ func TestRemovesPreExistingXDGConfigHome(t *testing.T) {
 	decoy := "/decoy/should/not/leak"
 	t.Setenv("XDG_CONFIG_HOME", decoy)
 
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	if got := envCount(env, "XDG_CONFIG_HOME"); got != 1 {
 		t.Fatalf("expected exactly 1 XDG_CONFIG_HOME entry, got %d", got)
@@ -115,7 +115,7 @@ func TestRemovesPreExistingXDGConfigHome(t *testing.T) {
 func TestRemovesEmptyPreExistingXDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	if got := envCount(env, "XDG_CONFIG_HOME"); got != 1 {
 		t.Fatalf("expected exactly 1 XDG_CONFIG_HOME entry, got %d", got)
@@ -134,7 +134,7 @@ func TestRemovesEmptyPreExistingXDGConfigHome(t *testing.T) {
 func TestPreservesPath(t *testing.T) {
 	wantPath := os.Getenv("PATH")
 
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	gotPath, okPath := envValue(env, "PATH")
 	if !okPath {
@@ -146,7 +146,7 @@ func TestPreservesPath(t *testing.T) {
 }
 
 // TestNeutralizesHomeAndXDGConfigHome asserts the folded-in host-noise
-// mitigation: NewIsolatedStateEnv must re-point HOME at a fresh
+// mitigation: IsolateStateForTest must re-point HOME at a fresh
 // tempdir (NOT the developer's real HOME) and the t.Setenv contract
 // guarantees the prior value is restored on cleanup. This pins the
 // "callers cannot forget the ordering invariant" guarantee that
@@ -154,7 +154,7 @@ func TestPreservesPath(t *testing.T) {
 func TestNeutralizesHomeAndXDGConfigHome(t *testing.T) {
 	priorHome := os.Getenv("HOME")
 
-	_, _ = portaltest.NewIsolatedStateEnv(t)
+	_, _ = portaltest.IsolateStateForTest(t)
 
 	// HOME on the test process env (where the backstop's
 	// resolveDevStateDir reads from) must NOT equal the prior HOME —
@@ -177,7 +177,7 @@ func TestNeutralizesHomeAndXDGConfigHome(t *testing.T) {
 // resolves to <XDG_CONFIG_HOME>/portal/state and exists on disk.
 // Pins the path layout daemon/saver tests depend on.
 func TestStateDirUnderXDGConfigHome(t *testing.T) {
-	env, stateDir := portaltest.NewIsolatedStateEnv(t)
+	env, stateDir := portaltest.IsolateStateForTest(t)
 
 	xdg, ok := envValue(env, "XDG_CONFIG_HOME")
 	if !ok {
@@ -201,7 +201,7 @@ func TestStateDirUnderXDGConfigHome(t *testing.T) {
 // subprocess sees the helper's XDG_CONFIG_HOME. This is the end-to-end
 // integration the daemon tests rely on.
 func TestEnvUsableAsExecCmdEnv(t *testing.T) {
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 	wantXDG, _ := envValue(env, "XDG_CONFIG_HOME")
 
 	cmd := exec.Command("sh", "-c", "echo $XDG_CONFIG_HOME")
@@ -224,10 +224,10 @@ func TestEnvUsableAsExecCmdEnv(t *testing.T) {
 func TestDistinctStateDirPerCall(t *testing.T) {
 	var a, b string
 	t.Run("first", func(t *testing.T) {
-		_, a = portaltest.NewIsolatedStateEnv(t)
+		_, a = portaltest.IsolateStateForTest(t)
 	})
 	t.Run("second", func(t *testing.T) {
-		_, b = portaltest.NewIsolatedStateEnv(t)
+		_, b = portaltest.IsolateStateForTest(t)
 	})
 	if a == "" || b == "" {
 		t.Fatalf("empty stateDir(s): a=%q b=%q", a, b)
@@ -242,7 +242,7 @@ func TestDistinctStateDirPerCall(t *testing.T) {
 // before returning. This matches the perm pattern used elsewhere in
 // portal for sensitive state directories.
 func TestConfigDirPermissions(t *testing.T) {
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 	configDir, _ := envValue(env, "XDG_CONFIG_HOME")
 	info, err := os.Stat(configDir)
 	if err != nil {

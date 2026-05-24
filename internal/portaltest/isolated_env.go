@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// NewIsolatedStateEnv returns an env slice and stateDir scoped to a
+// IsolateStateForTest returns an env slice and stateDir scoped to a
 // per-test t.TempDir(). Callers assign env directly to exec.Cmd.Env
 // when launching subprocesses (typically `portal state daemon`) so
 // the spawned process resolves XDG_CONFIG_HOME — and therefore all
@@ -20,8 +20,8 @@ import (
 // environment via t.Setenv (HOME → fresh t.TempDir(); XDG_CONFIG_HOME
 // → ""). The mutation is restored when t.Cleanup fires at test exit.
 // This is intentional and load-bearing for the fingerprint-diff
-// backstop described below; despite the New* prefix the helper is
-// not side-effect-free at the call site.
+// backstop described below — the verb-shaped name (Isolate…) signals
+// at the call site that the test process itself is being mutated.
 //
 // Host-noise mitigation: this helper neutralizes host env noise by
 // re-pointing HOME at a fresh t.TempDir() and clearing
@@ -53,7 +53,7 @@ import (
 // usage structurally. Production code cannot import this package
 // without dragging in the testing stdlib package, which would fail
 // `go build .` for the main binary.
-func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string) {
+func IsolateStateForTest(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
 
 	// Host-noise mitigation: re-point HOME at a fresh tempdir and

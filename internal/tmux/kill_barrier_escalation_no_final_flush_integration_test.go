@@ -18,7 +18,7 @@ package tmux_test
 // the test's state directory but is NOT the saver pane process):
 //
 //  1. tmuxtest.SkipIfNoTmux + isolated state dir via
-//     portaltest.NewIsolatedStateEnv (which folds in the host-noise
+//     portaltest.IsolateStateForTest (which folds in the host-noise
 //     scrub — HOME=<tempdir>, XDG_CONFIG_HOME="" — before its
 //     pre-snapshot). PORTAL_STATE_DIR is pushed to the test process
 //     env so any subprocess we spawn inherits it.
@@ -147,7 +147,7 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-killesc-")

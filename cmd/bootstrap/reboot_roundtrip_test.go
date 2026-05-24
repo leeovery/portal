@@ -187,7 +187,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// still wired via PORTAL_STATE_DIR (newIntegrationStateDir above),
 	// the env baseline below merely guarantees XDG_CONFIG_HOME does
 	// not leak.
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
@@ -903,7 +903,7 @@ func TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary(t *testi
 	// Isolated baseline env for DriveSignalHydrateBinary subprocess
 	// spawns — see Component G of
 	// slow-open-empty-previews-and-zombie-sessions.
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)
@@ -1137,7 +1137,7 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// Isolated baseline env for DriveSignalHydrateBinary subprocess
 	// spawns — see Component G of
 	// slow-open-empty-previews-and-zombie-sessions.
-	env, _ := portaltest.NewIsolatedStateEnv(t)
+	env, _ := portaltest.IsolateStateForTest(t)
 
 	hooksPath := filepath.Join(t.TempDir(), "hooks.json")
 	t.Setenv("PORTAL_HOOKS_FILE", hooksPath)

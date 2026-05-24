@@ -367,14 +367,14 @@ type harness struct {
 // the measurement scenarios start.
 func newHarness(t *testing.T, binary string) *harness {
 	t.Helper()
-	env, stateDir := portaltest.NewIsolatedStateEnv(t)
+	env, stateDir := portaltest.IsolateStateForTest(t)
 	// Mirror the isolated env into the test process before forking
 	// the tmux server. tmux inherits its environment from the test
 	// process at server-start time, and the saver pane process inherits
 	// it from tmux. Without this mirror, the daemon subprocess would
 	// resolve state.EnsureDir against the developer's real
 	// XDG_CONFIG_HOME and the portaltest backstop would fire on test
-	// exit. portaltest.NewIsolatedStateEnv's t.Cleanup still verifies
+	// exit. portaltest.IsolateStateForTest's t.Cleanup still verifies
 	// no writes leaked to the developer's real state dir.
 	for _, e := range env {
 		idx := strings.IndexByte(e, '=')

@@ -11,7 +11,7 @@
 // path):
 //
 //  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
-//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     portaltest.IsolateStateForTest (which folds in the HOME /
 //     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot). The
 //     PORTAL_STATE_DIR env override pins the daemon's state writes to
 //     the per-test temp dir.
@@ -119,11 +119,11 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	// portaltest.NewIsolatedStateEnv folds in the HOME=<tempdir> /
+	// portaltest.IsolateStateForTest folds in the HOME=<tempdir> /
 	// XDG_CONFIG_HOME="" host-noise scrub before its pre-snapshot, so
 	// the backstop targets a quiet tempdir rather than the developer's
 	// live ~/.config/portal/state/.
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	// Stand up the isolated tmux server. We do NOT bootstrap the
@@ -135,7 +135,7 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 	// note): daemon.pid must be absent so Component C's pre-check
 	// proceeds, and daemon.lock must be absent so the daemon's
 	// AcquireDaemonLock acquires cleanly (no contention with a stale
-	// fixture). portaltest.NewIsolatedStateEnv creates the stateDir
+	// fixture). portaltest.IsolateStateForTest creates the stateDir
 	// empty, so these stats are expected ENOENT — the assertions exist
 	// to surface a regression in the staging path if either file
 	// accidentally appears.
@@ -421,7 +421,7 @@ func TestSelfEject_PortalSaverPaneMismatch_ExitsCleanly(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-selfeject-mismatch-")
@@ -673,7 +673,7 @@ const firstFailingTickObservationWindow = 1200 * time.Millisecond
 // rather than the exit-code / log-marker assertions):
 //
 //  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
-//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     portaltest.IsolateStateForTest (which folds in the HOME /
 //     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot).
 //     daemon.pid staged absent (Component C's pre-check proceeds).
 //  2. Stand up an isolated tmux server WITHOUT _portal-saver — the
@@ -715,7 +715,7 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	// No _portal-saver session: the daemon's saver-membership probe
@@ -920,7 +920,7 @@ const legitimateColdStartLockAcquireBudget = 1500 * time.Millisecond
 // Choreography:
 //
 //  1. SkipIfNoTmux + StagePortalBinary + isolated state dir via
-//     portaltest.NewIsolatedStateEnv (which folds in the HOME /
+//     portaltest.IsolateStateForTest (which folds in the HOME /
 //     XDG_CONFIG_HOME host-noise scrub before its pre-snapshot). The
 //     PORTAL_STATE_DIR + PORTAL_LOG_LEVEL env vars are set on the
 //     test process so the tmux server (auto-started by the first
@@ -965,11 +965,11 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 		t.Skipf("portal not on PATH after build+prepend; skipping: %v", err)
 	}
 
-	// NewIsolatedStateEnv folds in the HOME=<tempdir> /
+	// IsolateStateForTest folds in the HOME=<tempdir> /
 	// XDG_CONFIG_HOME="" host-noise scrub before its pre-snapshot so
 	// the backstop targets a quiet tempdir rather than the developer's
 	// live state.
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 
 	// Env propagation: t.Setenv on the test process applies to every
 	// subprocess spawned by os/exec (including the tmux server auto-

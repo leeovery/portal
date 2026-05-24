@@ -91,7 +91,7 @@ const compositePreStatePGrepTimeout = 3 * time.Second
 // sessions for scrollback or kill assertions. The slice ordering
 // matches creation order (u0, u1, ...).
 type compositeHarness struct {
-	// Env is the filtered env slice from portaltest.NewIsolatedStateEnv,
+	// Env is the filtered env slice from portaltest.IsolateStateForTest,
 	// suitable for further isolated subprocess spawns (e.g. a
 	// `portal open` invocation in 6-x).
 	Env []string
@@ -138,7 +138,7 @@ type compositeHarness struct {
 //
 // Teardown is registered via t.Cleanup (LIFO):
 //   - tmuxtest.New registers tmux kill-server (runs LAST per LIFO).
-//   - portaltest.NewIsolatedStateEnv registers the fingerprint backstop.
+//   - portaltest.IsolateStateForTest registers the fingerprint backstop.
 //   - registerSubprocessCleanup arranges SIGKILL+Wait for each orphan
 //     subprocess (runs BEFORE tmux teardown so orphans are reaped while
 //     the test environment is still intact).
@@ -151,9 +151,9 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	//
 	// Ordering note: portalbintest.StagePortalBinary runs `go build`,
 	// which resolves the Go module cache from $HOME/go/pkg/mod when
-	// GOMODCACHE is unset. portaltest.NewIsolatedStateEnv re-points
+	// GOMODCACHE is unset. portaltest.IsolateStateForTest re-points
 	// HOME at a fresh t.TempDir internally (as part of its folded-in
-	// host-noise scrub), so staging BEFORE NewIsolatedStateEnv keeps
+	// host-noise scrub), so staging BEFORE IsolateStateForTest keeps
 	// `go build` against the developer's real (writable, populated)
 	// module cache. Staging AFTER would populate a read-only module
 	// cache under the tempdir that t.TempDir cleanup cannot remove.
@@ -161,11 +161,11 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	skipIfNoPgrep(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	// Step 2: isolated env + stateDir. NewIsolatedStateEnv folds in
+	// Step 2: isolated env + stateDir. IsolateStateForTest folds in
 	// the HOME=<tempdir> / XDG_CONFIG_HOME="" host-noise scrub before
 	// snapshotting the dev state dir. The portaltest backstop fires
 	// post-test to catch any leakage from the spawned daemons.
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	// Step 3: isolated tmux server + client. The server inherits the

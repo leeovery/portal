@@ -34,7 +34,7 @@ package tmux_test
 //
 // Host-noise mitigation (HOME=<tempdir>):
 //
-// `portaltest.NewIsolatedStateEnv` registers a backstop that snapshots
+// `portaltest.IsolateStateForTest` registers a backstop that snapshots
 // the developer's real state directory (resolved from XDG_CONFIG_HOME or
 // HOME pre-override) and re-snapshots on test exit to catch leakage from
 // the spawned daemon. On a dev box with a live `portal state daemon`
@@ -43,7 +43,7 @@ package tmux_test
 // test — producing a false-positive backstop failure that has nothing
 // to do with the test's own behaviour.
 //
-// `NewIsolatedStateEnv` folds in the mitigation: it `t.Setenv`s HOME
+// `IsolateStateForTest` folds in the mitigation: it `t.Setenv`s HOME
 // to a fresh tempdir and clears XDG_CONFIG_HOME BEFORE its
 // pre-snapshot, so `resolveDevStateDir` resolves to
 // `<tempdir>/.config/portal/state` — a path no other process knows
@@ -110,7 +110,7 @@ const lockLoserCascadeWindow = 2500 * time.Millisecond
 //
 // Flow:
 //  1. Skip if tmux not on PATH or portal binary build fails.
-//  2. Stage isolated state dir via portaltest.NewIsolatedStateEnv
+//  2. Stage isolated state dir via portaltest.IsolateStateForTest
 //     (which folds in the HOME=<tempdir> / XDG_CONFIG_HOME="" scrub
 //     before its pre-snapshot, so the backstop targets a quiet
 //     tempdir rather than the developer's live state). Set
@@ -129,14 +129,14 @@ func TestBootstrapPortalSaver_CleanBootstrap_EndState(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	// Isolated state dir + backstop. NewIsolatedStateEnv folds in the
+	// Isolated state dir + backstop. IsolateStateForTest folds in the
 	// HOME=<tempdir> / XDG_CONFIG_HOME="" host-noise scrub before its
 	// pre-snapshot, so the backstop targets a quiet tempdir rather
 	// than the developer's live state dir. The returned env slice is
 	// not used because the daemon is spawned by the tmux server (not
 	// directly by the test), so PORTAL_STATE_DIR on the test process
 	// env is the propagation channel that reaches both.
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-cleanboot-")
@@ -280,7 +280,7 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	envSlice, stateDir := portaltest.NewIsolatedStateEnv(t)
+	envSlice, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-lockloser-")
@@ -305,7 +305,7 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 
 	// Pre-seed the competing daemon. The daemon's PORTAL_STATE_DIR
 	// resolves to the same isolated dir as the test (via env slice from
-	// NewIsolatedStateEnv with PORTAL_STATE_DIR appended). The daemon's
+	// IsolateStateForTest with PORTAL_STATE_DIR appended). The daemon's
 	// stdout/stderr are discarded — we only care about its lifecycle
 	// (pid file written, lock held). On test cleanup we kill it
 	// explicitly so it does not leak into the next test.
@@ -452,7 +452,7 @@ func TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn(t *testing.T) 
 	tmuxtest.SkipIfNoTmux(t)
 	_ = portalbintest.StagePortalBinary(t)
 
-	_, stateDir := portaltest.NewIsolatedStateEnv(t)
+	_, stateDir := portaltest.IsolateStateForTest(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 
 	sock := tmuxtest.New(t, "ptl-envparity-")

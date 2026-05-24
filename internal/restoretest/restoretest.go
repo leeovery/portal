@@ -159,7 +159,7 @@ func DriveSignalHydrate(t *testing.T, client *tmux.Client, stateDir string, sess
 // resolve to the test's isolated config locations.
 //
 // env is the isolated baseline env — callers MUST obtain it via
-// portaltest.NewIsolatedStateEnv(t) (or an equivalent helper that strips
+// portaltest.IsolateStateForTest(t) (or an equivalent helper that strips
 // any inherited XDG_CONFIG_HOME and substitutes a per-test temp-dir
 // value). This parameter is mandatory and has no env-less overload: it
 // is the structural guarantee that the spawned binary cannot inherit
