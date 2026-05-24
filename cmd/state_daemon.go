@@ -210,7 +210,7 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 			return nil
 		}
 		if deps.Logger != nil {
-			deps.Logger.Error(state.ComponentDaemon, "acquire daemon lock: %v", err)
+			deps.Logger.Warn(state.ComponentDaemon, "acquire daemon lock: %v", err)
 		}
 		return fmt.Errorf("acquire daemon lock: %w", err)
 	}
