@@ -35,9 +35,6 @@
 //   - spawnOrphanDaemonIsolated (returns the orphan's stateDir too,
 //     since 6-1 needs to poll the orphan's own daemon.pid before
 //     overwriting the legitimate one)
-//   - waitForAnyDaemonPID (polls daemon.pid in a stateDir until any
-//     valid PID is written, without enforcing an expected value —
-//     distinct from waitForDaemonPID which enforces the expected PID)
 //   - seedUserSession (creates a user session with a small recurring
 //     output script in pane 0)
 //
@@ -78,15 +75,6 @@ const compositeUserSessionPrefix = "u"
 // captures without flooding the pane buffer. `sh -c 'while sleep 0.1; do
 // echo "hello $RANDOM"; done'` matches the task brief's example verbatim.
 const compositeUserSessionSeedScript = `while sleep 0.1; do echo "hello $RANDOM"; done`
-
-// compositeOrphanPIDTimeout bounds the wait for an orphan daemon to
-// write daemon.pid in its OWN stateDir. Mirrors upgradePathPIDFileTimeout
-// (3 s) — same daemon-startup latency envelope, same CI margin.
-const compositeOrphanPIDTimeout = 3 * time.Second
-
-// compositeOrphanPIDPollTick mirrors the upgrade-path PID-file poll
-// cadence (50 ms).
-const compositeOrphanPIDPollTick = 50 * time.Millisecond
 
 // compositePreStatePGrepTimeout bounds the pre-assertion poll waiting
 // for pgrep to observe N=3 daemons. 3 s mirrors the composition_abc
@@ -215,7 +203,7 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	// have observed orphan 1 reach a point where it would itself have
 	// written daemon.pid — which is the spec's "orphan-with-daemon.pid"
 	// shape.
-	waitForAnyDaemonPID(t, orphan1StateDir, orphan1.Process.Pid)
+	waitForDaemonPID(t, orphan1StateDir, orphan1.Process.Pid)
 
 	// Step 6 (continued): OVERWRITE the legitimate stateDir's
 	// daemon.pid with orphan 1's PID. This is the load-bearing
@@ -403,40 +391,6 @@ func spawnOrphanDaemonIsolated(t *testing.T, envSlice []string) (*exec.Cmd, stri
 	}
 	registerSubprocessCleanup(t, cmd)
 	return cmd, orphanStateDir
-}
-
-// waitForAnyDaemonPID polls <stateDir>/daemon.pid until a valid PID is
-// recorded, bounded by compositeOrphanPIDTimeout. Distinct from
-// waitForDaemonPID (which enforces an expected PID) — the composite
-// harness uses this to confirm an orphan has written its OWN
-// daemon.pid before we proceed to overwrite the LEGITIMATE stateDir's
-// daemon.pid with the orphan's PID.
-//
-// The orphanPID arg is the *expected* PID (we still verify it matches
-// what the orphan recorded, as a sanity check — a mismatch would mean
-// the orphan's stateDir got polluted by some other writer).
-//
-// Fails the test on timeout with a diagnostic citing the last observed
-// read state.
-func waitForAnyDaemonPID(t *testing.T, stateDir string, orphanPID int) {
-	t.Helper()
-	var lastPID int
-	var lastErr error
-	ok := tmuxtest.PollUntil(t, compositeOrphanPIDTimeout, compositeOrphanPIDPollTick, func() bool {
-		pid, err := state.ReadPIDFile(stateDir)
-		lastPID = pid
-		lastErr = err
-		if err != nil {
-			return false
-		}
-		return pid == orphanPID
-	})
-	if !ok {
-		t.Fatalf("orphan daemon.pid did not converge to %d within %s\n"+
-			"  last read: pid=%d err=%v\n"+
-			"  orphan state dir: %s",
-			orphanPID, compositeOrphanPIDTimeout, lastPID, lastErr, stateDir)
-	}
 }
 
 // TestCompositeHarness_PreState is the one consumer test in this file —
