@@ -69,10 +69,12 @@ type HookRegistrar struct {
 // As a side-effect, the same *state.Logger is installed as two
 // internal/tmux package-level logger sinks:
 //
-//   - tmux.BarrierLogger — used by the kill-barrier helper's
-//     WARN-on-timeout path. *state.Logger structurally satisfies
-//     BarrierLogger via its Warn(component, format string, args ...any)
-//     method.
+//   - tmux.BarrierLogger — used by BOTH saver-side barriers'
+//     WARN-on-timeout paths: the kill-barrier helper
+//     (killSaverAndWaitForDaemon / escalateKillToSIGKILL) AND the
+//     readiness barrier (waitForSaverDaemonReady). *state.Logger
+//     structurally satisfies BarrierLogger via its Warn(component,
+//     format string, args ...any) method.
 //   - tmux.versionWriterLogger — used by the bootstrap-side defensive
 //     portalSaverWriteVersionFile call site so its "daemon.version write:"
 //     DEBUG breadcrumb lands in portal.log under ComponentDaemon, matching

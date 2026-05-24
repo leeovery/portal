@@ -2653,8 +2653,10 @@ func TestPortalSaverDaemonCommand_LiteralValue(t *testing.T) {
 //   - continue polling on every not-ready shape (absent PID file, transient
 //     read error, transient ps error, IdentifyDead, IdentifyNotPortalDaemon),
 //   - bound wall-clock by saverReadinessTimeout,
-//   - on timeout, emit exactly one WARN via killBarrierLogger under
-//     state.ComponentBootstrap with the literal grep-anchor and return nil.
+//   - on timeout, emit exactly one WARN via the shared saverBarrier.Logger
+//     sink (installed via SetBarrierLogger; same Logger consumed by the kill
+//     barrier) under state.ComponentBootstrap with the literal grep-anchor
+//     and return nil.
 //
 // Tests use the directly-exported helper tmux.WaitForSaverDaemonReady so they
 // exercise the real loop independent of the waitForSaverDaemonReadyFn seam.

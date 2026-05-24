@@ -77,9 +77,11 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
 
-// BarrierLogger is the minimal logging seam killSaverAndWaitForDaemon needs.
-// A single Warn method is the smallest surface that conveys the spec's
-// observable shape: one WARN-level event on barrier timeout.
+// BarrierLogger is the minimal logging seam consumed by BOTH saver-side
+// barriers: killSaverAndWaitForDaemon's WARN-on-timeout / escalation paths
+// AND waitForSaverDaemonReady's WARN-on-readiness-timeout path. A single
+// Warn method is the smallest surface that conveys the spec's observable
+// shape: one WARN-level event per barrier timeout.
 //
 // *state.Logger satisfies this interface structurally; defining a local
 // interface mirrors the MigrationLogger precedent in hooks_register.go,
@@ -89,9 +91,9 @@ type BarrierLogger interface {
 	Warn(component, format string, args ...any)
 }
 
-// noopBarrierLogger satisfies BarrierLogger with a no-op Warn so the kill
-// barrier always has a safe sink when production wiring has not installed a
-// real logger.
+// noopBarrierLogger satisfies BarrierLogger with a no-op Warn so both
+// saver-side barriers (kill and readiness) always have a safe sink when
+// production wiring has not installed a real logger.
 type noopBarrierLogger struct{}
 
 func (noopBarrierLogger) Warn(component, format string, args ...any) {}
@@ -116,31 +118,40 @@ type SaverSharedSeams struct {
 	IdentifyDaemon func(int) (state.IdentifyResult, error)
 }
 
-// KillBarrierSeams groups the kill-barrier-specific seams driving
-// killSaverAndWaitForDaemon's poll loop and escalation path.
+// SaverBarrierSeams groups the kill-barrier-specific seams driving
+// killSaverAndWaitForDaemon's poll loop and escalation path, plus the
+// shared WARN-emission Logger sink also consumed by the readiness barrier
+// (waitForSaverDaemonReady). The struct is the single home for both
+// saver-side barriers' shared logger so grepping "Barrier" or "Saver"
+// surfaces every WARN emission site.
 //
 //   - IsAlive: probe of whether the prior daemon is still running. Tests can
 //     simulate "alive then dead after N ticks" / "alive forever" / "already
 //     dead" without spawning real processes. Defaults to state.IsProcessAlive.
+//     Kill-barrier scope only.
 //   - SendSIGKILL: escalation-path signal emission. Routing through the seam
 //     makes the "no SIGTERM ever sent" invariant trivially verifiable — only
-//     SIGKILL flows through this seam.
+//     SIGKILL flows through this seam. Kill-barrier scope only.
 //   - PollInterval: cadence at which the kill barrier re-probes IsAlive after
 //     issuing kill-session. Defaults to 50ms — chosen alongside Timeout so
-//     the median recycle path completes in well under a second.
+//     the median recycle path completes in well under a second. Kill-barrier
+//     scope only.
 //   - Timeout: upper bound on the kill barrier's wait for the prior daemon
 //     to exit. Sized to sit above the daemon's cold-sweep ceiling (3.9s on
 //     the affected user's scrollback profile) with margin, so the WARN path
 //     is reserved for genuinely stuck daemons rather than ordinary cold
-//     sweeps.
+//     sweeps. Kill-barrier scope only.
 //   - EscalationTimeout: upper bound on the post-SIGKILL poll window. Sized
 //     to a single second — SIGKILL is unblockable, so the process should be
 //     reaped almost immediately on any healthy system; the budget exists
 //     only to surface persistently-undead processes via a single WARN.
-//   - Logger: sink for kill-barrier WARN emissions. Production wiring
-//     replaces this with a real *state.Logger via SetBarrierLogger. Tests
-//     install a recording fake via the seam and reset it through t.Cleanup.
-type KillBarrierSeams struct {
+//     Kill-barrier scope only.
+//   - Logger: shared sink for BOTH the kill-barrier WARN-on-timeout /
+//     escalation paths AND the readiness-barrier WARN-on-timeout path
+//     (waitForSaverDaemonReady). Production wiring replaces this with a real
+//     *state.Logger via SetBarrierLogger. Tests install a recording fake via
+//     the seam and reset it through t.Cleanup.
+type SaverBarrierSeams struct {
 	IsAlive           func(int) bool
 	SendSIGKILL       func(int) error
 	PollInterval      time.Duration
@@ -211,7 +222,7 @@ type SaverOperationSeams struct {
 	KillAndWait  func(*Client, string) error
 }
 
-// saverShared, killBarrier, saverReadiness, saverVersion, and saverOps are
+// saverShared, saverBarrier, saverReadiness, saverVersion, and saverOps are
 // the package-level seam-struct instances. Production code references their
 // fields directly; tests swap fields (via swapSeam) or whole structs (via
 // the *Seams() accessors in export_test.go).
@@ -223,7 +234,7 @@ var (
 		IdentifyDaemon: state.IdentifyDaemon,
 	}
 
-	killBarrier = KillBarrierSeams{
+	saverBarrier = SaverBarrierSeams{
 		IsAlive: state.IsProcessAlive,
 		SendSIGKILL: func(pid int) error {
 			return syscall.Kill(pid, syscall.SIGKILL)
@@ -266,10 +277,12 @@ func init() {
 	}
 }
 
-// SetBarrierLogger installs a BarrierLogger as the sink for kill-barrier
-// WARN-on-timeout emissions. A nil argument is ignored so the package never
-// loses its sink to a programming error in the wiring layer; the default is
-// noopBarrierLogger which already swallows all calls safely.
+// SetBarrierLogger installs a BarrierLogger as the shared sink for BOTH
+// saver-side barriers' WARN emissions: killSaverAndWaitForDaemon's
+// WARN-on-timeout / escalation paths AND waitForSaverDaemonReady's
+// WARN-on-readiness-timeout path. A nil argument is ignored so the package
+// never loses its sink to a programming error in the wiring layer; the
+// default is noopBarrierLogger which already swallows all calls safely.
 //
 // Production wiring calls this once from internal/bootstrapadapter as part
 // of constructing the HookRegistrar, threading the same *state.Logger that
@@ -279,7 +292,7 @@ func SetBarrierLogger(l BarrierLogger) {
 	if l == nil {
 		return
 	}
-	killBarrier.Logger = l
+	saverBarrier.Logger = l
 }
 
 // SetVersionWriterLogger installs a *state.Logger as the sink for the
@@ -315,13 +328,13 @@ func SetVersionWriterLogger(l *state.Logger) {
 //  1. Read the prior PID via saverReadPID. On any error (file absent,
 //     unreadable, corrupted) → tolerant kill, return nil immediately. Polling
 //     is skipped because there is no prior PID to wait for.
-//  2. If the prior PID is already dead (killBarrierIsAlive returns false on
+//  2. If the prior PID is already dead (saverBarrier.IsAlive returns false on
 //     the first probe) → tolerant kill, return nil immediately. Zero polling.
 //  3. Otherwise issue kill-session exactly once, tolerating kill errors
 //     (the session may have auto-destroyed between probe and kill — that is
 //     equivalent to "already absent" for our purposes). Then enter the poll
-//     loop: re-probe killBarrierIsAlive every killBarrier.PollInterval until
-//     it returns false or killBarrier.Timeout elapses.
+//     loop: re-probe saverBarrier.IsAlive every saverBarrier.PollInterval until
+//     it returns false or saverBarrier.Timeout elapses.
 //  4. On session-kill poll timeout → escalate (spec § Component A —
 //     Kill-Barrier Escalation):
 //     (a) Identity-check the prior PID via saverIdentifyDaemon. If the
@@ -331,12 +344,12 @@ func SetVersionWriterLogger(l *state.Logger) {
 //     positively identify as a portal state daemon.
 //     (b) IMMEDIATELY (no intervening statements that could let the PID
 //     recycle between check and signal) send SIGKILL via
-//     killBarrierSendSIGKILL. SIGKILL is unblockable and bypasses the
+//     saverBarrier.SendSIGKILL. SIGKILL is unblockable and bypasses the
 //     daemon's shutdown handler — we explicitly do NOT want the orphan to
 //     execute one final destructive captureAndCommit on its way out.
-//     (c) Post-SIGKILL poll: probe killBarrierIsAlive at
-//     killBarrier.PollInterval cadence (50ms by default) for up to
-//     killBarrier.EscalationTimeout (1s by default). On exit → return nil.
+//     (c) Post-SIGKILL poll: probe saverBarrier.IsAlive at
+//     saverBarrier.PollInterval cadence (50ms by default) for up to
+//     saverBarrier.EscalationTimeout (1s by default). On exit → return nil.
 //     On persistent aliveness → emit one WARN and return nil.
 //
 // The helper never writes to the state directory. WARN is emitted at most
@@ -350,7 +363,7 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 		return nil
 	}
 
-	if !killBarrier.IsAlive(priorPID) {
+	if !saverBarrier.IsAlive(priorPID) {
 		// Prior daemon already dead. Tolerant kill, no polling.
 		_ = c.KillSession(PortalSaverName)
 		return nil
@@ -359,7 +372,7 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	// Prior daemon alive — issue kill-session once and wait for exit.
 	_ = c.KillSession(PortalSaverName)
 
-	if waitForPriorPIDExit(priorPID, killBarrier.Timeout) {
+	if waitForPriorPIDExit(priorPID, saverBarrier.Timeout) {
 		return nil
 	}
 
@@ -368,18 +381,18 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	return escalateKillToSIGKILL(priorPID)
 }
 
-// waitForPriorPIDExit polls killBarrier.IsAlive(pid) at killBarrier.PollInterval
+// waitForPriorPIDExit polls saverBarrier.IsAlive(pid) at saverBarrier.PollInterval
 // cadence until it returns false or budget elapses. Returns true on observed
 // exit, false on timeout. Used by killSaverAndWaitForDaemon's session-kill
 // wait stage; the post-SIGKILL wait stage shares the same probe primitive via
 // an inline loop tuned to the escalation budget.
 func waitForPriorPIDExit(pid int, budget time.Duration) bool {
-	ticker := time.NewTicker(killBarrier.PollInterval)
+	ticker := time.NewTicker(saverBarrier.PollInterval)
 	defer ticker.Stop()
 
 	deadline := time.Now().Add(budget)
 	for range ticker.C {
-		if !killBarrier.IsAlive(pid) {
+		if !saverBarrier.IsAlive(pid) {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -391,8 +404,8 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 
 // escalateKillToSIGKILL runs the Component A escalation: identity-check
 // priorPID and, only on IdentifyIsPortalDaemon, send SIGKILL via the seam as
-// the IMMEDIATELY-following statement. Then poll killBarrierIsAlive at
-// killBarrier.PollInterval cadence for up to killBarrier.EscalationTimeout.
+// the IMMEDIATELY-following statement. Then poll saverBarrier.IsAlive at
+// saverBarrier.PollInterval cadence for up to saverBarrier.EscalationTimeout.
 // All exit paths emit at most one WARN and return nil — bootstrap is
 // best-effort at this stage and the new daemon's lock acquisition is the
 // structural safety net.
@@ -404,23 +417,23 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 func escalateKillToSIGKILL(priorPID int) error {
 	result, err := saverShared.IdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
-		killBarrier.Logger.Warn(
+		saverBarrier.Logger.Warn(
 			state.ComponentBootstrap,
 			"prior daemon (pid=%d) not identity-checked as portal state daemon; skipping SIGKILL",
 			priorPID,
 		)
 		return nil
 	}
-	_ = killBarrier.SendSIGKILL(priorPID)
+	_ = saverBarrier.SendSIGKILL(priorPID)
 
-	if waitForPriorPIDExit(priorPID, killBarrier.EscalationTimeout) {
+	if waitForPriorPIDExit(priorPID, saverBarrier.EscalationTimeout) {
 		return nil
 	}
-	killBarrier.Logger.Warn(
+	saverBarrier.Logger.Warn(
 		state.ComponentBootstrap,
 		"prior daemon (pid=%d) survived SIGKILL escalation within %v",
 		priorPID,
-		killBarrier.EscalationTimeout,
+		saverBarrier.EscalationTimeout,
 	)
 	return nil
 }
@@ -437,9 +450,13 @@ func escalateKillToSIGKILL(priorPID int) error {
 //   - Returns nil immediately the first time saverReadPID returns a
 //     PID AND saverIdentifyDaemon returns IdentifyIsPortalDaemon. This is
 //     the success path.
-//   - Returns nil on timeout AFTER emitting exactly one WARN through
-//     killBarrierLogger under state.ComponentBootstrap containing the literal
-//     "saver respawn: daemon did not come up within". This is best-effort —
+//   - Returns nil on timeout AFTER emitting exactly one WARN through the
+//     shared saverBarrier.Logger sink under state.ComponentBootstrap
+//     containing the literal "saver respawn: daemon did not come up within".
+//     The same Logger seam is consumed by the kill-barrier escalation paths
+//     in killSaverAndWaitForDaemon / escalateKillToSIGKILL — installing it
+//     via SetBarrierLogger wires both barriers' WARN sinks at once. This is
+//     best-effort —
 //     the daemon's own lock acquisition is the structural safety net for the
 //     truly-stuck case, and the WARN gives operators a grep anchor without
 //     escalating to a fatal bootstrap abort.
@@ -462,7 +479,7 @@ func waitForSaverDaemonReady(stateDir string) error {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			killBarrier.Logger.Warn(
+			saverBarrier.Logger.Warn(
 				state.ComponentBootstrap,
 				"saver respawn: daemon did not come up within %v",
 				saverReadiness.Timeout,

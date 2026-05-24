@@ -12,10 +12,10 @@ import (
 // suffix.
 //
 // The package groups its mutable seams into logical structs (SaverSharedSeams,
-// KillBarrierSeams, SaverReadinessSeams, SaverVersionSeams,
+// SaverBarrierSeams, SaverReadinessSeams, SaverVersionSeams,
 // SaverOperationSeams). Two accessor shapes are exported for tests:
 //
-//   - Struct-pointer accessors (e.g. KillBarrier()) return the underlying
+//   - Struct-pointer accessors (e.g. SaverBarrier()) return the underlying
 //     struct instance so tests that need to swap a whole cluster can do so
 //     atomically.
 //   - Per-field *Seam() accessors return pointers into the same struct
@@ -64,9 +64,10 @@ var WaitForSaverDaemonReady = waitForSaverDaemonReady
 // primitives.
 func SaverShared() *SaverSharedSeams { return &saverShared }
 
-// KillBarrier returns a pointer to the KillBarrierSeams instance backing
-// killSaverAndWaitForDaemon's poll loop and escalation path.
-func KillBarrier() *KillBarrierSeams { return &killBarrier }
+// SaverBarrier returns a pointer to the SaverBarrierSeams instance backing
+// killSaverAndWaitForDaemon's poll loop and escalation path, plus the shared
+// WARN-emission Logger sink consumed by waitForSaverDaemonReady.
+func SaverBarrier() *SaverBarrierSeams { return &saverBarrier }
 
 // SaverReadiness returns a pointer to the SaverReadinessSeams instance
 // backing waitForSaverDaemonReady's poll loop.
@@ -102,28 +103,31 @@ func SaverIdentifyDaemonSeam() *func(int) (state.IdentifyResult, error) {
 }
 
 // BarrierIsAliveSeam returns a pointer to the kill-barrier IsAlive seam.
-func BarrierIsAliveSeam() *func(int) bool { return &killBarrier.IsAlive }
+func BarrierIsAliveSeam() *func(int) bool { return &saverBarrier.IsAlive }
 
 // BarrierPollIntervalSeam returns a pointer to the kill-barrier
 // PollInterval seam.
-func BarrierPollIntervalSeam() *time.Duration { return &killBarrier.PollInterval }
+func BarrierPollIntervalSeam() *time.Duration { return &saverBarrier.PollInterval }
 
 // BarrierTimeoutSeam returns a pointer to the kill-barrier Timeout seam.
-func BarrierTimeoutSeam() *time.Duration { return &killBarrier.Timeout }
+func BarrierTimeoutSeam() *time.Duration { return &saverBarrier.Timeout }
 
 // BarrierEscalationTimeoutSeam returns a pointer to the kill-barrier
 // EscalationTimeout seam so escalation-path tests can shrink the
 // post-SIGKILL poll budget.
-func BarrierEscalationTimeoutSeam() *time.Duration { return &killBarrier.EscalationTimeout }
+func BarrierEscalationTimeoutSeam() *time.Duration { return &saverBarrier.EscalationTimeout }
 
 // BarrierSendSIGKILLSeam returns a pointer to the kill-barrier SendSIGKILL
 // seam so escalation-path tests can record invocations and inject errors
 // without signalling real processes.
-func BarrierSendSIGKILLSeam() *func(int) error { return &killBarrier.SendSIGKILL }
+func BarrierSendSIGKILLSeam() *func(int) error { return &saverBarrier.SendSIGKILL }
 
-// BarrierLoggerSeam returns a pointer to the kill-barrier Logger seam so
-// tests can install a recording fake satisfying the BarrierLogger interface.
-func BarrierLoggerSeam() *BarrierLogger { return &killBarrier.Logger }
+// BarrierLoggerSeam returns a pointer to the shared saver-barrier Logger
+// seam so tests can install a recording fake satisfying the BarrierLogger
+// interface. The Logger sink is consumed by BOTH the kill-barrier
+// WARN-on-timeout / escalation paths AND the readiness-barrier
+// WARN-on-timeout path (waitForSaverDaemonReady).
+func BarrierLoggerSeam() *BarrierLogger { return &saverBarrier.Logger }
 
 // SaverReadinessPollIntervalSeam returns a pointer to the readiness-barrier
 // PollInterval seam so tests can shrink the poll cadence to keep
