@@ -11,15 +11,14 @@ import (
 // code never references these aliases; their existence is gated by the _test.go
 // suffix.
 //
-// The package groups its mutable seams into logical structs (SaverSharedSeams,
-// SaverBarrierSeams, SaverReadinessSeams, SaverVersionSeams,
-// SaverOperationSeams). Two accessor shapes are exported for tests:
+// The package collapses every saver-side mutable seam into a single SaverSeams
+// struct (saver). Two accessor shapes are exported for tests:
 //
-//   - Struct-pointer accessors (e.g. SaverBarrier()) return the underlying
-//     struct instance so tests that need to swap a whole cluster can do so
-//     atomically.
-//   - Per-field *Seam() accessors return pointers into the same struct
-//     instance so the existing swapSeam helper continues to work field-by-
+//   - Struct-pointer accessors (e.g. SaverBarrier()) return a pointer to the
+//     relevant sub-struct (or the parent for shared fields) so tests that
+//     need to swap a whole cluster can do so atomically.
+//   - Per-field *Seam() accessors return pointers into the same backing
+//     fields so the existing swapSeam helper continues to work field-by-
 //     field without test changes.
 //
 // Both shapes alias the same backing fields — pick whichever fits the
@@ -55,43 +54,43 @@ var ShouldKillSaverOnVersionDecision = shouldKillSaverOnVersionDecision
 var WaitForSaverDaemonReady = waitForSaverDaemonReady
 
 // ---------------------------------------------------------------------------
-// Struct-pointer accessors — return the underlying package-level seam struct
+// Struct-pointer accessors — return pointers into the unified saver instance
 // so tests can swap whole clusters atomically.
 // ---------------------------------------------------------------------------
 
-// SaverShared returns a pointer to the SaverSharedSeams instance backing
-// the kill-barrier and readiness barriers' shared PID-read + identity
-// primitives.
-func SaverShared() *SaverSharedSeams { return &saverShared }
+// Saver returns a pointer to the unified SaverSeams instance backing every
+// saver-side seam (shared PID-read + identity primitives at the top level,
+// plus the Barrier / Readiness / Version / Ops sub-clusters).
+func Saver() *SaverSeams { return &saver }
 
-// SaverBarrier returns a pointer to the SaverBarrierSeams instance backing
+// SaverBarrier returns a pointer to the Barrier sub-cluster backing
 // killSaverAndWaitForDaemon's poll loop and escalation path, plus the shared
 // WARN-emission Logger sink consumed by waitForSaverDaemonReady.
-func SaverBarrier() *SaverBarrierSeams { return &saverBarrier }
+func SaverBarrier() *SaverBarrierSeams { return &saver.Barrier }
 
-// SaverReadiness returns a pointer to the SaverReadinessSeams instance
-// backing waitForSaverDaemonReady's poll loop.
-func SaverReadiness() *SaverReadinessSeams { return &saverReadiness }
+// SaverReadiness returns a pointer to the Readiness sub-cluster backing
+// waitForSaverDaemonReady's poll loop.
+func SaverReadiness() *SaverReadinessSeams { return &saver.Readiness }
 
-// SaverVersion returns a pointer to the SaverVersionSeams instance backing
+// SaverVersion returns a pointer to the Version sub-cluster backing
 // EnsurePortalSaverVersion's read/write primitives and the bootstrap-side
 // defensive-write logger.
-func SaverVersion() *SaverVersionSeams { return &saverVersion }
+func SaverVersion() *SaverVersionSeams { return &saver.Version }
 
-// SaverOps returns a pointer to the SaverOperationSeams instance backing
-// the two operation-level function seams that callers route through to
-// substitute the entire kill-and-wait or readiness-wait flows.
-func SaverOps() *SaverOperationSeams { return &saverOps }
+// SaverOps returns a pointer to the Ops sub-cluster backing the two
+// operation-level function seams that callers route through to substitute
+// the entire kill-and-wait or readiness-wait flows.
+func SaverOps() *SaverOperationSeams { return &saver.Ops }
 
 // ---------------------------------------------------------------------------
 // Per-field *Seam() accessors — return pointers into the same backing
-// structs so the existing swapSeam helper continues to work field-by-field.
+// fields so the existing swapSeam helper continues to work field-by-field.
 // ---------------------------------------------------------------------------
 
 // SaverReadPIDSeam returns a pointer to the shared ReadPID seam. The seam
 // is shared between the kill barrier (priorPID read) and the readiness
 // barrier (poll-for-PID-file).
-func SaverReadPIDSeam() *func(string) (int, error) { return &saverShared.ReadPID }
+func SaverReadPIDSeam() *func(string) (int, error) { return &saver.ReadPID }
 
 // SaverIdentifyDaemonSeam returns a pointer to the shared IdentifyDaemon
 // seam so tests can deterministically drive identity-check outcomes without
@@ -99,55 +98,55 @@ func SaverReadPIDSeam() *func(string) (int, error) { return &saverShared.ReadPID
 // escalation path (pre-SIGKILL identity check) and the readiness barrier
 // (post-respawn classification of daemon.pid).
 func SaverIdentifyDaemonSeam() *func(int) (state.IdentifyResult, error) {
-	return &saverShared.IdentifyDaemon
+	return &saver.IdentifyDaemon
 }
 
 // BarrierIsAliveSeam returns a pointer to the kill-barrier IsAlive seam.
-func BarrierIsAliveSeam() *func(int) bool { return &saverBarrier.IsAlive }
+func BarrierIsAliveSeam() *func(int) bool { return &saver.Barrier.IsAlive }
 
 // BarrierPollIntervalSeam returns a pointer to the kill-barrier
 // PollInterval seam.
-func BarrierPollIntervalSeam() *time.Duration { return &saverBarrier.PollInterval }
+func BarrierPollIntervalSeam() *time.Duration { return &saver.Barrier.PollInterval }
 
 // BarrierTimeoutSeam returns a pointer to the kill-barrier Timeout seam.
-func BarrierTimeoutSeam() *time.Duration { return &saverBarrier.Timeout }
+func BarrierTimeoutSeam() *time.Duration { return &saver.Barrier.Timeout }
 
 // BarrierEscalationTimeoutSeam returns a pointer to the kill-barrier
 // EscalationTimeout seam so escalation-path tests can shrink the
 // post-SIGKILL poll budget.
-func BarrierEscalationTimeoutSeam() *time.Duration { return &saverBarrier.EscalationTimeout }
+func BarrierEscalationTimeoutSeam() *time.Duration { return &saver.Barrier.EscalationTimeout }
 
 // BarrierSendSIGKILLSeam returns a pointer to the kill-barrier SendSIGKILL
 // seam so escalation-path tests can record invocations and inject errors
 // without signalling real processes.
-func BarrierSendSIGKILLSeam() *func(int) error { return &saverBarrier.SendSIGKILL }
+func BarrierSendSIGKILLSeam() *func(int) error { return &saver.Barrier.SendSIGKILL }
 
 // BarrierLoggerSeam returns a pointer to the shared saver-barrier Logger
 // seam so tests can install a recording fake satisfying the BarrierLogger
 // interface. The Logger sink is consumed by BOTH the kill-barrier
 // WARN-on-timeout / escalation paths AND the readiness-barrier
 // WARN-on-timeout path (waitForSaverDaemonReady).
-func BarrierLoggerSeam() *BarrierLogger { return &saverBarrier.Logger }
+func BarrierLoggerSeam() *BarrierLogger { return &saver.Barrier.Logger }
 
 // SaverReadinessPollIntervalSeam returns a pointer to the readiness-barrier
 // PollInterval seam so tests can shrink the poll cadence to keep
 // wall-clock bounded.
 func SaverReadinessPollIntervalSeam() *time.Duration {
-	return &saverReadiness.PollInterval
+	return &saver.Readiness.PollInterval
 }
 
 // SaverReadinessTimeoutSeam returns a pointer to the readiness-barrier
 // Timeout seam so tests can shrink the total readiness budget to keep
 // wall-clock bounded.
 func SaverReadinessTimeoutSeam() *time.Duration {
-	return &saverReadiness.Timeout
+	return &saver.Readiness.Timeout
 }
 
 // PortalSaverReadVersionFileSeam returns a pointer to the version
 // ReadVersionFile seam so tests can simulate version-file read behaviour
 // (including non-absent I/O errors) without touching the filesystem.
 func PortalSaverReadVersionFileSeam() *func(string) (string, error) {
-	return &saverVersion.ReadVersionFile
+	return &saver.Version.ReadVersionFile
 }
 
 // PortalSaverWriteVersionFileSeam returns a pointer to the version
@@ -155,24 +154,24 @@ func PortalSaverReadVersionFileSeam() *func(string) (string, error) {
 // for the defensive alive+absent write performed by EnsurePortalSaverVersion
 // before BootstrapPortalSaver.
 func PortalSaverWriteVersionFileSeam() *func(string, string) error {
-	return &saverVersion.WriteVersionFile
+	return &saver.Version.WriteVersionFile
 }
 
 // VersionWriterLoggerSeam returns a pointer to the version WriterLogger
 // sink so tests can install a capturing *state.Logger via
 // SetVersionWriterLogger and restore the prior value via t.Cleanup.
-func VersionWriterLoggerSeam() **state.Logger { return &saverVersion.WriterLogger }
+func VersionWriterLoggerSeam() **state.Logger { return &saver.Version.WriterLogger }
 
 // WaitForSaverDaemonReadyFnSeam returns a pointer to the operation-level
 // WaitForReady seam so create-branch tests can stub the readiness barrier
 // with a no-op without exercising the full poll flow.
 func WaitForSaverDaemonReadyFnSeam() *func(string) error {
-	return &saverOps.WaitForReady
+	return &saver.Ops.WaitForReady
 }
 
 // KillSaverAndWaitForDaemonFnSeam returns a pointer to the operation-level
 // KillAndWait seam so tests can stub the helper invoked from the production
 // call sites without exercising the full barrier flow.
 func KillSaverAndWaitForDaemonFnSeam() *func(*Client, string) error {
-	return &saverOps.KillAndWait
+	return &saver.Ops.KillAndWait
 }
