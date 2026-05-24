@@ -54,6 +54,7 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -115,7 +116,7 @@ func TestCompositeBootstrap_ConvergesPgrepToOneWithin6s(t *testing.T) {
 			time.Since(start))
 	}
 	if !waitForPgrepCount(t, 1, remaining) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("post-bootstrap: pgrep -fx did not converge to 1 within %s of "+
 			"bootstrap-slice entry (elapsed=%s, budget=%s)\n"+
 			"  harness saver PID (setup-time): %d (alive=%v)\n"+
@@ -137,7 +138,7 @@ func TestCompositeBootstrap_ConvergesPgrepToOneWithin6s(t *testing.T) {
 	// escalation, kill-barrier escalation, etc.), in which case the
 	// survivor is the freshly respawned pane PID rather than the
 	// setup-time h.LegitimateDaemonPID.
-	survivors, err := pgrepPortalDaemonPIDs()
+	survivors, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("post-bootstrap pgrep snapshot: %v", err)
 	}

@@ -89,12 +89,6 @@ const pgrepConvergencePollTick = 50 * time.Millisecond
 // not to burn budget.
 const recycledPIDSettleWindow = 200 * time.Millisecond
 
-// pgrepCandidatePattern is the canonical pgrep form Component B's
-// production adapter uses. Tests run their own pgrep with the same
-// pattern so the test's count assertion and the production sweep see
-// the same candidate set (mod race windows).
-const pgrepCandidatePattern = "^portal state daemon( |$)"
-
 // TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne exercises
 // spec § Component B acceptance bullet 1: with N=3 concurrent daemons
 // (1 saver-pane + 2 orphans), SweepOrphanDaemons kills the 2 orphans
@@ -150,7 +144,7 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	if !waitForPgrepCount(t, 3, pgrepConvergenceTimeout) {
 		// Diagnostic — print live daemon PIDs and the current pgrep
 		// output so a partial convergence is debuggable.
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("precondition: pgrep -fxc did not reach 3 within %s\n"+
 			"  saverPID: %d\n"+
 			"  orphan1.PID: %d (alive=%v)\n"+
@@ -173,7 +167,7 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 
 	// 5. Convergence: pgrep -fxc must reach 1 within the bound.
 	if !waitForPgrepCount(t, 1, pgrepConvergenceTimeout) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("post-sweep: pgrep -fxc did not converge to 1 within %s; current pgrep=%v",
 			pgrepConvergenceTimeout, pids)
 	}
@@ -182,7 +176,7 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	//    saver-pane PID. Re-read pane_pid here in case the saver pane
 	//    was respawned between setup and now (the "saver pane dies
 	//    between setup and sweep" edge case).
-	survivors, err := pgrepPortalDaemonPIDs()
+	survivors, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("post-sweep pgrep snapshot: %v", err)
 	}
@@ -222,7 +216,7 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 	// Precondition: pgrep -fxc must already be 1 before the sweep so
 	// the post-sweep assertion is unambiguous.
 	if !waitForPgrepCount(t, 1, pgrepConvergenceTimeout) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("precondition: pgrep -fxc did not reach 1 within %s; pgrep=%v",
 			pgrepConvergenceTimeout, pids)
 	}
@@ -260,7 +254,7 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 
 	// 5. Singleton invariant: pgrep -fxc still == 1 (the saver-pane
 	//    daemon was not erroneously killed).
-	pids, err := pgrepPortalDaemonPIDs()
+	pids, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("post-sweep pgrep: %v", err)
 	}
@@ -493,59 +487,12 @@ func readSaverPanePID(t *testing.T, sock *tmuxtest.Socket) int {
 func waitForPgrepCount(t *testing.T, target int, timeout time.Duration) bool {
 	t.Helper()
 	return tmuxtest.PollUntil(t, timeout, pgrepConvergencePollTick, func() bool {
-		n, err := pgrepPortalDaemonCount()
+		pids, err := portaltest.PgrepPortalDaemons()
 		if err != nil {
 			return false
 		}
-		return n == target
+		return len(pids) == target
 	})
-}
-
-// pgrepPortalDaemonCount returns the number of live `portal state
-// daemon` processes by counting PIDs from `pgrep -fx <pattern>`.
-//
-// We do NOT use `pgrep -fxc` because BSD pgrep (darwin / FreeBSD) does
-// not implement the `-c` flag and surfaces a status-2 usage error,
-// breaking the test on a supported development platform. The
-// production adapter and the test both rely on `pgrep -fx` for
-// enumeration; counting via `len()` is the portable equivalent of
-// `-c`. The spec's literal acceptance form uses `-fxc` for
-// documentation symmetry; the test's actual probe is the portable
-// equivalent and asserts the same invariant.
-func pgrepPortalDaemonCount() (int, error) {
-	pids, err := pgrepPortalDaemonPIDs()
-	if err != nil {
-		return 0, err
-	}
-	return len(pids), nil
-}
-
-// pgrepPortalDaemonPIDs runs `pgrep -fx <pattern>` and returns the
-// PID set. Returns (nil, nil) when pgrep exits status 1 + empty
-// stdout (no matches). Used by failure diagnostics and by the
-// survivor-identity assertion in Scenario A.
-func pgrepPortalDaemonPIDs() ([]int, error) {
-	out, err := exec.Command("pgrep", "-fx", pgrepCandidatePattern).Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(strings.TrimSpace(string(out))) == 0 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("pgrep -fx %q: %w", pgrepCandidatePattern, err)
-	}
-	var pids []int
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		p, perr := strconv.Atoi(line)
-		if perr != nil {
-			continue
-		}
-		pids = append(pids, p)
-	}
-	return pids, nil
 }
 
 // pidAlive reports whether the supplied PID exists in the kernel's

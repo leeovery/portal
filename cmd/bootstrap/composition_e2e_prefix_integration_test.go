@@ -36,6 +36,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -66,11 +67,11 @@ func TestCompositeHarness_PreFixDysfunctionReproduces(t *testing.T) {
 	// Pre-fix observation 1: three daemons live, simultaneously.
 	// setupCompositeHarness's internal assertion already polled to N=3,
 	// so a re-read here is a snapshot — no second poll needed. We use
-	// pgrepPortalDaemonPIDs (not the count helper) so the failure
-	// diagnostic carries the PID set, distinguishing "daemons exited
-	// between harness setup and this assertion" from "harness never
-	// reached N=3".
-	pids, err := pgrepPortalDaemonPIDs()
+	// portaltest.PgrepPortalDaemons (returns the PID set, not just a
+	// count) so the failure diagnostic carries the PID set,
+	// distinguishing "daemons exited between harness setup and this
+	// assertion" from "harness never reached N=3".
+	pids, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("pgrep snapshot: %v", err)
 	}

@@ -153,7 +153,7 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 	//    not silently observed as N=2 → 1 (which would still pass the
 	//    post-state assertion).
 	if !waitForPgrepCount(t, 3, compositionPreStateTimeout) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("pre-state: pgrep -fx did not reach 3 within %s\n"+
 			"  legitimate saver PID: %d (alive=%v)\n"+
 			"  orphan1 PID: %d (alive=%v)\n"+
@@ -199,7 +199,7 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 			time.Since(start))
 	}
 	if !waitForPgrepCount(t, 1, remaining) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("post-bootstrap: pgrep -fx did not converge to 1 within %s of bootstrap entry "+
 			"(elapsed=%s, budget=%s)\n"+
 			"  legitimate saver PID: %d (alive=%v)\n"+
@@ -217,7 +217,7 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 	// 6. Survivor identity: the sole remaining daemon must equal the
 	//    saver pane's pane_pid. Re-read the pane_pid post-bootstrap
 	//    (it may have been respawned during the saver re-bootstrap).
-	survivors, err := pgrepPortalDaemonPIDs()
+	survivors, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("post-bootstrap pgrep snapshot: %v", err)
 	}

@@ -30,12 +30,20 @@ const (
 	IdentifyDead
 )
 
-// daemonArgvPattern is the anchored argv match for "portal state daemon".
-// The trailing "( |$)" disjunction permits exact match (end-of-string) or
-// continued argv (trailing space + flags like "--foo"). A suffix such as
-// "portal state daemon-foo" is rejected because neither space nor end follows
-// "daemon".
-var daemonArgvPattern = regexp.MustCompile(`^portal state daemon( |$)`)
+// PortalDaemonArgvPattern is the canonical anchored argv match for a live
+// `portal state daemon` process. The trailing "( |$)" disjunction permits
+// exact match (end-of-string) or continued argv (trailing space + flags
+// like "--foo"). A suffix such as "portal state daemon-foo" is rejected
+// because neither space nor end follows "daemon".
+//
+// Exported so the bootstrap adapter's `pgrep -fx` enumeration and the
+// portaltest pgrep helper share a single source of truth with the regex
+// compiled by IdentifyDaemon below.
+const PortalDaemonArgvPattern = `^portal state daemon( |$)`
+
+// daemonArgvPattern is the compiled form of PortalDaemonArgvPattern used by
+// IdentifyDaemon's argv match.
+var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
 
 // identifyPS is the test seam over the `ps -o comm=,args= -p <pid>` invocation.
 // Production code uses defaultIdentifyPS unchanged; tests in this package swap

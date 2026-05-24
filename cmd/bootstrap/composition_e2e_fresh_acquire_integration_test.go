@@ -53,6 +53,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/bootstrapadapter"
+	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -98,7 +99,7 @@ func TestCompositeBootstrap_FreshAcquireDaemonLockRefusesPostBootstrap(t *testin
 			time.Since(start))
 	}
 	if !waitForPgrepCount(t, 1, remaining) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("post-bootstrap: pgrep -fx did not converge to 1 within %s of "+
 			"bootstrap-slice entry (elapsed=%s, budget=%s)\n"+
 			"  harness saver PID (setup-time): %d (alive=%v)\n"+

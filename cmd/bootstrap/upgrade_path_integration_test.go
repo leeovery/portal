@@ -186,7 +186,7 @@ func TestUpgradePath_TwoBinary_AllComponentsCompose(t *testing.T) {
 	// Poll pgrep -fxc until it converges to 1 within the 6 s budget.
 	// On timeout, surface the current pgrep snapshot for diagnosis.
 	if !waitForPgrepCount(t, 1, upgradePathPGrepConvergenceTimeout) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("pgrep -fxc did not converge to 1 within %s\n"+
 			"  v(N) PID: %d (alive=%v)\n"+
 			"  current pgrep snapshot: %v\n"+
@@ -200,7 +200,7 @@ func TestUpgradePath_TwoBinary_AllComponentsCompose(t *testing.T) {
 	// original v(N) PID. The survivor is the saver-pane daemon
 	// (re-respawned by BootstrapPortalSaver), so the test that the v(N)
 	// orphan was swept reduces to PID inequality.
-	survivors, err := pgrepPortalDaemonPIDs()
+	survivors, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("post-bootstrap pgrep snapshot: %v", err)
 	}

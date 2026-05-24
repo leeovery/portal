@@ -27,7 +27,7 @@
 // upgrade_path tests in this same _test package:
 //   - skipIfNoPgrep, registerSubprocessCleanup
 //   - waitForSaverPanePID, waitForDaemonPID, waitForPgrepCount
-//   - pgrepPortalDaemonPIDs, pidAlive
+//   - portaltest.PgrepPortalDaemons, pidAlive
 //
 // New scaffolding introduced here (specific to the 6-x consumer shape):
 //   - compositeHarness struct
@@ -277,7 +277,7 @@ func assertCompositePreState(t *testing.T, stateDir string, sock *tmuxtest.Socke
 
 	// Pre-assertion 1: N=3 daemons observable via pgrep.
 	if !waitForPgrepCount(t, 3, compositePreStatePGrepTimeout) {
-		pids, _ := pgrepPortalDaemonPIDs()
+		pids, _ := portaltest.PgrepPortalDaemons()
 		t.Fatalf("harness pre-state: pgrep -fx did not reach 3 within %s\n"+
 			"  legitimate saver PID: %d (alive=%v)\n"+
 			"  orphan1 PID: %d (alive=%v)\n"+
@@ -495,7 +495,7 @@ func TestCompositeHarness_PreState(t *testing.T) {
 	// re-checking from the consumer's perspective catches a regression
 	// where the harness exits with N != 3 between the internal
 	// assertion and the consumer's first observation.)
-	pids, err := pgrepPortalDaemonPIDs()
+	pids, err := portaltest.PgrepPortalDaemons()
 	if err != nil {
 		t.Fatalf("pgrep snapshot: %v", err)
 	}

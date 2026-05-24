@@ -46,20 +46,20 @@ func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.Orpha
 	}
 }
 
-// pgrepDaemonPattern is the canonical `pgrep -fx` regex that matches a live
-// `portal state daemon` process. The `-f` flag matches against the full
-// argv string; `-x` requires an exact match (the regex must consume the
-// whole argv); the anchored regex prevents false positives from e.g.
-// `portal state daemon-foo` or `portal state daemon --some-flag` (the
-// trailing ` |$` clause allows trailing argv tokens separated by a space,
-// while still anchoring the prefix).
-//
-// Spec § Component B Behaviour #1 — pgrep -fx is the single canonical
-// form used by both the implementation and the acceptance criteria.
-const pgrepDaemonPattern = "^portal state daemon( |$)"
-
 // pgrepPortalDaemons enumerates candidate PIDs via
-// `pgrep -fx '^portal state daemon( |$)'`. Returns:
+// `pgrep -fx '^portal state daemon( |$)'` (the canonical pattern is
+// state.PortalDaemonArgvPattern — the single source of truth shared with
+// state.IdentifyDaemon's argv regex and the portaltest pgrep helper).
+// The `-f` flag matches against the full argv string; `-x` requires an
+// exact match (the regex must consume the whole argv); the anchored
+// regex prevents false positives from e.g. `portal state daemon-foo` or
+// `portal state daemon --some-flag` (the trailing ` |$` clause allows
+// trailing argv tokens separated by a space, while still anchoring the
+// prefix). Spec § Component B Behaviour #1 — pgrep -fx is the single
+// canonical form used by both the implementation and the acceptance
+// criteria.
+//
+// Returns:
 //
 //   - ([]int{...}, nil) on a successful match (one or more candidates).
 //   - (nil, nil) when pgrep exits with status 1 AND empty stdout — pgrep's
@@ -73,7 +73,7 @@ const pgrepDaemonPattern = "^portal state daemon( |$)"
 // PIDs that cannot be parsed as integers are skipped silently — best-
 // effort posture.
 func pgrepPortalDaemons() ([]int, error) {
-	out, err := exec.Command("pgrep", "-fx", pgrepDaemonPattern).Output()
+	out, err := exec.Command("pgrep", "-fx", state.PortalDaemonArgvPattern).Output()
 	if err != nil {
 		// pgrep status 1 + empty stdout = no matches (canonical pgrep
 		// "nothing found" signal). Treat as a normal empty result.
@@ -81,7 +81,7 @@ func pgrepPortalDaemons() ([]int, error) {
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(strings.TrimSpace(string(out))) == 0 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("pgrep %q: %w", pgrepDaemonPattern, err)
+		return nil, fmt.Errorf("pgrep %q: %w", state.PortalDaemonArgvPattern, err)
 	}
 
 	trimmed := strings.TrimSpace(string(out))
