@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -61,7 +62,7 @@ var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
 var identifyPS = defaultIdentifyPS
 
 func defaultIdentifyPS(pid int) (string, error) {
-	out, err := exec.Command("ps", "-o", "comm=,args=", "-p", fmt.Sprintf("%d", pid)).Output()
+	out, err := exec.Command("ps", "-o", "comm=,args=", "-p", strconv.Itoa(pid)).Output()
 	return string(out), err
 }
 
