@@ -69,67 +69,6 @@ const portalSaverDaemonCommand = "portal state daemon"
 // the check without writing real PID files. Defaults to state.DaemonAlive.
 var BootstrapAliveCheck = state.DaemonAlive
 
-// portalSaverReadVersionFile is the function used by EnsurePortalSaverVersion
-// to read the stored daemon.version from a state directory. It is a
-// package-level seam so tests can simulate read errors (including non-absent
-// I/O failures) without touching the filesystem. Defaults to
-// state.ReadVersionFile.
-var portalSaverReadVersionFile = state.ReadVersionFile
-
-// portalSaverWriteVersionFile is the function used by EnsurePortalSaverVersion
-// on the alive+absent branch to defensively write daemon.version before
-// falling through to BootstrapPortalSaver. It is a package-level seam so tests
-// can record invocations and inject errors without touching the filesystem.
-//
-// The wrapper forwards the package-level versionWriterLogger (installed via
-// SetVersionWriterLogger from internal/bootstrapadapter) to
-// state.WriteVersionFile so the bootstrap-side defensive write emits the
-// same "daemon.version write:" DEBUG breadcrumb as the daemon-startup call
-// site. A nil sink remains safe: *state.Logger's nil-receiver semantics
-// degrade Debug to a no-op without panicking.
-//
-// Wiring-order invariant: callers that fire this wrapper before bootstrap
-// step 2 (RegisterPortalHooks) has run will silently drop the breadcrumb,
-// because versionWriterLogger is still nil. Today the only production
-// producer is EnsurePortalSaverVersion (bootstrap step 5), which always
-// runs after step 2 installs the logger — so the breadcrumb is reliable.
-// Adding a new caller from an earlier step (or from outside the bootstrap
-// orchestrator) requires installing the logger first.
-var portalSaverWriteVersionFile = func(dir, version string) error {
-	return state.WriteVersionFile(dir, version, versionWriterLogger)
-}
-
-// versionWriterLogger is the package-level sink for the
-// "daemon.version write:" DEBUG breadcrumb emitted by state.WriteVersionFile
-// when invoked through portalSaverWriteVersionFile (the bootstrap-side
-// defensive write). Production wiring installs the real *state.Logger via
-// SetVersionWriterLogger from internal/bootstrapadapter at the same site
-// that calls SetBarrierLogger. The default zero value is a nil *state.Logger,
-// which Logger.Debug treats as a no-op — so the wrapper is safe to call
-// before production wiring runs (e.g. in tests that exercise the seam
-// without installing a logger).
-var versionWriterLogger *state.Logger
-
-// SetVersionWriterLogger installs a *state.Logger as the sink for the
-// "daemon.version write:" DEBUG breadcrumb emitted by the bootstrap-side
-// defensive portalSaverWriteVersionFile call. A nil argument is ignored so
-// the package never loses its sink to a programming error in the wiring
-// layer; the default (nil) is itself safe via Logger's nil-receiver
-// contract, so callers may also simply skip the call.
-//
-// Production wiring calls this once from internal/bootstrapadapter
-// alongside SetBarrierLogger, threading the same *state.Logger that the
-// rest of bootstrap uses. The result is a single grep anchor in portal.log
-// — "daemon.version write:" — that surfaces both the daemon-startup call
-// site and the bootstrap-survived-path defensive repair (spec § Change 3,
-// Acceptance Criterion #9).
-func SetVersionWriterLogger(l *state.Logger) {
-	if l == nil {
-		return
-	}
-	versionWriterLogger = l
-}
-
 // PortalSaverRetryDelay is the sleep between new-session retry attempts. It is
 // exported as a var so tests can shrink it. Defaults to 100ms.
 var PortalSaverRetryDelay = 100 * time.Millisecond
@@ -137,68 +76,6 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // portalSaverMaxAttempts is the maximum number of new-session attempts before
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
-
-// saverReadPID is the function used to read the saver daemon's PID file. It
-// is shared by BOTH the kill-barrier (reading the prior daemon's PID before a
-// kill-respawn cycle) and the readiness barrier (polling for the freshly-
-// respawned daemon's PID file to appear). Exposed as a package-level seam so
-// unit tests can simulate "no PID file", "corrupted PID file", "unreadable PID
-// file", and "absent then present" cases without touching the filesystem.
-// Defaults to state.ReadPIDFile.
-var saverReadPID = state.ReadPIDFile
-
-// killBarrierIsAlive is the function used by the kill barrier to probe whether
-// the prior daemon is still running. It is a package-level seam so tests can
-// simulate "alive then dead after N ticks" / "alive forever" / "already dead"
-// without spawning real processes. Defaults to state.IsProcessAlive.
-var killBarrierIsAlive = state.IsProcessAlive
-
-// killBarrierPollInterval is the cadence at which the kill barrier re-probes
-// killBarrierIsAlive after issuing kill-session. Exported as a var so tests
-// can shrink it. Defaults to 50ms — chosen alongside killBarrierTimeout so
-// the median recycle path completes in well under a second.
-var killBarrierPollInterval = 50 * time.Millisecond
-
-// killBarrierTimeout is the upper bound on the kill barrier's wait for the
-// prior daemon to exit. Sized to sit above the daemon's cold-sweep ceiling
-// (3.9s on the affected user's scrollback profile) with margin, so the WARN
-// path is reserved for genuinely stuck daemons rather than ordinary cold
-// sweeps. Exported as a var so tests can shrink it.
-var killBarrierTimeout = 5 * time.Second
-
-// killBarrierEscalationTimeout is the upper bound on the post-SIGKILL poll
-// window in the escalation path. After the session-kill poll loop times out
-// (killBarrierTimeout) and the prior PID identity-checks as a portal state
-// daemon, killSaverAndWaitForDaemon sends SIGKILL directly and then polls
-// killBarrierIsAlive at killBarrierPollInterval cadence for up to this
-// duration. Sized to a single second — SIGKILL is unblockable, so the
-// process should be reaped almost immediately on any healthy system; the
-// budget exists only to surface persistently-undead processes via a single
-// WARN. Exported as a var so tests can shrink it.
-var killBarrierEscalationTimeout = 1 * time.Second
-
-// saverIdentifyDaemon is the function used to classify whether a given PID is
-// a live `portal state daemon`. It is shared by BOTH the kill-barrier
-// escalation path (identity-checking the prior PID immediately before sending
-// SIGKILL) and the readiness barrier (classifying the PID read from
-// daemon.pid after the create-branch respawn). Defaults to state.IdentifyDaemon
-// — the shared three-result primitive. Exposed as a package-level seam so unit
-// tests can deterministically drive the IdentifyIsPortalDaemon /
-// IdentifyNotPortalDaemon / IdentifyDead / transient-error branches without
-// shelling out to ps.
-var saverIdentifyDaemon = state.IdentifyDaemon
-
-// killBarrierSendSIGKILL is the function used by killSaverAndWaitForDaemon's
-// escalation path to send SIGKILL directly to the prior PID after the
-// identity-check has succeeded. Defaults to syscall.Kill(pid, SIGKILL). A
-// package-level seam so kill-barrier unit tests can record invocations and
-// inject errors without signalling real processes. Routing through the seam
-// also makes the "no SIGTERM ever sent" invariant trivially verifiable: only
-// SIGKILL flows through this seam, and tests can confirm no other signal
-// emission happens.
-var killBarrierSendSIGKILL = func(pid int) error {
-	return syscall.Kill(pid, syscall.SIGKILL)
-}
 
 // BarrierLogger is the minimal logging seam killSaverAndWaitForDaemon needs.
 // A single Warn method is the smallest surface that conveys the spec's
@@ -219,12 +96,175 @@ type noopBarrierLogger struct{}
 
 func (noopBarrierLogger) Warn(component, format string, args ...any) {}
 
-// killBarrierLogger is the package-level sink for kill-barrier WARN
-// emissions. Production wiring (Task 2.2) replaces this with a real
-// *state.Logger via SetBarrierLogger, invoked from internal/bootstrapadapter
-// at the same site that constructs the HookRegistrar's *state.Logger. Tests
-// install a recording fake via the seam and reset it through t.Cleanup.
-var killBarrierLogger BarrierLogger = noopBarrierLogger{}
+// SaverSharedSeams groups the PID-read and daemon-identity primitives that
+// are shared by BOTH the kill barrier (priorPID read + escalation identity
+// check) and the readiness barrier (poll-for-PID-file + post-respawn
+// classification). Exposed as a single struct so tests that need to drive
+// both barriers swap one struct rather than two free vars.
+//
+//   - ReadPID: function used to read the saver daemon's PID file. Defaults
+//     to state.ReadPIDFile. Tests can simulate "no PID file", "corrupted PID
+//     file", "unreadable PID file", and "absent then present" cases without
+//     touching the filesystem.
+//   - IdentifyDaemon: function used to classify whether a given PID is a
+//     live `portal state daemon`. Defaults to state.IdentifyDaemon — the
+//     shared three-result primitive. Tests can deterministically drive the
+//     IdentifyIsPortalDaemon / IdentifyNotPortalDaemon / IdentifyDead /
+//     transient-error branches without shelling out to ps.
+type SaverSharedSeams struct {
+	ReadPID        func(string) (int, error)
+	IdentifyDaemon func(int) (state.IdentifyResult, error)
+}
+
+// KillBarrierSeams groups the kill-barrier-specific seams driving
+// killSaverAndWaitForDaemon's poll loop and escalation path.
+//
+//   - IsAlive: probe of whether the prior daemon is still running. Tests can
+//     simulate "alive then dead after N ticks" / "alive forever" / "already
+//     dead" without spawning real processes. Defaults to state.IsProcessAlive.
+//   - SendSIGKILL: escalation-path signal emission. Routing through the seam
+//     makes the "no SIGTERM ever sent" invariant trivially verifiable — only
+//     SIGKILL flows through this seam.
+//   - PollInterval: cadence at which the kill barrier re-probes IsAlive after
+//     issuing kill-session. Defaults to 50ms — chosen alongside Timeout so
+//     the median recycle path completes in well under a second.
+//   - Timeout: upper bound on the kill barrier's wait for the prior daemon
+//     to exit. Sized to sit above the daemon's cold-sweep ceiling (3.9s on
+//     the affected user's scrollback profile) with margin, so the WARN path
+//     is reserved for genuinely stuck daemons rather than ordinary cold
+//     sweeps.
+//   - EscalationTimeout: upper bound on the post-SIGKILL poll window. Sized
+//     to a single second — SIGKILL is unblockable, so the process should be
+//     reaped almost immediately on any healthy system; the budget exists
+//     only to surface persistently-undead processes via a single WARN.
+//   - Logger: sink for kill-barrier WARN emissions. Production wiring
+//     replaces this with a real *state.Logger via SetBarrierLogger. Tests
+//     install a recording fake via the seam and reset it through t.Cleanup.
+type KillBarrierSeams struct {
+	IsAlive           func(int) bool
+	SendSIGKILL       func(int) error
+	PollInterval      time.Duration
+	Timeout           time.Duration
+	EscalationTimeout time.Duration
+	Logger            BarrierLogger
+}
+
+// SaverReadinessSeams groups the readiness-barrier-specific seams driving
+// waitForSaverDaemonReady's poll loop. PID-read and identity-classification
+// primitives are shared with the kill barrier via SaverSharedSeams.
+//
+//   - PollInterval: cadence at which the readiness barrier re-probes
+//     ReadPIDFile + IdentifyDaemon. Defaults to 50ms.
+//   - Timeout: upper bound on the wait for the freshly respawned daemon to
+//     publish daemon.pid AND be identifiable as `portal state daemon`. Sized
+//     to cover normal daemon startup latency (fork + exec + flock + PID-file
+//     write) with margin while keeping the bootstrap step bounded.
+type SaverReadinessSeams struct {
+	PollInterval time.Duration
+	Timeout      time.Duration
+}
+
+// SaverVersionSeams groups the version-file read/write seams plus the
+// DEBUG-breadcrumb logger consulted by the bootstrap-side defensive
+// write.
+//
+//   - ReadVersionFile: function used by EnsurePortalSaverVersion to read the
+//     stored daemon.version. Tests can simulate read errors (including
+//     non-absent I/O failures) without touching the filesystem. Defaults to
+//     state.ReadVersionFile.
+//   - WriteVersionFile: function used on the alive+absent branch to
+//     defensively write daemon.version before falling through to
+//     BootstrapPortalSaver. The default wrapper forwards WriterLogger to
+//     state.WriteVersionFile so the bootstrap-side defensive write emits the
+//     same "daemon.version write:" DEBUG breadcrumb as the daemon-startup
+//     call site. A nil sink remains safe: *state.Logger's nil-receiver
+//     semantics degrade Debug to a no-op without panicking.
+//   - WriterLogger: sink for the "daemon.version write:" DEBUG breadcrumb.
+//     Production wiring installs the real *state.Logger via
+//     SetVersionWriterLogger from internal/bootstrapadapter at the same site
+//     that calls SetBarrierLogger.
+//
+// Wiring-order invariant: callers that fire WriteVersionFile before bootstrap
+// step 2 (RegisterPortalHooks) has run will silently drop the breadcrumb,
+// because WriterLogger is still nil. Today the only production producer is
+// EnsurePortalSaverVersion (bootstrap step 5), which always runs after step 2
+// installs the logger — so the breadcrumb is reliable.
+type SaverVersionSeams struct {
+	ReadVersionFile  func(string) (string, error)
+	WriteVersionFile func(dir, version string) error
+	WriterLogger     *state.Logger
+}
+
+// SaverOperationSeams groups the two operation-level function seams that
+// callers route through to substitute the entire kill-and-wait or
+// readiness-wait flows. Tests that do not care about the inner barrier
+// mechanics swap these with a no-op or recorder and skip the full
+// poll-loop wall time; tests that exercise the real loops leave these as
+// the production helpers and stub the inner primitives instead.
+//
+//   - WaitForReady: routed through by BootstrapPortalSaver's create-branch.
+//   - KillAndWait: routed through by both production kill call sites
+//     (BootstrapPortalSaver session-lingering-with-dead-daemon path and
+//     EnsurePortalSaverVersion's kill decision).
+type SaverOperationSeams struct {
+	WaitForReady func(string) error
+	KillAndWait  func(*Client, string) error
+}
+
+// saverShared, killBarrier, saverReadiness, saverVersion, and saverOps are
+// the package-level seam-struct instances. Production code references their
+// fields directly; tests swap fields (via swapSeam) or whole structs (via
+// the *Seams() accessors in export_test.go).
+//
+// Defaults below mirror the prior bare-var initial values.
+var (
+	saverShared = SaverSharedSeams{
+		ReadPID:        state.ReadPIDFile,
+		IdentifyDaemon: state.IdentifyDaemon,
+	}
+
+	killBarrier = KillBarrierSeams{
+		IsAlive: state.IsProcessAlive,
+		SendSIGKILL: func(pid int) error {
+			return syscall.Kill(pid, syscall.SIGKILL)
+		},
+		PollInterval:      50 * time.Millisecond,
+		Timeout:           5 * time.Second,
+		EscalationTimeout: 1 * time.Second,
+		Logger:            noopBarrierLogger{},
+	}
+
+	saverReadiness = SaverReadinessSeams{
+		PollInterval: 50 * time.Millisecond,
+		Timeout:      2 * time.Second,
+	}
+
+	saverVersion = SaverVersionSeams{
+		ReadVersionFile: state.ReadVersionFile,
+		// WriteVersionFile defaults are wired in init() below to break the
+		// initialization cycle (the wrapper closes over saverVersion itself
+		// to read the current WriterLogger sink at call time).
+		// WriterLogger is left as the zero value (nil *state.Logger).
+		// *state.Logger's nil-receiver contract degrades Debug to a no-op,
+		// so the wrapper is safe to call before production wiring runs.
+	}
+
+	saverOps = SaverOperationSeams{
+		WaitForReady: waitForSaverDaemonReady,
+		KillAndWait:  killSaverAndWaitForDaemon,
+	}
+)
+
+func init() {
+	// Wire the default WriteVersionFile wrapper outside the saverVersion
+	// composite literal to avoid an initialization cycle. The closure
+	// captures the package-level saverVersion so it always reads the
+	// current WriterLogger sink (including any SetVersionWriterLogger
+	// installation) at call time.
+	saverVersion.WriteVersionFile = func(dir, version string) error {
+		return state.WriteVersionFile(dir, version, saverVersion.WriterLogger)
+	}
+}
 
 // SetBarrierLogger installs a BarrierLogger as the sink for kill-barrier
 // WARN-on-timeout emissions. A nil argument is ignored so the package never
@@ -239,43 +279,28 @@ func SetBarrierLogger(l BarrierLogger) {
 	if l == nil {
 		return
 	}
-	killBarrierLogger = l
+	killBarrier.Logger = l
 }
 
-// saverReadinessPollInterval is the cadence at which the readiness barrier
-// re-probes ReadPIDFile + IdentifyDaemon after the create-branch respawn.
-// Exported as a var so tests can shrink it. Defaults to 50ms — chosen
-// alongside saverReadinessTimeout so the median ready path completes in
-// well under a second on a healthy host.
-var saverReadinessPollInterval = 50 * time.Millisecond
-
-// saverReadinessTimeout is the upper bound on waitForSaverDaemonReady's
-// wait for the freshly respawned daemon to publish daemon.pid AND be
-// identifiable as `portal state daemon`. Sized to cover normal daemon
-// startup latency (fork + exec + flock + PID-file write) with margin while
-// keeping the bootstrap step bounded. Exported as a var so tests can shrink
-// it.
-var saverReadinessTimeout = 2 * time.Second
-
-// waitForSaverDaemonReadyFn is the package-level seam that the
-// BootstrapPortalSaver create-branch call routes through. It defaults to
-// the production helper; unit tests swap it with a no-op via the
-// WaitForSaverDaemonReadyFnSeam test export so existing create-branch
-// tests do not incur the full poll-loop wall time. The pattern mirrors
-// killSaverAndWaitForDaemonFn — a single fn-seam lets tests that do not
-// care about the readiness barrier skip it cheaply, while leaving the
-// real helper available for tests that exercise it directly.
-var waitForSaverDaemonReadyFn = waitForSaverDaemonReady
-
-// killSaverAndWaitForDaemonFn is the package-level seam that both
-// production kill call sites route through. It defaults to the production
-// helper; unit tests swap it with a recorder or a no-op via the
-// KillSaverAndWaitForDaemonFnSeam test export. Routing both call sites
-// through this single var keeps the wiring symmetric and lets a single
-// stub disable barrier semantics for tests that only care about call-site
-// behaviour, while leaving the real helper available for tests that want
-// the full kill+poll flow (with the inner seams stubbed).
-var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
+// SetVersionWriterLogger installs a *state.Logger as the sink for the
+// "daemon.version write:" DEBUG breadcrumb emitted by the bootstrap-side
+// defensive WriteVersionFile call. A nil argument is ignored so the package
+// never loses its sink to a programming error in the wiring layer; the
+// default (nil) is itself safe via Logger's nil-receiver contract, so
+// callers may also simply skip the call.
+//
+// Production wiring calls this once from internal/bootstrapadapter
+// alongside SetBarrierLogger, threading the same *state.Logger that the
+// rest of bootstrap uses. The result is a single grep anchor in portal.log
+// — "daemon.version write:" — that surfaces both the daemon-startup call
+// site and the bootstrap-survived-path defensive repair (spec § Change 3,
+// Acceptance Criterion #9).
+func SetVersionWriterLogger(l *state.Logger) {
+	if l == nil {
+		return
+	}
+	saverVersion.WriterLogger = l
+}
 
 // killSaverAndWaitForDaemon issues kill-session against _portal-saver and
 // blocks until the prior daemon has actually exited or a timeout fires. The
@@ -295,8 +320,8 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 //  3. Otherwise issue kill-session exactly once, tolerating kill errors
 //     (the session may have auto-destroyed between probe and kill — that is
 //     equivalent to "already absent" for our purposes). Then enter the poll
-//     loop: re-probe killBarrierIsAlive every killBarrierPollInterval until
-//     it returns false or killBarrierTimeout elapses.
+//     loop: re-probe killBarrierIsAlive every killBarrier.PollInterval until
+//     it returns false or killBarrier.Timeout elapses.
 //  4. On session-kill poll timeout → escalate (spec § Component A —
 //     Kill-Barrier Escalation):
 //     (a) Identity-check the prior PID via saverIdentifyDaemon. If the
@@ -310,22 +335,22 @@ var killSaverAndWaitForDaemonFn = killSaverAndWaitForDaemon
 //     daemon's shutdown handler — we explicitly do NOT want the orphan to
 //     execute one final destructive captureAndCommit on its way out.
 //     (c) Post-SIGKILL poll: probe killBarrierIsAlive at
-//     killBarrierPollInterval cadence (50ms by default) for up to
-//     killBarrierEscalationTimeout (1s by default). On exit → return nil.
+//     killBarrier.PollInterval cadence (50ms by default) for up to
+//     killBarrier.EscalationTimeout (1s by default). On exit → return nil.
 //     On persistent aliveness → emit one WARN and return nil.
 //
 // The helper never writes to the state directory. WARN is emitted at most
 // once per invocation across the entire flow; the new daemon's lock
 // acquisition is the safety net for genuinely-stuck cases.
 func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
-	priorPID, readErr := saverReadPID(stateDir)
+	priorPID, readErr := saverShared.ReadPID(stateDir)
 	if readErr != nil {
 		// No usable prior PID. Tolerant kill, no polling.
 		_ = c.KillSession(PortalSaverName)
 		return nil
 	}
 
-	if !killBarrierIsAlive(priorPID) {
+	if !killBarrier.IsAlive(priorPID) {
 		// Prior daemon already dead. Tolerant kill, no polling.
 		_ = c.KillSession(PortalSaverName)
 		return nil
@@ -334,7 +359,7 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	// Prior daemon alive — issue kill-session once and wait for exit.
 	_ = c.KillSession(PortalSaverName)
 
-	if waitForPriorPIDExit(priorPID, killBarrierTimeout) {
+	if waitForPriorPIDExit(priorPID, killBarrier.Timeout) {
 		return nil
 	}
 
@@ -343,18 +368,18 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	return escalateKillToSIGKILL(priorPID)
 }
 
-// waitForPriorPIDExit polls killBarrierIsAlive(pid) at killBarrierPollInterval
+// waitForPriorPIDExit polls killBarrier.IsAlive(pid) at killBarrier.PollInterval
 // cadence until it returns false or budget elapses. Returns true on observed
 // exit, false on timeout. Used by killSaverAndWaitForDaemon's session-kill
 // wait stage; the post-SIGKILL wait stage shares the same probe primitive via
 // an inline loop tuned to the escalation budget.
 func waitForPriorPIDExit(pid int, budget time.Duration) bool {
-	ticker := time.NewTicker(killBarrierPollInterval)
+	ticker := time.NewTicker(killBarrier.PollInterval)
 	defer ticker.Stop()
 
 	deadline := time.Now().Add(budget)
 	for range ticker.C {
-		if !killBarrierIsAlive(pid) {
+		if !killBarrier.IsAlive(pid) {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -367,7 +392,7 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 // escalateKillToSIGKILL runs the Component A escalation: identity-check
 // priorPID and, only on IdentifyIsPortalDaemon, send SIGKILL via the seam as
 // the IMMEDIATELY-following statement. Then poll killBarrierIsAlive at
-// killBarrierPollInterval cadence for up to killBarrierEscalationTimeout.
+// killBarrier.PollInterval cadence for up to killBarrier.EscalationTimeout.
 // All exit paths emit at most one WARN and return nil — bootstrap is
 // best-effort at this stage and the new daemon's lock acquisition is the
 // structural safety net.
@@ -377,32 +402,32 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 // runs between the check and the signal. The two seam calls are deliberately
 // adjacent in source.
 func escalateKillToSIGKILL(priorPID int) error {
-	result, err := saverIdentifyDaemon(priorPID)
+	result, err := saverShared.IdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
-		killBarrierLogger.Warn(
+		killBarrier.Logger.Warn(
 			state.ComponentBootstrap,
 			"prior daemon (pid=%d) not identity-checked as portal state daemon; skipping SIGKILL",
 			priorPID,
 		)
 		return nil
 	}
-	_ = killBarrierSendSIGKILL(priorPID)
+	_ = killBarrier.SendSIGKILL(priorPID)
 
-	if waitForPriorPIDExit(priorPID, killBarrierEscalationTimeout) {
+	if waitForPriorPIDExit(priorPID, killBarrier.EscalationTimeout) {
 		return nil
 	}
-	killBarrierLogger.Warn(
+	killBarrier.Logger.Warn(
 		state.ComponentBootstrap,
 		"prior daemon (pid=%d) survived SIGKILL escalation within %v",
 		priorPID,
-		killBarrierEscalationTimeout,
+		killBarrier.EscalationTimeout,
 	)
 	return nil
 }
 
 // waitForSaverDaemonReady polls daemon.pid + state.IdentifyDaemon until the
-// freshly-respawned saver daemon has come up, bounded to saverReadinessTimeout
-// total wall-clock at saverReadinessPollInterval cadence. It closes the
+// freshly-respawned saver daemon has come up, bounded to saverReadiness.Timeout
+// total wall-clock at saverReadiness.PollInterval cadence. It closes the
 // race between the create-branch respawn-pane (which atomically swaps the
 // placeholder for `portal state daemon`) and subsequent bootstrap steps
 // (Restore, EagerSignalHydrate, ...) that assume a healthy daemon.
@@ -427,9 +452,9 @@ func escalateKillToSIGKILL(priorPID int) error {
 //   - The deadline is computed once at entry so the 2s ceiling is enforced
 //     regardless of how many transient errors occur inside the loop.
 func waitForSaverDaemonReady(stateDir string) error {
-	deadline := time.Now().Add(saverReadinessTimeout)
+	deadline := time.Now().Add(saverReadiness.Timeout)
 
-	ticker := time.NewTicker(saverReadinessPollInterval)
+	ticker := time.NewTicker(saverReadiness.PollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -437,10 +462,10 @@ func waitForSaverDaemonReady(stateDir string) error {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			killBarrierLogger.Warn(
+			killBarrier.Logger.Warn(
 				state.ComponentBootstrap,
 				"saver respawn: daemon did not come up within %v",
-				saverReadinessTimeout,
+				saverReadiness.Timeout,
 			)
 			return nil
 		}
@@ -454,11 +479,11 @@ func waitForSaverDaemonReady(stateDir string) error {
 // identify error, IdentifyDead, IdentifyNotPortalDaemon) returns false so
 // the caller continues polling.
 func isSaverDaemonReady(stateDir string) bool {
-	pid, err := saverReadPID(stateDir)
+	pid, err := saverShared.ReadPID(stateDir)
 	if err != nil {
 		return false
 	}
-	result, err := saverIdentifyDaemon(pid)
+	result, err := saverShared.IdentifyDaemon(pid)
 	if err != nil {
 		return false
 	}
@@ -508,7 +533,7 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 		// Session lingering with a dead daemon — kill via the synchronous
 		// barrier so the prior daemon's exit precedes the respawn, then
 		// fall through to recreate.
-		_ = killSaverAndWaitForDaemonFn(c, stateDir)
+		_ = saverOps.KillAndWait(c, stateDir)
 		sessionPresent = false
 	}
 
@@ -530,13 +555,13 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 		}
 		// Readiness barrier: poll daemon.pid + IdentifyDaemon until the
 		// freshly-respawned daemon is observably up, bounded to
-		// saverReadinessTimeout. Routed through waitForSaverDaemonReadyFn so
+		// saverReadiness.Timeout. Routed through waitForSaverDaemonReadyFn so
 		// unit tests not exercising the barrier can stub it out cheaply.
 		// Always returns nil today — WARN-on-timeout is logged inside the
 		// helper. The barrier closes the gap where subsequent bootstrap
 		// steps (Restore, EagerSignalHydrate, ...) would otherwise observe
 		// a not-yet-up daemon racing the respawn.
-		_ = waitForSaverDaemonReadyFn(stateDir)
+		_ = saverOps.WaitForReady(stateDir)
 	}
 
 	return nil
@@ -581,11 +606,11 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 // runs to (re)create the session and apply the defensive
 // destroy-unattached=off option.
 func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error {
-	stored, readErr := portalSaverReadVersionFile(stateDir)
+	stored, readErr := saverVersion.ReadVersionFile(stateDir)
 	alive := BootstrapAliveCheck(stateDir)
 
 	if alive && shouldKillSaverOnVersionDecision(stored, currentVersion, readErr) {
-		_ = killSaverAndWaitForDaemonFn(c, stateDir)
+		_ = saverOps.KillAndWait(c, stateDir)
 	} else if alive && errors.Is(readErr, state.ErrVersionFileAbsent) {
 		// Defensive complement: lock-loser daemons return cleanly before
 		// writing daemon.version, so on every bootstrap we observe the
@@ -594,7 +619,7 @@ func EnsurePortalSaverVersion(c *Client, stateDir, currentVersion string) error 
 		// audit trail is restored and the kill cascade cannot re-trigger
 		// silently. A write failure must propagate — BootstrapPortalSaver
 		// is NOT called when the defensive write fails.
-		if err := portalSaverWriteVersionFile(stateDir, currentVersion); err != nil {
+		if err := saverVersion.WriteVersionFile(stateDir, currentVersion); err != nil {
 			return fmt.Errorf("defensive daemon.version write failed: %w", err)
 		}
 	}
