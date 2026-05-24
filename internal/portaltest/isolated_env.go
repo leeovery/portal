@@ -16,6 +16,13 @@ import (
 // the spawned process resolves XDG_CONFIG_HOME — and therefore all
 // portal state paths — under the isolated temp directory.
 //
+// SIDE EFFECT: this helper MUTATES the calling test process's
+// environment via t.Setenv (HOME → fresh t.TempDir(); XDG_CONFIG_HOME
+// → ""). The mutation is restored when t.Cleanup fires at test exit.
+// This is intentional and load-bearing for the fingerprint-diff
+// backstop described below; despite the New* prefix the helper is
+// not side-effect-free at the call site.
+//
 // Host-noise mitigation: this helper neutralizes host env noise by
 // re-pointing HOME at a fresh t.TempDir() and clearing
 // XDG_CONFIG_HOME on the test process BEFORE snapshotting the
