@@ -232,3 +232,19 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-8-7 | Rename killBarrierLogger to saverBarrierLogger | rename setter and interface in lockstep, update bootstrapadapter wiring, no killBarrierLogger references remain |
 | slow-open-empty-previews-and-zombie-sessions-8-8 | Replace fmt.Sprintf with strconv.Itoa in identifyPS | drop fmt import if no other usage, add strconv import, tests pass |
 | slow-open-empty-previews-and-zombie-sessions-8-9 | Document or split NewIsolatedStateEnv to reflect parent-env mutation | option (a) rename to SetupIsolatedStateEnv preferred for minimal disruption, all callers migrated, tests pass under new name |
+
+### Phase 9: Analysis (Cycle 3)
+
+**Goal**: Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-9-1 | Promote pgrep enumeration to state.PgrepPortalDaemons | byte-equivalent production/test forwarders, exit-1-empty-stdout parity, parse-loop drift eliminated, orphan-sweep and pgrep-using tests pass |
+| slow-open-empty-previews-and-zombie-sessions-9-2 | Add tmux.SaverPanePIDOrAbsent helper centralizing any-error-to-absent rule | ErrNoSuchSession/ErrEmptyPaneList → (0,false,nil), other errors → (0,false,err), success → (pid,true,nil), Component B adapter + Component D probe both delegate |
+| slow-open-empty-previews-and-zombie-sessions-9-3 | Delete waitForAnyDaemonPID (functionally identical to waitForDaemonPID) | callers migrate to waitForDaemonPID(t, stateDir, expectedPID), constant pairs reconciled, incorrect docstring removed, ~-20 LOC |
+| slow-open-empty-previews-and-zombie-sessions-9-4 | Promote ReadPortalLogSafe to internal/portaltest | leaf-package *testing.T signature, ~14 call sites migrated, both local helpers deleted, ~-20 LOC |
+| slow-open-empty-previews-and-zombie-sessions-9-5 | Rename NewIsolatedStateEnv to communicate parent-env mutation in its name | option (a) IsolateStateForTest/MustIsolateStateDir or (b) ScrubHostEnv+BuildIsolatedEnv, ~63 call sites migrated, syntactic cue for HOME mutation |
+| slow-open-empty-previews-and-zombie-sessions-9-6 | Embed or collapse the 5 Saver*Seams structs | option (a) embed SaverSharedSeams into Barrier/Readiness, or (b) single SaverSeams composite, export_test.go accessors updated, tests reach across one struct only |
+| slow-open-empty-previews-and-zombie-sessions-9-7 | Fix Component C log-acquire error level (Error to Warn per spec) | Logger.Warn replaces Logger.Error at cmd/state_daemon.go:210, wrapped-error return preserved, exit status 1 preserved, log-level-asserting tests updated |
