@@ -2,21 +2,16 @@ package bootstrapadapter
 
 // Production adapter for the bootstrap.OrphanSweeper interface — step 4 of
 // the eleven-step bootstrap sequence. The adapter is a thin wrapper that
-// pins the canonical Pgrep form (`pgrep -fx '^portal state daemon( |$)'`)
-// and wires tmux.SaverPanePID into the (saverPID int, err error) seam
-// shape consumed by *bootstrap.OrphanSweepCore.
+// pins the canonical Pgrep form (`pgrep -fx '^portal state daemon( |$)'`,
+// via state.PgrepPortalDaemons) and wires tmux.SaverPanePID into the
+// (saverPID int, err error) seam shape consumed by *bootstrap.OrphanSweepCore.
 //
 // Lives in its own file (sibling to adapters.go) because the orphan-sweep
-// adapter pulls in os/exec (for the pgrep shell-out) — keeping that import
-// surface scoped to a single file lets the rest of internal/bootstrapadapter
-// stay free of process-management dependencies.
+// adapter wires tmux-specific helpers — keeping that import surface scoped
+// to a single file lets the rest of internal/bootstrapadapter stay focused.
 
 import (
 	"errors"
-	"fmt"
-	"os/exec"
-	"strconv"
-	"strings"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/state"
@@ -25,9 +20,10 @@ import (
 
 // NewOrphanSweeper builds a fully-wired *bootstrap.OrphanSweepCore — the
 // production OrphanSweeper for orchestrator step 4. Pgrep is the canonical
-// `pgrep -fx '^portal state daemon( |$)'` enumeration; SaverPanePID reads
-// the first pane's PID from the `_portal-saver` session via the
-// *tmux.Client; Identify and Kill fall through to the package-internal
+// `pgrep -fx '^portal state daemon( |$)'` enumeration (state.PgrepPortalDaemons,
+// the single source of truth shared with the portaltest helper);
+// SaverPanePID reads the first pane's PID from the `_portal-saver` session
+// via the *tmux.Client; Identify and Kill fall through to the package-internal
 // defaults (state.IdentifyDaemon and syscall.Kill(pid, SIGKILL)).
 //
 // client must be non-nil; behaviour with a nil client is undefined and
@@ -40,72 +36,10 @@ import (
 // substitutes its no-op default at entry.
 func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.OrphanSweeper {
 	return &bootstrap.OrphanSweepCore{
-		Pgrep:        pgrepPortalDaemons,
+		Pgrep:        state.PgrepPortalDaemons,
 		SaverPanePID: func() (int, error) { return saverPanePID(client) },
 		Logger:       logger,
 	}
-}
-
-// pgrepPortalDaemons enumerates candidate PIDs via
-// `pgrep -fx '^portal state daemon( |$)'` (the canonical pattern is
-// state.PortalDaemonArgvPattern — the single source of truth shared with
-// state.IdentifyDaemon's argv regex and the portaltest pgrep helper).
-// The `-f` flag matches against the full argv string; `-x` requires an
-// exact match (the regex must consume the whole argv); the anchored
-// regex prevents false positives from e.g. `portal state daemon-foo` or
-// `portal state daemon --some-flag` (the trailing ` |$` clause allows
-// trailing argv tokens separated by a space, while still anchoring the
-// prefix). Spec § Component B Behaviour #1 — pgrep -fx is the single
-// canonical form used by both the implementation and the acceptance
-// criteria.
-//
-// Returns:
-//
-//   - ([]int{...}, nil) on a successful match (one or more candidates).
-//   - (nil, nil) when pgrep exits with status 1 AND empty stdout — pgrep's
-//     documented "no matches" signal. This is the steady-state form on a
-//     clean install where no orphan daemons exist; treating it as an error
-//     would force the core to log a WARN on every bootstrap.
-//   - (nil, err) on any other non-zero exit or OS-layer failure. The core
-//     surfaces the error via Logger.Warn and continues — orphan-sweep is
-//     best-effort.
-//
-// PIDs that cannot be parsed as integers are skipped silently — best-
-// effort posture.
-func pgrepPortalDaemons() ([]int, error) {
-	out, err := exec.Command("pgrep", "-fx", state.PortalDaemonArgvPattern).Output()
-	if err != nil {
-		// pgrep status 1 + empty stdout = no matches (canonical pgrep
-		// "nothing found" signal). Treat as a normal empty result.
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(strings.TrimSpace(string(out))) == 0 {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("pgrep %q: %w", state.PortalDaemonArgvPattern, err)
-	}
-
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		// Exit 0 with empty output: defensive guard. pgrep's documented
-		// contract is exit 1 on no matches, but the empty-output / exit-0
-		// shape is handled here for robustness.
-		return nil, nil
-	}
-
-	var pids []int
-	for _, line := range strings.Split(trimmed, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		pid, parseErr := strconv.Atoi(line)
-		if parseErr != nil {
-			// Skip malformed lines silently — best-effort posture.
-			continue
-		}
-		pids = append(pids, pid)
-	}
-	return pids, nil
 }
 
 // saverPanePID reads the first pane PID of `_portal-saver` via
