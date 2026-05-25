@@ -222,10 +222,12 @@
             "slow-open-empty-previews-and-zombie-sessions-10-3",
             "slow-open-empty-previews-and-zombie-sessions-11-1",
             "slow-open-empty-previews-and-zombie-sessions-11-2",
-            "slow-open-empty-previews-and-zombie-sessions-11-3"
+            "slow-open-empty-previews-and-zombie-sessions-11-3",
+            "slow-open-empty-previews-and-zombie-sessions-11-4"
           ],
           "completed_phases": [
-            10
+            10,
+            11
           ],
           "updated": "2026-05-25"
         }

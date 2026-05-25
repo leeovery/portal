@@ -537,17 +537,18 @@ func TestStateDaemon_DoesNotWritePIDFileWhenLockHeld(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// daemon.pid must NOT have been written — the WritePIDFile call now lives
-	// inside defaultDaemonRun, immediately after the acquireDaemonLock guard,
-	// so a lock-held early-return guarantees the pid file is never touched.
-	//
-	// Note: daemon.version IS written when lock-held under the new ordering
-	// (WriteVersionFile runs in RunE before defaultDaemonRun's acquire call).
-	// That ordering is the documented architectural consequence of the
-	// Component C step 4 refactor — only acquire+pid moved into the run func;
-	// WriteVersionFile and other startup writes remain in RunE.
+	// Under the post-T7-5 ordering, neither daemon.pid nor daemon.version is
+	// written when the daemon exits on lock contention: defaultDaemonRun now
+	// performs acquireDaemonLock → WritePIDFile → WriteVersionFile in that
+	// order, so a lock-held early-return at the acquire err-guard short-
+	// circuits both writes. This test spot-checks the daemon.pid invariant
+	// and (below) the daemon.version invariant; the acquire-then-write
+	// adjacency itself is pinned structurally by the T4-8 AST adjacency test.
 	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
 		t.Errorf("daemon.pid must not exist when lock is held; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "daemon.version")); !os.IsNotExist(err) {
+		t.Errorf("daemon.version must not exist when lock is held; stat err = %v", err)
 	}
 }
 
