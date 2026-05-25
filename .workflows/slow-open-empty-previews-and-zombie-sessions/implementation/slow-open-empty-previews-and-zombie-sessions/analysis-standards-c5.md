@@ -1,30 +1,24 @@
-# Standards Analysis — Cycle 5 (Phase 11 re-scan)
+# Standards Analysis — Cycle 5
 
 AGENT: standards
 STATUS: clean
 FINDINGS_COUNT: 0
 FINDINGS: none
 
-## Phase 11 spec/convention verification
+SUMMARY: Independent re-scan finds no remaining spec drift; T10-1 / T10-2 / T10-3 (the only post-c4 changes) are conforming refactors.
 
-**T11-1** (`cmd/state_daemon_test.go`): Test renamed to `TestStateDaemon_ReturnsErrorAndLogsWarnOnNonContentionLockFailure`. Sets `PORTAL_LOG_LEVEL=warn`, asserts exactly one log line matching both `"WARN"` and `"acquire daemon lock"`. Matches Component C's WARN emission contract and is symmetric with `TestStateDaemon_EmitsWarnOnLockContention`.
+## Verification notes (deduplicated against c1–c4)
 
-**T11-2** (`cmd/bootstrap/composition_e2e_scrollback_stability_integration_test.go`): `snapshotScrollbackPaths` now returns `(map[string]struct{}, bool dirExists)`. Caller fatals on `!dirExists` with `"scrollback dir does not exist: ..."` and on `len(baseline) == 0` with the plan-specified diagnostic. File-header bullets explicitly mark empty baseline and missing dir as regression signals; no residual "empty set is a valid baseline" claim survives.
+- **T10-1 (`internal/portaltest/spawn_daemon.go`)** — consolidates orphan-daemon spawn + reap test helpers into `portaltest`. Test-only (enforced structurally by the `*testing.T` first parameter per spec § Component G). Bare `"portal"` argv[0] preserved with explicit comment citing the Darwin `comm` truncation requirement that `state.IdentifyDaemon` depends on. Uses `PORTAL_STATE_DIR` for per-call isolation on top of the caller's `IsolateStateForTest`-supplied env, matching the existing override precedence in `internal/state/paths.go`.
 
-**T11-3** (spec amendment): Component F bullet 3 at `specification.md:391` rewritten to "Lock-loser cascade is quiet — no `no such session` log noise" with rationale and the new opt-in note at line 394. Implementation assertion shape (`assertNoNoSuchSessionEntries` in `internal/tmux/portal_saver_endstate_integration_test.go`) matches the log-noise-absence contract.
+- **T10-2 (`cmd/bootstrap/orphan_sweep.go:50-92`)** — tri-state `SaverPanePID func() (pid int, present bool, err error)` correctly distinguishes spec § Component B step 2's two legitimate-set cases: present → singleton legitimate set; absent → empty legitimate set (no warn). Error case preserves "log WARN and proceed" best-effort contract from spec § Component B step 4. Defensive `os.Getpid()` self-skip retained at line 166.
 
-The line-365 "session persists for the next bootstrap to evaluate" residual the reviewer flagged is unchanged by Phase 11; covered by the architecture finding for this cycle. Not raised here to avoid duplication.
+- **T10-3 (`internal/tmux/saver_pane_pid.go`)** — `SaverPanePIDOrAbsent` (exported) collapses `ErrNoSuchSession` and `ErrEmptyPaneList` into absent shape; other errors returned verbatim. Unexported `saverPanePID` keeps rich sentinel surface available for in-package callers. Spec's "treat any error as absent" rule for Component D self-check step 1 correctly applied at Component D probe (verified clean in c4); orphan-sweep adapter surfaces the error per Component B WARN-and-empty-set behaviour.
 
-**T11-4** (`cmd/state_daemon_test.go`): Comment rewritten to describe the post-T7-5 `acquireDaemonLock → WritePIDFile → WriteVersionFile` ordering and short-circuit semantics. Symmetric `os.Stat` assertion on `daemon.version` added, paralleling the `daemon.pid` invariant.
+- **Component A–G** — all spec contracts verified intact. Identity-check→SIGKILL adjacency / 50ms cadence / 1s budget (A); canonical pgrep + literal INFO + nil-return contract (B); pre-check + post-flock fstat/stat cross-check + 3×10ms retry + WARN log level (C); probe-before-tick + N=3 hysteresis + literal INFO + osExit(0) bypassing daemonShutdownFunc (D); typed `tmuxerr.ErrNoSuchSession` sentinel in dependency-free leaf (E); placeholder command + ordering + readiness barrier (F); leaf `internal/portaltest` with `*testing.T` parameter (G).
 
-## Conventions (carried forward from prior c5)
+Conventions verified: no `t.Parallel()` in cmd-package tests; `*Deps` mutable-seam pattern with `t.Cleanup`; `%w` wrapping (multi-`%w` at `wrapNoSuchSession`); integration tests carry `//go:build integration`; leaf-package discipline preserved; 11-step bootstrap sequence documented consistently in `cmd/bootstrap/bootstrap.go` and `CLAUDE.md`.
 
-- No `t.Parallel()` in cmd-package tests
-- `*Deps` mutable-seam pattern with `t.Cleanup`
-- `%w` wrapping; integration tests carry `//go:build integration`
-- Leaf-package discipline preserved
-- 11-step bootstrap sequence documented consistently
+**Note (not a finding):** the planning-folder audit deliverable `audit-G-test-helpers.md` references the pre-T9-5 helper name `NewIsolatedStateEnv` in its prose. Planning artefact, not production code — doc-hygiene rather than spec drift.
 
-## Components A–G
-
-All spec contracts verified intact in prior c5 (carried forward): identity-check→SIGKILL adjacency / 50ms cadence / 1s budget (A); canonical pgrep + literal INFO + nil-return contract (B); pre-check + post-flock fstat/stat cross-check + 3×10ms retry + WARN log level (C); probe-before-tick + N=3 hysteresis + literal INFO + osExit(0) bypassing daemonShutdownFunc (D); typed `tmuxerr.ErrNoSuchSession` sentinel (E); placeholder command + ordering + readiness barrier (F); leaf `internal/portaltest` with `*testing.T` parameter (G).
+Returning clean — no genuinely remaining gaps.

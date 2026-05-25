@@ -1,4 +1,4 @@
-# Analysis Tasks — Cycle 5 (Phase 11 re-scan)
+# Analysis Tasks — Cycle 6 (Phase 11 re-scan)
 
 STATUS: tasks_proposed
 TASKS_PROPOSED: 1
@@ -13,7 +13,7 @@ Duplication and standards came back clean. Architecture flagged one medium-sever
 
 - status: pending
 - severity: medium
-- sources: architecture-c5
+- sources: architecture-c6
 
 ### Problem
 
