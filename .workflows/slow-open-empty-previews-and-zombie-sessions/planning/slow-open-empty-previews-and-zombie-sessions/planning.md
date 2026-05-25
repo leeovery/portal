@@ -248,3 +248,15 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-9-5 | Rename NewIsolatedStateEnv to communicate parent-env mutation in its name | option (a) IsolateStateForTest/MustIsolateStateDir or (b) ScrubHostEnv+BuildIsolatedEnv, ~63 call sites migrated, syntactic cue for HOME mutation |
 | slow-open-empty-previews-and-zombie-sessions-9-6 | Embed or collapse the 5 Saver*Seams structs | option (a) embed SaverSharedSeams into Barrier/Readiness, or (b) single SaverSeams composite, export_test.go accessors updated, tests reach across one struct only |
 | slow-open-empty-previews-and-zombie-sessions-9-7 | Fix Component C log-acquire error level (Error to Warn per spec) | Logger.Warn replaces Logger.Error at cmd/state_daemon.go:210, wrapped-error return preserved, exit status 1 preserved, log-level-asserting tests updated |
+
+### Phase 10: Analysis (Cycle 4)
+
+**Goal**: Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-10-1 | Promote orphan-daemon spawn + reap-cleanup helpers to internal/portaltest | five call sites migrated (bootstrap_test + internal/tmux integration tests), darwin comm-match unqualified "portal" argv[0] preserved, rationale comments centralized on helper godoc, ~-50 LOC, no production package gains internal/portaltest dependency |
+| slow-open-empty-previews-and-zombie-sessions-10-2 | Encode tri-state contract at the OrphanSweepCore.SaverPanePID seam boundary | seam widened to (pid, present, err), consumer switch reads !present explicitly (no pid==0 branch), adapter forwards tri-state verbatim, unit-test stubs updated to three-value shape, defensive return 0,true,nil distinct from 0,false,nil at type level |
+| slow-open-empty-previews-and-zombie-sessions-10-3 | Unexport tmux.SaverPanePID since SaverPanePIDOrAbsent is the sole production entry point | rename to lowercase saverPanePID, godoc updated to internal framing, go build ./... succeeds, grep for tmux.SaverPanePID word boundary returns no production matches, in-package callers (SaverPanePIDOrAbsent) updated |

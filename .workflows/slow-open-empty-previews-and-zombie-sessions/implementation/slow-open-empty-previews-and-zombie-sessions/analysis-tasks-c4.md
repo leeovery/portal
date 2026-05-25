@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: slow-open-empty-previews-and-zombie-sessions (Cycle 4)
 
 ## Task 1: Promote orphan-daemon spawn + reap-cleanup helpers to internal/portaltest
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -43,7 +43,7 @@ sources: duplication
 ---
 
 ## Task 2: Encode tri-state contract at the OrphanSweepCore.SaverPanePID seam boundary
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -75,7 +75,7 @@ sources: architecture
 ---
 
 ## Task 3: Unexport tmux.SaverPanePID since SaverPanePIDOrAbsent is the sole production entry point
-status: pending
+status: approved
 severity: low
 sources: architecture
 
