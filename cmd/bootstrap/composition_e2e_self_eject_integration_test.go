@@ -25,10 +25,11 @@
 //   equivalent mechanism this test uses: `tmux new-window -t _portal-saver:`
 //   with a placeholder shell command. The default tmux behaviour for
 //   new-window is to make the new window the SESSION'S ACTIVE WINDOW;
-//   `tmux.SaverPanePID` runs `list-panes -t =_portal-saver -F '#{pane_pid}'`
-//   which (without `-s`) enumerates panes in the SESSION'S ACTIVE WINDOW.
-//   After new-window the active window's pane is the placeholder, so
-//   `SaverPanePID(c, "_portal-saver")` returns the placeholder PID — not
+//   `tmux.SaverPanePIDOrAbsent` runs `list-panes -t =_portal-saver -F
+//   '#{pane_pid}'` which (without `-s`) enumerates panes in the SESSION'S
+//   ACTIVE WINDOW. After new-window the active window's pane is the
+//   placeholder, so `SaverPanePIDOrAbsent(c, "_portal-saver")` returns the
+//   placeholder PID with present=true — not
 //   the daemon's PID — which is exactly the pid-mismatch the daemon's
 //   per-tick probe is designed to detect. The daemon process itself is
 //   still alive in the original window 0; the saver session is still
@@ -266,13 +267,19 @@ func TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject(t *testing.T) {
 	// per-tick probe would still observe the daemon's pid and the
 	// self-eject path would not fire — surface that diagnosis up
 	// front rather than via a 6 s hang.
-	newActivePID, err := tmux.SaverPanePID(h.Client, tmux.PortalSaverName)
+	newActivePID, present, err := tmux.SaverPanePIDOrAbsent(h.Client, tmux.PortalSaverName)
 	if err != nil {
-		t.Fatalf("tmux.SaverPanePID post-new-window: %v\n"+
+		t.Fatalf("tmux.SaverPanePIDOrAbsent post-new-window: %v\n"+
 			"  the external-mismatch verification requires reading the saver "+
 			"session's active-window pane pid; a read failure here means the "+
 			"saver session was destroyed by the new-window call (unexpected)",
 			err)
+	}
+	if !present {
+		t.Fatalf("tmux.SaverPanePIDOrAbsent post-new-window: present=false\n" +
+			"  the external-mismatch verification requires the saver session " +
+			"to still host a pane after the new-window call; absent here means " +
+			"the saver session was destroyed (unexpected)")
 	}
 	if newActivePID == survivorPID {
 		t.Fatalf("post-new-window saver pane pid (%d) STILL equals survivor PID "+

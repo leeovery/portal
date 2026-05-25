@@ -34,7 +34,7 @@ import (
 // classification against the same sentinel.
 var ErrNoSuchSession = tmuxerr.ErrNoSuchSession
 
-// ErrEmptyPaneList is the typed sentinel returned (wrapped) by SaverPanePID
+// ErrEmptyPaneList is the typed sentinel returned (wrapped) by saverPanePID
 // when the underlying `tmux list-panes -t =<session> -F '#{pane_pid}'`
 // invocation succeeds (no exec error, no "no such session" stderr) but
 // produces stdout with no non-empty lines. The shape is observably distinct
@@ -43,11 +43,11 @@ var ErrNoSuchSession = tmuxerr.ErrNoSuchSession
 //
 // Callers consume this sentinel via errors.Is(err, ErrEmptyPaneList).
 // Component D's saverMembershipProbe collapses this — like every other
-// SaverPanePID failure mode — to "absent" so the daemon's self-supervision
+// saverPanePID failure mode — to "absent" so the daemon's self-supervision
 // counter increments without coupling to the underlying classification.
 var ErrEmptyPaneList = errors.New("empty pane list")
 
-// ErrPanePIDParse is the typed sentinel returned (wrapped) by SaverPanePID
+// ErrPanePIDParse is the typed sentinel returned (wrapped) by saverPanePID
 // when the underlying tmux invocation succeeds with a non-empty first line
 // that cannot be parsed as a base-10 integer via strconv.Atoi. Observed in
 // practice when tmux's format expansion emits an unexpected token (e.g., a

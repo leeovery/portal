@@ -27,6 +27,16 @@ import (
 // KillSaverAndWaitForDaemon re-exports killSaverAndWaitForDaemon for tests.
 var KillSaverAndWaitForDaemon = killSaverAndWaitForDaemon
 
+// SaverPanePID re-exports the unexported saverPanePID for the external
+// tmux_test package's rich-sentinel-classification unit tests. Production
+// code routes through SaverPanePIDOrAbsent — the sole exported entry point
+// — so the centralized "any-error → absent" collapse cannot be bypassed by
+// accident. The unit tests, however, must drive each error classification
+// (ErrNoSuchSession / ErrEmptyPaneList / ErrPanePIDParse / generic) directly
+// against the rich-sentinel form to pin the discriminator surface that
+// SaverPanePIDOrAbsent depends on.
+var SaverPanePID = saverPanePID
+
 // PortalSaverPlaceholderCommand re-exports portalSaverPlaceholderCommand so
 // the external tmux_test package can pin its literal value. The placeholder
 // is the create-time pane process used in Component F before
