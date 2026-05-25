@@ -126,7 +126,7 @@
     "implementation": {
       "items": {
         "slow-open-empty-previews-and-zombie-sessions": {
-          "status": "completed",
+          "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
@@ -223,7 +223,8 @@
           ],
           "completed_phases": [
             10
-          ]
+          ],
+          "updated": "2026-05-25"
         }
       }
     },
