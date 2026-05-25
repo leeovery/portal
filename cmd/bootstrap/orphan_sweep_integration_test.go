@@ -132,8 +132,8 @@ func TestSweepOrphanDaemons_Integration_ThreeDaemonsConvergeToOne(t *testing.T) 
 	//    multiple `portal state daemon` processes the orchestrator
 	//    must see and kill — while staying compatible with Component
 	//    C's singleton guarantee on the saver's state dir.
-	orphan1, _ := spawnOrphanDaemonIsolated(t, envSlice)
-	orphan2, _ := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
 
 	// 3. Precondition: pgrep -fxc must reach 3 before we invoke the
 	//    sweep. Without this barrier the sweep can race the orphan
@@ -298,7 +298,7 @@ func TestSweepOrphanDaemons_Integration_RecycledPIDRefusal(t *testing.T) {
 		t.Fatalf("start sleep process: %v", err)
 	}
 	sleeperPID := sleeper.Process.Pid
-	reaped := registerSubprocessCleanup(t, sleeper)
+	reaped := portaltest.RegisterSubprocessCleanup(t, sleeper)
 
 	// 3. Wire the production adapter, then override Pgrep to return
 	//    a candidate set that includes both the saver PID (legit) and
@@ -351,33 +351,6 @@ func skipIfNoPgrep(t *testing.T) {
 	if _, err := exec.LookPath("pgrep"); err != nil {
 		t.Skipf("pgrep not available; skipping orphan-sweep integration test: %v", err)
 	}
-}
-
-// registerSubprocessCleanup arranges a guaranteed SIGKILL + Wait for
-// the supplied command on test exit so spawned subprocesses cannot
-// leak across tests. Returns a channel that closes when the reaper
-// goroutine observes the process exit — callers that need to time
-// process death (Scenario C's settle-window check) can select on it.
-//
-// The reaper goroutine and the t.Cleanup hook coordinate via the
-// returned channel so calling Process.Wait directly from cleanup
-// (a second concurrent Wait) is structurally avoided.
-func registerSubprocessCleanup(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
-	t.Helper()
-	reaped := make(chan struct{})
-	go func() {
-		_, _ = cmd.Process.Wait()
-		close(reaped)
-	}()
-	t.Cleanup(func() {
-		// Belt-and-braces. SIGKILL is the only signal guaranteed to
-		// terminate a daemon that may already be in its osExit path
-		// or otherwise unresponsive. Errors swallowed — typical case
-		// is "process already exited" by the time cleanup runs.
-		_ = cmd.Process.Kill()
-		<-reaped
-	})
-	return reaped
 }
 
 // waitForSaverPanePID polls `_portal-saver`'s pane_pid until it is

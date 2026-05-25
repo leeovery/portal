@@ -74,9 +74,11 @@
 //     orphan_sweep_integration_test.go) and clean-skips with a
 //     diagnostic reason.
 //
-// Host-noise mitigation, isolated state env, pgrep helpers, and
-// registerSubprocessCleanup are all shared with
-// orphan_sweep_integration_test.go in the same `bootstrap_test` package.
+// Host-noise mitigation, isolated state env, and pgrep helpers are
+// shared with orphan_sweep_integration_test.go in the same
+// `bootstrap_test` package. Reap-cleanup uses
+// portaltest.RegisterSubprocessCleanup (promoted from the formerly
+// per-package helpers).
 // Logger capture uses `bootstrap.RecordingLogger` (exported from the
 // internal `package bootstrap` test file).
 //
@@ -155,7 +157,7 @@ func TestUpgradePath_TwoBinary_AllComponentsCompose(t *testing.T) {
 		t.Fatalf("start v(N) daemon: %v", err)
 	}
 	vNPID := vN.Process.Pid
-	_ = registerSubprocessCleanup(t, vN)
+	_ = portaltest.RegisterSubprocessCleanup(t, vN)
 
 	// Wait until v(N) writes daemon.pid. This is the precondition the
 	// upgrade-path scenario hinges on: the pre-acquire check in
@@ -287,7 +289,7 @@ func TestUpgradePath_ComponentC_IsolatedRefusesCleanly(t *testing.T) {
 		t.Fatalf("start v(N) daemon: %v", err)
 	}
 	vNPID := vN.Process.Pid
-	_ = registerSubprocessCleanup(t, vN)
+	_ = portaltest.RegisterSubprocessCleanup(t, vN)
 
 	// Wait until v(N) writes daemon.pid AND IdentifyDaemon confirms its
 	// identity. Without IdentifyDaemon confirmation the pre-check

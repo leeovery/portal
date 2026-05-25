@@ -25,16 +25,14 @@
 //
 // Shared scaffolding reused from composition_abc / orphan_sweep /
 // upgrade_path tests in this same _test package:
-//   - skipIfNoPgrep, registerSubprocessCleanup
+//   - skipIfNoPgrep
 //   - waitForSaverPanePID, waitForDaemonPID, waitForPgrepCount
-//   - portaltest.PgrepPortalDaemons, pidAlive
+//   - portaltest.PgrepPortalDaemons, portaltest.SpawnIsolatedDaemon,
+//     portaltest.RegisterSubprocessCleanup, pidAlive
 //
 // New scaffolding introduced here (specific to the 6-x consumer shape):
 //   - compositeHarness struct
 //   - setupCompositeHarness function
-//   - spawnOrphanDaemonIsolated (returns the orphan's stateDir too,
-//     since 6-1 needs to poll the orphan's own daemon.pid before
-//     overwriting the legitimate one)
 //   - seedUserSession (creates a user session with a small recurring
 //     output script in pane 0)
 //
@@ -44,7 +42,6 @@ package bootstrap_test
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
@@ -139,9 +136,10 @@ type compositeHarness struct {
 // Teardown is registered via t.Cleanup (LIFO):
 //   - tmuxtest.New registers tmux kill-server (runs LAST per LIFO).
 //   - portaltest.IsolateStateForTest registers the fingerprint backstop.
-//   - registerSubprocessCleanup arranges SIGKILL+Wait for each orphan
-//     subprocess (runs BEFORE tmux teardown so orphans are reaped while
-//     the test environment is still intact).
+//   - portaltest.SpawnIsolatedDaemon arranges SIGKILL+Wait for each
+//     orphan subprocess (via portaltest.RegisterSubprocessCleanup —
+//     runs BEFORE tmux teardown so orphans are reaped while the test
+//     environment is still intact).
 func setupCompositeHarness(t *testing.T) *compositeHarness {
 	t.Helper()
 
@@ -196,7 +194,7 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	// all three daemons stay live long enough for pgrep to observe
 	// N=3. pgrep's argv match is system-wide, so all three still
 	// appear in `pgrep -fx '^portal state daemon( |$)'`.
-	orphan1, orphan1StateDir := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan1, orphan1StateDir := portaltest.SpawnIsolatedDaemon(t, envSlice)
 	// Wait until orphan 1 writes daemon.pid in its OWN stateDir. This
 	// is the precondition for the next step: we cannot overwrite the
 	// legitimate stateDir's daemon.pid with orphan 1's PID until we
@@ -223,7 +221,7 @@ func setupCompositeHarness(t *testing.T) *compositeHarness {
 	// "recorded" orphan in the reporter scenario. Orphan 2 is the
 	// "second loose orphan" that Component B's pgrep sweep must
 	// independently observe and kill.
-	orphan2, _ := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
 
 	// Step 8: pre-assertions. These prove the harness produces the
 	// documented preconditions before any consumer touches it. A
@@ -356,41 +354,6 @@ func seedUserSessions(t *testing.T, client *tmux.Client, count int) []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// spawnOrphanDaemonIsolated launches an orphan `portal state daemon`
-// subprocess with its OWN per-orphan PORTAL_STATE_DIR (a fresh
-// t.TempDir) and returns both the *exec.Cmd and the orphan's stateDir.
-//
-// Used by Scenario A so multiple orphans can coexist with the
-// saver-pane daemon without colliding on `daemon.lock` / `daemon.pid`.
-// pgrep is system-wide and argv-anchored, so the orphans still appear
-// in `pgrep -fx '^portal state daemon( |$)'` alongside the saver-pane
-// daemon. Component B's identity check passes (real `portal state
-// daemon` argv), the saver-pane PID legitimate-set check skips them
-// (they are not the saver's pane process), and the sweep SIGKILLs
-// them as designed.
-//
-// The composite harness uses the returned stateDir to poll the
-// orphan's OWN daemon.pid before overwriting the legitimate stateDir's
-// daemon.pid — that read-then-overwrite sequencing is the load-bearing
-// reporter-scenario shape. Callers that don't need the stateDir
-// discard it with `_`.
-//
-// Cleanup is registered via registerSubprocessCleanup — SIGKILL + Wait
-// on test exit.
-func spawnOrphanDaemonIsolated(t *testing.T, envSlice []string) (*exec.Cmd, string) {
-	t.Helper()
-	orphanStateDir := t.TempDir()
-	env := append([]string{}, envSlice...)
-	env = append(env, "PORTAL_STATE_DIR="+orphanStateDir)
-	cmd := exec.Command("portal", "state", "daemon")
-	cmd.Env = env
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start isolated orphan daemon (stateDir=%s): %v", orphanStateDir, err)
-	}
-	registerSubprocessCleanup(t, cmd)
-	return cmd, orphanStateDir
 }
 
 // TestCompositeHarness_PreState is the one consumer test in this file —

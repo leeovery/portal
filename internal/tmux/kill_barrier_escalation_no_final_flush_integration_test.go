@@ -173,6 +173,14 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 	// orphan is structurally divergent-view from the moment it
 	// starts. It will self-eject after 3 ticks (≈ 3 s); the test
 	// budget below fits comfortably inside that window.
+	//
+	// Daemon spawn shares the isolated stateDir with the test rather
+	// than getting its own (the assertion below reads scrollback
+	// under that stateDir), so we cannot use SpawnIsolatedDaemon
+	// (which forces a per-call tempdir). The spawn shape mirrors
+	// SpawnIsolatedDaemon's body verbatim; reap+SIGKILL cleanup is
+	// delegated to RegisterSubprocessCleanup so the load-bearing
+	// rationale lives in one place (see portaltest/spawn_daemon.go).
 	orphanEnv := append([]string{}, envSlice...)
 	orphanEnv = append(orphanEnv, "PORTAL_STATE_DIR="+stateDir)
 	orphan := exec.Command("portal", "state", "daemon")
@@ -181,30 +189,7 @@ func TestKillBarrierEscalation_NoScrollbackDeltaIn200msPostExit(t *testing.T) {
 		t.Fatalf("start orphan daemon: %v", err)
 	}
 	orphanPID := orphan.Process.Pid
-
-	// Reap the orphan in a background goroutine. Without this, an
-	// unreaped child stays kernel-resident as a zombie after SIGKILL
-	// — kill(pid, 0) returns 0 (not ESRCH) until reaping completes,
-	// so the ESRCH poll below would deadlock against the OS lifecycle
-	// rules. Reaping is best-effort and signalled via reaped so the
-	// main flow can observe the exit deterministically.
-	reaped := make(chan struct{})
-	go func() {
-		_, _ = orphan.Process.Wait()
-		close(reaped)
-	}()
-	t.Cleanup(func() {
-		// Belt-and-braces cleanup. If the test failed early the
-		// orphan may still be running; SIGKILL is the only signal
-		// guaranteed to terminate a self-ejecting daemon that has
-		// already entered its osExit path or is otherwise
-		// unresponsive. Errors are swallowed — the typical case is
-		// "process already exited" by the time cleanup runs.
-		_ = orphan.Process.Kill()
-		// Wait via the reaper goroutine; do not call Wait here as
-		// that would race with the goroutine on the same Process.
-		<-reaped
-	})
+	reaped := portaltest.RegisterSubprocessCleanup(t, orphan)
 
 	// Force a tick to capture immediately rather than waiting up to
 	// maxGap = 30 s. The daemon's tick loop reads save.requested as
@@ -358,4 +343,3 @@ func hasAnyBin(snap map[string]portaltest.Fingerprint) bool {
 	}
 	return false
 }
-

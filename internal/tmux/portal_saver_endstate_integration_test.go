@@ -309,29 +309,25 @@ func TestBootstrapPortalSaver_LockLoser_NoNoSuchSessionLogNoise(t *testing.T) {
 	// stdout/stderr are discarded — we only care about its lifecycle
 	// (pid file written, lock held). On test cleanup we kill it
 	// explicitly so it does not leak into the next test.
+	//
+	// The spawn cannot use portaltest.SpawnIsolatedDaemon (which
+	// pins a fresh per-call tempdir) because this test deliberately
+	// shares the test's stateDir with the seeded daemon — the
+	// downstream BootstrapPortalSaver assertion exercises a lock-loss
+	// shape that hinges on the seeded daemon holding daemon.lock under
+	// the SAME stateDir the new daemon attempts to acquire under.
+	// Reap+SIGKILL cleanup is delegated to RegisterSubprocessCleanup
+	// so the load-bearing rationale (darwin-comm argv[0], SIGKILL
+	// belt-and-braces, reaper goroutine vs concurrent-Wait) lives in
+	// one canonical location (see portaltest/spawn_daemon.go).
 	seededEnv := append([]string{}, envSlice...)
 	seededEnv = append(seededEnv, "PORTAL_STATE_DIR="+stateDir)
-	// Invoke via the unqualified name "portal" so the daemon's argv[0]
-	// is "portal" — that is what darwin's ps reports as `comm`, and
-	// state.IdentifyDaemon requires comm == "portal" exactly. Spawning
-	// via an absolute path would set comm to the path (truncated to 15
-	// chars on darwin) and the identity-check would classify the
-	// daemon as IdentifyNotPortalDaemon. StagePortalBinary has already
-	// PATH-prepended the binary directory; exec.Command resolves via
-	// the test process's PATH which is inherited into seededEnv.
 	seeded := exec.Command("portal", "state", "daemon")
 	seeded.Env = seededEnv
 	if startErr := seeded.Start(); startErr != nil {
 		t.Fatalf("start seeded competing daemon: %v", startErr)
 	}
-	t.Cleanup(func() {
-		// Kill the seeded daemon. SIGKILL bypasses any defer; the
-		// daemon's lock fd is released by the kernel on process exit.
-		// Errors are intentionally swallowed — the typical case is
-		// "process already exited" if the test took a long path.
-		_ = seeded.Process.Kill()
-		_, _ = seeded.Process.Wait()
-	})
+	portaltest.RegisterSubprocessCleanup(t, seeded)
 
 	// Wait until the seeded daemon writes daemon.pid AND IdentifyDaemon
 	// confirms its identity. This guarantees the pre-acquire check in

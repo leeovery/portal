@@ -122,7 +122,7 @@
       "items": {
         "slow-open-empty-previews-and-zombie-sessions": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
@@ -144,7 +144,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 1,
+          "current_phase": 10,
           "current_task": "~",
           "completed_tasks": [
             "slow-open-empty-previews-and-zombie-sessions-1-1",
@@ -211,7 +211,8 @@
             "slow-open-empty-previews-and-zombie-sessions-9-4",
             "slow-open-empty-previews-and-zombie-sessions-9-5",
             "slow-open-empty-previews-and-zombie-sessions-9-6",
-            "slow-open-empty-previews-and-zombie-sessions-9-7"
+            "slow-open-empty-previews-and-zombie-sessions-9-7",
+            "slow-open-empty-previews-and-zombie-sessions-10-1"
           ]
         }
       }

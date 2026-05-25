@@ -60,8 +60,9 @@
 // not stateDir-scoped) still ensures Component B sweeps them.
 //
 // Cleanup: every spawned subprocess is registered with
-// registerSubprocessCleanup (shared with orphan_sweep_integration_test.go).
-// Tmux teardown is automatic via tmuxtest.New's t.Cleanup hook.
+// portaltest.RegisterSubprocessCleanup (invoked transitively via
+// portaltest.SpawnIsolatedDaemon). Tmux teardown is automatic via
+// tmuxtest.New's t.Cleanup hook.
 // Fingerprint-diff backstop runs automatically via portaltest.
 //
 // Host-noise mitigation: portaltest.IsolateStateForTest folds the
@@ -75,7 +76,6 @@ package bootstrap_test
 
 import (
 	"errors"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -144,8 +144,8 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 	//    comment for the full rationale (mirrors the 4-5 / orphan_sweep
 	//    pattern). pgrep's argv match is system-wide, so all three
 	//    daemons still appear in `pgrep -fx '^portal state daemon( |$)'`.
-	orphan1, _ := spawnOrphanDaemonIsolated(t, envSlice)
-	orphan2, _ := spawnOrphanDaemonIsolated(t, envSlice)
+	orphan1, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
+	orphan2, _ := portaltest.SpawnIsolatedDaemon(t, envSlice)
 
 	// 3. Pre-state barrier: pgrep -fx must reach 3 before bootstrap
 	//    fires. On timeout, surface a diagnostic citing all three PIDs
@@ -306,9 +306,3 @@ func TestComposition_PhaseFour_ABC_EndToEnd(t *testing.T) {
 			acquireErr, currentSaverPID, convergenceElapsed)
 	}
 }
-
-// Compile-time guard: ensure exec is imported for orphan PID diagnostics
-// in case the linked spawnOrphanDaemonIsolated helper's signature is
-// refactored to not expose *exec.Cmd. Static referenced via type
-// assertion to keep the import surfaced in this file's import block.
-var _ = (*exec.Cmd)(nil)

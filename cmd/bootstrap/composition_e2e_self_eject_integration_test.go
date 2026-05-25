@@ -77,7 +77,6 @@ package bootstrap_test
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"syscall"

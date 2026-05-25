@@ -29,7 +29,7 @@
 // setupCompositeHarness (step 2), so its t.Cleanup is registered first
 // and fires LAST per Go's LIFO Cleanup semantics. Subsequent harness
 // setup steps register their own Cleanups (orphan SIGKILL+Wait via
-// registerSubprocessCleanup, tmux kill-server via tmuxtest.New); those
+// portaltest.RegisterSubprocessCleanup, tmux kill-server via tmuxtest.New); those
 // fire BEFORE the backstop, so by the time the backstop walks the dev
 // state dir, all spawned daemons and the isolated tmux server are
 // already torn down. This means the backstop observes the post-
