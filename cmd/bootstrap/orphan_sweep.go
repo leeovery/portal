@@ -57,13 +57,24 @@ type OrphanSweepCore struct {
 	// process-management surface into a pure-orchestration package.
 	Pgrep func() ([]int, error)
 
-	// SaverPanePID returns the pane PID of `_portal-saver`. On
-	// `_portal-saver` absent (or any tmux error), the production adapter
-	// returns (0, err) — SweepOrphanDaemons treats both (0, nil) and
-	// (any, err) as "legitimate set empty" so the sweep proceeds against
-	// the full pgrep set. No default here; production wiring must inject
-	// the tmux adapter.
-	SaverPanePID func() (int, error)
+	// SaverPanePID returns the pane PID of `_portal-saver` with explicit
+	// tri-state semantics:
+	//
+	//   - (pid, true,  nil)  — `_portal-saver` is present; pid is the
+	//     pane PID (typically > 0).
+	//   - (0,   false, nil)  — `_portal-saver` is absent. The sweep
+	//     proceeds with an empty legitimate set against the full pgrep
+	//     result, with no warning emitted.
+	//   - (0,   false, err)  — any other failure (generic exec failure,
+	//     parse failure). The sweep WARN-logs and proceeds with an empty
+	//     legitimate set.
+	//
+	// "Absent" is encoded at the type level (the `present` bool) rather
+	// than overloaded onto pid == 0, so a future implementer returning
+	// pid 0 defensively on a non-error path cannot silently flip "absent"
+	// into "legitimate empty PID". No default here; production wiring
+	// must inject the tmux adapter.
+	SaverPanePID func() (pid int, present bool, err error)
 
 	// Identify defaults to state.IdentifyDaemon when nil — the same
 	// primitive Component A uses for its kill-barrier identity check.
@@ -97,11 +108,12 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 //     must supply them; absence indicates a programmer error.)
 //  3. Invoke Pgrep. On error: WARN ("sweep: pgrep failed: %v") and return
 //     nil — best-effort posture forbids escalation.
-//  4. Invoke SaverPanePID. On error: WARN ("sweep: list-panes _portal-saver
-//     failed, legitimate set empty: %v") and treat the legitimate set as
-//     empty; sweep proceeds against ALL pgrep results. (0, nil) — meaning
-//     `_portal-saver` is absent — also yields an empty legitimate set
-//     without a warning.
+//  4. Invoke SaverPanePID. Three observable shapes:
+//     - err != nil: WARN ("sweep: list-panes _portal-saver failed,
+//     legitimate set empty: %v") and treat the legitimate set as
+//     empty; sweep proceeds against ALL pgrep results.
+//     - !present (absent): legitimate set stays empty; no warning.
+//     - present: insert pid into the legitimate set.
 //  5. For each candidate PID that is NOT in the legitimate set AND NOT
 //     equal to os.Getpid() (defensive self-skip):
 //     a. Invoke Identify. On error: WARN ("sweep: identity-check pid=%d
@@ -138,12 +150,14 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	}
 
 	legitimate := map[int]struct{}{}
-	saverPID, saverErr := c.SaverPanePID()
+	saverPID, saverPresent, saverErr := c.SaverPanePID()
 	switch {
 	case saverErr != nil:
 		logger.Warn(state.ComponentBootstrap,
 			"sweep: list-panes _portal-saver failed, legitimate set empty: %v", saverErr)
-	case saverPID > 0:
+	case !saverPresent:
+		// `_portal-saver` absent — legitimate set stays empty; no warn.
+	default:
 		legitimate[saverPID] = struct{}{}
 	}
 

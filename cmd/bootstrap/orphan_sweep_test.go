@@ -58,7 +58,7 @@ func TestSweepOrphanDaemons_killsTwoOrphansLeavesLegitimate(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{legitPID, 2001, 2002}, nil },
-		SaverPanePID: func() (int, error) { return legitPID, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return legitPID, true, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 	}
@@ -88,7 +88,7 @@ func TestSweepOrphanDaemons_saverAbsentKillsAllIdentifying(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{3001, 3002, 3003}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil }, // _portal-saver absent
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil }, // _portal-saver absent
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 	}
@@ -108,7 +108,7 @@ func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return nil, sentinel },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyIsPortalDaemon, nil },
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -142,7 +142,7 @@ func TestSweepOrphanDaemons_listPanesErrorTreatsLegitimateEmpty(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{4001, 4002}, nil },
-		SaverPanePID: func() (int, error) { return 0, sentinel },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -174,7 +174,7 @@ func TestSweepOrphanDaemons_identifyDeadSkipped(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{5001, 5002}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 	}
@@ -192,7 +192,7 @@ func TestSweepOrphanDaemons_identifyNotPortalDaemonSkipped(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{6001, 6002}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 	}
@@ -212,7 +212,7 @@ func TestSweepOrphanDaemons_identifyTransientErrorSkipped(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{7001}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -243,7 +243,7 @@ func TestSweepOrphanDaemons_killErrorLogsWarnContinues(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{8001, 8002}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -274,7 +274,7 @@ func TestSweepOrphanDaemons_cleanStateZeroInfo(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{legitPID}, nil },
-		SaverPanePID: func() (int, error) { return legitPID, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return legitPID, true, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -312,7 +312,7 @@ func TestSweepOrphanDaemons_neverSIGTERM(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		// Inject a Kill closure to record the call shape that the Core
 		// performs — Core MUST call Kill(pid) with a single int arg only.
@@ -342,7 +342,7 @@ func TestSweepOrphanDaemons_defensiveOwnPIDSkip(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{ownPID, 10001}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 	}
@@ -368,7 +368,7 @@ func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
 	kill := &recordingKill{}
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     func(pid int) (state.IdentifyResult, error) { return 0, nil },
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -396,7 +396,7 @@ func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
 
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{11001}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       logger,
@@ -427,7 +427,7 @@ func TestSweepOrphanDaemons_nilLoggerSafe(t *testing.T) {
 	kill := &recordingKill{}
 	c := &OrphanSweepCore{
 		Pgrep:        func() ([]int, error) { return []int{12001}, nil },
-		SaverPanePID: func() (int, error) { return 0, nil },
+		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
 		Logger:       nil,
@@ -435,6 +435,99 @@ func TestSweepOrphanDaemons_nilLoggerSafe(t *testing.T) {
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error under nil Logger: %v", err)
 	}
+}
+
+// TestSweepOrphanDaemons_presentVsAbsentTriState pins the SaverPanePID seam's
+// tri-state contract — (pid, present, err) where (0, true, nil) ("present but
+// reports pid 0", a defensive future-implementer shape) is observably distinct
+// from (0, false, nil) ("absent"). Both must skip the saverErr warning path;
+// the seam's signature MUST encode "absent" at the type level so a future
+// implementer returning a real PID of 0 cannot silently flip the meaning.
+func TestSweepOrphanDaemons_presentVsAbsentTriState(t *testing.T) {
+	t.Run("absent — (0, false, nil) — empty legit set, no warning", func(t *testing.T) {
+		logger := &RecordingLogger{}
+		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
+		kill := &recordingKill{}
+		c := &OrphanSweepCore{
+			Pgrep:        func() ([]int, error) { return []int{20001}, nil },
+			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
+			Identify:     identify.fn,
+			Kill:         kill.fn,
+			Logger:       logger,
+		}
+		if err := c.SweepOrphanDaemons(); err != nil {
+			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
+		}
+		if len(kill.calls) != 1 || kill.calls[0] != 20001 {
+			t.Errorf("absent: expected pid 20001 killed (empty legit set); got %v", kill.calls)
+		}
+		for _, msg := range logger.warnings {
+			if strings.Contains(msg, "list-panes") && strings.Contains(msg, "_portal-saver") {
+				t.Errorf("absent path must NOT emit list-panes Warn; got %q", msg)
+			}
+		}
+	})
+
+	t.Run("present with pid 0 — (0, true, nil) — distinct from absent, no warning", func(t *testing.T) {
+		// Defensive future-implementer shape: present=true with pid=0. The
+		// seam must observe this as a distinct case from (0, false, nil)
+		// — no warning, and pid 0 placed in the legit set (no practical
+		// effect since pgrep cannot return pid 0, but the type-level
+		// distinction is the load-bearing contract).
+		logger := &RecordingLogger{}
+		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
+		kill := &recordingKill{}
+		c := &OrphanSweepCore{
+			Pgrep:        func() ([]int, error) { return []int{20002}, nil },
+			SaverPanePID: func() (pid int, present bool, err error) { return 0, true, nil },
+			Identify:     identify.fn,
+			Kill:         kill.fn,
+			Logger:       logger,
+		}
+		if err := c.SweepOrphanDaemons(); err != nil {
+			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
+		}
+		// present=true with pid 0 must NOT trigger the saverErr warn path.
+		for _, msg := range logger.warnings {
+			if strings.Contains(msg, "list-panes") && strings.Contains(msg, "_portal-saver") {
+				t.Errorf("present=true path must NOT emit list-panes Warn; got %q", msg)
+			}
+		}
+		// Non-legit pid still killed.
+		if len(kill.calls) != 1 || kill.calls[0] != 20002 {
+			t.Errorf("present (pid 0): expected pid 20002 killed; got %v", kill.calls)
+		}
+	})
+
+	t.Run("error — (0, false, err) — warning emitted, sweep proceeds", func(t *testing.T) {
+		logger := &RecordingLogger{}
+		sentinel := errors.New("list-panes tri boom")
+		identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
+		kill := &recordingKill{}
+		c := &OrphanSweepCore{
+			Pgrep:        func() ([]int, error) { return []int{20003}, nil },
+			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
+			Identify:     identify.fn,
+			Kill:         kill.fn,
+			Logger:       logger,
+		}
+		if err := c.SweepOrphanDaemons(); err != nil {
+			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
+		}
+		if len(kill.calls) != 1 || kill.calls[0] != 20003 {
+			t.Errorf("error: expected pid 20003 killed (legit empty); got %v", kill.calls)
+		}
+		found := false
+		for _, msg := range logger.warnings {
+			if strings.Contains(msg, "list-panes") && strings.Contains(msg, "_portal-saver") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("error path must emit list-panes Warn; warnings=%v", logger.warnings)
+		}
+	})
 }
 
 // TestSweepOrphanDaemons_neverReturnsError pins acceptance criterion that the
@@ -448,7 +541,7 @@ func TestSweepOrphanDaemons_neverReturnsError(t *testing.T) {
 			name: "pgrep error",
 			core: &OrphanSweepCore{
 				Pgrep:        func() ([]int, error) { return nil, errors.New("pgrep") },
-				SaverPanePID: func() (int, error) { return 0, nil },
+				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 				Identify:     func(pid int) (state.IdentifyResult, error) { return 0, nil },
 				Kill:         func(pid int) error { return nil },
 			},
@@ -457,7 +550,7 @@ func TestSweepOrphanDaemons_neverReturnsError(t *testing.T) {
 			name: "list-panes error",
 			core: &OrphanSweepCore{
 				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (int, error) { return 0, errors.New("list-panes") },
+				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, errors.New("list-panes") },
 				Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyDead, nil },
 				Kill:         func(pid int) error { return nil },
 			},
@@ -466,7 +559,7 @@ func TestSweepOrphanDaemons_neverReturnsError(t *testing.T) {
 			name: "identify error",
 			core: &OrphanSweepCore{
 				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (int, error) { return 0, nil },
+				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 				Identify:     func(pid int) (state.IdentifyResult, error) { return 0, errors.New("identify") },
 				Kill:         func(pid int) error { return nil },
 			},
@@ -475,7 +568,7 @@ func TestSweepOrphanDaemons_neverReturnsError(t *testing.T) {
 			name: "kill error",
 			core: &OrphanSweepCore{
 				Pgrep:        func() ([]int, error) { return []int{1}, nil },
-				SaverPanePID: func() (int, error) { return 0, nil },
+				SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 				Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyIsPortalDaemon, nil },
 				Kill:         func(pid int) error { return errors.New("kill") },
 			},

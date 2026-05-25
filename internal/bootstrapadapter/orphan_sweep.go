@@ -3,8 +3,11 @@ package bootstrapadapter
 // Production adapter for the bootstrap.OrphanSweeper interface — step 4 of
 // the eleven-step bootstrap sequence. The adapter is a thin wrapper that
 // pins the canonical Pgrep form (`pgrep -fx '^portal state daemon( |$)'`,
-// via state.PgrepPortalDaemons) and wires tmux.SaverPanePID into the
-// (saverPID int, err error) seam shape consumed by *bootstrap.OrphanSweepCore.
+// via state.PgrepPortalDaemons) and forwards tmux.SaverPanePIDOrAbsent
+// verbatim into the (pid int, present bool, err error) seam consumed by
+// *bootstrap.OrphanSweepCore — preserving the tri-state contract at the
+// type level so absent ((0, false, nil)) and "present with pid 0"
+// ((0, true, nil)) cannot collapse into one another.
 //
 // Lives in its own file (sibling to adapters.go) because the orphan-sweep
 // adapter wires tmux-specific helpers — keeping that import surface scoped
@@ -34,42 +37,10 @@ import (
 // substitutes its no-op default at entry.
 func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.OrphanSweeper {
 	return &bootstrap.OrphanSweepCore{
-		Pgrep:        state.PgrepPortalDaemons,
-		SaverPanePID: func() (int, error) { return saverPanePID(client) },
-		Logger:       logger,
+		Pgrep: state.PgrepPortalDaemons,
+		SaverPanePID: func() (pid int, present bool, err error) {
+			return tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
+		},
+		Logger: logger,
 	}
-}
-
-// saverPanePID reads the first pane PID of `_portal-saver` via
-// tmux.SaverPanePIDOrAbsent.
-//
-// Three observable shapes:
-//
-//   - (pid, nil) when `_portal-saver` is present with at least one pane.
-//   - (0, nil) when `_portal-saver` is absent on the live tmux server
-//     (tmux.ErrNoSuchSession) OR present but reports zero panes
-//     (tmux.ErrEmptyPaneList). The orphan-sweep core treats both as
-//     "legitimate set empty" and sweeps the full pgrep result. The
-//     sentinel collapse is centralized in tmux.SaverPanePIDOrAbsent so
-//     this adapter and Component D's saver-membership probe share one
-//     definition of "absent".
-//   - (0, err) on any other failure path (generic exec failure,
-//     tmux.ErrPanePIDParse). The core logs the wrapped error via
-//     Logger.Warn and proceeds against the full pgrep result.
-//
-// The HasSession pre-check is intentionally omitted: tmux.SaverPanePID
-// classifies absent-session errors as tmux.ErrNoSuchSession via the
-// wrapNoSuchSession helper, which SaverPanePIDOrAbsent collapses to
-// (0, false, nil). Skipping the pre-check also closes the small
-// HasSession→list-panes race window in which the saver could be
-// destroyed between the two calls.
-func saverPanePID(client *tmux.Client) (int, error) {
-	pid, present, err := tmux.SaverPanePIDOrAbsent(client, tmux.PortalSaverName)
-	if err != nil {
-		return 0, err
-	}
-	if !present {
-		return 0, nil
-	}
-	return pid, nil
 }
