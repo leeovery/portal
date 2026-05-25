@@ -11,7 +11,7 @@ Duplication and standards came back clean. Architecture flagged one medium-sever
 
 ## Task 1 — Reconcile Component F design-rationale prose at specification.md:365 with the amended acceptance bullet 3 / Note
 
-- status: pending
+- status: approved
 - severity: medium
 - sources: architecture-c6
 

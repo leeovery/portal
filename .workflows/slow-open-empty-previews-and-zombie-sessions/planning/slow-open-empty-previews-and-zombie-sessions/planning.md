@@ -273,3 +273,13 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-11-2 | Fix T6-4 scrollback-stability harness silent-pass on empty baseline and missing dir | positive-baseline assertion with plan-specified diagnostic, ENOENT-at-root distinguished from empty-set, docstring updated, happy path still passes |
 | slow-open-empty-previews-and-zombie-sessions-11-3 | Resolve Component F spec/impl mismatch — _portal-saver session persists after daemon exits | default to option (a) spec amendment, option (b) remain-on-exit on with integration test, planning artefact note for task 3-5 |
 | slow-open-empty-previews-and-zombie-sessions-11-4 | Fix T7-5 stale misleading comment in TestStateDaemon_DoesNotWritePIDFileWhenLockHeld | comment rewritten to reflect post-T7-5 ordering, optional daemon.version stat assertion, test still passes |
+
+### Phase 12: Analysis (Cycle 6)
+
+**Goal**: Address findings from Analysis (Cycle 6).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-12-1 | Reconcile Component F design-rationale prose at specification.md:365 with the amended acceptance bullet 3 / Note | spec-only edit; preserve surrounding step-3 prose; preserve acceptance bullet 3 verbatim; preserve Note verbatim; no other components touched; no code paths touched |

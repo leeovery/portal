@@ -117,7 +117,9 @@
             "slow-open-empty-previews-and-zombie-sessions-11-1": "tick-a188cc",
             "slow-open-empty-previews-and-zombie-sessions-11-2": "tick-387a7e",
             "slow-open-empty-previews-and-zombie-sessions-11-3": "tick-0bbe0f",
-            "slow-open-empty-previews-and-zombie-sessions-11-4": "tick-2dfb98"
+            "slow-open-empty-previews-and-zombie-sessions-11-4": "tick-2dfb98",
+            "slow-open-empty-previews-and-zombie-sessions-12": "tick-386f40",
+            "slow-open-empty-previews-and-zombie-sessions-12-1": "tick-2defea"
           },
           "external_id": "tick-7da549"
         }
@@ -129,7 +131,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 6,
           "linters": [
