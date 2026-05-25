@@ -3,12 +3,12 @@ scope: slow-open-empty-previews-and-zombie-sessions
 cycle: 1
 source: review
 total_proposed: 4
-gate_mode: gated
+gate_mode: auto
 ---
 # Review Tasks: Slow Open Empty Previews And Zombie Sessions (Cycle 1)
 
 ## Task 1: Fix TestStateDaemon_ReturnsErrorOnNonContentionLockFailure to assert WARN
-status: pending
+status: approved
 severity: high
 sources: report.md Required Changes #1, report-9-7
 
@@ -68,7 +68,7 @@ exactly one matching line).
 ---
 
 ## Task 2: Fix T6-4 scrollback-stability harness silent-pass on empty baseline and missing dir
-status: pending
+status: approved
 severity: high
 sources: report.md Bugs #49 + #50, report-6-4
 
@@ -152,7 +152,7 @@ non-empty baseline.
 ---
 
 ## Task 3: Resolve Component F spec/impl mismatch — "_portal-saver session persists after daemon exits"
-status: pending
+status: approved
 severity: medium
 sources: report.md Recommendations #26 / Spec deviations Task 3-5, report-3-5
 
@@ -225,7 +225,7 @@ bullet 3. Future readers do not encounter a documented mismatch.
 ---
 
 ## Task 4: Fix T7-5 stale misleading comment in TestStateDaemon_DoesNotWritePIDFileWhenLockHeld
-status: pending
+status: approved
 severity: low
 sources: report.md Bugs #51, report-7-5
 

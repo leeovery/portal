@@ -260,3 +260,16 @@ approved_at: 2026-05-22
 | slow-open-empty-previews-and-zombie-sessions-10-1 | Promote orphan-daemon spawn + reap-cleanup helpers to internal/portaltest | five call sites migrated (bootstrap_test + internal/tmux integration tests), darwin comm-match unqualified "portal" argv[0] preserved, rationale comments centralized on helper godoc, ~-50 LOC, no production package gains internal/portaltest dependency |
 | slow-open-empty-previews-and-zombie-sessions-10-2 | Encode tri-state contract at the OrphanSweepCore.SaverPanePID seam boundary | seam widened to (pid, present, err), consumer switch reads !present explicitly (no pid==0 branch), adapter forwards tri-state verbatim, unit-test stubs updated to three-value shape, defensive return 0,true,nil distinct from 0,false,nil at type level |
 | slow-open-empty-previews-and-zombie-sessions-10-3 | Unexport tmux.SaverPanePID since SaverPanePIDOrAbsent is the sole production entry point | rename to lowercase saverPanePID, godoc updated to internal framing, go build ./... succeeds, grep for tmux.SaverPanePID word boundary returns no production matches, in-package callers (SaverPanePIDOrAbsent) updated |
+
+### Phase 11: Review Remediation (Cycle 1)
+
+**Goal**: Address findings from Review Remediation (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| slow-open-empty-previews-and-zombie-sessions-11-1 | Fix TestStateDaemon_ReturnsErrorOnNonContentionLockFailure to assert WARN | PORTAL_LOG_LEVEL=warn, ERROR→WARN matchers, stale comments updated, optional rename, exactly-one matching line invariant preserved |
+| slow-open-empty-previews-and-zombie-sessions-11-2 | Fix T6-4 scrollback-stability harness silent-pass on empty baseline and missing dir | positive-baseline assertion with plan-specified diagnostic, ENOENT-at-root distinguished from empty-set, docstring updated, happy path still passes |
+| slow-open-empty-previews-and-zombie-sessions-11-3 | Resolve Component F spec/impl mismatch — _portal-saver session persists after daemon exits | default to option (a) spec amendment, option (b) remain-on-exit on with integration test, planning artefact note for task 3-5 |
+| slow-open-empty-previews-and-zombie-sessions-11-4 | Fix T7-5 stale misleading comment in TestStateDaemon_DoesNotWritePIDFileWhenLockHeld | comment rewritten to reflect post-T7-5 ordering, optional daemon.version stat assertion, test still passes |
