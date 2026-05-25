@@ -1,11 +1,14 @@
 # Implementation Review: Slow Open Empty Previews And Zombie Sessions
 
 **Plan**: slow-open-empty-previews-and-zombie-sessions
-**QA Verdict**: Request Changes
+**QA Verdict**: Approve
+**Review cycle**: 2 (Phase 11 review remediation + Phase 12 analysis)
 
 ## Summary
 
-The bugfix lands all seven spec components (A–G) with high fidelity to the specification — daemon-identity primitive, kill-barrier SIGKILL escalation, bootstrap orphan sweep, `daemon.pid` pre-check + inode cross-check, daemon self-supervision, `CaptureStructure` per-session log-and-continue, placeholder-then-respawn saver creation, and the test-isolation helper. Four subsequent analysis cycles (phases 7–10) consolidated duplication and tightened API surfaces; the resulting code is well-tested, well-documented, and architecturally sound. One blocking issue: task **9-7** changed production log level from Error to Warn per spec but did not update `TestStateDaemon_ReturnsErrorOnNonContentionLockFailure`, which now fails. Test must be updated before ship. Two notable non-blocking concerns: spec/implementation drift on Component F's "session persists" lock-loser assertion (task 3-5) and Task 6-4's empty-baseline silent-pass that defeats its intended Component E regression-guard role.
+The bugfix lands all seven spec components (A–G) with high fidelity to the specification — daemon-identity primitive, kill-barrier SIGKILL escalation, bootstrap orphan sweep, `daemon.pid` pre-check + inode cross-check, daemon self-supervision, `CaptureStructure` per-session log-and-continue, placeholder-then-respawn saver creation, and the test-isolation helper. Four subsequent analysis cycles (phases 7–10) consolidated duplication and tightened API surfaces; the resulting code is well-tested, well-documented, and architecturally sound.
+
+**Cycle-2 remediation** (Phase 11, four tasks) addressed every blocking item from cycle 1: T11-1 flipped the T9-7 test to assert WARN (production-aligned), T11-2 closed the T6-4 empty-baseline + missing-dir silent-pass gaps with plan-verbatim diagnostics, T11-3 amended Component F bullet 3 to match the log-noise-absence assertion shape the implementation actually provides on tmux 3.6b (+ Note flagging `remain-on-exit on` as a future opt-in), and T11-4 rewrote the misleading T7-5 comment and lifted the daemon.version invariant from comment-only to a symmetric `os.Stat` assertion. **Phase 12** (one task) reconciled the Component F design-rationale prose at specification.md:365 with the amended bullet 3 + Note, eliminating the last spec-internal contradiction. Five new task verifiers (T11-1 – T11-4, T12-1) ran and returned no blocking issues. Spec and implementation are now internally consistent end-to-end.
 
 ## QA Verification
 
@@ -14,15 +17,17 @@ The bugfix lands all seven spec components (A–G) with high fidelity to the spe
 Implementation aligns with the specification across all components. Documented deviations are reasoned and architecturally justified:
 
 - **Task 2-1**: `ErrNoSuchSession` sentinel factored into new leaf package `internal/tmuxerr` (rather than declared directly in `internal/tmux`) to break a latent import cycle. Matches existing leaf-package precedents.
-- **Task 3-5**: Component F acceptance bullet "`_portal-saver` remains present after the daemon exits" reframed to "absence of no-such-session log noise during the lock-loser cascade". On tmux 3.6b without `remain-on-exit on`, the session DOES disappear when the lock-loser daemon exits even with `destroy-unattached=off`. Spec text was not updated; spec/impl mismatch remains in the record.
+- **Task 3-5**: Component F acceptance bullet "`_portal-saver` remains present after the daemon exits" reframed to "absence of no-such-session log noise during the lock-loser cascade". On tmux 3.6b without `remain-on-exit on`, the session DOES disappear when the lock-loser daemon exits even with `destroy-unattached=off`. **Resolved in cycle 2** — T11-3 amended bullet 3 + added Note; T12-1 reconciled design-rationale prose at line 365.
 - **Task 5-2**: Helper API exports `SaverPanePIDOrAbsent(*Client, string) (int, bool, error)` tri-state instead of the planned `SaverPanePID(*Client, string) (int, error)`, with the rich-sentinel form unexported. Encodes "treat any error as absent" rule at type level rather than caller discipline — improvement, later reinforced by T10-2 and T10-3.
 - **Task 6-1 / 6-4**: Composite harness uses per-orphan `PORTAL_STATE_DIR` (rather than shared) to keep all three daemons alive long enough for pgrep N=3 observation; defended in file-headers.
 
 ### Plan Completion
 
 - [x] Phases 1–6 (Components A–G + composite verification) acceptance criteria met
-- [x] All 68 completed tasks implemented
+- [x] All 73 completed tasks implemented (68 original + 4 cycle-1 review remediation + 1 cycle-6 analysis)
 - [x] Analysis cycles 7–10 (29 refactor tasks) completed
+- [x] Phase 11 (Cycle-1 review remediation, 4 tasks) completed
+- [x] Phase 12 (Cycle-6 analysis, 1 spec coherence task) completed
 - [x] No scope creep
 - [x] `go build ./...` clean
 - [x] CLAUDE.md bootstrap section updated to 11-step ordering with new SweepOrphanDaemons step
@@ -46,23 +51,30 @@ Tests adequately verify requirements at unit and integration level. Notable stre
 - No-final-flush snapshot tests (T4-2, T5-7) byte-compare scrollback directory across kill/eject windows
 - Lower-bound regression guard `selfSupervisionHysteresisTicks >= 1` (T5-9) prevents accidental zeroing
 
-Gaps:
+Gaps closed in cycle 2:
 
-- **Task 9-7**: log-level-asserting test was not updated to match the production WARN change — test now FAILS (see Required Changes #1)
-- **Task 6-4**: scrollback-stability test silently treats empty baseline as pass, defeating its intended role as a regression guard for Component E (capture pipeline) breakage — harness seeds two sessions emitting recurring output, so empty baseline IS the regression signal
-- **Task 4-8**: meta-test for "AST diagnostic names intruding statement" was not implemented; SingleProductionCallSite scans only `cmd/` non-recursively
-- **Task 6-1**: explicit ppid check that orphan parents != saver pane process is not asserted (structurally guaranteed but not verified)
+- **Task 9-7**: log-level test fixed by T11-1 (WARN assertion, renamed function).
+- **Task 6-4**: empty-baseline + missing-dir silent-pass closed by T11-2 (`(paths, dirExists)` return; plan-verbatim diagnostics).
+- **Task 7-5**: stale comment fixed by T11-4 (+ symmetric `os.Stat(daemon.version)` assertion).
+
+Remaining gaps (non-blocking, carried from cycle 1):
+
+- **Task 4-8**: meta-test for "AST diagnostic names intruding statement" was not implemented; `SingleProductionCallSite` scans only `cmd/` non-recursively.
+- **Task 6-1**: explicit ppid check that orphan parents != saver pane process is not asserted (structurally guaranteed but not verified).
+
+### Cycle-2 Remediation Coverage
+
+| Cycle-1 finding | Resolved by | Status |
+|---|---|---|
+| Required Changes #1 (T9-7 broken test) | T11-1 | ✓ Test asserts WARN; passes |
+| Bug #49 (T6-4 empty baseline silent-pass) | T11-2 | ✓ `len(baseline) > 0` guard with plan-specified message |
+| Bug #50 (T6-4 missing-dir silent-pass) | T11-2 | ✓ `(paths, dirExists)` discriminator; ENOENT fails loudly |
+| Bug #51 (T7-5 stale comment) | T11-4 | ✓ Comment rewritten + symmetric stat assertion |
+| Recommendation #26 (T3-5 spec/impl mismatch) | T11-3, T12-1 | ✓ Bullet 3 amended + design-rationale prose reconciled |
 
 ### Required Changes
 
-1. **Fix `TestStateDaemon_ReturnsErrorOnNonContentionLockFailure` (T9-7 broken test)**: at `cmd/state_daemon_test.go:591-650`, update assertions to expect WARN level (production now emits `Logger.Warn` at `cmd/state_daemon.go:213` per spec). Specifically:
-   - Line 594: change `PORTAL_LOG_LEVEL=error` to `PORTAL_LOG_LEVEL=warn`
-   - Line 633: change `strings.Contains(got, "ERROR")` to `"WARN"`
-   - Lines 640-649: change ERROR-line matcher to WARN
-   - Lines 592-593 + 624-627: update stale comments
-   - Optionally rename test to `TestStateDaemon_ReturnsErrorAndLogsWarnOnNonContentionLockFailure`
-
-   Verified failing via `go test ./cmd -run TestStateDaemon_ReturnsErrorOnNonContentionLockFailure`.
+None. All cycle-1 blocking items resolved.
 
 ## Recommendations
 
@@ -119,9 +131,10 @@ Gaps:
 46. **T8-2**: drift resolved in downstream T10-2/T10-3 not directly under T8-2; consider annotating planning.md row with "superseded"
 47. **T8-3**: small table-driven unit test for `state.PgrepPortalDaemons` would lock three-shape contract independently
 48. **T9-2**: focused 3-case table unit test for `SaverPanePIDOrAbsent` (ErrNoSuchSession→absent, ErrEmptyPaneList→absent, generic→err passthrough)
+49. **T11-2**: `composition_e2e_scrollback_stability_integration_test.go` line 138 `observation, _ := snapshotScrollbackPaths(...)` discards the new `dirExists` return. If the scrollback dir is deleted mid-window, `observation` is nil and `assertPathSetEqual` reports it as "removed paths" — correct behaviour, but explicit `if !dirExists { t.Fatalf("scrollback dir disappeared at observation %d", i) }` would yield a sharper diagnostic. Optional refinement.
+50. **T11-2**: optional unit test pinning the new `snapshotScrollbackPaths` contract (missing-dir vs empty-existing-dir) would lock the bool-return discriminator against future drift. Plan marked it "recommended but not load-bearing"; not in acceptance criteria.
+51. **T11-3**: Composite end-to-end verification step 9 (`specification.md:464`) asserts "`_portal-saver`'s pane process is `portal state daemon`" without acknowledging that in the lock-loser cascade the session disappears on tmux 3.6b. The composite scenario's preconditions implicitly scope step 9 to the lock-winner case, but a one-line footnote would close the last subtle gap between bullet 3's amendment and the composite verification.
 
 ### Bugs
 
-49. **T6-4 (significant)**: empty-baseline silent-pass at `composition_e2e_scrollback_stability_integration_test.go` line 113 (file header 30-33). Plan requires FAIL with `"scrollback baseline empty after first post-bootstrap tick — capture pipeline may be broken or seed activity insufficient"`. Harness seeds two sessions running `while sleep 0.1; do echo "hello $RANDOM"; done`, so empty baseline IS the "E regressed, capture pipeline broken" signal this composite test is meant to catch. Current code silently green-lights that regression. Fix: assert `len(baseline) > 0` after `baseline := snapshotScrollbackPaths(...)` at line 114 with the plan-specified message
-50. **T6-4 (significant)**: missing-scrollback-dir silent-pass (lines 145-150). Plan requires FAIL with `"scrollback dir does not exist"`; impl silently treats ENOENT as empty path-set. Distinguish ENOENT from empty set and fail with plan-specified message
-51. **T7-5**: `cmd/state_daemon_test.go:543-548` — comment in `TestStateDaemon_DoesNotWritePIDFileWhenLockHeld` factually wrong; states "daemon.version IS written when lock-held under the new ordering" but post-7-5 daemon.version is NOT written on contention. Test still passes (only checks daemon.pid) but comment misleads future readers
+(All cycle-1 bugs resolved — see Cycle-2 Remediation Coverage above. No new bugs found in cycle 2.)
