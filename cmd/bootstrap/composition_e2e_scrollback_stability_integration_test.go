@@ -27,9 +27,17 @@
 //   - Failure diagnostic lists which path(s) appeared / disappeared at
 //     which observation index, so a regression points the engineer at
 //     the offending writer.
-//   - If baseline is empty AND observations stay empty → valid pass
-//     (no daemon writes during the window, but no regression either —
-//     the path-set is stable at ∅).
+//   - Empty baseline is NOT a valid pass — the harness seeds two
+//     sessions running `while sleep 0.1; do echo "hello $RANDOM"; done`
+//     before bootstrap, so by the time the post-bootstrap buffer tick
+//     elapses the surviving daemon's capture loop MUST have produced at
+//     least one `.bin` file. An empty baseline therefore signals a
+//     broken capture pipeline (Component E regression) and the test
+//     fails loudly rather than admitting "stable at ∅" as a pass.
+//   - Missing scrollback dir at baseline is similarly a regression
+//     signal — the daemon should have created it during its first tick
+//     — and is distinguished from "dir exists but empty" by
+//     snapshotScrollbackPaths' second return value.
 //
 // Observation window starts AFTER the first post-bootstrap tick (1 s
 // buffer) so the baseline reflects steady-state scrollback contents,
@@ -101,52 +109,72 @@ func TestCompositeBootstrap_ScrollbackDirPathSetStableAcross10Observations(t *te
 	}
 
 	// Post-bootstrap buffer: wait one TickerPeriod so the observation
-	// window starts AFTER the first post-bootstrap tick. The surviving
-	// daemon may still be initializing its capture loop at the instant
-	// bootstrap returns; the buffer lets the dust settle.
+	// window starts AFTER the first post-bootstrap tick. The harness
+	// seeded two sessions running `while sleep 0.1; do echo "hello
+	// $RANDOM"; done` before bootstrap (see compositeUserSessionSeedScript)
+	// so by the time this buffer elapses the surviving daemon's capture
+	// loop MUST have produced at least one `.bin` file under
+	// scrollback/ — an empty baseline IS a regression signal (broken
+	// capture pipeline) and is asserted as such below.
 	time.Sleep(stabilityPostBootstrapBufferTick)
 
 	scrollbackDir := state.ScrollbackDir(h.StateDir)
 
-	// Baseline: snapshot the scrollback path-set. Empty-baseline is a
-	// valid starting point — if the surviving daemon has not yet
-	// written anything, the invariant becomes "stays empty".
-	baseline := snapshotScrollbackPaths(t, scrollbackDir)
+	// Baseline: snapshot the scrollback path-set.
+	baseline, dirExists := snapshotScrollbackPaths(t, scrollbackDir)
+	if !dirExists {
+		t.Fatalf("scrollback dir does not exist: %s", scrollbackDir)
+	}
+	if len(baseline) == 0 {
+		t.Fatalf("scrollback baseline empty after first post-bootstrap " +
+			"tick — capture pipeline may be broken or seed activity " +
+			"insufficient")
+	}
 
 	// Observation loop: sample 10× at 1 s cadence. Compare each
 	// observation's path-set to the baseline. Any add / remove fails.
 	for i := 1; i <= stabilityObservationCount; i++ {
 		time.Sleep(stabilityObservationInterval)
-		observation := snapshotScrollbackPaths(t, scrollbackDir)
+		observation, _ := snapshotScrollbackPaths(t, scrollbackDir)
 		assertPathSetEqual(t, baseline, observation, i, scrollbackDir)
 	}
 }
 
 // snapshotScrollbackPaths walks dir via filepath.WalkDir and returns
-// the set of relative paths (relative to dir) for regular files only.
+// the set of relative paths (relative to dir) for regular files only,
+// along with a bool indicating whether the root dir exists.
+//
+// Return contract:
+//   - (paths, true)  → dir exists; paths is the (possibly empty) set of
+//     regular files under it.
+//   - (nil, false)   → dir does not exist (ENOENT at root). The caller
+//     is expected to treat this as a regression signal and fail with a
+//     `scrollback dir does not exist` diagnostic — the post-bootstrap
+//     buffer tick is sized so the surviving daemon's capture loop
+//     should have created the dir by baseline time. Empty-set with
+//     dir-present is structurally distinct and is caught by the
+//     caller's separate len(baseline) > 0 assertion.
+//
 // Symlinks and subdirectories are excluded — the daemon's capture loop
 // writes only regular `.bin` files keyed by paneKey directly under
-// scrollback/. A non-existent dir yields an empty set (the surviving
-// daemon may not have written anything yet — valid baseline shape per
-// the spec's "baseline empty AND observations empty → valid pass" edge
-// case).
+// scrollback/.
 //
 // Uses lstat semantics (the file mode reported by fs.DirEntry.Type() is
 // the lstat mode, not the stat mode) so a symlink pointing at a regular
 // file is correctly excluded — symlinks under scrollback/ would be a
 // production regression we want to surface separately, not silently
 // admit into the path-set.
-func snapshotScrollbackPaths(t *testing.T, dir string) map[string]struct{} {
+func snapshotScrollbackPaths(t *testing.T, dir string) (map[string]struct{}, bool) {
 	t.Helper()
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, false
+		}
+		t.Fatalf("snapshotScrollbackPaths stat(%q): %v", dir, err)
+	}
 	paths := make(map[string]struct{})
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// ENOENT at the root means the dir does not exist yet —
-			// return an empty set. Any other error at the root or
-			// during traversal is unexpected and surfaces below.
-			if os.IsNotExist(walkErr) && path == dir {
-				return filepath.SkipDir
-			}
 			return walkErr
 		}
 		if path == dir {
@@ -166,10 +194,10 @@ func snapshotScrollbackPaths(t *testing.T, dir string) map[string]struct{} {
 		paths[filepath.ToSlash(rel)] = struct{}{}
 		return nil
 	})
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
 		t.Fatalf("snapshotScrollbackPaths(%q): %v", dir, err)
 	}
-	return paths
+	return paths, true
 }
 
 // assertPathSetEqual fails the test with a rich diagnostic if the
@@ -220,4 +248,3 @@ func setDifference(a, b map[string]struct{}) []string {
 	sort.Strings(out)
 	return out
 }
-
