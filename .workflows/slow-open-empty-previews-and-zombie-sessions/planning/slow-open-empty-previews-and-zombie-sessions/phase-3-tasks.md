@@ -265,7 +265,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 >
 > Phase 1 has shipped `portaltest.NewIsolatedStateEnv(t)`; consume it here for state isolation. `portalbintest.BuildPortalBinary` + `StagePortalBinary` are the canonical helpers per the CLAUDE.md `portalbintest` description.
 
-**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component F, Acceptance criteria bullet 1 (no "no such session" log line on create), bullet 2 (destroy-unattached=off set before daemon can exit), bullet 3 (lock-loser daemon does not destroy the session).
+**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component F, Acceptance criteria bullet 1 (no "no such session" log line on create), bullet 2 (destroy-unattached=off set before daemon can exit), bullet 3 (lock-loser cascade is quiet — no `no such session` log noise; **spec amended 2026-05-25 under task 11-3** to reflect tmux 3.6b behaviour observed during implementation: with `destroy-unattached=off` but without `remain-on-exit on`, `_portal-saver` does NOT outlive its daemon pane process — the session disappears when the lock-loser daemon exits, but the recovery cascade is quiet because every `BootstrapPortalSaver` tmux call targets an extant session at the moment of the call. The implementation in `internal/tmux/portal_saver_endstate_integration_test.go` asserts the log-noise-absence shape directly, matching the amended spec).
 
 ## slow-open-empty-previews-and-zombie-sessions-3-6 | approved
 
