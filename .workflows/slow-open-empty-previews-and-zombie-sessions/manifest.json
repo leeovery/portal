@@ -240,7 +240,7 @@
     "review": {
       "items": {
         "slow-open-empty-previews-and-zombie-sessions": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "slow-open-empty-previews-and-zombie-sessions-1-1",
             "slow-open-empty-previews-and-zombie-sessions-1-2",
