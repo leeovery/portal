@@ -1,0 +1,38 @@
+# cmd-layer test scaffolding hardening (bundle)
+
+Five independent test-quality improvements across the daemon / hydrate / commit-now / saver test surface in the `cmd` package. Each is small in isolation, none is design-decision-laden, and they all land in adjacent test files with shared scaffolding. Combined into one work unit to amortise workflow ceremony — five separate ideas would each pay full investigation/spec/plan/impl/review cost; one bundled work unit pays it once.
+
+## Atom A — cmd-hydrate test refactors (4 sub-items in `cmd/state_hydrate_test.go`)
+
+1. **EISDIR-via-mkdir fixture helper.** The pattern `os.Mkdir(hooksDir, 0o700)` to force `os.ReadFile` to fail with EISDIR recurs at lines 1517-1521 (`TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning`) and 1576-1580 (`TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning`). Extract a `seedUnreadableHookStore(t, dir)` helper.
+
+2. **Table-driven convergence on `OpenFIFO` seam.** `TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning` (line 1504) and `TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning` (line 1565) are near-identical except for the `OpenFIFO` seam (timeout vs signal-arrived). A table-driven test parameterised on `OpenFIFO` would express the "both branches share `execShellOrHookAndExit`" invariant more compactly. Convergence of recovery paths onto a single exec contract is the whole point of Fix 2 — the duplication may be deliberate for spec-traceability, weigh that before collapsing.
+
+3. **Sleep-ownership subtest table.** The `runHydrate`-level lower-bound timing test (`TestHydrate_Timeout_PreservesSettleSleepBeforeExec` at line 1050) and the handler-level direct test (`TestHydrate_TimeoutHandler_OrderingAndTimingInvariants` at line 1202) could be co-located as adjacent subtests in a single `TestHydrate_Timeout_SleepOwnership` table — makes the "sleep lives in `runHydrate`, not the handler" contract more obvious to future readers.
+
+4. **`makeAndSignalFIFO` companion helper.** Many call sites pair `fifo := makeFIFO(...); signalFIFOAsync(t, fifo)`. A 2→1-line collapse at 30+ sites via an optional `makeAndSignalFIFO(t, dir) string` helper would extend the task 4-5 cleanup further. Originally marked optional.
+
+## Atom B — Deterministic mid-tick gate for SIGHUP integration test
+
+In `cmd/state_daemon_integration_test.go`, `TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow` uses a static `tickStartDelay = 1.2 * time.Second` (against the daemon's 1s tick interval) to schedule SIGHUP "mid-tick". The worst-case timing analysis in the test's inline comment (~lines 319-339) is thorough, but on a slow CI cold-start the SIGHUP can still land in the idle outer `select` arm rather than mid-tick — flipping the test from "exercises `ctx.Done()` inside `captureAndCommit`" to "exercises the outer select", which is a different code path. Replace the static sleep with a deterministic gate that fires SIGHUP only once the daemon has demonstrably entered a tick. Candidate gates (design call): poll for the first per-pane scrollback file appearing in `stateDir`; poll for an instrumentation hook the daemon could emit (would require a test-only seam); poll for `daemon.pid`'s mtime changing post-startup (weaker — only proves the tick wrote something). Closes a real CI-flake risk and tightens what the test actually exercises.
+
+## Atom C — Recycle-induced sweep pressure cancellation test
+
+Spec §Defect 2 of the saver-kill-respawn-loop-leaks-daemons work documents a "self-amplifying property": the kill-respawn path itself emits `session-closed` and `session-created` hooks, both of which fire `save.requested` events on the surviving daemon, pushing it into a back-to-back sweep regime. This widens the cancel-to-exit window precisely on the recycle path the barrier is meant to defend. Change 2's ctx-aware loop must remain interruptible under this pressure. Task 2-5 flagged the sweep-pressure test as optional and did not land it. The current `TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow` proves cancellation works under a single-tick scenario; it does not prove cancellation survives the self-amplifying back-to-back-`save.requested` regime. Design call needed for how to drive the pressure (looping `os.WriteFile(state.SaveRequested(dir), ...)` from a goroutine is the obvious approach but cadence and total count need a measurement) and what to assert (daemon still exits within the anchored threshold, or some tighter bound that proves cancellation isn't deferred by queued saves).
+
+## Atom D — Split `cmd/state_commit_now_test.go` into per-task files
+
+The unit-test file is 1,282 lines and bundles tests for tasks 1-1 (happy path), 1-2 (`@portal-restoring` short-circuit + presume-set), and 1-3 (failure-path discipline) behind section banners. Navigation across the file relies on those banners; physical separation would help future readers. Suggested split: `state_commit_now_test.go` for happy-path tests (zero/one/multi-pane sessions, `PrevIndex` passthrough, underscore filter, ENOENT/corrupt `sessions.json`, no-touch-on-success, no-`.bin`-writes, subcommand registration); `state_commit_now_restoring_test.go` for `@portal-restoring` short-circuit + `IsRestoring`-presume-set behaviours; `state_commit_now_failure_test.go` for failure-path discipline (capture/commit errors, touch-also-fails, no-panic, sentinel identity). Pure structural refactor — no logic or assertion changes. Care needed around shared fixtures (`commitNowFixture`, `installCommitNowDeps`, `fakeCaptureClient`) — keep them in the happy-path file and let the siblings import via package-level visibility.
+
+## Atom E — Strengthen `TestCommitNowSymptom` sub-test 2 (saver self-kill marker-clear)
+
+Sub-test 2 of `TestCommitNowSymptom` (`cmd/state_commit_now_symptom_integration_test.go`) kills `_portal-saver` with `@portal-restoring` clear and asserts `sessions.json` contains `A`+`B` and omits `_portal-saver`. That shape is identical to the pre-kill baseline — the saver was never in `sessions.json` to begin with (filtered out by `keepSessionNames`'s underscore-prefix rule), and `A`+`B` were already present. Two consecutive consistent reads after the kill can pass even if `commit-now` never executed at all. Options to tighten: (1) `sessions.json` mtime delta — record mtime before the kill, assert it advances within the budget, cheapest mechanical change; (2) `portal.log` scan — grep for a `commit-now` log entry matching the saver session name, pins the actual code path; (3) `save.requested` mtime assertion — per spec § `save.requested` Discipline, a successful sync commit does NOT touch `save.requested`, so asserting `save.requested` is absent (or its mtime unchanged) confirms commit-now ran and took the success path. Option 1 is the lightest; risk of flakiness on systems with low mtime resolution can be addressed with a 2s tolerance window consistent with the existing `TestTouchSaveRequested` mtime bracket.
+
+## Sources
+
+Original atoms before bundling on 2026-05-26:
+- Atom A: `ideas/2026-05-11--cmd-hydrate-test-refactors.md` — source: review of `killed-sessions-resurrect-on-restart`
+- Atom B: `ideas/2026-05-20--deterministic-mid-tick-gate-for-sighup-test.md` — source: review of `saver-kill-respawn-loop-leaks-daemons` (Task 2-5 non-blocking note #11)
+- Atom C: `ideas/2026-05-20--recycle-induced-sweep-pressure-cancellation-test.md` — source: review of `saver-kill-respawn-loop-leaks-daemons` (Task 2-5 non-blocking note #10)
+- Atom D: `ideas/2026-05-22--split-state-commit-now-test-file.md` — source: review of `killed-session-resurrects-within-tick-window`
+- Atom E: `ideas/2026-05-22--strengthen-symptom-saver-kill-assertion.md` — source: review of `killed-session-resurrects-within-tick-window`
