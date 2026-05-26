@@ -92,6 +92,9 @@
     },
     "hydrate-command-shell-safety": {
       "work_type": "quick-fix"
+    },
+    "hooks-skip-bootstrap": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
