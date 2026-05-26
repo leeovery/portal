@@ -86,6 +86,9 @@
     },
     "slow-open-empty-previews-and-zombie-sessions": {
       "work_type": "bugfix"
+    },
+    "hooks-rm-pane-key-flag": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {

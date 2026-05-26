@@ -1,0 +1,16 @@
+{
+  "name": "hooks-rm-pane-key-flag",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-05-26",
+  "description": "Add --pane-key flag to portal hooks rm so callers can remove a hook entry for any pane, not just the current one.",
+  "phases": {
+    "specification": {
+      "items": {
+        "hooks-rm-pane-key-flag": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
