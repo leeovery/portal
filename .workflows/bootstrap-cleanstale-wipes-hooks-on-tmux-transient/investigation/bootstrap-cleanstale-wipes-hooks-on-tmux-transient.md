@@ -27,7 +27,7 @@ That WARN is Component B's orphan-sweep noting a transient tmux state where `_po
 
 - Silent data destruction: `hooks.json` content goes from 22 entries to `{}` with no error returned to the user, no WARN in portal.log specifically for the hook wipe, and no UI signal during the bootstrap that ran the cleanup.
 - User-visible follow-on impact: at next reboot, no Claude session auto-resumes because every per-pane on-resume hook entry is gone. The user has to manually identify and resume each Claude session via Claude's own session picker — exactly the scenario the Portal resume system was built to prevent.
-- Indistinguishable user-symptom from the earlier `slow-open-empty-previews-and-zombie-sessions` bug ("none of my Claude sessions resumed"), even though the upstream cause is entirely different — that bug was about FIFO timing during restore; this one is the cleanup-after-restore step destroying state during a tmux transient.
+- Indistinguishable user-symptom from the earlier `slow-open-empty-previews-and-zombie-sessions` bug ("none of my Claude sessions resumed"), even though the upstream cause is entirely different — that bug was about FIFO timing during restore; this one is the cleanup-after-restore step destroying state during a tmux transient. **Distinguishable in logs**, though: the FIFO race left 53 eager-signal `ENOENT` warnings in `portal.log`; the CleanStale wipe leaves **zero** warnings (the destructive adapter call emits no log at all). Until adapter logging is added, "silent in logs" is itself a fingerprint for this defect class.
 
 ### Reproduction Steps
 
@@ -244,6 +244,8 @@ The same dual-conflation exists in `cmd/clean.go:75-80` (the `portal clean` call
 - **The destructive call is silent.** Without logging at the adapter, the only post-hoc evidence is the wiped `hooks.json`. The bug went undetected for an unknown duration before the user noticed at next-reboot resume failure.
 - **The prior-art for the fix already exists in this codebase** — bootstrap step 9 — but was not replicated to step 11 at the time step 11 was wired. The architectural-consistency review that should have caught the gap was either skipped or did not consider hook entries equivalent in destructive potential to marker entries.
 - **The `slow-open-empty-previews-and-zombie-sessions` and `saver-kill-respawn-loop-leaks-daemons` work units both touched saver lifecycle but did not audit downstream consumers of `list-panes -a` for the new transient window they were introducing.** The 2026-05-19 `saver-kill-respawn-loop-leaks-daemons` investigation explicitly listed CleanStale as a candidate destructive force for disappearing `daemon.version`, but the line of inquiry didn't lead back to this hooks-wipe defect.
+- **`cmd/clean_test.go:327-368` actively codifies the destructive behavior as correct.** The subtest `"zero live panes prunes every hook entry"` asserts `hooks.json` is emptied to `{}` when `ListAllPanes` returns an empty slice, with a comment: *"Phase 4: CleanStale runs unconditionally. With no live panes, every hooks.json entry is genuinely orphaned and must be pruned."* That mental model — empty live set ⇒ genuinely orphaned — *is* the bug expressed as a positive test. The fix must **invert** this subtest (preserve the structural "what happens when livePanes is empty" coverage; flip the asserted outcome from "wipes everything" to "refuses to wipe + emits a Warn"). Same inversion shape used by Phase-4 subtests in the `hooks-skip-bootstrap` quickfix earlier today. The original commit's rationale matters for spec scoping: if the destructive interpretation was deliberate (some users may rely on `portal clean` as "kill all hooks when no tmux"), the spec must address migration messaging; if it was accidental, no migration note is needed.
+- **No `cmd/bootstrap_production_test.go` file exists.** Zero unit coverage of `cleanStaleAdapter`. The fix must require creation of this file, not merely inversion of the existing `clean_test.go` subtest — otherwise the bootstrap adapter's empty-`livePanes` path remains uncovered post-fix.
 
 ### Blast Radius
 
@@ -261,6 +263,11 @@ The same dual-conflation exists in `cmd/clean.go:75-80` (the `portal clean` call
 
 - The `internal/tmux/tmux.go:687-693` swallow contract itself, considered in isolation, is *not* a bug — `portal clean` invoked with no tmux server running should not error. The bug is the conflation *plus* the unguarded destructive consumer pattern. Removing the swallow would force `portal clean` to handle the "no server" case explicitly; that may or may not be desirable on its own merits.
 
+### Wipe Scope (Bounding the User-Visible Impact)
+
+- The wipe affects **user-session hooks only**. Portal-internal sessions (`_portal-bootstrap`, `_portal-saver`) never have `hooks.json` entries — they are filtered out at registration time. So even when `livePanes` is empty (or the destructive call fires), only user-registered hooks are at risk.
+- Bounds the user-visible impact precisely: 100% of user hooks affected during a fired event, 0% of portal-internal hooks (because none exist).
+
 ---
 
 ## Fix Direction
@@ -273,7 +280,7 @@ Defense-in-depth across both layers, mirroring the prior-art pattern at bootstra
 
 2. **Add a mass-deletion hazard guard at `cleanStaleAdapter.CleanStale` (and the `portal clean` callsite).** Before passing the live-pane slice to `hooks.Store.CleanStale`, check the combination `len(livePanes) == 0 && len(persistedHooks) > 0`. When that combination holds, emit `Logger.Warn(ComponentBootstrap, ...)` with both counts and skip the destructive call — exact prior-art at `cmd/bootstrap/stale_marker_cleanup.go:126-141`. The wiring at the adapter needs a `Logger` field (currently absent — the adapter is bare); plumbing it through `buildProductionOrchestrator` is a small refactor mirroring how `MarkerCleanupCore` already receives one.
 
-3. **Add adapter-level logging.** `Debug` on entry (live count, persisted count, what would be removed), `Warn` when the hazard guard fires, `Debug` on the normal-path completion (count removed). The absence of these breadcrumbs was a contributing factor; restoring them makes the next analogous defect detectable.
+3. **Add adapter-level logging.** `Debug` on entry (live count, persisted count, what would be removed), `Warn` when the hazard guard fires, `Debug` on the normal-path completion (count removed). The absence of these breadcrumbs was a contributing factor; restoring them makes the next analogous defect detectable. **A secondary benefit of the logging contract:** post-fix, failure modes (a) (exit ≠ 0) and (b) (exit 0 with empty stdout) become distinguishable in `portal.log` — mode (a) surfaces as the propagated error from `ListAllPanesWithFormat` (orchestrator-level `Warn` with the wrapped error message), while mode (b) surfaces as the hazard-guard `Warn` with the counts. Currently both modes are silent at the adapter; the new logging lets future occurrences pin exactly which path fired without speculative analysis.
 
 **Deciding factor (tentative):** matching the prior-art exactly is structurally cleaner than any alternative single-layer fix. The two-layer change closes both failure modes — (a) exit ≠ 0 closed by switching to the propagating helper; (b) exit 0 with empty stdout closed by the hazard guard. Either alone leaves one failure mode open.
 
@@ -297,6 +304,8 @@ Defense-in-depth across both layers, mirroring the prior-art pattern at bootstra
 
 ### Testing Recommendations
 
+- **Create `cmd/bootstrap_production_test.go`.** This file does not exist today; zero unit coverage exists for `cleanStaleAdapter`. The fix must establish this file and populate it with hazard-guard, error-propagation, and normal-path coverage. Inverting the existing `clean_test.go` subtest is necessary but not sufficient — the bootstrap adapter has its own path and must be covered independently.
+- **Invert (not delete) `cmd/clean_test.go:327-368` "zero live panes prunes every hook entry".** Preserve the structural coverage that the test provides ("what happens when `ListAllPanes` returns an empty slice") but flip the asserted outcome: from "every hook entry pruned" to "no entry removed, hooks file unchanged, output reports the deferral." Also rewrite the comment block (lines 333-335) so the new mental model — "empty live set is *ambiguous*, not authoritative" — is captured in test prose. The original commit's rationale for the destructive interpretation is a spec-phase input (deliberate vs. accidental drives whether migration messaging is needed).
 - **Unit: hazard guard fires on empty live set.** `cleanStaleAdapter.CleanStale` with a stub `LivePaneLister` returning empty slice and a hooks store seeded with N entries → assert no `Save` call on the hooks store and a `Warn` is recorded with both counts. Mirrors `cmd/bootstrap/stale_marker_cleanup_test.go`'s hazard-guard coverage.
 - **Unit: hazard guard does not fire when both sides empty.** Empty live set + empty persisted set → no warn, no save, no error. Confirms the guard is not noisy.
 - **Unit: error from `ListAllPanesWithFormat` propagates as soft warning.** Stub returning non-nil error → adapter returns the error → orchestrator (or test harness) wraps as a soft warning. Counterpart to the existing swallow path.
