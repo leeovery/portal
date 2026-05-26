@@ -46,6 +46,31 @@
 // harness's env containment. The test passes cleanly in CI / on any
 // host where no live portal daemon is running.
 //
+// Documented backstop failure causes
+// ----------------------------------
+// When the backstop reports a divergence, the cause is one of three
+// documented categories:
+//
+//  1. Subprocess inherited the developer's XDG_CONFIG_HOME — a spawned
+//     `portal` binary received the developer's env instead of the
+//     isolated env returned by portaltest.IsolateStateForTest. The
+//     containment helper's reach stops at the env it returns; tests
+//     that do not propagate the helper-supplied env to every spawned
+//     subprocess will leak.
+//  2. A direct file write bypassed the env entirely — a test or helper
+//     opened a path under the developer's real state dir directly,
+//     without consulting XDG_CONFIG_HOME at all. The env override
+//     can't catch this because the path is hard-coded or computed from
+//     a non-env source.
+//  3. The helper snapshot semantics changed — portaltest.IsolateStateForTest
+//     snapshots BEFORE applying its env mutation in normal operation
+//     (the slow-open-empty-previews-and-zombie-sessions Task 1-3
+//     deviation snapshot-AFTER-mutation is host-noise-mitigation-only
+//     and remains documented). A future refactor that moves the
+//     snapshot point or alters the fingerprint walk's ignore list can
+//     surface as false positives until the snapshot/walk semantics are
+//     audited.
+//
 // No explicit backstop invocation
 // -------------------------------
 // There is no Go-stdlib API to inspect t.Cleanup registrations, so this

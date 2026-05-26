@@ -4,7 +4,7 @@
 `internal/restoretest` that spawns a subprocess via `exec.Command`,
 `exec.CommandContext`, or equivalent primitive. Each row is classified:
 
-- **(a)** updated to take/use the isolated env (`portaltest.NewIsolatedStateEnv`)
+- **(a)** updated to take/use the isolated env (`portaltest.IsolateStateForTest`)
 - **(b)** does not spawn the `portal` binary — out of scope
 - **(c)** wrapped leaf already classified — no separate spawn-site to migrate
 
@@ -20,7 +20,7 @@ classifies each. The verbatim spec grep is captured in the footer.
 
 | Helper | File:Line | Disposition | Notes |
 | --- | --- | --- | --- |
-| `DriveSignalHydrateBinary` | `internal/restoretest/restoretest.go:181` | (a) | Spawns the built `portal state signal-hydrate ...` binary. Migrated: signature now requires `env []string` (callers supply via `portaltest.NewIsolatedStateEnv(t)`); per-spawn overrides (`TMUX`, `PORTAL_STATE_DIR`, `PORTAL_HOOKS_FILE`, `PATH`) are appended on top so last-write-wins shadows any inherited duplicate. No env-less overload. |
+| `DriveSignalHydrateBinary` | `internal/restoretest/restoretest.go:181` | (a) | Spawns the built `portal state signal-hydrate ...` binary. Migrated: signature now requires `env []string` (callers supply via `portaltest.IsolateStateForTest(t)`); per-spawn overrides (`TMUX`, `PORTAL_STATE_DIR`, `PORTAL_HOOKS_FILE`, `PATH`) are appended on top so last-write-wins shadows any inherited duplicate. No env-less overload. |
 | `buildPortalBinaryInto` | `internal/portalbintest/build.go:108` | (b) | `exec.Command("go", "build", "-o", binary, ".")` — spawns the Go toolchain to compile the binary; does **not** spawn the `portal` binary itself. The `go build` subprocess legitimately inherits the developer's env (GOPATH, GOCACHE, GOPROXY, etc.) and writes only to its supplied `-o` destination under a `t.TempDir`. No portal state-dir contact. |
 | `Socket.cmd` | `internal/tmuxtest/socket.go:79` | (b) | `exec.Command("tmux", ...)` — spawns `tmux` (not `portal`) against an isolated `-S <socketPath>` server rooted in `os.MkdirTemp`. Server lifecycle is bounded by `t.Cleanup → KillServer`. Inherits env so tmux can find `$HOME`/`$TERM`/etc.; does not exec the portal binary. |
 | `socketCommander.runRaw` | `internal/tmuxtest/socket.go:123` | (b) | Same as `Socket.cmd` — `exec.Command("tmux", ...)` against the test's isolated tmux socket. Wraps tmux invocations from a `*tmux.Client`; does not spawn `portal`. |
@@ -31,7 +31,7 @@ classifies each. The verbatim spec grep is captured in the footer.
 
 | Caller | File:Line | Notes |
 | --- | --- | --- |
-| `runRebootRoundTrip` | `cmd/bootstrap/reboot_roundtrip_test.go:389` | Now obtains `env, _ := portaltest.NewIsolatedStateEnv(t)` once near the existing `stateDir`/`hooksPath` setup and threads `env` through. |
+| `runRebootRoundTrip` | `cmd/bootstrap/reboot_roundtrip_test.go:389` | Now obtains `env, _ := portaltest.IsolateStateForTest(t)` once near the existing `stateDir`/`hooksPath` setup and threads `env` through. |
 | `TestRestoreSwitchClientHookFires` (alpha branch) | `cmd/bootstrap/reboot_roundtrip_test.go:980` | Same: `env` obtained at the top of the test and reused for both `DriveSignalHydrateBinary` invocations. |
 | `TestRestoreSwitchClientHookFires` (beta branch) | `cmd/bootstrap/reboot_roundtrip_test.go:1004` | Reuses the env captured for the alpha invocation. |
 | `TestRestoreLeadingDashSessionNamePropagatesToHook` | `cmd/bootstrap/reboot_roundtrip_test.go:1217` | `env` obtained once near the existing `stateDir`/`hooksPath` setup. |
@@ -72,7 +72,7 @@ authoritative completion record.
   `TestPhase5RebootRoundTripBaseIndexDrift`,
   `TestPhase5RebootRoundTripBothSessionsHydrateViaSignalHydrateBinary`,
   `TestRebootRoundTrip_LeadingDashSessionName`) fire the
-  `portaltest.NewIsolatedStateEnv` post-test backstop when the
+  `portaltest.IsolateStateForTest` post-test backstop when the
   developer's live `portal state daemon` mutates
   `~/.config/portal/state/{save.requested,scrollback,sessions.json,portal.log}`
   during the test window. The deltas are on the developer's real state

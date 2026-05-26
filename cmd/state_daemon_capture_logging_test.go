@@ -38,12 +38,16 @@ func noSuchSessionCommandErr(session string) error {
 }
 
 // readPortalLog returns the on-disk portal.log body after flushing the
-// supplied logger so subsequent assertions see every write.
+// supplied logger so subsequent assertions see every write. The
+// captureAndCommit call site this exercises is at
+// cmd/state_daemon.go:325 (state.CaptureStructure(..., deps.Logger)).
 func readPortalLog(t *testing.T, logger *state.Logger, dir string) string {
 	t.Helper()
-	// Flush the logger before reading so buffered writes land on disk. The
-	// logger is also closed by makeDeps' t.Cleanup, but assertions need the
-	// body now.
+	// Flush the logger before reading so buffered writes land on disk.
+	// This is an intentional double-close — makeDeps' t.Cleanup will
+	// also Close the logger at test teardown, but assertions need the
+	// body now. The error from the second close is discarded by the
+	// cleanup (and the first close here) so the redundancy is safe.
 	_ = logger.Close()
 	data, err := os.ReadFile(state.PortalLog(dir))
 	if err != nil {

@@ -43,7 +43,6 @@ package bootstrap_test
 import (
 	"fmt"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -460,9 +459,3 @@ func TestCompositeHarness_PreState(t *testing.T) {
 	}
 }
 
-// Compile-time guard: ensure syscall is imported. The harness uses
-// pidAlive (defined in orphan_sweep_integration_test.go) which calls
-// syscall.Kill; if a future refactor moves pidAlive away from the
-// _test package or changes its signature, this file's syscall reference
-// surfaces the issue.
-var _ = syscall.SIGKILL

@@ -31,7 +31,6 @@ package bootstrap_test
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -196,7 +195,7 @@ func assertScrollbackOscillation(t *testing.T, dir string, samples []int) {
 func dirNames(entries []os.DirEntry) []string {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, filepath.Base(e.Name()))
+		out = append(out, e.Name())
 	}
 	return out
 }

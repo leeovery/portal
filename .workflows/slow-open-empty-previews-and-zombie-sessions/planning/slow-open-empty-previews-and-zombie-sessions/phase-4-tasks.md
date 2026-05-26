@@ -74,7 +74,7 @@ total: 10
 
 **Do**:
 - Place the test in `internal/tmux/portal_saver_escalation_integration_test.go` (or `cmd/bootstrap/escalation_no_flush_integration_test.go` if the orchestrator entry point is cleaner) under the existing integration build tag pattern used elsewhere in the repo.
-- Use `portaltest.NewIsolatedStateEnv(t)` (Phase 1 deliverable) so the developer's real `~/.config/portal/state/` is untouched — the helper also installs the fingerprint-diff `t.Cleanup` backstop.
+- Use `portaltest.IsolateStateForTest(t)` (Phase 1 deliverable) so the developer's real `~/.config/portal/state/` is untouched — the helper also installs the fingerprint-diff `t.Cleanup` backstop.
 - Use `portalbintest.BuildPortalBinary` to build the binary under test.
 - Spawn a `portal state daemon` subprocess with the isolated env, against a real tmux server fixture (`tmuxtest`) that has a `_portal-saver` session whose pane process is some OTHER process (the orphan must NOT be the pane process — the whole point of escalation).
 - Wait until the orphan has produced at least one `.bin` file in `<stateDir>/scrollback/` (poll `os.ReadDir` until non-empty, bounded to ~3 s).
@@ -86,7 +86,7 @@ total: 10
 
 **Acceptance Criteria**:
 - [ ] Test compiles under the existing integration build tag and runs only when that tag is enabled.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` — no writes to the developer's real state dir.
+- [ ] Test uses `portaltest.IsolateStateForTest` — no writes to the developer's real state dir.
 - [ ] Pre-SIGKILL snapshot is non-empty (at least one `.bin`); the test does NOT silently pass against an empty scrollback dir.
 - [ ] Post-SIGKILL snapshot is taken exactly 200 ms after the orphan's death is observed.
 - [ ] Snapshot equality is asserted across all five fingerprint fields (existence, size, mtime ns, ctime ns, SHA-256); any delta fails the test with a path-and-field diagnostic.
@@ -264,7 +264,7 @@ total: 10
 
 **Do**:
 - Place in `cmd/bootstrap/orphan_sweep_integration_test.go` under the existing integration build tag.
-- Use `portaltest.NewIsolatedStateEnv(t)` for state-dir isolation.
+- Use `portaltest.IsolateStateForTest(t)` for state-dir isolation.
 - Use `portalbintest.BuildPortalBinary` to build the binary under test.
 - Use `tmuxtest` to start a real tmux server with `_portal-saver` plus one user session.
 - Scenario A — "3 daemons converge to 1":
@@ -286,7 +286,7 @@ total: 10
 
 **Acceptance Criteria**:
 - [ ] Test runs only under the integration build tag.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` — no writes to developer state dir; fingerprint-diff cleanup verifies on exit.
+- [ ] Test uses `portaltest.IsolateStateForTest` — no writes to developer state dir; fingerprint-diff cleanup verifies on exit.
 - [ ] Test uses real `portal state daemon` subprocesses (built via `portalbintest.BuildPortalBinary`), real tmux server (via `tmuxtest`), real production `OrphanSweepCore` via `NewOrphanSweeper`.
 - [ ] Scenario A converges to `pgrep -fxc == 1` within 3 s of `SweepOrphanDaemons()` returning.
 - [ ] Scenario A: the survivor PID equals the `_portal-saver` pane PID.
@@ -493,7 +493,7 @@ total: 10
 
 **Do**:
 - Place the test in `internal/state/daemon_lock_upgrade_integration_test.go` (or `cmd/bootstrap/upgrade_path_integration_test.go` if real-tmux scaffolding is more convenient) under the existing integration build tag.
-- Use `portaltest.NewIsolatedStateEnv(t)` for state-dir isolation.
+- Use `portaltest.IsolateStateForTest(t)` for state-dir isolation.
 - Use `portalbintest.BuildPortalBinary` to build the binary. The "two binaries" can be:
   - **Option A** (preferred): build the same source twice into two distinct paths (`portalA`, `portalB`) so they exec from different inodes; PID-recycle and identity-check semantics are identical.
   - **Option B**: build once and use the same binary twice; mark the two daemons by env var (`PORTAL_DAEMON_TAG=A` vs `B`) so test diagnostics can distinguish them. Either is acceptable — the spec's "v(N) / v(N+1)" framing is illustrative, not literal version semantics.
@@ -511,7 +511,7 @@ total: 10
 
 **Acceptance Criteria**:
 - [ ] Test runs only under the integration build tag.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` and `portalbintest.BuildPortalBinary`.
+- [ ] Test uses `portaltest.IsolateStateForTest` and `portalbintest.BuildPortalBinary`.
 - [ ] Scenario A — full A+B+C composition: v(N) daemon is swept by B, v(N+1) daemon acquires cleanly, `pgrep -fxc == 1` within 6 s.
 - [ ] Scenario B — C in isolation (Sweep disabled via seam): v(N) daemon survives the bootstrap window, v(N+1)'s `AcquireDaemonLock` refuses via the pre-check (`ErrDaemonLockHeld`), no destructive coexistence (sessions.json not overwritten by the loser).
 - [ ] Test-side `state.AcquireDaemonLock(stateDir)` from a fresh goroutine after bootstrap returns `ErrDaemonLockHeld` (proves Component C's pre-check is live).
@@ -545,7 +545,7 @@ total: 10
 
 **Do**:
 - Place the test in `cmd/bootstrap/composition_abc_integration_test.go` (or `internal/restoretest/` if the real-tmux scaffolding there is more convenient — the planning task list explicitly allows either) under the integration build tag.
-- Use `portaltest.NewIsolatedStateEnv(t)` for state-dir isolation.
+- Use `portaltest.IsolateStateForTest(t)` for state-dir isolation.
 - Use `portalbintest.BuildPortalBinary` to build the binary.
 - Use `tmuxtest` to start a real tmux server with `_portal-saver` plus 2 user sessions.
 - Setup phase:
@@ -565,7 +565,7 @@ total: 10
 
 **Acceptance Criteria**:
 - [ ] Test runs only under the integration build tag.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` and `portalbintest.BuildPortalBinary`.
+- [ ] Test uses `portaltest.IsolateStateForTest` and `portalbintest.BuildPortalBinary`.
 - [ ] Pre-state assertion: `pgrep -fxc 'portal state daemon' == 3` before bootstrap.
 - [ ] Post-bootstrap: `pgrep -fxc 'portal state daemon' == 1` within 6 s of orchestrator entry.
 - [ ] Survivor PID matches `_portal-saver`'s pane PID via `tmux list-panes -t _portal-saver -F '#{pane_pid}'`.

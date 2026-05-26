@@ -1,7 +1,3 @@
-// Test-only. Importing this package from non-*_test.go files is
-// prohibited — the *testing.T parameter on the exported helpers
-// enforces this structurally.
-
 package portaltest
 
 import (

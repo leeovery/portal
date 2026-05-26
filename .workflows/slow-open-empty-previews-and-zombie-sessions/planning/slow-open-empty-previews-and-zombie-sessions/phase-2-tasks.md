@@ -227,7 +227,7 @@ This is a deliberate refactor cycle (signature plumbing) with no behavioural cha
 - [ ] `cmd/state_daemon.go:149` passes `deps.Logger` to `state.CaptureStructure`.
 - [ ] A new test in `cmd/state_daemon_test.go` drives a tick with one failing session and asserts the daemon's `portal.log` contains a WARN line under `daemon` naming the failing session.
 - [ ] A second test drives an all-natural-churn tick and asserts (a) one WARN per session, (b) `Commit` invoked exactly once writing an empty `sessions.json`.
-- [ ] Both tests use `portaltest.NewIsolatedStateEnv` (Phase 1 deliverable) or otherwise scope all state writes to a per-test temp dir — no mutation of the developer's `~/.config/portal/state/`.
+- [ ] Both tests use `portaltest.IsolateStateForTest` (Phase 1 deliverable) or otherwise scope all state writes to a per-test temp dir — no mutation of the developer's `~/.config/portal/state/`.
 - [ ] No `t.Parallel()` in any new test (cmd package convention — see CLAUDE.md "Tests must not use `t.Parallel()`").
 - [ ] If the daemon initialisation creates the logger after the first tick somehow (verify, do not assume), document the ordering with a code comment so subsequent edits don't introduce a tick-zero nil logger.
 

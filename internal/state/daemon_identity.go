@@ -114,7 +114,7 @@ func IdentifyDaemon(pid int) (IdentifyResult, error) {
 		// Non-zero exit with output is unexpected — treat as transient so the
 		// caller applies its component-specific policy rather than us
 		// committing to an answer we cannot defend.
-		return 0, fmt.Errorf("identify pid %d: ps failed with output %q: %w", pid, trimmed, execErr)
+		return 0, fmt.Errorf("identify pid %d: ps failed with stdout %q: %w", pid, trimmed, execErr)
 	}
 
 	if trimmed == "" {

@@ -16,7 +16,7 @@ total: 9
 
 **Do**:
 - Author a measurement harness (a `go test` with the existing integration build tag, e.g., `cmd/state_daemon_hysteresis_measurement_test.go`, gated so it can run on demand but is not part of the default `go test ./...` budget if expensive — follow the existing integration tag pattern in the repo).
-- The harness, for each of the four scenarios, spawns a real `portal state daemon` subprocess (via `portalbintest.BuildPortalBinary` + `portaltest.NewIsolatedStateEnv` so the developer state dir is untouched), drives the scenario, and records — at the granularity of the daemon's `TickerPeriod` (currently `1 * time.Second` in `cmd/state_daemon.go:333`) — how many consecutive ticks would have observed saver-membership failure. Use a polling probe that mirrors what `saverMembershipProbe` will check in Task 5-2: `tmux has-session -t _portal-saver` plus `tmux list-panes -t _portal-saver -F '#{pane_pid}'` compared against the daemon subprocess's PID.
+- The harness, for each of the four scenarios, spawns a real `portal state daemon` subprocess (via `portalbintest.BuildPortalBinary` + `portaltest.IsolateStateForTest` so the developer state dir is untouched), drives the scenario, and records — at the granularity of the daemon's `TickerPeriod` (currently `1 * time.Second` in `cmd/state_daemon.go:333`) — how many consecutive ticks would have observed saver-membership failure. Use a polling probe that mirrors what `saverMembershipProbe` will check in Task 5-2: `tmux has-session -t _portal-saver` plus `tmux list-panes -t _portal-saver -F '#{pane_pid}'` compared against the daemon subprocess's PID.
 - Scenarios:
   1. **Steady-state**: daemon running inside a healthy `_portal-saver` for ≥30 s, no external interaction. Expected worst-case ≈ 0 ticks.
   2. **Attach/detach**: attach to a user session and detach repeatedly while the daemon runs. Expected worst-case ≈ 0 ticks.
@@ -44,7 +44,7 @@ total: 9
 - [ ] Measurement memo committed at `.workflows/slow-open-empty-previews-and-zombie-sessions/planning/slow-open-empty-previews-and-zombie-sessions/component-d-hysteresis-measurement.md` with per-scenario raw numbers, tmux version, OS, binary version, date.
 - [ ] Value satisfies `3 ≤ selfSupervisionHysteresisTicks ≤ 9` (single-digit ticks ceiling).
 - [ ] If `max_observed × 2 > 5`, the memo flags this as evidence of upstream defect per Risk Summary guidance.
-- [ ] Measurement harness uses `portaltest.NewIsolatedStateEnv` (Phase 1) — no developer-state mutations on test exit.
+- [ ] Measurement harness uses `portaltest.IsolateStateForTest` (Phase 1) — no developer-state mutations on test exit.
 - [ ] Measurement harness uses `portalbintest.BuildPortalBinary` and `tmuxtest` real-tmux scaffolding — no mocks for tmux or the daemon binary in the measurement runs.
 
 **Tests**:
@@ -285,14 +285,14 @@ total: 9
 
 **Problem**: Unit tests with stubbed probes prove the counter logic but cannot prove that the production `defaultSaverMembershipProbe` wired to real tmux commands actually drives the eject. The first integration acceptance — "Self-eject on absent saver" — requires spawning a real `portal state daemon` subprocess against a real tmux server that does NOT have a `_portal-saver` session and observing the process exit within `(N+1) * TickerPeriod`.
 
-**Solution**: Add an integration test that (a) uses `portaltest.NewIsolatedStateEnv` to keep the developer's real state directory untouched, (b) uses `portalbintest.BuildPortalBinary` to build the daemon binary under test, (c) starts a real tmux server fixture via `tmuxtest` with NO `_portal-saver` session, (d) stages the state directory with no `daemon.pid` (so Phase 4 Component C's pre-check skips and proceeds), (e) spawns the daemon binary as a subprocess (bypassing the bootstrap orchestrator so Phase 4 Component B's sweep does not preempt the test), and (f) asserts the subprocess exits within `(selfSupervisionHysteresisTicks + 1) * TickerPeriod` wall time, plus a generous slack for tmux + ps latency.
+**Solution**: Add an integration test that (a) uses `portaltest.IsolateStateForTest` to keep the developer's real state directory untouched, (b) uses `portalbintest.BuildPortalBinary` to build the daemon binary under test, (c) starts a real tmux server fixture via `tmuxtest` with NO `_portal-saver` session, (d) stages the state directory with no `daemon.pid` (so Phase 4 Component C's pre-check skips and proceeds), (e) spawns the daemon binary as a subprocess (bypassing the bootstrap orchestrator so Phase 4 Component B's sweep does not preempt the test), and (f) asserts the subprocess exits within `(selfSupervisionHysteresisTicks + 1) * TickerPeriod` wall time, plus a generous slack for tmux + ps latency.
 
 **Outcome**: A failing eject (e.g., a future regression that re-orders the self-check after `captureAndCommit`, or accidentally short-circuits on `@portal-restoring`) fails this test loudly via timeout.
 
 **Do**:
 - Place the test under the existing integration build tag pattern. Suggested file: `cmd/state_daemon_self_supervision_integration_test.go`.
 - Setup:
-  1. `env, stateDir := portaltest.NewIsolatedStateEnv(t)` — Phase 1 helper. The returned env contains an isolated `XDG_CONFIG_HOME` and the `t.Cleanup` fingerprint-diff backstop is registered.
+  1. `env, stateDir := portaltest.IsolateStateForTest(t)` — Phase 1 helper. The returned env contains an isolated `XDG_CONFIG_HOME` and the `t.Cleanup` fingerprint-diff backstop is registered.
   2. Build the daemon binary: `binPath := portalbintest.BuildPortalBinary(t)`.
   3. Start a real tmux server via `tmuxtest` with a custom socket (so it cannot collide with the developer's tmux). Do NOT create `_portal-saver` — the absence is the test condition.
   4. Verify the staging satisfies Phase 4 Component C's pre-check:
@@ -313,7 +313,7 @@ total: 9
 
 **Acceptance Criteria**:
 - [ ] Test is tagged with the existing integration build tag pattern (see `cmd/state_daemon_integration_test.go` for the precedent).
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` — no developer-state mutations on exit.
+- [ ] Test uses `portaltest.IsolateStateForTest` — no developer-state mutations on exit.
 - [ ] Test stages `<stateDir>/daemon.pid` as absent so Phase 4 Component C's pre-check proceeds.
 - [ ] Test spawns the daemon binary directly (not via `portal open` / not via the bootstrap orchestrator) so Phase 4 Component B's sweep does not preempt setup.
 - [ ] Test does NOT create `_portal-saver` on the real tmux server.
@@ -330,7 +330,7 @@ total: 9
 **Edge Cases**:
 - The daemon binary may race: spawn → write daemon.pid → first tick fires → probe → probe-false → counter=1 → ... → counter=N → osExit(0). The TickerPeriod is 1 s, so wall time to eject is bounded but not instantaneous. Test slack of 2 s on top of `(N+1) * 1s` absorbs this.
 - The test must NOT call `tmux kill-server` until after the subprocess has exited and been waited on — killing tmux first could make the probe error differently and obscure failures.
-- If `portaltest.NewIsolatedStateEnv` is not yet wired (Phase 1 incomplete), this task is blocked. Per the planning brief, Phase 1 has shipped — the helper is available.
+- If `portaltest.IsolateStateForTest` is not yet wired (Phase 1 incomplete), this task is blocked. Per the planning brief, Phase 1 has shipped — the helper is available.
 - Confirm the daemon honours `TMUX` env or whatever mechanism `tmux.DefaultClient()` uses to discover the socket. If the production client always uses `tmux` from PATH against the default socket, the test must invoke the binary with `TMUX_TMPDIR` or similar to redirect. Verify during initial scaffolding.
 
 **Context**:
@@ -338,7 +338,7 @@ total: 9
 >
 > Spec § Test staging note: "D's integration tests intentionally violate the saver-pane-process invariant; to reach the tick loop, they must satisfy Component C's lock-acquire pre-check. Tests stage the state directory with either (i) no `daemon.pid` file (pre-check skips and proceeds), or (ii) a `daemon.pid` referencing a known-dead PID. The tests spawn the daemon directly (bypassing the bootstrap orchestrator) so Component B's sweep does not preempt the test setup."
 >
-> Phase 1 has shipped `portaltest.NewIsolatedStateEnv`; Phase 4 has shipped the `AcquireDaemonLock` pre-check.
+> Phase 1 has shipped `portaltest.IsolateStateForTest`; Phase 4 has shipped the `AcquireDaemonLock` pre-check.
 
 **Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component D, acceptance criterion "Self-eject on absent saver" and "Test staging note".
 
@@ -355,7 +355,7 @@ total: 9
 **Do**:
 - Place the test alongside Task 5-5's in `cmd/state_daemon_self_supervision_integration_test.go`.
 - Setup:
-  1. `env, stateDir := portaltest.NewIsolatedStateEnv(t)`.
+  1. `env, stateDir := portaltest.IsolateStateForTest(t)`.
   2. `binPath := portalbintest.BuildPortalBinary(t)`.
   3. Start real tmux server via `tmuxtest` against a custom socket.
   4. Stage `<stateDir>/daemon.pid` with a known-dead PID. Use a PID known to be unused (e.g., spawn a short-lived process, capture its PID, wait for it to exit, then write that PID into `daemon.pid` via `state.WritePIDFile`). Phase 1's `state.IdentifyDaemon` will resolve this as `IdentifyDead` so Phase 4 Component C's pre-check proceeds.
@@ -377,7 +377,7 @@ total: 9
 
 **Acceptance Criteria**:
 - [ ] Test is tagged with the integration build tag pattern.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` and `portalbintest.BuildPortalBinary`.
+- [ ] Test uses `portaltest.IsolateStateForTest` and `portalbintest.BuildPortalBinary`.
 - [ ] Test stages `<stateDir>/daemon.pid` with a known-dead PID (not absent) — the alternative staging path from the spec's Test staging note, complementing Task 5-5's "absent" staging.
 - [ ] `_portal-saver` is pre-created with a placeholder process (`sh -c 'exec tail -f /dev/null'`) so the daemon's PID cannot match `pane_pid`.
 - [ ] Daemon exits with code 0 within `(N+1) * TickerPeriod + 2s`.
@@ -401,7 +401,7 @@ total: 9
 >
 > Spec § Test staging note explicitly suggests `tmux respawn-pane -k -t _portal-saver 'sh -c "exec tail -f /dev/null"'` for this case. The variant chosen in this task is "pre-create the saver with the placeholder, then spawn the daemon as a non-saver subprocess" — structurally equivalent (the daemon's PID differs from `pane_pid`) and simpler than spawning-then-respawning.
 >
-> Phase 3 has shipped placeholder-then-respawn saver creation ordering; Phase 4 has shipped Component C's pre-check (the dead-PID staging path); Phase 1 has shipped `portaltest.NewIsolatedStateEnv`.
+> Phase 3 has shipped placeholder-then-respawn saver creation ordering; Phase 4 has shipped Component C's pre-check (the dead-PID staging path); Phase 1 has shipped `portaltest.IsolateStateForTest`.
 
 **Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component D, acceptance criterion "Self-eject on saver pane pid mismatch" and "Test staging note".
 
@@ -418,7 +418,7 @@ total: 9
 **Do**:
 - Place the test alongside Tasks 5-5 and 5-6 in `cmd/state_daemon_self_supervision_integration_test.go`.
 - Setup mirrors Task 5-5 (absent-saver trigger):
-  1. `env, stateDir := portaltest.NewIsolatedStateEnv(t)`.
+  1. `env, stateDir := portaltest.IsolateStateForTest(t)`.
   2. `binPath := portalbintest.BuildPortalBinary(t)`.
   3. Start real tmux server via `tmuxtest` against a custom socket; do NOT create `_portal-saver`.
   4. Stage `<stateDir>/daemon.pid` as absent (per the "no daemon.pid" staging path).
@@ -440,7 +440,7 @@ total: 9
 
 **Acceptance Criteria**:
 - [ ] Test is tagged with the integration build tag pattern.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` and `portalbintest.BuildPortalBinary`.
+- [ ] Test uses `portaltest.IsolateStateForTest` and `portalbintest.BuildPortalBinary`.
 - [ ] `snapshotDir` records size, mtime nanoseconds, and SHA-256 for every regular file under `<stateDir>/scrollback/` (recursive); uses lstat semantics (no symlink following).
 - [ ] `snapBefore` is captured at or after the first failing-tick observation, before the counter reaches N.
 - [ ] `snapAfter` is captured immediately after the daemon process exits (verified via `Signal(0)` ESRCH).
@@ -478,7 +478,7 @@ total: 9
 **Do**:
 - Place the test alongside Tasks 5-5/5-6/5-7 in `cmd/state_daemon_self_supervision_integration_test.go` (or a separate file if cohesion improves).
 - Setup:
-  1. `env, stateDir := portaltest.NewIsolatedStateEnv(t)`.
+  1. `env, stateDir := portaltest.IsolateStateForTest(t)`.
   2. `binPath := portalbintest.BuildPortalBinary(t)`.
   3. Start real tmux server via `tmuxtest` against a custom socket.
   4. Invoke `BootstrapPortalSaver` (via a test entry point, or by spawning a short-lived helper invocation of `portal open --no-tui` or equivalent — verify the cleanest seam during scaffolding). The goal is to exercise the **production** saver-creation path so Phase 3's placeholder-then-respawn ordering is on the test path.
@@ -497,7 +497,7 @@ total: 9
 
 **Acceptance Criteria**:
 - [ ] Test is tagged with the integration build tag pattern.
-- [ ] Test uses `portaltest.NewIsolatedStateEnv` and `portalbintest.BuildPortalBinary`.
+- [ ] Test uses `portaltest.IsolateStateForTest` and `portalbintest.BuildPortalBinary`.
 - [ ] Test uses Phase 3's `BootstrapPortalSaver` path (placeholder-then-respawn ordering) — does NOT manually `tmux new-session -s _portal-saver ...` bypassing the production flow.
 - [ ] Daemon remains alive for at least `(selfSupervisionHysteresisTicks + 2) * TickerPeriod` after the Phase 3 readiness barrier resolves healthy.
 - [ ] Daemon log contains zero `"self-supervision: saver-membership lost for"` entries during the observation window.
@@ -519,7 +519,7 @@ total: 9
 >
 > Spec § Component D, "Hysteresis N: 3 consecutive ticks" rationale: "The legitimate daemon never observes a transient 'saver absent' condition." This task is the empirical verification of that claim under the Phase 3 saver-creation ordering.
 >
-> Phase 3 has shipped placeholder-then-respawn saver creation ordering. Phase 4 has shipped Component C's pre-check. Phase 1 has shipped `portaltest.NewIsolatedStateEnv`. Together these allow the test to exercise the **full** legitimate cold-start path.
+> Phase 3 has shipped placeholder-then-respawn saver creation ordering. Phase 4 has shipped Component C's pre-check. Phase 1 has shipped `portaltest.IsolateStateForTest`. Together these allow the test to exercise the **full** legitimate cold-start path.
 
 **Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component D, acceptance criterion "Skipped check on first tick is benign".
 

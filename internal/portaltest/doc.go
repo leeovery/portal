@@ -17,7 +17,11 @@
 // scope where it writes.
 //
 // Test-only. Importing this package from non-*_test.go files is
-// prohibited — the *testing.T parameter on the exported helpers
-// enforces this structurally (the testing import would fail
-// production builds).
+// prohibited — most exported helpers take a *testing.T parameter
+// which enforces this structurally (the testing import would fail
+// production builds). The exceptions (e.g. SnapshotStateDir,
+// DiffFingerprints, FormatDelta, Fingerprint, ReadPortalLogSafe) are
+// consumed from *_test.go files in sibling packages by contributor
+// discipline — they have no production-side callers and are not
+// intended to grow any.
 package portaltest

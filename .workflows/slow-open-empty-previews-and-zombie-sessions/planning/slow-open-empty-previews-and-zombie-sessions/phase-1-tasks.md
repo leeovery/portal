@@ -67,17 +67,17 @@ total: 5
 
 ## slow-open-empty-previews-and-zombie-sessions-1-2 | approved
 
-### Task 1.2: Implement portaltest.NewIsolatedStateEnv helper
+### Task 1.2: Implement portaltest.IsolateStateForTest helper
 
 **Problem**: The trigger that caused the reporter's bug was a leaked test-fixture daemon that inherited the developer's `$XDG_CONFIG_HOME` and wrote to `~/.config/portal/state/` while enumerating sessions from an unrelated tmux server. Without a structurally-mandatory test helper, future ad-hoc tests can recreate the same hazard. Components A/B/C/D all require integration tests that spawn `portal state daemon`; running those tests safely demands per-test state-dir isolation.
 
-**Solution**: Add a new leaf package `internal/portaltest/` with `NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string)`. The helper derives a per-test `t.TempDir()` value, builds an `env` slice (starting from `os.Environ()`) that **removes** any inherited `XDG_CONFIG_HOME` and **sets** `XDG_CONFIG_HOME=<tempDir>/config`, `MkdirAll`s that path, and resolves the state directory underneath it. The `*testing.T` signature ensures the helper cannot be imported into production code.
+**Solution**: Add a new leaf package `internal/portaltest/` with `IsolateStateForTest(t *testing.T) (env []string, stateDir string)`. The helper derives a per-test `t.TempDir()` value, builds an `env` slice (starting from `os.Environ()`) that **removes** any inherited `XDG_CONFIG_HOME` and **sets** `XDG_CONFIG_HOME=<tempDir>/config`, `MkdirAll`s that path, and resolves the state directory underneath it. The `*testing.T` signature ensures the helper cannot be imported into production code.
 
 **Outcome**: A test helper that any daemon-spawning test calls before `exec.Cmd.Env = env`; the spawned subprocess writes only to the isolated state dir, never to the developer's real `~/.config/portal/state/`. This task lands the helper itself; the `t.Cleanup` fingerprint backstop lands in Task 1.3.
 
 **Do**:
 - Create `internal/portaltest/` as a new leaf package with `doc.go` describing the package's test-only purpose.
-- Create `internal/portaltest/isolated_env.go` exporting `func NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string)`:
+- Create `internal/portaltest/isolated_env.go` exporting `func IsolateStateForTest(t *testing.T) (env []string, stateDir string)`:
   - Call `t.Helper()`.
   - `tempDir := t.TempDir()`.
   - `configDir := filepath.Join(tempDir, "config")`; `os.MkdirAll(configDir, 0o700)`; fatal-fail via `t.Fatalf` on error.
@@ -89,7 +89,7 @@ total: 5
 - Do NOT add the fingerprint backstop in this task — Task 1.3 owns it.
 
 **Acceptance Criteria**:
-- [ ] `portaltest.NewIsolatedStateEnv(t)` compiles and is callable from `*_test.go` files in any package.
+- [ ] `portaltest.IsolateStateForTest(t)` compiles and is callable from `*_test.go` files in any package.
 - [ ] Returned `env` contains exactly one entry beginning with `XDG_CONFIG_HOME=`, and its value points inside `t.TempDir()`.
 - [ ] Returned `env` does NOT contain the developer's pre-test `XDG_CONFIG_HOME` value (verified by setting `XDG_CONFIG_HOME=/decoy` before the call and asserting it is gone from the returned slice).
 - [ ] Returned `env` preserves all other entries from `os.Environ()` (e.g., `HOME`, `PATH`) — verified by spot-checking `HOME`.
@@ -124,7 +124,7 @@ total: 5
 
 **Problem**: The env override in Task 1.2 is the primary defence, but a test that bypasses the env (direct file write to `~/.config/portal/state/sessions.json`, ad-hoc subprocess that ignores `Cmd.Env`, etc.) could still corrupt the developer's real state directory. The spec mandates a `t.Cleanup`-time backstop that fingerprints the real state directory pre-test, walks it again post-test, and fails on any delta.
 
-**Solution**: Extend `portaltest.NewIsolatedStateEnv` so it captures a pre-test `map[string]fileFingerprint` of `~/.config/portal/state/` (using lstat semantics throughout), then registers `t.Cleanup` to walk the same directory post-test and `t.Errorf` on any delta. The fingerprint captures (a) existence, (b) size, (c) mtime nanoseconds, (d) ctime nanoseconds, and (e) SHA-256 of contents for files ≤ 1 MiB.
+**Solution**: Extend `portaltest.IsolateStateForTest` so it captures a pre-test `map[string]fileFingerprint` of `~/.config/portal/state/` (using lstat semantics throughout), then registers `t.Cleanup` to walk the same directory post-test and `t.Errorf` on any delta. The fingerprint captures (a) existence, (b) size, (c) mtime nanoseconds, (d) ctime nanoseconds, and (e) SHA-256 of contents for files ≤ 1 MiB.
 
 **Outcome**: Any test that uses the helper but accidentally writes to the developer's real state dir fails with a clear error citing the changed path and delta type. The backstop never fires on legitimate test runs because legitimate tests only write through the redirected `XDG_CONFIG_HOME`.
 
@@ -138,7 +138,7 @@ total: 5
   - If the entry is a regular file ≤ 1 MiB: read and SHA-256; set `hashed=true`.
   - If > 1 MiB: leave `hashed=false`; the size/mtime/ctime comparison still detects mutation.
   - Key the map by path relative to `root`.
-- Call `snapshotStateDir` at the start of `NewIsolatedStateEnv` (before any env mutation).
+- Call `snapshotStateDir` at the start of `IsolateStateForTest` (before any env mutation).
 - Register `t.Cleanup` that:
   - Walks `root` again with the same function.
   - Diffs old vs new map; for each path: if the entry was added, removed, or any field changed (`exists`, `size`, `mtimeNanos`, `ctimeNanos`, `sha256` when both `hashed`), call `t.Errorf("portaltest backstop: developer state dir mutated at %s: %s", path, deltaType)`.
@@ -190,7 +190,7 @@ total: 5
 
 **Problem**: Helpers in `internal/portalbintest`, `internal/tmuxtest`, and `internal/restoretest` that spawn `portal` or `portal state daemon` as subprocesses currently inherit `os.Environ()` directly. Any test using them risks corrupting the developer's real state directory — exactly the trigger that produced the reporter's bug. The spec mandates an audit + migration with a `grep`-based completion criterion.
 
-**Solution**: Enumerate every helper in the three packages that calls `exec.Command` / `exec.CommandContext` (or equivalent) with a `portal` binary path. For each: either update the signature to take the isolated env as a parameter (preferred), call `portaltest.NewIsolatedStateEnv` internally before spawning, or tag the helper as out-of-scope with a one-line justification. Produce an audit document captured in the PR description.
+**Solution**: Enumerate every helper in the three packages that calls `exec.Command` / `exec.CommandContext` (or equivalent) with a `portal` binary path. For each: either update the signature to take the isolated env as a parameter (preferred), call `portaltest.IsolateStateForTest` internally before spawning, or tag the helper as out-of-scope with a one-line justification. Produce an audit document captured in the PR description.
 
 **Outcome**: Every repo helper that spawns `portal` is either env-isolated or explicitly justified as out-of-scope. The completion grep — `grep -rn "exec.Command.*portal\b" internal/portalbintest internal/tmuxtest internal/restoretest` — yields zero call sites that are not (a)-tagged or (b)-justified in the audit.
 
@@ -201,9 +201,9 @@ total: 5
   - `internal/tmuxtest/socket.go:79,123` — `exec.Command("tmux", ...)` — spawns tmux, not portal; tag (b) out-of-scope.
   - Verify by re-running the grep against current HEAD before changes; record any sites missed by the spec investigation.
 - For each (a) site that spawns portal:
-  - Preferred: change the helper signature to accept `env []string` as a parameter; callers obtain it via `portaltest.NewIsolatedStateEnv(t)`. Update every call site in test files.
-  - Alternate: if the helper has no `*testing.T` already and adding one would be intrusive, call `portaltest.NewIsolatedStateEnv` internally — but this only works for helpers that already take `*testing.T`.
-  - For `internal/restoretest/restoretest.go:181` specifically: the surrounding helper already takes `*testing.T` (verify by reading the file). Update it to call `portaltest.NewIsolatedStateEnv(t)` and apply the returned `env` to the `exec.Command` before `Run`. If the helper already takes an env or state-dir argument, route the isolated env through that.
+  - Preferred: change the helper signature to accept `env []string` as a parameter; callers obtain it via `portaltest.IsolateStateForTest(t)`. Update every call site in test files.
+  - Alternate: if the helper has no `*testing.T` already and adding one would be intrusive, call `portaltest.IsolateStateForTest` internally — but this only works for helpers that already take `*testing.T`.
+  - For `internal/restoretest/restoretest.go:181` specifically: the surrounding helper already takes `*testing.T` (verify by reading the file). Update it to call `portaltest.IsolateStateForTest(t)` and apply the returned `env` to the `exec.Command` before `Run`. If the helper already takes an env or state-dir argument, route the isolated env through that.
 - For each (b) site: append a one-line justification in the audit (e.g., "builds the binary; spawns `go`, not `portal` — does not write to state dir").
 - Audit deliverable: produce `.workflows/slow-open-empty-previews-and-zombie-sessions/planning/slow-open-empty-previews-and-zombie-sessions/audit-G-test-helpers.md` containing a table with columns `Helper | File:Line | Disposition (a/b/c) | Notes`. Capture the post-change `grep -rn "exec.Command.*portal\b" internal/portalbintest internal/tmuxtest internal/restoretest` output verbatim in the audit footer; the completion criterion is that every line in the grep output is either tagged (a) "updated" or (b) "out of scope".
 - Also widen the grep to catch `exec.CommandContext` and any helper that wraps these via a thin adapter (e.g., a local `runPortal` function). If a wrapper is found, treat it as a single audit entry.
@@ -222,14 +222,14 @@ total: 5
 - `"the audit file's grep footer matches the live grep output"` — meta-check during code review; the audit's captured grep is reproducible.
 - `"helpers that spawn portal accept env as parameter"` — for each updated helper, a unit test or compile-time check confirms the signature; the helper rejects nil/empty env if that policy is chosen.
 - `"existing daemon-saver integration test passes with the updated helper"` — run an existing test that uses `restoretest`'s portal-spawning helper end-to-end; assert no failures.
-- `"the updated helper does not write to the real state dir"` — wrap an existing integration test in `portaltest.NewIsolatedStateEnv`; assert the backstop from Task 1.3 does not fire.
+- `"the updated helper does not write to the real state dir"` — wrap an existing integration test in `portaltest.IsolateStateForTest`; assert the backstop from Task 1.3 does not fire.
 
 **Edge Cases**:
 - Helpers that build the binary but don't spawn portal (`portalbintest.BuildPortalBinary`) → tag (b); justify; no change required.
 - Indirect spawn wrappers (a local helper that calls another helper that calls `exec.Command`) → traced to the leaf and tagged once.
 - Inline subprocess calls inside `_test.go` files outside the three packages → out of scope for the audit (those are individual tests, not helpers); a note in `CLAUDE.md` (Task 1.5) covers them via contributor discipline.
 - A helper currently uses `Cmd.Env = nil` (implicit inheritance) → must be changed to explicit `Cmd.Env = env` with the isolated env.
-- A helper currently sets `Cmd.Env` to a hand-curated slice → migrate to `portaltest.NewIsolatedStateEnv` as the canonical source; assert no `XDG_CONFIG_HOME` divergence.
+- A helper currently sets `Cmd.Env` to a hand-curated slice → migrate to `portaltest.IsolateStateForTest` as the canonical source; assert no `XDG_CONFIG_HOME` divergence.
 - A helper takes a `stateDir` parameter independent of env → still must set `XDG_CONFIG_HOME` because the spawned binary resolves config via env, not arg.
 
 **Context**:
@@ -251,9 +251,9 @@ total: 5
 - Open `CLAUDE.md` and locate the existing "DI / testing pattern" subsection inside the "Architecture" section.
 - Append a new subsection titled "Test isolation for daemon-spawning tests" (or similar; the exact heading must contain the phrase "test isolation"). Suggested location: immediately after the existing paragraph about `*Deps` mocks and `t.Cleanup`.
 - Content must cover:
-  1. **The rule**: any test that runs `portal state daemon` directly OR via `portal open` / bootstrap MUST call `portaltest.NewIsolatedStateEnv(t)` and apply the returned env to the spawned subprocess (`exec.Cmd.Env = env`).
+  1. **The rule**: any test that runs `portal state daemon` directly OR via `portal open` / bootstrap MUST call `portaltest.IsolateStateForTest(t)` and apply the returned env to the spawned subprocess (`exec.Cmd.Env = env`).
   2. **The reasoning**: a leaked test daemon inheriting the developer's `$XDG_CONFIG_HOME` corrupts the developer's live install; the slow-open / empty-previews / zombie-session incident is the canonical example.
-  3. **The helper**: link to `internal/portaltest/isolated_env.go` and document the signature `NewIsolatedStateEnv(t *testing.T) (env []string, stateDir string)`.
+  3. **The helper**: link to `internal/portaltest/isolated_env.go` and document the signature `IsolateStateForTest(t *testing.T) (env []string, stateDir string)`.
   4. **The backstop**: the `t.Cleanup` fingerprint-diff is a defence-in-depth check, NOT a substitute for the env override.
   5. **No lint**: state explicitly that no static enforcement exists; the rule is contributor-discipline + structurally-mandatory helper signature.
 - Keep the section short (≤ 15 lines) — CLAUDE.md is reference, not narrative.
@@ -263,7 +263,7 @@ total: 5
 **Acceptance Criteria**:
 - [ ] `CLAUDE.md` contains a new subsection under "DI / testing pattern" covering the test-isolation contract.
 - [ ] The section is searchable via `grep -i "test isolation" CLAUDE.md` AND `grep -i "XDG_CONFIG_HOME" CLAUDE.md` — both return the new section.
-- [ ] The section names the helper (`portaltest.NewIsolatedStateEnv`) with its full signature.
+- [ ] The section names the helper (`portaltest.IsolateStateForTest`) with its full signature.
 - [ ] The section cites the reporter's bug as the canonical example justifying the rule.
 - [ ] The section explicitly notes the backstop is defence-in-depth, NOT a substitute for the env override.
 - [ ] The section explicitly notes no lint or CI enforcement exists.
@@ -272,7 +272,7 @@ total: 5
 **Tests**:
 - `"CLAUDE.md grep for 'test isolation' returns the new subsection"` — manual verification during PR review; record the grep output in the PR description.
 - `"CLAUDE.md grep for 'XDG_CONFIG_HOME' returns the new subsection"` — same.
-- `"CLAUDE.md grep for 'portaltest.NewIsolatedStateEnv' returns at least one match"` — confirms the helper is named.
+- `"CLAUDE.md grep for 'portaltest.IsolateStateForTest' returns at least one match"` — confirms the helper is named.
 - `"the new section is ≤ 15 lines"` — line-count check.
 
 **Edge Cases**:

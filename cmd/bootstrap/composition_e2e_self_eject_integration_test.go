@@ -77,10 +77,8 @@
 package bootstrap_test
 
 import (
-	"errors"
 	"os"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -425,8 +423,3 @@ func pollForPIDExit(pid int, startInstant time.Time, budget, tick time.Duration)
 	}
 }
 
-// Compile-time guards: keep `syscall` and `errors` imports anchored
-// to a referenced symbol so a future refactor that drops the only
-// use surfaces in build rather than as a silently dropped import.
-var _ = syscall.SIGKILL
-var _ = errors.Is

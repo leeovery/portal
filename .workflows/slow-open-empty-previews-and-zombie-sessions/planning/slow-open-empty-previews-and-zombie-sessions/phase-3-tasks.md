@@ -209,7 +209,7 @@ total: 6
 
 **Problem**: Unit tests with argv recorders prove the call sequence is correct but do not prove the actual end-state against a real tmux server. Spec acceptance criteria require: (a) zero `"no such session: _portal-saver"` log entries during clean bootstrap; (b) `tmux show-options -t _portal-saver destroy-unattached` reports `off` AND the pane process is `portal state daemon`; (c) lock-loser daemon exit does NOT destroy the session. These are integration-level invariants.
 
-**Solution**: Add a real-tmux integration test in `internal/tmux/portal_saver_integration_test.go` (or a sibling file) that uses `tmuxtest.New` to spin up an isolated tmux server, `portalbintest.BuildPortalBinary` + PATH-staging so `portal state daemon` resolves, and `portaltest.NewIsolatedStateEnv` (Phase 1) so the test never touches the developer's real state directory. The test invokes `BootstrapPortalSaver` against a freshly-created state dir, asserts end-state observables, then simulates a lock-loser scenario by seeding a competing daemon (via `state.WritePIDFile` of the test process PID + a held flock, or by running a second daemon to acquisition then introducing the new bootstrap) and asserts the session persists after the lock-loser daemon exits.
+**Solution**: Add a real-tmux integration test in `internal/tmux/portal_saver_integration_test.go` (or a sibling file) that uses `tmuxtest.New` to spin up an isolated tmux server, `portalbintest.BuildPortalBinary` + PATH-staging so `portal state daemon` resolves, and `portaltest.IsolateStateForTest` (Phase 1) so the test never touches the developer's real state directory. The test invokes `BootstrapPortalSaver` against a freshly-created state dir, asserts end-state observables, then simulates a lock-loser scenario by seeding a competing daemon (via `state.WritePIDFile` of the test process PID + a held flock, or by running a second daemon to acquisition then introducing the new bootstrap) and asserts the session persists after the lock-loser daemon exits.
 
 **Outcome**: Two real-tmux integration test functions land in `internal/tmux/portal_saver_integration_test.go`:
 - `TestBootstrapPortalSaver_CleanBootstrap_EndState` — proves the clean-bootstrap end-state.
@@ -219,7 +219,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 **Do**:
 - Add `TestBootstrapPortalSaver_CleanBootstrap_EndState` to `internal/tmux/portal_saver_integration_test.go`:
   1. `tmuxtest.SkipIfNoTmux(t)`; build the portal binary via `portalbintest.BuildPortalBinary(t)`; stage on PATH via `portalbintest.StagePortalBinary(t, bin)`.
-  2. `env, stateDir := portaltest.NewIsolatedStateEnv(t)` — Phase 1 helper for state-dir isolation.
+  2. `env, stateDir := portaltest.IsolateStateForTest(t)` — Phase 1 helper for state-dir isolation.
   3. `sock := tmuxtest.New(t)`; construct a `*tmux.Client` against the socket; ensure the spawned tmux server inherits the isolated env (PATH + XDG_CONFIG_HOME).
   4. Pre-condition: assert `_portal-saver` not present.
   5. Call `tmux.BootstrapPortalSaver(client, stateDir)`; assert no error.
@@ -240,7 +240,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 
 **Acceptance Criteria**:
 - [ ] `TestBootstrapPortalSaver_CleanBootstrap_EndState` exists in `internal/tmux/portal_saver_integration_test.go` (or sibling) and skips when tmux is absent via `tmuxtest.SkipIfNoTmux`.
-- [ ] Uses `portaltest.NewIsolatedStateEnv(t)` for state-dir isolation — assertion that the developer's real `~/.config/portal/state/` is untouched on test exit is automatic via Phase 1's t.Cleanup backstop.
+- [ ] Uses `portaltest.IsolateStateForTest(t)` for state-dir isolation — assertion that the developer's real `~/.config/portal/state/` is untouched on test exit is automatic via Phase 1's t.Cleanup backstop.
 - [ ] Asserts: HasSession returns true; `tmux show-options -t _portal-saver destroy-unattached` contains `off`; pane pid resolves to `ps args` containing `portal state daemon`; zero `"no such session: _portal-saver"` log entries in captured logger output.
 - [ ] `TestBootstrapPortalSaver_LockLoser_SessionPersists` exists and proves the lock-loser daemon exit does not destroy the saver session.
 - [ ] Both tests fail if 3-2's ordering is reverted (verify by temporarily reordering to expose the regression during implementation).
@@ -255,7 +255,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 **Edge Cases**:
 - Test runs without tmux on PATH — skipped via `tmuxtest.SkipIfNoTmux`.
 - Test runs without `portal` binary — built fresh via `portalbintest.BuildPortalBinary` and PATH-staged so tmux resolves it.
-- Developer real state dir not touched — guaranteed by `portaltest.NewIsolatedStateEnv` plus its fingerprint-diff t.Cleanup.
+- Developer real state dir not touched — guaranteed by `portaltest.IsolateStateForTest` plus its fingerprint-diff t.Cleanup.
 - Lock-loser daemon exit timing: the seeded competing daemon must be confirmed alive AND owning the lock before the bootstrap fires; otherwise the bootstrap's daemon could win the lock and the test asserts a different invariant.
 - The respawned daemon's pane pid is observed via `list-panes -F '#{pane_pid}'` after the readiness barrier (which in this case fails to identify and times out per spec — log-scan assertion accommodates the timeout WARN, which is distinct from `"no such session"`).
 - `destroy-unattached=off` must be set BEFORE the lock-loser daemon exits — that's the invariant being proved by `TestBootstrapPortalSaver_LockLoser_SessionPersists`.
@@ -263,7 +263,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 **Context**:
 > Spec § Component F, Acceptance criteria: "No 'no such session' log line on create… destroy-unattached=off is set before daemon process can exit… Lock-loser daemon does not destroy the session. Simulate a lock-loser scenario (another daemon already holds the singleton): the new bootstrap creates `_portal-saver`, applies `destroy-unattached=off`, respawns the daemon, and the daemon exits cleanly as lock-loser — `_portal-saver` remains present after the daemon exits. Verified by integration test."
 >
-> Phase 1 has shipped `portaltest.NewIsolatedStateEnv(t)`; consume it here for state isolation. `portalbintest.BuildPortalBinary` + `StagePortalBinary` are the canonical helpers per the CLAUDE.md `portalbintest` description.
+> Phase 1 has shipped `portaltest.IsolateStateForTest(t)`; consume it here for state isolation. `portalbintest.BuildPortalBinary` + `StagePortalBinary` are the canonical helpers per the CLAUDE.md `portalbintest` description.
 
 **Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Component F, Acceptance criteria bullet 1 (no "no such session" log line on create), bullet 2 (destroy-unattached=off set before daemon can exit), bullet 3 (lock-loser cascade is quiet — no `no such session` log noise; **spec amended 2026-05-25 under task 11-3** to reflect tmux 3.6b behaviour observed during implementation: with `destroy-unattached=off` but without `remain-on-exit on`, `_portal-saver` does NOT outlive its daemon pane process — the session disappears when the lock-loser daemon exits, but the recovery cascade is quiet because every `BootstrapPortalSaver` tmux call targets an extant session at the moment of the call. The implementation in `internal/tmux/portal_saver_endstate_integration_test.go` asserts the log-noise-absence shape directly, matching the amended spec).
 
@@ -280,7 +280,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 **Do**:
 - Add `TestBootstrapPortalSaver_EnvironmentInheritanceAcrossRespawn` to `internal/tmux/portal_saver_integration_test.go`:
   1. `tmuxtest.SkipIfNoTmux(t)`; build + PATH-stage `portal` via `portalbintest`.
-  2. `env, _ := portaltest.NewIsolatedStateEnv(t)`; the env is used both as the spawned tmux server's environment AND as the implicit input for verification.
+  2. `env, _ := portaltest.IsolateStateForTest(t)`; the env is used both as the spawned tmux server's environment AND as the implicit input for verification.
   3. `sock := tmuxtest.New(t)`; tmux server inherits the isolated env.
   4. Compute the **pre-F baseline**: create a throwaway session via `client.NewDetachedSessionNoCwd("_env-baseline", "sh -c 'exec tail -f /dev/null'")` (a placeholder, used here purely to capture the session-env that tmux would have used for ANY initial command including `portal state daemon` pre-F). Read `tmux show-environment -t _env-baseline` via `Commander.RunRaw` and parse the lines for the three keys. Kill `_env-baseline` immediately after capture.
   5. Compute the **post-F observed**: call `tmux.BootstrapPortalSaver(client, stateDir)` which executes the full create-placeholder → set-option → respawn flow. After the readiness barrier returns, read `tmux show-environment -t _portal-saver`. Parse the same three keys.
@@ -294,7 +294,7 @@ Both pass on a developer machine with tmux installed and fail when the saver-cre
 - [ ] Test captures `XDG_CONFIG_HOME`, `HOME`, `PATH` from a pre-F baseline session AND from `_portal-saver` after the full create-placeholder → respawn flow; asserts byte-equality of all three pairs.
 - [ ] Test fails with a clear diff message if any of the three keys differ.
 - [ ] A complementary unit test (or in-test argv inspection) asserts `NewDetachedSessionNoCwd` constructs `new-session -d -s NAME [SHELLCMD]` with NO `-e KEY=VAL` overrides — guarding against future env-override regressions.
-- [ ] Uses `portaltest.NewIsolatedStateEnv` so the developer's real state dir is not touched.
+- [ ] Uses `portaltest.IsolateStateForTest` so the developer's real state dir is not touched.
 - [ ] `go test ./internal/tmux/...` passes with tmux available.
 
 **Tests**:

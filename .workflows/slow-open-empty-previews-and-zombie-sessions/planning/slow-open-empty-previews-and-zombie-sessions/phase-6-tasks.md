@@ -17,7 +17,7 @@ total: 8
 **Do**:
 - Create `cmd/bootstrap/composition_full_integration_test.go` (or `internal/restoretest/composition_full_integration_test.go` if `tmuxtest` scaffolding there is more convenient — the planning task list explicitly allows either; pick the one that minimises new dependency imports). Tag with the existing integration build tag pattern used by Phase-4 task 4-10's composition test (`//go:build integration`).
 - Author `setupCompositeHarness(t *testing.T)`:
-  1. Call `portaltest.NewIsolatedStateEnv(t)` to obtain `env, stateDir`.
+  1. Call `portaltest.IsolateStateForTest(t)` to obtain `env, stateDir`.
   2. Call `portalbintest.BuildPortalBinary(t)` to obtain the binary path; stage via `portalbintest.StagePortalBinary` so `portal` is on `PATH` for child processes.
   3. Start a real tmux server via `tmuxtest` against a per-test socket; pass the isolated env to every `tmux` invocation.
   4. Create `_portal-saver` via the production `BootstrapPortalSaver` (Phase 3 ordering: placeholder `sh -c 'exec tail -f /dev/null'` → `set destroy-unattached=off` → `respawn-pane -k 'portal state daemon'` → readiness barrier). This is the legitimate saver-pane daemon; record its PID via `tmux list-panes -t _portal-saver -F '#{pane_pid}'`.
@@ -25,7 +25,7 @@ total: 8
   6. Wait until the legitimate daemon has written `daemon.pid` (poll up to 2 s at 50 ms cadence).
   7. Spawn orphan daemon #1 as a direct `exec.Command` subprocess with the isolated env; let it briefly run, then overwrite `daemon.pid` with its own PID (simulating the reporter's "orphan with daemon.pid reference" case). Use `state.WritePIDFile` from the test goroutine to keep the atomic write semantics consistent.
   8. Spawn orphan daemon #2 as a direct subprocess with the isolated env; do NOT touch `daemon.pid` (so this orphan is only visible via `pgrep`). Both orphans must have a parent PID equal to the test process, NOT the saver pane process — this matches the spec's "different parent processes" requirement and makes them unreachable via `tmux kill-session _portal-saver`.
-  9. Register `t.Cleanup` that: (i) `kill -9`s `orphanWithoutPIDFile`, `orphanWithPIDFile`, and `legitimatePID` in that order; (ii) waits for each to reap (`os.Process.Wait`); (iii) tears down the tmux server via `tmuxtest` teardown; (iv) leaves the `portaltest.NewIsolatedStateEnv` fingerprint backstop to run last (it is the outermost cleanup — see Task 6-8). All cleanup runs even if earlier assertions failed.
+  9. Register `t.Cleanup` that: (i) `kill -9`s `orphanWithoutPIDFile`, `orphanWithPIDFile`, and `legitimatePID` in that order; (ii) waits for each to reap (`os.Process.Wait`); (iii) tears down the tmux server via `tmuxtest` teardown; (iv) leaves the `portaltest.IsolateStateForTest` fingerprint backstop to run last (it is the outermost cleanup — see Task 6-8). All cleanup runs even if earlier assertions failed.
 - Add a sentinel constant `compositeHarnessOrphanCount = 2` and use it in pgrep assertions so the test's intent stays explicit.
 
 **Acceptance Criteria**:
@@ -36,7 +36,7 @@ total: 8
 - [ ] Both orphan PIDs have a parent PID equal to the test process (`os.Getpid()`), not the saver pane process — asserted via `ps -o ppid= -p <pid>`.
 - [ ] `daemon.pid` after setup contains `orphanWithPIDFile`'s PID (not the legitimate daemon's PID).
 - [ ] `t.Cleanup` runs to completion even when an earlier assertion fails (verified by a deliberate `t.Fatal` in a meta-test that confirms all three daemons are dead on cleanup).
-- [ ] Harness uses `portaltest.NewIsolatedStateEnv` for state-dir isolation (Phase 1 helper).
+- [ ] Harness uses `portaltest.IsolateStateForTest` for state-dir isolation (Phase 1 helper).
 - [ ] No `t.Parallel()` (per project convention — cmd package mocks via package-level state).
 
 **Tests**:
@@ -63,7 +63,7 @@ total: 8
 >
 > Phase 3's `BootstrapPortalSaver` already implements the placeholder-then-respawn ordering plus the 2 s / 50 ms readiness barrier — invoke it directly rather than reimplementing the sequence in the harness.
 
-**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Composite End-to-End Verification (scenario setup); Phase 1 (portaltest.NewIsolatedStateEnv contract); Phase 3 (BootstrapPortalSaver ordering).
+**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Composite End-to-End Verification (scenario setup); Phase 1 (portaltest.IsolateStateForTest contract); Phase 3 (BootstrapPortalSaver ordering).
 
 ---
 
@@ -413,25 +413,25 @@ total: 8
 
 ### Task 6-8: Assert portaltest cleanup fingerprint backstop reports clean on test exit
 
-**Problem**: Component G's `portaltest.NewIsolatedStateEnv` registers a `t.Cleanup` fingerprint-diff backstop that fails the test if the developer's real `~/.config/portal/state/` was touched during the test. This is the canonical defence against the exact failure mode the bugfix exists to address (leaked test daemon corrupting the developer's live install). The composite test exercises the full daemon lifecycle and could in principle violate the isolation invariant if any subprocess accidentally inherits the developer's `XDG_CONFIG_HOME` or if a test path constructs an unisolated `state.AcquireDaemonLock` call. This task validates that the backstop runs to completion AND reports clean (no developer-state mutations), proving that the composite test itself does not regress the isolation contract.
+**Problem**: Component G's `portaltest.IsolateStateForTest` registers a `t.Cleanup` fingerprint-diff backstop that fails the test if the developer's real `~/.config/portal/state/` was touched during the test. This is the canonical defence against the exact failure mode the bugfix exists to address (leaked test daemon corrupting the developer's live install). The composite test exercises the full daemon lifecycle and could in principle violate the isolation invariant if any subprocess accidentally inherits the developer's `XDG_CONFIG_HOME` or if a test path constructs an unisolated `state.AcquireDaemonLock` call. This task validates that the backstop runs to completion AND reports clean (no developer-state mutations), proving that the composite test itself does not regress the isolation contract.
 
 **Solution**: Ensure the test's `t.Cleanup` callbacks are structured so that (a) the harness teardown (kill daemons, tear down tmux server) completes BEFORE the fingerprint backstop walks the developer's state directory, and (b) no test code writes to the developer's state directory after the assertions but before cleanup. The backstop itself is implemented in Phase 1 — Task 6-8's job is to verify it fires correctly in the composite context and to add a meta-assertion that confirms the cleanup completed without late-write races.
 
 **Outcome**: The composite test exits cleanly with the Phase 1 fingerprint backstop reporting no developer-state mutations. Any leak — e.g., a subprocess that inherited `XDG_CONFIG_HOME` accidentally — fails the test loudly with the leaked path identified.
 
 **Do**:
-- In the composite test body, after all assertion blocks (Tasks 6-2 through 6-7) have completed and the test would naturally return, add an explicit `t.Cleanup` registration ordering check. `portaltest.NewIsolatedStateEnv` was called FIRST in Task 6-1's harness, which means its `t.Cleanup` is the OUTERMOST (last to run per LIFO). All harness cleanups (daemon kills, tmux teardown) run BEFORE the fingerprint walk — this is structurally correct but worth documenting in the test preamble.
+- In the composite test body, after all assertion blocks (Tasks 6-2 through 6-7) have completed and the test would naturally return, add an explicit `t.Cleanup` registration ordering check. `portaltest.IsolateStateForTest` was called FIRST in Task 6-1's harness, which means its `t.Cleanup` is the OUTERMOST (last to run per LIFO). All harness cleanups (daemon kills, tmux teardown) run BEFORE the fingerprint walk — this is structurally correct but worth documenting in the test preamble.
 - Add a meta-assertion at the end of the test body: synchronously call `t.Helper()` plus a marker `t.Logf("composite test body complete — backstop fingerprint walk will follow in t.Cleanup")`. This ensures the assertion phase has completed cleanly; the actual backstop assertion is owned by Phase 1's helper.
 - Ensure no test code writes to `~/.config/portal/state/` directly. Audit the test source for any path that could accidentally write to the developer's state dir:
-  - All `state.AcquireDaemonLock` calls in the test must take the isolated `stateDir` from `portaltest.NewIsolatedStateEnv` (not a default-path version).
-  - All subprocess spawns must use `exec.Cmd.Env = isolatedEnv` (the env returned by `portaltest.NewIsolatedStateEnv`).
+  - All `state.AcquireDaemonLock` calls in the test must take the isolated `stateDir` from `portaltest.IsolateStateForTest` (not a default-path version).
+  - All subprocess spawns must use `exec.Cmd.Env = isolatedEnv` (the env returned by `portaltest.IsolateStateForTest`).
   - The fresh-process subprocess in Task 6-5 must pass `PORTAL_STATE_DIR=<isolated>` explicitly AND set `Env` to the isolated env.
 - Add a positive control: before the test returns, log via `t.Logf` the contents of `<isolatedStateDir>` (file count and total size) to confirm the test wrote to the isolated dir, not the developer's. This makes a successful backstop result more interpretable.
 - Document in the test's preamble comment block that the fingerprint backstop's failure indicates one of: (i) a subprocess inherited the developer's `XDG_CONFIG_HOME`, (ii) a direct file write bypassed the env, or (iii) the helper's snapshot semantics changed; the test does NOT need to disambiguate — the backstop's error message identifies the leaked path.
 
 **Acceptance Criteria**:
-- [ ] `portaltest.NewIsolatedStateEnv` is called as the FIRST step in `setupCompositeHarness(t)` (Task 6-1), ensuring its `t.Cleanup` is the outermost (last LIFO).
-- [ ] All harness cleanups (daemon kills, tmux teardown) are registered AFTER `NewIsolatedStateEnv` and therefore run BEFORE the fingerprint backstop walk.
+- [ ] `portaltest.IsolateStateForTest` is called as the FIRST step in `setupCompositeHarness(t)` (Task 6-1), ensuring its `t.Cleanup` is the outermost (last LIFO).
+- [ ] All harness cleanups (daemon kills, tmux teardown) are registered AFTER `IsolateStateForTest` and therefore run BEFORE the fingerprint backstop walk.
 - [ ] The test body completes its assertion phase before returning — no late writes (e.g., a deferred file write) that could race the backstop.
 - [ ] Every `state.AcquireDaemonLock` call in the test uses the isolated `stateDir`; audit grep `state.AcquireDaemonLock` in the test file confirms zero unisolated call sites.
 - [ ] Every subprocess spawn in the test sets `Env` to the isolated env explicitly; audit grep `exec.Command` / `exec.CommandContext` in the test file confirms zero spawns inheriting `os.Environ()` directly.
@@ -448,14 +448,14 @@ total: 8
 - `"composite G (meta): deliberately writing to ~/.config/portal/state/ in a test that uses the helper fails with a clear backstop diagnostic"` (this meta-test lives separately — it is NOT part of the composite test itself, but it validates the backstop's failure path; reference it from the composite test's preamble)
 
 **Edge Cases**:
-- A subprocess writes to `~/.config/portal/state/` after the test goroutine has returned but before the subprocess is killed by cleanup — the late-write race. Mitigation: the cleanup kills all subprocesses (SIGKILL + wait) BEFORE the backstop walk runs. Confirm via cleanup ordering: subprocess kill registered in Task 6-1 is INNER to `NewIsolatedStateEnv` registration, so it runs FIRST per LIFO; backstop runs LAST after all subprocesses are dead.
+- A subprocess writes to `~/.config/portal/state/` after the test goroutine has returned but before the subprocess is killed by cleanup — the late-write race. Mitigation: the cleanup kills all subprocesses (SIGKILL + wait) BEFORE the backstop walk runs. Confirm via cleanup ordering: subprocess kill registered in Task 6-1 is INNER to `IsolateStateForTest` registration, so it runs FIRST per LIFO; backstop runs LAST after all subprocesses are dead.
 - A `t.Cleanup` callback itself writes to `~/.config/portal/state/` (e.g., a poorly-written cleanup that touches files) — audit cleanup callbacks for writes; none of the harness cleanups should touch the developer's state dir.
 - The Phase 1 helper changes its fingerprint snapshot semantics in a future refactor and produces a false positive — the composite test's positive control (logging isolated state dir contents at end) helps diagnose this; if the backstop reports a path that the test never wrote, the bug is in the helper, not the test.
 - `~/.config/portal/state/` does not exist on the test host (e.g., a CI runner without prior portal usage) — Phase 1 helper handles this case (empty pre-test snapshot; any post-test file is a delta). Composite test does not need to special-case this.
 - The fingerprint backstop is slow (e.g., the developer's state dir has hundreds of `.bin` files) and times out — Phase 1's helper bounds content hashing to files ≤1 MiB; total walk should be sub-second. If observed slowness becomes a problem, raise with the Phase 1 helper, not the composite test.
 
 **Context**:
-> Spec § Composite End-to-End Verification — final acceptance: "Test uses `portaltest.NewIsolatedStateEnv` for state-dir isolation (Phase 1 helper); no developer-state mutations on test exit."
+> Spec § Composite End-to-End Verification — final acceptance: "Test uses `portaltest.IsolateStateForTest` for state-dir isolation (Phase 1 helper); no developer-state mutations on test exit."
 >
 > Spec § Component G — Helper exists with the documented signature: "Registers `t.Cleanup` to verify on test exit that the developer's real `~/.config/portal/state/` was untouched."
 >
@@ -463,4 +463,4 @@ total: 8
 >
 > The composite test is the highest-risk site for accidental isolation violations because it spawns the most subprocesses (build helper, three daemons, fresh-process AcquireDaemonLock subprocess, tmux server). Verifying the backstop fires clean here gives high confidence that the rest of the test suite — which spawns fewer subprocesses per test — is also clean.
 
-**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Composite End-to-End Verification (final acceptance — "Test uses `portaltest.NewIsolatedStateEnv` ... no developer-state mutations on test exit"); § Component G (full section, especially mtime backstop fires on violation acceptance and audit grep completion criterion).
+**Spec Reference**: `.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/specification.md` § Composite End-to-End Verification (final acceptance — "Test uses `portaltest.IsolateStateForTest` ... no developer-state mutations on test exit"); § Component G (full section, especially mtime backstop fires on violation acceptance and audit grep completion criterion).
