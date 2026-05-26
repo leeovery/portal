@@ -19,21 +19,27 @@ import (
 //
 // Per the resurrection spec, the exempt set is:
 //   - alias / clean / help / init / version: user-facing config or help
+//   - hooks: hooks set/rm/list are pure config-file operations that need
+//     only $TMUX_PANE (already guaranteed because they run inside a tmux
+//     pane) and a single tmux display-message round-trip via
+//     buildHooksTmuxClient() in cmd/hooks.go to resolve the structural
+//     pane key; they do not need daemon orchestration, saver bootstrap,
+//     version-upgrade machinery, Restore, EagerSignalHydrate,
+//     marker/FIFO cleanup, or hookStore.CleanStale. hooks list needs
+//     nothing tmux-related at all. Stale-entry auto-cleanup remains
+//     attached to bootstrap-triggering commands (portal open / x /
+//     attach).
 //   - state: every `portal state ...` subcommand. User-facing children
 //     (status, cleanup) inspect or tear down machinery the bootstrap sets
 //     up — running bootstrap first would be circular. Internal children
 //     (daemon, notify, signal-hydrate, hydrate, migrate-rename) are invoked
 //     by tmux hooks or as the pane's initial process; re-running bootstrap
 //     would recursively register hooks and could spawn nested daemons.
-//
-// Note: 'hooks' is intentionally NOT in this map. Phase 4 moved hook
-// firing into the hydrate helper, so `portal hooks set/list/rm` now go
-// through full bootstrap to keep CleanStale and skeleton restoration in
-// the path where the user expects it.
 var skipTmuxCheck = map[string]bool{
 	"alias":   true,
 	"clean":   true,
 	"help":    true,
+	"hooks":   true,
 	"init":    true,
 	"state":   true,
 	"version": true,
