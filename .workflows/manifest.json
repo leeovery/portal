@@ -89,6 +89,9 @@
     },
     "hooks-rm-pane-key-flag": {
       "work_type": "quick-fix"
+    },
+    "hydrate-command-shell-safety": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {

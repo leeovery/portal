@@ -1,0 +1,16 @@
+{
+  "name": "hydrate-command-shell-safety",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-05-26",
+  "description": "Harden buildHydrateCommand quoting and broaden sanitizeSessionName to an allowlist so resume works for session names with whitespace or shell-meta characters",
+  "phases": {
+    "specification": {
+      "items": {
+        "hydrate-command-shell-safety": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
