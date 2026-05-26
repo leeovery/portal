@@ -61,10 +61,41 @@ That WARN is Component B's orphan-sweep noting a transient tmux state where `_po
 
 ### Initial File Pointers
 
-- `cmd/bootstrap_production.go` — `cleanStaleAdapter.CleanStale` (~line 76).
+- `cmd/bootstrap_production.go` — `cleanStaleAdapter.CleanStale` (~line 76-83). No adapter-level logging of the call or the live-panes count.
 - `cmd/clean.go` — `portal clean` subcommand (~line 82), same destructive pattern via the same `ListAllPanes` path.
-- `internal/tmux/tmux.go` — `ListAllPanes` (~line 687).
+- `internal/tmux/tmux.go` — `ListAllPanes` (~line 687). Collapses `list-panes -a` exit ≠ 0 into `([]string{}, nil)` — indistinguishable from a legitimate empty-pane reply.
 - `internal/hooks/store.go` — `Store.CleanStale` (~line 130).
+
+### Observation Boundary
+
+Direct observation extends only to:
+
+1. Component B logged `list-panes -t _portal-saver: exit status 1: can't find window: _portal-saver` at `19:48:39Z`.
+2. `hooks.json` went from 23 → 1 entries.
+3. No log entry from `cleanStaleAdapter.CleanStale` itself.
+
+From those facts we infer `hookStore.CleanStale` must have been called with an empty (or near-empty) `livePanes` slice. We **cannot** tell from logs whether the upstream `list-panes -a` call returned exit ≠ 0 (which `ListAllPanes` collapses to `([]string{}, nil)`) or returned exit 0 with empty stdout. Both paths produce the same destructive end-state. Component B's WARN is a different list-panes call (`-t _portal-saver`, not `-a`), so it confirms tmux was transient at that moment but does not pin down step 11's exact behavior.
+
+### Failure Modes That Must Be Covered
+
+Both failure modes are plausible and produce the same destructive end-state:
+
+- **(a) `list-panes -a` exit ≠ 0** — collapsed to `([]string{}, nil)` inside `ListAllPanes`. The error is swallowed; the caller cannot distinguish "tmux is transient" from "tmux has no panes."
+- **(b) `list-panes -a` exit 0 with empty stdout** — possible during a `_portal-saver` mid-respawn transient (Component F's placeholder-then-respawn ordering reduces but doesn't eliminate this window). Tmux can momentarily reply "no panes" on `-a` with exit 0 while the saver is being recreated.
+
+A fix that propagates the error from `ListAllPanes` alone closes (a) but a real exit-0-with-empty-stdout reply from tmux during a saver-respawn transient (b) would still bypass the error guard.
+
+### Defensive Sanity Gate Worth Considering
+
+Cross-check `ListSessionNames` (or `tmux has-session`) returning non-empty at the adapter layer. If tmux says it has live sessions but `list-panes -a` returns zero panes, that's incoherent and the wipe should be refused. Bounds the blast radius cheaply but is **defense-in-depth, not the root-cause fix.**
+
+### Audit Scope
+
+All other callers of `ListAllPanes` must be audited as part of the investigation. `portal clean` uses the same path at `cmd/clean.go:82`. Any other consumer that interprets `ListAllPanes → empty` as ground truth has the same defect latent.
+
+### Relationship to Recent Releases
+
+The fix in v0.5.11 (`hooks-skip-bootstrap`) reduces trigger frequency by eliminating the `SessionStart` cascade but does **not** change the latency of this bug. `portal open` / `x` / attach during a tmux transient can still wipe everything.
 
 ---
 
