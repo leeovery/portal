@@ -276,9 +276,33 @@ The same dual-conflation exists in `cmd/clean.go:75-80` (the `portal clean` call
 
 Defense-in-depth across both layers, mirroring the prior-art pattern at bootstrap step 9 (`CleanStaleMarkers`). Three coordinated changes:
 
-1. **Replace `ListAllPanes` calls with `ListAllPanesWithFormat`.** Force callers to acknowledge that the underlying tmux call can fail. The two production sites are `cmd/bootstrap_production.go:77` and `cmd/clean.go:76`. The error-propagating helper already exists; we are simply asking each caller to consume it. Parsing of `session:window.pane` lines is centralised in `cmd/bootstrap/stale_marker_cleanup.go`'s `parseLivePaneSet` — it should be promoted to a shared utility (likely `internal/tmux` or a new helper next to it) so all three call sites use one parser. *Decision still open:* whether `ListAllPanes` should be deleted, deprecated with a `// Deprecated:` doc comment, or repurposed to wrap `ListAllPanesWithFormat` + sanitised parsing. Discussion item.
+1. **Replace the swallow at the helper layer; both destructive callsites consume the fixed contract.** Parsing of `session:window.pane` lines is currently centralised in `cmd/bootstrap/stale_marker_cleanup.go`'s `parseLivePaneSet` — promote it to a shared utility (likely `internal/tmux` or a new helper next to it) so all three call sites use one parser.
 
-2. **Add a mass-deletion hazard guard at `cleanStaleAdapter.CleanStale` (and the `portal clean` callsite).** Before passing the live-pane slice to `hooks.Store.CleanStale`, check the combination `len(livePanes) == 0 && len(persistedHooks) > 0`. When that combination holds, emit `Logger.Warn(ComponentBootstrap, ...)` with both counts and skip the destructive call — exact prior-art at `cmd/bootstrap/stale_marker_cleanup.go:126-141`. The wiring at the adapter needs a `Logger` field (currently absent — the adapter is bare); plumbing it through `buildProductionOrchestrator` is a small refactor mirroring how `MarkerCleanupCore` already receives one.
+   **Disposition of `ListAllPanes` — locked to repurpose.** The helper at `internal/tmux/tmux.go:687-693` is repurposed to wrap `ListAllPanesWithFormat` + the shared `parseLivePaneSet`, returning the same `([]string, error)` shape but with errors propagated. Approximately 10 lines replacing the current 7-line swallow body:
+
+   ```go
+   func (c *Client) ListAllPanes() ([]string, error) {
+       raw, err := c.ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")
+       if err != nil {
+           return nil, err
+       }
+       set := parseLivePaneSet(raw, /* logger */ nil)
+       keys := make([]string, 0, len(set))
+       for k := range set {
+           keys = append(keys, k)
+       }
+       return keys, nil
+   }
+   ```
+
+   Rationale for repurpose vs. the alternatives:
+   - **Deletion** forces every call site (production and test) to be touched in this work unit, and any future restoration via git history requires re-creating the symbol. High blast radius for a contract-narrowing change.
+   - **Deprecation with `// Deprecated:`** keeps the footgun alive — a future consumer who reaches for `ListAllPanes` for ergonomic reasons can still introduce the same defect class. The compiler does not enforce the deprecation tag.
+   - **Repurpose to wrap `ListAllPanesWithFormat` + sanitised parsing** gives one canonical helper, keeps every existing call site compiling unchanged, and structurally eliminates the swallow contract going forward. New consumers inherit the safe behaviour by default.
+
+   Existing callers of `ListAllPanes` (production and test) then receive the propagated error in the `err` return slot they already check for shape — and discover their swallow assumption is wrong at the point where it matters (the destructive consumer paths in `cleanStaleAdapter.CleanStale` and `cmd/clean.go`).
+
+2. **Add a mass-deletion hazard guard at `cleanStaleAdapter.CleanStale` (and the `portal clean` callsite).** Before passing the live-pane slice to `hooks.Store.CleanStale`, check the combination `len(livePanes) == 0 && len(persistedHooks) > 0`. When that combination holds, emit `Logger.Warn(ComponentBootstrap, ...)` with both counts and skip the destructive call — exact prior-art at `cmd/bootstrap/stale_marker_cleanup.go:126-141`. The wiring at the adapter needs a `Logger` field (currently absent — the adapter is bare); plumbing it through `buildProductionOrchestrator` is a small refactor mirroring how `MarkerCleanupCore` already receives one. **Reference site:** `cmd/bootstrap_production.go:147-152` — the inline `MarkerCleanupCore` literal where `Logger: logger` is populated from the orchestrator-scope logger resolved at lines 109-110. Copy the field-population pattern verbatim into the new `cleanStaleAdapter` construction at lines 113-118.
 
 3. **Add adapter-level logging.** `Debug` on entry (live count, persisted count, what would be removed), `Warn` when the hazard guard fires, `Debug` on the normal-path completion (count removed). The absence of these breadcrumbs was a contributing factor; restoring them makes the next analogous defect detectable. **A secondary benefit of the logging contract:** post-fix, failure modes (a) (exit ≠ 0) and (b) (exit 0 with empty stdout) become distinguishable in `portal.log` — mode (a) surfaces as the propagated error from `ListAllPanesWithFormat` (orchestrator-level `Warn` with the wrapped error message), while mode (b) surfaces as the hazard-guard `Warn` with the counts. Currently both modes are silent at the adapter; the new logging lets future occurrences pin exactly which path fired without speculative analysis.
 
@@ -300,7 +324,24 @@ Defense-in-depth across both layers, mirroring the prior-art pattern at bootstra
 
 ### Discussion
 
-(pending — to be filled by the findings review with the user)
+Findings-review surfaced four refinements / adjustments folded into the file above:
+
+1. **Inversion (not deletion) of `cmd/clean_test.go:327-368`.** The existing subtest `"zero live panes prunes every hook entry"` codifies the destructive behaviour as correct with comment-block rationale. Fix must invert (preserve structural coverage of the empty-live-set path; flip asserted outcome from "wipes" to "refuses to wipe + emits Warn"), not delete. Spec-phase open item: examine the commit that added it — deliberate or accidental rationale drives whether migration messaging is required for any user relying on `portal clean` as "kill all hooks when no tmux."
+2. **Mode-(b) precautionary framing preserved.** Mode (a) (exit ≠ 0) is well-evidenced by the time-correlated Component B WARN; mode (b) (exit 0 with empty stdout during saver-respawn) is plausible but unconfirmed. The hazard guard remains the right fix because its cost is trivial and it closes both modes — but the spec must not oversell mode (b) as observed evidence.
+3. **Symptom-distinguishability nuance.** User-facing symptoms collide with `slow-open-empty-previews-and-zombie-sessions`, but logs distinguish: FIFO race left 53 eager-signal `ENOENT` warnings; CleanStale wipe leaves zero warnings (silent at the adapter). "Silent in logs" is itself a fingerprint for this defect class until the new adapter logging lands.
+4. **`ListAllPanes` disposition locked to repurpose.** Three options were live (delete / deprecate / repurpose). Decision: repurpose to wrap `ListAllPanesWithFormat` + shared `parseLivePaneSet`. Deletion has high blast radius; deprecation keeps the footgun alive (compiler doesn't enforce); repurpose structurally eliminates the swallow contract and new consumers inherit the safe behaviour by default. See §Chosen Approach atom 1 for the in-line implementation sketch.
+
+Three context items folded in alongside:
+
+- **Wipe scope.** User-session hooks only — portal-internal sessions (`_portal-bootstrap`, `_portal-saver`) never have `hooks.json` entries (filtered at registration). 100% of user hooks affected during a fired event, 0% of portal-internal hooks.
+- **Post-fix log distinguishability.** New adapter logging (Debug entry, Warn guard, Debug success, Warn propagated error) makes modes (a) and (b) distinguishable in `portal.log` for future occurrences without speculative analysis.
+- **`cmd/bootstrap_production_test.go` does not exist.** Zero unit coverage of `cleanStaleAdapter`. Fix must create the file with hazard-guard, error-propagation, and normal-path coverage. Inverting the existing `clean_test.go` subtest is necessary but not sufficient — the bootstrap adapter has its own path.
+
+User priorities surfaced:
+
+- Defense-in-depth across both layers (closes mode (a) by helper change, closes mode (b) by hazard guard) preferred over single-layer fix.
+- Maintain architectural consistency with the prior-art at step 9 — the fix shape should be lifted verbatim where possible, not re-derived.
+- Test deliverables are first-class: existing test must be inverted with new prose, missing test file must be created, integration test for the transient simulation is required.
 
 ### Testing Recommendations
 
