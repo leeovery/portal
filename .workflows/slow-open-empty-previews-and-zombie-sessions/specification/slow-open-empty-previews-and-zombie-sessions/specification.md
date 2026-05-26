@@ -21,6 +21,20 @@ This specification was amended after the Phase 3 specification phase closed. Ame
 - **T11-3** amended acceptance criterion 3 and added the `remain-on-exit on` opt-in Note.
 - **T12-1** reconciled the design-rationale prose in "New behaviour" step 3 to cross-reference acceptance criterion 3 and the Note instead of asserting the demoted claim.
 
+### 2026-05-26 — Cycle-2 review-recommendation absorption (post-cycle-1 doc corrections)
+
+The cycle-1 review surfaced five spec/impl mismatches and missing-acknowledgement gaps that did not block ship but were left documented for a future amendment. They are captured here so the spec matches what the implementation actually does.
+
+**Component C — orphan-PID write semantics on self-eject path.** When `AcquireDaemonLock`'s pre-check identifies the recorded `daemon.pid` as alive but not a `portal state daemon` (the orphan case Component A/B handle), the implementation **does not** write a new `daemon.pid` value before the daemon exits. The spec did not enumerate this branch's pidfile behaviour. Source: cycle-1 recommendation #34 (T4-10). See Component C below — refer to this corrigendum entry from there.
+
+**Component D — surrogate triad for "no final flush on self-eject" acceptance.** Spec acceptance criterion uses `ProcessState.Exited()` as the verification, but when the daemon runs as a tmux pane process the test framework cannot observe `ProcessState` directly (tmux owns the child). The implementation uses a documented surrogate: (a) scrollback bytes-identical between pre- and post-eject snapshots, (b) `daemon.pid` retained (not unlinked by the eject), and (c) the literal INFO log marker "self-supervision: saver-membership lost for N consecutive ticks, exiting" present exactly once. The three together discharge the original `ProcessState`-style assertion. Source: cycle-1 recommendation #43 (T6-6).
+
+**Component G — fingerprint backstop ordering deviation.** Spec contract specified that the backstop snapshots the developer's state dir **BEFORE** `IsolateStateForTest` mutates the env. The implementation snapshots **AFTER** env mutation as host-noise mitigation: a developer running a real portal daemon would otherwise see a transient pre-mutation snapshot drift constantly. The materially changed threat model is "env-flow tests only" — direct file writes that bypass the env are still caught because the backstop's post-test walk is independent. Source: cycle-1 recommendation #22 (T1-3).
+
+**Component G — `hashed-changed` delta label.** The backstop's diff vocabulary includes a `hashed-changed` label, surfaced when a file's content hash differs but other metadata (size, mtime, ctime) is unchanged — the strongest "file actually edited" signal. The spec did not enumerate the delta vocabulary; the label is recorded here for future reference. Source: cycle-1 recommendation #21 (T1-3).
+
+**Composite End-to-End Verification — step 9 scope footnote.** Composite step 9 asserts `_portal-saver`'s pane process is `portal state daemon`. On tmux 3.6b the lock-loser cascade case sees the session disappear (see the Component F amendment above) and step 9 is implicitly scoped to the lock-winner case. Reader-orientation footnote added inline at the step. Source: cycle-1 recommendation #51 (T11-3).
+
 ## Specification
 
 ## Problem Statement
@@ -482,7 +496,7 @@ In addition to per-component acceptance criteria, the work unit MUST include **o
 6. Scrollback directory is stable across 10 consecutive 1 s observations — no `.bin` file deletions or unexpected new files (Components A+B+E composition).
 7. A subsequent test-bench invocation of `AcquireDaemonLock` from a fresh process refuses with `ErrDaemonLockHeld` (Component C pre-check verifies on the live state).
 8. After externally killing the legitimate daemon's `_portal-saver` pane (simulating an out-of-band saver loss), the daemon self-ejects within (N+1) tick intervals (Component D in the live context).
-9. `_portal-saver`'s pane process is `portal state daemon` AND `tmux show-options -t _portal-saver destroy-unattached` reports `off` (Component F).
+9. `_portal-saver`'s pane process is `portal state daemon` AND `tmux show-options -t _portal-saver destroy-unattached` reports `off` (Component F). *Note: this step is scoped to the lock-winner case. In the lock-loser cascade — see the Component F acceptance amendment in the Corrigendum — the saver session disappears on tmux 3.6b and is recreated by the next bootstrap, so step 9 evaluates against the post-recovery session, not the disappeared one.*
 
 **Files affected:** new integration test file in `cmd/` or `internal/restoretest/` (planning decides; the latter has existing real-tmux scaffolding via `tmuxtest`). The test is tagged with the existing integration build tag pattern.
 
