@@ -11,6 +11,33 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "hooks-skip-bootstrap": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "85e0b382284b6f832dbd29596e20fab70312fcfc",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "hooks-skip-bootstrap-1-1": "tick-ee3166",
+            "hooks-skip-bootstrap-1-2": "tick-3fcd1f"
+          },
+          "external_id": "tick-26cf7c"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "hooks-skip-bootstrap": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
