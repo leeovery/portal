@@ -15,8 +15,7 @@ import (
 // and tmux skeleton-marker option names.
 //
 // Algorithm:
-//  1. Replace each filesystem-unsafe byte (forward slash, backslash, null) in
-//     session with '_'.
+//  1. Replace each byte not in [A-Za-z0-9._-] with '_'.
 //  2. Replace a leading '.' with '_'.
 //  3. If the sanitized name differs from the original, append '-' followed by
 //     the first 8 hex characters of xxhash.Sum64String(session) to disambiguate
@@ -35,19 +34,21 @@ func SanitizePaneKey(session string, window, pane int) string {
 	return fmt.Sprintf("%s__%d.%d", stem, window, pane)
 }
 
-// sanitizeSessionName replaces filesystem-unsafe bytes and a leading '.' with
-// '_'. The substitutions are byte-wise so behavior is identical regardless of
-// whether the input contains valid UTF-8.
+// sanitizeSessionName applies an allowlist substitution: each byte in
+// [A-Za-z0-9._-] is preserved; every other byte becomes '_'. A leading '.' is
+// then also replaced with '_' so the sanitized stem is not filesystem-hidden
+// by default on Unix. Substitutions are byte-wise so behaviour is identical
+// regardless of whether the input contains valid UTF-8.
 func sanitizeSessionName(session string) string {
 	var b strings.Builder
 	b.Grow(len(session))
 	for i := 0; i < len(session); i++ {
 		c := session[i]
-		if isUnsafeByte(c) {
-			b.WriteByte('_')
+		if isAllowedByte(c) {
+			b.WriteByte(c)
 			continue
 		}
-		b.WriteByte(c)
+		b.WriteByte('_')
 	}
 
 	out := b.String()
@@ -57,12 +58,19 @@ func sanitizeSessionName(session string) string {
 	return out
 }
 
-// isUnsafeByte reports whether b conflicts with filesystem path conventions.
-// Forward slash and backslash are path separators on Unix and Windows
-// respectively; null bytes terminate C strings used by most filesystem APIs.
-func isUnsafeByte(b byte) bool {
-	switch b {
-	case '/', '\\', 0x00:
+// isAllowedByte reports whether b is in the allowlist [A-Za-z0-9._-]. All
+// other bytes (whitespace, shell-meta, path separators, NUL, high bytes from
+// multi-byte UTF-8 sequences, etc.) are replaced with '_' by
+// sanitizeSessionName.
+func isAllowedByte(b byte) bool {
+	switch {
+	case b >= 'A' && b <= 'Z':
+		return true
+	case b >= 'a' && b <= 'z':
+		return true
+	case b >= '0' && b <= '9':
+		return true
+	case b == '.' || b == '_' || b == '-':
 		return true
 	}
 	return false

@@ -66,9 +66,13 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "hydrate-command-shell-safety-1-2",
+          "current_task": "~",
           "completed_tasks": [
-            "hydrate-command-shell-safety-1-1"
+            "hydrate-command-shell-safety-1-1",
+            "hydrate-command-shell-safety-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }
