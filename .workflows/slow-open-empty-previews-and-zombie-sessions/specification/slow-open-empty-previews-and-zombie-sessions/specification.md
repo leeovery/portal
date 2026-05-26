@@ -1,5 +1,26 @@
 # Specification: Slow Open Empty Previews And Zombie Sessions
 
+## Corrigendum
+
+This specification was amended after the Phase 3 specification phase closed. Amendments were authored within the same work unit (`slow-open-empty-previews-and-zombie-sessions`) during cycle-1 review remediation (Phase 11) and cycle-6 analysis (Phase 12). The live file below reflects the corrected text; git history preserves the original.
+
+### 2026-05-25 — Component F lock-loser cascade re-framed (tasks T11-3, T12-1)
+
+**Original claim (acceptance criteria, bullet 3):**
+
+> "`_portal-saver` session persists after the daemon exits."
+
+**Original claim (design rationale, "New behaviour" step 3 trailing clause):**
+
+> "Even if the daemon exits immediately as lock-loser, `destroy-unattached=off` is already in effect, so the session persists for the next bootstrap to evaluate."
+
+**Correction:** On tmux 3.6b, the `_portal-saver` session DOES disappear when its lock-loser daemon-pane process exits even with `destroy-unattached=off`, because the daemon pane owns the session lifetime. The observable contract Component F actually delivers is **log-noise absence**: zero `no such session: _portal-saver` log entries during the lock-loser cascade. Literal session-persistence is demoted to a future opt-in via `set-option -t _portal-saver remain-on-exit on` (see the Note immediately after the acceptance criteria for trade-offs).
+
+**Companion work:**
+
+- **T11-3** amended acceptance criterion 3 and added the `remain-on-exit on` opt-in Note.
+- **T12-1** reconciled the design-rationale prose in "New behaviour" step 3 to cross-reference acceptance criterion 3 and the Note instead of asserting the demoted claim.
+
 ## Specification
 
 ## Problem Statement
