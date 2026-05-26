@@ -11,6 +11,33 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "hydrate-command-shell-safety": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "ac1b5ebba58140b6963e59d1ec5e1949c3af7122",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "hydrate-command-shell-safety-1-1": "tick-7c4b5c",
+            "hydrate-command-shell-safety-1-2": "tick-eeefe1"
+          },
+          "external_id": "tick-72464c"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "hydrate-command-shell-safety": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
