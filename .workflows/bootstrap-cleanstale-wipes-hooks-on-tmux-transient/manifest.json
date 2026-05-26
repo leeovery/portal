@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-05-26",
+          "sources": {
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
