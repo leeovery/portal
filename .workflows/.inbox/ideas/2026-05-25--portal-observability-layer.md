@@ -129,6 +129,21 @@ and should ship as one coherent improvement.
   level and proceeds. Add a DEBUG breadcrumb naming the PID and the
   error. Pattern (3) — DEBUG breadcrumb on swallowed-error paths.
 
+- **`ShowGlobalHooks` failure-logging asymmetry between hook-migration
+  helpers** (`internal/tmux/hooks_register.go`, folded from
+  `2026-05-22--showglobalhooks-failure-log-asymmetry` on 2026-05-26).
+  `migrateSessionClosedHook` (line ~304) emits a WARN log AND returns a
+  wrapped error when `ShowGlobalHooks` fails; `migrateHydrationHooks`
+  (line ~232) only wraps and returns. Converge both helpers on
+  "WARN at the failure site for diagnostic locality" — add a WARN to
+  `migrateHydrationHooks` that mirrors the existing one in
+  `migrateSessionClosedHook`. Two log lines downstream (per-site WARN +
+  caller's aggregate via `RegisterPortalHooks`) is exactly the per-event
+  + cycle-summary shape patterns (4) and (5) prescribe. Trivial in
+  isolation (one new log line) but treated as a #20 atom because the
+  prefix/format choice should be made coherently with the broader
+  subsystem-prefixing rewrite, not as an ad-hoc precedent.
+
 - **Hard-to-explain defensive branches go uncommented** (e.g.
   `defaultIdentifyPS` zero-exit + empty-stdout, treated as transient;
   `cmd/state_daemon.go` capture-tick log-and-continue). Future code
