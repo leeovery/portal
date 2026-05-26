@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -405,14 +406,14 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 	}
 }
 
-// buildHydrateCommand returns the bare `portal state hydrate ...` invocation
+// buildHydrateCommand returns the `portal state hydrate ...` invocation
 // delivered to a freshly-created pane via respawn-pane -k. respawn-pane kills
 // the default shell and replaces the pane's process with this command in a
 // single atomic call, so no leading `exec` prefix is needed (and would be
-// redundant — tmux's respawn already replaces, not stacks). Under this bare
-// form `portal state hydrate` is the pane's initial process directly under
-// tmux and syscall.Exec's the user's shell as its replacement, so no parked
-// shell parent exists for the lifetime of the pane.
+// redundant — tmux's respawn already replaces, not stacks). Under this form
+// `portal state hydrate` is the pane's initial process directly under tmux
+// and syscall.Exec's the user's shell as its replacement, so no parked shell
+// parent exists for the lifetime of the pane.
 //
 // Per spec Fix 3 (Defect D), the previous outer shell envelope around this
 // invocation was dropped: the trailing shell-replacement trailer it contained
@@ -423,17 +424,29 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 // hook-firing wrapper inside cmd/state_hydrate.go is independent and
 // preserved.
 //
-// Inputs containing literal `'` would break shell parsing under the bare
-// form (no outer single-quoted envelope exists to anchor the canonical
-// close-escape-reopen idiom for embedding a single quote inside a
-// single-quoted string). Portal's sanitization (sanitizeSessionName in
-// internal/state/panekey.go) does not currently produce such inputs —
-// session names with `/`, `\`, or `\0` are filtered, and pane keys derive
-// from the sanitized session name plus integer indices — so the bare form
-// is safe in practice.
+// Quoting contract: all three interpolated values (fifo, file, hookKey) are
+// single-quoted via shellQuoteSingle, which applies the standard close-
+// escape-reopen idiom to embedded single quotes (see shellQuoteSingle below
+// for the exact escape sequence). This makes the command shape robust to any
+// byte sequence in fifo, file, or hookKey — whitespace, shell metacharacters
+// (dollar, backtick, semicolon, etc.), and embedded single quotes all pass
+// through to the helper's flag parser as single tokens. The helper's flag-
+// based argv parsing in cmd/state_hydrate.go receives the quoted single-
+// token values correctly.
 func buildHydrateCommand(fifo, file, hookKey string) string {
 	return fmt.Sprintf(
 		"portal state hydrate --fifo %s --file %s --hook-key %s",
-		fifo, file, hookKey,
+		shellQuoteSingle(fifo), shellQuoteSingle(file), shellQuoteSingle(hookKey),
 	)
+}
+
+// shellQuoteSingle wraps s in single quotes for safe interpolation into a
+// shell command string. Embedded single quotes are escaped via the standard
+// close-escape-reopen idiom: each literal single quote in s is replaced by
+// the four-byte sequence quote-backslash-quote-quote (close the open quote,
+// emit an escaped literal quote, reopen). See the function body for the
+// exact replacement string. The result is a single shell-token that survives
+// word-splitting regardless of the bytes in s.
+func shellQuoteSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

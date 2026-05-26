@@ -289,8 +289,8 @@ func TestSessionRestorer_HydrateCommandContainsAbsoluteScrollbackPath(t *testing
 
 	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
 	wantAbs := filepath.Join(dir, "scrollback/work__0.0.bin")
-	if !strings.Contains(hydrate, "--file "+wantAbs) {
-		t.Errorf("hydrate cmd %q does not contain --file %s", hydrate, wantAbs)
+	if !strings.Contains(hydrate, "--file '"+wantAbs+"'") {
+		t.Errorf("hydrate cmd %q does not contain --file '%s'", hydrate, wantAbs)
 	}
 }
 
@@ -313,8 +313,8 @@ func TestSessionRestorer_HydrateCommandContainsRawHookKey(t *testing.T) {
 
 	hydrate := respawnPaneHydrateCommand(t, mock.Calls)
 	wantHookKey := "work:3.7"
-	if !strings.Contains(hydrate, "--hook-key "+wantHookKey) {
-		t.Errorf("hydrate cmd %q does not contain --hook-key %s", hydrate, wantHookKey)
+	if !strings.Contains(hydrate, "--hook-key '"+wantHookKey+"'") {
+		t.Errorf("hydrate cmd %q does not contain --hook-key '%s'", hydrate, wantHookKey)
 	}
 }
 
@@ -396,17 +396,17 @@ func TestSessionRestorer_FIFOUsesLivePaneKeyFromListPanesReQuery(t *testing.T) {
 		t.Errorf("respawn-pane target = %q, want %q (live coords)", args[3], wantTarget)
 	}
 	hydrate := args[4]
-	if !strings.Contains(hydrate, "--fifo "+liveFIFO) {
+	if !strings.Contains(hydrate, "--fifo '"+liveFIFO+"'") {
 		t.Errorf("hydrate cmd %q does not reference live FIFO %s", hydrate, liveFIFO)
 	}
 	// hook-key must remain saved (raw) form regardless of live drift.
-	if !strings.Contains(hydrate, "--hook-key work:0.0") {
-		t.Errorf("hydrate cmd %q does not contain raw saved hook-key work:0.0", hydrate)
+	if !strings.Contains(hydrate, "--hook-key 'work:0.0'") {
+		t.Errorf("hydrate cmd %q does not contain raw saved hook-key 'work:0.0'", hydrate)
 	}
 	// Scrollback --file uses the SAVED path (sessions.json was written under
 	// saved indices) — verify it's the saved path, not the live one.
 	wantFile := filepath.Join(dir, "scrollback/work__0.0.bin")
-	if !strings.Contains(hydrate, "--file "+wantFile) {
+	if !strings.Contains(hydrate, "--file '"+wantFile+"'") {
 		t.Errorf("hydrate cmd %q does not reference saved scrollback %s", hydrate, wantFile)
 	}
 
@@ -582,7 +582,7 @@ func TestSessionRestorer_HydrateCommandFormat(t *testing.T) {
 	wantFIFO := state.FIFOPath(dir, liveKey)
 	wantFile := filepath.Join(dir, "scrollback/work__0.0.bin")
 	wantCmd := fmt.Sprintf(
-		"portal state hydrate --fifo %s --file %s --hook-key %s",
+		"portal state hydrate --fifo '%s' --file '%s' --hook-key '%s'",
 		wantFIFO, wantFile, "work:0.0",
 	)
 	if hydrate != wantCmd {
