@@ -139,13 +139,11 @@ var daemonLockFile *os.File
 // upstream-defect flag (max×2 > 5)                     → false
 //
 // Measured 2026-05-23, binary version "dev" (from `go build .`).
-// Memo path (relative to repo root):
-//
-//	.workflows/slow-open-empty-previews-and-zombie-sessions/specification/slow-open-empty-previews-and-zombie-sessions/component-d-hysteresis-measurement.md
 //
 // Harness: cmd/state_daemon_hysteresis_measurement_test.go (build tag
 // `integration`, re-runnable to verify the safety-factor invariant;
-// assertion fires loudly on regression).
+// assertion fires loudly on regression). The harness file header
+// documents the scenario-2 `refresh-client` substitution rationale.
 const selfSupervisionHysteresisTicks = 3
 
 // defaultDaemonRun is the production daemon body: a 1-second ticker that fires

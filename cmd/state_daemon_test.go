@@ -719,8 +719,9 @@ func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
 // § Component D acceptance criteria: "A unit test asserts
 // selfSupervisionHysteresisTicks >= 1 to prevent accidental zeroing".
 // The full clamp envelope (3 ≤ N ≤ 9) is the explicit lower-floor /
-// upper-ceiling from the task body, which the measurement memo
-// records and the integration harness re-verifies whenever it runs.
+// upper-ceiling from the task body; the in-source comment above the
+// constant records the per-scenario measurements, and the integration
+// harness re-verifies the safety-factor invariant whenever it runs.
 //
 // This test is the cheap default-lane guard against the
 // constant being accidentally edited out of the safe envelope (e.g.

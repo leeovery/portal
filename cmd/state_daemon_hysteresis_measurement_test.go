@@ -20,9 +20,9 @@
 //  4. BootstrapPortalSaver unhealthy-saver recreate   → bounded by respawn settle
 //
 // N is then chosen as clamp(ceil(max_observed × 2), 3, 9). If
-// max_observed × 2 exceeds 5 the memo (and this file's flag log line)
-// declares "evidence of upstream defect" per spec § Risk Summary;
-// N is still clamped to the [3, 9] window.
+// max_observed × 2 exceeds 5 this file's flag log line declares
+// "evidence of upstream defect" per spec § Risk Summary; N is still
+// clamped to the [3, 9] window.
 //
 // The actual saverMembershipProbe seam ships in Task 5-2. For this
 // measurement harness we implement the probe inline with the exact
@@ -75,7 +75,7 @@ import (
 const hysteresisTickerPeriod = 1 * time.Second
 
 // hysteresisRunsPerScenario is the number of independent runs per
-// scenario whose min/median/max are recorded in the memo. ≥5 per spec.
+// scenario logged at INFO level by this harness. ≥5 per spec.
 const hysteresisRunsPerScenario = 5
 
 // hysteresisSteadyStateDuration is the observation window for the
@@ -115,8 +115,7 @@ type scenarioResult struct {
 }
 
 // summarise computes min / max / median over runs and stores them on
-// the receiver. Median is the lower-middle for even-length runs (the
-// memo records the algorithm so future readers don't second-guess).
+// the receiver. Median is the lower-middle for even-length runs.
 func (s *scenarioResult) summarise() {
 	if len(s.runs) == 0 {
 		return
@@ -218,13 +217,18 @@ func measureSteadyState(t *testing.T, binary string) int {
 
 // measureAttachDetach uses tmux switch-client / refresh-client from a
 // parallel goroutine as the closest available approximation of a real
-// attach/detach cycle without an interactive terminal. The harness
-// documents this substitution in the memo. Approximation rationale:
-// neither switch-client nor refresh-client changes the saver pane's
-// pid, so the membership probe should still be true — the test
-// expects ≈0 consecutive failures and any non-zero result is a
-// genuine measurement of transient tmux-command flakiness during the
-// cycle.
+// attach/detach cycle without an interactive terminal.
+//
+// Substitution rationale: the spec describes `tmux attach -d` from a
+// parallel goroutine OR `switch-client`/`refresh-client`. Without an
+// interactive PTY in `go test`, `tmux attach` exits immediately and
+// would not exercise the attach/detach lifecycle meaningfully. We
+// substitute `refresh-client` — the closest available approximation
+// that touches client state without requiring a PTY. Neither
+// switch-client nor refresh-client changes the saver pane's pid, so
+// the membership probe should still be true — the test expects ≈0
+// consecutive failures and any non-zero result is a genuine
+// measurement of transient tmux-command flakiness during the cycle.
 func measureAttachDetach(t *testing.T, binary string) int {
 	t.Helper()
 	h := newHarness(t, binary)

@@ -867,8 +867,10 @@ func TestSelfEject_NoScrollbackDeltaAcrossEject(t *testing.T) {
 // unexported production const) reads cleanly.
 //
 // Duplicating the value here is acceptable because (a) the production
-// const is stable (rationale pinned by the 5-1 measurement memo at
-// .workflows/.../component-d-hysteresis-measurement.md) and (b) any
+// const is stable (rationale pinned by the in-source comment block
+// above selfSupervisionHysteresisTicks in cmd/state_daemon.go and the
+// integration-tagged harness at
+// cmd/state_daemon_hysteresis_measurement_test.go) and (b) any
 // drift between the two does NOT produce a false-positive failure:
 // this test asserts the legitimate-cold-start path NEVER ejects
 // regardless of N, so a larger production N just means more headroom
