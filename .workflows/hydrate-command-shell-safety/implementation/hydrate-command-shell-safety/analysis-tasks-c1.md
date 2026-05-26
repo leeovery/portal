@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: hydrate-command-shell-safety (Cycle 1)
 
 ## Task 1: Extract sanitized-stem assertion helper in panekey_test.go
-status: pending
+status: approved
 severity: low
 sources: duplication
 
