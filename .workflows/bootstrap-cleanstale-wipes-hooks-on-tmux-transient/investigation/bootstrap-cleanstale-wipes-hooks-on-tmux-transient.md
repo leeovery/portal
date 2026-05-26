@@ -265,7 +265,54 @@ The same dual-conflation exists in `cmd/clean.go:75-80` (the `portal clean` call
 
 ## Fix Direction
 
-(pending)
+### Chosen Approach — Pending Discussion
+
+Defense-in-depth across both layers, mirroring the prior-art pattern at bootstrap step 9 (`CleanStaleMarkers`). Three coordinated changes:
+
+1. **Replace `ListAllPanes` calls with `ListAllPanesWithFormat`.** Force callers to acknowledge that the underlying tmux call can fail. The two production sites are `cmd/bootstrap_production.go:77` and `cmd/clean.go:76`. The error-propagating helper already exists; we are simply asking each caller to consume it. Parsing of `session:window.pane` lines is centralised in `cmd/bootstrap/stale_marker_cleanup.go`'s `parseLivePaneSet` — it should be promoted to a shared utility (likely `internal/tmux` or a new helper next to it) so all three call sites use one parser. *Decision still open:* whether `ListAllPanes` should be deleted, deprecated with a `// Deprecated:` doc comment, or repurposed to wrap `ListAllPanesWithFormat` + sanitised parsing. Discussion item.
+
+2. **Add a mass-deletion hazard guard at `cleanStaleAdapter.CleanStale` (and the `portal clean` callsite).** Before passing the live-pane slice to `hooks.Store.CleanStale`, check the combination `len(livePanes) == 0 && len(persistedHooks) > 0`. When that combination holds, emit `Logger.Warn(ComponentBootstrap, ...)` with both counts and skip the destructive call — exact prior-art at `cmd/bootstrap/stale_marker_cleanup.go:126-141`. The wiring at the adapter needs a `Logger` field (currently absent — the adapter is bare); plumbing it through `buildProductionOrchestrator` is a small refactor mirroring how `MarkerCleanupCore` already receives one.
+
+3. **Add adapter-level logging.** `Debug` on entry (live count, persisted count, what would be removed), `Warn` when the hazard guard fires, `Debug` on the normal-path completion (count removed). The absence of these breadcrumbs was a contributing factor; restoring them makes the next analogous defect detectable.
+
+**Deciding factor (tentative):** matching the prior-art exactly is structurally cleaner than any alternative single-layer fix. The two-layer change closes both failure modes — (a) exit ≠ 0 closed by switching to the propagating helper; (b) exit 0 with empty stdout closed by the hazard guard. Either alone leaves one failure mode open.
+
+### Options Explored
+
+- **A — Switch helper only.** Replace `ListAllPanes` → `ListAllPanesWithFormat` in both callers. Closes (a) cleanly. Leaves (b) open — a real exit-0-empty-stdout from tmux during a saver-respawn transient still triggers the wipe. **Rejected as sole fix:** the saver-respawn scenario is exactly the documented high-risk window and ignoring it would ship a bug-still-present fix.
+
+- **B — Hazard guard only.** Add the `len(livePanes)==0 && len(persisted)>0` guard at the adapter, keep `ListAllPanes` as-is. Closes (b) cleanly. Also closes (a) by side-effect (the swallow produces empty slice → guard fires). Simplest single-layer fix. **Considered but not preferred:** the helper's contract remains a footgun for any future consumer; the next person who reaches for `ListAllPanes` inherits the silent-failure mode. Defense-in-depth is cheap here.
+
+- **C — Defense-in-depth (A + B + adapter logging).** Both layers fixed, logging added, parser deduplicated. The chosen approach.
+
+- **D — Cross-check via `ListSessionNames` / `has-session`.** Sanity-gate the wipe by asserting tmux reports at least one live session when the live-pane set is empty. Considered as an additional defensive belt. **Out of scope unless C is judged insufficient:** the hazard guard in C covers the same failure modes more cheaply (no extra tmux RPC, no additional transient surface), and adding D layers a second guard that can itself fail transiently. Worth revisiting only if review surfaces a scenario where the hazard guard's `len(persisted)>0` check is itself ambiguous.
+
+- **E — Adapter-side retry-with-backoff on empty result.** Re-call `list-panes -a` after a short delay; only wipe if the second call also returns empty. **Rejected:** introduces test complexity, conflicts with bootstrap's "best-effort, never block PersistentPreRunE" posture, and the hazard guard already achieves the same end (defer-and-retry-next-bootstrap) without polling.
+
+- **F — Disable step 11 entirely.** Move stale-hook cleanup to an explicit user command. **Rejected:** stale hook entries do accumulate (panes die, sessions get renamed), and a cleanup pass at bootstrap is desirable — just not destructively so under uncertainty. The fix is to make the cleanup safe, not to remove it.
+
+### Discussion
+
+(pending — to be filled by the findings review with the user)
+
+### Testing Recommendations
+
+- **Unit: hazard guard fires on empty live set.** `cleanStaleAdapter.CleanStale` with a stub `LivePaneLister` returning empty slice and a hooks store seeded with N entries → assert no `Save` call on the hooks store and a `Warn` is recorded with both counts. Mirrors `cmd/bootstrap/stale_marker_cleanup_test.go`'s hazard-guard coverage.
+- **Unit: hazard guard does not fire when both sides empty.** Empty live set + empty persisted set → no warn, no save, no error. Confirms the guard is not noisy.
+- **Unit: error from `ListAllPanesWithFormat` propagates as soft warning.** Stub returning non-nil error → adapter returns the error → orchestrator (or test harness) wraps as a soft warning. Counterpart to the existing swallow path.
+- **Unit: legitimate stale removal still works.** Live set `{a,b,c}`, persisted `{a,b,c,d}` → assert `d` removed, `a/b/c` preserved.
+- **Unit: shared parser correctness.** If the parser is promoted to a shared utility, the existing `parseLivePaneSet` coverage in `cmd/bootstrap/stale_marker_cleanup_test.go` should be moved or duplicated for the new location.
+- **Integration: tmux transient simulation.** Spawn a tmux server, populate `hooks.json`, kill `_portal-saver` mid-bootstrap and arrange for `list-panes -a` to return exit ≠ 0 (e.g., via a `Commander` stub at the integration boundary). Assert `hooks.json` is unchanged at the end of the bootstrap.
+- **Integration: `portal clean` analogue.** Same pattern against the `portal clean` callsite — assert it does not wipe entries on transient `ListAllPanes` failure or empty result.
+- **Regression: existing `cmd/bootstrap_production_test.go` and `cmd/clean_test.go` coverage.** Confirm no behavioural change for non-empty live sets.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium. Three changes are individually small; the largest line-count contributor is the parser-deduplication refactor. No tmux-protocol changes, no `hooks.json` schema changes, no concurrency changes.
+- **Regression risk:** Low. The destructive code path is the failure mode; the fix narrows what triggers it without removing legitimate cleanups. Existing tests should pass unchanged for the non-empty live-set path.
+- **Recommended approach:** Regular release. The bug is high-severity (silent data destruction) but the trigger window is intermittent and the recovery path (`portal-resume-backfill.sh --apply`) exists, so a hotfix-cadence release is not required.
+
+---
 
 ---
 
