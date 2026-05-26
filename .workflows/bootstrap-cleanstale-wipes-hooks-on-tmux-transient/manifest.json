@@ -1,0 +1,16 @@
+{
+  "name": "bootstrap-cleanstale-wipes-hooks-on-tmux-transient",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-05-26",
+  "description": "Bootstrap step 11 CleanStale silently wipes all hooks.json entries when tmux list-panes returns transient non-zero exit, interpreting empty pane set as legitimate",
+  "phases": {
+    "investigation": {
+      "items": {
+        "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
+          "status": "in-progress"
+        }
+      }
+    }
+  }
+}

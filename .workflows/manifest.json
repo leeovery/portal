@@ -95,6 +95,9 @@
     },
     "hooks-skip-bootstrap": {
       "work_type": "quick-fix"
+    },
+    "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
