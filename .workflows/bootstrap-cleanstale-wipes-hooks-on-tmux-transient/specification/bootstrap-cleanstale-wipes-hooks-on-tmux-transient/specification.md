@@ -46,6 +46,48 @@ User-facing symptoms collide with the earlier `slow-open-empty-previews-and-zomb
 
 "Silent in logs" is itself a fingerprint for this defect class until the new adapter logging lands.
 
+## Root Cause
+
+**Dual conflation across two layers, neither of which independently makes the bug appear, but jointly produce silent destruction of `hooks.json` whenever `tmux list-panes -a` returns an empty result for any reason during a bootstrap-triggering command.**
+
+### Layer 1 — Helper Swallow (`internal/tmux/tmux.go:687-693`)
+
+`(*tmux.Client).ListAllPanes` swallows every error class — transient transport failures, exit ≠ 0 from a saver-respawn race, server-gone, and legitimate empty — into the same `([]string{}, nil)` signal. The contract is irreversibly ambiguous from this layer up.
+
+```go
+func (c *Client) ListAllPanes() ([]string, error) {
+    output, err := c.cmd.Run("list-panes", "-a", "-F", "...")
+    if err != nil {
+        return []string{}, nil
+    }
+    return parsePaneOutput(output), nil
+}
+```
+
+The peer helper `ListAllPanesWithFormat` (same file, lines 655-665) does the opposite — it propagates errors. The conflation in `ListAllPanes` is a documented, intentional behavioural divergence. The cost of that divergence is exactly this bug.
+
+### Layer 2 — Unguarded Destructive Consumer
+
+Two callsites pass the (possibly empty) live-pane slice straight to `hooks.Store.CleanStale` with no hazard guard against the `empty live set + non-empty store` combination, and no adapter-level logging:
+
+- `cmd/bootstrap_production.go:76-83` — `cleanStaleAdapter.CleanStale` (bootstrap step 11).
+- `cmd/clean.go:75-91` — `portal clean` subcommand's hook-cleanup tail.
+
+The hooks store itself (`internal/hooks/store.go:130-159`) is correctly scoped — it does precisely what its name says ("remove entries for keys not present in `liveKeys`"). The destructive end-state is therefore a caller-side defect, not a store-side defect.
+
+### Why This Happens
+
+The helper's docstring describes the swallow as a convenience for the "no tmux server" case — a real, legitimate situation where `portal clean` should not error out. The convenience was retained when the helper was reused inside bootstrap step 11, where the same swallow becomes a vector for silent destruction because the caller's context guarantees a tmux server *is* running. The error-swallow assumption that was safe outside tmux became unsafe inside tmux without the docstring or implementation being revisited.
+
+### Architectural Inconsistency
+
+Bootstrap step 9 (`CleanStaleMarkers`) implements the same diff-then-delete shape against tmux server-option markers and is **immune** to this defect by construction:
+
+1. Uses `ListAllPanesWithFormat` (the error-propagating helper).
+2. Has an explicit mass-deletion hazard guard (`cmd/bootstrap/stale_marker_cleanup.go:126-141`) that refuses to unset markers when the parsed live set is empty but markers exist.
+
+Step 11 has the same shape of work but neither safeguard. **The architectural inconsistency is the bug.** The fix lifts the step-9 pattern verbatim into the two affected callsites.
+
 ---
 
 ## Working Notes
