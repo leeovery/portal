@@ -1,11 +1,38 @@
 package state_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
 )
+
+// assertSanitizedStem asserts that got has the shape
+// "<wantStem>-<8 lowercase hex chars>__<w>.<p>". Centralises the
+// suffix-strip + prefix-check + 8-char-lowercase-hex invariant for the
+// collision-bearing sub-tests in TestSanitizePaneKey.
+func assertSanitizedStem(t *testing.T, got, wantStem string, w, p int) {
+	t.Helper()
+	suffix := fmt.Sprintf("__%d.%d", w, p)
+	stem := strings.TrimSuffix(got, suffix)
+	prefix := wantStem + "-"
+	if !strings.HasPrefix(stem, prefix) {
+		t.Errorf("expected sanitized stem %q prefix; got %q", prefix, got)
+		return
+	}
+	hashPart := strings.TrimPrefix(stem, prefix)
+	if len(hashPart) != 8 {
+		t.Errorf("expected 8-char collision suffix; got %q (%d chars)", hashPart, len(hashPart))
+		return
+	}
+	for _, r := range hashPart {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			t.Errorf("hash must be lowercase hex; got %q", hashPart)
+			break
+		}
+	}
+}
 
 func TestSanitizePaneKey(t *testing.T) {
 	t.Run("leaves filesystem-safe session names unchanged", func(t *testing.T) {
@@ -61,21 +88,7 @@ func TestSanitizePaneKey(t *testing.T) {
 
 		unsafe := state.SanitizePaneKey("foo/bar", 0, 0)
 		// Stem: "foo_bar-XXXXXXXX" (8 hex chars), then "__0.0".
-		stem := strings.TrimSuffix(unsafe, "__0.0")
-		// stem should be "foo_bar-" + 8 hex chars.
-		if !strings.HasPrefix(stem, "foo_bar-") {
-			t.Fatalf("expected 'foo_bar-' prefix in stem; got %q", stem)
-		}
-		hashPart := strings.TrimPrefix(stem, "foo_bar-")
-		if len(hashPart) != 8 {
-			t.Errorf("expected 8-char hash; got %d chars (%q)", len(hashPart), hashPart)
-		}
-		for _, r := range hashPart {
-			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
-				t.Errorf("hash must be lowercase hex; got %q", hashPart)
-				break
-			}
-		}
+		assertSanitizedStem(t, unsafe, "foo_bar", 0, 0)
 	})
 
 	t.Run("distinguishes two sessions that sanitize to the same stem via the hash", func(t *testing.T) {
@@ -109,14 +122,7 @@ func TestSanitizePaneKey(t *testing.T) {
 
 	t.Run("replaces whitespace bytes under the allowlist", func(t *testing.T) {
 		got := state.SanitizePaneKey("evvi webhooks and watchers", 1, 1)
-		stem := strings.TrimSuffix(got, "__1.1")
-		if !strings.HasPrefix(stem, "evvi_webhooks_and_watchers-") {
-			t.Errorf("expected sanitized stem 'evvi_webhooks_and_watchers-' prefix; got %q", got)
-		}
-		hashPart := strings.TrimPrefix(stem, "evvi_webhooks_and_watchers-")
-		if len(hashPart) != 8 {
-			t.Errorf("expected 8-char collision suffix; got %q (%d chars)", hashPart, len(hashPart))
-		}
+		assertSanitizedStem(t, got, "evvi_webhooks_and_watchers", 1, 1)
 		if strings.ContainsAny(got, " \t\n") {
 			t.Errorf("result must not contain whitespace; got %q", got)
 		}
@@ -139,40 +145,19 @@ func TestSanitizePaneKey(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				got := state.SanitizePaneKey(tc.in, 0, 0)
-				stem := strings.TrimSuffix(got, "__0.0")
-				if !strings.HasPrefix(stem, "a_b-") {
-					t.Errorf("expected sanitized stem 'a_b-' prefix for input %q; got %q", tc.in, got)
-				}
-				hashPart := strings.TrimPrefix(stem, "a_b-")
-				if len(hashPart) != 8 {
-					t.Errorf("expected 8-char collision suffix; got %q (%d chars)", hashPart, len(hashPart))
-				}
+				assertSanitizedStem(t, got, "a_b", 0, 0)
 			})
 		}
 	})
 
 	t.Run("replaces mixed whitespace and shell-meta bytes under the allowlist", func(t *testing.T) {
 		got := state.SanitizePaneKey("foo bar$baz;qux", 0, 0)
-		stem := strings.TrimSuffix(got, "__0.0")
-		if !strings.HasPrefix(stem, "foo_bar_baz_qux-") {
-			t.Errorf("expected sanitized stem 'foo_bar_baz_qux-' prefix; got %q", got)
-		}
-		hashPart := strings.TrimPrefix(stem, "foo_bar_baz_qux-")
-		if len(hashPart) != 8 {
-			t.Errorf("expected 8-char collision suffix; got %q (%d chars)", hashPart, len(hashPart))
-		}
+		assertSanitizedStem(t, got, "foo_bar_baz_qux", 0, 0)
 	})
 
 	t.Run("collapses an all-non-allowlist input to underscores with collision suffix", func(t *testing.T) {
 		// Three spaces: every byte fails the allowlist and becomes '_'.
 		got := state.SanitizePaneKey("   ", 0, 0)
-		stem := strings.TrimSuffix(got, "__0.0")
-		if !strings.HasPrefix(stem, "___-") {
-			t.Errorf("expected sanitized stem '___-' prefix; got %q", got)
-		}
-		hashPart := strings.TrimPrefix(stem, "___-")
-		if len(hashPart) != 8 {
-			t.Errorf("expected 8-char collision suffix; got %q (%d chars)", hashPart, len(hashPart))
-		}
+		assertSanitizedStem(t, got, "___", 0, 0)
 	})
 }
