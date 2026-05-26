@@ -26,7 +26,9 @@
           "task": "~",
           "task_map": {
             "hooks-skip-bootstrap-1-1": "tick-ee3166",
-            "hooks-skip-bootstrap-1-2": "tick-3fcd1f"
+            "hooks-skip-bootstrap-1-2": "tick-3fcd1f",
+            "hooks-skip-bootstrap-2": "tick-1b0799",
+            "hooks-skip-bootstrap-2-1": "tick-9a2a5f"
           },
           "external_id": "tick-26cf7c"
         }
@@ -45,7 +47,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [

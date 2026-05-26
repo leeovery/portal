@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Hooks Skip Bootstrap (Cycle 1)
 
 ## Task 1: Consolidate skipTmuxCheck coverage at canonical allowlist site and extend to full hooks chain
-status: pending
+status: approved
 severity: low
 sources: standards, architecture
 
