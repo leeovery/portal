@@ -67,14 +67,16 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 1,
+          "current_phase": 2,
           "current_task": "~",
           "completed_tasks": [
             "hooks-skip-bootstrap-1-1",
-            "hooks-skip-bootstrap-1-2"
+            "hooks-skip-bootstrap-1-2",
+            "hooks-skip-bootstrap-2-1"
           ],
           "completed_phases": [
-            1
+            1,
+            2
           ]
         }
       }

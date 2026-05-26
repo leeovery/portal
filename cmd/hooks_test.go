@@ -120,36 +120,6 @@ func TestHooksListCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("hooks list skips tmux bootstrap", func(t *testing.T) {
-		dir := t.TempDir()
-		hooksFile := filepath.Join(dir, "hooks.json")
-		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
-
-		// Per .workflows/hooks-skip-bootstrap/specification/hooks-skip-bootstrap/specification.md,
-		// `hooks` is now in the skipTmuxCheck allowlist — `portal hooks
-		// list` is a pure config-file read and must not trigger the 11-step
-		// bootstrap orchestrator. This inverts the prior Phase-4 contract
-		// (which routed hooks through bootstrap to keep CleanStale and
-		// skeleton restoration in scope) because the cascading-bootstrap
-		// burst from Claude Code's SessionStart hook produced 50+ ENOENT
-		// FIFO warnings per resume on real installs.
-		runner := &recordingRunner{}
-		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
-		t.Cleanup(func() { bootstrapDeps = nil })
-
-		buf := new(bytes.Buffer)
-		resetRootCmd()
-		rootCmd.SetOut(buf)
-		rootCmd.SetArgs([]string{"hooks", "list"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if runner.calls != 0 {
-			t.Errorf("orchestrator Run call count = %d, want 0 for portal hooks list (skipTmuxCheck allowlist)", runner.calls)
-		}
-	})
-
 	t.Run("accepts no arguments", func(t *testing.T) {
 		dir := t.TempDir()
 		hooksFile := filepath.Join(dir, "hooks.json")
@@ -378,38 +348,6 @@ func TestHooksSetCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("hooks set skips tmux bootstrap", func(t *testing.T) {
-		dir := t.TempDir()
-		hooksFile := filepath.Join(dir, "hooks.json")
-		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
-		t.Setenv("TMUX_PANE", "%3")
-
-		// Per .workflows/hooks-skip-bootstrap/specification/hooks-skip-bootstrap/specification.md,
-		// `hooks` is now in the skipTmuxCheck allowlist. `portal hooks set`
-		// must resolve the structural pane key via hooksDeps.KeyResolver
-		// and write hooks.json without invoking the 11-step bootstrap
-		// orchestrator — mirroring the assertion pattern used for the
-		// other allowlisted commands (alias/clean/help/init/state/version)
-		// in cmd/root_test.go.
-		runner := &recordingRunner{}
-		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
-		t.Cleanup(func() { bootstrapDeps = nil })
-
-		resolver := &mockKeyResolver{key: "my-session:0.0"}
-		hooksDeps = &HooksDeps{KeyResolver: resolver}
-		t.Cleanup(func() { hooksDeps = nil })
-
-		resetRootCmd()
-		rootCmd.SetOut(new(bytes.Buffer))
-		rootCmd.SetArgs([]string{"hooks", "set", "--on-resume", "claude --resume abc123"})
-		err := rootCmd.Execute()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if runner.calls != 0 {
-			t.Errorf("orchestrator Run call count = %d, want 0 for portal hooks set (skipTmuxCheck allowlist)", runner.calls)
-		}
-	})
 }
 
 func TestHooksRmCommand(t *testing.T) {

@@ -246,19 +246,65 @@ func TestPersistentPreRunE_CallsEnsureServer(t *testing.T) {
 	})
 
 	t.Run("orchestrator Run not called for skipTmuxCheck commands", func(t *testing.T) {
-		runner := &recordingRunner{}
-		bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
-		t.Cleanup(func() { bootstrapDeps = nil })
-
-		resetRootCmd()
-		rootCmd.SetArgs([]string{"version"})
-		err := rootCmd.Execute()
-
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		// Canonical coverage site for the skipTmuxCheck allowlist contract:
+		// every command on the allowlist must execute without invoking the
+		// 11-step bootstrap orchestrator. The hooks rows guard against
+		// regression of the hooks-skip-bootstrap spec
+		// (.workflows/hooks-skip-bootstrap/specification/...) which moved
+		// `hooks` into the allowlist to eliminate the cascading-bootstrap
+		// ENOENT burst from Claude Code's SessionStart hook. The `hooks rm`
+		// row is included for symmetry — without it a refactor that
+		// special-cases `hooks rm --pane-key` through bootstrap would
+		// silently regress the no-bootstrap contract for that path.
+		tests := []struct {
+			name string
+			argv []string
+		}{
+			{name: "version", argv: []string{"version"}},
+			{name: "hooks list", argv: []string{"hooks", "list"}},
+			{name: "hooks set", argv: []string{"hooks", "set", "--on-resume", "true"}},
+			{name: "hooks rm", argv: []string{"hooks", "rm", "--on-resume"}},
 		}
-		if runner.calls != 0 {
-			t.Errorf("orchestrator Run call count for skip command = %d, want 0", runner.calls)
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				runner := &recordingRunner{}
+				bootstrapDeps = &BootstrapDeps{Orchestrator: runner}
+				t.Cleanup(func() { bootstrapDeps = nil })
+
+				// hooks set / hooks rm need a TMUX_PANE, an injected
+				// KeyResolver, and an isolated hooks file so the command
+				// runs to completion without reaching real tmux or the
+				// developer's config dir.
+				if tt.argv[0] == "hooks" && (tt.argv[1] == "set" || tt.argv[1] == "rm") {
+					dir := t.TempDir()
+					hooksFile := filepath.Join(dir, "hooks.json")
+					t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+					t.Setenv("TMUX_PANE", "%3")
+
+					resolver := &mockKeyResolver{key: "my-session:0.0"}
+					hooksDeps = &HooksDeps{KeyResolver: resolver}
+					t.Cleanup(func() { hooksDeps = nil })
+
+					// Seed an entry for `hooks rm` to remove; harmless for `hooks set`.
+					writeHooksJSON(t, hooksFile, map[string]map[string]string{
+						"my-session:0.0": {"on-resume": "claude --resume abc123"},
+					})
+				}
+
+				resetRootCmd()
+				rootCmd.SetOut(new(bytes.Buffer))
+				rootCmd.SetErr(new(bytes.Buffer))
+				rootCmd.SetArgs(tt.argv)
+				err := rootCmd.Execute()
+
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if runner.calls != 0 {
+					t.Errorf("orchestrator Run call count for %v = %d, want 0", tt.argv, runner.calls)
+				}
+			})
 		}
 	})
 
