@@ -141,9 +141,19 @@ var hooksRmCmd = &cobra.Command{
 	Short: "Remove a resume hook for the current pane",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		structuralKey, err := resolveCurrentPaneKey()
+		paneKey, err := cmd.Flags().GetString("pane-key")
 		if err != nil {
 			return err
+		}
+
+		var structuralKey string
+		if paneKey != "" {
+			structuralKey = paneKey
+		} else {
+			structuralKey, err = resolveCurrentPaneKey()
+			if err != nil {
+				return err
+			}
 		}
 
 		store, err := loadHookStore()
@@ -161,6 +171,7 @@ func init() {
 
 	hooksRmCmd.Flags().Bool("on-resume", false, "Remove the on-resume hook")
 	_ = hooksRmCmd.MarkFlagRequired("on-resume")
+	hooksRmCmd.Flags().String("pane-key", "", "Structural key of the pane whose hook should be removed (defaults to the current pane)")
 
 	hooksCmd.AddCommand(hooksListCmd)
 	hooksCmd.AddCommand(hooksSetCmd)

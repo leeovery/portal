@@ -613,4 +613,68 @@ func TestHooksRmCommand(t *testing.T) {
 			t.Error("hook should not have been removed on resolver failure")
 		}
 	})
+
+	t.Run("--pane-key flag removes specified key without requiring TMUX_PANE", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "")
+
+		// Seed two entries; only the one passed via --pane-key should be removed.
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"sess:0.1":       {"on-resume": "claude --resume xyz"},
+			"other-proj:0.0": {"on-resume": "npm start"},
+		})
+
+		// Resolver should NOT be consulted on the flag-set branch. Use one that
+		// would fail loudly if called, so an accidental fallback is caught.
+		resolver := &mockKeyResolver{err: fmt.Errorf("resolver must not be called when --pane-key is set")}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetErr(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--pane-key", "sess:0.1", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["sess:0.1"]; ok {
+			t.Error("expected sess:0.1 entry to be removed via --pane-key")
+		}
+		if data["other-proj:0.0"]["on-resume"] != "npm start" {
+			t.Errorf("other-proj:0.0 on-resume = %q, want %q", data["other-proj:0.0"]["on-resume"], "npm start")
+		}
+	})
+
+	t.Run("--pane-key unset falls back to resolveCurrentPaneKey", func(t *testing.T) {
+		dir := t.TempDir()
+		hooksFile := filepath.Join(dir, "hooks.json")
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+		t.Setenv("TMUX_PANE", "%7")
+
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"resolved-session:0.0": {"on-resume": "some-cmd"},
+		})
+
+		resolver := &mockKeyResolver{key: "resolved-session:0.0"}
+		hooksDeps = &HooksDeps{KeyResolver: resolver}
+		t.Cleanup(func() { hooksDeps = nil })
+
+		resetRootCmd()
+		rootCmd.SetOut(new(bytes.Buffer))
+		rootCmd.SetArgs([]string{"hooks", "rm", "--on-resume"})
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data := readHooksJSON(t, hooksFile)
+		if _, ok := data["resolved-session:0.0"]; ok {
+			t.Error("expected resolved-session:0.0 entry to be removed via fallback")
+		}
+	})
 }
