@@ -175,12 +175,13 @@ xctl alias list                      # list all aliases
 
 ### `xctl hooks`
 
-Register per-pane commands that re-execute automatically when a session is attached after a reboot. Must be run from inside a tmux pane.
+Register per-pane commands that re-execute automatically when a session is attached after a reboot. `hooks set` must be run from inside a tmux pane; `hooks rm` defaults to the current pane but accepts `--pane-key` to remove a hook for any pane (including ones that no longer exist).
 
 ```bash
-xctl hooks set --on-resume "npm start"    # register a resume hook
-xctl hooks rm --on-resume                 # remove the hook
-xctl hooks list                           # list all hooks
+xctl hooks set --on-resume "npm start"            # register a resume hook
+xctl hooks rm --on-resume                         # remove the current pane's hook
+xctl hooks rm --on-resume --pane-key 'sess:0.1'   # remove a specific entry (works outside tmux)
+xctl hooks list                                   # list all hooks
 ```
 
 **When hooks fire:** Portal fires resume hooks ONLY when a pane is freshly recreated
