@@ -37,12 +37,18 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 2,
-          "task": "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-1",
+          "phase": 3,
+          "task": "~",
           "task_map": {
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1": "tick-824435",
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1": "tick-d8948e",
-            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-2": "tick-679caf"
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-2": "tick-679caf",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2": "tick-824435",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-1": "tick-cf564d",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-2": "tick-ceb63d",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-3": "tick-36cdf8",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-4": "tick-bb61c8",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-5": "tick-a2b689"
           },
           "external_id": "tick-00f5e0"
         }
