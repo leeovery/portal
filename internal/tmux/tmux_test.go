@@ -1472,6 +1472,13 @@ func TestListAllPanes(t *testing.T) {
 		}
 	})
 
+	// Legitimate-empty contract: exit 0 + empty stdout ⇒ ([]string{}, nil).
+	// This is the distinguishability boundary between failure mode (a)
+	// "tmux failed" (non-nil err) and failure mode (b) "no panes exist"
+	// (nil err, empty slice). Phase 2's hazard guard in cleanStaleAdapter /
+	// `portal clean` relies on this shape to detect mode (b) and refuse to
+	// wipe markers when the live pane set is authoritatively empty.
+	// Do not delete this subtest or the whitespace-only sibling below.
 	t.Run("returns empty slice when output is empty", func(t *testing.T) {
 		mock := &MockCommander{Output: ""}
 		client := tmux.NewClient(mock)
@@ -1481,8 +1488,28 @@ func TestListAllPanes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+		if got == nil {
+			t.Fatalf("expected non-nil empty slice, got nil")
+		}
 		if len(got) != 0 {
 			t.Fatalf("got %d panes, want 0", len(got))
+		}
+	})
+
+	t.Run("returns empty slice when output is whitespace-only", func(t *testing.T) {
+		mock := &MockCommander{Output: "  \n\n\t\n "}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ListAllPanes()
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil {
+			t.Fatalf("expected non-nil empty slice, got nil")
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %d panes, want 0; slice = %#v", len(got), got)
 		}
 	})
 

@@ -84,10 +84,14 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 1,
-          "current_task": "tick-679caf",
+          "current_phase": 2,
+          "current_task": "tick-cf564d",
           "completed_tasks": [
-            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1"
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-2"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }
