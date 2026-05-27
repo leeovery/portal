@@ -72,18 +72,18 @@ func (a *saverAdapter) EnsureSaver() error {
 type cleanStaleAdapter struct {
 	lister AllPaneLister
 	store  *hooks.Store
-	Logger bootstrap.Logger
+	logger bootstrap.Logger
 }
 
-// CleanStale delegates to runHookStaleCleanup with the bootstrap-step-11
-// policy (returnError — the orchestrator Warn-and-swallows at its own
-// level so errors surface through the StaleCleaner interface) and no
-// per-removal callback (bootstrap has nothing to print to the user).
+// CleanStale delegates to runHookStaleCleanup with swallowListError=false
+// (the bootstrap step-11 contract — the orchestrator Warn-and-swallows at
+// its own level so errors surface through the StaleCleaner interface) and
+// no per-removal callback (bootstrap has nothing to print to the user).
 // Algorithm, hazard guard, and log format strings all live in the
 // shared helper — see cmd/run_hook_stale_cleanup.go for the full design
 // rationale.
 func (a *cleanStaleAdapter) CleanStale() error {
-	return runHookStaleCleanup(a.lister, a.store, a.Logger, returnError, nil)
+	return runHookStaleCleanup(a.lister, a.store, a.logger, false, nil)
 }
 
 // Compile-time assertion that *tmux.Client satisfies AllPaneLister so
@@ -144,7 +144,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	// downgraded to a no-op rather than aborting bootstrap.
 	var cleaner bootstrap.StaleCleaner
 	if hookStore, err := loadHookStore(); err == nil && hookStore != nil {
-		cleaner = &cleanStaleAdapter{lister: client, store: hookStore, Logger: logger}
+		cleaner = &cleanStaleAdapter{lister: client, store: hookStore, logger: logger}
 	} else {
 		cleaner = bootstrap.NoOpStaleCleaner{}
 	}

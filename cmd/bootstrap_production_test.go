@@ -20,6 +20,7 @@ import (
 
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -128,4 +129,65 @@ func keysOf(m map[string]map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestCleanStaleAdapter_CleanStale pins the composition specifics of
+// cleanStaleAdapter — that its logger field flows through to the shared
+// runHookStaleCleanup helper and that it passes swallowListError=false
+// so a ListAllPanes failure surfaces back to the orchestrator (the
+// bootstrap step-11 contract Warn-and-swallows at the orchestrator level,
+// not inside the adapter). Without a direct unit test the composition is
+// exercised only by the integration suite, leaving the field-name and
+// bool-parameter wiring untested at the package-cmd unit level.
+func TestCleanStaleAdapter_CleanStale(t *testing.T) {
+	t.Run("ListAllPanes error propagates and Warn flows through adapter logger", func(t *testing.T) {
+		store, _ := newTempHooksStore(t, `{"a:0.0": {"on-resume": "cmd-a"}}`)
+		logger := &recordingLogger{}
+		sentinel := errors.New("simulated tmux")
+		lister := &stubAllPaneLister{panes: nil, err: sentinel}
+
+		adapter := &cleanStaleAdapter{
+			lister: lister,
+			store:  store,
+			logger: logger,
+		}
+
+		err := adapter.CleanStale()
+		if err == nil {
+			t.Fatal("CleanStale: want error (proves swallowListError=false was passed), got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("err = %v, want errors.Is == sentinel %v", err, sentinel)
+		}
+
+		const listPanesWarnFmt = "stale-hook cleanup: list-panes failed: %v"
+		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, listPanesWarnFmt); got != 1 {
+			t.Errorf("list-panes Warn count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
+		}
+	})
+
+	t.Run("normal path emits entry-point Debug through adapter logger", func(t *testing.T) {
+		seed := `{
+  "a:0.0": {"on-resume": "cmd-a"},
+  "b:0.0": {"on-resume": "cmd-b"}
+}`
+		store, _ := newTempHooksStore(t, seed)
+		logger := &recordingLogger{}
+		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
+
+		adapter := &cleanStaleAdapter{
+			lister: lister,
+			store:  store,
+			logger: logger,
+		}
+
+		if err := adapter.CleanStale(); err != nil {
+			t.Fatalf("CleanStale: %v", err)
+		}
+
+		const entryDebugFmt = "stale-hook cleanup: live=%d persisted=%d"
+		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 1 {
+			t.Errorf("entry-point Debug count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
+		}
+	})
 }

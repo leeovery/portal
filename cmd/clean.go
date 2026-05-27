@@ -116,14 +116,14 @@ var cleanCmd = &cobra.Command{
 			return nil
 		}
 
-		// Delegate the six-branch algorithm to the shared helper. Policy
-		// is `swallow` so a transient ListAllPanes failure never fails
-		// the user's command (the Warn lands in portal.log for audit).
+		// Delegate the six-branch algorithm to the shared helper.
+		// swallowListError=true so a transient ListAllPanes failure never
+		// fails the user's command (the Warn lands in portal.log for audit).
 		// onRemoved prints "Removed stale hook: <key>" per removed entry,
 		// preserving the pre-extraction user-facing stdout byte-for-byte.
 		//
-		// Return value is deliberately discarded: the helper's `swallow`
-		// policy already returns nil for ListAllPanes errors. The
+		// Return value is deliberately discarded: with swallowListError=true
+		// the helper already returns nil for ListAllPanes errors. The
 		// remaining return paths are (a) nil on the happy path and (b) a
 		// hookStore.Load / CleanStale error on the destructive branches.
 		// Per spec §Logger plumbing / portal clean: "the subcommand's
@@ -137,7 +137,7 @@ var cleanCmd = &cobra.Command{
 			buildCleanPaneLister(),
 			hookStore,
 			logger,
-			swallow,
+			true,
 			func(paneID string) {
 				_, _ = fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)
 			},

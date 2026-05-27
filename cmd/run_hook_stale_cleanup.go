@@ -12,14 +12,14 @@ package cmd
 //
 // Policy axes:
 //
-//   - listErrorPolicy {returnError, swallow}: how to surface a non-nil
-//     err from ListAllPanes. The bootstrap adapter uses returnError
-//     (the orchestrator Warn-and-swallows at step 11, so the helper
-//     escalates the err up through the StaleCleaner interface). The
-//     portal-clean RunE uses swallow because the user-boundary contract
-//     pre-fix already silenced this branch — the Warn breadcrumb lands
-//     in portal.log for post-hoc audit while the command continues to
-//     return nil. Both policies still emit the propagated-error Warn.
+//   - swallowListError (bool): how to surface a non-nil err from
+//     ListAllPanes. The bootstrap adapter passes false (the orchestrator
+//     Warn-and-swallows at step 11, so the helper escalates the err up
+//     through the StaleCleaner interface). The portal-clean RunE passes
+//     true because the user-boundary contract pre-fix already silenced
+//     this branch — the Warn breadcrumb lands in portal.log for post-hoc
+//     audit while the command continues to return nil. Both values still
+//     emit the propagated-error Warn.
 //
 //   - onRemoved (nil-tolerant): per-removal callback invoked after a
 //     successful store.CleanStale. The bootstrap adapter passes nil
@@ -28,9 +28,9 @@ package cmd
 //     output preserves the pre-extraction contract byte-for-byte.
 //
 // Algorithm (mirrors the pre-extraction six-branch shape verbatim):
-//   1. ListAllPanes. On error apply policy: returnError → emit Warn,
-//      return err. swallow → emit Warn, return nil. The entry-point
-//      Debug is NOT emitted on this branch (terminal-Warn-only branch).
+//   1. ListAllPanes. On error emit Warn, then return err (swallowListError
+//      false) or nil (swallowListError true). The entry-point Debug is NOT
+//      emitted on this branch (terminal-Warn-only branch).
 //   2. store.Load. On error emit Warn, return err. The destructive
 //      CleanStale call is NOT made on this branch.
 //   3. Entry-point Debug breadcrumb with live + persisted counts.
@@ -58,27 +58,14 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// listErrorPolicy selects how runHookStaleCleanup surfaces a non-nil
-// err from ListAllPanes. Both values still emit the propagated-error
-// Warn breadcrumb under ComponentBootstrap — they differ only in the
-// helper's return value.
-type listErrorPolicy int
-
-const (
-	// returnError makes the helper return the ListAllPanes error to the
-	// caller. Used by the bootstrap step-11 adapter so the orchestrator
-	// observes the failure (and Warn-and-swallows at its own level).
-	returnError listErrorPolicy = iota
-	// swallow makes the helper log the Warn and return nil. Used by
-	// portal clean's RunE so a transient tmux failure never fails the
-	// user's command.
-	swallow
-)
-
 // runHookStaleCleanup is the shared implementation of bootstrap step 11
 // (cleanStaleAdapter.CleanStale) and the portal-clean hook-cleanup tail
 // (cleanCmd.RunE). See the package-doc-style block above for the full
 // algorithm description, policy axes, and design rationale.
+//
+// swallowListError selects how a non-nil err from ListAllPanes surfaces:
+// false → return err to the caller (bootstrap step-11 contract); true →
+// return nil after logging the Warn (portal-clean user-boundary contract).
 //
 // A nil logger is tolerated — substituted with bootstrap.NoopLogger so
 // the call sites in this function can invoke logger.Warn / logger.Debug
@@ -91,7 +78,7 @@ func runHookStaleCleanup(
 	lister AllPaneLister,
 	store *hooks.Store,
 	logger bootstrap.Logger,
-	policy listErrorPolicy,
+	swallowListError bool,
 	onRemoved func(string),
 ) error {
 	if logger == nil {
@@ -101,7 +88,7 @@ func runHookStaleCleanup(
 	livePanes, err := lister.ListAllPanes()
 	if err != nil {
 		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: list-panes failed: %v", err)
-		if policy == swallow {
+		if swallowListError {
 			return nil
 		}
 		return err
