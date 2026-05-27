@@ -45,6 +45,29 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
+// cleanStaleNoopLogger is the local no-op stand-in substituted inside
+// (*cleanStaleAdapter).CleanStale when the Logger field is nil. Mirrors
+// the noopLogger pattern in cmd/bootstrap so the adapter can invoke
+// Logger.Warn / Logger.Debug unconditionally — matching the nil-tolerance
+// contract that MarkerCleanupCore.CleanStaleMarkers uses at
+// cmd/bootstrap/stale_marker_cleanup.go:109-112.
+type cleanStaleNoopLogger struct{}
+
+// Debug is a no-op.
+func (cleanStaleNoopLogger) Debug(component, format string, args ...any) {}
+
+// Info is a no-op.
+func (cleanStaleNoopLogger) Info(component, format string, args ...any) {}
+
+// Warn is a no-op.
+func (cleanStaleNoopLogger) Warn(component, format string, args ...any) {}
+
+// Error is a no-op.
+func (cleanStaleNoopLogger) Error(component, format string, args ...any) {}
+
+// Compile-time assertion that cleanStaleNoopLogger satisfies bootstrap.Logger.
+var _ bootstrap.Logger = cleanStaleNoopLogger{}
+
 // saverAdapter wraps tmux.EnsurePortalSaverVersion to satisfy
 // bootstrap.SaverBootstrapper. Carries the binary's ldflags-injected
 // version so the version-marker upgrade protocol kicks in on release-
@@ -66,6 +89,7 @@ func (a *saverAdapter) EnsureSaver() error {
 type cleanStaleAdapter struct {
 	client *tmux.Client
 	store  *hooks.Store
+	Logger bootstrap.Logger
 }
 
 // CleanStale fetches the live pane keys from tmux and asks the hooks
@@ -74,6 +98,18 @@ type cleanStaleAdapter struct {
 // during bootstrap never aborts the user's command — matches the
 // safety-net semantic in `portal clean`.
 func (a *cleanStaleAdapter) CleanStale() error {
+	// Substitute a no-op Logger when none was injected so call sites can
+	// invoke logger.Warn / logger.Debug unconditionally, matching the
+	// nil-tolerance contract used by MarkerCleanupCore.CleanStaleMarkers
+	// at cmd/bootstrap/stale_marker_cleanup.go:109-112. Use a local var
+	// rather than mutating a.Logger so the receiver's state is not
+	// silently rewritten across calls.
+	logger := a.Logger
+	if logger == nil {
+		logger = cleanStaleNoopLogger{}
+	}
+	_ = logger
+
 	livePanes, err := a.client.ListAllPanes()
 	if err != nil {
 		return nil
@@ -112,7 +148,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	// downgraded to a no-op rather than aborting bootstrap.
 	var cleaner bootstrap.StaleCleaner
 	if hookStore, err := loadHookStore(); err == nil && hookStore != nil {
-		cleaner = &cleanStaleAdapter{client: client, store: hookStore}
+		cleaner = &cleanStaleAdapter{client: client, store: hookStore, Logger: logger}
 	} else {
 		cleaner = bootstrap.NoOpStaleCleaner{}
 	}
