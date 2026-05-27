@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 1
 phase: Gap Analysis
@@ -14,18 +14,10 @@ topic: bootstrap-cleanstale-wipes-hooks-on-tmux-transient
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 2 — Promote `parseLivePaneSet` to a Shared Utility
+**Affects**: Fix Specification → Change 2
 
-**Details**:
-Change 2 specifies the parser must be promoted to a shared location but qualifies the destination as "likely `internal/tmux` or a new helper next to it." A planning agent breaking this into tasks needs a concrete target package/file to write the move task. The choice has downstream consequences for the test-coverage move in Change 2 ("Promoted Parser Coverage") and for the import paths in three consumers (`ListAllPanes`, `CleanStaleMarkers`, both `CleanStale` callsites). Leaving the location open forces the implementer to make a design decision.
-
-Sub-question that needs resolving: does the promoted parser live in `internal/tmux` (alongside the helper that now consumes it), a new leaf like `internal/tmuxparse` (analogous to `tmuxout`/`tmuxerr`), or stay in `cmd/bootstrap` with an exported name? Each has implications for import graph and test placement.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Adjusted
+**Notes**: Code grounding revealed that hook entries are keyed by *structural keys* (raw `session:window.pane` from `ResolveStructuralKey`), while `parseLivePaneSet` in `cmd/bootstrap` produces *canonical paneKeys* via `state.SanitizePaneKey` for markers. The two parsing concerns are distinct — no parser promotion is required for hook cleanup. Change 2 was rewritten to instruct reusing the existing `parsePaneOutput` helper inside the repurposed `ListAllPanes` and leaving `parseLivePaneSet` in place. This corrects an inaccuracy in the original fix-direction sketch from the investigation.
 
 ---
 
@@ -33,21 +25,10 @@ Sub-question that needs resolving: does the promoted parser live in `internal/tm
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 1 (code sketch)
+**Affects**: Fix Specification → Change 1
 
-**Details**:
-The example body for the repurposed `ListAllPanes` shows `parseLivePaneSet(raw, /* logger */ nil)`. The existing `parseLivePaneSet` in `cmd/bootstrap/stale_marker_cleanup.go` apparently takes a logger to record malformed-line skips. Passing `nil` from `(*tmux.Client).ListAllPanes` raises two questions a planner needs answered:
-
-- Does the promoted parser need to accept a nil-safe logger, or should its signature change to drop the logger?
-- If kept, where does `ListAllPanes` (which lives in `internal/tmux`) source a logger? The tmux client does not currently hold one — adding it is a non-trivial wiring change touching every construction site.
-
-If the answer is "nil-safe and silently skip malformed lines from `ListAllPanes`," that needs to be stated so the planner does not bikeshed the seam.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Adjusted
+**Notes**: Resolved by Finding #1 — the repurposed `ListAllPanes` no longer calls `parseLivePaneSet`. The sketch in Change 1 now uses `parsePaneOutput` (loggerless, same-package helper), eliminating the placeholder.
 
 ---
 
@@ -57,16 +38,8 @@ If the answer is "nil-safe and silently skip malformed lines from `ListAllPanes`
 **Category**: Gap/Ambiguity
 **Affects**: Fix Specification → Change 1 and Change 2
 
-**Details**:
-The Change 1 sketch passes `"#{session_name}:#{window_index}.#{pane_index}"` to `ListAllPanesWithFormat`. The existing `parseLivePaneSet` in `cmd/bootstrap/stale_marker_cleanup.go` is presumed to parse the same format, but the spec never asserts the format matches (or that the existing parser tolerates the chosen format). If the existing parser was written against a different format string (e.g. one that the step-9 caller currently uses), the repurposed `ListAllPanes` will silently produce empty sets.
-
-This is a one-line verification the planner needs done (or asserted in spec) before writing the implementation task.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Format-string alignment" subsection to Change 1 explicitly stating that the chosen format `"#{session_name}:#{window_index}.#{pane_index}"` matches `ResolveStructuralKey`'s output, which is how hook entries are keyed in `hooks.json`. No parser-format mismatch exists.
 
 ---
 
@@ -74,22 +47,10 @@ This is a one-line verification the planner needs done (or asserted in spec) bef
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 3 (Mass-Deletion Hazard Guard)
+**Affects**: Fix Specification → Change 3
 
-**Details**:
-The hazard guard condition is `len(livePanes) == 0 && len(persistedHooks) > 0`. To evaluate `len(persistedHooks)` the caller must read the hooks store *before* calling `hooks.Store.CleanStale`. The spec does not state which API surface on the hooks store the adapter/clean.go uses to obtain the count:
-
-- An existing `Load`/`List`/`Count` method?
-- A new method introduced by this work unit?
-- Inspecting `hooks.json` directly?
-
-This determines whether Change 3 is a pure-callsite change or whether it adds a method to `internal/hooks/store.go`. The prior-art at `stale_marker_cleanup.go:126-141` has a different shape (markers are read via tmux server options), so the lift is not as verbatim as the spec implies — the hooks side needs an explicit count source.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added explicit instruction to Change 3 specifying `hookStore.Load()` (already-public method on `*hooks.Store`) as the count source. No new API is introduced on `internal/hooks/store.go`. Noted that `portal clean` already calls `Load()` at line 65, so the bootstrap adapter alone needs to add the call.
 
 ---
 
@@ -97,18 +58,10 @@ This determines whether Change 3 is a pure-callsite change or whether it adds a 
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 3, Test Requirements → New file
+**Affects**: Fix Specification → Change 3, Test Requirements
 
-**Details**:
-The spec references the adapter at `cmd/bootstrap_production.go:76-83` and its docstring at `:71-75`, but never reproduces the current method signature, the seam interface it implements, or what dependencies it currently receives (e.g. `LivePaneLister`, `HooksStore`). A planning agent will need to either re-derive this from source or be told what the seam looks like to write the "Adapter docstring rewrite" + "Logger plumbing" task accurately.
-
-In particular: does the adapter consume a `LivePaneLister` interface (with a `ListAllPanes() ([]string, error)` method), or does it call `tmux.Client.ListAllPanes` directly? The fix changes the underlying helper to call `ListAllPanesWithFormat`, but if the seam is `LivePaneLister`, the interface signature may need to change too (or stay the same with a new internal implementation). Test stubs in `cmd/bootstrap_production_test.go` depend on this.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Current adapter shape" paragraph to Change 3 describing the existing struct (lines 66-69), the existing method (lines 76-83), and the seam choice (continue consuming `*tmux.Client` directly; tests may introduce a local `AllPaneLister` matching the existing shape in `cmd/clean.go:13-15`).
 
 ---
 
@@ -116,23 +69,10 @@ In particular: does the adapter consume a `LivePaneLister` interface (with a `Li
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 3 (Logger plumbing) and Change 4 (Adapter-Level Logging)
+**Affects**: Fix Specification → Change 3
 
-**Details**:
-Change 3 spells out logger plumbing for `cleanStaleAdapter` (gain a `Logger` field, populate from orchestrator-scope logger at lines 109-110). Change 4 then requires `Debug`/`Warn` emission at **both** `CleanStale` callsites — including `cmd/clean.go:75-91`. But `portal clean` runs outside the bootstrap orchestrator and the spec does not state whether `cmd/clean.go` has access to a logger today or how it should acquire one.
-
-Specifically:
-- Does `cmd/clean.go` already construct/receive a `Logger`, or is one introduced by this work unit?
-- Is the log destination the same `portal.log` used by bootstrap, or does `portal clean` log to stderr/stdout per its CLI ergonomics?
-- If `portal.log` for `portal clean`, does writing to that file require state-dir resolution that may not already happen in `cmd/clean.go`?
-
-Without this resolved, the planner must invent the wiring.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Logger plumbing (`portal clean`)" paragraph specifying `openNoRotateLogger()` as the acquisition mechanism, writes into the same `portal.log` as bootstrap, with the same nil-tolerance contract. User-facing stderr output from `portal clean` is unchanged.
 
 ---
 
@@ -140,23 +80,10 @@ Without this resolved, the planner must invent the wiring.
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 3 ("Adapter docstring rewrite"), Acceptance Criteria #2, Test Requirements → "Error from `ListAllPanesWithFormat` propagates as soft warning"
+**Affects**: Fix Specification → Change 3, Acceptance Criteria, Test Requirements
 
-**Details**:
-The spec states the adapter "surfaces propagated errors as soft warnings" and that "the orchestrator surfaces it as a soft warning." But the mechanical contract by which a non-nil error returned from step 11 becomes a `Warning` in the orchestrator's warnings slice is not described. Two plausible interpretations:
-
-- (i) The orchestrator already converts step-11 errors into warnings under the "never abort `PersistentPreRunE`" rule; the adapter simply returns the error.
-- (ii) The adapter itself must convert the error into a `warning.Warning` value and return it via a separate channel (e.g. via the orchestrator-scope warnings slice).
-
-These have different implementation shapes. The current bootstrap orchestrator step contract for warnings vs errors needs stating, or a pointer to the existing precedent (e.g. how `SaverDownWarning` or step-9 errors surface today) needs to be in-spec so the planner does not have to spelunk.
-
-The test requirement "orchestrator (or test harness) wraps as a soft warning" further hedges this — the planner needs to know which one to test.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Soft-warning surfacing contract" paragraph to Change 3 stating that the orchestrator's step-runner is responsible for converting the non-nil return into a `warning.Warning` (same path as step-9), and that the adapter returns the error directly without wrapping. The `portal clean` callsite handles its own surfacing via `Warn` log + nil return.
 
 ---
 
@@ -166,21 +93,8 @@ The test requirement "orchestrator (or test harness) wraps as a soft warning" fu
 **Category**: Gap/Ambiguity
 **Affects**: Fix Specification → Change 1
 
-**Details**:
-The pre-fix `ListAllPanes` returns `([]string{}, nil)` on error — a non-nil, empty slice. The post-fix sketch returns `nil, err` on error. The spec asserts "every existing call site compiling unchanged" but does not address runtime behaviour for any caller that:
-
-- Iterates the returned slice (safe — `range nil` is a no-op).
-- Checks `len(slice) == 0` to decide a branch (safe — both produce 0).
-- Distinguishes `nil` from non-nil slices (unsafe — semantic shift).
-- Treats `err == nil` as "result is authoritative" (unsafe — previously always true, now sometimes false).
-
-The audit at "Defect Class Scope" bounds production consumers of `ListAllPanes` to two sites, both of which this work unit modifies. But test code and any indirect consumers (e.g. via stub `LivePaneLister`s that return `ListAllPanes` output) may exhibit the contract shift. A planner needs explicit confirmation that no caller depends on the never-error, always-non-nil contract — or that the audit covers tests too.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Return-value contract change" paragraph to Change 1 stating the shift from `([]string{}, nil)` to `(nil, err)` on error, confirming both audited production consumers handle this safely, and instructing test stubs to adopt the new shape.
 
 ---
 
@@ -188,20 +102,10 @@ The audit at "Defect Class Scope" bounds production consumers of `ListAllPanes` 
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Fix Specification → Change 4 (Adapter-Level Logging), Acceptance Criteria #4
+**Affects**: Fix Specification → Change 4, Acceptance Criteria #4
 
-**Details**:
-Change 4 lists four log emissions: Debug on entry, Warn on hazard fire, Debug on normal-path completion, Warn on propagated error. Acceptance Criterion #4 says every invocation emits "Debug on entry" and "either Debug on completion or Warn on hazard-guard skip / propagated error."
-
-Unclear: when the hazard guard fires, is the Debug-on-completion line *also* emitted (with removed=0), or is the Warn the *only* terminal log line for that path? The spec's "either/or" phrasing in AC#4 implies mutual exclusivity, but the Change 4 emission list is additive. A planner will pick one; assertions in `cmd/bootstrap_production_test.go` will codify it.
-
-This is small but matters for the "Hazard guard fires on empty live set" subtest — what exact log records does it assert?
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Rewrote Change 4 to make mutual exclusivity structural — every invocation emits exactly one entry-point Debug line (after enumeration) and exactly one terminal line (Warn-on-error, Warn-on-guard, or Debug-on-completion). Tests assert the Debug-on-completion line is absent on the hazard-guard path. AC #4 updated to match.
 
 ---
 
@@ -209,18 +113,10 @@ This is small but matters for the "Hazard guard fires on empty live set" subtest
 
 **Source**: Specification analysis
 **Category**: Gap/Ambiguity
-**Affects**: Test Requirements → Inverted Subtest
+**Affects**: Test Requirements — Inverted Subtest, Notes
 
-**Details**:
-The subtest-inversion guidance ends with "Same inversion shape used by Phase-4 subtests in the earlier-shipped `hooks-skip-bootstrap` quickfix." No file path or PR/commit reference is given. A planner who has not lived through that quickfix has to grep history to find the shape. Either inline the shape (a 3-line skeleton would suffice) or cite the file/commit.
-
-This is minor — the inversion instruction in the section above is concrete enough that an implementer can proceed without the reference — but the dangling pointer adds friction.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Anchored to commit `7e33c04b` (`impl(hooks-skip-bootstrap): T1-2 — invert hooks list test, add hooks set test`) in both the Test Requirements section and the v0.5.11 Notes bullet, with a one-sentence description of the structural-preserve-flip-assert pattern.
 
 ---
 
@@ -230,16 +126,8 @@ This is minor — the inversion instruction in the section above is concrete eno
 **Category**: Gap/Ambiguity
 **Affects**: Fix Specification → Change 2
 
-**Details**:
-The spec promotes `parseLivePaneSet` to a shared utility without stating its current signature (does it return `map[string]struct{}`? `map[string]bool`? `[]string`?), whether it takes a logger, and whether the signature is preserved verbatim in the move or whether the move is a chance to tighten the contract (e.g. drop the logger parameter, return a set type).
-
-Combined with finding #2 (logger placeholder) and finding #3 (format string alignment), the planner is being asked to do an in-place move while three signature questions remain unanswered. A concrete target signature for the promoted helper would let the move be a single, mechanical task.
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Adjusted
+**Notes**: Resolved by Finding #1 — Change 2 no longer requires `parseLivePaneSet` movement. Its signature is therefore out of scope for this work unit.
 
 ---
 
@@ -249,18 +137,7 @@ Combined with finding #2 (logger placeholder) and finding #3 (format string alig
 **Category**: Gap/Ambiguity
 **Affects**: Acceptance Criteria #4
 
-**Details**:
-AC #4 reads: *"every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits `Debug` on entry (with live and persisted counts)."* But at the entry point, `livePanes` is not yet known — the helper call hasn't happened. Either:
-
-- The Debug-on-entry fires *before* the helper call and only logs `persisted count`, with `live count` logged separately after the helper returns, or
-- The Debug-on-entry fires *after* the helper call (and before the guard / `Save`), at which point both counts are known but it is no longer strictly "on entry."
-
-The Change 4 description ("Debug on entry — live count, persisted count, what would be removed") implies the latter, but calling it "on entry" is misleading. A planner will resolve this one way or the other; the spec should either clarify the position or rename the log point (e.g. "Debug after enumeration").
-
-**Proposed Addition**:
-*(to be filled during discussion)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Renamed the log point from "Debug on entry" to "Debug after enumeration" throughout Change 4 and AC #4, with explicit positioning ("after the `ListAllPanes` + `Load` calls complete successfully and before the hazard-guard check"). Eliminates ambiguity about when `livePanes` is known.
 
 ---
