@@ -1,7 +1,7 @@
 # Analysis Cycle 1 — Proposed Tasks
 
 ## Task 1: Extract shared `runHookStaleCleanup` helper and adopt `AllPaneLister` in `cleanStaleAdapter`
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -35,7 +35,7 @@ sources: duplication, architecture
 ---
 
 ## Task 2: Promote shared transient-list-panes test scaffolding to `internal/transienttest`
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -67,7 +67,7 @@ sources: duplication, architecture
 ---
 
 ## Task 3: Export `bootstrap.NoopLogger` and delete `cleanStaleNoopLogger`
-status: pending
+status: approved
 severity: low
 sources: architecture
 
@@ -95,7 +95,7 @@ sources: architecture
 ---
 
 ## Task 4: Fix stale comparative docstring on `ListAllPanesWithFormat`
-status: pending
+status: approved
 severity: low
 sources: standards
 

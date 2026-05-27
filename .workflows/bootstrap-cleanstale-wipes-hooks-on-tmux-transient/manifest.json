@@ -52,7 +52,12 @@
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-3": "tick-d0c2f7",
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-3-1": "tick-64c451",
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-3-2": "tick-9d6419",
-            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-3-3": "tick-f65977"
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-3-3": "tick-f65977",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4": "tick-39f461",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-1": "tick-9a76c1",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-2": "tick-fe93a2",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-3": "tick-446961",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-4": "tick-4fe690"
           },
           "external_id": "tick-00f5e0"
         }
@@ -64,7 +69,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle": 1,
           "linters": [
