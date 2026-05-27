@@ -167,7 +167,12 @@ The existing `parsePaneOutput` helper inside `internal/tmux/tmux.go` (split + tr
 
 1. Load the persisted hooks via `hookStore.Load()` (already a public method on `*hooks.Store`); this returns the current `hooksFile` map. Use `len(persisted) > 0` as the guard's right-hand condition. No new API on `internal/hooks/store.go` is required. `portal clean` already calls `hookStore.Load()` (line 65) and exits early when empty (line 71-73), so this read is already paid for at that callsite. The bootstrap adapter must add the `Load()` call.
 
-   **`Load()` error handling.** When `hookStore.Load()` returns a non-nil error (disk read failure, JSON parse error on a corrupt `hooks.json`), the adapter treats it the same as a `ListAllPanesWithFormat` error: return the error directly (no `hookStore.CleanStale` call), letting the orchestrator surface it as a soft warning. This avoids the corrupt-file-overwrite hazard — if `Load()` were treated as `len(persisted) == 0`, a normal-path stale removal could proceed against an unparseable file, overwriting it with `{}` and silently destroying recoverable state. The "treat unknown as unknown" principle applies on both sides of the hazard guard. The `portal clean` callsite already errors out on `Load()` failure (line 65-68); preserve that behaviour and emit a `Warn` breadcrumb before the existing error return.
+   **`Load()` error handling.** When `hookStore.Load()` returns a non-nil error (disk read failure, JSON parse error on a corrupt `hooks.json`), the adapter:
+
+   1. Emits a `Warn` breadcrumb: `"stale-hook cleanup: hookStore.Load failed: <error>"`.
+   2. Returns the error directly (no `hookStore.CleanStale` call), letting the orchestrator surface it as a soft warning.
+
+   This treats `Load()` failure the same as a `ListAllPanesWithFormat` error and avoids the corrupt-file-overwrite hazard — if `Load()` were treated as `len(persisted) == 0`, a normal-path stale removal could proceed against an unparseable file, overwriting it with `{}` and silently destroying recoverable state. The "treat unknown as unknown" principle applies on both sides of the hazard guard. The `Warn` breadcrumb preserves the "single auditable destructive-callsite log stream" property (no silent-destructive-context fingerprint reintroduced). The `portal clean` callsite already errors out on `Load()` failure (line 65-68); preserve that behaviour and emit the same-shape `Warn` breadcrumb before the existing error return.
 2. Check the combination `len(livePanes) == 0 && len(persisted) > 0`. When that combination holds:
    - Emit `Logger.Warn(ComponentBootstrap, "stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)", len(persisted))`.
    - Skip the destructive `hookStore.CleanStale(...)` call.
@@ -201,7 +206,8 @@ At both `CleanStale` callsites, every invocation emits **exactly two log lines**
 
 **Terminal line — mutually exclusive, exactly one fires per invocation:**
 
-- **`Warn` on propagated error from `ListAllPanesWithFormat`** — surfaces mode (a) with the wrapped error message. Fires before the entry-point line if enumeration itself fails (so this branch emits only the terminal line, not the entry-point line).
+- **`Warn` on propagated error from `ListAllPanesWithFormat`** — surfaces mode (a) with the wrapped error message. Fires before the entry-point line if `ListAllPanes` itself fails (so this branch emits only the terminal line, not the entry-point line).
+- **`Warn` on `hookStore.Load()` failure** — `"stale-hook cleanup: hookStore.Load failed: <error>"` (corrupt/unreadable `hooks.json`). Fires before the entry-point line if `Load()` itself fails.
 - **`Warn` when the hazard guard fires** — `"stale-hook cleanup: zero live panes parsed with <M> hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)"` (mode (b)).
 - **`Debug` on normal-path completion** — `"stale-hook cleanup: removed=<K>"` after `hookStore.CleanStale` returns successfully.
 
@@ -284,7 +290,7 @@ Specifically:
 1. **Hazard guard:** when `len(livePanes) == 0 && len(persistedHooks) > 0` at either `CleanStale` callsite, no entries are removed from `hooks.json` and a `Warn` is emitted at `ComponentBootstrap` recording both counts.
 2. **Error propagation:** when `ListAllPanesWithFormat` returns a non-nil error, the adapter returns that error; the orchestrator surfaces it as a soft warning. `hooks.json` is untouched.
 3. **Normal-path preservation:** when the live-pane set is non-empty, the pre-fix behaviour is preserved verbatim — stale entries are removed; live entries are kept.
-4. **Log breadcrumbs:** every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits exactly two log lines on the success-of-enumeration paths (one `Debug` after enumeration with both counts, plus one terminal line — `Debug` on completion with removed count, or `Warn` on hazard-guard skip), or exactly one terminal `Warn` on the enumeration-error path (propagated error from `ListAllPanesWithFormat`, no entry-point Debug). The two terminal lines are mutually exclusive per invocation. `portal clean`'s pre-enumeration early-exit on `persisted == 0` emits a single `Debug` breadcrumb so every invocation still produces at least one log line.
+4. **Log breadcrumbs:** every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits exactly two log lines on the success-of-enumeration paths (one `Debug` after enumeration with both counts, plus one terminal line — `Debug` on completion with removed count, or `Warn` on hazard-guard skip), or exactly one terminal `Warn` on either enumeration-error path (propagated error from `ListAllPanesWithFormat`, or non-nil error from `hookStore.Load()` — both fire before the entry-point Debug, so neither branch emits the entry-point line). The terminal lines are mutually exclusive per invocation. `portal clean`'s pre-enumeration early-exit on `persisted == 0` emits a single `Debug` breadcrumb so every invocation still produces at least one log line.
 5. **Bootstrap posture preserved:** no fatal abort from `PersistentPreRunE` is introduced. The orchestrator's "never block the user's command" rule remains in force.
 6. **Coverage:** every entry in the test coverage matrix exists, passes, and inverts (where the existing test asserts the destructive outcome) to assert the new "refuse + warn" outcome.
 

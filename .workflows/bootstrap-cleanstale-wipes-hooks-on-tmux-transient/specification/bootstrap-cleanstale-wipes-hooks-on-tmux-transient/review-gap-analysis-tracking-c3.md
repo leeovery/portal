@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 3
 phase: Gap Analysis
@@ -29,10 +29,7 @@ An implementer is left to guess one of three behaviours for the bootstrap adapte
 
 Given the spec's stated intent of a "single auditable destructive-callsite log stream" and the explicit `portal clean` Warn breadcrumb on `Load()` error, option (2) is the most likely intended behaviour, but the spec does not say so. This is material because Acceptance Criteria #6 requires the test coverage matrix to assert log breadcrumb shapes; absent an explicit rule, the new `cmd/bootstrap_production_test.go` would either skip the `Load()`-error path entirely or codify whichever option the implementer chose.
 
-**Proposed Addition**:
-{leave blank until discussed}
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved (option 2 — symmetric Warn breadcrumb)
+**Notes**: Adopted option (2). Updated Change 3's `Load()` error handling paragraph to enumerate two explicit steps (emit `Warn` then return error). Added a second `Warn`-on-`Load()`-failure entry to Change 4's terminal-line list, with positioning matching the `ListAllPanesWithFormat` error (fires before the entry-point Debug). Updated Acceptance Criteria #4 to cover both enumeration-error paths symmetrically (`ListAllPanesWithFormat` and `hookStore.Load()`).
 
 ---
