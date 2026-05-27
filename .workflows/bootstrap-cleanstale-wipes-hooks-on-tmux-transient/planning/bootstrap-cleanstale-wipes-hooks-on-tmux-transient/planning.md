@@ -19,6 +19,15 @@ approved_at: 2026-05-27
 - [ ] Existing non-empty-live-set tests in `cmd/clean_test.go` pass unchanged
 - [ ] `go test ./...` is green
 
+#### Tasks
+
+status: draft
+
+| Internal ID | Name | Description | Edge Cases | Acceptance |
+|-------------|------|-------------|------------|------------|
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1 | Propagate tmux errors from `ListAllPanes` | Replace the error-swallow body of `(*tmux.Client).ListAllPanes` in `internal/tmux/tmux.go` with a thin delegation to `ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")` that returns `(nil, err)` on helper error and `parsePaneOutput(raw), nil` on success; rewrite the docstring to remove the "no tmux server" convenience framing and describe the new error-propagating contract. | Underlying `Commander` returns exit ≠ 0; wrapped tmux transport error; docstring framing no longer mentions the swallow | Failing unit test asserting `(nil, err)` on `Commander` exit ≠ 0 lands first and passes after the repurpose; `ListAllPanes` body delegates to `ListAllPanesWithFormat`; docstring rewritten; `go test ./...` green |
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-2 | Pin the legitimate-empty contract for `ListAllPanes` | Add a unit test in `internal/tmux/` asserting that when the underlying `Commander` returns exit 0 with empty stdout, `ListAllPanes` returns `([]string{}, nil)` — distinguishing "tmux failed" from "no panes exist" at the helper boundary. | `list-panes -a` exit 0 empty stdout; whitespace-only stdout coerces to empty slice via `parsePaneOutput` | New unit test exists and passes against the Task 1 implementation; covers both the empty-stdout and whitespace-only cases; `go test ./...` green |
+
 ---
 
 ### Phase 2: Hazard Guard and Adapter Logging at Both `CleanStale` Callsites
