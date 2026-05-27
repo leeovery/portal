@@ -100,10 +100,12 @@ total: 3
      prev := commanderFactory
      commanderFactory = func() tmux.Commander { return stub }
      t.Cleanup(func() { commanderFactory = prev })
+
      orch, _ := buildProductionOrchestrator()
-     warnings, err := orch.Run(ctx)
+     ctx := context.Background()
+     _, warnings, err := orch.Run(ctx)
      ```
-     Assert against the returned warnings slice and `err`. Wiring caveat: this task introduces the seam in addition to consuming it — add the new package-level `var commanderFactory` and update the one call site inside `buildProductionOrchestrator` in the same PR so the test compiles. The production surface widens by one unexported variable — acceptable per the `cleanDeps` precedent.
+     Note the three-value destructure — `(*bootstrap.Orchestrator).Run` at `cmd/bootstrap/bootstrap.go:248` returns `(serverStarted bool, warnings []Warning, err error)`. The `serverStarted` bool is `_`-discarded here — it signals whether the tmux server was just started, consumed elsewhere for TUI-vs-bare-CLI warning drain ordering, but carries no assertion value for the hooks-preservation property under test. Assert against the returned `warnings` slice and `err`. Wiring caveat: this task introduces the seam in addition to consuming it — add the new package-level `var commanderFactory` and update the one call site inside `buildProductionOrchestrator` in the same PR so the test compiles. The production surface widens by one unexported variable — acceptable per the `cleanDeps` precedent.
   7. Capture `after := hooksJSONBytes(t)`. Assert `bytes.Equal(before, after)` — byte-identical, no entries removed.
   8. Read `portal.log` via `tailPortalLog(t, stateDir)`. Assert:
      - For mode (a): contains the substring `"stale-hook cleanup:"` + a propagated-error fragment (e.g., `"list-panes"` or `"exit 1"`) on a `WARN` line. Per spec § Change 4: mode (a) emits only the terminal Warn (no entry-point Debug because `ListAllPanes` itself failed).

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 2
 phase: Plan Integrity Review
@@ -67,7 +67,7 @@ The fix is mechanical: update the destructure to three values. While the snippet
      Note the three-value destructure — `(*bootstrap.Orchestrator).Run` at `cmd/bootstrap/bootstrap.go:248` returns `(serverStarted bool, warnings []Warning, err error)`. The `serverStarted` bool is `_`-discarded in this test (it signals whether the tmux server was just started, consumed elsewhere for TUI-vs-bare-CLI warning drain ordering — carries no assertion value for the hooks-preservation property under test here). Assert against the returned `warnings` slice and `err`. Wiring caveat: this task introduces the seam in addition to consuming it — add the new package-level `var commanderFactory` and update the one call site inside `buildProductionOrchestrator` in the same PR so the test compiles. The production surface widens by one unexported variable — acceptable per the `cleanDeps` precedent.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
