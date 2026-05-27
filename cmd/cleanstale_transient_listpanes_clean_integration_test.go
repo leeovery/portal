@@ -88,28 +88,20 @@ func (panickingPaneLister) ListAllPanes() ([]string, error) {
 	panic("ListAllPanes must not be invoked when persisted==0 (early-exit branch)")
 }
 
-// setupCleanTransientEnv builds the per-subtest scaffolding for the
-// portal-clean transient integration tests. Side effects:
-//   - calls portaltest.IsolateStateForTest (scrubs HOME / XDG,
-//     installs the fingerprint-diff backstop);
-//   - sets PORTAL_STATE_DIR on the test process so openNoRotateLogger
-//     and ReadPortalLogSafe resolve the same isolated dir;
-//   - sets PORTAL_LOG_LEVEL=debug so the entry-point / completion
-//     Debug breadcrumbs are emitted;
-//   - re-pushes XDG_CONFIG_HOME onto the test process so the cmd-
-//     package config-path resolution (loadHookStore, loadProjectStore)
-//     observes the isolated config dir (same workaround as the
-//     bootstrap-tail companion file's setupTransientCleanStaleEnv).
-//
-// Returns the env slice (carries the isolated XDG_CONFIG_HOME for any
-// would-be subprocesses) and stateDir (passed to ReadPortalLogSafe).
+// setupCleanTransientEnv is the portal-clean callsite's env-builder.
+// The portal-clean entry point has no callsite-specific extras
+// beyond the four invariant scaffolding steps shared with the
+// bootstrap callsite (no tmux dependency at this layer, no
+// subprocess spawn, no socket), so this helper is a pure
+// delegation to isolateCleanStaleTestEnv. It survives as a thin
+// pass-through so call sites read symmetrically with the
+// bootstrap-callsite setupTransientCleanStaleEnv and so any future
+// callsite-specific extra can be layered here without touching the
+// individual subtests. XDG_CONFIG_HOME re-push rationale is
+// documented at isolateCleanStaleTestEnv.
 func setupCleanTransientEnv(t *testing.T) (env []string, stateDir string) {
 	t.Helper()
-	env, stateDir = portaltest.IsolateStateForTest(t)
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	t.Setenv("PORTAL_LOG_LEVEL", "debug")
-	t.Setenv("XDG_CONFIG_HOME", configDirFromEnvSlice(t, env))
-	return env, stateDir
+	return isolateCleanStaleTestEnv(t)
 }
 
 // installCleanDepsForLister wires the supplied AllPaneLister into the
@@ -161,111 +153,52 @@ func assertNoStaleHookRemovalsOnStdout(t *testing.T, output string, seededKeys .
 // row-for-row at this callsite so a regression at either destructive
 // site fails loudly under tmux transient.
 func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
-	t.Run("mode_a_list_panes_exit_nonzero", func(t *testing.T) {
-		env, stateDir := setupCleanTransientEnv(t)
-
-		seedEntries := map[string]string{
-			"alpha:0.0": "echo a",
-			"beta:0.0":  "echo b",
-			"gamma:0.0": "echo c",
-		}
-		transienttest.SeedHooksJSON(t, env, seedEntries)
-		before := transienttest.HooksJSONBytes(t, env)
-		if len(before) == 0 {
-			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
-		}
-
-		// Wrap a *tmux.Client around a transient-listpanes Commander.
-		// The Inner Commander is irrelevant for mode (a) — every
-		// list-panes -a call is intercepted before reaching Inner — so
-		// a placeholder *tmux.RealCommander is acceptable; the
-		// intercept path never delegates to it.
-		stub := &transienttest.Commander{
-			Inner: &tmux.RealCommander{},
-			Mode:  transienttest.FailExitNonZero,
-		}
-		installCleanDepsForLister(t, tmux.NewClient(stub))
-
-		output, err := runPortalClean(t)
-		if err != nil {
-			t.Fatalf("portal clean returned error under mode (a); want nil (RunE must Warn-and-swallow): %v\n  output:\n%s", err, output)
-		}
-
-		after := transienttest.HooksJSONBytes(t, env)
-		if !bytes.Equal(before, after) {
-			t.Fatalf("hooks.json mutated under mode (a) — the wipe regression has returned at the portal-clean callsite\n"+
-				"  before: %s\n"+
-				"  after:  %s",
-				before, after)
-		}
-
-		assertNoStaleHookRemovalsOnStdout(t, output, "alpha:0.0", "beta:0.0", "gamma:0.0")
-
-		lines := staleHookCleanupLogLines(portaltest.ReadPortalLogSafe(stateDir))
-		if len(lines) == 0 {
-			t.Fatalf("no `stale-hook cleanup:` lines found in portal.log under mode (a); want at least the propagated-error Warn\n"+
-				"  full log:\n%s", portaltest.ReadPortalLogSafe(stateDir))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "list-panes failed", "simulated transient") {
-			t.Fatalf("missing mode (a) propagated-error Warn line; want a `stale-hook cleanup:` line containing `list-panes failed` and `simulated transient`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
-		for _, line := range lines {
-			if strings.Contains(line, "live=") {
-				t.Fatalf("mode (a) emitted entry-point Debug (`live=...`); must be absent — the err-from-ListAllPanes branch returns before the Debug emission\n"+
-					"  offending line: %s", line)
+	// Portal-clean-callsite invoker for the table-driven mode
+	// subtests. The portal-clean entry point intercepts
+	// list-panes -a before any real tmux delegation under both failure
+	// modes, so a placeholder *tmux.RealCommander as Inner is safe —
+	// the intercept path never reaches Inner. runPortalClean captures
+	// combined stdout/stderr, which the shared driver hands to
+	// spec.extraAssert so the callsite can verify no
+	// "Removed stale hook:" line surfaces to the user.
+	cleanInvoker := func(mode transienttest.FailureMode) func(t *testing.T, env []string, stateDir string) (string, error) {
+		return func(t *testing.T, env []string, stateDir string) (string, error) {
+			t.Helper()
+			stub := &transienttest.Commander{
+				Inner: &tmux.RealCommander{},
+				Mode:  mode,
 			}
+			installCleanDepsForLister(t, tmux.NewClient(stub))
+			return runPortalClean(t)
 		}
+	}
+	// Extra assertion shared by mode (a) and mode (b): the user must
+	// not see a "Removed stale hook:" line on stdout under either
+	// failure mode. The shared driver doesn't know about stdout — it
+	// only handles the byte-identity invariant on hooks.json — so the
+	// portal-clean callsite layers this assertion on via
+	// spec.extraAssert.
+	cleanNoStdoutRemovalsAssert := func(t *testing.T, output string, seededKeys []string) {
+		t.Helper()
+		assertNoStaleHookRemovalsOnStdout(t, output, seededKeys...)
+	}
+
+	t.Run("mode_a_list_panes_exit_nonzero", func(t *testing.T) {
+		runTransientCleanStaleModeSubtest(t, transientModeSpec{
+			name:        "portal-clean mode (a)",
+			mode:        transienttest.FailExitNonZero,
+			invoke:      cleanInvoker(transienttest.FailExitNonZero),
+			extraAssert: cleanNoStdoutRemovalsAssert,
+		})
 	})
 
 	t.Run("mode_b_list_panes_empty_stdout", func(t *testing.T) {
-		env, stateDir := setupCleanTransientEnv(t)
-
-		seedEntries := map[string]string{
-			"alpha:0.0": "echo a",
-			"beta:0.0":  "echo b",
-			"gamma:0.0": "echo c",
-		}
-		transienttest.SeedHooksJSON(t, env, seedEntries)
-		before := transienttest.HooksJSONBytes(t, env)
-		if len(before) == 0 {
-			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
-		}
-
-		stub := &transienttest.Commander{
-			Inner: &tmux.RealCommander{},
-			Mode:  transienttest.FailEmptyStdout,
-		}
-		installCleanDepsForLister(t, tmux.NewClient(stub))
-
-		output, err := runPortalClean(t)
-		if err != nil {
-			t.Fatalf("portal clean returned error under mode (b); want nil (hazard guard must Warn-and-swallow): %v\n  output:\n%s", err, output)
-		}
-
-		after := transienttest.HooksJSONBytes(t, env)
-		if !bytes.Equal(before, after) {
-			t.Fatalf("hooks.json mutated under mode (b) — the hazard guard failed and the wipe regression has returned at the portal-clean callsite\n"+
-				"  before: %s\n"+
-				"  after:  %s",
-				before, after)
-		}
-
-		assertNoStaleHookRemovalsOnStdout(t, output, "alpha:0.0", "beta:0.0", "gamma:0.0")
-
-		lines := staleHookCleanupLogLines(portaltest.ReadPortalLogSafe(stateDir))
-		if len(lines) == 0 {
-			t.Fatalf("no `stale-hook cleanup:` lines found in portal.log under mode (b); want the entry-point Debug and the hazard-guard Warn\n"+
-				"  full log:\n%s", portaltest.ReadPortalLogSafe(stateDir))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "live=0", "persisted=3") {
-			t.Fatalf("missing mode (b) entry-point Debug; want a `stale-hook cleanup:` line containing `live=0` and `persisted=3`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "zero live panes", "3 hook(s) present", "mass-deletion hazard") {
-			t.Fatalf("missing mode (b) hazard-guard Warn; want a `stale-hook cleanup:` line containing `zero live panes`, `3 hook(s) present`, and `mass-deletion hazard`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
+		runTransientCleanStaleModeSubtest(t, transientModeSpec{
+			name:        "portal-clean mode (b)",
+			mode:        transienttest.FailEmptyStdout,
+			invoke:      cleanInvoker(transienttest.FailEmptyStdout),
+			extraAssert: cleanNoStdoutRemovalsAssert,
+		})
 	})
 
 	t.Run("normal_path_legitimate_stale_removal_still_works", func(t *testing.T) {

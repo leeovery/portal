@@ -70,7 +70,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -83,40 +82,28 @@ import (
 	"github.com/leeovery/portal/internal/transienttest"
 )
 
-// setupTransientCleanStaleEnv builds the per-subtest scaffolding.
-// Side effects:
-//   - calls portaltest.IsolateStateForTest (scrubs HOME / XDG, installs
-//     fingerprint backstop),
-//   - sets PORTAL_STATE_DIR on the test process so subprocesses
-//     resolve the same isolated dir,
-//   - sets PORTAL_LOG_LEVEL=debug so step 11's Debug breadcrumbs land
-//     in portal.log,
-//   - stages the portal binary on PATH so step 5 (EnsureSaver) can
-//     spawn `portal state daemon` inside the saver pane,
-//   - constructs the isolated tmux socket.
+// setupTransientCleanStaleEnv builds the per-subtest scaffolding for
+// the bootstrap-step-11 transient integration tests. Layers two
+// bootstrap-callsite-specific extras over isolateCleanStaleTestEnv
+// (the four invariant scaffolding steps shared with the portal-clean
+// callsite):
+//
+//   - tmux skip-if-absent guard (step 5 EnsureSaver requires a real
+//     tmux binary on PATH);
+//   - portal-binary staging on PATH so step 5 (EnsureSaver) can spawn
+//     `portal state daemon` inside the saver pane;
+//   - construction of the isolated tmux socket (returned to the
+//     subtest so it can wire it into the Commander seam).
+//
+// XDG_CONFIG_HOME re-push rationale is documented at
+// isolateCleanStaleTestEnv.
 func setupTransientCleanStaleEnv(t *testing.T, sockPrefix string) (env []string, stateDir string, sock *tmuxtest.Socket) {
 	t.Helper()
 
 	tmuxtest.SkipIfNoTmux(t)
-
 	_ = portalbintest.StagePortalBinary(t)
 
-	env, stateDir = portaltest.IsolateStateForTest(t)
-	t.Setenv("PORTAL_STATE_DIR", stateDir)
-	t.Setenv("PORTAL_LOG_LEVEL", "debug")
-
-	// IsolateStateForTest sets XDG_CONFIG_HOME="" on the test process
-	// (load-bearing for its fingerprint backstop), pushing the
-	// isolated XDG_CONFIG_HOME=<configDir> into the env slice for
-	// subprocesses only. The orchestrator under test runs IN the test
-	// process, so cmd-package hook-store path resolution (configFilePath
-	// → xdg.ConfigBase → $XDG_CONFIG_HOME) would otherwise resolve to
-	// the test process's HOME-based fallback and miss the seeded
-	// hooks.json. Override XDG_CONFIG_HOME on the test process too —
-	// IsolateStateForTest's pre-snapshot already ran, so this
-	// post-snapshot Setenv does not perturb the backstop.
-	configDir := configDirFromEnvSlice(t, env)
-	t.Setenv("XDG_CONFIG_HOME", configDir)
+	env, stateDir = isolateCleanStaleTestEnv(t)
 
 	sock = tmuxtest.New(t, sockPrefix)
 
@@ -207,94 +194,49 @@ func runProductionBootstrap(t *testing.T) (bool, []bootstrap.Warning, error) {
 // continues to work — a legitimate stale entry is removed while live
 // entries survive.
 func TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
+	// Bootstrap-callsite invoker for the table-driven mode subtests.
+	// The bootstrap entry point requires one callsite-specific extra
+	// not handled by the shared isolateCleanStaleTestEnv: an isolated
+	// tmux socket wired into the commanderFactory seam. The other two
+	// bootstrap-only steps (tmuxtest.SkipIfNoTmux and
+	// portalbintest.StagePortalBinary) MUST run before the shared
+	// env-builder calls portaltest.IsolateStateForTest — staging
+	// shells out to `go build`, and IsolateStateForTest sets HOME to a
+	// fresh t.TempDir which would otherwise redirect the module cache
+	// under that TempDir and trigger permission-denied cleanup errors
+	// on test exit. They run in the t.Run body before
+	// runTransientCleanStaleModeSubtest is called. The invoker returns
+	// an empty output string since bootstrap doesn't expose a stdout
+	// buffer (warnings drain via the orchestrator's
+	// []bootstrap.Warning return).
+	bootstrapInvoker := func(sockPrefix string, mode transienttest.FailureMode) func(t *testing.T, env []string, stateDir string) (string, error) {
+		return func(t *testing.T, env []string, stateDir string) (string, error) {
+			t.Helper()
+			sock := tmuxtest.New(t, sockPrefix)
+			installTransientCommanderFactory(t, sock.SocketPath(), mode)
+			_, _, err := runProductionBootstrap(t)
+			return "", err
+		}
+	}
+
 	t.Run("mode_a_list_panes_exit_nonzero", func(t *testing.T) {
-		env, stateDir, sock := setupTransientCleanStaleEnv(t, "ptl-cs-a-")
-
-		seedEntries := map[string]string{
-			"alpha:0.0": "echo a",
-			"beta:0.0":  "echo b",
-			"gamma:0.0": "echo c",
-		}
-		transienttest.SeedHooksJSON(t, env, seedEntries)
-		before := transienttest.HooksJSONBytes(t, env)
-		if len(before) == 0 {
-			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
-		}
-
-		installTransientCommanderFactory(t, sock.SocketPath(), transienttest.FailExitNonZero)
-
-		_, _, err := runProductionBootstrap(t)
-		if err != nil {
-			t.Fatalf("bootstrap fatally aborted under mode (a); want nil err (step 11 must Warn-and-swallow): %v", err)
-		}
-
-		after := transienttest.HooksJSONBytes(t, env)
-		if !bytes.Equal(before, after) {
-			t.Fatalf("hooks.json mutated under mode (a) — the wipe regression has returned\n"+
-				"  before: %s\n"+
-				"  after:  %s",
-				before, after)
-		}
-
-		lines := staleHookCleanupLogLines(portaltest.ReadPortalLogSafe(stateDir))
-		if len(lines) == 0 {
-			t.Fatalf("no `stale-hook cleanup:` lines found in portal.log under mode (a); want at least the propagated-error Warn\n"+
-				"  full log:\n%s", portaltest.ReadPortalLogSafe(stateDir))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "list-panes failed", "simulated transient") {
-			t.Fatalf("missing mode (a) propagated-error Warn line; want a `stale-hook cleanup:` line containing `list-panes failed` and `simulated transient`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
-		for _, line := range lines {
-			if strings.Contains(line, "live=") {
-				t.Fatalf("mode (a) emitted entry-point Debug (`live=...`); must be absent — the err-from-ListAllPanes branch returns before the Debug emission\n"+
-					"  offending line: %s", line)
-			}
-		}
+		tmuxtest.SkipIfNoTmux(t)
+		_ = portalbintest.StagePortalBinary(t)
+		runTransientCleanStaleModeSubtest(t, transientModeSpec{
+			name:   "bootstrap mode (a)",
+			mode:   transienttest.FailExitNonZero,
+			invoke: bootstrapInvoker("ptl-cs-a-", transienttest.FailExitNonZero),
+		})
 	})
 
 	t.Run("mode_b_list_panes_empty_stdout", func(t *testing.T) {
-		env, stateDir, sock := setupTransientCleanStaleEnv(t, "ptl-cs-b-")
-
-		seedEntries := map[string]string{
-			"alpha:0.0": "echo a",
-			"beta:0.0":  "echo b",
-			"gamma:0.0": "echo c",
-		}
-		transienttest.SeedHooksJSON(t, env, seedEntries)
-		before := transienttest.HooksJSONBytes(t, env)
-		if len(before) == 0 {
-			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
-		}
-
-		installTransientCommanderFactory(t, sock.SocketPath(), transienttest.FailEmptyStdout)
-
-		_, _, err := runProductionBootstrap(t)
-		if err != nil {
-			t.Fatalf("bootstrap fatally aborted under mode (b); want nil err (step 11 must Warn-and-swallow): %v", err)
-		}
-
-		after := transienttest.HooksJSONBytes(t, env)
-		if !bytes.Equal(before, after) {
-			t.Fatalf("hooks.json mutated under mode (b) — the hazard guard failed and the wipe regression has returned\n"+
-				"  before: %s\n"+
-				"  after:  %s",
-				before, after)
-		}
-
-		lines := staleHookCleanupLogLines(portaltest.ReadPortalLogSafe(stateDir))
-		if len(lines) == 0 {
-			t.Fatalf("no `stale-hook cleanup:` lines found in portal.log under mode (b); want the entry-point Debug and the hazard-guard Warn\n"+
-				"  full log:\n%s", portaltest.ReadPortalLogSafe(stateDir))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "live=0", "persisted=3") {
-			t.Fatalf("missing mode (b) entry-point Debug; want a `stale-hook cleanup:` line containing `live=0` and `persisted=3`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
-		if !containsLineMatching(lines, "stale-hook cleanup:", "zero live panes", "3 hook(s) present", "mass-deletion hazard") {
-			t.Fatalf("missing mode (b) hazard-guard Warn; want a `stale-hook cleanup:` line containing `zero live panes`, `3 hook(s) present`, and `mass-deletion hazard`\n"+
-				"  matched stale-hook lines:\n%s", strings.Join(lines, "\n"))
-		}
+		tmuxtest.SkipIfNoTmux(t)
+		_ = portalbintest.StagePortalBinary(t)
+		runTransientCleanStaleModeSubtest(t, transientModeSpec{
+			name:   "bootstrap mode (b)",
+			mode:   transienttest.FailEmptyStdout,
+			invoke: bootstrapInvoker("ptl-cs-b-", transienttest.FailEmptyStdout),
+		})
 	})
 
 	t.Run("normal_path_legitimate_stale_removal_still_works", func(t *testing.T) {
