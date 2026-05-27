@@ -166,6 +166,60 @@ Bootstrap step 11 remains **best-effort** under the orchestrator's "never abort 
 
 Either change alone leaves one failure mode open. Both are required.
 
+## Test Requirements
+
+### New File — `cmd/bootstrap_production_test.go`
+
+This file does **not** exist today; `cleanStaleAdapter` has zero unit coverage. The fix must create it and populate it with the bootstrap adapter's `CleanStale` path coverage. Inverting the existing `clean_test.go` subtest is necessary but **not sufficient** — the adapter has its own path.
+
+Required subtests:
+
+- **Hazard guard fires on empty live set.** Stub `LivePaneLister` returns empty slice + hooks store seeded with N entries → assert no `Save` call on the hooks store and a `Warn` is recorded with both counts. Mirrors `cmd/bootstrap/stale_marker_cleanup_test.go`'s hazard-guard coverage.
+- **Hazard guard does not fire when both sides empty.** Empty live set + empty persisted set → no warn, no save, no error. Confirms the guard is not noisy.
+- **Error from `ListAllPanesWithFormat` propagates as soft warning.** Stub returning non-nil error → adapter returns the error → orchestrator (or test harness) wraps as a soft warning.
+- **Legitimate stale removal still works.** Live set `{a,b,c}`, persisted `{a,b,c,d}` → assert `d` removed; `a/b/c` preserved.
+
+### Inverted Subtest — `cmd/clean_test.go:327-368`
+
+The existing subtest `"zero live panes prunes every hook entry"` codifies the destructive behaviour as correct, with a comment block stating: *"Phase 4: CleanStale runs unconditionally. With no live panes, every hooks.json entry is genuinely orphaned and must be pruned."* That mental model — empty live set ⇒ genuinely orphaned — **is** the bug expressed as a positive test.
+
+The fix must **invert** this subtest:
+
+1. Preserve the structural coverage that the test provides — "what happens when `ListAllPanes` returns an empty slice."
+2. Flip the asserted outcome: from "every hook entry pruned" to **"no entry removed, hooks file unchanged, output reports the deferral."**
+3. Rewrite the comment block (lines 333-335) so the new mental model — **"empty live set is *ambiguous*, not authoritative"** — is captured in test prose.
+
+Same inversion shape used by Phase-4 subtests in the earlier-shipped `hooks-skip-bootstrap` quickfix.
+
+### Promoted Parser Coverage
+
+If `parseLivePaneSet` is moved out of `cmd/bootstrap/stale_marker_cleanup.go`, the existing coverage in `cmd/bootstrap/stale_marker_cleanup_test.go` must move or be duplicated to live next to the new location.
+
+### Integration — Tmux Transient Simulation
+
+Spawn a real tmux server, populate `hooks.json`, kill `_portal-saver` mid-bootstrap, and arrange for `list-panes -a` to return exit ≠ 0 (e.g., via a `Commander` stub at the integration boundary). Assert `hooks.json` is unchanged at the end of the bootstrap.
+
+### Integration — `portal clean` Analogue
+
+Same pattern against the `portal clean` callsite — assert it does not wipe entries on transient `ListAllPanes` failure or empty result.
+
+### Regression — Non-Empty Live Sets
+
+Confirm no behavioural change in existing `cmd/clean_test.go` non-empty live-set paths.
+
+### Coverage Matrix
+
+| Path | Test |
+|---|---|
+| Bootstrap adapter — hazard guard fires | New `cmd/bootstrap_production_test.go` |
+| Bootstrap adapter — both-empty no-op | New `cmd/bootstrap_production_test.go` |
+| Bootstrap adapter — error propagates | New `cmd/bootstrap_production_test.go` |
+| Bootstrap adapter — legitimate stale removal | New `cmd/bootstrap_production_test.go` |
+| `portal clean` — empty live set refuses wipe | Inverted `cmd/clean_test.go:327-368` |
+| Promoted parser | Moved/duplicated from `stale_marker_cleanup_test.go` |
+| Tmux transient end-to-end | New integration test |
+| `portal clean` transient end-to-end | New integration test |
+
 ---
 
 ## Working Notes
