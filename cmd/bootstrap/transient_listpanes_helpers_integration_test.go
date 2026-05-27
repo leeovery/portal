@@ -1,36 +1,18 @@
 //go:build integration
 
-// Shared scaffolding for Phase 3 integration tests that reproduce a
-// tmux transient where `list-panes -a` either exits non-zero (failure
-// mode (a)) or returns exit 0 with empty stdout (failure mode (b)).
-//
-// This file is the canonical Commander-injection primitive mandated by
-// spec § "Deterministic Repro Mechanism" and consumed by Tasks 3-2
-// (bootstrap end-to-end) and 3-3 (`portal clean` end-to-end). It
-// exposes four helpers with stable signatures:
-//
-//   1. transientListPanesCommander — wraps an inner tmux.Commander and
-//      intercepts only `list-panes -a` calls based on a per-test
-//      policy; everything else delegates verbatim. Default policy is
-//      sticky failure (every intercepted call fails until the test
-//      explicitly flips the mode). A OneShot toggle is exposed so
-//      Tasks 3-2 / 3-3 can isolate which bootstrap step observes the
-//      transient.
-//   2. seedHooksJSON — writes a populated hooks.json into the
-//      isolated config tree resolved from the env slice returned by
-//      portaltest.IsolateStateForTest. Uses the production
-//      internal/hooks package so the on-disk shape stays canonical.
-//   3. hooksJSONBytes — raw os.ReadFile against the same resolved
-//      path, used for the byte-identical before/after assertion that
-//      pins the "no wipe" invariant.
-//   4. tailPortalLog — thin wrapper around portaltest.ReadPortalLogSafe
-//      for substring-match assertions on Warn / Debug breadcrumbs in
-//      the daemon's audit trail.
+// Behavioural verification of the shared transient-list-panes scaffolding
+// promoted to internal/transienttest. The scaffolding itself (Commander,
+// SocketCommander, SeedHooksJSON, HooksJSONBytes,
+// ResolveHooksFilePathFromEnv, FailureMode + variants) lives in the
+// internal/transienttest package; this file exercises each helper
+// through one concrete code path so a future change that breaks the
+// helper contracts surfaces here rather than in the downstream
+// bootstrap-step-11 / portal-clean integration tests.
 //
 // Isolation invariant: every subtest that touches the state dir or
 // spawns a subprocess MUST go through portaltest.IsolateStateForTest
 // and apply the returned env slice to every spawned exec.Cmd. The
-// helpers below resolve the config path from that env slice rather
+// helpers under test resolve the config path from the env slice rather
 // than os.Getenv so they remain robust to future changes in which env
 // vars IsolateStateForTest overrides.
 //
@@ -45,317 +27,47 @@ package bootstrap_test
 import (
 	"bytes"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/portaltest"
-	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
+	"github.com/leeovery/portal/internal/transienttest"
 )
 
-// failureMode selects the per-test policy applied by
-// transientListPanesCommander when it observes a `list-panes -a`
-// invocation. passThrough disables the interception entirely so a
-// single Commander instance can be constructed and rotated between
-// modes during a test without rebuilding the wrapping chain.
-type failureMode int
-
-const (
-	// passThrough disables interception — every call (including
-	// `list-panes -a`) delegates to the inner Commander verbatim.
-	passThrough failureMode = iota
-	// failExitNonZero makes intercepted calls return
-	// ("", error) — modelling tmux exit ≠ 0 on the wire.
-	failExitNonZero
-	// failEmptyStdout makes intercepted calls return ("", nil) —
-	// modelling tmux exit 0 with empty stdout (the mode (b) trigger
-	// for the bootstrap hazard guard).
-	failEmptyStdout
-)
-
-// transientListPanesCommander wraps an inner tmux.Commander and
-// intercepts only invocations matching `list-panes` with the `-a`
-// flag. All other invocations (including `list-panes` without `-a`,
-// `list-windows -a`, capture-pane, etc.) are delegated to the inner
-// Commander verbatim — preserving production fidelity for every
-// non-target tmux call.
-//
-// Policy semantics:
-//   - mode == passThrough: no interception, inner Commander handles
-//     every call.
-//   - mode == failExitNonZero: intercepted calls return
-//     ("", fmt.Errorf("tmux list-panes -a: exit 1 (simulated transient)")).
-//   - mode == failEmptyStdout: intercepted calls return ("", nil).
-//
-// The OneShot toggle is the lever Tasks 3-2 / 3-3 use when they need
-// step 4 (orphan sweep) to succeed before step 11 (CleanStale)
-// observes the transient. When OneShot is true, the FIRST intercepted
-// call applies the policy; every subsequent intercepted call falls
-// through to the inner Commander. When OneShot is false (the
-// default), every intercepted call applies the policy — "sticky
-// failure" matching the prevailing semantics across this file's
-// consumers.
-//
-// Concurrent-safety: the interception counter uses atomic.Int64 so
-// the OneShot toggle is safe under the parallel `tmux ...` calls
-// that bootstrap step 4 (orphan sweep) and step 11 (CleanStale)
-// may issue. The Mode and Inner fields are NOT protected because
-// tests are expected to flip them only between phases, not during
-// concurrent tmux activity.
-type transientListPanesCommander struct {
-	// Inner is the downstream Commander. Defaults at construction
-	// time to &tmux.RealCommander{} in production-fidelity tests;
-	// integration tests targeting an isolated tmux server should
-	// wire a socket-anchored Commander here instead.
-	Inner tmux.Commander
-	// Mode selects the interception policy. Default zero value is
-	// passThrough — explicitly require the test to opt in to a
-	// failure policy.
-	Mode failureMode
-	// OneShot, when true, causes only the first intercepted call to
-	// apply the policy. Subsequent intercepted calls delegate to
-	// Inner verbatim. Default false (sticky failure).
-	OneShot bool
-
-	// intercepted is the atomic counter backing the OneShot toggle.
-	// Zero-value means "no intercepted calls observed yet".
-	intercepted atomic.Int64
-}
-
-// shouldIntercept reports whether the supplied tmux argv targets
-// `list-panes -a`. The check is positional on argv[0] and a substring
-// scan for "-a" in the remaining args — matching the production
-// callsites (tmux.ListAllPanesWithFormat and bootstrap step 4's
-// orphan-sweep pgrep precondition).
-func (c *transientListPanesCommander) shouldIntercept(args []string) bool {
-	if len(args) == 0 || args[0] != "list-panes" {
-		return false
-	}
-	for _, a := range args[1:] {
-		if a == "-a" {
-			return true
-		}
-	}
-	return false
-}
-
-// applyPolicy applies the per-mode policy AFTER the OneShot gate has
-// decided this invocation is the one to act on. Returns the
-// (output, error) pair every Run / RunRaw caller expects.
-func (c *transientListPanesCommander) applyPolicy() (string, error) {
-	switch c.Mode {
-	case failExitNonZero:
-		return "", fmt.Errorf("tmux list-panes -a: exit 1 (simulated transient)")
-	case failEmptyStdout:
-		return "", nil
-	case passThrough:
-		// Should not be reached — passThrough is filtered before
-		// applyPolicy via the caller's policy check. Defensive
-		// fall-through to a clear error so a future regression
-		// surfaces immediately rather than silently degrading.
-		return "", fmt.Errorf("transientListPanesCommander: applyPolicy called with passThrough mode")
-	default:
-		return "", fmt.Errorf("transientListPanesCommander: unknown failure mode %d", c.Mode)
-	}
-}
-
-// intercept centralises the OneShot / Mode dispatch shared by Run
-// and RunRaw. Returns (output, error, true) when the policy applied,
-// or ("", nil, false) when the caller should delegate to Inner.
-func (c *transientListPanesCommander) intercept(args []string) (string, error, bool) {
-	if c.Mode == passThrough {
-		return "", nil, false
-	}
-	if !c.shouldIntercept(args) {
-		return "", nil, false
-	}
-	n := c.intercepted.Add(1)
-	if c.OneShot && n > 1 {
-		return "", nil, false
-	}
-	out, err := c.applyPolicy()
-	return out, err, true
-}
-
-// Run implements tmux.Commander. Intercepts `list-panes -a` per the
-// configured policy and delegates every other call to Inner.
-func (c *transientListPanesCommander) Run(args ...string) (string, error) {
-	if out, err, handled := c.intercept(args); handled {
-		return out, err
-	}
-	return c.Inner.Run(args...)
-}
-
-// RunRaw implements tmux.Commander. Intercepts `list-panes -a` per
-// the configured policy and delegates every other call to Inner —
-// scrollback-capturing paths in bootstrap depend on RunRaw fidelity.
-func (c *transientListPanesCommander) RunRaw(args ...string) (string, error) {
-	if out, err, handled := c.intercept(args); handled {
-		return out, err
-	}
-	return c.Inner.RunRaw(args...)
-}
-
-// resolveHooksFilePathFromEnv mirrors cmd/config.go's configFilePath
-// resolution chain but consumes the env slice returned by
-// portaltest.IsolateStateForTest rather than os.Getenv. The chain:
-//
-//  1. If env contains PORTAL_HOOKS_FILE=<path>, return <path> verbatim.
-//  2. Otherwise scan env for XDG_CONFIG_HOME=<dir> and return
-//     <dir>/portal/hooks.json.
-//  3. Otherwise t.Fatalf — signals isolation regression.
-//
-// Returning early on PORTAL_HOOKS_FILE matches the production
-// behaviour where the env-var override takes precedence over
-// XDG-derived defaults.
-func resolveHooksFilePathFromEnv(t *testing.T, env []string) string {
-	t.Helper()
-	const (
-		hooksFileKey = "PORTAL_HOOKS_FILE="
-		xdgKey       = "XDG_CONFIG_HOME="
-	)
-	var xdg string
-	for _, e := range env {
-		if strings.HasPrefix(e, hooksFileKey) {
-			return strings.TrimPrefix(e, hooksFileKey)
-		}
-		if strings.HasPrefix(e, xdgKey) {
-			xdg = strings.TrimPrefix(e, xdgKey)
-		}
-	}
-	if xdg == "" {
-		t.Fatalf("resolveHooksFilePathFromEnv: env slice contains neither PORTAL_HOOKS_FILE nor XDG_CONFIG_HOME — IsolateStateForTest isolation regression")
-	}
-	return filepath.Join(xdg, "portal", "hooks.json")
-}
-
-// seedHooksJSON writes a populated hooks.json under the resolved
-// config path. The supplied entries map is interpreted as
-// {structuralKey: onResumeCommand} — for each entry, a single
-// on-resume hook is registered via the production hooks.Store so the
-// on-disk JSON layout matches what `portal hooks set --on-resume`
-// would produce at runtime.
-//
-// The resolved path is t.Logf'd to verify the seed lands under the
-// isolated tree, per the project's daemon-test isolation rule.
-func seedHooksJSON(t *testing.T, env []string, entries map[string]string) {
-	t.Helper()
-	path := resolveHooksFilePathFromEnv(t, env)
-	t.Logf("seedHooksJSON: resolved hooks.json path = %s", path)
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("seedHooksJSON: mkdir %s: %v", filepath.Dir(path), err)
-	}
-
-	store := hooks.NewStore(path)
-	for key, cmd := range entries {
-		if err := store.Set(key, "on-resume", cmd); err != nil {
-			t.Fatalf("seedHooksJSON: set %s=%q: %v", key, cmd, err)
-		}
-	}
-}
-
-// hooksJSONBytes returns the raw on-disk bytes of hooks.json resolved
-// from the test-isolated env. Used for byte-identical before/after
-// comparisons that pin the "no wipe" invariant. Fails the test on
-// any read error other than ENOENT — callers asserting on byte
-// identity have no meaningful answer if the file is unreadable.
-//
-// ENOENT returns a nil slice so a missing-file precondition can be
-// distinguished from a present-but-empty file (bytes.Equal handles
-// both cases the same way, but the caller may want to check the
-// distinction).
-func hooksJSONBytes(t *testing.T, env []string) []byte {
-	t.Helper()
-	path := resolveHooksFilePathFromEnv(t, env)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("hooksJSONBytes: read %s: %v", path, err)
-	}
-	return data
-}
-
-// tailPortalLog returns the contents of portal.log under stateDir as
-// a string, or the stable `(read portal.log failed: %v)` placeholder
-// when the file is unreadable. Thin wrapper around
-// portaltest.ReadPortalLogSafe — exists so Tasks 3-2 / 3-3 can call
-// the same helper name as documented in the plan rather than reaching
-// into portaltest directly. ENOENT-tolerant by construction (the
+// tailPortalLog returns the contents of portal.log under stateDir as a
+// string, or the stable `(read portal.log failed: %v)` placeholder when
+// the file is unreadable. Thin wrapper around
+// portaltest.ReadPortalLogSafe — kept local because it is consumed only
+// by the smoke subtest below. ENOENT-tolerant by construction (the
 // underlying helper folds ENOENT into the placeholder string).
 func tailPortalLog(t *testing.T, stateDir string) string {
 	t.Helper()
 	return portaltest.ReadPortalLogSafe(stateDir)
 }
 
-// Compile-time guard: transientListPanesCommander must satisfy
-// tmux.Commander so the Task 3-2 / 3-3 wiring (which builds a
-// *tmux.Client from this stub) compiles even if Commander gains
-// methods.
-var _ tmux.Commander = (*transientListPanesCommander)(nil)
-
-// passthroughSocketCommander is a tiny tmux.Commander that targets
-// the test's isolated tmux socket via `tmux -S <path>`. Used only by
-// the pass-through smoke subtest below — production code paths build
-// the Inner Commander differently (either &tmux.RealCommander{} or
-// the unexported tmuxtest socketCommander accessible via Socket.Client).
-//
-// We construct one locally rather than reaching into the unexported
-// tmuxtest socketCommander so this file does not couple to internal
-// tmuxtest details. The shape is intentionally minimal: it just
-// shells out to tmux with the -S socket prefix.
-type passthroughSocketCommander struct {
-	socketPath string
-}
-
-func (p *passthroughSocketCommander) runArgs(args []string) []string {
-	return append([]string{"-S", p.socketPath, "-f", "/dev/null"}, args...)
-}
-
-func (p *passthroughSocketCommander) Run(args ...string) (string, error) {
-	out, err := exec.Command("tmux", p.runArgs(args)...).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func (p *passthroughSocketCommander) RunRaw(args ...string) (string, error) {
-	out, err := exec.Command("tmux", p.runArgs(args)...).Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
 // TestTransientListPanesHelpers_Smoke is the behavioural verification
-// for this scaffolding file. It exercises each helper through one
-// concrete code path so a future change that breaks the helper
-// contracts surfaces here rather than in Tasks 3-2 / 3-3.
+// for the transienttest scaffolding. Each subtest exercises one helper
+// shape through one concrete code path.
 //
 // Subtests:
 //   - intercepts_list_panes_dash_a_with_exit_nonzero — mode (a) trigger.
 //   - intercepts_list_panes_dash_a_with_empty_stdout — mode (b) trigger.
 //   - passes_through_unrelated_tmux_commands — `list-windows -a` reaches
 //     real tmux on the isolated socket.
-//   - seed_and_read_hooks_json_roundtrip — seedHooksJSON + hooksJSONBytes
+//   - seed_and_read_hooks_json_roundtrip — SeedHooksJSON + HooksJSONBytes
 //     round-trip a non-empty hook map.
 //   - tail_portal_log_handles_missing_file — tailPortalLog tolerates
 //     ENOENT and returns the stable placeholder.
 //   - isolation_backstop_passes — IsolateStateForTest's fingerprint
 //     backstop sees zero delta after a no-op test body.
+//   - one_shot_toggle_only_intercepts_first_call — OneShot truthiness.
 func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 	t.Run("intercepts_list_panes_dash_a_with_exit_nonzero", func(t *testing.T) {
-		c := &transientListPanesCommander{
+		c := &transienttest.Commander{
 			Inner: panicCommander{},
-			Mode:  failExitNonZero,
+			Mode:  transienttest.FailExitNonZero,
 		}
 		out, err := c.Run("list-panes", "-a", "-F", "#{pane_id}")
 		if err == nil {
@@ -376,9 +88,9 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 	})
 
 	t.Run("intercepts_list_panes_dash_a_with_empty_stdout", func(t *testing.T) {
-		c := &transientListPanesCommander{
+		c := &transienttest.Commander{
 			Inner: panicCommander{},
-			Mode:  failEmptyStdout,
+			Mode:  transienttest.FailEmptyStdout,
 		}
 		out, err := c.Run("list-panes", "-a", "-F", "#{pane_id}")
 		if err != nil {
@@ -404,10 +116,10 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 			t.Fatalf("new-session: %v", err)
 		}
 
-		inner := &passthroughSocketCommander{socketPath: sock.SocketPath()}
-		c := &transientListPanesCommander{
+		inner := &transienttest.SocketCommander{SocketPath: sock.SocketPath()}
+		c := &transienttest.Commander{
 			Inner: inner,
-			Mode:  failExitNonZero, // policy applies only to list-panes -a
+			Mode:  transienttest.FailExitNonZero, // policy applies only to list-panes -a
 		}
 
 		// list-windows -a is NOT intercepted; must reach real tmux
@@ -445,17 +157,17 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 			"smoke:0.0": "echo hello",
 			"smoke:1.0": "claude --resume",
 		}
-		seedHooksJSON(t, env, entries)
+		transienttest.SeedHooksJSON(t, env, entries)
 
-		data := hooksJSONBytes(t, env)
+		data := transienttest.HooksJSONBytes(t, env)
 		if len(data) == 0 {
-			t.Fatalf("hooksJSONBytes returned empty slice after seed")
+			t.Fatalf("HooksJSONBytes returned empty slice after seed")
 		}
 
 		// Round-trip through the production Store to confirm the
 		// on-disk shape is canonical and every seeded entry is
 		// present under the on-resume event.
-		path := resolveHooksFilePathFromEnv(t, env)
+		path := transienttest.ResolveHooksFilePathFromEnv(t, env)
 		store := hooks.NewStore(path)
 		for key, want := range entries {
 			cmd, ok, err := hooks.LookupOnResume(store, key)
@@ -470,11 +182,11 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 			}
 		}
 
-		// A second hooksJSONBytes call must return the SAME bytes
+		// A second HooksJSONBytes call must return the SAME bytes
 		// (no time-dependent serialization).
-		data2 := hooksJSONBytes(t, env)
+		data2 := transienttest.HooksJSONBytes(t, env)
 		if !bytes.Equal(data, data2) {
-			t.Fatalf("hooksJSONBytes not deterministic across reads:\n  first:  %s\n  second: %s", data, data2)
+			t.Fatalf("HooksJSONBytes not deterministic across reads:\n  first:  %s\n  second: %s", data, data2)
 		}
 	})
 
@@ -510,10 +222,10 @@ func TestTransientListPanesHelpers_Smoke(t *testing.T) {
 			t.Fatalf("new-session: %v", err)
 		}
 
-		inner := &passthroughSocketCommander{socketPath: sock.SocketPath()}
-		c := &transientListPanesCommander{
+		inner := &transienttest.SocketCommander{SocketPath: sock.SocketPath()}
+		c := &transienttest.Commander{
 			Inner:   inner,
-			Mode:    failExitNonZero,
+			Mode:    transienttest.FailExitNonZero,
 			OneShot: true,
 		}
 

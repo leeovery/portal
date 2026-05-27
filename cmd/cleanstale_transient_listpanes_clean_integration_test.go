@@ -42,14 +42,17 @@
 //
 // Package: `package cmd` so the test can mutate the unexported
 // `cleanDeps` seam directly (same pattern as cmd/clean_test.go).
-// Helper duplication: the Phase 3-2 file
-// (cmd/cleanstale_transient_listpanes_integration_test.go) is also in
-// `package cmd` under the same `//go:build integration` tag, so the
-// shapes it declares (`failureMode`, `transientListPanesCommander`,
-// `socketCommander`, `seedHooksJSON`, `hooksJSONBytes`,
-// `configDirFromEnvSlice`, `resolveHooksFilePathFromEnv`,
-// `staleHookCleanupLogLines`, `containsLineMatching`) are accessible
-// here verbatim — no duplication required.
+// Shared scaffolding: the `transienttest.Commander`,
+// `transienttest.SocketCommander`, `transienttest.SeedHooksJSON`,
+// `transienttest.HooksJSONBytes`,
+// `transienttest.ResolveHooksFilePathFromEnv`, and
+// `transienttest.FailureMode` (+ PassThrough / FailExitNonZero /
+// FailEmptyStdout) shapes live in internal/transienttest. The
+// `configDirFromEnvSlice`, `staleHookCleanupLogLines`, and
+// `containsLineMatching` helpers remain in the sibling
+// cmd/cleanstale_transient_listpanes_integration_test.go file (same
+// `package cmd`, same `//go:build integration` tag) and are accessible
+// here verbatim.
 //
 // Isolation: every subtest calls portaltest.IsolateStateForTest(t).
 // XDG_CONFIG_HOME is re-set on the test process (the helper scrubs it
@@ -73,6 +76,7 @@ import (
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
+	"github.com/leeovery/portal/internal/transienttest"
 )
 
 // panickingPaneLister is an AllPaneLister whose ListAllPanes panics on
@@ -165,8 +169,8 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"beta:0.0":  "echo b",
 			"gamma:0.0": "echo c",
 		}
-		seedHooksJSON(t, env, seedEntries)
-		before := hooksJSONBytes(t, env)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
+		before := transienttest.HooksJSONBytes(t, env)
 		if len(before) == 0 {
 			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
 		}
@@ -176,9 +180,9 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		// list-panes -a call is intercepted before reaching Inner — so
 		// a placeholder *tmux.RealCommander is acceptable; the
 		// intercept path never delegates to it.
-		stub := &transientListPanesCommander{
+		stub := &transienttest.Commander{
 			Inner: &tmux.RealCommander{},
-			Mode:  failExitNonZero,
+			Mode:  transienttest.FailExitNonZero,
 		}
 		installCleanDepsForLister(t, tmux.NewClient(stub))
 
@@ -187,7 +191,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			t.Fatalf("portal clean returned error under mode (a); want nil (RunE must Warn-and-swallow): %v\n  output:\n%s", err, output)
 		}
 
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		if !bytes.Equal(before, after) {
 			t.Fatalf("hooks.json mutated under mode (a) — the wipe regression has returned at the portal-clean callsite\n"+
 				"  before: %s\n"+
@@ -222,15 +226,15 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"beta:0.0":  "echo b",
 			"gamma:0.0": "echo c",
 		}
-		seedHooksJSON(t, env, seedEntries)
-		before := hooksJSONBytes(t, env)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
+		before := transienttest.HooksJSONBytes(t, env)
 		if len(before) == 0 {
 			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
 		}
 
-		stub := &transientListPanesCommander{
+		stub := &transienttest.Commander{
 			Inner: &tmux.RealCommander{},
-			Mode:  failEmptyStdout,
+			Mode:  transienttest.FailEmptyStdout,
 		}
 		installCleanDepsForLister(t, tmux.NewClient(stub))
 
@@ -239,7 +243,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			t.Fatalf("portal clean returned error under mode (b); want nil (hazard guard must Warn-and-swallow): %v\n  output:\n%s", err, output)
 		}
 
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		if !bytes.Equal(before, after) {
 			t.Fatalf("hooks.json mutated under mode (b) — the hazard guard failed and the wipe regression has returned at the portal-clean callsite\n"+
 				"  before: %s\n"+
@@ -283,14 +287,14 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"live:0.0": "echo live",
 			"gone:0.0": "echo gone",
 		}
-		seedHooksJSON(t, env, seedEntries)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
 
 		// Pass-through Commander targets the real test-isolated tmux
 		// socket. list-panes -a is delegated to the real tmux server,
 		// returning exactly the keys for the seeded `live` session.
-		passThroughStub := &transientListPanesCommander{
-			Inner: &socketCommander{socketPath: sock.SocketPath()},
-			Mode:  passThrough,
+		passThroughStub := &transienttest.Commander{
+			Inner: &transienttest.SocketCommander{SocketPath: sock.SocketPath()},
+			Mode:  transienttest.PassThrough,
 		}
 		installCleanDepsForLister(t, tmux.NewClient(passThroughStub))
 
@@ -300,7 +304,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		}
 
 		// The live entry must survive; the stale entry must be removed.
-		afterStr := string(hooksJSONBytes(t, env))
+		afterStr := string(transienttest.HooksJSONBytes(t, env))
 		if !strings.Contains(afterStr, `"live:0.0"`) {
 			t.Fatalf("normal path destroyed the live entry `live:0.0`; want it preserved\n"+
 				"  hooks.json after: %s", afterStr)
@@ -344,7 +348,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		// Snapshot hooks.json state BEFORE invoking clean. Absent
 		// means hooksJSONBytes returns nil — that nil-is-preserved
 		// invariant is what we assert after the early-exit.
-		before := hooksJSONBytes(t, env)
+		before := transienttest.HooksJSONBytes(t, env)
 		if before != nil {
 			t.Fatalf("precondition: hooks.json must be absent before the early-exit subtest; got %d bytes", len(before))
 		}
@@ -363,7 +367,7 @@ func TestPortalClean_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 		}
 
 		// hooks.json must remain absent (no implicit creation).
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		if after != nil {
 			t.Fatalf("persisted-empty early-exit created hooks.json on disk; want it to remain absent\n  after: %s", after)
 		}

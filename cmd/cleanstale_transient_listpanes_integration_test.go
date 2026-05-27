@@ -36,19 +36,15 @@
 // unexported `commanderFactory` seam (declared in
 // cmd/bootstrap_production.go).
 //
-// Helper duplication: the Phase 3-1 scaffolding file
-// (cmd/bootstrap/transient_listpanes_helpers_integration_test.go)
-// declares `transientListPanesCommander`, `seedHooksJSON`,
-// `hooksJSONBytes`, and `tailPortalLog` under `package bootstrap_test`.
-// Symbols defined in another package's `_test.go` files are NOT
-// importable across packages (even under the same package name), so
-// the small handful of shapes this file needs are duplicated locally
-// rather than re-shape the Phase 3-1 file. The duplication is bounded
-// (~60 lines) and the shapes are stable; the more invasive
-// alternatives (promote helpers to a non-`_test.go` file in
-// `package bootstrap`, or move them to a new test-only sub-package)
-// would touch unrelated wiring without buying material additional
-// safety. See the parent plan task's Option B/C/D discussion.
+// Shared scaffolding: `transienttest.Commander`,
+// `transienttest.SocketCommander`, `transienttest.SeedHooksJSON`,
+// `transienttest.HooksJSONBytes`,
+// `transienttest.ResolveHooksFilePathFromEnv`, and
+// `transienttest.FailureMode` (+ PassThrough / FailExitNonZero /
+// FailEmptyStdout) live in internal/transienttest. The earlier
+// duplication of these shapes across `package bootstrap_test` and
+// `package cmd` has been collapsed into the single canonical
+// declaration in that sub-package.
 //
 // Isolation: every subtest calls portaltest.IsolateStateForTest(t) to
 // scrub host env and install the fingerprint-diff backstop. Each
@@ -76,225 +72,16 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
-	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/portaltest"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
+	"github.com/leeovery/portal/internal/transienttest"
 )
-
-// failureMode selects the per-test policy applied by
-// transientListPanesCommander when it observes a `list-panes -a`
-// invocation. Mirrors the type in
-// cmd/bootstrap/transient_listpanes_helpers_integration_test.go;
-// duplicated locally because that file lives in `package bootstrap_test`
-// and is not importable across packages.
-type failureMode int
-
-const (
-	// passThrough disables interception — every call (including
-	// `list-panes -a`) delegates to the inner Commander verbatim.
-	passThrough failureMode = iota
-	// failExitNonZero makes intercepted calls return ("", error) —
-	// modelling tmux exit ≠ 0 on the wire.
-	failExitNonZero
-	// failEmptyStdout makes intercepted calls return ("", nil) —
-	// modelling tmux exit 0 with empty stdout.
-	failEmptyStdout
-)
-
-// transientListPanesCommander wraps an inner tmux.Commander and
-// intercepts only invocations matching `list-panes` with the `-a`
-// flag. All other invocations (including `list-panes` without `-a`,
-// `list-windows -a`, capture-pane, etc.) are delegated to the inner
-// Commander verbatim — preserving production fidelity for every
-// non-target tmux call.
-//
-// Sticky failure (OneShot=false): every intercepted call applies the
-// policy. The orchestrator's step 9 (CleanStaleMarkers) and step 11
-// (CleanStale) BOTH call `list-panes -a`; sticky failure ensures step
-// 11 — the target of this test — observes the policy regardless of
-// step-ordering details. Assertions filter on the "stale-hook cleanup:"
-// prefix so step 9's own log lines (which use a different prefix) do
-// not contaminate the assertion surface.
-//
-// Mirrors the type in cmd/bootstrap/transient_listpanes_helpers_integration_test.go;
-// duplicated locally because that file lives in `package bootstrap_test`.
-type transientListPanesCommander struct {
-	Inner       tmux.Commander
-	Mode        failureMode
-	intercepted atomic.Int64
-}
-
-// shouldIntercept reports whether the supplied tmux argv targets
-// `list-panes -a`.
-func (c *transientListPanesCommander) shouldIntercept(args []string) bool {
-	if len(args) == 0 || args[0] != "list-panes" {
-		return false
-	}
-	for _, a := range args[1:] {
-		if a == "-a" {
-			return true
-		}
-	}
-	return false
-}
-
-// applyPolicy applies the per-mode policy AFTER the intercept gate.
-func (c *transientListPanesCommander) applyPolicy() (string, error) {
-	switch c.Mode {
-	case failExitNonZero:
-		return "", fmt.Errorf("tmux list-panes -a: exit 1 (simulated transient)")
-	case failEmptyStdout:
-		return "", nil
-	default:
-		return "", fmt.Errorf("transientListPanesCommander: unexpected mode %d", c.Mode)
-	}
-}
-
-// intercept centralises the Mode dispatch shared by Run and RunRaw.
-func (c *transientListPanesCommander) intercept(args []string) (string, error, bool) {
-	if c.Mode == passThrough {
-		return "", nil, false
-	}
-	if !c.shouldIntercept(args) {
-		return "", nil, false
-	}
-	c.intercepted.Add(1)
-	out, err := c.applyPolicy()
-	return out, err, true
-}
-
-// Run implements tmux.Commander. Intercepts `list-panes -a` per the
-// configured policy and delegates every other call to Inner.
-func (c *transientListPanesCommander) Run(args ...string) (string, error) {
-	if out, err, handled := c.intercept(args); handled {
-		return out, err
-	}
-	return c.Inner.Run(args...)
-}
-
-// RunRaw implements tmux.Commander. Intercepts `list-panes -a` per
-// the configured policy and delegates every other call to Inner.
-func (c *transientListPanesCommander) RunRaw(args ...string) (string, error) {
-	if out, err, handled := c.intercept(args); handled {
-		return out, err
-	}
-	return c.Inner.RunRaw(args...)
-}
-
-// socketCommander is a tmux.Commander targeting a specific tmux
-// socket via `tmux -S <path>`. The `-f /dev/null` flag suppresses the
-// user's ~/.tmux.conf so the production-builder's tmux invocations do
-// not pull in user config that would couple this test to the
-// developer's environment. Errors are wrapped via
-// tmux.WrapCommandError so any callers that errors.As against
-// *tmux.CommandError continue to work — matches the production
-// tmux.RealCommander error-wrapping shape end-to-end.
-type socketCommander struct {
-	socketPath string
-}
-
-func (s *socketCommander) runArgs(args []string) []string {
-	return append([]string{"-S", s.socketPath, "-f", "/dev/null"}, args...)
-}
-
-func (s *socketCommander) Run(args ...string) (string, error) {
-	out, err := exec.Command("tmux", s.runArgs(args)...).Output()
-	if err != nil {
-		return "", tmux.WrapCommandError(err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func (s *socketCommander) RunRaw(args ...string) (string, error) {
-	out, err := exec.Command("tmux", s.runArgs(args)...).Output()
-	if err != nil {
-		return "", tmux.WrapCommandError(err)
-	}
-	return string(out), nil
-}
-
-// Compile-time guards: both Commanders must satisfy tmux.Commander.
-var (
-	_ tmux.Commander = (*transientListPanesCommander)(nil)
-	_ tmux.Commander = (*socketCommander)(nil)
-)
-
-// resolveHooksFilePathFromEnv mirrors cmd/config.go's configFilePath
-// resolution chain but consumes the env slice returned by
-// portaltest.IsolateStateForTest rather than os.Getenv. The chain:
-//
-//  1. If env contains PORTAL_HOOKS_FILE=<path>, return <path> verbatim.
-//  2. Otherwise scan env for XDG_CONFIG_HOME=<dir> and return
-//     <dir>/portal/hooks.json.
-//  3. Otherwise t.Fatalf — signals isolation regression.
-func resolveHooksFilePathFromEnv(t *testing.T, env []string) string {
-	t.Helper()
-	const (
-		hooksFileKey = "PORTAL_HOOKS_FILE="
-		xdgKey       = "XDG_CONFIG_HOME="
-	)
-	var xdg string
-	for _, e := range env {
-		if strings.HasPrefix(e, hooksFileKey) {
-			return strings.TrimPrefix(e, hooksFileKey)
-		}
-		if strings.HasPrefix(e, xdgKey) {
-			xdg = strings.TrimPrefix(e, xdgKey)
-		}
-	}
-	if xdg == "" {
-		t.Fatalf("resolveHooksFilePathFromEnv: env slice contains neither PORTAL_HOOKS_FILE nor XDG_CONFIG_HOME — IsolateStateForTest isolation regression")
-	}
-	return filepath.Join(xdg, "portal", "hooks.json")
-}
-
-// seedHooksJSON writes a populated hooks.json under the resolved
-// config path using the production hooks.Store so the on-disk shape
-// matches what `portal hooks set --on-resume` would produce at
-// runtime.
-func seedHooksJSON(t *testing.T, env []string, entries map[string]string) {
-	t.Helper()
-	path := resolveHooksFilePathFromEnv(t, env)
-	t.Logf("seedHooksJSON: resolved hooks.json path = %s", path)
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("seedHooksJSON: mkdir %s: %v", filepath.Dir(path), err)
-	}
-
-	store := hooks.NewStore(path)
-	for key, cmd := range entries {
-		if err := store.Set(key, "on-resume", cmd); err != nil {
-			t.Fatalf("seedHooksJSON: set %s=%q: %v", key, cmd, err)
-		}
-	}
-}
-
-// hooksJSONBytes returns the raw on-disk bytes of hooks.json resolved
-// from the test-isolated env. Used for byte-identical before/after
-// comparisons. ENOENT returns a nil slice.
-func hooksJSONBytes(t *testing.T, env []string) []byte {
-	t.Helper()
-	path := resolveHooksFilePathFromEnv(t, env)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("hooksJSONBytes: read %s: %v", path, err)
-	}
-	return data
-}
 
 // setupTransientCleanStaleEnv builds the per-subtest scaffolding.
 // Side effects:
@@ -353,15 +140,15 @@ func configDirFromEnvSlice(t *testing.T, env []string) string {
 }
 
 // installTransientCommanderFactory installs a commanderFactory that
-// wires a transientListPanesCommander wrapping a socket-anchored
-// Commander targeting the test's isolated tmux socket. The factory is
-// reverted on test exit via t.Cleanup.
-func installTransientCommanderFactory(t *testing.T, socketPath string, mode failureMode) {
+// wires a transienttest.Commander wrapping a socket-anchored Commander
+// targeting the test's isolated tmux socket. The factory is reverted on
+// test exit via t.Cleanup.
+func installTransientCommanderFactory(t *testing.T, socketPath string, mode transienttest.FailureMode) {
 	t.Helper()
 	prev := commanderFactory
 	commanderFactory = func() tmux.Commander {
-		return &transientListPanesCommander{
-			Inner: &socketCommander{socketPath: socketPath},
+		return &transienttest.Commander{
+			Inner: &transienttest.SocketCommander{SocketPath: socketPath},
 			Mode:  mode,
 		}
 	}
@@ -428,20 +215,20 @@ func TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"beta:0.0":  "echo b",
 			"gamma:0.0": "echo c",
 		}
-		seedHooksJSON(t, env, seedEntries)
-		before := hooksJSONBytes(t, env)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
+		before := transienttest.HooksJSONBytes(t, env)
 		if len(before) == 0 {
 			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
 		}
 
-		installTransientCommanderFactory(t, sock.SocketPath(), failExitNonZero)
+		installTransientCommanderFactory(t, sock.SocketPath(), transienttest.FailExitNonZero)
 
 		_, _, err := runProductionBootstrap(t)
 		if err != nil {
 			t.Fatalf("bootstrap fatally aborted under mode (a); want nil err (step 11 must Warn-and-swallow): %v", err)
 		}
 
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		if !bytes.Equal(before, after) {
 			t.Fatalf("hooks.json mutated under mode (a) — the wipe regression has returned\n"+
 				"  before: %s\n"+
@@ -474,20 +261,20 @@ func TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"beta:0.0":  "echo b",
 			"gamma:0.0": "echo c",
 		}
-		seedHooksJSON(t, env, seedEntries)
-		before := hooksJSONBytes(t, env)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
+		before := transienttest.HooksJSONBytes(t, env)
 		if len(before) == 0 {
 			t.Fatalf("precondition: hooksJSONBytes returned empty slice after seed")
 		}
 
-		installTransientCommanderFactory(t, sock.SocketPath(), failEmptyStdout)
+		installTransientCommanderFactory(t, sock.SocketPath(), transienttest.FailEmptyStdout)
 
 		_, _, err := runProductionBootstrap(t)
 		if err != nil {
 			t.Fatalf("bootstrap fatally aborted under mode (b); want nil err (step 11 must Warn-and-swallow): %v", err)
 		}
 
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		if !bytes.Equal(before, after) {
 			t.Fatalf("hooks.json mutated under mode (b) — the hazard guard failed and the wipe regression has returned\n"+
 				"  before: %s\n"+
@@ -529,9 +316,9 @@ func TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 			"live:0.0": "echo live",
 			"gone:0.0": "echo gone",
 		}
-		seedHooksJSON(t, env, seedEntries)
+		transienttest.SeedHooksJSON(t, env, seedEntries)
 
-		installTransientCommanderFactory(t, sock.SocketPath(), passThrough)
+		installTransientCommanderFactory(t, sock.SocketPath(), transienttest.PassThrough)
 
 		_, _, err := runProductionBootstrap(t)
 		if err != nil {
@@ -540,7 +327,7 @@ func TestBootstrap_CleanStale_TmuxTransient_DoesNotWipeHooks(t *testing.T) {
 
 		// After the normal path, the live entry must still be
 		// present AND the stale entry must have been removed.
-		after := hooksJSONBytes(t, env)
+		after := transienttest.HooksJSONBytes(t, env)
 		afterStr := string(after)
 		if !strings.Contains(afterStr, `"live:0.0"`) {
 			t.Fatalf("normal path destroyed the live entry `live:0.0`; want it preserved\n"+
