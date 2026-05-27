@@ -111,3 +111,18 @@ approved_at: 2026-05-27
 | bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-2 | Promote shared transient-list-panes test scaffolding to `internal/transienttest` | Capitalised symbol names per Go convention; OneShot and smoke fixtures available to both callsites; production code must not transitively import the package; CLAUDE.md test-only-packages row updated |
 | bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-3 | Export `bootstrap.NoopLogger` and delete `cleanStaleNoopLogger` | In-package usages of `noopLogger` updated post-rename; only one no-op `bootstrap.Logger` implementation remains repo-wide |
 | bootstrap-cleanstale-wipes-hooks-on-tmux-transient-4-4 | Fix stale comparative docstring on `ListAllPanesWithFormat` | "Unlike `ListAllPanes`" framing removed; new framing describes format-string flexibility vs. structural-key convenience wrapper; consistency confirmed with `ListAllPanes` docstring |
+
+---
+
+### Phase 5: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-5-1 | Fix portal clean Load-error path to emit canonical Warn | `hookStore.Load()` returns `(nil, err)` (permission denied); fall-through to `runHookStaleCleanup` re-Load reproduces failure; `(nil, nil)` empty-slice early-exit preserved; narrative comment at clean.go:87-97 aligned with actual control flow |
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-5-2 | Promote structural-key format literal to a single exported constant | Format string `"#{session_name}:#{window_index}.#{pane_index}"` appears exactly once; both `cmd/bootstrap/stale_marker_cleanup.go` and `internal/tmux/tmux.go` `ListAllPanes` reference `tmux.StructuralKeyFormat`; format-string-pinning tests updated |
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-5-3 | Consolidate transient integration-test scaffolding (env helper + table-driven mode subtests) | Four invariant Setenv/Isolate steps appear exactly once via `isolateCleanStaleTestEnv(t)`; needle strings asserting `runHookStaleCleanup` format output declared once; `transientModeSpec` + `runTransientCleanStaleModeSubtest(t, spec)` driver replaces both pairs of mode_a / mode_b bodies; new file `cmd/cleanstale_transient_listpanes_shared_test.go` carries `//go:build integration` |
+| bootstrap-cleanstale-wipes-hooks-on-tmux-transient-5-4 | Post-extraction polish on cleanStaleAdapter (logger rename, bool simplification, direct unit test) | `cleanStaleAdapter.Logger` → unexported `logger` (struct-literal-symmetry with `lister` / `store`); `listErrorPolicy` enum + constants deleted in favour of `swallowListError bool` parameter on `runHookStaleCleanup` (callsites pass `false` for adapter, `true` for `portal clean`); new non-integration unit test pins adapter composition (`logger` field flow + `swallowListError=false` policy) |

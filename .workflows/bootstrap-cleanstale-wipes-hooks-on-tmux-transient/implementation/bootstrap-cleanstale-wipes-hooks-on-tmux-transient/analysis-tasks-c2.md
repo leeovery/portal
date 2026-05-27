@@ -1,7 +1,7 @@
 # Analysis Cycle 2 — Proposed Tasks
 
 ## Task 1: Fix portal clean Load-error path to emit canonical Warn
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -30,7 +30,7 @@ sources: standards
 ---
 
 ## Task 2: Promote structural-key format literal to a single exported constant
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -57,7 +57,7 @@ sources: duplication
 ---
 
 ## Task 3: Consolidate transient integration-test scaffolding (env helper + table-driven mode subtests)
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -90,7 +90,7 @@ sources: duplication
 ---
 
 ## Task 4: Post-extraction polish on cleanStaleAdapter (logger rename, bool simplification, direct unit test)
-status: pending
+status: approved
 severity: low
 sources: architecture
 
