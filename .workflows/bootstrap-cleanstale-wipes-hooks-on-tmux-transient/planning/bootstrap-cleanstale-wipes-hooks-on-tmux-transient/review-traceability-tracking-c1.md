@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 1
 phase: Traceability Review
@@ -54,8 +54,8 @@ The bridge problem — `cleanStaleAdapter` declares `client *tmux.Client` (concr
 5. Define a test-local `cleanStaleAdapterT` struct that mirrors the production `cleanStaleAdapter` field layout (`store *hooks.Store`, `Logger bootstrap.Logger`) but substitutes `lister AllPaneLister` for `client *tmux.Client`. Re-implement the six-branch algorithm from Task 2-2 verbatim on this test-local type's `CleanStale` method so the test exercises an identically-shaped algorithm against stubbable enumeration. **Do not refactor the production adapter** — the test-local type is the seam. Drift risk is mitigated by Task 2-2's six-branch algorithm being short, fully specified in Do step 3 of that task, and covered by the integration tests in Phase 3 against the real production adapter.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Auto-applied. Plan and tick task updated to use the test-local `cleanStaleAdapterT` shape with no production refactor.
 
 ---
 
@@ -80,7 +80,7 @@ This finding is surfaced for awareness; the defensive subtest is arguably valuab
 
 **Proposed**: (No change recommended — defensive coverage is arguably valuable. Listed here so the user can opt to trim if strict spec-fidelity is preferred. If trimming, remove Do step 2 entirely and remove the corresponding entry from Acceptance Criteria and Tests sections.)
 
-**Resolution**: Pending
-**Notes**: User-discretion finding — the subtest is reasonable defensive coverage and may be kept. Surfaced for transparency on minor scope expansion beyond spec text.
+**Resolution**: Skipped (no-change recommended)
+**Notes**: Auto-applied. Defensive coverage retained as recommended — the whitespace-only subtest is reasonable beyond-spec hardening against future `parsePaneOutput` regressions. No content removed.
 
 ---
