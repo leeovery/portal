@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 2
 phase: Gap Analysis
@@ -36,11 +36,8 @@ An implementer reading this would either (a) be momentarily confused about wheth
 > *Coverage Matrix row (line 273):*
 > | Promoted parser | Moved/duplicated from `stale_marker_cleanup_test.go` |
 
-**Proposed Addition**:
-*(Pending discussion — remove both the "Promoted Parser Coverage" subsection and the matrix row, since Change 2 locks that no promotion occurs.)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Removed both the "### Promoted Parser Coverage" subsection and the "Promoted parser" Coverage Matrix row. Change 2's no-promote decision is now the only word on parser disposition.
 
 ---
 
@@ -74,11 +71,8 @@ Resolution options the spec should pick between:
 > *Acceptance Criteria #4 (line 286):*
 > *"every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits exactly two log lines on the success-of-enumeration paths…"*
 
-**Proposed Addition**:
-*(Pending — pick (i), (ii), or (iii) above and amend Change 4 + Acceptance Criteria #4 to match. If (i), name the exception explicitly so an implementer doesn't add the early-exit Debug "to be safe.")*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved (option iii)
+**Notes**: Picked option (iii) — `portal clean`'s early-exit on `persisted == 0` emits a single `Debug` breadcrumb so every invocation produces at least one log line, without losing the no-tmux-server entry ergonomics. Added a `portal clean` early-exit special-case paragraph to Change 4 and updated Acceptance Criteria #4 to name the exception explicitly.
 
 ---
 
@@ -105,11 +99,8 @@ The Soft-warning surfacing contract paragraph (line 182) covers the `ListAllPane
 > *Change 3 step 1 (line 166):*
 > *"Load the persisted hooks via `hookStore.Load()` (already a public method on `*hooks.Store`); this returns the current `hooksFile` map. Use `len(persisted) > 0` as the guard's right-hand condition. No new API on `internal/hooks/store.go` is required. `portal clean` already calls `hookStore.Load()` (line 65) and exits early when empty (line 71-73), so this read is already paid for at that callsite. The bootstrap adapter must add the `Load()` call."*
 
-**Proposed Addition**:
-*(Pending — name the `Load()` error path explicitly. Recommended default: treat `Load()` non-nil error the same as `ListAllPanesWithFormat` non-nil error — adapter returns it, orchestrator surfaces as soft warning, no destructive call. This matches the "treat empty as unknown" principle and avoids the corrupt-file-overwrite hazard.)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added `Load()` error handling subsection to Change 3 step 1. Adopted the recommended default: non-nil `Load()` error is returned directly (no destructive call), orchestrator surfaces as soft warning. Explicitly named the corrupt-file-overwrite hazard the choice avoids. `portal clean`'s existing error-return is preserved with an added `Warn` breadcrumb.
 
 ---
 
@@ -134,10 +125,7 @@ Minor — but Change 3's docstring-rewrite call-out sets a precedent that the sp
 > *Compare Change 3 line 184:*
 > *"the existing docstring on `cleanStaleAdapter.CleanStale` at `cmd/bootstrap_production.go:71-75` reads: … Post-fix this is actively misleading … The docstring must be rewritten alongside the code change…"*
 
-**Proposed Addition**:
-*(Pending — add a "Docstring rewrite" bullet under Change 1 directing the implementer to rewrite `ListAllPanes`'s docstring to describe the new error-propagating contract and remove the no-server-convenience framing. Mirrors the Change 3 directive.)*
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added "Helper docstring rewrite" paragraph at the bottom of Change 1, mirroring the Change 3 docstring-rewrite directive. Specifies that the existing no-server-convenience framing be removed and replaced with prose describing the new error-propagating contract.
 
 ---

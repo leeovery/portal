@@ -147,6 +147,8 @@ func (c *Client) ListAllPanes() ([]string, error) {
 - Deprecation with `// Deprecated:` keeps the footgun alive — the compiler does not enforce the tag.
 - Repurpose structurally eliminates the swallow contract while keeping every existing call site compiling unchanged (the slice consumers compile through; only the error-path runtime shape narrows). New consumers inherit the safe behaviour by default.
 
+**Helper docstring rewrite.** The existing docstring on `(*tmux.Client).ListAllPanes` (currently describes the swallow as a convenience for the "no tmux server" case) must be rewritten alongside the code change to describe the new error-propagating contract. Remove the no-server-convenience framing; describe what the helper actually does now: enumerate live panes via the error-propagating `ListAllPanesWithFormat` helper, return `(nil, err)` on tmux failure, and let the caller decide policy for empty/error results. Mirrors the docstring-rewrite directive in Change 3 for `cleanStaleAdapter.CleanStale`.
+
 ### Change 2 — Hook-Cleanup Parser Reuse (No Promotion Required)
 
 The parser at `cmd/bootstrap/stale_marker_cleanup.go` (`parseLivePaneSet`) produces **canonical paneKeys** via `state.SanitizePaneKey` — the form used by `@portal-skeleton-*` markers. Hook entries in `hooks.json` are keyed by **structural keys** (raw `session:window.pane` from `ResolveStructuralKey`), not canonical paneKeys. These two parsing concerns are **distinct**, so `parseLivePaneSet` is **not** the right utility to share for hook cleanup, and no promotion is required.
@@ -164,6 +166,8 @@ The existing `parsePaneOutput` helper inside `internal/tmux/tmux.go` (split + tr
 **Hazard-guard algorithm.** Before passing the live-pane slice to `hooks.Store.CleanStale`:
 
 1. Load the persisted hooks via `hookStore.Load()` (already a public method on `*hooks.Store`); this returns the current `hooksFile` map. Use `len(persisted) > 0` as the guard's right-hand condition. No new API on `internal/hooks/store.go` is required. `portal clean` already calls `hookStore.Load()` (line 65) and exits early when empty (line 71-73), so this read is already paid for at that callsite. The bootstrap adapter must add the `Load()` call.
+
+   **`Load()` error handling.** When `hookStore.Load()` returns a non-nil error (disk read failure, JSON parse error on a corrupt `hooks.json`), the adapter treats it the same as a `ListAllPanesWithFormat` error: return the error directly (no `hookStore.CleanStale` call), letting the orchestrator surface it as a soft warning. This avoids the corrupt-file-overwrite hazard — if `Load()` were treated as `len(persisted) == 0`, a normal-path stale removal could proceed against an unparseable file, overwriting it with `{}` and silently destroying recoverable state. The "treat unknown as unknown" principle applies on both sides of the hazard guard. The `portal clean` callsite already errors out on `Load()` failure (line 65-68); preserve that behaviour and emit a `Warn` breadcrumb before the existing error return.
 2. Check the combination `len(livePanes) == 0 && len(persisted) > 0`. When that combination holds:
    - Emit `Logger.Warn(ComponentBootstrap, "stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)", len(persisted))`.
    - Skip the destructive `hookStore.CleanStale(...)` call.
@@ -192,6 +196,8 @@ At both `CleanStale` callsites, every invocation emits **exactly two log lines**
 **Entry-point line — emitted once per invocation, immediately after the `ListAllPanes` + `Load` calls complete successfully and before the hazard-guard check:**
 
 - **`Debug` after enumeration** — `"stale-hook cleanup: live=<N> persisted=<M>"` (both counts known at this point).
+
+**`portal clean` early-exit special case.** `cmd/clean.go` retains its existing pre-enumeration early-exit when `len(persisted) == 0` (the existing line 71-73 short-circuit; preserved to keep the no-tmux-server ergonomics intact). On that branch, neither `ListAllPanes` nor the hazard guard runs. Emit a single `Debug` breadcrumb at the early-exit before returning: `"stale-hook cleanup: persisted=0, skipping"`. This preserves the "every invocation logs at least one breadcrumb" property without inverting `portal clean`'s entry ergonomics. The bootstrap adapter does **not** take this branch — it always calls `ListAllPanes` first and consumes the entry-point Debug + terminal-line pair.
 
 **Terminal line — mutually exclusive, exactly one fires per invocation:**
 
@@ -241,10 +247,6 @@ The fix must **invert** this subtest:
 
 Same inversion shape used by the `hooks-skip-bootstrap` quickfix — reference commit `7e33c04b` (`impl(hooks-skip-bootstrap): T1-2 — invert hooks list test, add hooks set test`). That commit shows the structural-preserve-flip-assert pattern: the test's setup and call shape are kept; the asserted outcome is inverted; the comment block is rewritten so the new mental model is captured in test prose alongside the assertions.
 
-### Promoted Parser Coverage
-
-If `parseLivePaneSet` is moved out of `cmd/bootstrap/stale_marker_cleanup.go`, the existing coverage in `cmd/bootstrap/stale_marker_cleanup_test.go` must move or be duplicated to live next to the new location.
-
 ### Deterministic Repro Mechanism
 
 The canonical mechanism for reproducing failure mode (a) deterministically is **`Commander` injection** at the `tmux.Client` boundary. A stub `Commander` returning `exit 1` (or empty stdout for mode (b)) on the `list-panes -a` call exercises the destructive path without spawning a real tmux server. The hazard-guard unit subtests rely on stub `LivePaneLister`s one layer up; `Commander`-level injection is the lower-level analogue used by integration tests when they want the deterministic failure without coordinating a saver-respawn race.
@@ -270,7 +272,6 @@ Confirm no behavioural change in existing `cmd/clean_test.go` non-empty live-set
 | Bootstrap adapter — error propagates | New `cmd/bootstrap_production_test.go` |
 | Bootstrap adapter — legitimate stale removal | New `cmd/bootstrap_production_test.go` |
 | `portal clean` — empty live set refuses wipe | Inverted `cmd/clean_test.go:327-368` |
-| Promoted parser | Moved/duplicated from `stale_marker_cleanup_test.go` |
 | Tmux transient end-to-end | New integration test |
 | `portal clean` transient end-to-end | New integration test |
 
@@ -283,7 +284,7 @@ Specifically:
 1. **Hazard guard:** when `len(livePanes) == 0 && len(persistedHooks) > 0` at either `CleanStale` callsite, no entries are removed from `hooks.json` and a `Warn` is emitted at `ComponentBootstrap` recording both counts.
 2. **Error propagation:** when `ListAllPanesWithFormat` returns a non-nil error, the adapter returns that error; the orchestrator surfaces it as a soft warning. `hooks.json` is untouched.
 3. **Normal-path preservation:** when the live-pane set is non-empty, the pre-fix behaviour is preserved verbatim — stale entries are removed; live entries are kept.
-4. **Log breadcrumbs:** every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits exactly two log lines on the success-of-enumeration paths (one `Debug` after enumeration with both counts, plus one terminal line — `Debug` on completion with removed count, or `Warn` on hazard-guard skip), or exactly one terminal `Warn` on the enumeration-error path (propagated error from `ListAllPanesWithFormat`, no entry-point Debug). The two terminal lines are mutually exclusive per invocation.
+4. **Log breadcrumbs:** every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits exactly two log lines on the success-of-enumeration paths (one `Debug` after enumeration with both counts, plus one terminal line — `Debug` on completion with removed count, or `Warn` on hazard-guard skip), or exactly one terminal `Warn` on the enumeration-error path (propagated error from `ListAllPanesWithFormat`, no entry-point Debug). The two terminal lines are mutually exclusive per invocation. `portal clean`'s pre-enumeration early-exit on `persisted == 0` emits a single `Debug` breadcrumb so every invocation still produces at least one log line.
 5. **Bootstrap posture preserved:** no fatal abort from `PersistentPreRunE` is introduced. The orchestrator's "never block the user's command" rule remains in force.
 6. **Coverage:** every entry in the test coverage matrix exists, passes, and inverts (where the existing test asserts the destructive outcome) to assert the new "refuse + warn" outcome.
 
