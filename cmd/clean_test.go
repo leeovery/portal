@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -324,15 +323,19 @@ func TestCleanCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("zero live panes prunes every hook entry", func(t *testing.T) {
+	t.Run("zero live panes refuses to wipe hooks (hazard guard)", func(t *testing.T) {
 		dir := t.TempDir()
 		projectsFile := filepath.Join(dir, "projects.json")
 		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
 		hooksFile := filepath.Join(dir, "hooks.json")
 		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
 
-		// Phase 4: CleanStale runs unconditionally. With no live panes,
-		// every hooks.json entry is genuinely orphaned and must be pruned.
+		// Post-fix mental model: an empty live-pane set is *ambiguous*, not
+		// authoritative. The cleanup must treat the live set as "unknown" and
+		// defer the destructive call so a transient tmux state does not wipe
+		// hooks.json. The mass-deletion hazard guard refuses the wipe when
+		// len(livePanes) == 0 && len(persistedHooks) > 0; next bootstrap
+		// retries. See spec §Change 3.
 		writeHooksJSON(t, hooksFile, map[string]map[string]string{
 			"my-session:0.1":    {"on-resume": "cmd-1"},
 			"other-session:1.0": {"on-resume": "cmd-2"},
@@ -353,17 +356,22 @@ func TestCleanCommand(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		out := buf.String()
-		if !strings.Contains(out, "Removed stale hook: my-session:0.1") {
-			t.Errorf("output = %q, want containing my-session:0.1 removal", out)
-		}
-		if !strings.Contains(out, "Removed stale hook: other-session:1.0") {
-			t.Errorf("output = %q, want containing other-session:1.0 removal", out)
+		// User-facing stderr/stdout must NOT report any removal because the
+		// destructive CleanStale call was skipped.
+		if buf.String() != "" {
+			t.Errorf("output = %q, want empty (hazard guard deferred wipe)", buf.String())
 		}
 
+		// hooks.json must be byte-preserved — both entries still present.
 		data := readHooksJSON(t, hooksFile)
-		if len(data) != 0 {
-			t.Errorf("expected hooks file to be emptied; got %v", data)
+		if _, ok := data["my-session:0.1"]; !ok {
+			t.Error("expected my-session:0.1 to be preserved under hazard guard")
+		}
+		if _, ok := data["other-session:1.0"]; !ok {
+			t.Error("expected other-session:1.0 to be preserved under hazard guard")
+		}
+		if len(data) != 2 {
+			t.Errorf("expected hooks file to retain both entries; got %v", data)
 		}
 	})
 
