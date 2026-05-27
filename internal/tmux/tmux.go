@@ -653,9 +653,12 @@ func (c *Client) ListPanes(sessionName string) ([]string, error) {
 }
 
 // ListAllPanesWithFormat runs "list-panes -a -F <format>" and returns the raw,
-// untrimmed tmux output. Callers are responsible for parsing the format string
-// they supplied. Unlike ListAllPanes, this method propagates the underlying
-// error so callers can distinguish "no panes" from "tmux failed".
+// untrimmed tmux output. Use this when a non-default tmux format string is
+// required and caller-side parsing is acceptable; ListAllPanes is the
+// convenience wrapper for the canonical structural-key format. Both helpers
+// share the same error-propagating contract — a non-nil error indicates a tmux
+// failure (transport error, exit ≠ 0, server gone), wrapped so callers can use
+// errors.Is / errors.As against any sentinel in the chain.
 func (c *Client) ListAllPanesWithFormat(format string) (string, error) {
 	out, err := c.cmd.Run("list-panes", "-a", "-F", format)
 	if err != nil {
