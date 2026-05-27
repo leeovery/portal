@@ -4,7 +4,8 @@
 
 ### Phase 1: Repurpose `ListAllPanes` to Propagate Errors
 
-status: draft
+status: approved
+approved_at: 2026-05-27
 
 **Goal**: Replace the error-swallow body of `(*tmux.Client).ListAllPanes` with a thin wrapper around `ListAllPanesWithFormat` so transient tmux failures surface as `(nil, err)` instead of `([]string{}, nil)`. Closes failure mode (a) at the source. Rewrite the helper docstring to describe the new error-propagating contract.
 
@@ -22,7 +23,8 @@ status: draft
 
 ### Phase 2: Hazard Guard and Adapter Logging at Both `CleanStale` Callsites
 
-status: draft
+status: approved
+approved_at: 2026-05-27
 
 **Goal**: Add the mass-deletion hazard guard and two-line logging contract to both destructive consumers — `cleanStaleAdapter.CleanStale` (`cmd/bootstrap_production.go:76-83`) and the `portal clean` hook-cleanup tail (`cmd/clean.go:75-91`). Closes failure mode (b). Lifts the prior-art guard from `cmd/bootstrap/stale_marker_cleanup.go:126-141` verbatim (with `len(persisted)` substituted for `len(markers)`). Plumbs a logger into `cleanStaleAdapter` and the `portal clean` `RunE` closure (via `openNoRotateLogger`). Inverts the `cmd/clean_test.go:327-368` destructive subtest so the existing destructive interpretation is replaced by the "refuse + warn" assertion, and creates the new `cmd/bootstrap_production_test.go` covering the adapter's four required paths (hazard guard fires, both-sides-empty no-op, error propagates as soft warning, legitimate stale removal). Rewrites the `cleanStaleAdapter.CleanStale` docstring to describe the new contract; lifts and adapts the load-bearing comment block from `stale_marker_cleanup.go:80-92` naming `hooks.json` entries as the protected data.
 
@@ -45,7 +47,8 @@ status: draft
 
 ### Phase 3: Integration Coverage for Tmux Transient and `portal clean`
 
-status: draft
+status: approved
+approved_at: 2026-05-27
 
 **Goal**: Land the two end-to-end integration tests required by the spec's coverage matrix. The first reproduces the original incident shape (real tmux server, populated `hooks.json`, kill `_portal-saver` mid-bootstrap, `Commander` stub forces `list-panes -a` exit ≠ 0) and asserts `hooks.json` is unchanged at the end of bootstrap. The second exercises the same posture against the `portal clean` callsite.
 
