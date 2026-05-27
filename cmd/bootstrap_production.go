@@ -92,11 +92,40 @@ type cleanStaleAdapter struct {
 	Logger bootstrap.Logger
 }
 
-// CleanStale fetches the live pane keys from tmux and asks the hooks
-// store to drop any entries that no longer match. A ListAllPanes
-// failure degrades to no-op (returns nil) so a transient tmux error
-// during bootstrap never aborts the user's command — matches the
-// safety-net semantic in `portal clean`.
+// CleanStale prunes the hooks store of entries whose structural key is
+// no longer represented by a live tmux pane. Errors from the two
+// dependency calls (tmux pane enumeration, hooks.json load) are surfaced
+// to the caller as soft warnings (the orchestrator Warn-and-swallows at
+// step 11); they are NOT silently degraded to nil because doing so was
+// the bug this rewrite closes — a list-panes failure used to fall
+// through to a destructive CleanStale call against a stale (empty)
+// live-pane slice.
+//
+// Algorithm:
+//  1. Enumerate live panes via a.client.ListAllPanes. On error: Warn
+//     under ComponentBootstrap and return err.
+//  2. Load persisted hooks via a.store.Load. On error: Warn under
+//     ComponentBootstrap and return err. The destructive CleanStale
+//     call is NOT made on this branch.
+//  3. Emit a Debug breadcrumb with the live and persisted counts so the
+//     hazard-guard / normal-path decision is observable from portal.log.
+//  4. Mass-deletion hazard guard: if the parsed live-pane set is empty
+//     AND at least one hooks.json entry exists, emit a Logger.Warn
+//     (component=bootstrap) describing the deferral (including hook
+//     count) and return nil without invoking a.store.CleanStale.
+//     Treating an empty live set as authoritative would destabilise a
+//     still-live tmux server by deleting every hooks.json entry —
+//     including hooks.json entries for legitimate live panes whose
+//     enumeration momentarily failed. The deferral is a successful soft
+//     outcome ("skip this run; next bootstrap retries"), not a failure;
+//     surfacing it as a return error would conflate it with genuine
+//     dependency failures.
+//  5. If the parsed live-pane set is empty AND no hooks.json entries
+//     exist, return nil — there is nothing to do and no hazard to guard
+//     against.
+//  6. Otherwise invoke a.store.CleanStale(livePanes) and, on success,
+//     emit a Debug breadcrumb with the removed-entry count. Surface any
+//     error from CleanStale to the caller.
 func (a *cleanStaleAdapter) CleanStale() error {
 	// Substitute a no-op Logger when none was injected so call sites can
 	// invoke logger.Warn / logger.Debug unconditionally, matching the
@@ -108,14 +137,46 @@ func (a *cleanStaleAdapter) CleanStale() error {
 	if logger == nil {
 		logger = cleanStaleNoopLogger{}
 	}
-	_ = logger
 
 	livePanes, err := a.client.ListAllPanes()
 	if err != nil {
+		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: list-panes failed: %v", err)
+		return err
+	}
+
+	persisted, err := a.store.Load()
+	if err != nil {
+		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: hookStore.Load failed: %v", err)
+		return err
+	}
+
+	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: live=%d persisted=%d", len(livePanes), len(persisted))
+
+	// Mass-deletion hazard guard. The guard MUST run before any destructive
+	// CleanStale invocation so a silently-empty live-pane result (transient
+	// tmux failure swallowed upstream, saver pane mid-respawn returning
+	// exit 0 / empty stdout, or genuinely zero live panes during tmux
+	// instability) cannot fall through to "live set empty → delete every
+	// hooks.json entry". The deferral surfaces via Logger.Warn so the
+	// error channel of CleanStale exclusively carries genuine dependency
+	// failures.
+	if len(livePanes) == 0 {
+		if len(persisted) == 0 {
+			// Empty persisted + empty live: nothing to do, no hazard.
+			return nil
+		}
+		logger.Warn(state.ComponentBootstrap,
+			"stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)",
+			len(persisted))
 		return nil
 	}
-	_, err = a.store.CleanStale(livePanes)
-	return err
+
+	removed, err := a.store.CleanStale(livePanes)
+	if err != nil {
+		return err
+	}
+	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: removed=%d", len(removed))
+	return nil
 }
 
 // buildProductionOrchestrator constructs a fully-wired

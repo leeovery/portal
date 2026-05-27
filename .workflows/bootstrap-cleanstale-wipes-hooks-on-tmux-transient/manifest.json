@@ -85,11 +85,12 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 2,
-          "current_task": "tick-ceb63d",
+          "current_task": "tick-36cdf8",
           "completed_tasks": [
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1",
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-2",
-            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-1"
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-1",
+            "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-2"
           ],
           "completed_phases": [
             1
