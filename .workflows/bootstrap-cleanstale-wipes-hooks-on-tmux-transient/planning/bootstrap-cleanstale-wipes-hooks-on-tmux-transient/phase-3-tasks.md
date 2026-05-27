@@ -19,7 +19,7 @@ total: 3
 - Define `transientListPanesCommander` as a struct wrapping an inner `tmux.Commander` (production `&tmux.RealCommander{}` by default) plus a policy field (`mode failureMode` where `failureMode` is one of `failExitNonZero`, `failEmptyStdout`, `passThrough`) and a one-shot/sticky toggle. Implement `Run(args ...string) (string, error)` and `RunRaw(args ...string) (string, error)`. Inside both: if `args[0] == "list-panes"` and `args` contains `"-a"`, apply the policy; otherwise delegate to the inner Commander verbatim. Track invocation count so the one-shot variant resets after the first intercepted call.
 - For `mode == failExitNonZero`: return `("", fmt.Errorf("tmux list-panes -a: exit 1 (simulated transient)"))` so the wrapping at `ListAllPanesWithFormat` (Phase 1) produces a non-nil error to the adapter.
 - For `mode == failEmptyStdout`: return `("", nil)`. This exercises failure mode (b) — `ListAllPanes` returns `([]string{}, nil)`, triggering the hazard guard at the adapter.
-- Implement `seedHooksJSON(t *testing.T, stateDir string, entries map[string]string)` — write a valid `hooks.json` to the resolved config path (NB: hooks live under `~/.config/portal/hooks.json`, not under `stateDir`; resolve via `os.Getenv("PORTAL_HOOKS_FILE")` first, then `$XDG_CONFIG_HOME/portal/hooks.json`, matching `cmd/config.go`'s `configFilePath` resolution). Use the production `internal/hooks` package to construct the file so the on-disk shape stays canonical. The `IsolateStateForTest` helper scrubs `XDG_CONFIG_HOME` to a per-test tempdir — verify the path the helper writes to is under the isolated tree.
+- Implement `seedHooksJSON(t *testing.T, env []string, entries map[string]string)` — write a valid `hooks.json` to the resolved config path. **Resolve from the `env` slice returned by `IsolateStateForTest(t)`, not from the global process env**, so the seed lands under the isolated tree regardless of which env vars the helper actually overrides today. Concretely: scan `env` for `PORTAL_HOOKS_FILE=...` first (use it verbatim if present); otherwise scan for `XDG_CONFIG_HOME=...` and join with `portal/hooks.json`; otherwise `t.Fatalf` (signals isolation regression — preferable to silently corrupting). Mirrors `cmd/config.go`'s `configFilePath` resolution but consumes the test-isolated env. Use the production `internal/hooks` package to construct the file so the on-disk shape stays canonical. `t.Logf` the resolved path to verify the seed lands under the isolated tree.
 - Implement `hooksJSONBytes(t *testing.T) []byte` — read the resolved `hooks.json` file via `os.ReadFile` (no parsing). Return the raw bytes used for the byte-identical assertion. `t.Fatalf` on read errors.
 - Implement `tailPortalLog(t *testing.T, stateDir string) string` — thin wrapper around `portaltest.ReadPortalLogSafe(stateDir)` returning the content as a string for substring-match assertions on Warn/Debug lines.
 - Add a smoke-test subtest `TestTransientListPanesHelpers_Smoke` in the same file: build a `transientListPanesCommander{inner: &tmux.RealCommander{}, mode: failExitNonZero}`, call `Run("list-panes", "-a", "-F", "...")` — assert non-nil error and empty string; call `Run("list-windows", "-a")` — assert pass-through to real tmux. Use a real tmux fixture from `internal/tmuxtest` for the pass-through arm.
@@ -48,7 +48,7 @@ total: 3
 **Edge Cases**:
 - One-shot vs sticky policy: default sticky; expose a `OneShot bool` toggle on the Commander stub for Tasks 3-2 / 3-3 if they need step-4 (orphan sweep) to succeed before step-11 observes the transient
 - Pass-through fidelity: the stub must delegate `RunRaw` as well as `Run`, otherwise scrollback-capturing paths in other parts of bootstrap break
-- Hooks file path resolution: must respect `PORTAL_HOOKS_FILE` env override (set by `IsolateStateForTest`) before falling back to `$XDG_CONFIG_HOME/portal/hooks.json`
+- Hooks file path resolution: resolve from the `env` slice returned by `IsolateStateForTest(t)` rather than `os.Getenv`, so the helper is robust to future changes in which env vars `IsolateStateForTest` overrides
 - Subprocess reap discipline: any helper that spawns a subprocess (none required here but possible in expansion) must use `portaltest.RegisterSubprocessCleanup` per the daemon-spawning-test rule
 - tmux server teardown between subtests handled by `tmuxtest` fixtures; the helper file itself is server-agnostic and reusable across fresh-server and persisted-server scenarios
 
@@ -86,9 +86,24 @@ total: 3
   3. Build a `*tmux.Client` using `tmux.NewClient(&transientListPanesCommander{inner: &tmux.RealCommander{...wrapping the test socket commander...}, mode: <policy>, sticky: true})`. The inner Commander needs to target the test tmux socket; if `RealCommander` does not accept a socket override, either (a) extend the helper from Task 3-1 to accept a base `Commander` constructed by `tmuxtest`, or (b) set the relevant `TMUX_TMPDIR` / `-L` env so the production `RealCommander` reaches the right socket. Use whichever path is idiomatic in existing real-tmux integration tests (audit `internal/tmux/portal_saver_integration_test.go` for the pattern).
   4. Seed `hooks.json` via `seedHooksJSON(t, stateDir, map[string]string{"user-proj:0.0": "claude --resume sess-1", "user-proj:0.1": "claude --resume sess-2", "other-proj:0.0": "echo resumed"})`. Capture `before := hooksJSONBytes(t)`.
   5. (Optional) Kill `_portal-saver` mid-bootstrap to compound the transient — exercises the original incident shape from spec § "Trigger Windows of Highest Empirical Risk" item 1. Skip if the orchestrator's first bootstrap call already triggers the same transient via the Commander stub.
-  6. Drive a bootstrap-triggering command. Two options — pick the one that matches existing conventions in `cmd/bootstrap/composition_e2e_*_integration_test.go`:
-     - **Option A (direct orchestrator)**: call `buildProductionOrchestrator()` after overriding the package-level Commander factory (if such a seam exists) or by constructing the orchestrator inline with the stub client. Invoke `orch.Bootstrap(ctx)` and collect the returned warnings. Lower friction for assertion access.
-     - **Option B (subprocess)**: use `portalbintest.BuildPortalBinary` to build a `portal` binary, then run `portal open <path>` or equivalent as an `exec.Cmd` with `cmd.Env = env`. Higher fidelity but harder to inject the Commander stub — requires an env-var-driven hook in production code, which does not exist. Prefer Option A.
+  6. Drive a bootstrap-triggering command via the **commander-factory seam approach** (subprocess approach rejected — no env-var-driven Commander seam exists in production and adding one is out of scope). Add a small test-only seam in `cmd/bootstrap_production.go` following the `cleanDeps` / `bootstrapDeps` package-level-mutable-state pattern (CLAUDE.md § "DI / testing pattern"):
+     ```go
+     // commanderFactory is the indirection seam tests use to inject a
+     // wrapping Commander. Production code leaves it at the default;
+     // tests override and restore via t.Cleanup.
+     var commanderFactory = func() tmux.Commander { return &tmux.RealCommander{} }
+     ```
+     Inside `buildProductionOrchestrator`, replace `client := tmux.DefaultClient()` with `client := tmux.NewClient(commanderFactory())`. One-line production change; the call path is unchanged because the default factory returns the same `*RealCommander` `DefaultClient` uses today. In the test, override the factory before invoking `buildProductionOrchestrator`:
+     ```go
+     base := commanderFactory()
+     stub := &transientListPanesCommander{inner: base, mode: <policy>, sticky: true}
+     prev := commanderFactory
+     commanderFactory = func() tmux.Commander { return stub }
+     t.Cleanup(func() { commanderFactory = prev })
+     orch, _ := buildProductionOrchestrator()
+     warnings, err := orch.Run(ctx)
+     ```
+     Assert against the returned warnings slice and `err`. Wiring caveat: this task introduces the seam in addition to consuming it — add the new package-level `var commanderFactory` and update the one call site inside `buildProductionOrchestrator` in the same PR so the test compiles. The production surface widens by one unexported variable — acceptable per the `cleanDeps` precedent.
   7. Capture `after := hooksJSONBytes(t)`. Assert `bytes.Equal(before, after)` — byte-identical, no entries removed.
   8. Read `portal.log` via `tailPortalLog(t, stateDir)`. Assert:
      - For mode (a): contains the substring `"stale-hook cleanup:"` + a propagated-error fragment (e.g., `"list-panes"` or `"exit 1"`) on a `WARN` line. Per spec § Change 4: mode (a) emits only the terminal Warn (no entry-point Debug because `ListAllPanes` itself failed).

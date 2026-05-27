@@ -15,7 +15,7 @@ total: 5
 **Outcome**: `cleanStaleAdapter` carries a `Logger` field, the production wiring at `buildProductionOrchestrator` populates it from the orchestrator-scope `logger`, the receiver method can call `a.Logger.Warn`/`a.Logger.Debug` unconditionally (with no-op when nil), and all existing tests pass unchanged because no observable behaviour has shifted yet.
 
 **Do**:
-1. Open `cmd/bootstrap_production.go`. Edit the `cleanStaleAdapter` struct at lines 66-69 to add a third field: `Logger bootstrap.Logger`.
+1. Open `cmd/bootstrap_production.go`. Edit the `cleanStaleAdapter` struct at lines 66-69 to add a third field: `Logger bootstrap.Logger`. This is the interface type declared at `cmd/bootstrap/bootstrap.go:178-183`; the orchestrator-scope `logger` at line 109 is `*state.Logger`, whose method set satisfies the interface. Mirrors `MarkerCleanupCore.Logger` at `cmd/bootstrap/stale_marker_cleanup.go`, which is also declared as `bootstrap.Logger` and populated from the same `*state.Logger` value at `bootstrap_production.go:151`.
 2. Edit the wiring at lines 113-118 — when the `*hooks.Store` resolves cleanly, populate the new field: `cleaner = &cleanStaleAdapter{client: client, store: hookStore, Logger: logger}`. Keep the `NoOpStaleCleaner` fallback path unchanged.
 3. Inside `(*cleanStaleAdapter).CleanStale` at lines 76-83, add the nil-substitute boilerplate at the top of the method body — copy the shape used at `cmd/bootstrap/stale_marker_cleanup.go:105-112`:
    ```go
@@ -102,7 +102,7 @@ Lift the load-bearing comment block from `cmd/bootstrap/stale_marker_cleanup.go:
    logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: removed=%d", len(removed))
    return nil
    ```
-4. Lift the comment block from `cmd/bootstrap/stale_marker_cleanup.go:80-92` above the hazard-guard branch. Adapt: replace "marker" with "hook entry" / "hooks.json entry", "unset every marker" with "delete every hooks.json entry", "markers protecting legitimate hydrate-in-progress panes" with "hooks.json entries for legitimate live panes whose enumeration momentarily failed". Preserve the "deferral is a successful soft outcome ('skip this run; next bootstrap retries'), not a failure" framing verbatim. The protected-data noun and the soft-outcome framing are both load-bearing per spec §Change 3.
+4. Lift the hazard-guard comment block from `cmd/bootstrap/stale_marker_cleanup.go` — the source span is items 4 and 5 of the `CleanStaleMarkers` algorithm-step comment (the "Mass-unset hazard guard" paragraph and the "empty markers + empty live" paragraph that follows it, located around lines 81-92 — confirm before lifting since line numbers may shift). Adapt: replace "marker" with "hook entry" / "hooks.json entry", "unset every marker" with "delete every hooks.json entry", "markers protecting legitimate hydrate-in-progress panes" with "hooks.json entries for legitimate live panes whose enumeration momentarily failed". Preserve the "deferral is a successful soft outcome ('skip this run; next bootstrap retries'), not a failure" framing verbatim. Do **not** lift the surrounding algorithm-step bullets (items 2, 3, 6) — they describe `CleanStaleMarkers`'s flow, not the hazard-guard rationale. The protected-data noun and the soft-outcome framing are both load-bearing per spec §Change 3.
 5. Rewrite the docstring at lines 71-75. New shape (approximate):
    ```
    // CleanStale prunes hooks.json entries whose structural pane key no
@@ -125,13 +125,13 @@ Lift the load-bearing comment block from `cmd/bootstrap/stale_marker_cleanup.go:
    // recording both counts, plus the terminal line for the branch taken).
    // Enumeration-error branches emit only the terminal Warn.
    ```
-6. Sanity-check the `hooksFile` type is exported enough to be the return shape of `Store.Load()` — per `internal/hooks/store.go:36` it returns `(hooksFile, error)`. `len(persisted)` works on the unexported map type returned from the same package boundary because we only consume `len()` here, not index into it; no API change is required.
+6. Note on `Store.Load()` return type: `internal/hooks/store.go:22` declares `type hooksFile = map[string]map[string]string` as a type alias (note the `=`). Aliases are transparent across package boundaries, so the local `persisted` declared via `:=` is the underlying `map[string]map[string]string` and `len(persisted)` works directly. No API change required, no type-visibility workaround needed.
 7. Run `go build ./...` and `go vet ./...` to confirm the import is wired.
 
 **Acceptance Criteria**:
 - Method body matches the six-branch algorithm described in Do step 3.
 - Comment block lifted from `stale_marker_cleanup.go:80-92` is present above the hazard-guard branch, names `hooks.json` entries as the protected data, and preserves the "deferral is a successful soft outcome" framing.
-- Docstring at the method declaration is rewritten — no longer claims "degrades to no-op"; instead describes the four-branch contract.
+- Docstring at the method declaration is rewritten — no longer claims "degrades to no-op"; instead describes the five-branch contract enumerated in Do step 5 (ListAllPanes error, Load error, hazard guard, both-sides-empty silent no-op, normal path with completion Debug on success).
 - Each of the six branches emits exactly the log lines specified by Change 4 (verified by Task 2-3 tests):
   - ListAllPanes error → terminal Warn only.
   - Load error → terminal Warn only.

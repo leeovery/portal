@@ -13,7 +13,8 @@ approved_at: 2026-05-27
 
 **Acceptance**:
 - [ ] `(*tmux.Client).ListAllPanes` delegates to `ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")` and returns `(nil, err)` on non-nil helper error
-- [ ] Helper docstring rewritten — removes the "no tmux server convenience" framing, describes the error-propagating contract
+- [ ] Helper docstring rewritten — removes the "no tmux server convenience" framing; describes (a) enumeration via the error-propagating `ListAllPanesWithFormat` using the canonical `"#{session_name}:#{window_index}.#{pane_index}"` format, (b) `(nil, err)` on tmux failure, (c) `(parsePaneOutput(raw), nil)` on success, (d) that callers decide policy for empty/error results
+- [ ] Existing subtest at `internal/tmux/tmux_test.go:1461-1473` (`"returns empty slice when no tmux server running"`) is inverted to assert `(nil, non-nil err)` on commander error and renamed to reflect the new contract
 - [ ] New unit test asserts `(nil, err)` is returned when the underlying `Commander` returns exit ≠ 0 on `list-panes -a`
 - [ ] New unit test asserts `([]string{}, nil)` is returned only when `list-panes -a` legitimately returns exit 0 with empty stdout
 - [ ] Existing non-empty-live-set tests in `cmd/clean_test.go` pass unchanged

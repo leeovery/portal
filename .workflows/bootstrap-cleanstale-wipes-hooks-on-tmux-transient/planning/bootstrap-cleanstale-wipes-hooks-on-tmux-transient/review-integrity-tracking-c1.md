@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-27
 cycle: 1
 phase: Plan Integrity Review
@@ -71,7 +71,7 @@ The plan should pick one. Option (a) is the closest match to existing convention
      **Wiring caveat for `cmd/bootstrap_production.go`**: this task introduces the seam in addition to consuming it. Add the new package-level `var commanderFactory` declaration and update the one call site inside `buildProductionOrchestrator` in the same PR so the test compiles. The production surface widens by one unexported variable — acceptable per the `cleanDeps` precedent.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -100,7 +100,7 @@ The intended count is 5 docstring bullets (Save-error rolls into "Normal path" s
 - Docstring at the method declaration is rewritten — no longer claims "degrades to no-op"; instead describes the five-branch contract enumerated in Do step 5 (ListAllPanes error, Load error, hazard guard, both-sides-empty silent no-op, normal path with completion Debug on success).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -129,7 +129,7 @@ The correct source span is roughly lines 81-92 (items 4 and 5 of the original co
 4. Lift the hazard-guard comment block from `cmd/bootstrap/stale_marker_cleanup.go` — the source span is items 4 and 5 of the `CleanStaleMarkers` algorithm-step comment (the "Mass-unset hazard guard" paragraph and the "empty markers + empty live" paragraph that follows it, located around lines 81-92 — confirm before lifting since line numbers may shift). Adapt: replace "marker" with "hook entry" / "hooks.json entry", "unset every marker" with "delete every hooks.json entry", "markers protecting legitimate hydrate-in-progress panes" with "hooks.json entries for legitimate live panes whose enumeration momentarily failed". Preserve the "deferral is a successful soft outcome ('skip this run; next bootstrap retries'), not a failure" framing verbatim. Do **not** lift the surrounding algorithm-step bullets (items 2, 3, 6) — they describe `CleanStaleMarkers`'s flow, not the hazard-guard rationale. The protected-data noun and the soft-outcome framing are both load-bearing per spec §Change 3.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -169,7 +169,7 @@ Phase 1's task-level detail in Task 1-1 (Do step 4) inverts the `TestListAllPane
 - [ ] `go test ./...` is green
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -198,7 +198,7 @@ Also worth noting that the `MarkerCleanupCore.Logger` field at `cmd/bootstrap/st
 1. Open `cmd/bootstrap_production.go`. Edit the `cleanStaleAdapter` struct at lines 66-69 to add a third field: `Logger bootstrap.Logger`. This is the interface type (declared at `cmd/bootstrap/bootstrap.go:178-183`); the orchestrator-scope `logger` at line 109 is `*state.Logger`, whose method set satisfies the interface. This mirrors `MarkerCleanupCore.Logger` at `cmd/bootstrap/stale_marker_cleanup.go`, which is also declared as `bootstrap.Logger` and populated from the same `*state.Logger` value at `bootstrap_production.go:151`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -227,7 +227,7 @@ This is imprecise: `hooksFile` is a `type hooksFile = map[string]map[string]stri
 6. Note on `Store.Load()` return type: `internal/hooks/store.go:22` declares `type hooksFile = map[string]map[string]string` as a type alias (note the `=`). Aliases are transparent across package boundaries, so the local `persisted` declared via `:=` is the underlying `map[string]map[string]string` and `len(persisted)` works directly. No API change required, no type-visibility workaround needed.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -262,7 +262,7 @@ Also update **Edge Cases** entry:
 - Hooks file path resolution: resolve from the `env` slice returned by `IsolateStateForTest(t)` rather than `os.Getenv`, so the helper is robust to future changes in which env vars `IsolateStateForTest` overrides
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -289,7 +289,7 @@ The phase-level AC says "Helper docstring rewritten — removes the 'no tmux ser
 - [ ] Helper docstring rewritten — removes the "no tmux server convenience" framing; describes (a) enumeration via the error-propagating `ListAllPanesWithFormat` using the canonical `"#{session_name}:#{window_index}.#{pane_index}"` format, (b) `(nil, err)` on tmux failure, (c) `(parsePaneOutput(raw), nil)` on success, (d) that callers decide policy for empty/error results
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
