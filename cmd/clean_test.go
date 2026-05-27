@@ -595,6 +595,82 @@ func TestCleanCommand(t *testing.T) {
 			t.Error("hook for live pane must NOT be pruned when projects.json is absent")
 		}
 	})
+
+	// Spec-pinned regression (Phase 5 — bootstrap-cleanstale-wipes-hooks-on-tmux-
+	// transient): when hookStore.Load() returns a non-nil error inside the
+	// portal-clean RunE, the command MUST fall through to runHookStaleCleanup so
+	// the canonical "stale-hook cleanup: hookStore.Load failed: %v" Warn is
+	// emitted exactly once to portal.log. The pre-fix RunE discarded the Load
+	// error with `_` and let len(nil) == 0 fall into the persisted=0 short
+	// circuit — silently swallowing Load failures and re-introducing the
+	// "silent at the adapter" defect class the spec set out to eliminate.
+	t.Run("hookStore.Load error emits canonical Warn and returns nil", func(t *testing.T) {
+		dir := t.TempDir()
+		projectsFile := filepath.Join(dir, "projects.json")
+		t.Setenv("PORTAL_PROJECTS_FILE", projectsFile)
+
+		// Isolate XDG_CONFIG_HOME so portal.log lands under our temp dir
+		// (state.PortalLog resolves to <XDG>/portal/state/portal.log). HOME
+		// is re-pointed too so xdg.ConfigBase has no chance of resolving
+		// to the developer's real ~/.config.
+		isolatedXDG := filepath.Join(dir, "xdg")
+		if err := os.MkdirAll(isolatedXDG, 0o700); err != nil {
+			t.Fatalf("failed to create isolated XDG dir: %v", err)
+		}
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("XDG_CONFIG_HOME", isolatedXDG)
+
+		// Write a hooks.json then chmod it to 0o000 so Store.Load's
+		// os.ReadFile returns (nil, EACCES). This is a non-ENOENT read
+		// failure — Store.Load propagates the OS error per its contract
+		// (internal/hooks/store.go:36-51).
+		hooksFile := filepath.Join(dir, "hooks.json")
+		writeHooksJSON(t, hooksFile, map[string]map[string]string{
+			"my-session:0.0": {"on-resume": "cmd1"},
+		})
+		if err := os.Chmod(hooksFile, 0o000); err != nil {
+			t.Fatalf("failed to chmod hooks file: %v", err)
+		}
+		t.Cleanup(func() {
+			// Restore perms so t.TempDir cleanup can remove the file.
+			_ = os.Chmod(hooksFile, 0o600)
+		})
+		t.Setenv("PORTAL_HOOKS_FILE", hooksFile)
+
+		// Inject a benign AllPaneLister — the helper's Load reproduces
+		// the EACCES before reaching the destructive CleanStale branch,
+		// so the lister's panes value is irrelevant. We still inject one
+		// because the production buildCleanPaneLister would construct a
+		// real tmux client and ListAllPanes against the test environment.
+		cleanDeps = &CleanDeps{
+			AllPaneLister: &mockCleanPaneLister{panes: []string{"my-session:0.0"}},
+		}
+		t.Cleanup(func() { cleanDeps = nil })
+
+		buf := new(bytes.Buffer)
+		resetRootCmd()
+		rootCmd.SetOut(buf)
+		rootCmd.SetArgs([]string{"clean"})
+
+		err := rootCmd.Execute()
+		if err != nil {
+			t.Fatalf("expected nil error (swallow policy), got: %v", err)
+		}
+
+		// Read portal.log under the isolated state dir and assert the
+		// canonical Warn substring is present. The helper writes the
+		// fmt-rendered line; we substring-match against the format
+		// string's invariant prefix.
+		stateDir := filepath.Join(isolatedXDG, "portal", "state")
+		logData, readErr := os.ReadFile(filepath.Join(stateDir, "portal.log"))
+		if readErr != nil {
+			t.Fatalf("failed to read portal.log at %s: %v", stateDir, readErr)
+		}
+		const canonicalPrefix = "stale-hook cleanup: hookStore.Load failed:"
+		if !bytes.Contains(logData, []byte(canonicalPrefix)) {
+			t.Errorf("portal.log missing canonical Load-failure Warn; got:\n%s", string(logData))
+		}
+	})
 }
 
 // mockCleanPaneLister implements AllPaneLister for clean command tests.

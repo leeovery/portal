@@ -95,14 +95,23 @@ var cleanCmd = &cobra.Command{
 		// (a) the helper's swallow policy means ListAllPanes never fails
 		// the user's command, and (b) Load failures are rare (corrupt or
 		// permission-denied hooks.json).
-		existingHooks, _ := hookStore.Load()
+		//
+		// loadErr is captured (NOT discarded with `_`) so the persisted==0
+		// early-exit only fires when Load actually succeeded with an empty
+		// map. Without the err-gate, a (nil, EACCES) return from Load
+		// satisfies len(nil) == 0 and silently short-circuits past the
+		// helper — re-introducing the "silent at the adapter" defect class
+		// the parent spec set out to eliminate (acceptance criterion 4).
+		existingHooks, loadErr := hookStore.Load()
 
 		// No hooks registered — nothing to clean. Emit a single Debug
 		// breadcrumb so every invocation of portal clean produces at least
 		// one log line (preserves no-tmux-server ergonomics while keeping
 		// the cleanup callsite observable in portal.log). This breadcrumb
 		// stays at the callsite — the shared helper does NOT emit it.
-		if len(existingHooks) == 0 {
+		// Gated on loadErr == nil so Load failures fall through to the
+		// helper for canonical-Warn emission rather than silently exiting.
+		if loadErr == nil && len(existingHooks) == 0 {
 			logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: persisted=0, skipping")
 			return nil
 		}
@@ -112,7 +121,19 @@ var cleanCmd = &cobra.Command{
 		// the user's command (the Warn lands in portal.log for audit).
 		// onRemoved prints "Removed stale hook: <key>" per removed entry,
 		// preserving the pre-extraction user-facing stdout byte-for-byte.
-		return runHookStaleCleanup(
+		//
+		// Return value is deliberately discarded: the helper's `swallow`
+		// policy already returns nil for ListAllPanes errors. The
+		// remaining return paths are (a) nil on the happy path and (b) a
+		// hookStore.Load / CleanStale error on the destructive branches.
+		// Per spec §Logger plumbing / portal clean: "the subcommand's
+		// RunE continues to return nil for the hook-cleanup tail's
+		// transient failures (matching the existing pre-fix safety-net
+		// posture which already chose silence-and-continue over
+		// user-facing error)". The helper has already emitted the
+		// canonical Warn breadcrumb to portal.log before returning, so
+		// the failure is post-hoc auditable.
+		_ = runHookStaleCleanup(
 			buildCleanPaneLister(),
 			hookStore,
 			logger,
@@ -121,6 +142,7 @@ var cleanCmd = &cobra.Command{
 				_, _ = fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)
 			},
 		)
+		return nil
 	},
 }
 
