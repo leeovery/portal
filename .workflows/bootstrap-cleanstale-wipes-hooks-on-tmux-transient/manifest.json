@@ -32,7 +32,7 @@
         "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "972731cfdc3bfbf7d3d3c0fc0c5ba14e39fac92e",
+          "spec_commit": "2ad70f49f80bf805dd8f89ca805643cb5b563159",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
