@@ -15,10 +15,10 @@
     "specification": {
       "items": {
         "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 4,
           "finding_gate_mode": "auto",
-          "date": "2026-05-26",
+          "date": "2026-05-27",
           "sources": {
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
               "status": "incorporated"
