@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "972731cfdc3bfbf7d3d3c0fc0c5ba14e39fac92e",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
