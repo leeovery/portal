@@ -86,98 +86,33 @@ func (a *saverAdapter) EnsureSaver() error {
 // cleanStaleAdapter prunes the on-disk hooks store of entries whose
 // structural key no longer matches a live tmux pane. Step 11 of the
 // bootstrap sequence; best-effort per spec.
+//
+// The lister field is the AllPaneLister interface (declared in
+// cmd/clean.go) — production wiring passes a *tmux.Client which
+// satisfies the interface via ListAllPanes. Using the interface (rather
+// than the concrete *tmux.Client) lets unit tests substitute a stub
+// without needing a test-only adapter mirror.
 type cleanStaleAdapter struct {
-	client *tmux.Client
+	lister AllPaneLister
 	store  *hooks.Store
 	Logger bootstrap.Logger
 }
 
-// CleanStale prunes the hooks store of entries whose structural key is
-// no longer represented by a live tmux pane. Errors from the two
-// dependency calls (tmux pane enumeration, hooks.json load) are surfaced
-// to the caller as soft warnings (the orchestrator Warn-and-swallows at
-// step 11); they are NOT silently degraded to nil because doing so was
-// the bug this rewrite closes — a list-panes failure used to fall
-// through to a destructive CleanStale call against a stale (empty)
-// live-pane slice.
-//
-// Algorithm:
-//  1. Enumerate live panes via a.client.ListAllPanes. On error: Warn
-//     under ComponentBootstrap and return err.
-//  2. Load persisted hooks via a.store.Load. On error: Warn under
-//     ComponentBootstrap and return err. The destructive CleanStale
-//     call is NOT made on this branch.
-//  3. Emit a Debug breadcrumb with the live and persisted counts so the
-//     hazard-guard / normal-path decision is observable from portal.log.
-//  4. Mass-deletion hazard guard: if the parsed live-pane set is empty
-//     AND at least one hooks.json entry exists, emit a Logger.Warn
-//     (component=bootstrap) describing the deferral (including hook
-//     count) and return nil without invoking a.store.CleanStale.
-//     Treating an empty live set as authoritative would destabilise a
-//     still-live tmux server by deleting every hooks.json entry —
-//     including hooks.json entries for legitimate live panes whose
-//     enumeration momentarily failed. The deferral is a successful soft
-//     outcome ("skip this run; next bootstrap retries"), not a failure;
-//     surfacing it as a return error would conflate it with genuine
-//     dependency failures.
-//  5. If the parsed live-pane set is empty AND no hooks.json entries
-//     exist, return nil — there is nothing to do and no hazard to guard
-//     against.
-//  6. Otherwise invoke a.store.CleanStale(livePanes) and, on success,
-//     emit a Debug breadcrumb with the removed-entry count. Surface any
-//     error from CleanStale to the caller.
+// CleanStale delegates to runHookStaleCleanup with the bootstrap-step-11
+// policy (returnError — the orchestrator Warn-and-swallows at its own
+// level so errors surface through the StaleCleaner interface) and no
+// per-removal callback (bootstrap has nothing to print to the user).
+// Algorithm, hazard guard, and log format strings all live in the
+// shared helper — see cmd/run_hook_stale_cleanup.go for the full design
+// rationale.
 func (a *cleanStaleAdapter) CleanStale() error {
-	// Substitute a no-op Logger when none was injected so call sites can
-	// invoke logger.Warn / logger.Debug unconditionally, matching the
-	// nil-tolerance contract used by MarkerCleanupCore.CleanStaleMarkers
-	// at cmd/bootstrap/stale_marker_cleanup.go:109-112. Use a local var
-	// rather than mutating a.Logger so the receiver's state is not
-	// silently rewritten across calls.
-	logger := a.Logger
-	if logger == nil {
-		logger = cleanStaleNoopLogger{}
-	}
-
-	livePanes, err := a.client.ListAllPanes()
-	if err != nil {
-		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: list-panes failed: %v", err)
-		return err
-	}
-
-	persisted, err := a.store.Load()
-	if err != nil {
-		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: hookStore.Load failed: %v", err)
-		return err
-	}
-
-	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: live=%d persisted=%d", len(livePanes), len(persisted))
-
-	// Mass-deletion hazard guard. The guard MUST run before any destructive
-	// CleanStale invocation so a silently-empty live-pane result (transient
-	// tmux failure swallowed upstream, saver pane mid-respawn returning
-	// exit 0 / empty stdout, or genuinely zero live panes during tmux
-	// instability) cannot fall through to "live set empty → delete every
-	// hooks.json entry". The deferral surfaces via Logger.Warn so the
-	// error channel of CleanStale exclusively carries genuine dependency
-	// failures.
-	if len(livePanes) == 0 {
-		if len(persisted) == 0 {
-			// Empty persisted + empty live: nothing to do, no hazard.
-			return nil
-		}
-		logger.Warn(state.ComponentBootstrap,
-			"stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)",
-			len(persisted))
-		return nil
-	}
-
-	removed, err := a.store.CleanStale(livePanes)
-	if err != nil {
-		return err
-	}
-	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: removed=%d", len(removed))
-	return nil
+	return runHookStaleCleanup(a.lister, a.store, a.Logger, returnError, nil)
 }
+
+// Compile-time assertion that *tmux.Client satisfies AllPaneLister so
+// the production wiring at buildProductionOrchestrator can pass a
+// *tmux.Client into the cleanStaleAdapter.lister field unchanged.
+var _ AllPaneLister = (*tmux.Client)(nil)
 
 // commanderFactory is the indirection seam tests use to inject a
 // wrapping tmux.Commander into the production orchestrator-builder
@@ -232,7 +167,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	// downgraded to a no-op rather than aborting bootstrap.
 	var cleaner bootstrap.StaleCleaner
 	if hookStore, err := loadHookStore(); err == nil && hookStore != nil {
-		cleaner = &cleanStaleAdapter{client: client, store: hookStore, Logger: logger}
+		cleaner = &cleanStaleAdapter{lister: client, store: hookStore, Logger: logger}
 	} else {
 		cleaner = bootstrap.NoOpStaleCleaner{}
 	}
