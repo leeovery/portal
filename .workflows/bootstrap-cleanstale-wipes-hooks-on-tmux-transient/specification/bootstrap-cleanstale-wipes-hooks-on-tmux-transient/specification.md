@@ -220,6 +220,42 @@ Confirm no behavioural change in existing `cmd/clean_test.go` non-empty live-set
 | Tmux transient end-to-end | New integration test |
 | `portal clean` transient end-to-end | New integration test |
 
+## Acceptance Criteria
+
+A bootstrap-triggering command (`portal open`, `x`, `portal hooks set`, `portal hooks rm`, etc.) executed while tmux is in a transient state (where `list-panes -a` returns exit ≠ 0 or empty stdout) must leave `hooks.json` **unchanged**.
+
+Specifically:
+
+1. **Hazard guard:** when `len(livePanes) == 0 && len(persistedHooks) > 0` at either `CleanStale` callsite, no entries are removed from `hooks.json` and a `Warn` is emitted at `ComponentBootstrap` recording both counts.
+2. **Error propagation:** when `ListAllPanesWithFormat` returns a non-nil error, the adapter returns that error; the orchestrator surfaces it as a soft warning. `hooks.json` is untouched.
+3. **Normal-path preservation:** when the live-pane set is non-empty, the pre-fix behaviour is preserved verbatim — stale entries are removed; live entries are kept.
+4. **Log breadcrumbs:** every invocation of `cleanStaleAdapter.CleanStale` and the `portal clean` hook tail emits `Debug` on entry (with live and persisted counts) and either `Debug` on completion (with removed count) or `Warn` on hazard-guard skip / propagated error.
+5. **Bootstrap posture preserved:** no fatal abort from `PersistentPreRunE` is introduced. The orchestrator's "never block the user's command" rule remains in force.
+6. **Coverage:** every entry in the test coverage matrix exists, passes, and inverts (where the existing test asserts the destructive outcome) to assert the new "refuse + warn" outcome.
+
+## Out of Scope
+
+The following are explicitly **not** part of this work unit:
+
+- **Removing the swallow at the helper layer for "no tmux server" use cases.** The repurposed `ListAllPanes` will propagate errors uniformly; if a future user of `portal clean` wants the prior "no server → no error" ergonomics, that is a separate decision handled at the callsite, not by re-introducing the swallow.
+- **Defensive cross-check via `ListSessionNames` / `has-session`.** Considered (Option D in the investigation) and judged unnecessary given the hazard guard's coverage. May be revisited only if review surfaces a scenario where `len(persisted) > 0` is itself ambiguous.
+- **Retry-with-backoff on empty result.** Rejected — conflicts with the bootstrap "never block `PersistentPreRunE`" posture; the hazard guard achieves the same end (defer-and-retry-next-bootstrap) without polling.
+- **Disabling step 11 entirely.** Stale hook cleanup at bootstrap remains desirable; the fix makes it safe, not removes it.
+- **Migration messaging for users relying on `portal clean` as "kill all hooks when no tmux."** The investigation flagged this as a spec-phase open item (deliberate-vs-accidental rationale for the existing destructive subtest). **Resolution:** no migration messaging required. The destructive interpretation in `clean_test.go:327-368` is treated as the codified-as-correct expression of the bug, not as deliberate user-facing behaviour worth preserving. Users wanting to clear all hooks should use `portal hooks rm` explicitly per-entry; an explicit "wipe all" subcommand can be added later if demand surfaces.
+- **`hooks.json` schema changes.** None.
+
+## Risk Assessment
+
+- **Fix complexity:** Low–Medium. Three changes are individually small; the largest line-count contributor is the parser-deduplication refactor. No tmux-protocol changes, no `hooks.json` schema changes, no concurrency changes.
+- **Regression risk:** Low. The destructive code path is the failure mode; the fix narrows what triggers it without removing legitimate cleanups. Existing non-empty-live-set tests should pass unchanged.
+- **Release cadence:** Regular release. The bug is high-severity (silent data destruction) but the trigger window is intermittent and a recovery one-shot exists (`portal-resume-backfill.sh --apply`). Hotfix cadence is not required.
+
+## Notes
+
+- Not a regression from any recent change. The destructive pattern has existed since `CleanStale` was wired to the live-pane enumeration. Recent `slow-open-empty-previews-and-zombie-sessions` and `saver-kill-respawn-loop-leaks-daemons` releases increase exposure because they involve more bootstrap activity during which tmux transients become more frequent.
+- Component B (orphan-sweep) already implements the "log and skip on transient" posture this fix is asking for elsewhere — Component B's behaviour is the prior-art reference alongside step 9.
+- The wipe affects user-session hooks only — portal-internal sessions (`_portal-bootstrap`, `_portal-saver`) are filtered out at registration and never appear in `hooks.json`.
+
 ---
 
 ## Working Notes
