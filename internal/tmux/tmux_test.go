@@ -1458,17 +1458,17 @@ func TestListAllPanes(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty slice when no tmux server running", func(t *testing.T) {
+	t.Run("returns error when underlying commander fails", func(t *testing.T) {
 		mock := &MockCommander{Err: fmt.Errorf("no server running on /tmp/tmux-501/default")}
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListAllPanes()
 
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err == nil {
+			t.Fatalf("expected non-nil error, got nil")
 		}
-		if len(got) != 0 {
-			t.Fatalf("got %d panes, want 0", len(got))
+		if got != nil {
+			t.Fatalf("expected nil slice on error, got %#v", got)
 		}
 	})
 

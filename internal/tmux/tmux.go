@@ -680,16 +680,30 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 	return out, nil
 }
 
-// ListAllPanes returns the structural keys for all panes across all tmux sessions.
-// Each key has the form "session_name:window_index.pane_index" (e.g. "my-project:0.0").
-// Structural keys survive tmux server restarts (unlike ephemeral pane IDs).
-// Returns an empty slice and nil error when no tmux server is running.
+// ListAllPanes enumerates every live pane across every tmux session and returns
+// the canonical structural key for each one. Keys have the form
+// "session_name:window_index.pane_index" (e.g. "my-project:0.0") — the same
+// format produced by (*Client).ResolveStructuralKey and used as the lookup key
+// in hooks.json, so callers can intersect the returned slice with persisted
+// hook entries directly.
+//
+// The implementation delegates to the error-propagating ListAllPanesWithFormat
+// helper. On any tmux failure (transport error, exit ≠ 0, server gone) it
+// returns (nil, err) with the underlying error wrapped — callers can use
+// errors.Is / errors.As against any sentinel in the chain. On success it
+// returns the parsed structural-key slice.
+//
+// This helper deliberately does not paper over failure modes: policy for an
+// empty result vs. a tmux error is the caller's decision. Treating a tmux
+// failure as "no live panes" silently elides every entry that depends on the
+// live set (notably hooks.json), so the discriminating contract is load-
+// bearing.
 func (c *Client) ListAllPanes() ([]string, error) {
-	output, err := c.cmd.Run("list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}")
+	raw, err := c.ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")
 	if err != nil {
-		return []string{}, nil
+		return nil, err
 	}
-	return parsePaneOutput(output), nil
+	return parsePaneOutput(raw), nil
 }
 
 // SendKeys delivers a command to the specified tmux pane followed by Enter.
