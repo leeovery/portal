@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // stale_marker_cleanup.go's Logger field uses the package-local Logger
@@ -32,11 +33,14 @@ type MarkerUnsetter interface {
 	UnsetServerOption(name string) error
 }
 
-// liveFormat is the canonical tmux format string the cleanup step requests
-// from list-panes -a. Each output line is `session:window.pane`, parsed via
-// strconv.Atoi and converted to canonical paneKey form via
-// state.SanitizePaneKey before set-difference computation.
-const liveFormat = "#{session_name}:#{window_index}.#{pane_index}"
+// The cleanup step requests the canonical tmux structural-key format
+// (tmux.StructuralKeyFormat) from list-panes -a. Each output line is
+// `session:window.pane`, parsed via strconv.Atoi and converted to canonical
+// paneKey form via state.SanitizePaneKey before set-difference computation.
+// Pinning to the shared constant keeps this path's notion of "what is a
+// paneKey" byte-identical to (*tmux.Client).ListAllPanes /
+// ResolveStructuralKey / ListPanes — drift here would silently desync the
+// stale-marker and orphan-FIFO cleanup paths.
 
 // MarkerCleanupCore is the orchestrator seam responsible for diffing
 // canonical-paneKey markers against live-pane paneKeys and unsetting any
@@ -72,10 +76,11 @@ var _ MarkerCleaner = (*MarkerCleanupCore)(nil)
 //
 // Algorithm:
 //  1. Enumerate canonical-paneKey markers via state.ListSkeletonMarkers(c.Markers).
-//  2. Enumerate live panes via Panes.ListAllPanesWithFormat using the literal
-//     `#{session_name}:#{window_index}.#{pane_index}` format string. On
-//     error, return without invoking any unset — the orchestrator surfaces
-//     the error as a soft warning per spec §Fix Component B.
+//  2. Enumerate live panes via Panes.ListAllPanesWithFormat using
+//     tmux.StructuralKeyFormat (the canonical structural-key format
+//     constant). On error, return without invoking any unset — the
+//     orchestrator surfaces the error as a soft warning per spec §Fix
+//     Component B.
 //  3. Parse each non-empty trimmed line into (session, window, pane) and
 //     convert to canonical paneKey form via state.SanitizePaneKey.
 //  4. Mass-unset hazard guard: if the parsed live-pane set is empty AND at
@@ -116,7 +121,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 		return err
 	}
 
-	raw, err := c.Panes.ListAllPanesWithFormat(liveFormat)
+	raw, err := c.Panes.ListAllPanesWithFormat(tmux.StructuralKeyFormat)
 	if err != nil {
 		return err
 	}

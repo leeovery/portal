@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 )
 
 // fakeMarkerLister is a lightweight in-memory state.ServerOptionLister for
@@ -38,7 +39,7 @@ func (f *fakeMarkerLister) ShowAllServerOptions() (string, error) {
 
 // fakeLivePaneLister is a lightweight in-memory LivePaneLister for unit tests.
 // It records the format string requested so tests can assert the canonical
-// `#{session_name}:#{window_index}.#{pane_index}` literal is used verbatim.
+// tmux.StructuralKeyFormat constant is used verbatim.
 type fakeLivePaneLister struct {
 	output      string
 	err         error
@@ -145,9 +146,8 @@ func TestCleanStaleMarkers_requestsLivePanesWithCanonicalFormat(t *testing.T) {
 		t.Fatalf("CleanStaleMarkers returned error: %v", err)
 	}
 
-	wantFormat := "#{session_name}:#{window_index}.#{pane_index}"
-	if live.gotFormat != wantFormat {
-		t.Errorf("ListAllPanesWithFormat format = %q, want %q", live.gotFormat, wantFormat)
+	if live.gotFormat != tmux.StructuralKeyFormat {
+		t.Errorf("ListAllPanesWithFormat format = %q, want %q", live.gotFormat, tmux.StructuralKeyFormat)
 	}
 }
 

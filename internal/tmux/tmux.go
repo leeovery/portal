@@ -303,7 +303,7 @@ func (c *Client) CurrentSessionName() (string, error) {
 // (e.g. "my-project:0.1") by querying tmux for the pane's session name,
 // window index, and pane index.
 func (c *Client) ResolveStructuralKey(paneID string) (string, error) {
-	output, err := c.cmd.Run("display-message", "-p", "-t", paneID, "#{session_name}:#{window_index}.#{pane_index}")
+	output, err := c.cmd.Run("display-message", "-p", "-t", paneID, StructuralKeyFormat)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve structural key for pane %q: %w", paneID, err)
 	}
@@ -645,7 +645,7 @@ func (c *Client) ListWindowsAndPanesInSession(session string) ([]WindowGroup, er
 // Each key has the form "session_name:window_index.pane_index" (e.g. "my-project:0.0").
 // Structural keys survive tmux server restarts (unlike ephemeral pane IDs).
 func (c *Client) ListPanes(sessionName string) ([]string, error) {
-	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", "#{session_name}:#{window_index}.#{pane_index}")
+	output, err := c.cmd.Run("list-panes", "-t", sessionName, "-F", StructuralKeyFormat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list panes for session %q: %w", sessionName, err)
 	}
@@ -683,6 +683,16 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 	return out, nil
 }
 
+// StructuralKeyFormat is the canonical tmux format string that yields a pane's
+// structural key (e.g. "my-project:0.1") — the load-bearing join key between
+// live-pane enumeration (list-panes / display-message), persisted hook entries
+// in hooks.json, and @portal-skeleton-* marker names. Every tmux call whose
+// output is consumed as a structural key MUST request exactly this format so
+// the two cleanup paths (stale-marker cleanup and orphan-FIFO sweep) and the
+// hook lookup table all agree on what constitutes a paneKey. Drift here would
+// silently desync the cleanup paths' interpretation of "what is a paneKey".
+const StructuralKeyFormat = "#{session_name}:#{window_index}.#{pane_index}"
+
 // ListAllPanes enumerates every live pane across every tmux session and returns
 // the canonical structural key for each one. Keys have the form
 // "session_name:window_index.pane_index" (e.g. "my-project:0.0") — the same
@@ -702,7 +712,7 @@ func (c *Client) ShowEnvironment(session string) (string, error) {
 // live set (notably hooks.json), so the discriminating contract is load-
 // bearing.
 func (c *Client) ListAllPanes() ([]string, error) {
-	raw, err := c.ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")
+	raw, err := c.ListAllPanesWithFormat(StructuralKeyFormat)
 	if err != nil {
 		return nil, err
 	}

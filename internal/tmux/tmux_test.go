@@ -1274,7 +1274,7 @@ func TestListPanes(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "list-panes -t my-session -F #{session_name}:#{window_index}.#{pane_index}"
+		wantArgs := "list-panes -t my-session -F " + tmux.StructuralKeyFormat
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -1522,7 +1522,7 @@ func TestListAllPanes(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "list-panes -a -F #{session_name}:#{window_index}.#{pane_index}"
+		wantArgs := "list-panes -a -F " + tmux.StructuralKeyFormat
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -1547,7 +1547,7 @@ func TestResolveStructuralKey(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "display-message -p -t %3 #{session_name}:#{window_index}.#{pane_index}"
+		wantArgs := "display-message -p -t %3 " + tmux.StructuralKeyFormat
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
