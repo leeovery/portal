@@ -88,6 +88,84 @@ Bootstrap step 9 (`CleanStaleMarkers`) implements the same diff-then-delete shap
 
 Step 11 has the same shape of work but neither safeguard. **The architectural inconsistency is the bug.** The fix lifts the step-9 pattern verbatim into the two affected callsites.
 
+## Fix Specification
+
+**Defense-in-depth across both layers**, lifting the prior-art pattern from bootstrap step 9 (`CleanStaleMarkers`) verbatim. Three coordinated changes:
+
+### Change 1 — Repurpose `ListAllPanes` to Wrap the Error-Propagating Helper
+
+**File:** `internal/tmux/tmux.go` (~line 687-693).
+
+Replace the current swallow body so that `ListAllPanes` becomes a thin wrapper around `ListAllPanesWithFormat` plus a shared `parseLivePaneSet` utility. Approximate shape:
+
+```go
+func (c *Client) ListAllPanes() ([]string, error) {
+    raw, err := c.ListAllPanesWithFormat("#{session_name}:#{window_index}.#{pane_index}")
+    if err != nil {
+        return nil, err
+    }
+    set := parseLivePaneSet(raw, /* logger */ nil)
+    keys := make([]string, 0, len(set))
+    for k := range set {
+        keys = append(keys, k)
+    }
+    return keys, nil
+}
+```
+
+**Disposition rationale (locked):** repurpose, not delete or deprecate.
+- Deletion forces every call site (production and test) to be touched in this work unit; high blast radius for a contract-narrowing change.
+- Deprecation with `// Deprecated:` keeps the footgun alive — the compiler does not enforce the tag.
+- Repurpose structurally eliminates the swallow contract while keeping every existing call site compiling unchanged. New consumers inherit the safe behaviour by default.
+
+### Change 2 — Promote `parseLivePaneSet` to a Shared Utility
+
+The `session:window.pane` parser currently lives in `cmd/bootstrap/stale_marker_cleanup.go`. It must be promoted to a shared location (likely `internal/tmux` or a new helper next to it) so all three consumers — the new `ListAllPanes`, `CleanStaleMarkers`, and the two `CleanStale` callsites — use one parser.
+
+Existing `parseLivePaneSet` test coverage in `cmd/bootstrap/stale_marker_cleanup_test.go` must move or be duplicated for the new location.
+
+### Change 3 — Add Mass-Deletion Hazard Guard at Both `CleanStale` Callsites
+
+**Files:**
+- `cmd/bootstrap_production.go:76-83` — `cleanStaleAdapter.CleanStale`.
+- `cmd/clean.go:75-91` — `portal clean` hook-cleanup tail.
+
+Before passing the live-pane slice to `hooks.Store.CleanStale`, check the combination `len(livePanes) == 0 && len(persistedHooks) > 0`. When that combination holds:
+
+1. Emit `Logger.Warn(ComponentBootstrap, ...)` with both counts.
+2. Skip the destructive call.
+3. Return nil (next bootstrap retries).
+
+This mirrors the prior-art at `cmd/bootstrap/stale_marker_cleanup.go:126-141` exactly.
+
+**Logger plumbing:** `cleanStaleAdapter` currently has no `Logger` field. It must gain one, populated from the orchestrator-scope logger using the same field-population pattern at `cmd/bootstrap_production.go:147-152` where `MarkerCleanupCore` already receives one. The orchestrator-scope logger is resolved at lines 109-110 of the same file.
+
+The `portal clean` subcommand must apply the same hazard guard at `cmd/clean.go:75-91`.
+
+### Change 4 — Add Adapter-Level Logging
+
+At both `CleanStale` callsites, emit:
+
+- **`Debug` on entry** — live count, persisted count, what would be removed.
+- **`Warn` when the hazard guard fires** — both counts (covers mode (b)).
+- **`Debug` on the normal-path completion** — count removed.
+- **`Warn` on propagated error from `ListAllPanesWithFormat`** — surfaces mode (a) with the wrapped error message.
+
+**Post-fix log distinguishability:** failure modes (a) (exit ≠ 0) and (b) (exit 0 with empty stdout) become distinguishable in `portal.log` — mode (a) surfaces as the propagated-error `Warn`; mode (b) surfaces as the hazard-guard `Warn`. Currently both modes are silent at the adapter.
+
+### Bootstrap Posture Preserved
+
+Bootstrap step 11 remains **best-effort** under the orchestrator's "never abort `PersistentPreRunE`" rule. The propagated error from `ListAllPanesWithFormat` and the hazard-guard skip both manifest as soft warnings, not fatal aborts. The change is "treat empty as unknown, log, and continue," not "fail loudly on empty."
+
+### Closing Both Failure Modes
+
+| Failure mode | Closed by |
+|---|---|
+| (a) `list-panes -a` exit ≠ 0 | Change 1 (helper propagates error → adapter returns it as soft warning) |
+| (b) `list-panes -a` exit 0 with empty stdout | Change 3 (hazard guard refuses wipe when `len(live)==0 && len(persisted)>0`) |
+
+Either change alone leaves one failure mode open. Both are required.
+
 ---
 
 ## Working Notes
