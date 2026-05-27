@@ -179,6 +179,23 @@ func (a *cleanStaleAdapter) CleanStale() error {
 	return nil
 }
 
+// commanderFactory is the indirection seam tests use to inject a
+// wrapping tmux.Commander into the production orchestrator-builder
+// chain. Production code leaves it at the default — a freshly
+// constructed *tmux.RealCommander, byte-identical to what
+// tmux.DefaultClient produces — so the production binary is
+// unaffected. Integration tests under //go:build integration override
+// this var (under t.Cleanup restore) to inject, for example, a
+// TransientListPanesCommander wrapping a socket-anchored inner
+// Commander so the entire eleven-step bootstrap pipeline observes
+// the test's failure policy via a single, structurally-pinned seam.
+//
+// Discipline: callers MUST NOT cache the Client built from this
+// factory across builds — the factory is invoked once per
+// buildProductionOrchestrator call so a test that flips the factory
+// between phases gets the new Commander in the next build.
+var commanderFactory = func() tmux.Commander { return &tmux.RealCommander{} }
+
 // buildProductionOrchestrator constructs a fully-wired
 // *bootstrap.Orchestrator and the underlying *tmux.Client to be shared
 // with downstream commands via cmd.Context(). The construction is
@@ -192,8 +209,14 @@ func (a *cleanStaleAdapter) CleanStale() error {
 //
 // HookStore: when loadHookStore fails (path resolution error) the
 // CleanStale step degrades to bootstrap.NoOpStaleCleaner.
+//
+// Commander seam: the underlying *tmux.Client is built via
+// commanderFactory rather than tmux.DefaultClient so integration
+// tests can inject a wrapping Commander (see commanderFactory godoc).
+// The default factory returns &tmux.RealCommander{}, byte-identical
+// to tmux.DefaultClient's construction.
 func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
-	client := tmux.DefaultClient()
+	client := tmux.NewClient(commanderFactory())
 
 	// Resolve state dir once. An error here does not abort bootstrap —
 	// state.EnsureDir will be retried inside individual subsystems and
