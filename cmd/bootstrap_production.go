@@ -45,29 +45,6 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// cleanStaleNoopLogger is the local no-op stand-in substituted inside
-// (*cleanStaleAdapter).CleanStale when the Logger field is nil. Mirrors
-// the noopLogger pattern in cmd/bootstrap so the adapter can invoke
-// Logger.Warn / Logger.Debug unconditionally — matching the nil-tolerance
-// contract that MarkerCleanupCore.CleanStaleMarkers uses at
-// cmd/bootstrap/stale_marker_cleanup.go:109-112.
-type cleanStaleNoopLogger struct{}
-
-// Debug is a no-op.
-func (cleanStaleNoopLogger) Debug(component, format string, args ...any) {}
-
-// Info is a no-op.
-func (cleanStaleNoopLogger) Info(component, format string, args ...any) {}
-
-// Warn is a no-op.
-func (cleanStaleNoopLogger) Warn(component, format string, args ...any) {}
-
-// Error is a no-op.
-func (cleanStaleNoopLogger) Error(component, format string, args ...any) {}
-
-// Compile-time assertion that cleanStaleNoopLogger satisfies bootstrap.Logger.
-var _ bootstrap.Logger = cleanStaleNoopLogger{}
-
 // saverAdapter wraps tmux.EnsurePortalSaverVersion to satisfy
 // bootstrap.SaverBootstrapper. Carries the binary's ldflags-injected
 // version so the version-marker upgrade protocol kicks in on release-

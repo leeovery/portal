@@ -174,7 +174,7 @@ func TestEagerSignalHydrate_ReturnsErrorWhenListSkeletonMarkersFails(t *testing.
 	}
 }
 
-// TestEagerSignalHydrate_NilLoggerTolerated pins the local noopLogger
+// TestEagerSignalHydrate_NilLoggerTolerated pins the local NoopLogger
 // substitution: a nil Logger field must not panic when the failure path
 // exercises Logger.Warn. Mirrors MarkerCleanupCore's nil-Logger contract.
 func TestEagerSignalHydrate_NilLoggerTolerated(t *testing.T) {

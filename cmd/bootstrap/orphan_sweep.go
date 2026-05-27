@@ -132,7 +132,7 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	logger := c.Logger
 	if logger == nil {
-		logger = noopLogger{}
+		logger = NoopLogger{}
 	}
 	identify := c.Identify
 	if identify == nil {

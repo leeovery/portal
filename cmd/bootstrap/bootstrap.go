@@ -174,7 +174,7 @@ type StaleCleaner interface {
 // degrade-and-continue Warn, fatal Error. Adding a fifth method (Trace,
 // Fatal, etc.) requires a corresponding new emission site inside Run; do
 // not widen this interface speculatively because every implementer
-// (noopLogger, *state.Logger, test recorders) must satisfy the full set.
+// (NoopLogger, *state.Logger, test recorders) must satisfy the full set.
 type Logger interface {
 	Debug(component, format string, args ...any)
 	Info(component, format string, args ...any)
@@ -182,24 +182,29 @@ type Logger interface {
 	Error(component, format string, args ...any)
 }
 
-// noopLogger is the default Logger Run substitutes when Orchestrator.Logger
+// NoopLogger is the default Logger Run substitutes when Orchestrator.Logger
 // is nil. It exists so step sites can call o.Logger.Debug / o.Logger.Warn /
 // o.Logger.Error unconditionally — trusting the contract uniformly with the
 // rest of the codebase, where *state.Logger's nil-receiver no-op is relied
 // on directly.
-type noopLogger struct{}
+//
+// Exported as the single canonical no-op Logger implementation across the
+// repo — adapter packages in cmd/ and internal/bootstrapadapter use
+// bootstrap.NoopLogger{} for nil-substitution rather than redeclaring local
+// stand-ins.
+type NoopLogger struct{}
 
 // Debug is a no-op.
-func (noopLogger) Debug(component, format string, args ...any) {}
+func (NoopLogger) Debug(component, format string, args ...any) {}
 
 // Info is a no-op.
-func (noopLogger) Info(component, format string, args ...any) {}
+func (NoopLogger) Info(component, format string, args ...any) {}
 
 // Warn is a no-op.
-func (noopLogger) Warn(component, format string, args ...any) {}
+func (NoopLogger) Warn(component, format string, args ...any) {}
 
 // Error is a no-op.
-func (noopLogger) Error(component, format string, args ...any) {}
+func (NoopLogger) Error(component, format string, args ...any) {}
 
 // Orchestrator runs the eleven-step bootstrap sequence. Wiring of
 // production implementations lives in cmd/root.go (task 5-3); this
@@ -252,7 +257,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// call o.Logger.Warn / o.Logger.Error unconditionally. Tests that pass
 	// nil for the Logger field rely on this default.
 	if o.Logger == nil {
-		o.Logger = noopLogger{}
+		o.Logger = NoopLogger{}
 	}
 
 	var warnings []Warning

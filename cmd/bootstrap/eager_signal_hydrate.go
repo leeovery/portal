@@ -75,7 +75,7 @@ func (c *EagerSignalCore) EagerSignalHydrate() error {
 	// across calls.
 	logger := c.Logger
 	if logger == nil {
-		logger = noopLogger{}
+		logger = NoopLogger{}
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)

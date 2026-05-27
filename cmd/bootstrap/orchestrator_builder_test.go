@@ -113,7 +113,7 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 // cmd/bootstrap integration tests. They remain split because not every site
 // that needs the stateDir half also needs a real logger (e.g. the
 // orchestrator end-to-end smoke test wires no logger at all and lets the
-// orchestrator substitute its noopLogger).
+// orchestrator substitute its NoopLogger).
 func newIntegrationStateDir(t *testing.T) string {
 	t.Helper()
 	stateDir := t.TempDir()

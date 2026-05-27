@@ -35,7 +35,7 @@ package bootstrap
 //     they back fatal-on-failure steps (1, 3, 8) of the bootstrap
 //     sequence and silently degrading would violate the contract.
 //   - Logger: positional; nil tolerated (Run substitutes its internal
-//     noopLogger at entry).
+//     NoopLogger at entry).
 
 import (
 	"github.com/leeovery/portal/internal/state"

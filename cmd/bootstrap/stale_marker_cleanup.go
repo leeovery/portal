@@ -108,7 +108,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// the receiver's state is not silently rewritten across calls.
 	logger := c.Logger
 	if logger == nil {
-		logger = noopLogger{}
+		logger = NoopLogger{}
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)

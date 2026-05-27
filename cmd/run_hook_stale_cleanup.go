@@ -80,7 +80,7 @@ const (
 // (cleanCmd.RunE). See the package-doc-style block above for the full
 // algorithm description, policy axes, and design rationale.
 //
-// A nil logger is tolerated — substituted with cleanStaleNoopLogger so
+// A nil logger is tolerated — substituted with bootstrap.NoopLogger so
 // the call sites in this function can invoke logger.Warn / logger.Debug
 // unconditionally.
 //
@@ -95,7 +95,7 @@ func runHookStaleCleanup(
 	onRemoved func(string),
 ) error {
 	if logger == nil {
-		logger = cleanStaleNoopLogger{}
+		logger = bootstrap.NoopLogger{}
 	}
 
 	livePanes, err := lister.ListAllPanes()
