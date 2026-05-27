@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 2,
-          "task": "~",
+          "task": "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-2-1",
           "task_map": {
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1": "tick-824435",
             "bootstrap-cleanstale-wipes-hooks-on-tmux-transient-1-1": "tick-d8948e",
