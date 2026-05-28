@@ -152,6 +152,48 @@ and should ship as one coherent improvement.
   every silent fallthrough deserves either a log line or a comment, and
   preferably both.
 
+## Log rotation and retention policy
+
+The current `portal.log` rotation behaviour destroys post-mortem evidence. On 2026-05-28 we lost critical diagnostic context when `portal.log` was truncated to 0 bytes at 08:38 BST, eliminating any record of a `hooks.json` wipe that occurred at 08:18 and a saver-disappearance event sometime between 08:18 and 08:35. We had **no way to determine the cause** because the log was destroyed before we observed the symptom.
+
+This is the wrong default. A user reporting an incident from yesterday — or from last week — must be able to find the relevant log entries. The current "rotate to 0 bytes whenever it feels like it" behaviour is not rotation, it's destruction.
+
+### Required behaviour
+
+- **Daily rotation, not size-triggered destructive truncation.** At the start of each day, the current `portal.log` is moved to `portal.log.YYYY-MM-DD` (or `portal.log.1`, `portal.log.2`, … shifted style — whichever is easier to reason about across the daemon-respawn boundary). A fresh empty `portal.log` is created for today's entries.
+- **Configurable retention window.** Default to **30 days** of rotated history kept on disk; older logs are deleted. The window is configurable via `PORTAL_LOG_RETENTION_DAYS` environment variable or equivalent. The 30-day default is the breathing room needed for "this happened last week" investigations to stay tractable; users who want more or less can tune it.
+- **Rotation discipline survives daemon respawn.** Today, a saver/daemon respawn appears to reset the log to 0 bytes. Rotation must be tied to **calendar date**, not daemon lifetime — otherwise a daemon-churn day produces zero log history while a quiet day produces a full day's worth, which is the opposite of what we need (churn = MORE evidence wanted, not less).
+- **Rotated logs are read-only after rotation.** Once `portal.log.2026-05-27` exists, it is never written to again. Today's log is the only mutable file.
+- **No silent destruction.** If retention cleanup needs to delete `portal.log.2026-04-28` (30 days old), a single INFO entry in today's log records `log-rotate: deleted portal.log.2026-04-28 (retention 30d)`. The user can grep for `log-rotate:` to see the rotation audit trail.
+
+### Design implications
+
+- The current `state.Logger` (or equivalent) needs a rotation hook at daemon-tick boundaries (or via `cron`/`launchd` if we want it strictly calendar-driven). The simplest path is daemon-tick-driven: on the first tick after midnight local time, rotate and clean.
+- Log path resolution stays at `~/.config/portal/state/portal.log` for the current file. Rotated files live in the same directory.
+- `portal clean` should preserve rotated logs by default — only the user explicitly asking for log cleanup (`portal clean --logs`) should delete them.
+
+This whole sub-initiative is high-leverage: it doesn't require touching any production code paths, but it transforms the productivity of every future investigation by ensuring evidence outlives the immediate symptom.
+
+## Saver and daemon lifecycle observability (explicit category)
+
+Implicitly covered by patterns (5) and (6) above, but worth surfacing as its own category because we keep needing exactly these events and not having them. The lifecycle events portal should emit at INFO level:
+
+- `saver: create — placeholder pid=N` (Component F's tail -f /dev/null pane process)
+- `saver: destroy-unattached set off — pane=%X`
+- `saver: respawn daemon — placeholder pid=N → daemon pid=M`
+- `saver: daemon ready — pid=M version=V` (after the 2s readiness barrier)
+- `saver: kill barrier started — prior pid=N`
+- `saver: kill barrier SIGKILL escalated — pid=N` (Component A path)
+- `saver: died — pane process exited, reason=<reason if known>`
+- `daemon: spawn — pid=N pane=%X version=V`
+- `daemon: lock acquired — daemon.pid=N`
+- `daemon: self-eject — consecutive saver-absent ticks=N, threshold=M`
+- `daemon: shutdown — reason=<sighup|self-eject|sigkill>, final flush=<yes|no>`
+
+Plus per-tick summaries already covered under pattern (5).
+
+With these events grep'd as `saver:` and `daemon:`, an operator can reconstruct the entire saver-and-daemon lifecycle across any rotation boundary, definitively answering questions like "why did the saver disappear at 08:18 today" without having to reverse-engineer from circumstantial evidence.
+
 ## Architectural limit (carried forward from the hydrate seed)
 
 Portal exec's hooks via `syscall.Exec`, replacing the helper process. So
