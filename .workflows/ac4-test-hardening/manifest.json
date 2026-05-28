@@ -11,6 +11,33 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "ac4-test-hardening": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "aac2b0a3f2f051ef3f4aeeb05241d0a52ff91a4a",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "ac4-test-hardening-1-1": "tick-fb718c",
+            "ac4-test-hardening-1-2": "tick-7ad1a9"
+          },
+          "external_id": "tick-dad5a6"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "ac4-test-hardening": {
+          "status": "completed"
+        }
+      }
     }
   }
 }
