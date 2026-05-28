@@ -306,6 +306,11 @@ func tick(ctx context.Context, deps *daemonDeps) {
 // "phase boundary" steps (list markers, capture structure, commit) propagate
 // to the caller so tick can log and back off.
 func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
+	// Drift-mirror: cmd/bootstrap/daemon_tick_test_helpers_test.go runDaemonTick
+	// shadows this body byte-for-byte under the integration build tag for AC4
+	// coverage. Mirror any structural change here in that helper or AC4 may pass
+	// under a broken production tick.
+
 	// observation point 1 of 3: pre-enumeration; ensures a cancellation that
 	// arrives between ticker fire and tick entry returns immediately without
 	// any tmux work or commit. See spec § Change 2.
