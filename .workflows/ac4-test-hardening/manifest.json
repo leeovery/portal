@@ -1,7 +1,7 @@
 {
   "name": "ac4-test-hardening",
   "work_type": "quick-fix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-05-28",
   "description": "Add drift-mirror comment in captureAndCommit and an inline negative-control sub-test for AC4 in cmd/bootstrap/eager_signal_hydrate_integration_test.go",
   "phases": {
@@ -77,5 +77,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-05-28"
 }
