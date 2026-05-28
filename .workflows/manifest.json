@@ -98,6 +98,9 @@
     },
     "bootstrap-cleanstale-wipes-hooks-on-tmux-transient": {
       "work_type": "bugfix"
+    },
+    "ac4-test-hardening": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
