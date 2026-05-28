@@ -4,7 +4,7 @@
 
 ---
 
-Gather the file paths to import. No topic naming needed — epic research imports into the default exploration file.
+Gather the file paths to import, then hand off to the shared import-files reference to copy, register, and index each one. The inception session reads `manifest.imports[]` as the conversation launchpad.
 
 > *Output the next fenced block as a code block:*
 
@@ -16,7 +16,7 @@ Gather the file paths to import. No topic naming needed — epic research import
 
 ```
 > Provide the path(s) to the files you want to import.
-> Content will be ingested verbatim — no summarization.
+> Files are copied verbatim and indexed into the knowledge base.
 
 · · · · · · · · · · · ·
 Which files should be imported?
@@ -27,8 +27,8 @@ Which files should be imported?
 
 **STOP.** Wait for user response.
 
-Validate each path exists. If any are missing, report which ones and ask again.
+Capture the paths from the user's response as `import_paths`.
 
-Store the validated paths as `import_files`.
+→ Load **[import-files.md](../../workflow-shared/references/import-files.md)** with work_unit = `{work_unit}`, import_paths = `{import_paths}`.
 
 → Return to caller.

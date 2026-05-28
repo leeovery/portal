@@ -13,13 +13,14 @@ const WORKFLOWS_DIR = path.resolve(process.cwd(), '.workflows');
 const VALID_WORK_TYPES = ['epic', 'feature', 'bugfix', 'cross-cutting', 'quick-fix'];
 
 const VALID_PHASES = [
-  'research', 'discussion', 'investigation', 'scoping',
+  'inception', 'research', 'discussion', 'investigation', 'scoping',
   'specification', 'planning', 'implementation',
   'review'
 ];
 
 const VALID_PHASE_STATUSES = {
-  research:       ['in-progress', 'completed', 'cancelled'],
+  inception:      ['in-progress'],
+  research:       ['in-progress', 'completed', 'superseded', 'cancelled'],
   discussion:     ['in-progress', 'completed', 'cancelled'],
   investigation:  ['in-progress', 'completed', 'cancelled'],
   scoping:        ['in-progress', 'completed', 'cancelled'],
@@ -438,6 +439,36 @@ function parseValue(raw) {
   }
 }
 
+// Deep equality used by `pull` so object-shaped array entries (e.g. imports[]
+// records) can be matched by value, not by reference. Order-independent for
+// object keys.
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+function findDeepIndex(arr, value) {
+  for (let i = 0; i < arr.length; i++) {
+    if (deepEqual(arr[i], value)) return i;
+  }
+  return -1;
+}
+
 function outputValue(value) {
   if (value !== null && typeof value === 'object') {
     process.stdout.write(JSON.stringify(value, null, 2) + '\n');
@@ -516,15 +547,14 @@ function cmdGet(args) {
       return;
     }
     const value = getByPath(manifest, proj.fieldSegments);
-    if (value === undefined) {
-      die(`Path "${proj.fieldSegments.join('.')}" not found in project manifest`, 2);
-    }
+    if (value === undefined) return;
     outputValue(value);
     return;
   }
 
   const { workUnit, phase, topic } = parsePath(args[0]);
-  const manifest = readManifest(workUnit);
+  if (!fs.existsSync(manifestPath(workUnit))) return;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath(workUnit), 'utf8'));
 
   if (!phase) {
     // Work-unit-level: get <wu> [field]
@@ -534,9 +564,7 @@ function cmdGet(args) {
     }
     const segments = args[1].split('.');
     const value = getByPath(manifest, segments);
-    if (value === undefined) {
-      die(`Path "${args[1]}" not found in "${workUnit}"`, 2);
-    }
+    if (value === undefined) return;
     outputValue(value);
     return;
   }
@@ -547,18 +575,14 @@ function cmdGet(args) {
   // Wildcard topic: collect values from all topics
   if (topic === '*') {
     const results = resolveWildcardTopic(manifest, phase, fieldSegments);
-    if (results.length === 0) {
-      die(`No items found in phase "${phase}" of "${workUnit}"`, 2);
-    }
+    if (results.length === 0) return;
     process.stdout.write(JSON.stringify(results, null, 2) + '\n');
     return;
   }
 
   const segments = resolvePhaseSegments(phase, topic, fieldSegments);
   const value = getByPath(manifest, segments);
-  if (value === undefined) {
-    die(`Path "${segments.join('.')}" not found in "${workUnit}"`, 2);
-  }
+  if (value === undefined) return;
   outputValue(value);
 }
 
@@ -780,7 +804,7 @@ function cmdPull(args) {
       const manifest = readProjectManifest();
       const current = getByPath(manifest, proj.fieldSegments);
       if (!Array.isArray(current)) return; // no-op
-      const idx = current.indexOf(value);
+      const idx = findDeepIndex(current, value);
       if (idx === -1) return; // no-op
       current.splice(idx, 1);
       writeProjectManifestAtomic(manifest);
@@ -802,7 +826,7 @@ function cmdPull(args) {
     const manifest = readManifest(workUnit);
     const current = getByPath(manifest, segments);
     if (!Array.isArray(current)) return; // no-op
-    const idx = current.indexOf(value);
+    const idx = findDeepIndex(current, value);
     if (idx === -1) return; // no-op
     current.splice(idx, 1);
     writeManifestAtomic(workUnit, manifest);
@@ -897,10 +921,10 @@ function cmdProject(args) {
     const name = args[1];
     if (!name) die('Usage: project get <name>');
     const projPath = path.join(WORKFLOWS_DIR, 'manifest.json');
-    if (!fs.existsSync(projPath)) die(`Project manifest not found`, 2);
+    if (!fs.existsSync(projPath)) return;
     const proj = JSON.parse(fs.readFileSync(projPath, 'utf8'));
     const entry = (proj.work_units || {})[name];
-    if (!entry) die(`Work unit "${name}" not found in project manifest`, 2);
+    if (!entry) return;
     process.stdout.write(`work_type: ${entry.work_type}\n`);
     return;
   }

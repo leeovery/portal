@@ -1,6 +1,6 @@
 ---
 name: continue-epic
-allowed-tools: Bash(node .claude/skills/continue-epic/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
+allowed-tools: Bash(node .claude/skills/continue-epic/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-legacy-research-split/scripts/detect.cjs), Bash(node .claude/skills/workflow-inception-process/scripts/discovery.cjs)
 ---
 
 Continue an in-progress epic. Shows full phase-by-phase state and routes to the appropriate phase skill.
@@ -112,6 +112,9 @@ Parse the discovery output to understand:
   - `next_phase_ready` - items ready for the next phase (name + action + label)
   - `unaccounted_discussions` - completed discussions not sourced in any spec
   - `reopened_discussions` - in-progress discussions that are sourced in a spec
+  - `discovery_map` - per-topic lifecycle for the inception/research/discussion span (tier-sorted; empty when no inception items exist)
+  - `convergence_state` - `'in-progress'` | `'settled'` | `null` (when no map)
+  - `map_summary` - count totals for the map (`total`, `decided`, `in_flight`, `ready`, `fresh`, `cancelled`)
   - `gating` - boolean flags for phase-forward gating
 
 **From top-level fields:**
@@ -204,7 +207,54 @@ Load **[validate-selection.md](references/validate-selection.md)** and follow it
 
 ---
 
-## Step 5: Display State and Menu
+## Step 5: Backfill
+
+Silent gate. Detects whether any one-time-per-project recovery work is needed; loads the dispatching reference only when work fires.
+
+```bash
+node .claude/skills/workflow-legacy-research-split/scripts/detect.cjs {work_unit}
+```
+
+Parse `qualifying_sources` from the JSON output.
+
+Then read `discovery_map` from the most recent discovery `detail` and filter for items where `summary_present` is false or `description_present` is false — regardless of `source`. Store the filtered list as `items_to_recover`.
+
+#### If `qualifying_sources` is empty and `items_to_recover` is empty
+
+→ Proceed to **Step 6**.
+
+#### Otherwise
+
+Load **[backfill-checks.md](references/backfill-checks.md)** with work_unit = `{work_unit}`, qualifying_sources = `{qualifying_sources}`, items_to_recover = `{items_to_recover}`.
+
+backfill-checks is terminal when it fires — it commits the recovery work and stops, advising the user to `/clear` and re-run `/workflow-start`. Do not proceed to Step 6 on this branch.
+
+---
+
+## Step 6: Topic Discovery
+
+> *Output the next fenced block as a code block:*
+
+```
+── Topic Discovery ──────────────────────────────
+```
+
+> *Output the next fenced block as markdown (not a code block):*
+
+```
+> Checking whether completed research or discussion has new themes
+> to surface onto the inception map.
+```
+
+Read `analysis_caches` from the most recent discovery `detail`. Load **[topic-discovery-dispatch.md](../workflow-shared/references/topic-discovery-dispatch.md)** with work_unit = `{work_unit}`, analysis_caches = `{analysis_caches}`.
+
+On return, `new_arrivals` is populated for Step 7 to render the callout.
+
+→ Proceed to **Step 7**.
+
+---
+
+## Step 7: Display State and Menu
 
 > *Output the next fenced block as a code block:*
 
@@ -218,13 +268,13 @@ Load **[validate-selection.md](references/validate-selection.md)** and follow it
 > Showing the full phase-by-phase breakdown and available actions.
 ```
 
-Load **[epic-display-and-menu.md](references/epic-display-and-menu.md)** and follow its instructions as written.
+Load **[epic-display-and-menu.md](references/epic-display-and-menu.md)** with new_arrivals = `{new_arrivals}`.
 
-→ Proceed to **Step 6**.
+→ Proceed to **Step 8**.
 
 ---
 
-## Step 6: Route Selection
+## Step 8: Route Selection
 
 > *Output the next fenced block as a code block:*
 
@@ -238,22 +288,25 @@ Load **[epic-display-and-menu.md](references/epic-display-and-menu.md)** and fol
 > Handing off to the selected phase for this epic.
 ```
 
-Invoke the appropriate skill based on the user's menu selection:
+Invoke the appropriate skill based on the user's menu selection. Match by **prefix** — labels may carry a trailing context segment (e.g., `— research completed`, `— spec completed`, `(Phase 2, Task 3)`) which doesn't change the routing target.
 
 | Menu option | Invoke |
 |-------------|--------|
+| Start research for {topic} | `/workflow-research-entry epic {work_unit} {topic}` |
+| Start discussion for {topic} | `/workflow-discussion-entry epic {work_unit} {topic}` |
 | Continue {topic} — discussion | `/workflow-discussion-entry epic {work_unit} {topic}` |
 | Continue {topic} — research | `/workflow-research-entry epic {work_unit} {topic}` |
 | Continue {topic} — specification | `/workflow-specification-entry epic {work_unit} {topic}` |
 | Continue {topic} — planning | `/workflow-planning-entry epic {work_unit} {topic}` |
 | Continue {topic} — implementation | `/workflow-implementation-entry epic {work_unit} {topic}` |
+| Continue {topic} — review | `/workflow-review-entry epic {work_unit} {topic}` |
 | Start planning for {topic} | `/workflow-planning-entry epic {work_unit} {topic}` |
 | Start implementation of {topic} | `/workflow-implementation-entry epic {work_unit} {topic}` |
 | Start review for {topic} | `/workflow-review-entry epic {work_unit} {topic}` |
 | Start specification | `/workflow-specification-entry epic {work_unit}` |
 | Start new discussion topic | `/workflow-discussion-entry epic {work_unit}` |
-| Discuss pending topic {topic} | `/workflow-discussion-entry epic {work_unit} {topic}` |
 | Start new research | `/workflow-research-entry epic {work_unit}` |
+| Continue inception | `/workflow-inception-entry epic {work_unit}` |
 
 Skills receive positional arguments: `$0` = work_type (`epic`), `$1` = work_unit, `$2` = topic (when provided).
 

@@ -1,8 +1,9 @@
 'use strict';
 
-const { loadActiveManifests, loadAllManifests, loadManifest, phaseItems, phaseData, computePendingFromResearch, computePendingFromGaps } = require('../../workflow-shared/scripts/discovery-utils.cjs');
+const path = require('path');
+const { loadActiveManifests, loadAllManifests, loadManifest, phaseItems, phaseData, computeTopicLifecycle, computeNextAction, computeMapSummary, computeSourceProvenance, computeAnalysisCacheStatus, TIER_RANK } = require('../../workflow-shared/scripts/discovery-utils.cjs');
 
-const EPIC_PHASES = ['research', 'discussion', 'specification', 'planning', 'implementation', 'review'];
+const EPIC_PHASES = ['inception', 'research', 'discussion', 'specification', 'planning', 'implementation', 'review'];
 
 function lastCompletedPhaseEpic(manifest) {
   let last = null;
@@ -46,6 +47,14 @@ function resolveDeps(cwd, manifest, planItem) {
   return { deps_satisfied: depsSatisfied, deps_blocking: depsBlocking };
 }
 
+function buildAnalysisCaches(cwd, manifest) {
+  const workflowsDir = path.join(cwd, '.workflows');
+  return {
+    research_analysis: computeAnalysisCacheStatus(manifest, workflowsDir, 'research-analysis'),
+    gap_analysis: computeAnalysisCacheStatus(manifest, workflowsDir, 'gap-analysis'),
+  };
+}
+
 function buildEpicDetail(cwd, manifest) {
   const phases = {};
   const allSourcedDiscussions = new Set();
@@ -55,6 +64,7 @@ function buildEpicDetail(cwd, manifest) {
   const nextPhaseReady = [];
 
   for (const phase of EPIC_PHASES) {
+    if (phase === 'inception') continue;
     const items = phaseItems(manifest, phase);
     if (items.length === 0) continue;
 
@@ -154,17 +164,49 @@ function buildEpicDetail(cwd, manifest) {
     }
   }
 
-  const hasResearch = researchItems.some(r => r.status !== 'cancelled');
   const hasCompletedResearch = researchItems.some(r => r.status === 'completed');
   const hasCompletedSpec = specItems.some(s => s.status === 'completed');
   const hasCompletedPlan = planItems.some(p => p.status === 'completed');
   const hasCompletedDiscussion = discussionItems.some(d => d.status === 'completed');
   const hasCompletedImpl = implItems.some(i => i.status === 'completed');
 
-  const pendingFromResearch = computePendingFromResearch(manifest);
-  const pendingFromGaps = computePendingFromGaps(manifest);
-  const hasPendingGaps = pendingFromGaps.length > 0;
-  const hasPendingDiscussions = pendingFromResearch.length > 0 || hasPendingGaps;
+  const inceptionItems = phaseItems(manifest, 'inception');
+  let discoveryMap = [];
+  let convergenceState = null;
+  let mapSummary = null;
+  if (inceptionItems.length > 0) {
+    discoveryMap = inceptionItems.map(item => {
+      const { lifecycle, tier, current_phase } = computeTopicLifecycle(manifest, item.name);
+      const next_action = computeNextAction(item.routing, lifecycle);
+      const source_provenance = computeSourceProvenance(item.source);
+      const summaryText = typeof item.summary === 'string' && item.summary.trim() ? item.summary : null;
+      const descriptionText = typeof item.description === 'string' && item.description.trim() ? item.description : null;
+      return {
+        name: item.name,
+        summary_present: summaryText !== null,
+        summary: summaryText,
+        description_present: descriptionText !== null,
+        routing: item.routing || null,
+        source: item.source || 'inception',
+        source_provenance,
+        lifecycle,
+        tier,
+        current_phase,
+        next_action,
+      };
+    });
+    discoveryMap.sort((a, b) => {
+      const ra = TIER_RANK[a.tier] != null ? TIER_RANK[a.tier] : 99;
+      const rb = TIER_RANK[b.tier] != null ? TIER_RANK[b.tier] : 99;
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    });
+    mapSummary = computeMapSummary(discoveryMap);
+    const allSettled = discoveryMap.every(t => t.lifecycle === 'decided' || t.lifecycle === 'cancelled');
+    convergenceState = allSettled ? 'settled' : 'in-progress';
+  }
+
+  const importsCount = Array.isArray(manifest.imports) ? manifest.imports.length : 0;
 
   return {
     phases,
@@ -174,12 +216,12 @@ function buildEpicDetail(cwd, manifest) {
     next_phase_ready: nextPhaseReady,
     unaccounted_discussions: unaccountedDiscussions,
     reopened_discussions: reopenedDiscussions,
-    pending_from_research: pendingFromResearch.map(t => ({ name: t, phase: 'discussion' })),
-    pending_from_gaps: pendingFromGaps.map(t => ({ name: t, phase: 'discussion' })),
+    discovery_map: discoveryMap,
+    convergence_state: convergenceState,
+    map_summary: mapSummary,
+    imports_count: importsCount,
+    analysis_caches: buildAnalysisCaches(cwd, manifest),
     gating: {
-      has_research: hasResearch,
-      has_pending_discussions: hasPendingDiscussions,
-      has_pending_gaps: hasPendingGaps,
       can_start_discussion: hasCompletedResearch,
       can_start_specification: hasCompletedDiscussion,
       can_start_planning: hasCompletedSpec,
@@ -274,6 +316,23 @@ function format(result) {
         lines.push(line);
       }
     }
+    if (d.imports_count && d.imports_count > 0) {
+      lines.push(`    imports_count: ${d.imports_count}`);
+    }
+    if (d.discovery_map && d.discovery_map.length > 0) {
+      const s = d.map_summary;
+      lines.push(`    discovery_map (${s.total} topics — ${s.decided} decided, ${s.in_flight} in-flight, ${s.ready} ready, ${s.fresh} fresh, ${s.cancelled} cancelled, convergence: ${d.convergence_state}):`);
+      for (const t of d.discovery_map) {
+        let line = `      - ${t.tier} ${t.name} [${t.lifecycle}]`;
+        if (t.next_action) line += ` -> ${t.next_action}`;
+        line += ` [summary: ${t.summary_present ? 'present' : 'absent'}, description: ${t.description_present ? 'present' : 'absent'}]`;
+        if (t.source_provenance) line += ` (${t.source_provenance})`;
+        lines.push(line);
+        if (t.summary) {
+          lines.push(`             summary: ${t.summary}`);
+        }
+      }
+    }
     if (d.in_progress.length > 0) {
       lines.push('    in-progress:');
       for (const i of d.in_progress) lines.push(`      - ${i.name} (${i.phase})`);
@@ -292,11 +351,8 @@ function format(result) {
     if (d.reopened_discussions.length > 0) {
       lines.push(`    reopened_discussions: ${d.reopened_discussions.join(', ')}`);
     }
-    if (d.pending_from_research.length > 0) {
-      lines.push(`    pending_from_research: ${d.pending_from_research.map(p => p.name).join(', ')}`);
-    }
-    if (d.pending_from_gaps.length > 0) {
-      lines.push(`    pending_from_gaps: ${d.pending_from_gaps.map(p => p.name).join(', ')}`);
+    if (d.analysis_caches) {
+      lines.push(`    analysis_caches: research_analysis=${d.analysis_caches.research_analysis.status}, gap_analysis=${d.analysis_caches.gap_analysis.status}`);
     }
     if (d.completed.length > 0) {
       lines.push('    completed:');
