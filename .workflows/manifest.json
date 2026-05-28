@@ -101,6 +101,9 @@
     },
     "ac4-test-hardening": {
       "work_type": "quick-fix"
+    },
+    "portal-observability-layer": {
+      "work_type": "feature"
     }
   },
   "defaults": {
