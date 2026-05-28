@@ -84,6 +84,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
@@ -391,6 +392,153 @@ func TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4(t *testing.T
 			"non-empty (Fix 1: eager-signal unset beta's marker → "+
 			"daemon resumed capturing beta). scrollback path=%s",
 			betaPaneKey, scrollbackPath)
+	}
+}
+
+// TestPhase1Integration_DaemonSkipsCaptureWithoutEagerSignal_AC4NegativeControl
+// is the active negative-control symmetric with
+// TestPhase1Integration_DaemonResumesCaptureAfterEagerSignal_AC4 above. It
+// converts the docstring-level mapping of regression failure modes ("a
+// regression that wires NoOpEagerHydrateSignaler{} would surface here as ...")
+// into a live assertion, mirroring TestScrollbackResumption_WithoutCleanupScrollbackNotSaved
+// (cmd/bootstrap/scrollback_resumption_test.go:187) which provides the same
+// regression-guard pattern for the stale-marker cleanup step.
+//
+// Setup is identical to the AC4 positive case (alpha/beta sessions, real
+// RestoreAdapter so phase 6 creates the beta skeleton pane) with the single
+// load-bearing difference that bootstrap.NoOpEagerHydrateSignaler{} is wired
+// into orchestratorOpts.EagerSignaler. That bypasses step 7 — no FIFO byte is
+// written to beta's helper — so beta's @portal-skeleton-* marker stays set.
+//
+// Contract under test: while beta's marker is still set, the daemon's per-pane
+// skip-save guard (cmd/state_daemon.go:131-133, mirrored by runDaemonTick)
+// must suppress all writes for beta. The next daemon tick therefore MUST NOT
+// produce a scrollback file at state.ScrollbackFile(stateDir, betaPaneKey).
+// If this test ever observes the file present, the eager-signal seam has
+// fired despite the no-op signaler — which means either step 7 wiring drifted
+// (positional handler call ignoring EagerSignaler), the skip-save guard in
+// captureAndCommit drifted (no longer consulting the marker), or some other
+// path is asynchronously clearing the marker.
+//
+// Spec § Acceptance Criteria → AC4 and the originating
+// killed-sessions-resurrect-on-restart review motivate this pairing: the
+// positive case alone could silently degrade into the negative outcome
+// without a user-facing symptom, so an active negative-control is required.
+func TestPhase1Integration_DaemonSkipsCaptureWithoutEagerSignal_AC4NegativeControl(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short")
+	}
+	tmuxtest.SkipIfNoTmux(t)
+
+	// Reuse the same N=2 fixture shape as the AC4 positive: alpha + beta,
+	// each single-window/single-pane. beta is the non-attached session
+	// whose marker is the assertion target.
+	binDir := restoretest.BuildPortalBinaryDir(t)
+	restoretest.PrependPATH(t, binDir)
+
+	stateDir := newIntegrationStateDir(t)
+
+	sessions := []string{"alpha", "beta"}
+	restoretest.SeedSessionsJSON(t, stateDir, sessions...)
+
+	ts := tmuxtest.New(t, "ptl-eager-ac4-neg-")
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	for _, name := range sessions {
+		if _, err := ts.TryRun("has-session", "-t", name); err == nil {
+			t.Fatalf("session %q unexpectedly live before Run", name)
+		}
+	}
+
+	logger := restoretest.OpenTestLogger(t, stateDir)
+
+	// Load-bearing wiring: Restore is real (phase 6 must skeleton-create
+	// alpha + beta and set their @portal-skeleton-* markers, otherwise the
+	// negative-control assertion is vacuous) but EagerSignaler is the
+	// explicit no-op (phase 7 must NOT send the FIFO byte to beta's
+	// helper, leaving beta's marker set). Mirrors the wiring pattern at
+	// phase5_integration_test.go:184 and :276.
+	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
+		Restore:       bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
+		EagerSignaler: bootstrap.NoOpEagerHydrateSignaler{},
+		Logger:        logger,
+	})
+
+	defer dumpPortalLogOnFailure(t, stateDir)
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Orchestrator.Run: %v", err)
+	}
+
+	// Sanity: every saved session must now be live (Restore step 6
+	// skeleton-created them). If beta were missing, the daemon-tick below
+	// would be vacuously skip-save-free for beta — a false-positive
+	// negative-control pass.
+	liveOut := ts.Run(t, "list-sessions", "-F", "#{session_name}")
+	for _, name := range sessions {
+		if !strings.Contains(liveOut, name) {
+			t.Fatalf("session %q not live after Run; list-sessions=%q",
+				name, liveOut)
+		}
+	}
+
+	// Precondition assertion (mirroring TestScrollbackResumption_WithoutCleanupScrollbackNotSaved
+	// at scrollback_resumption_test.go:217-225): beta's skeleton marker MUST
+	// still be present after bootstrap. With NoOpEagerHydrateSignaler{},
+	// step 7 is a no-op so the helper never receives its FIFO byte and the
+	// marker survives. NOTE: we deliberately do NOT call
+	// restoretest.WaitForSkeletonMarkersCleared here — the whole point is
+	// that beta's marker stays set.
+	betaPaneKey := state.SanitizePaneKey("beta", 0, 0)
+	betaMarker := state.SkeletonMarkerPrefix + betaPaneKey
+	_, found, err := client.TryGetServerOption(betaMarker)
+	if err != nil {
+		t.Fatalf("TryGetServerOption %s: %v", betaMarker, err)
+	}
+	if !found {
+		t.Fatalf("marker %s absent after no-op eager-signal bootstrap; "+
+			"want present (negative-control contract requires beta's "+
+			"marker to survive when step 7 is the no-op signaler — "+
+			"something else is clearing the marker and the assertion "+
+			"below would be vacuously satisfied)", betaMarker)
+	}
+
+	// Force a deterministic terminated record into beta's pane buffer.
+	// Even though the assertion below is "file absent," seeding a real
+	// terminated record means a regression failure surfaces as "file
+	// present with non-empty content" rather than as the more ambiguous
+	// "file present but empty" (which could indicate either an
+	// eager-signal regression or an unrelated capture-pane edge case).
+	// Symmetric with the positive AC4 test at lines 360-365.
+	betaTarget := tmux.PaneTarget("beta", 0, 0)
+	if err := client.SendKeys(betaTarget, "echo ac4-negctrl"); err != nil {
+		t.Fatalf("SendKeys to %s: %v", betaTarget, err)
+	}
+	waitForPaneText(t, client, betaTarget, "ac4-negctrl", 2*time.Second, 50*time.Millisecond)
+
+	// Drive one daemon-equivalent capture-and-commit pass. runDaemonTick
+	// mirrors cmd/state_daemon.go captureAndCommit including the per-pane
+	// skip-save guard at cmd/state_daemon.go:131-133. Because beta's
+	// marker is still set, the guard MUST fire for beta and no scrollback
+	// file is written.
+	runDaemonTick(t, client, stateDir)
+
+	// Negative-control assertion: beta's scrollback file MUST NOT exist.
+	// A present file means the eager-signal seam fired despite the no-op
+	// signaler (or the skip-save guard regressed). Mirrors the assertion
+	// shape at scrollback_resumption_test.go:238-242.
+	scrollbackPath := state.ScrollbackFile(stateDir, betaPaneKey)
+	if _, err := os.Stat(scrollbackPath); !os.IsNotExist(err) {
+		t.Fatalf("scrollback file %s exists after daemon tick under "+
+			"NoOpEagerHydrateSignaler; want absent (skip-save guard "+
+			"should suppress writes while beta's marker is still set — "+
+			"a write here means the eager-signal seam fired despite "+
+			"the no-op signaler, or the daemon's marker-aware "+
+			"skip-save guard regressed). stat err=%v",
+			scrollbackPath, err)
 	}
 }
 
