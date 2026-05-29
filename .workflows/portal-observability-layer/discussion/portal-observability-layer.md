@@ -28,7 +28,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Logger library (slog adoption) [decided]
   Log rotation mechanism [decided]
   Retention policy and audit [decided]
-  Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [pending]
+  Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [decided]
   Subsystem prefix taxonomy [pending]
   Defensive invariants against unknown-cause log destruction [pending]
   State-mutation audit trail for user config files [pending]
@@ -165,6 +165,51 @@ Reasoning: standard library, structured by default, handler-based (one set of ca
 
 ---
 
+## Log-level discipline (DEBUG/INFO/WARN/ERROR contract)
+
+### Context
+
+The slog adoption pinned four levels (`Debug`, `Info`, `Warn`, `Error`) but didn't specify what events go where. Without a contract, "log everywhere" devolves into noise — DEBUG and INFO blur, WARN gets used for events that should be ERROR or vice versa, and `PORTAL_LOG_LEVEL` loses meaning because changing it doesn't predictably change what you see.
+
+The contract also has to match portal's production posture: the daemon swallows-and-continues on per-pane failures, so genuinely unrecoverable conditions are rare. ERROR sites that existed historically (e.g. the non-contention lock-acquire failure) were downgraded to WARN during the `slow-open-empty-previews-and-zombie-sessions` remediation precisely because the operational reality didn't match "unrecoverable".
+
+### Options Considered
+
+**Default level for production:**
+- A. WARN (current). Only anomalies surface. ~50–200 KB/day. Quiet at the cost of forensic baseline.
+- B. INFO (new). Steady-state production signal — bootstrap transitions, cycle summaries, lifecycle events. ~1–5 MB/day. Continuous forensic baseline. Trivial within the 30-day window (well under 500 MB cap).
+
+**Level granularity:**
+- Stay with slog's four standard levels (Debug/Info/Warn/Error).
+- Custom sublevels (e.g. Trace under Debug, Notice between Info and Warn) for more granularity.
+
+### Journey
+
+The seed framing was "DEBUG aggressive dump; INFO steady-state when all good". That collapses to: DEBUG is bounded by code paths reached (not judgement); INFO is bounded by the rate of *meaningful* events. WARN is "every line is signal"; ERROR is "we're about to give up".
+
+Default-level discussion: WARN-only is what we have today, and is exactly the posture that left no evidence on 2026-05-28 — no INFO-level breadcrumbs were emitted around the hooks.json wipe or the saver disappearance. The point of the broader observability initiative is to *have* a steady-state baseline to grep through; defaulting to WARN defeats that. INFO trades trivial disk for a continuous forensic record.
+
+Custom sublevels were considered briefly and rejected — slog's four is the standard; introducing Trace/Notice creates a contract drift the rest of the codebase has to learn. Keep it simple.
+
+ERROR usage: the prior downgrade of non-contention lock-failure from ERROR to WARN reflects portal's reality. ERROR is for "we're exiting because we cannot continue" — the lock-contention case is exactly that (the loser daemon exits because it lost the lock). Most other "errors" in portal are recoverable and warrant WARN.
+
+### Decision
+
+**Locked: slog four-level (Debug/Info/Warn/Error) with the semantic contract below; production default `PORTAL_LOG_LEVEL=info`.**
+
+| Level | Purpose | Volume |
+|---|---|---|
+| **DEBUG** | Kitchen sink for reconstruction: breadcrumbs on swallowed-error paths, per-event state changes under cycle summaries, observed transient values, decision-point inputs. Off in production. | Bound by code paths reached, not judgement. |
+| **INFO** | Decision/terminal-point summaries, cycle summaries, lifecycle events. One line per *meaningful choice*, not per state change. The steady-state production signal. | Bound by rate of meaningful events (~1–5 MB/day). |
+| **WARN** | Unexpected-but-recoverable conditions. Per-session capture anomalies, retries triggered, transient probe failures inside hysteresis, invalid config falling back to default. | Every line is a signal worth looking at. |
+| **ERROR** | Genuinely unrecoverable — process is about to exit because it cannot continue. Rare in portal due to swallow-and-continue posture. | Few sites total; most candidates warrant WARN instead. |
+
+Two implications carry forward:
+1. **Subsystem prefix taxonomy** (next subtopic) must be designed so `grep` on a prefix produces a useful trace at INFO level — INFO is the production baseline that has to be greppable.
+2. **State-mutation audit trail** breadcrumbs are INFO (decision points), not DEBUG — they need to survive at production level.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -175,6 +220,7 @@ Reasoning: standard library, structured by default, handler-based (one set of ca
 4. State-mutation breadcrumbs need to cover *internal* mutations too (e.g. `hookStore.CleanStale`), not just user-CLI mutations — the bash hook log can only see user-driven calls.
 5. The scope is broader than the inbox's seven patterns — it's "use logging anywhere it aids debugging or insight under a disciplined level taxonomy". That makes level discipline and prefix taxonomy foundational, not auxiliary.
 6. The foundation is `log/slog` (Go 1.21 standard library). Structured fields, handler abstraction, standard-library posture all compose better than extending the existing printf wrapper.
+7. Default production level shifts from WARN to INFO. WARN-only is exactly the posture that left no evidence on 2026-05-28; a continuous INFO-level baseline costs ~5 MB/day and gives the forensic record the whole initiative is about.
 
 ### Open Threads
 
@@ -195,8 +241,8 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 
 ### Current State
 
-- Three subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default).
-- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under a disciplined level taxonomy. Inbox's seven patterns remain the minimum scope.
+- Four subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract, INFO production default).
+- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract. Inbox's seven patterns remain the minimum scope.
 - Review-set 001 fully drained: 14 findings closed (F7 and F12 explicitly rejected with rationale; F1/F2 closed by library-encapsulated decision; F3-F6, F8, F9, F11, F13 captured as spec-phase work; F10 closed by ship-and-watch gate; F14 closed by scope-expansion pivot).
-- Pivoting next to log-level discipline as the foundational contract every log line follows.
-- Remaining map: 11 pending subtopics on level discipline, prefix taxonomy, defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
+- Pivoting next to subsystem prefix taxonomy — the grep affordance that makes the INFO-baseline forensically useful.
+- Remaining map: 10 pending subtopics on prefix taxonomy, defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
