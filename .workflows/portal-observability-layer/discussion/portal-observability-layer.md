@@ -25,16 +25,17 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
 
 ### Map
 
-  Log rotation mechanism [converging]
-  Retention policy and audit [converging]
+  Logger library (slog adoption) [decided]
+  Log rotation mechanism [decided]
+  Retention policy and audit [decided]
+  Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [pending]
+  Subsystem prefix taxonomy [pending]
   Defensive invariants against unknown-cause log destruction [pending]
   State-mutation audit trail for user config files [pending]
-  Subsystem prefix taxonomy [pending]
   Decision-point INFO line shape [pending]
   DEBUG breadcrumb pattern on swallowed errors [pending]
   Diagnostic context preservation at boundaries [pending]
   Cycle-level summary cadence and shape [pending]
-  Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [pending]
   Log-level propagation verification [pending]
   Saver and daemon lifecycle event taxonomy [pending]
   Hook-firing observability limit (syscall.Exec) [pending]
@@ -88,9 +89,15 @@ The current 1 MiB threshold being laughably small also explains why the `.old` k
 
 ### Decision
 
-**Provisional: Option A — calendar-only daily rotation, no size cap.** Files named `portal.log.YYYY-MM-DD` for completed days; same-day overflow (only possible via process restart or boundary-crossing race) appends `.N`. Retention policy bounds total disk use; runaway scenarios are intentionally not capped because the runaway itself is the evidence.
+**Locked: Option C — calendar-daily rotation primary, configurable size-cap safety valve.**
 
-Final decision deferred until size-cap question resolves: no cap (Option A) vs. very generous safety valve (Option C at 500 MB / 1 GB).
+- Calendar-daily rotation at local midnight (timezone, DST, and clock-skew handling details deferred to spec phase).
+- Filenames: `portal.log.YYYY-MM-DD` for completed days; same-day overflow appends `.N` (semantics for N — monotonic, `O_CREAT|O_EXCL` retry — deferred to spec).
+- Size-cap safety valve: default **500 MB**. Configurable via `PORTAL_LOG_ROTATE_SIZE` env var accepting K/M/G suffixes (e.g. `500M`, `1G`). When today's file reaches the threshold, force a same-day rotation to `portal.log.YYYY-MM-DD.N`.
+- Rotated files are immutable (`chmod 0400` after rotation).
+- Default 500 MB chosen as: never fires in normal use even at DEBUG steady-state (20 MB/day), catches a runaway within ~1 day before disk can fill.
+
+**Operational edges deferred to spec phase**: rotation ownership across writers (daemon-only vs every-writer date-check), multi-writer concurrency at the midnight boundary, midnight-while-daemon-down (laptop suspend), DST/timezone transitions, behaviour across portal version upgrades mid-day, first-startup migration from any existing `portal.log.old`, disk-full and EACCES failure modes, retention-pass scheduling and missed-day catchup. These are real but tactical — none invalidates the strategic shape locked above.
 
 ---
 
@@ -118,13 +125,36 @@ Per-deletion INFO line is required: the 2026-05-28 incident taught that silent d
 
 ### Decision
 
-**Provisional:**
+**Locked:**
 - Default retention: **30 days** of rotated history kept on disk.
 - Configurable via `PORTAL_LOG_RETENTION_DAYS` environment variable. Invalid values fall back to default with a startup WARN.
-- Per-deletion INFO breadcrumb with stable prefix `log-rotate: deleted <file> (retention <N>d)`.
+- Per-deletion INFO breadcrumb with stable prefix `log-rotate: deleted <file> (retention <N>d)`. One INFO line per deleted file.
 - `portal clean` preserves rotated logs; `portal clean --logs` opts in to log cleanup.
 
-Confirm retention default (30d) and env var name with user before locking.
+**Open in spec phase**: where the rotation/retention breadcrumb lands across the midnight boundary (yesterday's file vs today's, or both); whether rotated logs are compressed (would cut 30d worst-case from ~600 MB to under 80 MB); how an open-fd-on-yesterday's-file interacts with retention `unlink` (zombie writers post-deletion). Plus whether to mirror retention breadcrumbs to a separate out-of-band file so the audit trail survives even if rotation itself is the corruptor.
+
+---
+
+## Logger library (slog adoption)
+
+### Context
+
+The existing `internal/state/logger.go` is a thin printf-style wrapper around `os.File`: line format `timestamp | level | component | message\n`, levels `LevelDebug/Info/Warn/Error`, component constants (`daemon`, `restore`, `hydrate`, ...), file-mutex serialisation. It works but is bespoke — no structured fields, no handler abstraction, no contextual propagation. Any extension (e.g. structured per-key fields for state-mutation breadcrumbs) means inventing conventions on top of printf.
+
+The broader framing — "use logging anywhere it helps, with disciplined levels, learn from known patterns" — pushes toward a structured leveled logger as the foundation. Go's standard library `log/slog` (stable since Go 1.21) is the canonical choice: handler-based (swap text/JSON without changing call sites), `slog.Attr`-based field passing, level + context propagation via `slog.Logger`.
+
+### Options Considered
+
+- **A. Keep printf + extend.** Add structured field conventions on top of the existing format. Minimal migration. Loses standardisation; future tooling expects slog-shaped logs.
+- **B. Adopt `log/slog`.** Migrate call sites, replace `state.Logger` with a thin wrapper around `slog.Logger` (or use slog directly). Standard library, no new dependency, future-proof, structured fields native. Requires a sweep of every existing `logger.Info/Warn/...` call site, then becomes the foundation for the broader instrumentation rollout.
+
+### Decision
+
+**Locked: Option B — adopt `log/slog`.**
+
+Reasoning: standard library, structured by default, handler-based (one set of call sites can emit human-readable text for tail/grep and JSON for tooling/aggregation depending on handler), and future-proof. The broader scope of "instrument everywhere" means call sites multiply, and we want them ergonomic and conventional from day one. Migration cost is manageable today (small N of existing call sites) and savings compound as we add new sites.
+
+**Implementation detail for spec phase**: the existing rotation/multi-writer machinery in `logger.go` needs to be re-expressed as a custom `slog.Handler` (or wrap a `slog.TextHandler` with rotation-aware `io.Writer`) so rotation behaviour is preserved end-to-end. The text handler's line format can be retained for backward compatibility with existing greps, or replaced with an `slog`-canonical key=value layout — TBD during spec.
 
 ---
 
@@ -133,9 +163,11 @@ Confirm retention default (30d) and env var name with user before locking.
 ### Key Insights
 
 1. The 2026-05-28 evidence loss is rotation-churn (1 MiB threshold + single `.old` overwritten on each rotation), not literal truncation. Reframes the inbox premise.
-2. Realistic per-day log sizing makes calendar-only daily rotation viable without a size cap; size-cap only defensible as a disk-fill safety valve at a very generous threshold.
+2. Realistic per-day log sizing makes calendar-daily rotation the right primary boundary; size cap is a disk-fill safety valve, not the main mechanism.
 3. Silent destruction (no log line on retention deletion or rotation) was the actual incident-multiplier. Every destructive action must emit a breadcrumb.
 4. State-mutation breadcrumbs need to cover *internal* mutations too (e.g. `hookStore.CleanStale`), not just user-CLI mutations — the bash hook log can only see user-driven calls.
+5. The scope is broader than the inbox's seven patterns — it's "use logging anywhere it aids debugging or insight under a disciplined level taxonomy". That makes level discipline and prefix taxonomy foundational, not auxiliary.
+6. The foundation is `log/slog` (Go 1.21 standard library). Structured fields, handler abstraction, standard-library posture all compose better than extending the existing printf wrapper.
 
 ### Open Threads
 
@@ -145,6 +177,8 @@ Confirm retention default (30d) and env var name with user before locking.
 
 ### Current State
 
-- Two subtopics converging: Log rotation mechanism (Option A provisional), Retention policy and audit (30d default provisional).
-- Two new subtopics added to the map: defensive invariants against unknown-cause destruction, state-mutation audit trail for user config files.
-- Remaining map: 10 pending subtopics on patterns, lifecycle events, and rollout.
+- Three subtopics decided: Logger library (slog), Log rotation mechanism (Option C, 500 MB default), Retention policy and audit (30d default).
+- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under a disciplined level taxonomy. Inbox's seven patterns remain the minimum scope.
+- Pivoting next to log-level discipline as the foundational contract every log line follows.
+- 14 review findings pending walk-through; several pertain directly to rotation operational edges deferred to spec.
+- Remaining map: 11 pending subtopics on level discipline, prefix taxonomy, defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
