@@ -179,8 +179,17 @@ Reasoning: standard library, structured by default, handler-based (one set of ca
 ### Open Threads
 
 - **Current `portal.log` zeroing bug** — no `.old` exists, no `O_TRUNC` in `logger.go`, so the destruction mechanism is currently unidentified. Not logged as a separate inbox bug — likely surfaced or resolved as a side effect of the rotation rewrite; investigate during implementation.
-- **Size-cap safety valve decision** — Option A (no cap) vs Option C (500 MB / 1 GB cap). Blocks final lock on Log rotation mechanism.
 - **Hook command privacy** — verbatim vs SHA-256 hash prefix vs truncation. To resolve when state-mutation audit trail subtopic is explored.
+
+### Considered and Rejected / Closed by Prior Decisions
+
+Documenting review-set 001 finding resolutions so future-us knows omissions were deliberate, not oversights.
+
+- **F1** (rotation when daemon down at midnight boundary) — closed by library-encapsulated date-aware open. Daemon presence is no longer load-bearing for boundary crossing.
+- **F2** (multi-writer concurrency at rotation boundary) — closed by same library-encapsulated decision; `O_CREAT|O_EXCL` handles cross-process create race.
+- **F7** (out-of-band rotation audit channel) — considered and rejected. Locked invariants (rotated-file immutability + per-process startup markers + `O_EXCL` on today's file creation) provide sufficient post-hoc detectability for portal's scale. Cost of a second log file with divergent rotation policy outweighs benefit for a single-user dev tool.
+- **F3, F4, F5, F6, F8, F9, F11, F13** (rotation/retention operational edges: timezone/DST, first-startup migration, disk-full/EACCES, retention scheduling and missed-day catchup, version-upgrade boundary, `.N` ordering, open-fd-after-unlink, rotation-INFO placement) — captured in the locked rotation/retention Decision sections as spec-phase work.
+- **F14** (subsystem prefix taxonomy sequencing) — closed by scope-expansion call to promote level discipline and prefix taxonomy to foundational subtopics ahead of further pattern decisions.
 
 ### Current State
 
