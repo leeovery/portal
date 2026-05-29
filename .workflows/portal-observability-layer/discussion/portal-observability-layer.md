@@ -29,7 +29,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Log rotation mechanism [decided]
   Retention policy and audit [decided]
   Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [decided]
-  Subsystem prefix taxonomy [pending]
+  Subsystem prefix taxonomy [exploring]
   Defensive invariants against unknown-cause log destruction [pending]
   State-mutation audit trail for user config files [pending]
   Decision-point INFO line shape [pending]
@@ -207,6 +207,49 @@ ERROR usage: the prior downgrade of non-contention lock-failure from ERROR to WA
 Two implications carry forward:
 1. **Subsystem prefix taxonomy** (next subtopic) must be designed so `grep` on a prefix produces a useful trace at INFO level — INFO is the production baseline that has to be greppable.
 2. **State-mutation audit trail** breadcrumbs are INFO (decision points), not DEBUG — they need to survive at production level.
+
+---
+
+## Subsystem prefix taxonomy
+
+### Context
+
+The grep affordance is what makes the INFO baseline forensically useful. Without a stable, predictable prefix shape, `grep "<subsystem>:" portal.log` doesn't produce a clean per-subsystem audit trail — it produces a mix of subsystem mentions in arbitrary log lines.
+
+The inbox framing was: `grep 'hydrate:' portal.log` should reconstruct exactly which pane took which exit path on every helper invocation. That intuitive idiom — `<component>:` as a literal at the start of the human-readable message — is the design target.
+
+Under slog, the natural model is a structured `component` attr that handlers render however they choose. The mechanism decision below preserves both the literal `component:` grep idiom for tail-and-eyeball use AND the structured attr for programmatic filtering and JSON output.
+
+The subtopic scope (per review-002 G11) absorbs two adjacent concerns: the canonical attr-key vocabulary across call sites (G3), and the mandatory baseline attrs every log line should carry (G4). These are part of the same "what does a portal log line look like" decision and shouldn't be re-litigated when the first call site lands.
+
+### Options Considered (rendering mechanism)
+
+**A. Standard slog `TextHandler`.** `... component=hydrate path=/x/y took=1.2s`. Standard, predictable, JSON-friendly. Grep: `component=hydrate`. Noisier when scanning by eye.
+
+**B. Custom `slog.Handler` rendering `component` as a literal `<component>:` prefix at the start of the message body.** `... INFO hydrate: ok paneKey=foo:0.0 took=1.2s`. Matches the inbox grep idiom; preserves `component` as a structured attr under the hood (JSON output still works). One small custom handler — and we already need a custom handler for the rotation machinery, so the cost is essentially zero.
+
+**C. Manual `<component>:` prefix in the message text only.** Simplest but loses the structured attr — `component` is buried inside `msg` and programmatic filtering / JSON output regress.
+
+### Decision (partial — mechanism locked, taxonomy and attr vocabulary still open)
+
+**Locked: Option B — `component` is a structured slog attr at every call site; the custom `slog.Handler` renders text output with `component:` as a literal prefix at the start of the message body and the timestamp + level preceding it.**
+
+Example text-mode line:
+```
+2026-05-29T08:38:00Z INFO hydrate: ok pane_key=foo:0.0 took=1.2s
+```
+
+Example JSON-mode line (same call site, different handler):
+```json
+{"time":"2026-05-29T08:38:00Z","level":"INFO","component":"hydrate","msg":"ok","pane_key":"foo:0.0","took":"1.2s"}
+```
+
+Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem audit trail. Programmatic filtering also works: handlers can route by `component` attr, JSON tooling can index it.
+
+**Still open (this subtopic):**
+- The taxonomy list — exact set of `component` values and their boundaries (existing constants vs new additions like `saver`, `capture`, `signal`, `log-rotate`).
+- Attr-key vocabulary — canonical names for `pane_key`, `session`, `project`, `path`, `took`, etc. (snake_case proposed). Locks the field naming so the first 10 call sites don't define a drifting de-facto vocabulary.
+- Mandatory baseline attrs — what every log line carries automatically (proposed: `component`, `pid`, `version`, `process_role`), injected by the handler via `slog.With` at logger construction so call sites don't have to remember.
 
 ---
 
