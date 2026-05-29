@@ -89,15 +89,22 @@ The current 1 MiB threshold being laughably small also explains why the `.old` k
 
 ### Decision
 
-**Locked: Option C — calendar-daily rotation primary, configurable size-cap safety valve.**
+**Locked: Option C — calendar-daily rotation primary, configurable size-cap safety valve, library-encapsulated ownership.**
 
-- Calendar-daily rotation at local midnight (timezone, DST, and clock-skew handling details deferred to spec phase).
-- Filenames: `portal.log.YYYY-MM-DD` for completed days; same-day overflow appends `.N` (semantics for N — monotonic, `O_CREAT|O_EXCL` retry — deferred to spec).
-- Size-cap safety valve: default **500 MB**. Configurable via `PORTAL_LOG_ROTATE_SIZE` env var accepting K/M/G suffixes (e.g. `500M`, `1G`). When today's file reaches the threshold, force a same-day rotation to `portal.log.YYYY-MM-DD.N`.
-- Rotated files are immutable (`chmod 0400` after rotation).
+**Rotation ownership (library-level, every-writer date-aware):**
+- The `slog.Handler` in every portal process is date-aware. On each write, it computes today's filename via `time.Now().Format("2006-01-02")` and ensures the open fd points at today's file.
+- First write of the day across all processes opens the new day's file via `O_CREAT|O_EXCL`. First writer wins the create race atomically; losers detect the file exists and open `O_APPEND` — race-safe on Unix for slog-sized line writes (< PIPE_BUF).
+- A symlink `portal.log → portal.log.YYYY-MM-DD` is swung atomically (`os.Symlink` + `os.Rename`) at the boundary so `tail -f portal.log` always follows today's file regardless of which process owns the swing.
+- Daemon-down across midnight is solved by construction — any waking process's first write opens today's file. No explicit catchup logic needed. (Closes review F1 and F2.)
+
+**Boundary, filenames, size cap, immutability:**
+- Calendar boundary: local midnight (timezone/DST handling deferred to spec phase).
+- Filenames: `portal.log.YYYY-MM-DD` for completed days; same-day overflow on size-cap appends `.N`. Semantics for N — monotonic via `O_CREAT|O_EXCL` retry against highest existing `.N` — deferred to spec.
+- Size-cap safety valve: default **500 MB**. Configurable via `PORTAL_LOG_ROTATE_SIZE` env var accepting K/M/G suffixes (e.g. `500M`, `1G`). When today's file reaches the threshold, library rotates to `portal.log.YYYY-MM-DD.N`.
+- Rotated files are immutable (`chmod 0400` once they are no longer today's file).
 - Default 500 MB chosen as: never fires in normal use even at DEBUG steady-state (20 MB/day), catches a runaway within ~1 day before disk can fill.
 
-**Operational edges deferred to spec phase**: rotation ownership across writers (daemon-only vs every-writer date-check), multi-writer concurrency at the midnight boundary, midnight-while-daemon-down (laptop suspend), DST/timezone transitions, behaviour across portal version upgrades mid-day, first-startup migration from any existing `portal.log.old`, disk-full and EACCES failure modes, retention-pass scheduling and missed-day catchup. These are real but tactical — none invalidates the strategic shape locked above.
+**Operational edges deferred to spec phase**: DST/timezone transitions and the local-midnight definition; behaviour across portal version upgrades mid-day; first-startup migration from any existing `portal.log.old`; disk-full and EACCES failure modes; retention-pass scheduling and missed-day catchup; `.N` ordering details. These are tactical — none invalidates the strategic shape locked above.
 
 ---
 
