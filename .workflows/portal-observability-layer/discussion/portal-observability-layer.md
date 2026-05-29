@@ -190,11 +190,13 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **F7** (out-of-band rotation audit channel) — considered and rejected. Locked invariants (rotated-file immutability + per-process startup markers + `O_EXCL` on today's file creation) provide sufficient post-hoc detectability for portal's scale. Cost of a second log file with divergent rotation policy outweighs benefit for a single-user dev tool.
 - **F3, F4, F5, F6, F8, F9, F11, F13** (rotation/retention operational edges: timezone/DST, first-startup migration, disk-full/EACCES, retention scheduling and missed-day catchup, version-upgrade boundary, `.N` ordering, open-fd-after-unlink, rotation-INFO placement) — captured in the locked rotation/retention Decision sections as spec-phase work.
 - **F14** (subsystem prefix taxonomy sequencing) — closed by scope-expansion call to promote level discipline and prefix taxonomy to foundational subtopics ahead of further pattern decisions.
+- **F10** (investigation gate for the unknown zeroing bug) — closed. Ship the rewrite without blocking on root-cause understanding. If destruction recurs in the new system with no clear cause within 30 days post-ship, file a separate investigation bug; startup-marker tripwires will provide concrete evidence. Until then, treat the original bug as resolved-by-rewrite or detectable-when-it-recurs.
+- **F12** (compress rotated logs) — considered and rejected. Worst-case 30-day window at ~600 MB uncompressed is already trivial; introducing `zgrep` as a precondition for searching anything older than today adds friction at exactly the moment the user is investigating an incident. Greppability outweighs disk savings at portal's scale.
 
 ### Current State
 
-- Three subtopics decided: Logger library (slog), Log rotation mechanism (Option C, 500 MB default), Retention policy and audit (30d default).
+- Three subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default).
 - Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under a disciplined level taxonomy. Inbox's seven patterns remain the minimum scope.
+- Review-set 001 fully drained: 14 findings closed (F7 and F12 explicitly rejected with rationale; F1/F2 closed by library-encapsulated decision; F3-F6, F8, F9, F11, F13 captured as spec-phase work; F10 closed by ship-and-watch gate; F14 closed by scope-expansion pivot).
 - Pivoting next to log-level discipline as the foundational contract every log line follows.
-- 14 review findings pending walk-through; several pertain directly to rotation operational edges deferred to spec.
 - Remaining map: 11 pending subtopics on level discipline, prefix taxonomy, defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
