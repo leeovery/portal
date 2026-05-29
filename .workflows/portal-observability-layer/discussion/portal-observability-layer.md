@@ -29,7 +29,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Log rotation mechanism [decided]
   Retention policy and audit [decided]
   Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [decided]
-  Subsystem prefix taxonomy [exploring]
+  Subsystem prefix taxonomy [decided]
   Defensive invariants against unknown-cause log destruction [pending]
   State-mutation audit trail for user config files [pending]
   Decision-point INFO line shape [pending]
@@ -275,10 +275,62 @@ The factory returns a thin child wrapper around the root via `root.With("compone
 
 **Existing `Component*` constants (`internal/state/logger.go:30-38`) are deleted as part of the migration sweep.** The factory's string argument is the only place a component name appears in Go code, so the typo surface is the ~12 package-init call sites — easy to review by eye. CLAUDE.md gets updated at lock time to reflect the new shape. (Closes review-002 G6.)
 
-**Still open (this subtopic):**
-- The taxonomy list — exact set of `component` values and their boundaries (existing 7 + new additions like `saver`, `capture`, `signal`, `log-rotate`, `clean`).
-- Attr-key vocabulary — canonical names for `pane_key`, `session`, `project`, `path`, `took`, etc. (snake_case proposed). Locks the field naming so the first 10 call sites don't define a drifting de-facto vocabulary.
-- Mandatory baseline attrs — what every log line carries automatically (proposed: `component`, `pid`, `version`, `process_role`), injected by the handler / root logger so call sites don't have to remember.
+**Locked: component taxonomy (12 components, kebab-case where multi-word).**
+
+| Component | Owns |
+|---|---|
+| `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
+| `bootstrap` | The 11-step bootstrap orchestrator |
+| `restore` | Two-phase restore engine (skeleton + geometry + scrollback) |
+| `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
+| `notify` | Notification helpers |
+| `hooks` | `hooks.json` mutations (`portal hooks set/rm`, `hookStore.CleanStale`) |
+| `preview` | TUI scrollback preview page |
+| `saver` | `_portal-saver` session lifecycle |
+| `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`) |
+| `signal` | FIFO signaling — `EagerSignalHydrate`, hydrate-helper signal receipt |
+| `log-rotate` | Rotation and retention events |
+| `clean` | `portal clean` command path |
+
+`tmux` deliberately excluded — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Better as DEBUG breadcrumbs under the caller's component (e.g. `daemon` logs "tmux command failed: …").
+
+**Locked: attr-key vocabulary (snake_case, slog/JSON ecosystem convention).**
+
+| Key | What |
+|---|---|
+| `pane_key` | Structural pane key (canonical, persisted form like `session__window.pane`) |
+| `tmux_pane` | `$TMUX_PANE` env var (live tmux pane id like `%42`) |
+| `session` | tmux session name |
+| `project` | project name from `projects.json` |
+| `path` | filesystem path |
+| `took` | duration (`time.Duration` rendered) |
+| `error` | error message (slog idiom: `slog.Any("error", err)`) |
+| `error_class` | for swallowed errors: `expected` / `unexpected` |
+| `hook_key` | hooks subsystem — the structural hook key |
+| `op` | state-mutation breadcrumbs — `set` / `rm` / `clean-stale` |
+
+Conventions:
+- **snake_case** for all attr keys.
+- **Message string is a terse phrase**, data lives in attrs: `logger.Info("ok", "pane_key", k, "took", d)` — NOT `logger.Info(fmt.Sprintf(...))`.
+- **Sticky context via `.With(...)`** when multiple events share context: `paneLogger := logger.With("pane_key", k); paneLogger.Info("scrollback replayed"); paneLogger.Info("hook fired")`.
+
+The vocabulary is the closed set today; new keys are added by amendment in spec/follow-on PRs when a use case appears. The point is *no ad-hoc invention at call-site time* — every contributor consults the list.
+
+**Locked: mandatory baseline attrs (every line carries these, root-injected once).**
+
+| Key | Set where |
+|---|---|
+| `component` | Per-package via `log.For("...")` |
+| `pid` | Root logger construction (`os.Getpid()`) |
+| `version` | Root logger construction (build-time `cmd.version`) |
+| `process_role` | Root logger construction — one of `daemon` / `bootstrap` / `hydrate` / `hooks_cli` / `tui` / `clean`. Identifies which portal binary invocation emitted the line. Critical for multi-writer disambiguation on reboot-recovery days. |
+
+Example full line (INFO mode, text handler):
+```
+2026-05-29T08:38:00Z INFO hydrate: ok pane_key=foo:0.0 took=1.2s pid=12345 version=0.5.0 process_role=hydrate
+```
+
+Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB/day total). They make every line self-describing for forensic use across multi-writer days. (Closes review-002 G3 and G4.)
 
 ---
 
@@ -313,8 +365,8 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 
 ### Current State
 
-- Four subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract, INFO production default).
+- Five subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract, INFO production default), Subsystem prefix taxonomy (Option B rendering + factory pattern + 12-component taxonomy + snake_case attr vocab + 4 baseline attrs).
 - Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract. Inbox's seven patterns remain the minimum scope.
-- Review-set 001 fully drained: 14 findings closed (F7 and F12 explicitly rejected with rationale; F1/F2 closed by library-encapsulated decision; F3-F6, F8, F9, F11, F13 captured as spec-phase work; F10 closed by ship-and-watch gate; F14 closed by scope-expansion pivot).
-- Pivoting next to subsystem prefix taxonomy — the grep affordance that makes the INFO-baseline forensically useful.
-- Remaining map: 10 pending subtopics on prefix taxonomy, defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
+- Review-set 001 fully drained: 14 findings closed.
+- Review-set 002 in flight: G6 + G11 closed by factory-pattern decision; G3 + G4 closed by attr-vocab + baseline-attrs lock. Remaining: G1, G2, G5, G7, G8, G9, G10 — most pertain to migration mechanics and level-discipline edge cases.
+- Remaining map: 9 pending subtopics on defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
