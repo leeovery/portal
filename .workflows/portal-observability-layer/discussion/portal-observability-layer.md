@@ -246,10 +246,39 @@ Example JSON-mode line (same call site, different handler):
 
 Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem audit trail. Programmatic filtering also works: handlers can route by `component` attr, JSON tooling can index it.
 
+**Locked: call-site shape — factory pattern.**
+
+A central `internal/log` package owns the shared `*slog.Logger` (the root, configured at process start with our custom handler for rotation, prefix render, and baseline attrs). It exposes one factory function:
+
+```go
+func For(component string) *slog.Logger
+```
+
+Each consumer package binds its component name once, at init:
+
+```go
+package state // package: internal/state
+
+import "github.com/leeovery/portal/internal/log"
+
+var logger = log.For("daemon")
+```
+
+Call sites then use the package-level logger with no component argument repeated:
+
+```go
+logger.Info("tick complete", "panes", 12, "took", "18ms")
+// renders: 2026-05-29T08:38:00Z INFO daemon: tick complete panes=12 took=18ms
+```
+
+The factory returns a thin child wrapper around the root via `root.With("component", component)` — cheap, no shared-state surface. Test code injects a silent logger via existing DI seams (`slog.New(slog.NewTextHandler(io.Discard, nil))`) or constructs its own via `log.For("test")`.
+
+**Existing `Component*` constants (`internal/state/logger.go:30-38`) are deleted as part of the migration sweep.** The factory's string argument is the only place a component name appears in Go code, so the typo surface is the ~12 package-init call sites — easy to review by eye. CLAUDE.md gets updated at lock time to reflect the new shape. (Closes review-002 G6.)
+
 **Still open (this subtopic):**
-- The taxonomy list — exact set of `component` values and their boundaries (existing constants vs new additions like `saver`, `capture`, `signal`, `log-rotate`).
+- The taxonomy list — exact set of `component` values and their boundaries (existing 7 + new additions like `saver`, `capture`, `signal`, `log-rotate`, `clean`).
 - Attr-key vocabulary — canonical names for `pane_key`, `session`, `project`, `path`, `took`, etc. (snake_case proposed). Locks the field naming so the first 10 call sites don't define a drifting de-facto vocabulary.
-- Mandatory baseline attrs — what every log line carries automatically (proposed: `component`, `pid`, `version`, `process_role`), injected by the handler via `slog.With` at logger construction so call sites don't have to remember.
+- Mandatory baseline attrs — what every log line carries automatically (proposed: `component`, `pid`, `version`, `process_role`), injected by the handler / root logger so call sites don't have to remember.
 
 ---
 
