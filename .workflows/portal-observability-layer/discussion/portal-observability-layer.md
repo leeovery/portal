@@ -33,7 +33,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Call-site logging pattern (DEBUG breadcrumbs + INFO terminal) [decided]
   State-mutation audit trail for user config files [decided]
   Defensive invariants against unknown-cause log destruction [decided]
-  Diagnostic context preservation at boundaries [pending]
+  Diagnostic context preservation at boundaries [decided]
   Cycle-level summary cadence and shape [pending]
   Log-level propagation verification [pending]
   Saver and daemon lifecycle event taxonomy [pending]
@@ -698,6 +698,88 @@ Renders:
 **Panic path:** `Init` MUST also install a `defer func() { if r := recover(); r != nil { ... } }()` in main if practical, emitting `process: panic reason=<r>` at ERROR before re-panicking. Implementation detail deferred to spec.
 
 **Privacy on `args` attr:** verbatim. Same posture as state-mutation audit trail. CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
+
+---
+
+## Diagnostic context preservation at boundaries
+
+### Context
+
+Pattern (4) from the inbox: when a subprocess fails or an external command returns unexpected output, capture stderr alongside stdout and propagate both into the wrapped error. Discarding stderr is the most common form of "we lost the debug context exactly where we needed it most." Same principle applies to syscalls (errno text) and tmux command failures.
+
+The cycle-1 review of `slow-open-empty-previews-and-zombie-sessions` surfaced `defaultIdentifyPS` (`internal/state/daemon_identity.go`) as a concrete example: stderr was discarded on failure, leaving the wrapped error context-free.
+
+This subtopic governs **error wrapping at external boundaries**. It is orthogonal to the level discipline (which governs how the resulting wrapped error is logged). Together they guarantee: when an external call fails, the failure context survives all the way to the log line.
+
+### Decision
+
+**Locked.** Every external-boundary call site MUST preserve stderr / errno / phase-of-failure context in the wrapped error returned to callers. The locked level discipline + call-site pattern then determines how that error reaches `portal.log`.
+
+### Mechanical rule (spec-phase intake)
+
+Four boundary classes; each has a concrete wrapping pattern.
+
+**Boundary class 1: `exec.Cmd`** (currently used in `internal/state/daemon_identity.go`, `internal/tmux/commander.go`, etc.).
+
+Every call site MUST either use `cmd.CombinedOutput()` OR capture `cmd.Stderr` into a `bytes.Buffer` before `cmd.Run/Output`. On error, the wrapped error MUST embed both:
+- The exit status (or signal) if the process exited.
+- The stderr text (trimmed).
+
+Canonical wrapping pattern:
+
+```go
+var stderr bytes.Buffer
+cmd.Stderr = &stderr
+out, err := cmd.Output()
+if err != nil {
+    return nil, fmt.Errorf("%s %v: %w (stderr: %s)",
+        cmd.Path,
+        cmd.Args[1:],
+        err,
+        strings.TrimSpace(stderr.String()),
+    )
+}
+```
+
+PROHIBITED: `_, _ = cmd.Run()`, `cmd.Output()` without `cmd.Stderr` assignment, or any error path that returns a wrapped error WITHOUT stderr text included.
+
+**Boundary class 2: `internal/tmux.RealCommander.Run` / `RunRaw`** (the wrapper layer for all tmux command execution).
+
+The commander interface MUST capture both stdout and stderr on every invocation. On non-zero exit:
+- The error returned MUST embed the exit code, the tmux argv, and the trimmed stderr text.
+- Tmux-specific sentinel errors (`ErrNoSuchSession`, `ErrEmptyPaneList` per `internal/tmuxerr`) MUST be detected via the stderr text and wrapped with the sentinel using `fmt.Errorf("%w: %s", sentinel, stderr)`.
+
+PROHIBITED: returning a generic error from a tmux invocation without the stderr context.
+
+**Boundary class 3: `os` package syscalls** (`os.Stat`, `os.OpenFile`, `os.Rename`, `os.Remove`, etc.).
+
+Go's standard `os` package wraps syscall errors with path + errno text by default (e.g. `open /tmp/x: permission denied`). The rule: do NOT replace these errors with a wrapper that loses the path/errno context. When additional context is wrapped on top, use `fmt.Errorf("...: %w", ..., err)` so the underlying error is preserved verbatim and accessible via `errors.Unwrap`.
+
+PROHIBITED: `return errors.New("file operation failed")` style wrapping that discards the original `*os.PathError`.
+
+**Boundary class 4: stdlib `io` / `bufio` / scrollback FIFO reads** (`internal/state/scrollback.go`, hydrate helper FIFO reads).
+
+EOF and timeout conditions are valid expected outcomes, not boundary failures — they take the "expected" classification in the level discipline contract. Other I/O errors (read error mid-stream, write error mid-write) wrap with `fmt.Errorf("read %s: %w", path, err)` to preserve path context.
+
+**Across all four classes — `slog` attr usage at the eventual log site:**
+
+```go
+logger.Warn("tmux command failed", "error", err, "session", sessionName)
+```
+
+The `"error"` attr value MUST be the wrapped error directly (`err`, not `err.Error()`); slog handles serialization. Custom handler renders the full chain of wrapped messages including the stderr text.
+
+**Boundary helper (allowed shared idiom, internal/log):**
+
+After 3+ identical boundary-wrapping patterns appear in production code, a shared helper in `internal/log` MAY be added. Examples of allowed helpers:
+
+```go
+// CombinedOutputWithContext runs cmd and returns its stdout. On error,
+// returns a wrapped error embedding exit status, argv, and trimmed stderr.
+func CombinedOutputWithContext(cmd *exec.Cmd) ([]byte, error)
+```
+
+Until 3+ sites need it, write the wrapping at each call site directly.
 
 ---
 
