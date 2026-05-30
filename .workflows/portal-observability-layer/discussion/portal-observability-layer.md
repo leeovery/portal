@@ -105,6 +105,25 @@ The current 1 MiB threshold being laughably small also explains why the `.old` k
 
 **Operational edges deferred to spec phase**: DST/timezone transitions and the local-midnight definition; behaviour across portal version upgrades mid-day; first-startup migration from any existing `portal.log.old`; disk-full and EACCES failure modes; retention-pass scheduling and missed-day catchup; `.N` ordering details. These are tactical — none invalidates the strategic shape locked above.
 
+**Mechanical rule (spec-phase intake):**
+
+For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
+
+1. Compute `today := time.Now().Format("2006-01-02")`.
+2. If the handler's currently-open fd is for `portal.log.<today>`, reuse it. Otherwise:
+   a. Open `${stateDir}/portal.log.<today>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`, mode `0600`.
+   b. On `EEXIST`, retry with `O_APPEND|O_WRONLY` (lost the cross-process create race; another writer beat us).
+   c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically via `os.Symlink(target, tmp)` + `os.Rename(tmp, link)`.
+   d. `chmod 0400` any other `portal.log.<date>*` files in `${stateDir}` that are not `<today>` and not already mode 0400.
+3. After fd is open, check `current_size + len(serialized) >= PORTAL_LOG_ROTATE_SIZE` (parsed once at handler init from env var, default `500*1024*1024`). If true, rotate to `portal.log.<today>.N`:
+   a. Find max existing `N` for today (`portal.log.<today>.*` listing); next N = max + 1, or 1 if none.
+   b. Open `portal.log.<today>.<N>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`.
+   c. On `EEXIST`, retry with `N+1`.
+   d. Swing the symlink to the new file. `chmod 0400` the previous file.
+4. Write the serialized record to the now-current fd.
+
+The above applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
+
 ---
 
 ## Retention policy and audit
@@ -139,6 +158,20 @@ Per-deletion INFO line is required: the 2026-05-28 incident taught that silent d
 
 **Open in spec phase**: where the rotation/retention breadcrumb lands across the midnight boundary (yesterday's file vs today's, or both); whether rotated logs are compressed (would cut 30d worst-case from ~600 MB to under 80 MB); how an open-fd-on-yesterday's-file interacts with retention `unlink` (zombie writers post-deletion). Plus whether to mirror retention breadcrumbs to a separate out-of-band file so the audit trail survives even if rotation itself is the corruptor.
 
+**Mechanical rule (spec-phase intake):**
+
+On the first `Handle(record)` call of each calendar date (detected via the date-change check from the rotation rule above), the handler runs a retention sweep:
+
+1. Parse `cutoff := today.AddDate(0, 0, -PORTAL_LOG_RETENTION_DAYS)`. Default `PORTAL_LOG_RETENTION_DAYS = 30`. Invalid env value (non-integer, negative, > 365) → use default and emit one WARN: `log-rotate: invalid PORTAL_LOG_RETENTION_DAYS=<v>, using 30d`.
+2. List `${stateDir}/portal.log.*` files. Extract the date portion of each filename. For each file whose date < `cutoff`:
+   a. Emit one INFO line BEFORE deletion: `log-rotate: deleted path=<filename> retention=<N>d`.
+   b. `os.Remove(filename)`. On error, emit one WARN with `error` attr and continue (don't abort the sweep).
+3. The sweep is best-effort and re-entrant; running it twice on the same day is a no-op.
+
+`portal clean` does NOT trigger this sweep on its own; it preserves rotated logs by default. `portal clean --logs` triggers the sweep with `cutoff = today` (i.e. delete every rotated file, leaving only the current one).
+
+The above applies to ONE seam: the `slog.Handler` in `internal/log` (and `portal clean --logs`, which calls into the same sweep function).
+
 ---
 
 ## Logger library (slog adoption)
@@ -161,6 +194,43 @@ The broader framing — "use logging anywhere it helps, with disciplined levels,
 Reasoning: standard library, structured by default, handler-based (one set of call sites can emit human-readable text for tail/grep and JSON for tooling/aggregation depending on handler), and future-proof. The broader scope of "instrument everywhere" means call sites multiply, and we want them ergonomic and conventional from day one. Migration cost is manageable today (small N of existing call sites) and savings compound as we add new sites.
 
 **Implementation detail for spec phase**: the existing rotation/multi-writer machinery in `logger.go` needs to be re-expressed as a custom `slog.Handler` (or wrap a `slog.TextHandler` with rotation-aware `io.Writer`) so rotation behaviour is preserved end-to-end. The text handler's line format can be retained for backward compatibility with existing greps, or replaced with an `slog`-canonical key=value layout — TBD during spec.
+
+**Mechanical rule (spec-phase intake):**
+
+A new package `internal/log` exposes exactly two public functions:
+
+```go
+package log
+
+// Init constructs the root *slog.Logger with baseline attrs bound and the
+// custom rotating handler attached. Called once per process from main.go
+// before any other portal code runs. Idempotent only via panic-on-second-call.
+func Init(stateDir string, version string, processRole string) error
+
+// For returns a child logger pre-bound to the given component name. Cheap;
+// callers are expected to cache the returned logger at package init via a
+// package-level var.
+func For(component string) *slog.Logger
+```
+
+Every other portal package that needs to log:
+
+```go
+import "github.com/leeovery/portal/internal/log"
+
+var logger = log.For("<component-name-from-locked-taxonomy>")
+```
+
+Then call sites use `logger.{Debug,Info,Warn,Error}` directly with `slog.Attr` args (`"key", value` variadic form).
+
+Migration sweep:
+- The `internal/state.Logger` type is deleted.
+- The `internal/state.Component*` constants are deleted.
+- All call sites of `state.Logger.{Debug,Info,Warn,Error}(component, fmt, args...)` are rewritten to `logger.{Debug,Info,Warn,Error}(msg, attrs...)` with the component bound at package-init via `log.For`.
+- `state.NopLogger()` is deleted; tests requiring a silent logger use `slog.New(slog.NewTextHandler(io.Discard, nil))` directly.
+- All test mock surfaces in `bootstrapDeps` and friends that previously held `*state.Logger` are updated to hold `*slog.Logger`.
+
+Big-bang in one PR (no adapter shim, no co-existence period).
 
 ---
 
@@ -212,6 +282,26 @@ Two implications carry forward:
 - **Idempotent no-ops** (e.g. `RegisterPortalHooks` deciding "already current, no action"): DEBUG by default. INFO only when the no-op IS the user-visible decision (e.g. "saver already at version V, skipping respawn" — the operator wants to see we considered upgrading and chose not to act). A purely-internal idempotent skip clutters the INFO baseline.
 - **Hysteresis-internal failures** (e.g. saver-membership probe failure inside the 3-tick self-supervision hysteresis): DEBUG per spurious tick. ONE INFO or WARN on the trip (when the threshold is crossed and the eject decision lands). WARN per tick during transient tmux contention would fire continuously and invert the "every WARN is signal" promise.
 - **Recoverable-but-rare** (e.g. corrupt `sessions.json` falling back to empty state; pane decode failures dropping one pane and continuing): WARN. These are signal even when recovered. "Rare" doesn't bump them to ERROR — ERROR is strictly "process exiting because it cannot continue".
+
+### Mechanical rule (spec-phase intake)
+
+Level selection per call site is determined mechanically by the code shape. Spec writers and code reviewers apply this table without judgment:
+
+| Code shape at the call site | Level |
+|---|---|
+| `_ = expectedErr` / `if errors.Is(err, KnownExpected) { return }` swallow path | `Debug` with `error_class="expected"` |
+| `_ = unexpectedErr` / `log-and-continue` on an error the codebase does not expect on the happy path | `Debug` with `error_class="unexpected"`, OR `Warn` if production visibility is wanted |
+| Terminal line just before successful return from a function representing a meaningful choice (saver respawn, hook fire, capture-tick complete, lifecycle transition) | `Info` |
+| Cycle-end summary at the end of a tick/iteration/batch (`tick complete`, `bootstrap step done`, `clean-stale entries=N`) | `Info` |
+| Idempotent no-op decision (key already correct, version already current, hook already registered) | `Debug` UNLESS the no-op is the user-visible decision (e.g. "skipping respawn because version matches"), in which case `Info` |
+| Probe failure inside a hysteresis window (`probe failed, retries=N/M`) | `Debug` per failure |
+| Hysteresis threshold trip (escalation, eject, give-up) | `Info` (the resolved decision) OR `Warn` if the trip represents an anomaly |
+| Unexpected-but-recoverable condition (anomalous capture, fallback to default after invalid config, retry triggered) | `Warn` |
+| Line immediately preceding `os.Exit(N)` / `return err` from `main` / panic | `Error` |
+
+Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercase) → fall back to `info` and emit one WARN at process start: `bootstrap: invalid PORTAL_LOG_LEVEL=<v>, using info`.
+
+Spec writers MUST verify each new log call site against this table during spec authoring. Code reviewers verify the same at PR review time.
 
 ---
 
@@ -337,6 +427,44 @@ Example full line (INFO mode, text handler):
 
 Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB/day total). They make every line self-describing for forensic use across multi-writer days. (Closes review-002 G3 and G4.)
 
+### Mechanical rule (spec-phase intake)
+
+**Closed component value space** (14 total, including the 2 added by State-mutation audit trail):
+
+```
+bootstrap  daemon  restore  hydrate  notify  hooks  preview
+saver  capture  signal  log-rotate  clean  aliases  projects
+```
+
+**Closed attr-key value space** (10 contextual + 4 baseline):
+
+Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`.
+
+Baseline (auto-injected at root logger construction in `internal/log.Init`): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
+
+**Custom `slog.Handler` text-mode rendering rule:**
+
+```
+<RFC3339Nano timestamp> <LEVEL> <component>: <msg> <attrs as key=value pairs>
+```
+
+Where:
+- `<component>` is read from the bound `component` attr and emitted as a literal prefix immediately before the colon. The `component` attr is NOT also rendered in the attrs key=value list.
+- `<msg>` is the slog record's message field.
+- `<attrs>` are emitted as space-separated `key=value` pairs in the order: contextual attrs (in slog.Record order), then the four baselines (`pid`, `version`, `process_role`; `component` was already rendered as the prefix).
+- Multi-word string values are quoted with `"`.
+- `time.Duration` values render with Go's default `String()` (e.g. `1.234s`).
+
+**Custom `slog.Handler` JSON-mode rendering rule:**
+
+Standard `slog.NewJSONHandler` output, no special handling — `component` becomes a normal `"component":"<name>"` JSON field.
+
+**Extension policy:**
+
+- New components require explicit amendment of THIS discussion file's closed component list (or a successor specification amendment).
+- New attr keys require the same amendment process.
+- Spec writers and code reviewers MAY NOT introduce new component or attr names ad hoc.
+
 ---
 
 ## Call-site logging pattern (DEBUG breadcrumbs + INFO terminal)
@@ -413,6 +541,26 @@ At DEBUG (investigating): all four DEBUG lines + the INFO summary.
 3. **Shared helpers in `internal/log`** — only after the same idiom appears 5+ times in production code and earns its weight. Don't pre-build helpers for theoretical cases.
 
 **Anti-pattern (explicitly rejected):** custom wrappers like `logger.Trace(LEVEL_BREADCRUMB, LEVEL_TERMINAL, msg, debugAttrs, infoAttrs)` that bundle levels into one call. Couples concerns, obscures level discipline at the call site, makes review harder. Each log call has ONE level chosen explicitly.
+
+### Mechanical rule (spec-phase intake)
+
+Per function authored or amended, spec writers and code reviewers apply this discipline mechanically:
+
+1. **DEBUG breadcrumbs** at each meaningful state transition inside the function (resource acquired, event received, sub-operation completed, branch chosen). One `logger.Debug(<terse-msg>, <attrs>...)` per transition.
+2. **INFO at terminal decision points** — one `logger.Info(<terse-msg>, <attrs>...)` immediately before each successful return path. The line MUST capture the chosen outcome and the resolved decision attrs.
+3. **WARN per recoverable error path** — one `logger.Warn(<terse-msg>, "error", err, <attrs>...)` before swallowing/returning. WARN exists at any code path that classifies as "unexpected-but-recoverable" per the level discipline table.
+4. **ERROR only at lines immediately preceding** `os.Exit(N)` / `panic(...)` / `return err` from a main entry point.
+
+**Sticky-context rule:** when ≥ 3 subsequent log calls in the same lexical scope share an attr, bind it once via `local := logger.With(<attrs>...)` and use `local.<Level>(...)` thereafter. Below the 3-call threshold, repeat attrs at each call.
+
+**Expensive-attr guard:** wrap with `if logger.Enabled(ctx, slog.LevelDebug) { ... }` ONLY when computing an attr value involves measurable cost (JSON marshalling, slice formatting > 100 elements, syscall to read state). For ordinary attrs (strings, ints, durations, pre-computed values), use slog's lazy formatting directly.
+
+**Prohibited (PR review must reject):**
+- Custom helpers that bundle multiple levels into one call (e.g. `Trace(msg, debugAttrs, infoAttrs)`).
+- `fmt.Sprintf` inside log message strings to embed values that should be attrs (`logger.Info(fmt.Sprintf("ok %s", k))` — wrong; use `logger.Info("ok", "key", k)`).
+- Direct construction of `*slog.Logger` outside `internal/log` package.
+- Pre-formatting attrs into the message string (use slog attrs instead).
+- Using attr keys not in the closed value space (extend the vocabulary first via discussion-file amendment).
 
 ---
 
