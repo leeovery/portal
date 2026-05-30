@@ -36,7 +36,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Diagnostic context preservation at boundaries [decided]
   Cycle-level summary cadence and shape [decided]
   Log-level propagation verification [decided]
-  Saver and daemon lifecycle event taxonomy [pending]
+  Saver and daemon lifecycle event taxonomy [decided]
   Hook-firing observability limit (syscall.Exec) [pending]
   Rollout sequencing and scope bundling [pending]
 
@@ -444,6 +444,8 @@ process
 Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`.
 
 Cycle-summary (set per summary line as relevant; enumerated by the Cycle-level summary subtopic): `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
+
+Lifecycle (set per saver/daemon lifecycle event; enumerated by the Saver and daemon lifecycle subtopic): `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`.
 
 Baseline (auto-injected at root logger construction in `internal/log.Init`): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -908,6 +910,69 @@ func AssertLogLevelResolved(t *testing.T, logPath string, pid int, expected stri
 This helper closes the env-propagation gap for ALL daemon-spawning integration tests, not just the test that motivated the assertion.
 
 **Coverage requirement:** every binary entry point that calls `log.Init` automatically emits this line; no separate per-entry-point work needed. The propagation assertion is the test-side coverage requirement.
+
+---
+
+## Saver and daemon lifecycle event taxonomy
+
+### Context
+
+Implicitly covered by patterns (5) cycle summaries and (6) lifecycle events, but worth surfacing as its own category because portal's reconstruction needs precisely these events and historically didn't have them. The 2026-05-28 incident's "why did the saver disappear at 08:18?" was undiagnosable because no INFO-level saver lifecycle events existed in the log — only a handful of WARNs from downstream sites that lost their connection.
+
+This subtopic enumerates the **closed catalog** of saver and daemon lifecycle INFO events. With these events grep'd as `saver:` and `daemon:`, an operator can reconstruct the entire saver-and-daemon lifecycle across any rotation boundary.
+
+### Decision
+
+**Locked.** The closed catalog below covers every saver and daemon lifecycle event. Adding new events requires explicit amendment of this discussion (or a successor spec amendment). Per-tick cycle summaries are already covered by the Cycle-level summary subtopic and don't reappear here.
+
+### Mechanical rule (spec-phase intake)
+
+Every site listed below MUST emit exactly one INFO log line at the moment described. Each row specifies the component, msg, and required attrs. Optional attrs (always allowed but not mandatory) are not listed; they follow the call-site pattern's general rules.
+
+**Saver lifecycle events (component: `saver`):**
+
+| Site | msg | Required attrs |
+|---|---|---|
+| Bootstrap creates the `_portal-saver` placeholder pane | `placeholder created` | `tmux_pane` (the pane id), `pid` (auto-baseline; the bootstrap process emitting this) |
+| Bootstrap turns off `destroy-unattached` on the placeholder session | `destroy-unattached off` | `tmux_pane` |
+| Bootstrap respawns the placeholder pane as `portal state daemon` (transition) | `respawn-daemon` | `from_pid` (placeholder pid), `to_pid` (daemon pid, post-respawn), `tmux_pane` |
+| Bootstrap observes the daemon process is up and ready (after the 2s readiness barrier) | `daemon ready` | `target_pid` (the daemon pid), `version` (auto-baseline) |
+| Bootstrap initiates the kill-barrier (Component A) for a prior daemon | `kill-barrier started` | `target_pid` (the prior daemon pid being killed) |
+| Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
+| Daemon self-supervision observes the saver pane's host process exited | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
+
+**Daemon lifecycle events (component: `daemon`):**
+
+| Site | msg | Required attrs |
+|---|---|---|
+| Daemon process startup (after `Init` but before tick loop) | `spawn` | `pid` (auto-baseline), `tmux_pane`, `version` (auto-baseline) |
+| Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline) |
+| Daemon's self-supervision counter increments toward eject | (no INFO — DEBUG per the level discipline placement-clarification "hysteresis-internal failures") | n/a |
+| Daemon's self-supervision counter trips threshold and ejects | `self-eject` | `ticks` (consecutive-absence count at trip), `threshold` (configured ejection threshold) |
+| Daemon shutdown (any reason — SIGHUP, self-eject, normal exit) | `shutdown` | `reason` ∈ {`sighup`, `self-eject`, `signal`, `exit`}, `flush_completed` (bool — whether the final commit completed) |
+
+**Closed attr extension (added to the prefix taxonomy attr vocabulary):** `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`. Plus existing baseline `pid`, `version` and existing contextual `tmux_pane`.
+
+**Reason value spaces (closed):**
+
+- `kill-barrier escalated reason`: `kill-session-timeout` (only value today; new values require amendment).
+- `placeholder died reason`: `signal` / `exit` / `unknown`.
+- `daemon shutdown reason`: `sighup` / `self-eject` / `signal` / `exit`.
+
+Reason value spaces are closed sets per event — spec writers MAY NOT introduce new reason values without amending this catalog.
+
+**Per-tick events (NOT in this catalog):**
+
+Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're covered by:
+- Cycle-level summary subtopic — one INFO per tick at the end of the daemon's capture-and-commit cycle (`capture: tick complete ...`).
+- Level-discipline placement clarifications — per-tick probe failures are DEBUG; only the trip (self-eject) is INFO per this catalog.
+
+Calling code for the catalog above lives across:
+- `cmd/bootstrap/` — most saver lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation).
+- `cmd/state_daemon.go` — daemon lifecycle (`spawn`, `lock acquired`, `self-eject`, `shutdown`).
+- `internal/tmux/portal_saver.go` — kill-barrier escalation.
+
+Spec writers walking these files apply the catalog row-by-row.
 
 ---
 
