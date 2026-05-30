@@ -113,7 +113,7 @@ For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
 2. If the handler's currently-open fd is for `portal.log.<today>`, reuse it. Otherwise:
    a. Open `${stateDir}/portal.log.<today>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`, mode `0600`.
    b. On `EEXIST`, retry with `O_APPEND|O_WRONLY` (lost the cross-process create race; another writer beat us).
-   c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically. Tmp-name discipline: use `portal.log.tmp.<pid>.<nanos>` where `<nanos>` is `time.Now().UnixNano()` (process-unique). `os.Symlink(target, tmp)`; on `EEXIST` increment `<nanos>` and retry up to 3 times then return an error from `Handle`. `os.Rename(tmp, link)` — atomic on Unix, last writer wins; leaked tmps from crashed processes are reaped on next start (see below).
+   c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically via `os.Symlink(target, tmp)` + `os.Rename(tmp, link)`.
    d. `chmod 0400` any other `portal.log.<date>*` files in `${stateDir}` that are not `<today>` and not already mode 0400.
 3. After fd is open, check `current_size + len(serialized) >= PORTAL_LOG_ROTATE_SIZE` (parsed once at handler init from env var, default `500*1024*1024`). If true, rotate to `portal.log.<today>.N`:
    a. Find max existing `N` for today (`portal.log.<today>.*` listing); next N = max + 1, or 1 if none.
@@ -123,8 +123,6 @@ For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
 4. Write the serialized record to the now-current fd.
 
 The above applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
-
-**Tmp-name reaping (crash recovery):** On the first `Handle(record)` call of each process (the same call that opens today's file), the handler scans `${stateDir}` for files matching `portal.log.tmp.*` and removes any whose mtime is older than 5 minutes. Best-effort; errors logged at DEBUG and swallowed. This reaps tmps leaked by crashed processes without affecting in-flight tmps owned by live writers.
 
 ---
 
@@ -162,16 +160,13 @@ Per-deletion INFO line is required: the 2026-05-28 incident taught that silent d
 
 **Mechanical rule (spec-phase intake):**
 
-On the first `Handle(record)` call of each calendar date, the handler runs a retention sweep — **coordinated across processes via a per-day sentinel file** so only one process per host per day actually runs it. The other processes observe the sentinel and skip silently.
+On the first `Handle(record)` call of each calendar date (detected via the date-change check from the rotation rule above), the handler runs a retention sweep:
 
 1. Parse `cutoff := today.AddDate(0, 0, -PORTAL_LOG_RETENTION_DAYS)`. Default `PORTAL_LOG_RETENTION_DAYS = 30`. Invalid env value (non-integer, negative, > 365) → use default and emit one WARN: `log-rotate: invalid PORTAL_LOG_RETENTION_DAYS=<v>, using 30d`.
-2. Attempt to create the sweep sentinel: `${stateDir}/portal.log.sweep.<today>` via `O_CREAT|O_EXCL|O_WRONLY`, mode 0600. The sentinel content is one line: `<pid>\n` (the sweeping process's pid).
-   - On success: we won the per-day sweep race. Proceed to step 3.
-   - On `EEXIST`: another process already started or completed the sweep. Skip the rest of the sweep silently (no log line — the duplicate-attempt floor is what I2 explicitly fixes).
-3. List `${stateDir}/portal.log.*` files (excluding the sentinel itself and any `portal.log.tmp.*`). Extract the date portion of each filename. For each file whose date < `cutoff`:
+2. List `${stateDir}/portal.log.*` files. Extract the date portion of each filename. For each file whose date < `cutoff`:
    a. Emit one INFO line BEFORE deletion: `log-rotate: deleted path=<filename> retention=<N>d`.
-   b. `os.Remove(filename)`. On error, emit one DEBUG (NOT WARN — the duplicate-already-gone case happens for legitimate reasons during normal operation) with `error` attr and continue.
-4. The sweep is best-effort and re-entrant: subsequent processes on the same day see the sentinel and skip; the sentinel itself is reaped by the rotation rule's chmod step on the *next day's* first write (the sentinel is a file matching `portal.log.*`).
+   b. `os.Remove(filename)`. On error, emit one WARN with `error` attr and continue (don't abort the sweep).
+3. The sweep is best-effort and re-entrant; running it twice on the same day is a no-op.
 
 `portal clean` does NOT trigger this sweep on its own; it preserves rotated logs by default. `portal clean --logs` triggers the sweep with `cutoff = today` (i.e. delete every rotated file, leaving only the current one).
 
@@ -295,8 +290,7 @@ Level selection per call site is determined mechanically by the code shape. Spec
 | Code shape at the call site | Level |
 |---|---|
 | `_ = expectedErr` / `if errors.Is(err, KnownExpected) { return }` swallow path | `Debug` with `error_class="expected"` |
-| `_ = unexpectedErr` / `log-and-continue` where the error doesn't break a function invariant (no observable downstream effect on subsequent behavior) | `Debug` with `error_class="unexpected"` |
-| `_ = unexpectedErr` / `log-and-continue` where the error breaks a function invariant or causes observable downstream effect (e.g. cleanup partially succeeded, next iteration sees stale state, retry will fire) | `Warn` with `error_class="unexpected"` |
+| `_ = unexpectedErr` / `log-and-continue` on an error the codebase does not expect on the happy path | `Debug` with `error_class="unexpected"`, OR `Warn` if production visibility is wanted |
 | Terminal line just before successful return from a function representing a meaningful choice (saver respawn, hook fire, capture-tick complete, lifecycle transition) | `Info` |
 | Cycle-end summary at the end of a tick/iteration/batch (`tick complete`, `bootstrap step done`, `clean-stale entries=N`) | `Info` |
 | Idempotent no-op decision (key already correct, version already current, hook already registered) | `Debug` UNLESS the no-op is the user-visible decision (e.g. "skipping respawn because version matches"), in which case `Info` |
@@ -376,7 +370,7 @@ The factory returns a thin child wrapper around the root via `root.With("compone
 
 **Existing `Component*` constants (`internal/state/logger.go:30-38`) are deleted as part of the migration sweep.** The factory's string argument is the only place a component name appears in Go code, so the typo surface is the ~12 package-init call sites — easy to review by eye. CLAUDE.md gets updated at lock time to reflect the new shape. (Closes review-002 G6.)
 
-**Locked: component taxonomy (initially 12 components, kebab-case where multi-word; extended by State-mutation audit trail and Defensive invariants subtopics to 15 — see the closed-space declaration below for the canonical list).**
+**Locked: component taxonomy (12 components, kebab-case where multi-word).**
 
 | Component | Owns |
 |---|---|
@@ -576,12 +570,6 @@ Per function authored or amended, spec writers and code reviewers apply this dis
 - Direct construction of `*slog.Logger` outside `internal/log` package.
 - Pre-formatting attrs into the message string (use slog attrs instead).
 - Using attr keys not in the closed value space (extend the vocabulary first via discussion-file amendment).
-- `slog.Group(...)` for nested attrs (the text-mode rendering rule renders flat `key=value`; grouped attrs would render inconsistently with the closed attr vocabulary). Use flat attr keys; if hierarchy is needed, use `<prefix>_<field>` flat names (e.g. `target_pid` not `target.pid`).
-
-**Allowed slog idioms (in addition to the variadic form):**
-- `slog.LogAttrs(ctx, level, msg, slog.String(k, v), slog.Int(k, n), ...)` — the type-safe / lower-allocation form. Equivalent to the variadic form; spec writers MAY use either at their discretion.
-- `slog.Any("error", err)` for error attrs — preserves wrapped chain for handler-side serialization.
-- Direct `time.Duration`, `int`, `string`, `bool` attr values — slog formats these automatically.
 
 ---
 
@@ -604,7 +592,7 @@ The subtopic's *design intent* is straightforward — log mutations. The *mechan
 
 `sessions.json` is **out of scope** for this subtopic — it's daemon-managed high-frequency state (mutated every tick), covered by the pending cycle-summary subtopic (one INFO per tick under `daemon` / `capture` components, not per-write).
 
-**Taxonomy addition:** `aliases` and `projects` are added as components (running total 14; later extended to 15 by Defensive invariants subtopic — see the canonical closed-space list under Subsystem prefix taxonomy → Mechanical rule).
+**Taxonomy addition:** `aliases` and `projects` are added as components. Total taxonomy: **14 components**.
 
 **Mechanical rule (the seam spec phase enumerates against):**
 
@@ -653,22 +641,6 @@ This applies the hysteresis-trip pattern (from level discipline) to mutation bat
 
 **Closes review-003 H1, H2, H3, H4, H5, H7.** Defers H6, H9, H10 to spec phase (boundary-rule formalization, aliases read-side scope, source-distinguishability per call site).
 
-**AtomicWrite enforcement seam (closes review-004 I8):**
-
-To enforce the audit-trail discipline at the seam level (not just per-caller), `internal/log` exposes a thin wrapper:
-
-```go
-// AuditedWrite writes data to path atomically (temp file + fsync + rename),
-// and emits one INFO breadcrumb on success or one WARN on failure, per the
-// State-mutation audit trail mechanical rule. The op + key attrs are mandatory;
-// the path must match one of the closed-set in-scope files.
-func AuditedWrite(path string, data []byte, mode os.FileMode, op string, keyAttr slog.Attr, optionalAttrs ...slog.Attr) error
-```
-
-Every call site that mutates one of the 3 in-scope files (`hooks.json`, `aliases`, `projects.json`) MUST use `log.AuditedWrite` instead of `fileutil.AtomicWrite` directly. The migration sweep replaces all in-scope callers in one pass. `fileutil.AtomicWrite` continues to exist for out-of-scope files (`sessions.json`, future state files) — its call sites are unaffected.
-
-PR review rejects: direct `fileutil.AtomicWrite` calls targeting any of the 3 in-scope filenames. The closed-set in-scope filenames are pinned in `internal/log` source as a constant set; if a future PR wants to add a file, it amends this discussion + the constant set together.
-
 ---
 
 ## Defensive invariants against unknown-cause log destruction
@@ -689,7 +661,7 @@ Even with the new design, an unknown bug could destroy today's `portal.log`. The
 
 **Invariant 3 (new this subtopic): Per-process lifecycle markers.** Every portal process emits ONE INFO line at the very start of its execution and ONE INFO line on clean exit. These are the tripwires that make destruction visible: if today's `portal.log` contains only lines from 09:15 forward but you know portal was running before, the first line of today's file is a "process: start" marker that timestamps when destruction had to have happened.
 
-**Taxonomy addition:** add `process` as a 15th component. Used exclusively for lifecycle markers of the portal **binary** itself — `start`, `exit`, `exec`, `log-level resolved`, `panic`. **Component boundary (closes review-004 I4):** `process:` events answer "did the binary boot / exit / hand off"; `saver:`/`daemon:`/etc. events answer "did the subsystem reach a state change". When `portal state daemon` boots: `process: start` fires from `log.Init` (binary just started); `daemon: spawn` fires later after lock acquisition (subsystem reached operational state). Two lines, two concerns, no overlap. When bootstrap kills the prior saver: bootstrap emits `saver: kill-barrier started` from its own process_role; the dying saver's own `process: exit` is emitted by the dying process if log.Close runs (NOT guaranteed under SIGKILL — see below). Audit reader sees both lines IF both fire; the gap shape is documented.
+**Taxonomy addition:** add `process` as a 15th component. Used exclusively for lifecycle markers (start, exit, panic) for the portal binary itself, regardless of which subcommand is running. (Subsystem-level lifecycle events — saver respawn, daemon spawn — go under the pending Saver/daemon lifecycle subtopic, not under `process`.)
 
 ### Mechanical rule (spec-phase intake)
 
@@ -709,7 +681,7 @@ Renders (text mode):
 
 (Note: `pid`, `version`, `process_role` are baseline attrs auto-injected; the call site does not pass them.)
 
-The `internal/log` package additionally exposes `func Close(exitCode int)` — invoked exclusively by `log.Fatal` (see below) and never directly from `main`. `Close` emits one INFO line:
+The `internal/log` package additionally exposes `func Close(exitCode int)` to be invoked from `main()` via deferred call OR explicit invocation immediately before `os.Exit(N)`. `Close` emits one INFO line:
 
 ```go
 log.For("process").Info("exit",
@@ -725,44 +697,13 @@ Renders:
 
 `startTime` is captured at `Init` time and stored package-private.
 
-**Coverage requirement (closes review-004 I5):** every binary entry point must:
-1. Call `log.Init` BEFORE any other portal code that might log (typically as the first statement in `main`).
-2. Replace every `os.Exit(N)` call site with `log.Fatal(N)` (the helper below). The migration sweep audits every direct `os.Exit` in `cmd/` and `main.go` and replaces it.
-3. Install ONE deferred panic-recover in `main` that emits `process: panic reason=<r>` at ERROR via the helper `log.Panic(r)` and re-panics.
+**Coverage requirement:** every binary entry point (currently only `main.go`, but extending in principle to any future entry binary) must:
+1. Call `log.Init` BEFORE any other portal code that might log.
+2. Either defer `log.Close(0)` (for normal-return paths) or invoke `log.Close(N)` explicitly before any `os.Exit(N)`.
 
-`internal/log` exposes the helper:
+**Panic path:** `Init` MUST also install a `defer func() { if r := recover(); r != nil { ... } }()` in main if practical, emitting `process: panic reason=<r>` at ERROR before re-panicking. Implementation detail deferred to spec.
 
-```go
-// Fatal emits process: exit with the given code, flushes the handler, and
-// calls os.Exit(code). Replaces every direct os.Exit call in portal code.
-func Fatal(code int)
-
-// Panic emits process: panic with the given reason at ERROR, flushes, and
-// re-panics. Called from main's recover defer.
-func Panic(reason any)
-```
-
-`os.Exit` outside `internal/log.Fatal` and `internal/log.Panic` is PROHIBITED. PR review rejects new direct `os.Exit` call sites.
-
-**Init re-entry (closes review-004 I6):** `log.Init` is idempotent and re-entrant by design. The first call constructs the root and wires the handler. Subsequent calls atomically replace the handler (via internal `atomic.Pointer[slog.Handler]`) — this supports test harnesses that need to redirect logs to a capture buffer (`Init(stateDir, version, processRole)` plus an internal `SetHandlerForTest(h slog.Handler)` seam exposed only to `internal/log` test code or via build-tag-gated export). `log.For` is safe before `Init` — returns a child of a default placeholder root that writes to stderr until `Init` lands; the cached package-level `var logger = log.For(...)` in consumer packages picks up the real root automatically via the atomic handler pointer.
-
-**syscall.Exec hand-off (closes review-004 I9):** `process: exit` is NOT emitted on `syscall.Exec` paths (the process image is overwritten before `log.Close` could run). For those paths, emit `process: exec` IMMEDIATELY before the exec call via:
-
-```go
-// Exec emits one INFO process: exec line synchronously (no deferred work),
-// flushes the handler, then calls syscall.Exec. Never returns under success.
-// Used by AttachConnector (cmd/open.go) and the hydrate helper's exec chain.
-func Exec(target string, argv []string, envv []string) error
-```
-
-Renders:
-```
-2026-05-30T14:00:00Z INFO process: exec target=tmux args="attach-session -A" pid=12345 ...
-```
-
-The lifecycle invariant becomes: **every `process: start` is paired with either `process: exit` or `process: exec`** (and possibly `process: panic` for unrecovered panics). An audit reader observing `process: start` with no paired exit/exec line concludes the process was killed externally — exactly the destruction signal the Defensive invariants subtopic is meant to expose.
-
-**Privacy on `args` / `target` attrs:** verbatim. Same posture as state-mutation audit trail. CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
+**Privacy on `args` attr:** verbatim. Same posture as state-mutation audit trail. CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
 
 ---
 
@@ -1226,7 +1167,6 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **F14** (subsystem prefix taxonomy sequencing) — closed by scope-expansion call to promote level discipline and prefix taxonomy to foundational subtopics ahead of further pattern decisions.
 - **F10** (investigation gate for the unknown zeroing bug) — closed. Ship the rewrite without blocking on root-cause understanding. If destruction recurs in the new system with no clear cause within 30 days post-ship, file a separate investigation bug; startup-marker tripwires will provide concrete evidence. Until then, treat the original bug as resolved-by-rewrite or detectable-when-it-recurs.
 - **F12** (compress rotated logs) — considered and rejected. Worst-case 30-day window at ~600 MB uncompressed is already trivial; introducing `zgrep` as a precondition for searching anything older than today adds friction at exactly the moment the user is investigating an incident. Greppability outweighs disk savings at portal's scale.
-- **Review-004 (I1–I12)** — all 12 findings addressed via in-place amendments to the locked subtopics. I1 added tmp-name discipline + reaping to rotation; I2 added per-day sentinel coordination to retention; I3 sharpened the level-discipline log-and-continue row with a mechanical predicate (function-invariant break vs no observable downstream effect); I4 clarified the process vs subsystem-lifecycle boundary; I5 introduced `log.Fatal` / `log.Panic` helpers and prohibited direct `os.Exit`; I6 softened Init re-entry to support test redirection via atomic handler swap; I7 unified the component count to 15 across all references via a canonical closed-space pointer; I8 introduced `log.AuditedWrite` as the enforcement seam wrapping `fileutil.AtomicWrite` for in-scope files; I9 added `log.Exec` to instrument `syscall.Exec` hand-offs (`process: exec` line as the paired terminal marker); I10 resolved by I2's sentinel coordination (only one process runs the sweep so the race is irrelevant); I11 (closed-taxonomy extension during discussion) — answered: amendments during discussion are explicit and visible in the closed-space declaration; post-discussion changes require spec-phase amendment; I12 (slog.LogAttrs / slog.Group) — answered in updated Prohibited / Allowed lists: variadic and LogAttrs both permitted, Group prohibited because flat key=value rendering doesn't support nested attrs.
 - **G6, G11** (Component constants reconciliation and prefix taxonomy scope) — closed by the factory pattern: `internal/log` exposes `log.For(component string) *slog.Logger`; each package binds its component once at init; existing `Component*` constants are deleted as part of the migration sweep. Prefix taxonomy subtopic scope explicitly absorbed attr-key vocabulary (G3) and mandatory baseline attrs (G4).
 - **G3, G4** (attr-key vocabulary and mandatory baseline attrs) — closed by the locked attr-key vocabulary (snake_case, 10 canonical keys) and the 4-attr mandatory baseline (`component`, `pid`, `version`, `process_role`) injected at root logger construction.
 - **G7, G10** (PORTAL_LOG_LEVEL default flip user-visible impact and deprecation path for existing `warn` users) — closed. Resolution: release notes only, no in-band breadcrumb. `portal.log` is a forensic artifact users only look at after the fact, so an in-band INFO line announcing the default change is invisible at the moment it would matter. Existing users who explicitly set `PORTAL_LOG_LEVEL=warn` continue to work unchanged. Users without an explicit value get the new INFO baseline; the "more volume than expected" friction is one mental moment + a changelog glance, acceptable cost for the continuous forensic baseline win.
@@ -1239,7 +1179,6 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 ### Current State
 
 - All 14 subtopics decided. Every locked subtopic carries a "Mechanical rule (spec-phase intake)" sub-section detailed enough that spec phase can produce per-call-site enumeration with zero judgment.
-- Component taxonomy locked at **15 components**: `bootstrap`, `daemon`, `restore`, `hydrate`, `notify`, `hooks`, `preview`, `saver`, `capture`, `signal`, `log-rotate`, `clean`, `aliases`, `projects`, `process`. The canonical closed-space declaration lives under Subsystem prefix taxonomy → Mechanical rule; subtopic write-ups that mention earlier intermediate counts (12 in the initial taxonomy lock, 14 after State-mutation) point readers there for the live count.
 - Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
 - Taxonomy final: 15 components, 31 attr keys (10 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 4 baseline — minus overlaps).
 - Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
