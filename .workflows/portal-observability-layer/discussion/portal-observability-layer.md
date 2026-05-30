@@ -34,7 +34,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   State-mutation audit trail for user config files [decided]
   Defensive invariants against unknown-cause log destruction [decided]
   Diagnostic context preservation at boundaries [decided]
-  Cycle-level summary cadence and shape [pending]
+  Cycle-level summary cadence and shape [decided]
   Log-level propagation verification [pending]
   Saver and daemon lifecycle event taxonomy [pending]
   Hook-firing observability limit (syscall.Exec) [pending]
@@ -439,9 +439,11 @@ process
 
 `process` is reserved for portal-binary lifecycle markers (start, exit, panic) only; subsystem-level lifecycle events have their own components.
 
-**Closed attr-key value space** (10 contextual + 4 baseline):
+**Closed attr-key value space** (10 contextual + 11 cycle-summary + 4 baseline):
 
 Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`.
+
+Cycle-summary (set per summary line as relevant; enumerated by the Cycle-level summary subtopic): `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
 
 Baseline (auto-injected at root logger construction in `internal/log.Init`): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -780,6 +782,76 @@ func CombinedOutputWithContext(cmd *exec.Cmd) ([]byte, error)
 ```
 
 Until 3+ sites need it, write the wrapping at each call site directly.
+
+---
+
+## Cycle-level summary cadence and shape
+
+### Context
+
+Pattern (5) from the inbox: daemon ticks, capture loops, bootstrap sequences, orphan sweeps — every cycle emits a single INFO summary at completion so an operator can reconstruct what happened over a window without needing per-event lines. Per-event WARNs still fire on anomalies; the summary is the steady-state grep target.
+
+The 2026-05-28 incident's reconstruction would have benefited from cycle summaries: a daemon tick that emitted `capture: tick complete sessions=3 panes=12 natural_churn=0 anomalous=0 took=18ms` once per second across the morning would have given a forensic timeline of when the saver disappeared, without scrolling through per-pane DEBUG breadcrumbs.
+
+This subtopic governs **when a cycle emits a summary, what attrs it carries, and what falls below it (DEBUG breadcrumbs) vs alongside it (per-event WARNs)**.
+
+### Decision
+
+**Locked.** Every cycle in portal emits ONE INFO summary at completion, with per-item events emitted at DEBUG (steady state) or WARN (anomaly).
+
+### Mechanical rule (spec-phase intake)
+
+A "cycle" is a function or method whose body matches one of these shapes:
+
+1. **Loop cycle** — a `for` loop iterating distinct items (sessions, panes, files, entries, orphans).
+2. **Sequence cycle** — an orchestrator running discrete named steps (e.g. the 11-step bootstrap orchestrator, the two-phase restore engine).
+3. **Tick cycle** — a periodic loop driven by a ticker (the daemon's 1Hz capture loop).
+
+For every cycle in portal, the function/method MUST:
+
+1. Capture `start := time.Now()` before the loop / sequence / tick body.
+2. Track counts of items processed and per-item anomalies (failures that did not terminate the loop).
+3. At the end of the cycle body (just before the function returns / the tick completes), emit exactly ONE INFO log line:
+
+```go
+logger.Info("<verb> complete",
+    "<unit>", count,
+    // additional counts for sub-categories if relevant, e.g.:
+    "natural_churn", churnCount,
+    "anomalous", anomCount,
+    "took", time.Since(start),
+)
+```
+
+Where:
+- `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
+- `<unit>` is the item being iterated: `sessions`, `panes`, `entries`, `orphans`, `steps`, `files`, etc.
+- Additional counts (sub-categorisations) ride as attrs on the same summary line. Examples: `natural_churn` (sessions that ended cleanly mid-capture), `entries_failed` (per-item failures), `warnings`.
+- `took` is always present.
+
+**Per-item event level inside a cycle:**
+
+- Per-item DEBUG breadcrumb ALWAYS for items where the per-item path is interesting (the capture loop's per-pane state, the bootstrap step's invocation, etc.). These flood at DEBUG and are silent at INFO — the summary is the INFO truth.
+- Per-item WARN ONLY for items that fail anomalously (count goes into the summary's anomalous attr).
+
+**Concrete cycle catalog (sites that this rule mandates a summary at):**
+
+| Cycle | Owning component | Summary line shape |
+|---|---|---|
+| Daemon tick (1Hz capture + commit) | `capture` | `capture: tick complete sessions=N panes=N natural_churn=N anomalous=N took=T` |
+| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=11 warnings=N took=T` |
+| Each bootstrap step | `bootstrap` | `bootstrap: step complete step=<StepName> took=T` |
+| Restore phase A (skeleton) | `restore` | `restore: skeleton complete sessions=N windows=N panes=N took=T` |
+| Restore phase B (geometry + replay) | `restore` | `restore: geometry complete panes=N took=T` |
+| Orphan FIFO sweep | `clean` | `clean: orphan-fifo sweep complete reaped=N skipped=N took=T` |
+| Orphan daemon sweep | `clean` | `clean: orphan-daemon sweep complete killed=N took=T` |
+| Marker cleanup | `clean` | `clean: marker sweep complete unset=N took=T` |
+| Hooks CleanStale | `hooks` | (already locked in State-mutation audit trail — same summary shape) |
+| Retention sweep (rotated logs) | `log-rotate` | (already locked in Retention policy — same summary shape) |
+
+**Closed attr extension (added to the prefix taxonomy attr vocabulary):** `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`. These were implicit in the locked attr vocab's "counts" but are explicitly enumerated here so spec writers don't invent names.
+
+Spec writers consulting this rule will produce one INFO call site per cycle in the codebase, with the verb-phrase + counts + `took` triplet, matching the catalog shape.
 
 ---
 
