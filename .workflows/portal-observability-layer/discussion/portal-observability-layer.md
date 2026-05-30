@@ -305,7 +305,7 @@ Level selection per call site is determined mechanically by the code shape. Spec
 | Unexpected-but-recoverable condition (anomalous capture, fallback to default after invalid config, retry triggered) | `Warn` |
 | Line immediately preceding `os.Exit(N)` / `return err` from `main` / panic | `Error` |
 
-Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercase) → fall back to `info` and emit one WARN at process start: `bootstrap: invalid PORTAL_LOG_LEVEL=<v>, using info`.
+Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercase) → fall back to `info` and emit one WARN at process start: `process: invalid PORTAL_LOG_LEVEL=<v>, using info`. The WARN uses the `process` component because `log.Init` runs in every binary entry point (daemon, hydrate helper, hooks CLI, etc.), not just bootstrap — emitting `bootstrap:` from a hydrate process would mis-attribute the prefix per review-005 J2.
 
 Spec writers MUST verify each new log call site against this table during spec authoring. Code reviewers verify the same at PR review time.
 
@@ -447,7 +447,9 @@ process
 
 **Closed attr-key value space** (10 contextual + 11 cycle-summary + 4 baseline):
 
-Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`.
+Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `alias`, `op`.
+
+State-mutation (set per AuditedWrite breadcrumb; enumerated by the State-mutation audit trail subtopic): `value`, `via`, `failure_phase`.
 
 Cycle-summary (set per summary line as relevant; enumerated by the Cycle-level summary subtopic): `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
 
@@ -617,12 +619,12 @@ The subtopic's *design intent* is straightforward — log mutations. The *mechan
 >
 > *Required attrs:*
 > - `op` — drawn from the closed value space below.
-> - Key identifying the affected entry: `hook_key` (hooks), `alias` (aliases), `project` (projects).
-> - On failure (WARN path): `error_class` from the closed AtomicWrite failure space below.
+> - Key identifying the affected entry: `hook_key` (hooks), `alias` (aliases), `project` (projects). All three keys are in the closed contextual attr vocabulary.
+> - On failure (WARN path): both `failure_phase` (which AtomicWrite step failed — see closed space below) AND `error_class="unexpected"` (AtomicWrite failures are always unexpected by the discipline's definition). Distinct attrs by design — `failure_phase` answers "where did it break"; `error_class` answers "was it anticipated".
 >
 > *Optional attrs:*
-> - `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`.
-> - `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
+> - `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`. In closed state-mutation attr group.
+> - `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path. In closed state-mutation attr group.
 
 **Closed `op` value space:**
 
@@ -634,9 +636,9 @@ The subtopic's *design intent* is straightforward — log mutations. The *mechan
 | `clean-stale` | Internal cleanup of an entry (always batched) |
 | `migrate` | One-shot migration from old config path (e.g. `~/Library/Application Support/portal/`) |
 
-**Closed `error_class` value space for AtomicWrite failures (per phase):**
+**Closed `failure_phase` value space for AtomicWrite failures (per phase, renamed from `error_class` to avoid overload with the level-discipline `expected`/`unexpected` partition — closes review-005 J5):**
 
-`write-failed-temp-create` / `write-failed-write` / `write-failed-fsync` / `write-failed-rename`
+`temp-create` / `write` / `fsync` / `rename`
 
 **No-op handling:** A `set` call where the entry already exists and the value matches → DEBUG with `op=set-noop`. NOT INFO. Matches the level-discipline placement clarification for idempotent no-ops.
 
@@ -744,7 +746,9 @@ func Panic(reason any)
 
 `os.Exit` outside `internal/log.Fatal` and `internal/log.Panic` is PROHIBITED. PR review rejects new direct `os.Exit` call sites.
 
-**Init re-entry (closes review-004 I6):** `log.Init` is idempotent and re-entrant by design. The first call constructs the root and wires the handler. Subsequent calls atomically replace the handler (via internal `atomic.Pointer[slog.Handler]`) — this supports test harnesses that need to redirect logs to a capture buffer (`Init(stateDir, version, processRole)` plus an internal `SetHandlerForTest(h slog.Handler)` seam exposed only to `internal/log` test code or via build-tag-gated export). `log.For` is safe before `Init` — returns a child of a default placeholder root that writes to stderr until `Init` lands; the cached package-level `var logger = log.For(...)` in consumer packages picks up the real root automatically via the atomic handler pointer.
+**Init re-entry (closes review-004 I6 and review-005 J8):** `log.Init` is idempotent and re-entrant by design. The first call constructs the root, wires the handler, AND emits both lifecycle markers (`process: start` + `process: log-level resolved`). Subsequent calls atomically replace the handler (via internal `atomic.Pointer[slog.Handler]`) but **DO NOT re-emit** the lifecycle markers — this preserves the paired-start/exit invariant (every `process: start` matches exactly one `process: exit` or `process: exec` per process lifetime). Test harnesses doing capture-redirect mid-test use the internal `SetHandlerForTest(h slog.Handler)` seam (build-tag-gated export) to swap handlers without re-emitting markers; full `Init` re-entry is permitted but the lifecycle invariant treats it as "same process, replaced handler", not a new process.
+
+`log.For` is safe before `Init` — returns a child of a default placeholder root that writes to stderr until `Init` lands; the cached package-level `var logger = log.For(...)` in consumer packages picks up the real root automatically via the atomic handler pointer.
 
 **syscall.Exec hand-off (closes review-004 I9):** `process: exit` is NOT emitted on `syscall.Exec` paths (the process image is overwritten before `log.Close` could run). For those paths, emit `process: exec` IMMEDIATELY before the exec call via:
 
@@ -932,7 +936,7 @@ The fix is a positive log-marker: every process emits one INFO line at start dec
 
 ### Mechanical rule (spec-phase intake)
 
-`internal/log.Init(stateDir, version, processRole)` MUST emit one INFO line immediately AFTER the `process: start` line (defined in Defensive invariants subtopic) and BEFORE returning:
+`internal/log.Init(stateDir, version, processRole)` MUST emit one INFO line immediately AFTER the `process: start` line (defined in Defensive invariants subtopic). Together these two lines constitute `log.Init`'s **final two actions** before returning (closes review-005 J7 — supersedes the earlier "final action" wording in Defensive invariants that predated this subtopic):
 
 ```go
 log.For("process").Info("log-level resolved",
@@ -1074,20 +1078,13 @@ Where `lookupResult` is `"hit"` if a hook was registered, `"miss"` if no hook fo
 
 This DEBUG line is the diagnostic anchor for distinguishing "hooks.json drifted from the saved hook-key" (miss) from "lookup failed for some other reason" (error) from "helper never reached the lookup" (no line at all).
 
-**2. Exec terminal point (INFO):**
+**2. Exec terminal point — handed off to `log.Exec` (closes review-005 J9):**
 
-Immediately before the `syscall.Exec` call:
+The hydrate helper's exec hand-off is performed via `log.Exec(target, argv, envv)` (defined in the Defensive invariants subtopic), which emits `process: exec target=... args=...` synchronously, flushes the handler, then calls `syscall.Exec`. There is NO separate `hydrate: exec` INFO — the original draft included one but it would duplicate `process: exec` for the same physical hand-off event. The `process` component is the correct prefix for "this process is about to be replaced by another binary".
 
-```go
-hookLogger.Info("exec",
-    "path", execPath,         // the binary being exec'd (e.g. "$SHELL" or "sh")
-    "hook_present", hookFound, // bool
-)
-```
+The hydrate-specific decisions (lookup result, exit path) are still captured under the `hydrate:` prefix in DEBUG rule 1 and the four exit-path INFOs in rule 3. The terminal exec moment itself is `process:` because it's a portal-binary lifecycle event, not a hydrate-subsystem state change.
 
-This INFO line is the terminal-point summary for the hydrate helper process (its last action before being replaced by the exec'd command). Per the call-site pattern, it's emitted at every successful exit path.
-
-When `hook_present=true`, the helper exec's `sh -c '<HOOK>; exec $SHELL'`. When `false`, it exec's `$SHELL` directly. The presence/absence is observable via this attr; the hook content itself is in the prior INFO line written by `hookStore` mutations (the state-mutation audit trail), so it's reconstructible via grep history without redundant logging here.
+When the helper resolved a hook, `log.Exec` is called with target=`sh` and argv containing `sh -c '<HOOK>; exec $SHELL'`. When no hook was resolved, target=`$SHELL` directly. The presence/absence is observable via the `args` attr on the `process: exec` line.
 
 **3. Failure-mode INFO lines (the four exit paths from the original inbox seed):**
 
@@ -1100,7 +1097,7 @@ Per the inbox's specific framing, the hydrate helper has four terminal points ot
 | Scrollback file missing | Around line 147 | `hookLogger.Info("scrollback missing", "path", scrollbackPath)` then exec |
 | Success — signal arrived, scrollback dumped | Around line 188 | `hookLogger.Info("scrollback replayed", "bytes", n, "took", took)` then exec |
 
-Each exit path's INFO is followed by the exec INFO (from rule 2). Two INFO lines per invocation in the failure-mode cases, three in the success case (counting the lookup DEBUG which is below INFO threshold in production). The repetition is intentional — the exit-path INFO captures *what happened in the helper*; the exec INFO captures *what we handed off to*.
+Each exit path's hydrate INFO is followed by the `process: exec` INFO from `log.Exec` (rule 2). **Two INFO lines per invocation** in every case: one `hydrate:` exit-path line + one `process: exec` line. (Lookup DEBUG sits below INFO threshold in production and is filtered out; it appears only in DEBUG-mode logs.) The split is intentional — the hydrate exit-path INFO captures *what happened in the helper*; the `process: exec` INFO captures *what we handed off to*. Components differ for the same reason.
 
 `grep "hydrate:" portal.log` after this rule applies will produce a complete per-pane audit trail for every helper invocation, broken down by exit path.
 
@@ -1134,8 +1131,9 @@ Scope:
 - New `internal/log` package (factory `For`, `Init`, `Close`) with the custom rotating slog.Handler.
 - Migration sweep: delete `state.Logger`, `Component*` constants; rewrite every existing `logger.X(component, ...)` call site to use slog idioms via `log.For("...")`.
 - Wire `log.Init` and `log.Close` into `main.go` for every entry point.
-- Apply the locked Defensive invariants (`process: start`, `process: log-level resolved`, `process: exit`) and the Log-level propagation INFO line.
-- Apply the locked Hook-firing observability subtopic in full (the original inbox seed): hydrate helper's lookup DEBUG, 4 exit-path INFOs, exec INFO.
+- Apply the locked Defensive invariants in full: `process: start`, `process: log-level resolved`, `process: exit`, `process: exec`, `process: panic`. This includes the `os.Exit → log.Fatal` migration sweep across `cmd/` and `main.go` (answers review-005 J12: the sweep ships in PR 1, since it's part of the locked Defensive invariants subtopic; deferring it would leave the lifecycle pairing invariant broken in production).
+- Apply the locked Hook-firing observability subtopic in full (the original inbox seed): hydrate helper's lookup DEBUG, 4 exit-path INFOs, hand-off via `log.Exec` (which emits the `process: exec` terminal-point INFO).
+- Apply the locked Diagnostic context preservation rule to the hydrate helper's boundary calls (its `exec.Cmd`, FIFO I/O, scrollback I/O, and tmux invocations) — closes review-005 J10. The codebase-wide boundary sweep remains in PR 2; PR 1 limits boundary preservation to the hydrate code path so the proof-of-pattern subsystem demonstrates the full call-site discipline end-to-end.
 - Tests: existing test suite must remain green. Add the `portaltest.AssertLogLevelResolved` helper. Add one new integration test covering the hydrate forensic story end-to-end.
 - CLAUDE.md updated to reflect the new logger architecture.
 
@@ -1158,7 +1156,7 @@ If gates pass: proceed to PR 2. If any gate fails: fix before PR 2 ships.
 Scope:
 - State-mutation audit trail across all 3 files (hooks.json, aliases, projects.json) per the locked mechanical rule. Includes adding `aliases` + `projects` to the taxonomy in the new component-set.
 - Cycle-level summaries at all 10 catalog sites (capture tick, bootstrap orchestration + per-step, restore phases, orphan sweeps, marker cleanup).
-- Saver and daemon lifecycle event catalog (all 12 sites).
+- Saver and daemon lifecycle event catalog (11 INFO sites — 7 saver + 4 daemon — plus 1 row codified as DEBUG-by-hysteresis-rule, per the catalog table).
 - Diagnostic context preservation sweep — audit every `exec.Cmd`, tmux invocation, and `os.*` boundary; apply the locked wrapping pattern.
 - Concrete gap-closures from the inbox: `defaultIdentifyPS` stderr capture, `escalateKillToSIGKILL` DEBUG breadcrumb, `ShowGlobalHooks` failure-log asymmetry, defensive-branch "why this branch exists" comments.
 - CLAUDE.md updated again to reflect the new instrumentation breadth.
@@ -1213,7 +1211,6 @@ Spec phase fleshes each task with the exact files, line ranges, and log call sit
 ### Open Threads
 
 - **Current `portal.log` zeroing bug** — no `.old` exists, no `O_TRUNC` in `logger.go`, so the destruction mechanism is currently unidentified. Not logged as a separate inbox bug — likely surfaced or resolved as a side effect of the rotation rewrite; investigate during implementation.
-- **Hook command privacy** — verbatim vs SHA-256 hash prefix vs truncation. To resolve when state-mutation audit trail subtopic is explored.
 
 ### Considered and Rejected / Closed by Prior Decisions
 
@@ -1227,6 +1224,7 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **F10** (investigation gate for the unknown zeroing bug) — closed. Ship the rewrite without blocking on root-cause understanding. If destruction recurs in the new system with no clear cause within 30 days post-ship, file a separate investigation bug; startup-marker tripwires will provide concrete evidence. Until then, treat the original bug as resolved-by-rewrite or detectable-when-it-recurs.
 - **F12** (compress rotated logs) — considered and rejected. Worst-case 30-day window at ~600 MB uncompressed is already trivial; introducing `zgrep` as a precondition for searching anything older than today adds friction at exactly the moment the user is investigating an incident. Greppability outweighs disk savings at portal's scale.
 - **Review-004 (I1–I12)** — all 12 findings addressed via in-place amendments to the locked subtopics. I1 added tmp-name discipline + reaping to rotation; I2 added per-day sentinel coordination to retention; I3 sharpened the level-discipline log-and-continue row with a mechanical predicate (function-invariant break vs no observable downstream effect); I4 clarified the process vs subsystem-lifecycle boundary; I5 introduced `log.Fatal` / `log.Panic` helpers and prohibited direct `os.Exit`; I6 softened Init re-entry to support test redirection via atomic handler swap; I7 unified the component count to 15 across all references via a canonical closed-space pointer; I8 introduced `log.AuditedWrite` as the enforcement seam wrapping `fileutil.AtomicWrite` for in-scope files; I9 added `log.Exec` to instrument `syscall.Exec` hand-offs (`process: exec` line as the paired terminal marker); I10 resolved by I2's sentinel coordination (only one process runs the sweep so the race is irrelevant); I11 (closed-taxonomy extension during discussion) — answered: amendments during discussion are explicit and visible in the closed-space declaration; post-discussion changes require spec-phase amendment; I12 (slog.LogAttrs / slog.Group) — answered in updated Prohibited / Allowed lists: variadic and LogAttrs both permitted, Group prohibited because flat key=value rendering doesn't support nested attrs.
+- **Review-005 (J1–J12)** — all 12 findings addressed via in-place amendments. J1 removed stale "Hook command privacy" from Open Threads (the verbatim posture was locked in State-mutation + Defensive invariants). J2 corrected the invalid-PORTAL_LOG_LEVEL WARN prefix from `bootstrap:` to `process:` (the WARN fires in every process, not just bootstrap). J3 added `value`, `via` to the closed attr vocab as a new state-mutation subgroup. J4 added `alias` to the contextual attr vocab. J5 renamed AtomicWrite's failure-phase attr from `error_class` to `failure_phase` to disambiguate the overlapping value space (AtomicWrite failures now carry both `failure_phase=<phase>` AND `error_class=unexpected`). J6 corrected the PR 2 lifecycle catalog count from "12 sites" to "11 INFO + 1 DEBUG-by-rule". J7 superseded the Defensive invariants "final action" wording with "final two actions" to accommodate the log-level resolved line. J8 specified Init re-entry suppresses lifecycle markers to preserve the paired-start/exit invariant. J9 collapsed the original `hydrate: exec` INFO into `process: exec` from `log.Exec` (one terminal-point INFO per exec hand-off, in the correct component). J10 added the diagnostic context preservation sweep for the hydrate code path to PR 1 scope (codebase-wide remains PR 2). J11 enumerated the cross-group attr overlaps explicitly in Current State. J12 answered: the `os.Exit → log.Fatal` migration sweep ships in PR 1 alongside the rest of Defensive invariants.
 - **G6, G11** (Component constants reconciliation and prefix taxonomy scope) — closed by the factory pattern: `internal/log` exposes `log.For(component string) *slog.Logger`; each package binds its component once at init; existing `Component*` constants are deleted as part of the migration sweep. Prefix taxonomy subtopic scope explicitly absorbed attr-key vocabulary (G3) and mandatory baseline attrs (G4).
 - **G3, G4** (attr-key vocabulary and mandatory baseline attrs) — closed by the locked attr-key vocabulary (snake_case, 10 canonical keys) and the 4-attr mandatory baseline (`component`, `pid`, `version`, `process_role`) injected at root logger construction.
 - **G7, G10** (PORTAL_LOG_LEVEL default flip user-visible impact and deprecation path for existing `warn` users) — closed. Resolution: release notes only, no in-band breadcrumb. `portal.log` is a forensic artifact users only look at after the fact, so an in-band INFO line announcing the default change is invisible at the moment it would matter. Existing users who explicitly set `PORTAL_LOG_LEVEL=warn` continue to work unchanged. Users without an explicit value get the new INFO baseline; the "more volume than expected" friction is one mental moment + a changelog glance, acceptable cost for the continuous forensic baseline win.
@@ -1241,7 +1239,7 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - All 14 subtopics decided. Every locked subtopic carries a "Mechanical rule (spec-phase intake)" sub-section detailed enough that spec phase can produce per-call-site enumeration with zero judgment.
 - Component taxonomy locked at **15 components**: `bootstrap`, `daemon`, `restore`, `hydrate`, `notify`, `hooks`, `preview`, `saver`, `capture`, `signal`, `log-rotate`, `clean`, `aliases`, `projects`, `process`. The canonical closed-space declaration lives under Subsystem prefix taxonomy → Mechanical rule; subtopic write-ups that mention earlier intermediate counts (12 in the initial taxonomy lock, 14 after State-mutation) point readers there for the live count.
 - Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
-- Taxonomy final: 15 components, 31 attr keys (10 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 4 baseline — minus overlaps).
+- Taxonomy final: 15 components, 31 distinct attr keys. Per-group counts: 11 contextual (`pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `alias`, `op`) + 3 state-mutation (`value`, `via`, `failure_phase`) + 11 cycle-summary + 7 lifecycle + 3 hydrate (`result`, `hook_present`, `bytes`) + 4 baseline = 39 group slots, minus 8 cross-group overlaps. Overlap enumeration: `pid` (baseline) is also referenced in lifecycle rows (saver placeholder created, daemon spawn, daemon lock acquired) as an auto-injected baseline; `version` (baseline) is referenced in lifecycle "daemon ready" row as auto-injected; `tmux_pane` (contextual) is also mandatory in 4 lifecycle rows; `took` (contextual) is also mandatory in every cycle-summary; `target_pid` / `from_pid` / `to_pid` (lifecycle) overlap with `pid` (baseline) in role discriminator semantics. Net distinct keys: 31.
 - Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
 - Review-sets 001, 002, 003 fully drained: 32 findings closed. Review-004 pending walk-through (9 gaps + 3 questions; queued for next session pause).
 - Discussion convergence: all map entries decided; subtopic write-ups + mechanical rules + closed value spaces + spec-phase-ingestible catalogs all captured.
