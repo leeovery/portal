@@ -35,7 +35,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Defensive invariants against unknown-cause log destruction [decided]
   Diagnostic context preservation at boundaries [decided]
   Cycle-level summary cadence and shape [decided]
-  Log-level propagation verification [pending]
+  Log-level propagation verification [decided]
   Saver and daemon lifecycle event taxonomy [pending]
   Hook-firing observability limit (syscall.Exec) [pending]
   Rollout sequencing and scope bundling [pending]
@@ -852,6 +852,62 @@ Where:
 **Closed attr extension (added to the prefix taxonomy attr vocabulary):** `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`. These were implicit in the locked attr vocab's "counts" but are explicitly enumerated here so spec writers don't invent names.
 
 Spec writers consulting this rule will produce one INFO call site per cycle in the codebase, with the verb-phrase + counts + `took` triplet, matching the catalog shape.
+
+---
+
+## Log-level propagation verification
+
+### Context
+
+Pattern (7) from the inbox: `PORTAL_LOG_LEVEL` must actually take effect through the test → tmux server → respawn-pane'd daemon chain. Today this is implicit and fragile; integration tests can set `PORTAL_LOG_LEVEL=debug` and assume the spawned daemon process receives it, but no positive verification exists. If the env var fails to propagate (because tmux clears it on `respawn-pane`, or because a test harness forgets to pass it), DEBUG coverage silently degrades and the test still passes (just with less log output than expected).
+
+The fix is a positive log-marker: every process emits one INFO line at start declaring the resolved level and its source (env / default / fallback). Tests assert on that line.
+
+### Decision
+
+**Locked.** Every portal process emits exactly one additional INFO line as part of its lifecycle init sequence, declaring the resolved log level and how it was resolved. Tests that depend on a specific log level for coverage assert on this line.
+
+### Mechanical rule (spec-phase intake)
+
+`internal/log.Init(stateDir, version, processRole)` MUST emit one INFO line immediately AFTER the `process: start` line (defined in Defensive invariants subtopic) and BEFORE returning:
+
+```go
+log.For("process").Info("log-level resolved",
+    "resolved", resolvedLevelStr,
+    "source", levelSource,
+    "raw", rawEnvValue,
+)
+```
+
+Where:
+- `resolved` is one of `debug` / `info` / `warn` / `error` — the level slog will actually filter at.
+- `source` is one of:
+  - `env` — `PORTAL_LOG_LEVEL` was set to a valid value.
+  - `default` — `PORTAL_LOG_LEVEL` was unset → `info`.
+  - `fallback` — `PORTAL_LOG_LEVEL` was set to an invalid value → fell back to `info` (also emits the WARN defined in the Log-level discipline mechanical rule).
+- `raw` is the raw env var value as observed (empty string if unset, the verbatim string if set — including invalid values).
+
+Renders (text mode):
+```
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=debug source=env raw="DEBUG" pid=12345 version=0.5.0 process_role=daemon
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=info source=default raw="" pid=12345 version=0.5.0 process_role=tui
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=info source=fallback raw="trace" pid=12345 version=0.5.0 process_role=daemon
+```
+
+**Test assertion contract:** any integration test that sets `PORTAL_LOG_LEVEL` MUST scan `portal.log` for the `process: log-level resolved resolved=<expected> source=env` line for the spawned process (matched by `pid` attr if multiple processes were involved). If the line is absent or `source` is not `env`, the test fails — the env var did not propagate.
+
+A canonical assertion helper SHOULD live in `internal/portaltest`:
+
+```go
+// AssertLogLevelResolved scans portal.log for the process: log-level resolved
+// line matching the given pid and asserts the resolved level matches expected
+// with source="env". Used by integration tests that set PORTAL_LOG_LEVEL.
+func AssertLogLevelResolved(t *testing.T, logPath string, pid int, expected string)
+```
+
+This helper closes the env-propagation gap for ALL daemon-spawning integration tests, not just the test that motivated the assertion.
+
+**Coverage requirement:** every binary entry point that calls `log.Init` automatically emits this line; no separate per-entry-point work needed. The propagation assertion is the test-side coverage requirement.
 
 ---
 
