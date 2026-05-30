@@ -208,6 +208,12 @@ Two implications carry forward:
 1. **Subsystem prefix taxonomy** (next subtopic) must be designed so `grep` on a prefix produces a useful trace at INFO level — INFO is the production baseline that has to be greppable.
 2. **State-mutation audit trail** breadcrumbs are INFO (decision points), not DEBUG — they need to survive at production level.
 
+### Placement clarifications (refines contract per review-002 G1)
+
+- **Idempotent no-ops** (e.g. `RegisterPortalHooks` deciding "already current, no action"): DEBUG by default. INFO only when the no-op IS the user-visible decision (e.g. "saver already at version V, skipping respawn" — the operator wants to see we considered upgrading and chose not to act). A purely-internal idempotent skip clutters the INFO baseline.
+- **Hysteresis-internal failures** (e.g. saver-membership probe failure inside the 3-tick self-supervision hysteresis): DEBUG per spurious tick. ONE INFO or WARN on the trip (when the threshold is crossed and the eject decision lands). WARN per tick during transient tmux contention would fire continuously and invert the "every WARN is signal" promise.
+- **Recoverable-but-rare** (e.g. corrupt `sessions.json` falling back to empty state; pane decode failures dropping one pane and continuing): WARN. These are signal even when recovered. "Rare" doesn't bump them to ERROR — ERROR is strictly "process exiting because it cannot continue".
+
 ---
 
 ## Subsystem prefix taxonomy
@@ -365,6 +371,9 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **G6, G11** (Component constants reconciliation and prefix taxonomy scope) — closed by the factory pattern: `internal/log` exposes `log.For(component string) *slog.Logger`; each package binds its component once at init; existing `Component*` constants are deleted as part of the migration sweep. Prefix taxonomy subtopic scope explicitly absorbed attr-key vocabulary (G3) and mandatory baseline attrs (G4).
 - **G3, G4** (attr-key vocabulary and mandatory baseline attrs) — closed by the locked attr-key vocabulary (snake_case, 10 canonical keys) and the 4-attr mandatory baseline (`component`, `pid`, `version`, `process_role`) injected at root logger construction.
 - **G7, G10** (PORTAL_LOG_LEVEL default flip user-visible impact and deprecation path for existing `warn` users) — closed. Resolution: release notes only, no in-band breadcrumb. `portal.log` is a forensic artifact users only look at after the fact, so an in-band INFO line announcing the default change is invisible at the moment it would matter. Existing users who explicitly set `PORTAL_LOG_LEVEL=warn` continue to work unchanged. Users without an explicit value get the new INFO baseline; the "more volume than expected" friction is one mental moment + a changelog glance, acceptable cost for the continuous forensic baseline win.
+- **G1** (level edge classes — idempotent no-ops, hysteresis-internal anomalies, recoverable-but-rare) — closed via the placement clarifications added under "Log-level discipline § Placement clarifications": no-ops default to DEBUG (INFO only when the no-op IS the user-visible decision), hysteresis-internal failures stay DEBUG until the threshold trips, recoverable-but-rare events warrant WARN.
+- **G8** (NopLogger sentinel / nil-receiver semantics under slog) — closed by the factory pattern. `log.For(...)` always returns non-nil; the migration mandate is "every consumer holds a `*slog.Logger` from `log.For` or accepts one via DI". Tests use `slog.New(slog.NewTextHandler(io.Discard, nil))` as the silent-logger idiom. No `NopLogger()` sentinel survives the rewrite.
+- **G9** (expected vs unexpected swallowed errors) — closed by the `error_class` attr already in the vocab. DEBUG breadcrumbs carry `error_class=expected|unexpected`; sites that genuinely want production visibility for unexpected swallowed errors emit at WARN instead. Per-site judgment call, not a level-contract refinement.
 
 ### Current State
 
