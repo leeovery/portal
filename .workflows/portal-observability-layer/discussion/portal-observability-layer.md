@@ -32,7 +32,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Subsystem prefix taxonomy [decided]
   Call-site logging pattern (DEBUG breadcrumbs + INFO terminal) [decided]
   State-mutation audit trail for user config files [decided]
-  Defensive invariants against unknown-cause log destruction [pending]
+  Defensive invariants against unknown-cause log destruction [decided]
   Diagnostic context preservation at boundaries [pending]
   Cycle-level summary cadence and shape [pending]
   Log-level propagation verification [pending]
@@ -429,12 +429,15 @@ Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB
 
 ### Mechanical rule (spec-phase intake)
 
-**Closed component value space** (14 total, including the 2 added by State-mutation audit trail):
+**Closed component value space** (15 total — 12 original + 2 added by State-mutation audit trail + 1 added by Defensive invariants):
 
 ```
 bootstrap  daemon  restore  hydrate  notify  hooks  preview
 saver  capture  signal  log-rotate  clean  aliases  projects
+process
 ```
+
+`process` is reserved for portal-binary lifecycle markers (start, exit, panic) only; subsystem-level lifecycle events have their own components.
 
 **Closed attr-key value space** (10 contextual + 4 baseline):
 
@@ -631,6 +634,70 @@ This applies the hysteresis-trip pattern (from level discipline) to mutation bat
 **Privacy posture: verbatim.** Hook commands, alias values, project paths logged as-is. Threat model accepted: portal is a single-user dev tool; `portal.log` lives on the same disk as the config files which already store these values plaintext. Users sharing logs in bug reports redact manually (same posture as `hooks.json` itself).
 
 **Closes review-003 H1, H2, H3, H4, H5, H7.** Defers H6, H9, H10 to spec phase (boundary-rule formalization, aliases read-side scope, source-distinguishability per call site).
+
+---
+
+## Defensive invariants against unknown-cause log destruction
+
+### Context
+
+The locked rotation/retention machinery is robust against the known destruction mechanism (rotation churn at the old 1 MiB threshold). The 2026-05-28 incident also suggested an unidentified zeroing path exists somewhere — currently deferred as Open Thread for investigation during implementation.
+
+Even with the new design, an unknown bug could destroy today's `portal.log`. The defense-in-depth invariants here make destruction **detectable post-hoc** so an operator who later looks at the log can tell that destruction happened and roughly when, even if the cause remains unknown.
+
+### Decision
+
+**Locked.** Three invariants. Two are already enforced inside the rotation subtopic — re-stated here for completeness; their authoritative rule lives in the rotation mechanical rule above. The third is new to this subtopic.
+
+**Invariant 1: Rotated-file immutability.** (Already locked in Log rotation mechanism.) Files older than today are `chmod 0400` so even a buggy library can't overwrite past evidence. The destruction surface narrows to today's file only.
+
+**Invariant 2: `O_CREAT|O_EXCL` on first-of-day open.** (Already locked in Log rotation mechanism.) Every process's first write of a day creates `portal.log.<today>` via `O_CREAT|O_EXCL` (with append-fallback on `EEXIST`). If something deletes today's file mid-day, the next writer's create-or-append races safely and observably.
+
+**Invariant 3 (new this subtopic): Per-process lifecycle markers.** Every portal process emits ONE INFO line at the very start of its execution and ONE INFO line on clean exit. These are the tripwires that make destruction visible: if today's `portal.log` contains only lines from 09:15 forward but you know portal was running before, the first line of today's file is a "process: start" marker that timestamps when destruction had to have happened.
+
+**Taxonomy addition:** add `process` as a 15th component. Used exclusively for lifecycle markers (start, exit, panic) for the portal binary itself, regardless of which subcommand is running. (Subsystem-level lifecycle events — saver respawn, daemon spawn — go under the pending Saver/daemon lifecycle subtopic, not under `process`.)
+
+### Mechanical rule (spec-phase intake)
+
+The `internal/log.Init(stateDir, version, processRole)` function, after constructing the root logger and wiring the rotating handler, MUST emit exactly one INFO line as its final action before returning:
+
+```go
+log.For("process").Info("start",
+    "cmd", filepath.Base(os.Args[0]),
+    "args", strings.Join(os.Args[1:], " "),
+)
+```
+
+Renders (text mode):
+```
+2026-05-30T14:00:00Z INFO process: start cmd=portal args="open ." pid=12345 version=0.5.0 process_role=tui
+```
+
+(Note: `pid`, `version`, `process_role` are baseline attrs auto-injected; the call site does not pass them.)
+
+The `internal/log` package additionally exposes `func Close(exitCode int)` to be invoked from `main()` via deferred call OR explicit invocation immediately before `os.Exit(N)`. `Close` emits one INFO line:
+
+```go
+log.For("process").Info("exit",
+    "code", exitCode,
+    "took", time.Since(startTime),
+)
+```
+
+Renders:
+```
+2026-05-30T14:00:02Z INFO process: exit code=0 took=2.1s pid=12345 version=0.5.0 process_role=tui
+```
+
+`startTime` is captured at `Init` time and stored package-private.
+
+**Coverage requirement:** every binary entry point (currently only `main.go`, but extending in principle to any future entry binary) must:
+1. Call `log.Init` BEFORE any other portal code that might log.
+2. Either defer `log.Close(0)` (for normal-return paths) or invoke `log.Close(N)` explicitly before any `os.Exit(N)`.
+
+**Panic path:** `Init` MUST also install a `defer func() { if r := recover(); r != nil { ... } }()` in main if practical, emitting `process: panic reason=<r>` at ERROR before re-panicking. Implementation detail deferred to spec.
+
+**Privacy on `args` attr:** verbatim. Same posture as state-mutation audit trail. CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
 
 ---
 
