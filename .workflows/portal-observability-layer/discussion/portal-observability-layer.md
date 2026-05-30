@@ -38,7 +38,7 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Log-level propagation verification [decided]
   Saver and daemon lifecycle event taxonomy [decided]
   Hook-firing observability limit (syscall.Exec) [decided]
-  Rollout sequencing and scope bundling [pending]
+  Rollout sequencing and scope bundling [decided]
 
 ---
 
@@ -1057,6 +1057,87 @@ The daemon could then read the exit-status file to log the hook's outcome. This 
 
 ---
 
+## Rollout sequencing and scope bundling
+
+### Context
+
+The locked design touches every package that logs (most of `internal/` and `cmd/`), introduces a new `internal/log` package, deletes the existing `state.Logger` type and `Component*` constants, and adds new instrumentation at ~30 explicit sites (per the locked catalogs). Shipping this all in one PR would produce a massive diff that's hard to review and risky to revert if a regression slips in.
+
+Shipping it in too many PRs adds coordination cost and risks the patterns drifting across PRs (e.g. PR 3's call sites adopt a slightly different attr convention than PR 2's).
+
+### Decision
+
+**Locked: two-PR rollout, gated by short production observation between them.**
+
+**PR 1 — Foundation + proof-of-pattern (one subsystem).**
+
+Scope:
+- New `internal/log` package (factory `For`, `Init`, `Close`) with the custom rotating slog.Handler.
+- Migration sweep: delete `state.Logger`, `Component*` constants; rewrite every existing `logger.X(component, ...)` call site to use slog idioms via `log.For("...")`.
+- Wire `log.Init` and `log.Close` into `main.go` for every entry point.
+- Apply the locked Defensive invariants (`process: start`, `process: log-level resolved`, `process: exit`) and the Log-level propagation INFO line.
+- Apply the locked Hook-firing observability subtopic in full (the original inbox seed): hydrate helper's lookup DEBUG, 4 exit-path INFOs, exec INFO.
+- Tests: existing test suite must remain green. Add the `portaltest.AssertLogLevelResolved` helper. Add one new integration test covering the hydrate forensic story end-to-end.
+- CLAUDE.md updated to reflect the new logger architecture.
+
+PR 1 ships behavior-equivalent for users at the steady state (logs look slightly different but cover the same events), with one substantial new capability: full hydrate-helper forensic trail.
+
+**Production observation window between PR 1 and PR 2:**
+
+After PR 1 ships, run portal for **at least 7 days** in production (the user's own daily-driver install).
+
+Gates:
+- `portal.log` shows the expected `process:` / `log-rotate:` / `daemon:` / `hydrate:` baseline at INFO.
+- No regressions in tmux/restore/hooks behavior.
+- The hydrate helper's INFO trail reconstructs every Claude-resume hook invocation observed.
+- No unexplained zeroing of `portal.log` (the open thread from F10).
+
+If gates pass: proceed to PR 2. If any gate fails: fix before PR 2 ships.
+
+**PR 2 — Pattern rollout across all remaining subsystems.**
+
+Scope:
+- State-mutation audit trail across all 3 files (hooks.json, aliases, projects.json) per the locked mechanical rule. Includes adding `aliases` + `projects` to the taxonomy in the new component-set.
+- Cycle-level summaries at all 10 catalog sites (capture tick, bootstrap orchestration + per-step, restore phases, orphan sweeps, marker cleanup).
+- Saver and daemon lifecycle event catalog (all 12 sites).
+- Diagnostic context preservation sweep — audit every `exec.Cmd`, tmux invocation, and `os.*` boundary; apply the locked wrapping pattern.
+- Concrete gap-closures from the inbox: `defaultIdentifyPS` stderr capture, `escalateKillToSIGKILL` DEBUG breadcrumb, `ShowGlobalHooks` failure-log asymmetry, defensive-branch "why this branch exists" comments.
+- CLAUDE.md updated again to reflect the new instrumentation breadth.
+
+PR 2 lands the full observability initiative. After PR 2 ships, the 30-day "no unexplained zeroing recurrence" window (from F10) starts ticking.
+
+### Mechanical rule (spec-phase intake)
+
+The spec phase produces ONE specification document covering both PRs, with explicit per-PR scope sections. The plan phase produces TWO plans, one per PR, with the PR 1 plan completing before the PR 2 plan is finalized (because PR 2's tasks depend on PR 1's foundation being merged and observed).
+
+**PR 1 task surface (planned tasks, generated mechanically from the locked rules):**
+- T1: implement `internal/log` package
+- T2: migration sweep across all existing `state.Logger` consumers
+- T3: implement `process:` lifecycle markers per Defensive invariants mechanical rule
+- T4: implement `process: log-level resolved` per Log-level propagation mechanical rule
+- T5: implement hydrate helper instrumentation per Hook-firing observability mechanical rule
+- T6: integration test for hydrate forensic story
+- T7: CLAUDE.md update
+
+**PR 2 task surface:**
+- T8: state-mutation audit trail across hooks/aliases/projects
+- T9: cycle-summary catalog (10 sites)
+- T10: lifecycle event catalog (12 sites)
+- T11: boundary context preservation sweep
+- T12: gap-closures bundle (4-5 small fixes)
+- T13: CLAUDE.md update
+
+Spec phase fleshes each task with the exact files, line ranges, and log call sites per the mechanical rules. Plan phase breaks each task into TDD steps. Implementation executes mechanically against the plan.
+
+### Out of scope (separate future work)
+
+- The shell-envelope hook-wrapping for post-exec exit status capture (see Hook-firing observability subtopic).
+- An out-of-band rotation audit channel (`portal-rotation.log` — see F7, considered and rejected).
+- Compression of rotated logs (see F12, considered and rejected).
+- Migrating `sessions.json` and other daemon-internal state files to the user-config audit-trail pattern (see review-003 H1 — out of scope by explicit decision).
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -1097,8 +1178,9 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 
 ### Current State
 
-- Seven subtopics decided: Logger library (slog), Log rotation, Retention, Log-level discipline, Subsystem prefix taxonomy (now 14 components), Call-site logging pattern, State-mutation audit trail.
-- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract.
-- Approach choice: mechanical-rule discussion (each locked subtopic gets a rule spec phase can apply with zero judgment), not per-site enumeration. State-mutation audit trail is the first subtopic written in this shape; the other six will be retro-sharpened to match before discussion concludes.
-- Review-sets 001, 002, 003 fully drained: 32 findings closed across all three reviews.
-- Remaining map: 6 pending subtopics on defensive invariants, diagnostic context preservation, cycle summaries, log-level propagation verification, lifecycle events, and rollout. All will be written with the mechanical-rule explicitness target.
+- All 14 subtopics decided. Every locked subtopic carries a "Mechanical rule (spec-phase intake)" sub-section detailed enough that spec phase can produce per-call-site enumeration with zero judgment.
+- Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
+- Taxonomy final: 15 components, 31 attr keys (10 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 4 baseline — minus overlaps).
+- Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
+- Review-sets 001, 002, 003 fully drained: 32 findings closed. Review-004 pending walk-through (9 gaps + 3 questions; queued for next session pause).
+- Discussion convergence: all map entries decided; subtopic write-ups + mechanical rules + closed value spaces + spec-phase-ingestible catalogs all captured.
