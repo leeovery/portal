@@ -30,10 +30,9 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Retention policy and audit [decided]
   Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [decided]
   Subsystem prefix taxonomy [decided]
+  Call-site logging pattern (DEBUG breadcrumbs + INFO terminal) [decided]
   Defensive invariants against unknown-cause log destruction [pending]
   State-mutation audit trail for user config files [pending]
-  Decision-point INFO line shape [pending]
-  DEBUG breadcrumb pattern on swallowed errors [pending]
   Diagnostic context preservation at boundaries [pending]
   Cycle-level summary cadence and shape [pending]
   Log-level propagation verification [pending]
@@ -340,6 +339,83 @@ Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB
 
 ---
 
+## Call-site logging pattern (DEBUG breadcrumbs + INFO terminal)
+
+This subtopic absorbs what was originally split between "Decision-point INFO line shape" and "DEBUG breadcrumb pattern on swallowed errors" — both are facets of the same call-site discipline.
+
+### Context
+
+The level discipline contract names DEBUG breadcrumbs and INFO terminal-point summaries but doesn't specify the call-site mechanics. Two questions follow: (1) does a function emit one log call that renders differently per level (some kind of "trace" abstraction), or multiple independent calls each at its chosen level? (2) what does the resulting log shape look like for a typical multi-step operation?
+
+### Options Considered
+
+**A. Multiple independent calls.** Each `logger.Debug(...)` and `logger.Info(...)` is a standalone call. Slog handles level filtering — drops calls below threshold cheaply. The function author explicitly chooses level per call.
+
+**B. Wrapper that bundles levels.** A custom helper like `logger.Trace(msg, debugAttrs, infoAttrs)` that emits at one or both levels based on enabled state.
+
+**C. OpenTelemetry-style span wrapper.** A `trace := logger.Span("hydrate.process"); defer trace.End()` pattern that records breadcrumbs as DEBUG events and emits the span-end as INFO.
+
+### Journey
+
+Option B couples two distinct concerns (the per-step breadcrumb and the terminal-point summary) into one API call, and hides level discipline from code review — a reviewer can't point at a line and say "this should be DEBUG, not INFO" because the level choice is buried in the wrapper logic. Rejected.
+
+Option C is designed for distributed tracing systems where span hierarchies and correlation IDs matter across hosts. Portal is single-host, file-logged. The wrapper adds API surface and conceptual load for benefits we don't need. Rejected.
+
+Option A is Go's `log/slog` idiom — independent calls, lazy formatting, near-zero cost for filtered-out calls. Working with the grain of the standard library means future contributors don't have to learn anything portal-specific.
+
+### Decision
+
+**Locked: Option A — multiple independent log calls per function, slog handles level filtering.**
+
+Canonical call-site pattern for a multi-step operation:
+
+```go
+package hydrate
+
+import "github.com/leeovery/portal/internal/log"
+
+var logger = log.For("hydrate")
+
+func Process(paneKey, fifoPath string) error {
+    log := logger.With("pane_key", paneKey)  // sticky context bound once
+    start := time.Now()
+
+    log.Debug("opening fifo", "path", fifoPath)
+    fd, err := openFifo(fifoPath)
+    if err != nil {
+        return err
+    }
+    log.Debug("fifo opened", "fd", fd, "took", time.Since(start))
+
+    if err := awaitSignal(fd); err != nil {
+        return err
+    }
+    log.Debug("signal received", "took", time.Since(start))
+
+    n, err := replayScrollback(...)
+    if err != nil {
+        return err
+    }
+    log.Debug("scrollback replayed", "bytes", n)
+
+    log.Info("ok", "took", time.Since(start))  // terminal-point summary
+    return nil
+}
+```
+
+At INFO (production): one INFO line per invocation lands in portal.log.
+At DEBUG (investigating): all four DEBUG lines + the INFO summary.
+
+**Allowed ergonomic helpers:**
+
+1. **`.With(...)` for sticky context** — bind shared attrs once when a function/scope has many log calls sharing context (e.g. `pane_key`, `session`). Stops attr-key repetition.
+2. **`logger.Enabled(ctx, slog.LevelDebug)` guard** — only for the rare case where computing the attrs is itself expensive (e.g. JSON-marshalling something just to attach as a debug attr). Slog's lazy formatting makes this irrelevant 99% of the time.
+3. **Shared helpers in `internal/log`** — only after the same idiom appears 5+ times in production code and earns its weight. Don't pre-build helpers for theoretical cases.
+
+**Anti-pattern (explicitly rejected):** custom wrappers like `logger.Trace(LEVEL_BREADCRUMB, LEVEL_TERMINAL, msg, debugAttrs, infoAttrs)` that bundle levels into one call. Couples concerns, obscures level discipline at the call site, makes review harder. Each log call has ONE level chosen explicitly.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -351,6 +427,7 @@ Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB
 5. The scope is broader than the inbox's seven patterns — it's "use logging anywhere it aids debugging or insight under a disciplined level taxonomy". That makes level discipline and prefix taxonomy foundational, not auxiliary.
 6. The foundation is `log/slog` (Go 1.21 standard library). Structured fields, handler abstraction, standard-library posture all compose better than extending the existing printf wrapper.
 7. Default production level shifts from WARN to INFO. WARN-only is exactly the posture that left no evidence on 2026-05-28; a continuous INFO-level baseline costs ~5 MB/day and gives the forensic record the whole initiative is about.
+8. Call-site discipline is "multiple independent log calls, slog filters by level" — no portal-specific abstraction. Trace-style wrappers couple DEBUG breadcrumbs to INFO summaries and obscure level discipline at code-review time; we reject them explicitly. Each log call has ONE level chosen explicitly.
 
 ### Open Threads
 
@@ -374,11 +451,13 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **G1** (level edge classes — idempotent no-ops, hysteresis-internal anomalies, recoverable-but-rare) — closed via the placement clarifications added under "Log-level discipline § Placement clarifications": no-ops default to DEBUG (INFO only when the no-op IS the user-visible decision), hysteresis-internal failures stay DEBUG until the threshold trips, recoverable-but-rare events warrant WARN.
 - **G8** (NopLogger sentinel / nil-receiver semantics under slog) — closed by the factory pattern. `log.For(...)` always returns non-nil; the migration mandate is "every consumer holds a `*slog.Logger` from `log.For` or accepts one via DI". Tests use `slog.New(slog.NewTextHandler(io.Discard, nil))` as the silent-logger idiom. No `NopLogger()` sentinel survives the rewrite.
 - **G9** (expected vs unexpected swallowed errors) — closed by the `error_class` attr already in the vocab. DEBUG breadcrumbs carry `error_class=expected|unexpected`; sites that genuinely want production visibility for unexpected swallowed errors emit at WARN instead. Per-site judgment call, not a level-contract refinement.
+- **G2** (volume math for reboot/upgrade burst at INFO) — closed. Reboot burst on a 30-pane install at INFO is ~50-100 lines across the first 10 seconds (30 hydrate-helper INFOs + 11 bootstrap-step INFOs + ~5-10 saver lifecycle INFOs + initial capture cycle summaries). Steady-state with 1Hz cycle summaries at INFO peaks at ~8 MB/day even under churn. Both well under the 500 MB cap; no rate limiting or sampling needed. The cap exists as runaway-loop protection, not steady-state ceiling.
+- **G5** (migration plan from existing `state.Logger` printf API to slog) — closed. The factory pattern lock makes this structurally simple: each of ~12 packages gets `var logger = log.For("<component>")` at init, and `state.Logger.Info(component, fmt, args)` call sites become `logger.Info(msg, attrs...)`. Big-bang sweep in one PR — no adapter shim, no co-existence period. The pipe-delimited line format and `state.Logger` type are deleted in the same PR. Test mock surfaces (`bootstrapDeps` and friends) drop the logger mock entirely and accept `*slog.Logger` directly via `slog.New(slog.NewTextHandler(io.Discard, nil))`.
 
 ### Current State
 
-- Five subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract, INFO production default), Subsystem prefix taxonomy (Option B rendering + factory pattern + 12-component taxonomy + snake_case attr vocab + 4 baseline attrs).
-- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract. Inbox's seven patterns remain the minimum scope.
+- Six subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract + placement clarifications, INFO production default), Subsystem prefix taxonomy (Option B rendering + factory pattern + 12-component taxonomy + snake_case attr vocab + 4 baseline attrs), Call-site logging pattern (multiple independent calls, slog filters by level, no trace-wrapper abstraction).
+- Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract.
 - Review-set 001 fully drained: 14 findings closed.
-- Review-set 002 in flight: G6 + G11 closed by factory-pattern decision; G3 + G4 closed by attr-vocab + baseline-attrs lock. Remaining: G1, G2, G5, G7, G8, G9, G10 — most pertain to migration mechanics and level-discipline edge cases.
-- Remaining map: 9 pending subtopics on defensive invariants, state-mutation audit trail, patterns, lifecycle events, and rollout.
+- Review-set 002 fully drained: 11 findings closed (G6/G11 by factory pattern; G3/G4 by attr-vocab + baseline attrs; G1 by placement clarifications; G7/G10 by release-notes-only resolution; G8 by factory pattern; G9 by `error_class` attr; G2 by volume math; G5 by big-bang migration plan).
+- Remaining map: 7 pending subtopics on defensive invariants, state-mutation audit trail, diagnostic context preservation, cycle summaries, log-level propagation verification, lifecycle events, and rollout.
