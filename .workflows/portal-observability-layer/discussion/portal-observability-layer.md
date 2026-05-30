@@ -31,8 +31,8 @@ The feature also has to cover **log rotation**: the current "rotate to 0 bytes w
   Log-level discipline (DEBUG/INFO/WARN/ERROR contract) [decided]
   Subsystem prefix taxonomy [decided]
   Call-site logging pattern (DEBUG breadcrumbs + INFO terminal) [decided]
+  State-mutation audit trail for user config files [decided]
   Defensive invariants against unknown-cause log destruction [pending]
-  State-mutation audit trail for user config files [pending]
   Diagnostic context preservation at boundaries [pending]
   Cycle-level summary cadence and shape [pending]
   Log-level propagation verification [pending]
@@ -416,6 +416,76 @@ At DEBUG (investigating): all four DEBUG lines + the INFO summary.
 
 ---
 
+## State-mutation audit trail for user config files
+
+### Context
+
+Direct answer to the 2026-05-28 incident's "I have no record of who wiped `hooks.json`" gap. Every mutation of a portal-owned user-config file must leave a breadcrumb in `portal.log` so the next time a file changes unexpectedly, `grep "<file>:" portal.log` reconstructs the change history.
+
+The subtopic's *design intent* is straightforward — log mutations. The *mechanical rule* below is what spec phase ingests to produce the per-call-site enumeration with zero implementation-time judgment. This is the first locked subtopic written with that explicitness target; the existing five will be retro-sharpened in the same shape.
+
+### Decision
+
+**Locked.**
+
+**Files in scope (closed set):**
+- `hooks.json`
+- `aliases`
+- `projects.json`
+
+`sessions.json` is **out of scope** for this subtopic — it's daemon-managed high-frequency state (mutated every tick), covered by the pending cycle-summary subtopic (one INFO per tick under `daemon` / `capture` components, not per-write).
+
+**Taxonomy addition:** `aliases` and `projects` are added as components. Total taxonomy: **14 components**.
+
+**Mechanical rule (the seam spec phase enumerates against):**
+
+> *Every call to `internal/fileutil.AtomicWrite` (or any successor primitive that performs a temp-file + rename of a portal-owned config file) whose target path matches one of `hooks.json` / `aliases` / `projects.json` emits, immediately after `AtomicWrite` returns:*
+>
+> - *On `error == nil`: ONE INFO log line.*
+> - *On `error != nil`: ONE WARN log line.*
+>
+> *The log line's component (prefix) is the file's owning component: `hooks` for `hooks.json`, `aliases` for `aliases`, `projects` for `projects.json`.*
+>
+> *Required attrs:*
+> - `op` — drawn from the closed value space below.
+> - Key identifying the affected entry: `hook_key` (hooks), `alias` (aliases), `project` (projects).
+> - On failure (WARN path): `error_class` from the closed AtomicWrite failure space below.
+>
+> *Optional attrs:*
+> - `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`.
+> - `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
+
+**Closed `op` value space:**
+
+| `op` value | Meaning |
+|---|---|
+| `set` | Create new entry (key did not exist before this write) |
+| `modify` | Update existing entry (key existed; value differs) |
+| `rm` | Remove existing entry |
+| `clean-stale` | Internal cleanup of an entry (always batched) |
+| `migrate` | One-shot migration from old config path (e.g. `~/Library/Application Support/portal/`) |
+
+**Closed `error_class` value space for AtomicWrite failures (per phase):**
+
+`write-failed-temp-create` / `write-failed-write` / `write-failed-fsync` / `write-failed-rename`
+
+**No-op handling:** A `set` call where the entry already exists and the value matches → DEBUG with `op=set-noop`. NOT INFO. Matches the level-discipline placement clarification for idempotent no-ops.
+
+**Batch operations (e.g. `CleanStale` iterating entries):**
+
+> *Every batch loop that mutates multiple entries emits:*
+> - *Per-entry DEBUG inside the loop.*
+> - *ONE INFO summary at the end of the batch with attrs `op=<batch-op>`, `entries=N`, and `entries_failed=M` if any per-entry failures occurred.*
+> - *Per-entry WARN with `error_class=unexpected` on per-entry failure mid-loop (regardless of whether the batch continues).*
+
+This applies the hysteresis-trip pattern (from level discipline) to mutation batches: detail at DEBUG, summary at INFO, exceptions at WARN. Replaces the per-entry-INFO proposal that contradicted that pattern.
+
+**Privacy posture: verbatim.** Hook commands, alias values, project paths logged as-is. Threat model accepted: portal is a single-user dev tool; `portal.log` lives on the same disk as the config files which already store these values plaintext. Users sharing logs in bug reports redact manually (same posture as `hooks.json` itself).
+
+**Closes review-003 H1, H2, H3, H4, H5, H7.** Defers H6, H9, H10 to spec phase (boundary-rule formalization, aliases read-side scope, source-distinguishability per call site).
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -456,8 +526,8 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 
 ### Current State
 
-- Six subtopics decided: Logger library (slog), Log rotation mechanism (Option C, library-encapsulated, 500 MB default), Retention policy and audit (30d default), Log-level discipline (slog four-level contract + placement clarifications, INFO production default), Subsystem prefix taxonomy (Option B rendering + factory pattern + 12-component taxonomy + snake_case attr vocab + 4 baseline attrs), Call-site logging pattern (multiple independent calls, slog filters by level, no trace-wrapper abstraction).
+- Seven subtopics decided: Logger library (slog), Log rotation, Retention, Log-level discipline, Subsystem prefix taxonomy (now 14 components), Call-site logging pattern, State-mutation audit trail.
 - Scope expansion confirmed: instrument the whole codebase wherever logging would aid debugging/insight, under the disciplined level contract.
-- Review-set 001 fully drained: 14 findings closed.
-- Review-set 002 fully drained: 11 findings closed (G6/G11 by factory pattern; G3/G4 by attr-vocab + baseline attrs; G1 by placement clarifications; G7/G10 by release-notes-only resolution; G8 by factory pattern; G9 by `error_class` attr; G2 by volume math; G5 by big-bang migration plan).
-- Remaining map: 7 pending subtopics on defensive invariants, state-mutation audit trail, diagnostic context preservation, cycle summaries, log-level propagation verification, lifecycle events, and rollout.
+- Approach choice: mechanical-rule discussion (each locked subtopic gets a rule spec phase can apply with zero judgment), not per-site enumeration. State-mutation audit trail is the first subtopic written in this shape; the other six will be retro-sharpened to match before discussion concludes.
+- Review-sets 001, 002, 003 fully drained: 32 findings closed across all three reviews.
+- Remaining map: 6 pending subtopics on defensive invariants, diagnostic context preservation, cycle summaries, log-level propagation verification, lifecycle events, and rollout. All will be written with the mechanical-rule explicitness target.
