@@ -119,7 +119,7 @@ For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
    a. Find max existing `N` for today (`portal.log.<today>.*` listing); next N = max + 1, or 1 if none.
    b. Open `portal.log.<today>.<N>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`.
    c. On `EEXIST`, retry with `N+1`.
-   d. Swing the symlink to the new file (same pid-scoped-tmp + atomic-rename procedure as step 2c). `chmod 0400` the previous file.
+   d. Swing the symlink to the new file (same pid-scoped-tmp + atomic-rename procedure as step 2c). **Do NOT `chmod 0400` the previous segment** (resolves review-007 L6): it is a *same-day* file, a peer process may still hold an open `O_APPEND` fd on it (`chmod` does not evict an already-open writer on Unix), and it is part of today's active write surface. Same-day segments are sealed only when the day rolls over — the next day's step 2d sweep `chmod 0400`s all of yesterday's segments at once. A peer that didn't observe this size-cap rotation simply keeps appending to the prior same-day segment; that splits today's writes across two readable same-day files (the symlink points at the newest), which is acceptable — the size cap is a disk-fill valve, not a correctness boundary.
 4. Write the serialized record to the now-current fd.
 
 The above applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
