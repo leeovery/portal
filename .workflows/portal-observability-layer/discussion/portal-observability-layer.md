@@ -617,12 +617,14 @@ The subtopic's *design intent* is straightforward — log mutations. The *mechan
 
 **Mechanical rule (the seam spec phase enumerates against):**
 
-> *Every call to `internal/fileutil.AtomicWrite` (or any successor primitive that performs a temp-file + rename of a portal-owned config file) whose target path matches one of `hooks.json` / `aliases` / `projects.json` emits, immediately after `AtomicWrite` returns:*
+**Seam = the per-file store's mutation methods, NOT `AtomicWrite` and NOT the callers (resolves review-004 I8).** Each portal-owned config file is fronted by exactly one store — `hooks.Store`, the alias store, the project store — and every mutation flows through that store's `Set` / `Rm` / `CleanStale` methods. The store is the chokepoint that (a) knows the `op` and the affected key and (b) is the single place per file where the breadcrumb can't be forgotten. The generic `internal/fileutil.AtomicWrite` primitive stays audit-unaware — it is shared with out-of-scope `sessions.json` and has no `op`/key semantics, so logging does NOT live inside it, and it does NOT live scattered at each caller (the forgettable "log in every controller" anti-pattern). This is the model-observer layer, not the controllers.
+
+> *Every mutating method of an in-scope config store (`hooks.Store`, alias store, project store) emits, immediately after the underlying `AtomicWrite` returns to it:*
 >
 > - *On `error == nil`: ONE INFO log line.*
 > - *On `error != nil`: ONE WARN log line.*
 >
-> *The log line's component (prefix) is the file's owning component: `hooks` for `hooks.json`, `aliases` for `aliases`, `projects` for `projects.json`.*
+> *The log line's component (prefix) is the store's owning component: `hooks` for `hooks.json`, `aliases` for `aliases`, `projects` for `projects.json`.*
 >
 > *Required attrs:*
 > - `op` — drawn from the closed value space below.
