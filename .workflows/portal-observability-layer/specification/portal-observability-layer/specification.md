@@ -250,4 +250,57 @@ Standard `slog.NewJSONHandler` output, no special handling — `component` becom
 
 ---
 
+## Log-level discipline
+
+### Decision
+
+slog four-level model (Debug / Info / Warn / Error) with the semantic contract below. **Production default `PORTAL_LOG_LEVEL=info`** (changed from the historical WARN — WARN-only was the posture that left no evidence on 2026-05-28). Custom sublevels (Trace/Notice) were considered and rejected — four levels is the standard.
+
+| Level | Purpose | Volume |
+|---|---|---|
+| **DEBUG** | Kitchen sink for reconstruction: breadcrumbs on swallowed-error paths, per-event state changes under cycle summaries, observed transient values, decision-point inputs. Off in production. | Bound by code paths reached, not judgement. |
+| **INFO** | Decision/terminal-point summaries, cycle summaries, lifecycle events. One line per *meaningful choice*, not per state change. The steady-state production signal. | Bound by rate of meaningful events (~1–5 MB/day). |
+| **WARN** | Unexpected-but-recoverable conditions. Per-session capture anomalies, retries triggered, transient probe failures inside hysteresis, invalid config falling back to default. | Every line is a signal worth looking at. |
+| **ERROR** | Genuinely unrecoverable — process is about to exit because it cannot continue. Rare in portal due to swallow-and-continue posture. | Few sites total; most candidates warrant WARN instead. |
+
+Two implications carry forward:
+1. The **subsystem prefix taxonomy** is designed so `grep` on a prefix produces a useful trace at INFO level — INFO is the production baseline that has to be greppable.
+2. **State-mutation audit trail** breadcrumbs are INFO (decision points), not DEBUG — they must survive at production level.
+
+### Placement clarifications
+
+- **Idempotent no-ops** (e.g. `RegisterPortalHooks` deciding "already current, no action"): DEBUG by default. INFO only when the no-op IS the user-visible decision (e.g. "saver already at version V, skipping respawn" — the operator wants to see we considered upgrading and chose not to act). A purely-internal idempotent skip clutters the INFO baseline.
+- **Hysteresis-internal failures** (e.g. saver-membership probe failure inside the 3-tick self-supervision hysteresis): DEBUG per spurious tick. ONE INFO or WARN on the trip (when the threshold is crossed and the eject decision lands). WARN per tick during transient tmux contention would fire continuously and invert the "every WARN is signal" promise.
+- **Recoverable-but-rare** (e.g. corrupt `sessions.json` falling back to empty state; pane decode failures dropping one pane and continuing): WARN. These are signal even when recovered. "Rare" doesn't bump them to ERROR — ERROR is strictly "process exiting because it cannot continue".
+
+### Mechanical level-selection table
+
+Level selection per call site is determined mechanically by the code shape. Spec writers and code reviewers apply this table without judgment:
+
+| Code shape at the call site | Level |
+|---|---|
+| `_ = expectedErr` / `if errors.Is(err, KnownExpected) { return }` swallow path | `Debug` with `error_class="expected"` |
+| `log-and-continue` on an unexpected error where swallowing it **drops a unit of work or leaves the function's postcondition unmet** (skipped a session this tick, write not persisted, degraded result returned) | `Warn` with `error_class="unexpected"` |
+| `log-and-continue` on an unexpected error where **the postcondition still holds** — the failure is incidental or self-heals next cycle (transient probe, best-effort cleanup safe to skip) | `Debug` with `error_class="unexpected"` |
+| Terminal line just before successful return from a function representing a meaningful choice (saver respawn, hook fire, capture-tick complete, lifecycle transition) | `Info` |
+| Cycle-end summary at the end of a tick/iteration/batch (`tick complete`, `bootstrap step done`, `clean-stale entries=N`) | `Info` |
+| Idempotent no-op decision (key already correct, version already current, hook already registered) | `Debug` UNLESS the no-op is the user-visible decision (e.g. "skipping respawn because version matches"), in which case `Info` |
+| Probe failure inside a hysteresis window (`probe failed, retries=N/M`) | `Debug` per failure |
+| Hysteresis threshold trip (escalation, eject, give-up) | `Info` (the resolved decision) OR `Warn` if the trip represents an anomaly |
+| Unexpected-but-recoverable condition (anomalous capture, fallback to default after invalid config, retry triggered) | `Warn` |
+| Line immediately preceding `os.Exit(N)` / `return err` from `main` / panic | `Error` |
+
+**Swallowed-error predicate.** The DEBUG-vs-WARN choice for an *unexpected* swallowed error is not a per-site judgment call. It is the single mechanical question: **did swallowing the error lose something?** If the function dropped a unit of work or failed its postcondition → WARN; if the postcondition still holds → DEBUG. Anchored to the function's contract, not the author's sense of importance. (Matches the codebase: per-session capture skips already log WARN — work dropped that tick — while transient hysteresis probe failures stay DEBUG.)
+
+### Default and invalid-value handling
+
+Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercasing) → fall back to `info` and emit one WARN at process start:
+```
+bootstrap: invalid PORTAL_LOG_LEVEL=<v>, using info
+```
+
+Spec writers MUST verify each new log call site against this table during spec authoring. Code reviewers verify the same at PR review time.
+
+---
+
 ## Working Notes
