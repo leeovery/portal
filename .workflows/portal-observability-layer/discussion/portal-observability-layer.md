@@ -311,7 +311,8 @@ Level selection per call site is determined mechanically by the code shape. Spec
 | Code shape at the call site | Level |
 |---|---|
 | `_ = expectedErr` / `if errors.Is(err, KnownExpected) { return }` swallow path | `Debug` with `error_class="expected"` |
-| `_ = unexpectedErr` / `log-and-continue` on an error the codebase does not expect on the happy path | `Debug` with `error_class="unexpected"`, OR `Warn` if production visibility is wanted |
+| `log-and-continue` on an unexpected error where swallowing it **drops a unit of work or leaves the function's postcondition unmet** (skipped a session this tick, write not persisted, degraded result returned) | `Warn` with `error_class="unexpected"` |
+| `log-and-continue` on an unexpected error where **the postcondition still holds** — the failure is incidental or self-heals next cycle (transient probe, best-effort cleanup safe to skip) | `Debug` with `error_class="unexpected"` |
 | Terminal line just before successful return from a function representing a meaningful choice (saver respawn, hook fire, capture-tick complete, lifecycle transition) | `Info` |
 | Cycle-end summary at the end of a tick/iteration/batch (`tick complete`, `bootstrap step done`, `clean-stale entries=N`) | `Info` |
 | Idempotent no-op decision (key already correct, version already current, hook already registered) | `Debug` UNLESS the no-op is the user-visible decision (e.g. "skipping respawn because version matches"), in which case `Info` |
@@ -319,6 +320,8 @@ Level selection per call site is determined mechanically by the code shape. Spec
 | Hysteresis threshold trip (escalation, eject, give-up) | `Info` (the resolved decision) OR `Warn` if the trip represents an anomaly |
 | Unexpected-but-recoverable condition (anomalous capture, fallback to default after invalid config, retry triggered) | `Warn` |
 | Line immediately preceding `os.Exit(N)` / `return err` from `main` / panic | `Error` |
+
+**Swallowed-error predicate (resolves review-004 I3).** The previous "DEBUG **or** WARN if production visibility is wanted" row carried the one piece of spec-time judgment the table exists to eliminate. It is replaced by the two structural rows above, selected by a single mechanical question: **did swallowing the error lose something?** If the function dropped a unit of work or failed its postcondition → WARN; if the postcondition still holds → DEBUG. Anchored to the function's contract, not the author's sense of importance. (Matches the codebase: per-session capture skips already log WARN — work dropped that tick — while transient hysteresis probe failures stay DEBUG.)
 
 Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercase) → fall back to `info` and emit one WARN at process start: `bootstrap: invalid PORTAL_LOG_LEVEL=<v>, using info`.
 
