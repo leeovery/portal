@@ -110,7 +110,11 @@ The current 1 MiB threshold being laughably small also explains why the `.old` k
 For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
 
 1. Compute `today := time.Now().Format("2006-01-02")`.
-2. If the handler's currently-open fd is for `portal.log.<today>`, reuse it. Otherwise:
+2. **Reuse the currently-open fd only while BOTH hold (resolves review-008 M2): (a) no date change — it is for `portal.log.<today>`; AND (b) its inode still matches the current `portal.log` symlink target** (`fstat` the open fd, `stat` the symlink target, compare `st_dev`+`st_ino`). Otherwise reopen. Two reopen triggers, handled differently:
+   - **Date change** (new calendar day) → run the full new-day path (steps a–d below) plus the Retention sweep (separate rule).
+   - **Inode mismatch / `ENOENT` on the target, same day** → today's file was unlinked or replaced out from under us mid-day (the unknown-zeroing scenario this subtopic defends against — a long-lived daemon's `O_APPEND` fd would otherwise keep writing to the orphaned inode and lose every byte on close — or a peer's size-cap rotation). Reopen by following the current symlink target if it exists (`O_APPEND|O_WRONLY`), else recreate via step a. Do NOT run the retention/`chmod` sweeps — the date did not change.
+
+   When a reopen is needed (either trigger):
    a. Open `${stateDir}/portal.log.<today>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`, mode `0600`.
    b. On `EEXIST`, retry with `O_APPEND|O_WRONLY` (lost the cross-process create race; another writer beat us).
    c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically. The temp link is **pid-scoped** — `portal.log.<pid>.symlink.tmp` — so cross-process swings can never collide on the tmp name (a single process performs at most one swing at a time, so no counter is needed); if this pid's own tmp already exists from a prior crash, `os.Remove` it and recreate. Then `os.Symlink(target, pidTmp)` + `os.Rename(pidTmp, link)` — `Rename` is atomic and last-writer-wins, and every racer's target is identical (`portal.log.<today>`), so a concurrent swing is benign. A tmp leaked by a crash between `Symlink` and `Rename` is reclaimed best-effort on the next swing and by `portal clean`. (Resolves review-004 I1.)
@@ -700,7 +704,7 @@ Even with the new design, an unknown bug could destroy today's `portal.log`. The
 
 **Invariant 1: Rotated-file immutability.** (Already locked in Log rotation mechanism.) Files older than today are `chmod 0400` so even a buggy library can't overwrite past evidence. The destruction surface narrows to today's file only.
 
-**Invariant 2: `O_CREAT|O_EXCL` on first-of-day open.** (Already locked in Log rotation mechanism.) Every process's first write of a day creates `portal.log.<today>` via `O_CREAT|O_EXCL` (with append-fallback on `EEXIST`). If something deletes today's file mid-day, the next writer's create-or-append races safely and observably.
+**Invariant 2: `O_CREAT|O_EXCL` on first-of-day open.** (Already locked in Log rotation mechanism.) Every process's first write of a day creates `portal.log.<today>` via `O_CREAT|O_EXCL` (with append-fallback on `EEXIST`). If something deletes today's file mid-day, the next writer's create-or-append races safely and observably. **An *already-open* writer (notably the long-lived daemon) recovers too:** its per-`Handle` inode-identity check (Log rotation rule step 2, resolves review-008 M2) detects that its fd's inode no longer matches the `portal.log` symlink target and reopens onto the live file — so a mid-day deletion is both detectable (start-marker tripwire) AND non-lossy going forward, rather than the daemon silently writing into an orphaned inode.
 
 **Invariant 3 (new this subtopic): Per-process lifecycle markers.** Every portal process emits ONE INFO line at the very start of its execution and ONE INFO line on clean exit. These are the tripwires that make destruction visible: if today's `portal.log` contains only lines from 09:15 forward but you know portal was running before, the first line of today's file is a "process: start" marker that timestamps when destruction had to have happened.
 
