@@ -202,16 +202,34 @@ A new package `internal/log` exposes exactly two public functions:
 ```go
 package log
 
-// Init constructs the root *slog.Logger with baseline attrs bound and the
-// custom rotating handler attached. Called once per process from main.go
-// before any other portal code runs. Idempotent only via panic-on-second-call.
+// Init configures the process-wide logger: builds the custom rotating handler
+// (baseline attrs pid/version/process_role injected per-record) and atomically
+// swaps it in behind the stable root logger. Called from main.go before any
+// other portal code runs. IDEMPOTENT and re-entrant — a second call re-points
+// the handler, it does NOT panic. By convention only main calls Init in prod.
 func Init(stateDir string, version string, processRole string) error
 
-// For returns a child logger pre-bound to the given component name. Cheap;
-// callers are expected to cache the returned logger at package init via a
-// package-level var.
+// For returns a component-bound child logger (root.With("component", name)).
+// Safe to call before Init — always returns a valid, non-nil *slog.Logger
+// backed by a safe default handler (discard / stderr-text at INFO) until Init
+// swaps in the configured handler. Cheap; callers cache it at package init via
+// a package-level var, and that cached logger picks up Init's handler
+// automatically because the swap lives inside the shared handler.
 func For(component string) *slog.Logger
+
+// SetTestHandler swaps in h for the duration of the test and restores the
+// previous handler via t.Cleanup. Test-only seam for capturing or silencing
+// log output in-process — no subprocess required.
+func SetTestHandler(t *testing.T, h slog.Handler)
 ```
+
+**Init/For contract — swappable-handler indirection (resolves review-004 I6).** The original "idempotent only via panic-on-second-call" rule was dropped — it fought slog's grain (the stdlib's own `slog.SetDefault` is re-settable, and `slog.LevelVar` mutates level without rebuilding). Replaced with:
+
+- The root `*slog.Logger` is constructed in `internal/log`'s own package init, over a small custom handler whose inner delegate is **replaceable** (mutex- or `atomic.Pointer`-guarded). Because every consumer imports `internal/log`, Go runs its init first, so `root` exists before any `For` call.
+- `Init` swaps the configured rotating handler into that indirection. Every `For`-created logger shares the indirection, so loggers cached at package-init (before `Init` ran) route to the configured handler once `Init` lands — no stale-logger footgun, no nil returns.
+- The "configured once in prod" invariant is preserved by **convention** (only `main` calls `Init`) plus the separate test-only `SetTestHandler` seam — NOT by panicking. In-process tests swap a capture/`io.Discard` handler; the prior design's "every log-asserting test must be a subprocess" tax is gone.
+- Cost: one synchronized read (atomic load / RLock) per `Handle`. Negligible behind slog's level filter, and free-riding on the custom handler we already need for rotation — the swap is one extra field, not a new abstraction.
+- **Baseline-attr refinement:** baseline attrs (`pid`, `version`, `process_role`) are injected by the configured handler **per-record**, NOT via `root.With(...)` at construction — otherwise package-init children created before `Init` would miss them. (Refines the Subsystem prefix taxonomy "root-injected once" wording.)
 
 Every other portal package that needs to log:
 
@@ -411,7 +429,7 @@ Conventions:
 
 The vocabulary is the closed set today; new keys are added by amendment in spec/follow-on PRs when a use case appears. The point is *no ad-hoc invention at call-site time* — every contributor consults the list.
 
-**Locked: mandatory baseline attrs (every line carries these, root-injected once).**
+**Locked: mandatory baseline attrs (every line carries these, injected per-record by the configured handler — see Logger library § Init/For contract, resolves I6's package-init ordering).**
 
 | Key | Set where |
 |---|---|
