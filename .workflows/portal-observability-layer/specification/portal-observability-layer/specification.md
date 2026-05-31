@@ -484,4 +484,112 @@ This applies to ONE seam: the `slog.Handler` in `internal/log` (and `portal clea
 
 ---
 
+## Defensive invariants against log destruction
+
+### Decision
+
+Three invariants. The first two are enforced inside the rotation handler (re-stated here for completeness; their authoritative rule lives in *Log rotation mechanism*). The third is new.
+
+**Invariant 1: Rotated-file immutability.** Files older than today are `chmod 0400` so even a buggy library can't overwrite past evidence. The destruction surface narrows to today's file only.
+
+**Invariant 2: `O_CREAT|O_EXCL` on first-of-day open.** Every process's first write of a day creates `portal.log.<today>` via `O_CREAT|O_EXCL` (append-fallback on `EEXIST`). If something deletes today's file mid-day, the next writer's create-or-append races safely and observably. An *already-open* writer (notably the long-lived daemon) recovers too: its per-`Handle` inode-identity check detects that its fd's inode no longer matches the `portal.log` symlink target and reopens onto the live file — so a mid-day deletion is both detectable (start-marker tripwire) AND non-lossy going forward, rather than the daemon silently writing into an orphaned inode.
+
+**Invariant 3 (new): Per-process lifecycle markers.** Every portal process emits ONE INFO line at the very start of its execution and ONE INFO line on termination. These are the tripwires that make destruction visible: if today's `portal.log` contains only lines from 09:15 forward but you know portal was running before, the first line of today's file is a `process: start` marker that timestamps when destruction had to have happened.
+
+### Mechanical rule — `process: start`
+
+`internal/log.Init(stateDir, version, processRole)`, after constructing the root logger and wiring the rotating handler, MUST emit exactly one INFO line as its final action before returning:
+
+```go
+log.For("process").Info("start",
+    "cmd", filepath.Base(os.Args[0]),
+    "args", strings.Join(os.Args[1:], " "),
+)
+```
+
+Renders (text mode):
+```
+2026-05-30T14:00:00Z INFO process: start cmd=portal args="open ." pid=12345 version=0.5.0 process_role=tui
+```
+
+(`pid`, `version`, `process_role` are baseline attrs auto-injected; the call site does not pass them.)
+
+### Mechanical rule — `process: exit` and the `main` exit shape
+
+`internal/log` exposes `func Close(exitCode int)` — a marker-emitter that computes `took` from the package-private `startTime` (captured at `Init`) and emits one INFO line. **`Close` does NOT call `os.Exit`; the logger owns no control flow.**
+
+```go
+log.For("process").Info("exit",
+    "code", exitCode,
+    "took", time.Since(startTime),
+)
+```
+```
+2026-05-30T14:00:02Z INFO process: exit code=0 took=2.1s pid=12345 version=0.5.0 process_role=tui
+```
+
+**`main` owns the single `os.Exit`.** `os.Exit` skips deferred functions, so a Close-defer would miss Cobra's `Execute()`-error path — the most operationally-interesting termination class. The idiomatic shape (exit only in `main`, everything else returns a code/error):
+
+```go
+func main() {
+    log.Init(...)
+    code := 0
+    func() {
+        defer func() {
+            if r := recover(); r != nil { log.For("process").Error("panic", "reason", r); code = 2 }
+        }()
+        if err := rootCmd.Execute(); err != nil { code = 1 }
+    }()
+    log.Close(code)   // emits process: exit code=N — does NOT exit
+    os.Exit(code)
+}
+```
+
+- Exactly one terminal marker fires per run: `exit` on clean/error return, `panic` on a recovered panic. No double-emit, no defer-ordering ambiguity.
+- **Bare `os.Exit` is prohibited outside `main`** (PR-review reject) — every other function returns an error/code. This prohibition is the enforcement mechanism for "every termination is marked."
+- `Execute()` maps to a return code rather than calling `os.Exit` inside.
+
+**Coverage requirement:** every binary entry point (currently only `main.go`) calls `log.Init` before any other portal code that might log, and routes all termination through the `main` shape above.
+
+### Mechanical rule — exec-handoff markers
+
+`syscall.Exec` overwrites the process image, runs no deferred functions, and never returns — so `Close` never fires. The bare-shell `portal open` happy path (`AttachConnector` → `tmux attach-session`) is exactly this, and it is portal's *most common* termination. Without a marker, a benign tmux handoff leaves an unpaired `process: start` indistinguishable from a destructive mid-flight kill.
+
+**Every `syscall.Exec` call site MUST emit a plain `exec`-terminal INFO line immediately before the exec, under its owning component.** No logger-owned helper — the call site uses the ordinary logger then performs its own `syscall.Exec`. Because the writer is unbuffered, the marker is already in the kernel before the image is replaced.
+
+```go
+// At the AttachConnector call site, immediately before syscall.Exec:
+log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv, " "))
+syscall.Exec(tmuxPath, argv, env)
+```
+
+- `AttachConnector` (bare-shell `portal open` → tmux) emits `process: exec target=tmux args="attach-session -A …"`. This is binary-level lifecycle, so `exec` joins `start` / `exit` / `panic` in the **`process` component's event space**.
+- The hydrate helper's pre-`syscall.Exec` marker is `hydrate: exec` (see *Hook-firing observability limit*) — same pattern, component-owned. This rule generalises it to the remaining exec site.
+
+This yields a clean four-way terminal classification of any `process: start`:
+
+| Followed by | Meaning |
+|---|---|
+| `process: exit` | Normal return (via `Close`) |
+| `process: exec` | Clean handoff to another image — no exit line expected (benign) |
+| `process: panic` | Crash, but recorded |
+| *nothing* | Genuinely alarming — process vanished without a terminal marker; investigate |
+
+**Externally-killed-process footnote.** A process killed by an uncatchable signal (the kill-barrier's SIGKILL escalation) runs no code, so it emits no terminal marker — its `process: start` looks unpaired. That is not the alarming case when the kill was deliberate: **the killer records it.** Bootstrap emits `saver: kill-barrier started/escalated target_pid=X` and `saver: placeholder died`. So: **an unpaired `process: start` is alarming only if no `saver:`/`daemon:` line names that pid as an external kill.** (The daemon's clean self-eject uses `os.Exit(0)` and still emits its own `process: exit`.)
+
+### Flush — unbuffered writer constraint
+
+Flush reduces to "do not buffer the log writer." The rotation handler writes directly to the `*os.File` (`O_APPEND`) with no `bufio` wrapper, so a marker is already in the kernel by the time `Info(...)` returns. `os.Exit` and `syscall.Exec` do not discard kernel buffers, so the bytes survive for a later reader — no `Sync()`/flush API and no logger-owned atomic exit/exec helper are needed. **Unbuffered writer is a locked constraint on the rotation handler.**
+
+### Lifecycle markers bypass the level filter
+
+The `process`-component lifecycle set — `start`, `exit`, `exec`, `panic`, and `log-level resolved` (see *Log-level propagation verification*) — is emitted **unconditionally by the custom handler, regardless of `PORTAL_LOG_LEVEL`.** These are forensic tripwires (and, for `log-level resolved`, a test anchor), not ordinary application logging. At `PORTAL_LOG_LEVEL=warn`/`error` a normal INFO line would be filtered — which would falsify the "always-present tripwire" guarantee and hide the line that proves the resolved level took effect. The handler special-cases this `process` lifecycle set to write through the level gate. They remain semantically INFO for every other purpose (no ERROR pollution).
+
+### Notes
+
+- **`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
+- **Privacy on `args` attr: verbatim.** CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
+
+---
+
 ## Working Notes
