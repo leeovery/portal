@@ -125,4 +125,129 @@ Call sites then use `logger.{Debug,Info,Warn,Error}` directly with `slog.Attr` a
 
 ---
 
+## Subsystem prefix taxonomy
+
+### Rendering mechanism
+
+`component` is a structured slog attr set at every call site. The custom `slog.Handler` renders **text** output with `component:` as a literal prefix at the start of the message body, timestamp + level preceding it. `component` remains a real structured attr under the hood, so **JSON** output and programmatic filtering work unchanged.
+
+Example text-mode line:
+```
+2026-05-29T08:38:00Z INFO hydrate: ok pane_key=foo:0.0 took=1.2s pid=12345 version=0.5.0 process_role=hydrate
+```
+
+Same call site, JSON handler:
+```json
+{"time":"2026-05-29T08:38:00Z","level":"INFO","component":"hydrate","msg":"ok","pane_key":"foo:0.0","took":"1.2s","pid":12345,"version":"0.5.0","process_role":"hydrate"}
+```
+
+Grep idiom preserved: `grep "hydrate:" portal.log` produces the per-subsystem audit trail. Programmatic filtering also works: handlers route by `component` attr, JSON tooling indexes it.
+
+Call-site binding is the factory pattern defined in *The `internal/log` package* — each consumer binds its component once at init via `var logger = log.For("<component>")`.
+
+### Closed component value space (15 total)
+
+```
+bootstrap  daemon  restore  hydrate  notify  hooks  preview
+saver  capture  signal  log-rotate  clean  aliases  projects
+process
+```
+
+This list is the **single source of truth** for the component count.
+
+| Component | Owns |
+|---|---|
+| `daemon` | `portal state daemon` runtime — tick loop, self-supervision |
+| `bootstrap` | The 11-step bootstrap orchestrator |
+| `restore` | Two-phase restore engine (skeleton + geometry + scrollback) |
+| `hydrate` | Per-pane `portal state hydrate` helper — FIFO open, scrollback replay, exec chain |
+| `notify` | Notification helpers |
+| `hooks` | `hooks.json` mutations (`portal hooks set/rm`, `hookStore.CleanStale`) |
+| `preview` | TUI scrollback preview page |
+| `saver` | `_portal-saver` session lifecycle |
+| `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`) |
+| `signal` | FIFO signaling — `EagerSignalHydrate`, hydrate-helper signal receipt |
+| `log-rotate` | Rotation and retention events |
+| `clean` | `portal clean` command path |
+| `aliases` | `aliases` store mutations |
+| `projects` | `projects.json` store mutations |
+| `process` | Portal-binary lifecycle markers (`start` / `exit` / `exec` / `panic` / `log-level resolved`) only, regardless of subcommand |
+
+`process` is reserved for portal-binary lifecycle/diagnostic markers only; subsystem-level lifecycle events have their own components. `tmux` is **deliberately excluded** — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Tmux-call detail rides as DEBUG breadcrumbs under the caller's component.
+
+### Closed attr-key value space (45 keys)
+
+**Contextual** (set per call as relevant) — 13:
+
+| Key | What |
+|---|---|
+| `pane_key` | Structural pane key (canonical persisted form, e.g. `session__window.pane`) |
+| `tmux_pane` | `$TMUX_PANE` env var (live tmux pane id, e.g. `%42`) |
+| `session` | tmux session name |
+| `project` | project name from `projects.json` |
+| `path` | filesystem path |
+| `took` | duration (`time.Duration` rendered) |
+| `error` | error message (slog idiom: `slog.Any("error", err)`) |
+| `error_class` | swallowed-error classification: `expected` / `unexpected`; or AtomicWrite failure phase |
+| `hook_key` | hooks subsystem — the structural hook key |
+| `op` | state-mutation breadcrumbs — `set` / `modify` / `rm` / `clean-stale` / `migrate` / `set-noop` |
+| `alias` | aliases-store key |
+| `value` | state-mutation — verbatim new value for `set` / `modify` |
+| `via` | state-mutation origin — `cli` / `internal` / `migrate` |
+
+**Cycle-summary** (set per summary line as relevant) — 11: `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
+
+**Lifecycle** (set per saver/daemon lifecycle event) — 7: `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`.
+
+**Hydrate** (set per hook-firing exec-chain event) — 3: `result`, `hook_present`, `bytes`.
+
+**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel.
+
+**Baseline** (auto-injected per-record by the configured handler) — 4: `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
+
+### Mandatory baseline attrs
+
+Every line carries these four, injected **per-record** by the configured handler (not via `root.With` — so package-init children created before `Init` still carry them):
+
+| Key | Set where |
+|---|---|
+| `component` | Per-package via `log.For("...")` |
+| `pid` | Root logger construction (`os.Getpid()`) |
+| `version` | Root logger construction (build-time `cmd.version`) |
+| `process_role` | Root logger construction — one of `daemon` / `bootstrap` / `hydrate` / `hooks_cli` / `tui` / `clean`. Identifies which portal binary invocation emitted the line; critical for multi-writer disambiguation on reboot-recovery days. |
+
+Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB/day). They make every line self-describing for forensic use across multi-writer days.
+
+### Conventions
+
+- **snake_case** for all attr keys.
+- **Message string is a terse phrase**; data lives in attrs: `logger.Info("ok", "pane_key", k, "took", d)` — never `logger.Info(fmt.Sprintf(...))`.
+- **Sticky context via `.With(...)`** when multiple events share context.
+
+### Custom `slog.Handler` text-mode rendering rule
+
+```
+<RFC3339Nano timestamp> <LEVEL> <component>: <msg> <attrs as key=value pairs>
+```
+
+- `<component>` is read from the bound `component` attr and emitted as a literal prefix immediately before the colon. It is **not** also rendered in the attrs key=value list.
+- `<msg>` is the slog record's message field.
+- `<attrs>` are emitted space-separated `key=value` in order: contextual attrs (in `slog.Record` order), then the three remaining baselines (`pid`, `version`, `process_role`).
+- Multi-word string values are quoted with `"`.
+- `time.Duration` values render with Go's default `String()` (e.g. `1.234s`).
+- `slog.Group` attrs flatten to **dotted keys** (`group.key=value`), mirroring the JSON handler's nesting.
+
+### Custom `slog.Handler` JSON-mode rendering rule
+
+Standard `slog.NewJSONHandler` output, no special handling — `component` becomes a normal `"component":"<name>"` JSON field.
+
+### Extension policy
+
+- New components require explicit amendment of THIS specification's closed component list.
+- New attr keys require the same amendment process.
+- Spec writers and code reviewers MAY NOT introduce new component or attr names ad hoc.
+- The space is **genuinely closed** — every contributor consults these lists; no ad-hoc invention at call-site time.
+
+---
+
 ## Working Notes
