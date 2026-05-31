@@ -162,12 +162,13 @@ Per-deletion INFO line is required: the 2026-05-28 incident taught that silent d
 
 On the first `Handle(record)` call of each calendar date (detected via the date-change check from the rotation rule above), the handler **attempts to claim the day's sweep, and only the winner runs it** (resolves review-004 I2 + I10):
 
-0. **Single-winner gate.** Attempt to create `${stateDir}/portal.log.swept.<today>` via `O_CREAT|O_EXCL`. On `EEXIST`, another process already owns today's sweep — **return immediately, run nothing, emit nothing.** On success, this process owns the sweep; proceed. (Same single-winner `O_EXCL` primitive the rotation rule uses one section up — the two adjacent rules now share one concurrency stance instead of contradicting.) The sentinel files age out under the same retention window as the logs (they match `portal.log.*`), so they self-clean.
+0. **Single-winner gate.** Attempt to create `${stateDir}/portal.log.swept.<today>` via `O_CREAT|O_EXCL`. On `EEXIST`, another process already owns today's sweep — **return immediately, run nothing, emit nothing.** On success, this process owns the sweep; proceed. (Same single-winner `O_EXCL` primitive the rotation rule uses one section up — the two adjacent rules now share one concurrency stance instead of contradicting.) Only *today's* sentinel is meaningful; prior-day sentinels are pruned in step 3 below (resolves review-007 L5 — they do NOT self-clean via the date-cutoff walk, which deliberately excludes `portal.log.swept.*`).
 1. Parse `cutoff := today.AddDate(0, 0, -PORTAL_LOG_RETENTION_DAYS)`. Default `PORTAL_LOG_RETENTION_DAYS = 30`. Invalid env value (non-integer, negative, > 365) → use default and emit one WARN: `log-rotate: invalid PORTAL_LOG_RETENTION_DAYS=<v>, using 30d`.
 2. List `${stateDir}/portal.log.*` files (excluding `portal.log.swept.*` sentinels). Extract the date portion of each filename. For each file whose date < `cutoff`:
    a. Emit one INFO line BEFORE deletion: `log-rotate: deleted path=<filename> retention=<N>d`.
    b. `os.Remove(filename)`. On error, emit one WARN with `error` attr and continue (don't abort the sweep).
-3. The sweep is best-effort. The single-winner gate (step 0) means it runs at most once per host per day, so the duplicate-INFO / duplicate-WARN floor from N concurrent process startups (the reboot-storm case) cannot occur.
+3. **Prune stale sentinels (resolves review-007 L5).** Unlink any `portal.log.swept.<date>` sentinel whose `<date>` ≠ `today` — prior-day sentinels are dead weight (only today's gates today's sweep). On error, WARN and continue. This is why step 2 excludes `portal.log.swept.*` from the date-cutoff walk: sentinels are pruned here by an exact "not today" rule, not by the retention cutoff.
+4. The sweep is best-effort. The single-winner gate (step 0) means it runs at most once per host per day, so the duplicate-INFO / duplicate-WARN floor from N concurrent process startups (the reboot-storm case) cannot occur.
 
 **Why single-winner rather than "re-entrant no-op":** every process's first log call of the day is its `process: start` line (Defensive invariants), so without the gate ALL ~32 reboot-morning processes would each emit the same deletion INFO lines and 31 would then hit `os.Remove` "already gone" WARNs — 32× audit noise on exactly the forensic surface this feature exists to keep clean. The gate makes the deletion breadcrumbs single-sourced.
 
@@ -463,9 +464,9 @@ process
 
 `process` is reserved for portal-binary lifecycle markers (start, exit, panic) only; subsystem-level lifecycle events have their own components.
 
-**Closed attr-key value space** (10 contextual + 11 cycle-summary + 4 baseline):
+**Closed attr-key value space** (13 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 7 process + 4 baseline). *(review-007 L1–L3: the process-lifecycle, log-level-propagation, and state-mutation attr sets — emitted by decided subtopics but previously missing here — are now enrolled in the Process and Contextual groups below.)*
 
-Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`.
+Contextual (set per call as relevant): `pane_key`, `tmux_pane`, `session`, `project`, `path`, `took`, `error`, `error_class`, `hook_key`, `op`, `alias`, `value`, `via`. (`alias` = aliases-store key; `value`/`via` = state-mutation audit attrs — enrolled per review-007 L3.)
 
 Cycle-summary (set per summary line as relevant; enumerated by the Cycle-level summary subtopic): `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
 
@@ -473,7 +474,9 @@ Lifecycle (set per saver/daemon lifecycle event; enumerated by the Saver and dae
 
 Hydrate (set per hook-firing exec chain event; enumerated by the Hook-firing observability subtopic): `result`, `hook_present`, `bytes`.
 
-Baseline (auto-injected at root logger construction in `internal/log.Init`): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
+Process (set per `process:` lifecycle/diagnostic line; enumerated by the Defensive invariants + Log-level propagation subtopics): `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. (Enrolled per review-007 L1+L2 — emitted by `process: start`/`exec`/`exit` and `process: log-level resolved`, previously absent from the closed space.)
+
+Baseline (auto-injected per-record by the configured handler — see Logger library § Init/For contract): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
 **Custom `slog.Handler` text-mode rendering rule:**
 
@@ -497,7 +500,7 @@ Standard `slog.NewJSONHandler` output, no special handling — `component` becom
 - New components require explicit amendment of THIS discussion file's closed component list (or a successor specification amendment).
 - New attr keys require the same amendment process.
 - Spec writers and code reviewers MAY NOT introduce new component or attr names ad hoc.
-- **The space is now genuinely closed, not soft (resolves review-004 I11).** I11 worried that the then-pending Saver/daemon-lifecycle and Diagnostic-context subtopics would need to add components/attrs, making "closed" aspirational. Those subtopics are now all decided and their additions are already folded into the closed lists above (lifecycle attrs `target_pid`/`from_pid`/`to_pid`/`reason`/`ticks`/`threshold`/`flush_completed`; hydrate attrs `result`/`hook_present`/`bytes`). No subtopic carries a pending vocabulary need, so the closed space holds; any future addition goes through this amendment policy.
+- **The space is now genuinely closed, not soft (resolves review-004 I11; completed by review-007 L1–L3).** I11 worried that decided subtopics would need to add components/attrs, making "closed" aspirational. Its first pass folded in only the lifecycle (`target_pid`/`from_pid`/`to_pid`/`reason`/`ticks`/`threshold`/`flush_completed`) and hydrate (`result`/`hook_present`/`bytes`) sets and prematurely declared "no pending vocabulary need." review-007 L1–L3 caught that the **process-lifecycle** (`cmd`/`args`/`target`/`code`), **log-level-propagation** (`resolved`/`source`/`raw`), and **state-mutation** (`alias`/`value`/`via`) attr sets — all from decided subtopics — were still unenrolled. They are now in the Process and Contextual groups above. With that enrollment complete, no subtopic carries a pending vocabulary need; any future addition goes through this amendment policy.
 
 ---
 
@@ -1050,7 +1053,7 @@ Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're co
 
 Calling code for the catalog above lives across:
 - `cmd/bootstrap/` — most saver lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation).
-- `cmd/state_daemon.go` — daemon lifecycle (`spawn`, `lock acquired`, `self-eject`, `shutdown`).
+- `cmd/state_daemon.go` — daemon lifecycle (`lock acquired`, `self-eject`, `shutdown`). The daemon's process startup is marked by `process: start process_role=daemon`, not a `daemon:` event — `daemon: spawn` was dropped per I4.
 - `internal/tmux/portal_saver.go` — kill-barrier escalation.
 
 Spec writers walking these files apply the catalog row-by-row.
@@ -1259,7 +1262,7 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 
 - All 14 subtopics decided. Every locked subtopic carries a "Mechanical rule (spec-phase intake)" sub-section detailed enough that spec phase can produce per-call-site enumeration with zero judgment.
 - Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
-- Taxonomy final: 15 components, 31 attr keys (10 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 4 baseline — minus overlaps).
+- Taxonomy final: 15 components; closed attr space = 13 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 7 process + 4 baseline (review-007 L1–L3 enrolled the previously-missing process, propagation, and state-mutation attr sets).
 - Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
 - Review-sets 001–004 fully drained: 44 findings closed (001–003: 32; 004: I1–I12). Review-004 was walked one finding at a time, each captured in-place under its owning subtopic. Reviews 005 and 006 were generated against the *since-reverted* review-004 in-place amendments (the cascade that was rolled back in git `ed61436b`/`cbed8200`/`e852fb84`); they were discarded as moot — anything still real will resurface in a fresh review.
 - Discussion convergence: all map entries decided; subtopic write-ups + mechanical rules + closed value spaces + spec-phase-ingestible catalogs all captured.
