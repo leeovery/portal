@@ -175,9 +175,9 @@ This list is the **single source of truth** for the component count.
 
 `process` is reserved for portal-binary lifecycle/diagnostic markers only; subsystem-level lifecycle events have their own components. `tmux` is **deliberately excluded** — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Tmux-call detail rides as DEBUG breadcrumbs under the caller's component.
 
-### Closed attr-key value space (45 keys)
+### Closed attr-key value space (46 keys)
 
-**Contextual** (set per call as relevant) — 13:
+**Contextual** (set per call as relevant) — 14:
 
 | Key | What |
 |---|---|
@@ -194,6 +194,7 @@ This list is the **single source of truth** for the component count.
 | `alias` | aliases-store key |
 | `value` | state-mutation — verbatim new value for `set` / `modify` |
 | `via` | state-mutation origin — `cli` / `internal` / `migrate` |
+| `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
 **Cycle-summary** (set per summary line as relevant) — 11: `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
 
@@ -296,7 +297,7 @@ Level selection per call site is determined mechanically by the code shape. Spec
 
 Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exactly `debug` / `info` / `warn` / `error` after lowercasing) → fall back to `info` and emit one WARN at process start:
 ```
-bootstrap: invalid PORTAL_LOG_LEVEL=<v>, using info
+bootstrap: invalid PORTAL_LOG_LEVEL raw="<v>" resolved=info
 ```
 
 Spec writers MUST verify each new log call site against this table during spec authoring. Code reviewers verify the same at PR review time.
@@ -440,6 +441,46 @@ The unbuffered-writer constraint (see Defensive invariants) means every record i
 - **Steady state:** at INFO the daemon emits ~1 line/tick; one unbuffered `write(2)` to an `O_APPEND` fd is microseconds.
 - **Midnight maintenance:** the first record after local midnight does the symlink swing + `chmod 0400` past-day sweep + retention sweep — a directory listing plus a handful of `chmod`/`unlink` calls, sub-ms to low-single-digit-ms, **once per day**, well within the 1 s tick / 3 s self-supervision budget.
 - **Gating:** the single-winner sweep gate (see Retention policy) means only one process per host runs the midnight sweep, so the daemon frequently pays zero sweep cost.
+
+---
+
+## Retention policy and audit
+
+### Decision
+
+- Default retention: **30 days** of rotated history kept on disk.
+- Configurable via `PORTAL_LOG_RETENTION_DAYS`. Invalid values (non-integer, negative, > 365) fall back to default with a startup WARN.
+- Per-deletion INFO breadcrumb, one line per deleted file: `log-rotate: deleted path=<file> retention=<N>`. `grep 'log-rotate:' portal.log` reconstructs the rotation history.
+- `portal clean` preserves rotated logs by default; `portal clean --logs` opts in to log cleanup.
+
+### Mechanical rule — the retention sweep
+
+Runs on the first `Handle(record)` of each calendar date (the date-change trigger from the rotation rule), **after** today's file is opened. The handler attempts to claim the day's sweep; only the winner runs it:
+
+0. **Single-winner gate.** Create `${stateDir}/portal.log.swept.<today>` via `O_CREAT|O_EXCL`. On `EEXIST`, another process already owns today's sweep — **return immediately, run nothing, emit nothing.** On success, this process owns the sweep; proceed. (Same single-winner `O_EXCL` primitive the rotation rule uses.) Only *today's* sentinel is meaningful; prior-day sentinels are pruned in step 3.
+1. `cutoff := today.AddDate(0, 0, -PORTAL_LOG_RETENTION_DAYS)`. Default `PORTAL_LOG_RETENTION_DAYS = 30`. Invalid env value (non-integer, negative, > 365) → use default and emit one WARN: `log-rotate: invalid PORTAL_LOG_RETENTION_DAYS raw="<v>" retention=30`.
+2. List `${stateDir}/portal.log.*` files. **Strict date-parse, skip otherwise:** keep only filenames that parse as `portal.log.<YYYY-MM-DD>[.<N>]`; any sibling whose date portion does not parse (the `portal.log.<pid>.symlink.tmp` swing temp, the `portal.log.swept.<date>` sentinel, any future non-log sibling) is **skipped: never deleted.** For each surviving file whose date < `cutoff`:
+   a. Emit one INFO line BEFORE deletion: `log-rotate: deleted path=<file> retention=<N>`.
+   b. `os.Remove(file)`. On error, emit one WARN with `error` attr and continue (don't abort the sweep).
+3. **Prune stale sentinels.** Unlink any `portal.log.swept.<date>` sentinel whose `<date>` ≠ `today`. On error, WARN and continue. (This is why step 2 excludes `portal.log.swept.*` from the date-cutoff walk: sentinels are pruned here by an exact "not today" rule, not by the retention cutoff.)
+4. The sweep is best-effort. The single-winner gate (step 0) means it runs at most once per host per day, so the duplicate-INFO / duplicate-WARN floor from N concurrent process startups (the reboot-storm case) cannot occur.
+
+**Why single-winner rather than re-entrant no-op:** every process's first log call of the day is its `process: start` line, so without the gate ALL ~32 reboot-morning processes would each emit the same deletion INFO lines and 31 would then hit `os.Remove` "already gone" WARNs — 32× audit noise on exactly the forensic surface this feature exists to keep clean. The gate makes the deletion breadcrumbs single-sourced.
+
+**Winner-completion semantics.** The sweep (steps 0–3) runs **synchronously inside the winner's first-of-day `Handle`**, and that first `Handle` is the `process: start` line emitted *during* `log.Init` — before the process does any work or `syscall.Exec`s. So even a short-lived winner (a bootstrap that hands off, a hydrate helper that exec's into the shell) completes the whole sweep before it exits; the exec does not preempt it. The gate guarantees **at-most-once per host per day**; the only failure of **at-least-once-completed** is a winner SIGKILL'd or crashing *mid-deletion-loop* (sentinel created, deletions partial). That is an **accepted risk**: retention is a disk-space bound, not a correctness boundary, so a partial sweep merely leaves a few extra rotated files until the next day's fresh winner sweeps — it self-heals, at ~tens-of-MB cost. A resumable sentinel was considered and rejected as disproportionate complexity for a harmless one-day slip.
+
+**`portal clean` integration:**
+- `portal clean` (no flag): preserves rotated logs; does NOT trigger the sweep.
+- `portal clean --logs`: triggers the sweep with `cutoff = today` (delete every rotated file, leaving only the current one). **BYPASSES the step-0 single-winner gate** — it is an explicit, deliberate user invocation and must always run regardless of any `portal.log.swept.<today>` sentinel; the gate exists only to dedupe the automatic per-process-startup sweep. It also removes stale `portal.log.swept.*` sentinels.
+
+This applies to ONE seam: the `slog.Handler` in `internal/log` (and `portal clean --logs`, which calls into the same sweep function).
+
+### Resolved operational edges
+
+- **Breadcrumb placement across midnight.** The sweep runs *after* step 2 opens today's new file, so all deletion INFO lines (and the retention WARN) land in today's file — never in the file being aged out.
+- **Open-fd vs retention unlink.** Resolved by construction. No portal writer holds an fd older than the current day (every `Handle` re-checks the date and reopens onto today's file within ~1 tick of midnight), and retention only deletes files older than the cutoff (≥ 30 days). So a retention `unlink` never races a live writer's fd — no zombie-writer-into-deleted-inode hazard.
+- **Compression of rotated logs.** Out of scope (rejected). Worst-case 30-day window (~600 MB uncompressed at DEBUG) is trivial; `zgrep` friction at investigation time outweighs the disk saving.
+- **Out-of-band audit channel** (separate `portal-rotation.log`). Out of scope (rejected). Rotated-file immutability + per-process start markers + `O_EXCL` first-of-day open provide sufficient post-hoc detectability for portal's scale.
 
 ---
 
