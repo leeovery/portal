@@ -646,4 +646,71 @@ This helper closes the env-propagation gap for ALL daemon-spawning integration t
 
 ---
 
+## State-mutation audit trail for user config files
+
+### Decision
+
+Every mutation of a portal-owned user-config file leaves a breadcrumb in `portal.log` so that `grep "<component>:" portal.log` reconstructs the change history.
+
+**Files in scope (closed set):**
+- `hooks.json` (component `hooks`)
+- `aliases` (component `aliases`)
+- `projects.json` (component `projects`)
+
+`sessions.json` is **out of scope** — it's daemon-managed high-frequency state (mutated every tick), covered by cycle summaries (one INFO per tick under `daemon` / `capture`, not per-write).
+
+### Seam — the per-file store's mutation methods
+
+The seam is each store's mutation methods (`hooks.Store`, the alias store, the project store — their `Set` / `Rm` / `CleanStale`), **NOT `AtomicWrite` and NOT the callers.** Each config file is fronted by exactly one store, and every mutation flows through that store's methods. The store is the chokepoint that (a) knows the `op` and the affected key and (b) is the single place per file where the breadcrumb can't be forgotten. The generic `internal/fileutil.AtomicWrite` primitive stays audit-unaware — it is shared with out-of-scope `sessions.json` and has no `op`/key semantics — so logging does NOT live inside it, and it does NOT live scattered at each caller (the forgettable "log in every controller" anti-pattern). This is the model-observer layer, not the controllers.
+
+**One sanctioned exception: `migrateConfigFile`.** The one-shot migration in `cmd/config.go` is a directory-to-directory file *move*, not a store mutation — it never flows through a store's `Set`/`Rm`, so under the store-method seam the `migrate` op would have no emitter. But a config directory relocating out from under the user is exactly the "a file changed and I don't know why" event this audit trail exists to explain, so `migrateConfigFile` is named as an **explicit, enumerated emission site**: it emits one INFO per migrated file under that file's owning component (`hooks` / `aliases` / `projects`) with `op=migrate via=migrate`. This is the *only* sanctioned non-store emitter; no other caller-level emission is permitted. **PR timing:** it lands in PR 2 with the rest of the state-mutation work, so a migration firing during the PR-1-only window goes unlogged — an accepted caveat (the migration is a rare idempotent one-shot most existing users already ran, and the move is otherwise observable via file mtimes and `process:` markers).
+
+### Mechanical rule
+
+Every mutating method of an in-scope config store emits, immediately after the underlying `AtomicWrite` returns to it:
+
+- On `error == nil`: ONE INFO log line.
+- On `error != nil`: ONE WARN log line.
+
+The line's component (prefix) is the store's owning component: `hooks` / `aliases` / `projects`.
+
+**Required attrs:**
+- `op` — drawn from the closed value space below.
+- Key identifying the affected entry: `hook_key` (hooks), `alias` (aliases), `project` (projects).
+- On failure (WARN path): `error_class` from the closed AtomicWrite failure space below.
+
+**Optional attrs:**
+- `value` — verbatim new value for `set` / `modify`; absent for `rm` / `clean-stale`.
+- `via` — `cli` for user-facing commands, `internal` for code-driven mutations (e.g. `CleanStale`), `migrate` for the one-shot `migrateConfigFile` path.
+
+**Closed `op` value space:**
+
+| `op` value | Meaning |
+|---|---|
+| `set` | Create new entry (key did not exist before this write) |
+| `modify` | Update existing entry (key existed; value differs) |
+| `rm` | Remove existing entry |
+| `clean-stale` | Internal cleanup of an entry (always batched) |
+| `migrate` | One-shot migration from old config path |
+| `set-noop` | `set` where the entry already exists and the value matches (DEBUG only) |
+
+**Closed `error_class` value space for AtomicWrite failures (per phase):**
+
+`write-failed-temp-create` / `write-failed-write` / `write-failed-fsync` / `write-failed-rename`
+
+**No-op handling:** a `set` call where the entry already exists and the value matches → DEBUG with `op=set-noop`. NOT INFO. Matches the level-discipline placement clarification for idempotent no-ops.
+
+**Batch operations** (e.g. `CleanStale` iterating entries):
+- Per-entry DEBUG inside the loop.
+- ONE INFO summary at the end of the batch with attrs `op=<batch-op>`, `entries=N`, and `entries_failed=M` if any per-entry failures occurred.
+- Per-entry WARN with `error_class=unexpected` on per-entry failure mid-loop (regardless of whether the batch continues).
+
+This applies the hysteresis-trip pattern to mutation batches: detail at DEBUG, summary at INFO, exceptions at WARN.
+
+### Privacy posture: verbatim
+
+Hook commands, alias values, project paths logged as-is. Threat model accepted: portal is a single-user dev tool; `portal.log` lives on the same disk as the config files, which already store these values plaintext. Users sharing logs in bug reports redact manually (same posture as `hooks.json` itself).
+
+---
+
 ## Working Notes
