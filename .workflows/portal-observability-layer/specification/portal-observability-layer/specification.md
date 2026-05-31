@@ -303,4 +303,84 @@ Spec writers MUST verify each new log call site against this table during spec a
 
 ---
 
+## Call-site logging pattern
+
+### Decision
+
+**Multiple independent log calls per function; slog handles level filtering.** Each `logger.Debug(...)` / `logger.Info(...)` is a standalone call with its level chosen explicitly. Rejected alternatives: a wrapper bundling levels into one call (hides level discipline from review), and an OpenTelemetry-style span abstraction (designed for distributed multi-host tracing portal doesn't need).
+
+Canonical pattern for a multi-step operation:
+
+```go
+package hydrate
+
+import "github.com/leeovery/portal/internal/log"
+
+var logger = log.For("hydrate")
+
+func Process(paneKey, fifoPath string) error {
+    log := logger.With("pane_key", paneKey)  // sticky context bound once
+    start := time.Now()
+
+    log.Debug("opening fifo", "path", fifoPath)
+    fd, err := openFifo(fifoPath)
+    if err != nil {
+        return err
+    }
+    log.Debug("fifo opened", "fd", fd, "took", time.Since(start))
+
+    if err := awaitSignal(fd); err != nil {
+        return err
+    }
+    log.Debug("signal received", "took", time.Since(start))
+
+    n, err := replayScrollback(...)
+    if err != nil {
+        return err
+    }
+    log.Debug("replay finished", "bytes", n)
+
+    log.Info("ok", "took", time.Since(start))  // terminal-point summary
+    return nil
+}
+```
+
+At INFO (production): one INFO line per invocation. At DEBUG (investigating): all four DEBUG lines + the INFO summary.
+
+**This listing illustrates the breadcrumb→terminal *pattern* only — it is not a literal transcription of the hydrate helper's log lines.** Where the pattern overlaps a real cataloged site, the subtopic catalog governs (the hydrate helper's actual lines are specified in *Hook-firing observability limit*). The subtopic catalogs (Hook-firing, Cycle-summary, Lifecycle) are authoritative for their real call sites; this example only shows the shape.
+
+### Allowed ergonomic helpers
+
+1. **`.With(...)` for sticky context** — bind shared attrs once when a function/scope has many log calls sharing context (e.g. `pane_key`, `session`). Stops attr-key repetition.
+2. **`logger.Enabled(ctx, slog.LevelDebug)` guard** — only for the rare case where computing the attrs is itself expensive (e.g. JSON-marshalling something just to attach as a debug attr). Slog's lazy formatting makes this irrelevant 99% of the time.
+3. **Shared helpers in `internal/log`** — only after the same idiom appears 5+ times in production code and earns its weight. Don't pre-build helpers for theoretical cases.
+
+### Allowed slog idioms
+
+- `logger.LogAttrs(ctx, level, msg, slog.String(...), …)` — explicitly PERMITTED and preferred on hot paths: lower-allocation, type-safe equivalent of the variadic `"key", value` form, identical semantics and level discipline. Attr keys still come from the closed vocabulary.
+- `slog.Group(name, …)` — PERMITTED. Text-mode rendering flattens grouped attrs to **dotted keys** (`group.key=value`), mirroring how the JSON handler nests them. A group name is part of the closed attr vocabulary — adding one needs the same amendment as a new attr key.
+
+### Mechanical rule
+
+Per function authored or amended, spec writers and code reviewers apply this discipline mechanically:
+
+1. **DEBUG breadcrumbs** at each meaningful state transition inside the function (resource acquired, event received, sub-operation completed, branch chosen). One `logger.Debug(<terse-msg>, <attrs>...)` per transition.
+2. **INFO at terminal decision points** — one `logger.Info(<terse-msg>, <attrs>...)` immediately before each successful return path. The line MUST capture the chosen outcome and the resolved decision attrs.
+3. **WARN per recoverable error path** — one `logger.Warn(<terse-msg>, "error", err, <attrs>...)` before swallowing/returning, at any code path that classifies as "unexpected-but-recoverable" per the level-discipline table.
+4. **ERROR only at lines immediately preceding** `os.Exit(N)` / `panic(...)` / `return err` from a main entry point.
+
+**Sticky-context rule:** when ≥ 3 subsequent log calls in the same lexical scope share an attr, bind it once via `local := logger.With(<attrs>...)` and use `local.<Level>(...)` thereafter. Below the 3-call threshold, repeat attrs at each call.
+
+**Expensive-attr guard:** wrap with `if logger.Enabled(ctx, slog.LevelDebug) { ... }` ONLY when computing an attr value involves measurable cost (JSON marshalling, slice formatting > 100 elements, syscall to read state). For ordinary attrs (strings, ints, durations, pre-computed values), use slog's lazy formatting directly.
+
+### Prohibited (PR review must reject)
+
+- Custom helpers that bundle multiple levels into one call (e.g. `Trace(msg, debugAttrs, infoAttrs)`).
+- `fmt.Sprintf` inside log message strings to embed values that should be attrs (`logger.Info(fmt.Sprintf("ok %s", k))` — wrong; use `logger.Info("ok", "key", k)`).
+- Direct construction of `*slog.Logger` outside the `internal/log` package.
+- Pre-formatting attrs into the message string (use slog attrs instead).
+- Using attr keys not in the closed value space (extend the vocabulary first via amendment).
+
+---
+
 ## Working Notes
