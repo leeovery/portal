@@ -175,7 +175,7 @@ This list is the **single source of truth** for the component count.
 
 `process` is reserved for portal-binary lifecycle/diagnostic markers only; subsystem-level lifecycle events have their own components. `tmux` is **deliberately excluded** — `internal/tmux` is a thin wrapper; logging at that layer produces extreme volume per tmux call. Tmux-call detail rides as DEBUG breadcrumbs under the caller's component.
 
-### Closed attr-key value space (46 keys)
+### Closed attr-key value space (49 keys)
 
 **Contextual** (set per call as relevant) — 14:
 
@@ -196,7 +196,7 @@ This list is the **single source of truth** for the component count.
 | `via` | state-mutation origin — `cli` / `internal` / `migrate` |
 | `retention` | log-rotate — retention window in days (integer); on `deleted` and invalid-env WARN lines |
 
-**Cycle-summary** (set per summary line as relevant) — 11: `sessions`, `panes`, `entries`, `steps`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`.
+**Cycle-summary** (set per summary line as relevant) — 14: `sessions`, `panes`, `entries`, `steps`, `step`, `windows`, `skipped`, `warnings`, `natural_churn`, `anomalous`, `reaped`, `killed`, `unset`, `entries_failed`. (`step` = bootstrap step name; `windows` = restore-skeleton window count; `skipped` = orphan-fifo sweep skip count.)
 
 **Lifecycle** (set per saver/daemon lifecycle event) — 7: `target_pid`, `from_pid`, `to_pid`, `reason`, `ticks`, `threshold`, `flush_completed`.
 
@@ -778,6 +778,63 @@ func CombinedOutputWithContext(cmd *exec.Cmd) ([]byte, error)
 ```
 
 Until 3+ sites need it, write the wrapping at each call site directly.
+
+---
+
+## Cycle-level summary cadence and shape
+
+### Decision
+
+Every cycle in portal emits ONE INFO summary at completion, with per-item events emitted at DEBUG (steady state) or WARN (anomaly). An operator reconstructs what happened over a window from the summaries without scrolling through per-event lines; per-event WARNs still fire on anomalies.
+
+### Mechanical rule
+
+A "cycle" is a function or method whose body matches one of these shapes:
+1. **Loop cycle** — a `for` loop iterating distinct items (sessions, panes, files, entries, orphans).
+2. **Sequence cycle** — an orchestrator running discrete named steps (the 11-step bootstrap orchestrator, the two-phase restore engine).
+3. **Tick cycle** — a periodic loop driven by a ticker (the daemon's 1 Hz capture loop).
+
+For every cycle, the function/method MUST:
+1. Capture `start := time.Now()` before the loop / sequence / tick body.
+2. Track counts of items processed and per-item anomalies (failures that did not terminate the loop).
+3. At the end of the cycle body (just before the function returns / the tick completes), emit exactly ONE INFO line:
+
+```go
+logger.Info("<verb> complete",
+    "<unit>", count,
+    // additional sub-category counts as relevant, e.g.:
+    "natural_churn", churnCount,
+    "anomalous", anomCount,
+    "took", time.Since(start),
+)
+```
+
+Where:
+- `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
+- `<unit>` is the item being iterated: `sessions`, `panes`, `entries`, `orphans`, `steps`, `files`, etc.
+- Additional sub-categorisation counts ride as attrs on the same summary line.
+- `took` is always present.
+
+**Per-item event level inside a cycle:**
+- Per-item DEBUG breadcrumb ALWAYS for items where the per-item path is interesting (the capture loop's per-pane state, the bootstrap step's invocation). These flood at DEBUG and are silent at INFO — the summary is the INFO truth.
+- Per-item WARN ONLY for items that fail anomalously (count goes into the summary's `anomalous` attr).
+
+### Concrete cycle catalog (sites this rule mandates a summary at)
+
+| Cycle | Owning component | Summary line shape |
+|---|---|---|
+| Daemon tick (1 Hz capture + commit) | `capture` | `capture: tick complete sessions=N panes=N natural_churn=N anomalous=N took=T` |
+| Bootstrap orchestration | `bootstrap` | `bootstrap: orchestration complete steps=11 warnings=N took=T` |
+| Each bootstrap step | `bootstrap` | `bootstrap: step complete step=<StepName> took=T` |
+| Restore phase A (skeleton) | `restore` | `restore: skeleton complete sessions=N windows=N panes=N took=T` |
+| Restore phase B (geometry + replay) | `restore` | `restore: geometry complete panes=N took=T` |
+| Orphan FIFO sweep | `clean` | `clean: orphan-fifo sweep complete reaped=N skipped=N took=T` |
+| Orphan daemon sweep | `clean` | `clean: orphan-daemon sweep complete killed=N took=T` |
+| Marker cleanup | `clean` | `clean: marker sweep complete unset=N took=T` |
+| Hooks CleanStale | `hooks` | (same batch-summary shape as *State-mutation audit trail*) |
+| Retention sweep (rotated logs) | `log-rotate` | (same shape as *Retention policy*) |
+
+Spec writers consulting this rule produce one INFO call site per cycle in the codebase, with the verb-phrase + counts + `took` triplet, matching the catalog shape.
 
 ---
 
