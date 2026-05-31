@@ -165,7 +165,7 @@ node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index <path/to/arti
 node .claude/skills/workflow-knowledge/scripts/knowledge.cjs index
 ```
 
-- **With a file**: re-indexing replaces existing chunks for that file (idempotent). The path must match `.workflows/{work_unit}/{phase}/...` so identity can be derived. For imports, the path is `.workflows/{work_unit}/imports/{filename}.md` and the topic is the filename basename without extension. For analysis caches, the path is `.workflows/{work_unit}/.state/{research-analysis,inception-gap-analysis}.md`; the phase is `analysis` and the topic is `research-analysis` or `gap-analysis`.
+- **With a file**: re-indexing replaces existing chunks for that file (idempotent). The path must match `.workflows/{work_unit}/{phase}/...` so identity can be derived. For imports, the path is `.workflows/{work_unit}/imports/{filename}.md` and the topic is the filename basename without extension. For analysis caches, the path is `.workflows/{work_unit}/.state/{research-analysis,discovery-gap-analysis}.md`; the phase is `analysis` and the topic is `research-analysis` or `gap-analysis`.
 - **Without args**: discovers every completed artifact across all work units and indexes anything missing. Used by setup and manual catch-up.
 - Failures are retried (exponential backoff). Files that still fail are pushed to a pending queue and retried on the next `index` call.
 - Exits non-zero if the file doesn't exist or the path can't be parsed.
@@ -204,7 +204,7 @@ Human-readable report of the store's state: chunk counts by work unit, phase, an
 
 ## `rebuild` and `compact` — maintenance commands
 
-- **`rebuild`** — destructive. Deletes the existing index and re-indexes everything currently discoverable: completed phase artifacts (research, discussion, investigation, specification), all entries on each work unit's `imports[]` array, and any present analysis caches (`.state/research-analysis.md`, `.state/inception-gap-analysis.md`). Prompts the user to type `rebuild` literally to confirm. **Human-only** — Claude cannot run it (interactive prompt). Non-deterministic: rebuilt chunks won't match the originals (embedding variance, edited artifacts).
+- **`rebuild`** — destructive. Deletes the existing index and re-indexes everything currently discoverable: completed phase artifacts (research, discussion, investigation, specification), all entries on each work unit's `imports[]` array, and any present analysis caches (`.state/research-analysis.md`, `.state/discovery-gap-analysis.md`). Prompts the user to type `rebuild` literally to confirm. **Human-only** — Claude cannot run it (interactive prompt). Non-deterministic: rebuilt chunks won't match the originals (embedding variance, edited artifacts).
 - **`compact [--dry-run]`** — removes chunks from work units whose `completed_at` date exceeds the configured `decay_months` TTL. Specifications are exempt. `--dry-run` previews without deleting.
 
 Skills do not call these directly during normal operation. Users run them manually.
@@ -214,6 +214,8 @@ Skills do not call these directly during normal operation. Users run them manual
 ## `setup` — interactive wizard
 
 One-shot first-time setup. Handles system config (`~/.config/workflows/config.json`), project init (`.workflows/.knowledge/`), and initial indexing of all completed artifacts in a single guided flow. **Human-only** — prompts throughout via readline. Non-TTY invocations (including Claude or piped input) abort with `knowledge setup requires an interactive terminal`. If `knowledge check` returns `not-ready`, direct the user to run `knowledge setup` rather than trying to fix it programmatically. Safe to re-run: per-step prompts detect existing state and offer skip or reconfigure; the bulk index at the end only processes missing artifacts.
+
+The provider menu offers `openai` (cloud, requires an API key), `openai-compatible` (any local/self-hosted OpenAI-compatible `/v1/embeddings` endpoint — LM Studio, Ollama, vLLM, LiteLLM), or `skip` (keyword-only). For `openai-compatible`, the wizard collects `base_url` (required), `model`, and `dimensions`; the API key is **optional** (press Enter to omit for open servers) and is stored only in `credentials.json` — there is no env-var override. `base_url` is consumed only under the `openai-compatible` provider and ignored under `openai`. Configured dimensions must match the local model's native output; the validation embed fails loudly on a mismatch.
 
 ---
 

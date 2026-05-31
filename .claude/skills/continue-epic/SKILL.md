@@ -1,6 +1,6 @@
 ---
 name: continue-epic
-allowed-tools: Bash(node .claude/skills/continue-epic/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-legacy-research-split/scripts/detect.cjs), Bash(node .claude/skills/workflow-inception-process/scripts/discovery.cjs)
+allowed-tools: Bash(node .claude/skills/continue-epic/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(node .claude/skills/workflow-legacy-research-split/scripts/detect.cjs), Bash(node .claude/skills/workflow-discovery-process/scripts/discovery.cjs)
 ---
 
 Continue an in-progress epic. Shows full phase-by-phase state and routes to the appropriate phase skill.
@@ -18,6 +18,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 - No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
+- Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
 - After rendering a gate block, the turn MUST end. No further tool calls in the same turn — wait for the user's response before proceeding.
 - Complete each step fully before moving to the next
 
@@ -112,7 +113,7 @@ Parse the discovery output to understand:
   - `next_phase_ready` - items ready for the next phase (name + action + label)
   - `unaccounted_discussions` - completed discussions not sourced in any spec
   - `reopened_discussions` - in-progress discussions that are sourced in a spec
-  - `discovery_map` - per-topic lifecycle for the inception/research/discussion span (tier-sorted; empty when no inception items exist)
+  - `discovery_map` - per-topic lifecycle for the discovery/research/discussion span (tier-sorted; empty when no discovery items exist)
   - `convergence_state` - `'in-progress'` | `'settled'` | `null` (when no map)
   - `map_summary` - count totals for the map (`total`, `decided`, `in_flight`, `ready`, `fresh`, `cancelled`)
   - `gating` - boolean flags for phase-forward gating
@@ -243,7 +244,7 @@ backfill-checks is terminal when it fires — it commits the recovery work and s
 
 ```
 > Checking whether completed research or discussion has new themes
-> to surface onto the inception map.
+> to surface onto the discovery map.
 ```
 
 Read `analysis_caches` from the most recent discovery `detail`. Load **[topic-discovery-dispatch.md](../workflow-shared/references/topic-discovery-dispatch.md)** with work_unit = `{work_unit}`, analysis_caches = `{analysis_caches}`.
@@ -306,7 +307,7 @@ Invoke the appropriate skill based on the user's menu selection. Match by **pref
 | Start specification | `/workflow-specification-entry epic {work_unit}` |
 | Start new discussion topic | `/workflow-discussion-entry epic {work_unit}` |
 | Start new research | `/workflow-research-entry epic {work_unit}` |
-| Continue inception | `/workflow-inception-entry epic {work_unit}` |
+| Continue discovery | `/workflow-discovery-entry epic {work_unit}` |
 
 Skills receive positional arguments: `$0` = work_type (`epic`), `$1` = work_unit, `$2` = topic (when provided).
 

@@ -14,7 +14,7 @@ You are in the **Research** phase — exploring ideas, feasibility, market, and 
 
 | Work type | Pipeline |
 |---|---|
-| Epic | Inception → **Research** → Discussion → Specification → Planning → Implementation → Review |
+| Epic | Discovery → **Research** → Discussion → Specification → Planning → Implementation → Review |
 | Feature | **Research** (optional) → Discussion → Specification → Planning → Implementation → Review |
 | Cross-cutting | **Research** (optional) → Discussion → Specification (terminal) |
 
@@ -33,6 +33,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them. Presen
 - No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
+- Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
 - After rendering a gate block, the turn MUST end. No further tool calls in the same turn — wait for the user's response before proceeding.
 - Even if the user's initial prompt seems to answer a question, still confirm with them at the appropriate step
 - Complete each step fully before moving to the next
@@ -86,7 +87,7 @@ What topic would you like to research?
 
 Kebab-case the response, store as `{topic}`. `resolved_filename = {topic}.md`.
 
-Silently derive `direct_entry_summary` (one-line) and `direct_entry_description` (one or two paragraphs) from the user's response. Do not render anything — these are local variables passed to `ensure-inception-item` in Step 2. The derivation is part of the same Claude turn that kebab-cases the response; no separate STOP gate.
+Silently derive `direct_entry_summary` (one-line) and `direct_entry_description` (one or two paragraphs) from the user's response. Do not render anything — these are local variables passed to `ensure-discovery-item` in Step 2. The derivation is part of the same Claude turn that kebab-cases the response; no separate STOP gate.
 
 → Proceed to **Step 2**.
 
@@ -106,7 +107,7 @@ Silently derive `direct_entry_summary` (one-line) and `direct_entry_description`
 > Checking if research already exists for this topic.
 ```
 
-Load **[ensure-inception-item.md](../workflow-shared/references/ensure-inception-item.md)** with work_type = `{work_type}`, work_unit = `{work_unit}`, topic = `{topic}`, routing = `research`. On the direct-entry path (no topic supplied as `$2`), also pass summary = `{direct_entry_summary}`, description = `{direct_entry_description}`. When the topic was provided by the caller, omit both — the caller didn't derive them.
+Load **[ensure-discovery-item.md](../workflow-shared/references/ensure-discovery-item.md)** with work_type = `{work_type}`, work_unit = `{work_unit}`, topic = `{topic}`, routing = `research`. On the direct-entry path (no topic supplied as `$2`), also pass summary = `{direct_entry_summary}`, description = `{direct_entry_description}`. When the topic was provided by the caller, omit both — the caller didn't derive them.
 
 Check if the research phase entry exists:
 

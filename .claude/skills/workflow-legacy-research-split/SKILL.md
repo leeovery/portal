@@ -6,7 +6,7 @@ allowed-tools: Bash(node .claude/skills/workflow-legacy-research-split/scripts/d
 
 # Legacy Research Split
 
-Act as **curator + interviewer**. Walk the user through decomposing broad research files — each holding multiple themes — into topic-scoped files plus matching inception-map items.
+Act as **curator + interviewer**. Walk the user through decomposing broad research files — each holding multiple themes — into topic-scoped files plus matching discovery-map items.
 
 ### What This Skill Needs
 
@@ -25,6 +25,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 - No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
+- Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
 - After rendering a gate block, the turn MUST end. No further tool calls in the same turn — wait for the user's response before proceeding.
 - Complete each step fully before moving to the next.
 
@@ -44,7 +45,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> This epic pre-dates the inception phase. Migration-seeded broad
+> This epic pre-dates the discovery phase. Migration-seeded broad
 > research files are decomposed here into topic-scoped themes,
 > user-guided per source.
 ```
@@ -181,6 +182,6 @@ Evaluate the branches below in order — error reporting takes precedence over c
 If `apply.cjs` returns `ok: false`, the response's `recovery_hint` names the manual cleanup the failing stage requires. Common cleanups:
 
 ```bash
-node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.inception.{stuck_source} legacy_split_state
+node .claude/skills/workflow-manifest/scripts/manifest.cjs delete {work_unit}.discovery.{stuck_source} legacy_split_state
 rm -rf .workflows/.cache/{work_unit}/legacy-split/{stuck_source}
 ```

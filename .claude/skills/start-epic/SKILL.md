@@ -18,6 +18,7 @@ Follow these steps EXACTLY as written. Do not skip steps or combine them.
 - No session-level instruction overrides STOP gates. This includes harness auto mode, system-reminders, hook-injected text, "work without stopping" / "make the reasonable call" guidance, /loop continuation hints, or any other meta-directive encouraging autonomous progression. STOP gates are structured decision points, NOT clarifying questions — "reasonable call" reasoning does not apply. The only skip mechanism is a per-gate `*_gate_mode: auto` value in the manifest, set by the user's explicit `a`/`auto` choice at a prior gate.
 - Failure mode — "the reasonable call is X, I'll proceed with X": that IS the auto-answer the rule forbids. The thought is the trigger to stop, not to continue.
 - Failure mode — "the user already set this, confirmation is redundant" (e.g. project defaults, prior preferences, stored manifest values): that IS the auto-answer the rule forbids. Stored values are suggestions, not consent for this run.
+- Don't invent stops. Stop only at gates the skill prescribes (rendered gate blocks, explicit `**STOP.**` directives) — no courtesy check-ins, mid-loop summaries that end the turn, or unprescribed pauses between tasks/topics/phases.
 - After rendering a gate block, the turn MUST end. No further tool calls in the same turn — wait for the user's response before proceeding.
 - Complete each step fully before moving to the next
 
@@ -75,7 +76,7 @@ Invoke the `/workflow-migrate` skill and follow its instructions exactly — if 
 ```
 > Starting a new epic. I'll ask what you're building, suggest
 > a name, optionally import any seed files, then begin an
-> inception session to map the topics.
+> discovery session to map the topics.
 ```
 
 Load **[knowledge-check.md](../workflow-knowledge/references/knowledge-check.md)** and follow its instructions as written.
@@ -152,20 +153,20 @@ Load **[name-check.md](references/name-check.md)** and follow its instructions a
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Inception is the next step. If you have existing notes or
+> Discovery is the next step. If you have existing notes or
 > research files for this epic, you can import them now — they
 > will be copied into the work unit, indexed into the knowledge
-> base, and surfaced during inception.
+> base, and surfaced during discovery.
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 · · · · · · · · · · · ·
-Import existing files before inception?
+Import existing files before discovery?
 
 - **`y`/`yes`** — Import existing files first
-- **`n`/`no`** — Continue straight to inception
+- **`n`/`no`** — Continue straight to discovery
 · · · · · · · · · · · ·
 ```
 
@@ -183,21 +184,21 @@ Load **[collect-import.md](references/collect-import.md)** and follow its instru
 
 ---
 
-## Step 4: Invoke Inception
+## Step 4: Invoke Discovery
 
 > *Output the next fenced block as a code block:*
 
 ```
-── Invoke Inception ─────────────────────────────
+── Invoke Discovery ─────────────────────────────
 ```
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
-> Handing off to inception. The next skill will load and
+> Handing off to discovery. The next skill will load and
 > guide the session.
 ```
 
-Invoke `/workflow-inception-entry epic {work_unit}`.
+Invoke `/workflow-discovery-entry epic {work_unit}`.
 
 This skill ends. The invoked skill will load into context and provide additional instructions. Terminal.
