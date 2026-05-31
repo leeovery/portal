@@ -721,6 +721,33 @@ Renders:
 
 **Panic path:** `Init` MUST also install a `defer func() { if r := recover(); r != nil { ... } }()` in main if practical, emitting `process: panic reason=<r>` at ERROR before re-panicking. Implementation detail deferred to spec.
 
+**Exec-handoff markers (resolves review-004 I9).** `os.Exit` and normal-return paths are covered above, but `syscall.Exec` is neither: it overwrites the process image, runs no deferred functions, and never returns — so `Close` never fires and no `process: exit` line is written. The bare-shell `portal open` happy path (`AttachConnector` → `tmux attach-session`) is exactly this, and it is portal's *most common* termination. Without a marker, a benign tmux handoff leaves an unpaired `process: start` that is indistinguishable from a destructive mid-flight kill — defeating the whole invariant.
+
+Rule: **every `syscall.Exec` call site MUST emit a synchronously-flushed exec-terminal INFO line immediately before the exec, under its owning component.**
+
+```go
+// log.Exec emits the binary-level exec handoff marker and flushes it to the
+// log fd synchronously (no buffering) BEFORE the caller invokes syscall.Exec.
+// syscall.Exec discards the process image, so an unflushed write is lost.
+func Exec(target string, args []string)
+```
+
+- `AttachConnector` (bare-shell `portal open` → tmux) emits `process: exec target=tmux args="attach-session -A …"`. This is binary-level lifecycle, so `exec` joins `start` / `exit` / `panic` in the **`process` component's event space**.
+- The hydrate helper's pre-`syscall.Exec` marker is already locked as `hydrate: exec` (Hook-firing observability subtopic) — same pattern, component-owned. This rule generalises it to the remaining exec site.
+
+This yields a clean four-way terminal classification of any `process: start`:
+
+| Followed by | Meaning |
+|---|---|
+| `process: exit` | Normal return (via `Close`) |
+| `process: exec` | Clean handoff to another image — no exit line expected (benign) |
+| `process: panic` | Crash, but recorded |
+| *nothing* | Genuinely alarming — process vanished without a terminal marker; investigate |
+
+**Flush-before-exec is load-bearing** (spec-phase intake): the exec line must reach the fd synchronously before `syscall.Exec`. Our handler writes `O_APPEND` directly, so a synchronous `Handle` + no buffering on this path suffices, but the spec MUST state "no buffering / explicit sync on the exec path" explicitly.
+
+**`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
+
 **Privacy on `args` attr:** verbatim. Same posture as state-mutation audit trail. CLI commands like `portal hooks set --on-resume "claude --resume X"` will have the full args string in `portal.log`. Acceptable for portal's single-user threat model.
 
 ---
