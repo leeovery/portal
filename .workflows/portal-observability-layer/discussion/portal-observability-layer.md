@@ -1257,8 +1257,9 @@ Spec phase fleshes each task with the exact files, line ranges, and log call sit
 
 ### Open Threads
 
-- **Current `portal.log` zeroing bug** — no `.old` exists, no `O_TRUNC` in `logger.go`, so the destruction mechanism is currently unidentified. Not logged as a separate inbox bug — likely surfaced or resolved as a side effect of the rotation rewrite; investigate during implementation.
-- **Hook command privacy** — verbatim vs SHA-256 hash prefix vs truncation. To resolve when state-mutation audit trail subtopic is explored.
+- **Current `portal.log` zeroing bug** — no `.old` exists, no `O_TRUNC` in `logger.go`, so the destruction mechanism is currently unidentified. Not logged as a separate inbox bug — likely surfaced or resolved as a side effect of the rotation rewrite; investigate during implementation. (The new design now brackets it: `process:` start-marker tripwires make a mid-day destruction *detectable*, and the review-008 M2 inode-identity reopen makes the daemon *recover* onto the live file instead of writing into the orphaned inode — but the root cause remains the implementation-phase investigation target.)
+
+(The earlier "Hook command privacy" open thread is resolved — the State-mutation audit trail subtopic locked the **verbatim** posture, so it is no longer open; the decision and its threat-model rationale live in that subtopic.)
 
 ### Considered and Rejected / Closed by Prior Decisions
 
@@ -1286,5 +1287,5 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
 - Taxonomy final: 15 components; closed attr space = 13 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 7 process + 4 baseline (review-007 L1–L3 enrolled the previously-missing process, propagation, and state-mutation attr sets).
 - Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
-- Review-sets 001–004 fully drained: 44 findings closed (001–003: 32; 004: I1–I12). Review-004 was walked one finding at a time, each captured in-place under its owning subtopic. Reviews 005 and 006 were generated against the *since-reverted* review-004 in-place amendments (the cascade that was rolled back in git `ed61436b`/`cbed8200`/`e852fb84`); they were discarded as moot — anything still real will resurface in a fresh review.
+- Review-sets 001–004 and 007–009 fully drained: 58 findings closed (001–003: 32; 004: I1–I12; 007: L1–L7; 008: M1–M5; 009: N1–N2), each walked one finding at a time and captured in-place under its owning subtopic. Reviews 005 and 006 were generated against the *since-reverted* review-004 in-place amendments (the cascade rolled back in git `ed61436b`/`cbed8200`/`e852fb84`) and were discarded as moot. Review-009 was the final pre-conclusion convergence check (2 narrow seams, both resolved).
 - Discussion convergence: all map entries decided; subtopic write-ups + mechanical rules + closed value spaces + spec-phase-ingestible catalogs all captured.
