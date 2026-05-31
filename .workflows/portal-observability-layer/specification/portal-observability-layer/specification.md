@@ -26,12 +26,6 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 - Compression of rotated logs.
 - Migrating `sessions.json` / daemon-internal state files to the user-config audit-trail pattern.
 
-### Delivery structure
-
-Two-PR rollout gated by a 7-day production observation window:
-- **PR 1** — `internal/log` foundation + migration sweep + process lifecycle markers + log-level propagation + full hydrate-helper instrumentation.
-- **PR 2** — pattern rollout across all remaining subsystems (state-mutation audit, cycle summaries, lifecycle catalog, boundary sweep, gap-closures).
-
 ### Specification roadmap
 
 1. Overview (this section)
@@ -48,8 +42,7 @@ Two-PR rollout gated by a 7-day production observation window:
 12. Cycle-level summary cadence and shape
 13. Saver and daemon lifecycle event taxonomy
 14. Hook-firing observability limit
-15. Rollout sequencing & PR scope
-16. Open threads & out of scope
+15. Open threads & out of scope
 
 ---
 
