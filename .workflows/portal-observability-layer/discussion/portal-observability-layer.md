@@ -447,7 +447,7 @@ The factory returns a thin child wrapper around the root via `root.With("compone
 Conventions:
 - **snake_case** for all attr keys.
 - **Message string is a terse phrase**, data lives in attrs: `logger.Info("ok", "pane_key", k, "took", d)` — NOT `logger.Info(fmt.Sprintf(...))`.
-- **Sticky context via `.With(...)`** when multiple events share context: `paneLogger := logger.With("pane_key", k); paneLogger.Info("scrollback replayed"); paneLogger.Info("hook fired")`.
+- **Sticky context via `.With(...)`** when multiple events share context: `paneLogger := logger.With("pane_key", k); paneLogger.Info("replay finished"); paneLogger.Info("hook fired")`.
 
 The vocabulary is the closed set today; new keys are added by amendment in spec/follow-on PRs when a use case appears. The point is *no ad-hoc invention at call-site time* — every contributor consults the list.
 
@@ -576,7 +576,7 @@ func Process(paneKey, fifoPath string) error {
     if err != nil {
         return err
     }
-    log.Debug("scrollback replayed", "bytes", n)
+    log.Debug("replay finished", "bytes", n)  // illustrative breadcrumb — see note below
 
     log.Info("ok", "took", time.Since(start))  // terminal-point summary
     return nil
@@ -585,6 +585,8 @@ func Process(paneKey, fifoPath string) error {
 
 At INFO (production): one INFO line per invocation lands in portal.log.
 At DEBUG (investigating): all four DEBUG lines + the INFO summary.
+
+**This `Process` listing illustrates the breadcrumb→terminal *pattern* only — it is not a literal transcription of the hydrate helper's log lines (resolves review-008 M1).** Where the pattern overlaps a real cataloged site, the subtopic catalog governs. In particular, the hydrate helper's actual `scrollback replayed` line is the **INFO exit-path terminal** carrying `bytes`+`took` (Hook-firing observability rule), NOT a DEBUG breadcrumb — the breadcrumb above is deliberately renamed (`replay finished`) so it no longer collides with that cataloged INFO line. The subtopic catalogs (Hook-firing, Cycle-summary, Lifecycle) are authoritative for their real call sites; this example only shows the shape.
 
 **Allowed ergonomic helpers:**
 
