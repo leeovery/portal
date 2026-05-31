@@ -679,7 +679,7 @@ Even with the new design, an unknown bug could destroy today's `portal.log`. The
 
 **Invariant 3 (new this subtopic): Per-process lifecycle markers.** Every portal process emits ONE INFO line at the very start of its execution and ONE INFO line on clean exit. These are the tripwires that make destruction visible: if today's `portal.log` contains only lines from 09:15 forward but you know portal was running before, the first line of today's file is a "process: start" marker that timestamps when destruction had to have happened.
 
-**Taxonomy addition:** add `process` as a 15th component. Used exclusively for lifecycle markers (start, exit, panic) for the portal binary itself, regardless of which subcommand is running. (Subsystem-level lifecycle events — saver respawn, daemon spawn — go under the pending Saver/daemon lifecycle subtopic, not under `process`.)
+**Taxonomy addition:** add `process` as a 15th component. Used exclusively for lifecycle markers (start, exit, exec, panic) for the portal binary itself, regardless of which subcommand is running. (Subsystem-level lifecycle events — saver respawn, daemon `lock acquired`/`self-eject`/`shutdown` — go under the Saver/daemon lifecycle subtopic, not under `process`. The daemon's *process startup* is NOT a separate subsystem event: `process: start process_role=daemon` covers it — see the I4 resolution there.)
 
 ### Mechanical rule (spec-phase intake)
 
@@ -761,6 +761,8 @@ This yields a clean four-way terminal classification of any `process: start`:
 | `process: exec` | Clean handoff to another image — no exit line expected (benign) |
 | `process: panic` | Crash, but recorded |
 | *nothing* | Genuinely alarming — process vanished without a terminal marker; investigate |
+
+**Externally-killed-process footnote (from review-004 I4).** A process killed by an uncatchable signal (the kill-barrier's escalation to SIGKILL) cannot run code, so it emits no terminal marker — its `process: start` looks "unpaired." That is *not* the alarming case when the kill was deliberate: the **killer records it**. Bootstrap already emits `saver: kill-barrier started/escalated target_pid=X` and `saver: placeholder died` (Saver/daemon lifecycle catalog). So the rule is: **an unpaired `process: start` is alarming only if no `saver:`/`daemon:` line names that pid as an external kill.** (The daemon's clean self-eject path uses `os.Exit(0)` and still emits its own `process: exit`.)
 
 **Flush** is handled by the unbuffered-writer constraint locked in the I5 resolution above — no exec-path-specific flush logic is needed.
 
@@ -1006,12 +1008,13 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
 | Daemon self-supervision observes the saver pane's host process exited | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
 
+**Process/subsystem boundary (resolves review-004 I4).** `process:` owns the OS-process boundary (`start`/`exit`/`exec`/`panic`) for *every* role, including the daemon — emitted by `Init`/`main`. `daemon:`/`saver:` lines are *additive subsystem milestones*, never a substitute for `process:`, and cover only moments `process:` cannot express. The redundant `daemon: spawn` event (it fired at the same instant as `process: start process_role=daemon`, carrying the same data) is therefore **dropped**; its one unique attr (`tmux_pane`) moves onto `daemon: lock acquired`. The `saver:` catalog is unaffected — those lines are emitted by *bootstrap observing the saver from outside* (a different observer than the saver's own `process:` lines), so they are not redundant.
+
 **Daemon lifecycle events (component: `daemon`):**
 
 | Site | msg | Required attrs |
 |---|---|---|
-| Daemon process startup (after `Init` but before tick loop) | `spawn` | `pid` (auto-baseline), `tmux_pane`, `version` (auto-baseline) |
-| Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline) |
+| Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline), `tmux_pane` |
 | Daemon's self-supervision counter increments toward eject | (no INFO — DEBUG per the level discipline placement-clarification "hysteresis-internal failures") | n/a |
 | Daemon's self-supervision counter trips threshold and ejects | `self-eject` | `ticks` (consecutive-absence count at trip), `threshold` (configured ejection threshold) |
 | Daemon shutdown (any reason — SIGHUP, self-eject, normal exit) | `shutdown` | `reason` ∈ {`sighup`, `self-eject`, `signal`, `exit`}, `flush_completed` (bool — whether the final commit completed) |
