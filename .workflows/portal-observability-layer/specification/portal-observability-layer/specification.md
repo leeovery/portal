@@ -16,16 +16,6 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 - Defensive invariants (per-process lifecycle markers, rotated-file immutability, `O_CREAT|O_EXCL` first-of-day open) that make log destruction detectable post-hoc.
 - Instrumentation catalogs: state-mutation audit trail, cycle-level summaries, saver/daemon lifecycle events, hydrate-helper forensic trail, and a boundary-context-preservation sweep.
 
-### Scope boundaries
-
-**In scope:** everything above, delivered across two PRs.
-
-**Out of scope** (explicitly deferred to separate future work):
-- Shell-envelope hook-wrapping to capture post-exec hook exit status.
-- An out-of-band rotation audit channel (`portal-rotation.log`).
-- Compression of rotated logs.
-- Migrating `sessions.json` / daemon-internal state files to the user-config audit-trail pattern.
-
 ### Specification roadmap
 
 1. Overview (this section)
@@ -42,7 +32,6 @@ Portal's logging is incidental — lines added ad hoc, not a deliberate observab
 12. Cycle-level summary cadence and shape
 13. Saver and daemon lifecycle event taxonomy
 14. Hook-firing observability limit
-15. Open threads & out of scope
 
 ---
 
@@ -480,6 +469,8 @@ This applies to ONE seam: the `slog.Handler` in `internal/log` (and `portal clea
 ## Defensive invariants against log destruction
 
 ### Decision
+
+The rotation/retention machinery is robust against the *known* destruction mechanism (1 MiB rotation churn). The 2026-05-28 incident also evidenced a second, still-unidentified path that can zero today's `portal.log`. These invariants do not root-cause it — they make any such destruction **detectable and recoverable** after the fact.
 
 Three invariants. The first two are enforced inside the rotation handler (re-stated here for completeness; their authoritative rule lives in *Log rotation mechanism*). The third is new.
 
