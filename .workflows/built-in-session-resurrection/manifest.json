@@ -202,7 +202,6 @@
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
@@ -359,7 +358,9 @@
             10,
             11
           ],
-          "updated": "2026-04-29"
+          "updated": "2026-04-29",
+          "analysis_cycle_total": 8,
+          "analysis_cycle_session": 0
         }
       }
     },

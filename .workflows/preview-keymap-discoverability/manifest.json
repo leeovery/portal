@@ -47,7 +47,6 @@
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
-          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
@@ -73,7 +72,9 @@
           ],
           "completed_phases": [
             1
-          ]
+          ],
+          "analysis_cycle_total": 0,
+          "analysis_cycle_session": 0
         }
       }
     }

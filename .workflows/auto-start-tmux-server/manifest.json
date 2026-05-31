@@ -77,7 +77,6 @@
           "fix_gate_mode": "auto",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 0,
           "linters": [
             "golangci-lint run ./..."
           ],
@@ -112,7 +111,9 @@
             4,
             5,
             6
-          ]
+          ],
+          "analysis_cycle_total": 4,
+          "analysis_cycle_session": 0
         }
       }
     },

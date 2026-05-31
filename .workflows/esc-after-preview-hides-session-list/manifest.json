@@ -62,7 +62,6 @@
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "auto",
           "fix_attempts": 0,
-          "analysis_cycle": 0,
           "linters": [
             {
               "name": "go vet",
@@ -90,7 +89,9 @@
             "esc-after-preview-hides-session-list-1-5",
             "esc-after-preview-hides-session-list-1-6",
             "esc-after-preview-hides-session-list-2-1"
-          ]
+          ],
+          "analysis_cycle_total": 2,
+          "analysis_cycle_session": 0
         }
       }
     }
