@@ -113,13 +113,13 @@ For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
 2. If the handler's currently-open fd is for `portal.log.<today>`, reuse it. Otherwise:
    a. Open `${stateDir}/portal.log.<today>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`, mode `0600`.
    b. On `EEXIST`, retry with `O_APPEND|O_WRONLY` (lost the cross-process create race; another writer beat us).
-   c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically via `os.Symlink(target, tmp)` + `os.Rename(tmp, link)`.
+   c. On either path: swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically. The temp link is **pid-scoped** — `portal.log.<pid>.symlink.tmp` — so cross-process swings can never collide on the tmp name (a single process performs at most one swing at a time, so no counter is needed); if this pid's own tmp already exists from a prior crash, `os.Remove` it and recreate. Then `os.Symlink(target, pidTmp)` + `os.Rename(pidTmp, link)` — `Rename` is atomic and last-writer-wins, and every racer's target is identical (`portal.log.<today>`), so a concurrent swing is benign. A tmp leaked by a crash between `Symlink` and `Rename` is reclaimed best-effort on the next swing and by `portal clean`. (Resolves review-004 I1.)
    d. `chmod 0400` any other `portal.log.<date>*` files in `${stateDir}` that are not `<today>` and not already mode 0400.
 3. After fd is open, check `current_size + len(serialized) >= PORTAL_LOG_ROTATE_SIZE` (parsed once at handler init from env var, default `500*1024*1024`). If true, rotate to `portal.log.<today>.N`:
    a. Find max existing `N` for today (`portal.log.<today>.*` listing); next N = max + 1, or 1 if none.
    b. Open `portal.log.<today>.<N>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`.
    c. On `EEXIST`, retry with `N+1`.
-   d. Swing the symlink to the new file. `chmod 0400` the previous file.
+   d. Swing the symlink to the new file (same pid-scoped-tmp + atomic-rename procedure as step 2c). `chmod 0400` the previous file.
 4. Write the serialized record to the now-current fd.
 
 The above applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
@@ -394,7 +394,7 @@ The factory returns a thin child wrapper around the root via `root.With("compone
 
 **Existing `Component*` constants (`internal/state/logger.go:30-38`) are deleted as part of the migration sweep.** The factory's string argument is the only place a component name appears in Go code, so the typo surface is the ~12 package-init call sites — easy to review by eye. CLAUDE.md gets updated at lock time to reflect the new shape. (Closes review-002 G6.)
 
-**Locked: component taxonomy (12 components, kebab-case where multi-word).**
+**Locked: component taxonomy — initial set of 12 (kebab-case where multi-word), later extended to the authoritative closed set of 15 (+`aliases`, +`projects` from State-mutation audit trail; +`process` from Defensive invariants). The closed-space list in the Mechanical rule below is the single source of truth for the count (resolves review-004 I7 count drift).**
 
 | Component | Owns |
 |---|---|
@@ -497,6 +497,7 @@ Standard `slog.NewJSONHandler` output, no special handling — `component` becom
 - New components require explicit amendment of THIS discussion file's closed component list (or a successor specification amendment).
 - New attr keys require the same amendment process.
 - Spec writers and code reviewers MAY NOT introduce new component or attr names ad hoc.
+- **The space is now genuinely closed, not soft (resolves review-004 I11).** I11 worried that the then-pending Saver/daemon-lifecycle and Diagnostic-context subtopics would need to add components/attrs, making "closed" aspirational. Those subtopics are now all decided and their additions are already folded into the closed lists above (lifecycle attrs `target_pid`/`from_pid`/`to_pid`/`reason`/`ticks`/`threshold`/`flush_completed`; hydrate attrs `result`/`hook_present`/`bytes`). No subtopic carries a pending vocabulary need, so the closed space holds; any future addition goes through this amendment policy.
 
 ---
 
@@ -588,6 +589,10 @@ Per function authored or amended, spec writers and code reviewers apply this dis
 
 **Expensive-attr guard:** wrap with `if logger.Enabled(ctx, slog.LevelDebug) { ... }` ONLY when computing an attr value involves measurable cost (JSON marshalling, slice formatting > 100 elements, syscall to read state). For ordinary attrs (strings, ints, durations, pre-computed values), use slog's lazy formatting directly.
 
+**Allowed slog idioms (resolves review-004 I12).**
+- `logger.LogAttrs(ctx, level, msg, slog.String(...), …)` — explicitly PERMITTED and preferred on hot paths: it is the lower-allocation, type-safe equivalent of the variadic `"key", value` form, with identical semantics and level discipline. Attr keys still come from the closed vocabulary.
+- `slog.Group(name, …)` — PERMITTED. Text-mode rendering flattens grouped attrs to **dotted keys** in the `key=value` stream (`group.key=value`), mirroring how the JSON handler nests them. A group name is part of the closed attr vocabulary — adding one needs the same discussion-file amendment as a new attr key.
+
 **Prohibited (PR review must reject):**
 - Custom helpers that bundle multiple levels into one call (e.g. `Trace(msg, debugAttrs, infoAttrs)`).
 - `fmt.Sprintf` inside log message strings to embed values that should be attrs (`logger.Info(fmt.Sprintf("ok %s", k))` — wrong; use `logger.Info("ok", "key", k)`).
@@ -616,7 +621,7 @@ The subtopic's *design intent* is straightforward — log mutations. The *mechan
 
 `sessions.json` is **out of scope** for this subtopic — it's daemon-managed high-frequency state (mutated every tick), covered by the pending cycle-summary subtopic (one INFO per tick under `daemon` / `capture` components, not per-write).
 
-**Taxonomy addition:** `aliases` and `projects` are added as components. Total taxonomy: **14 components**.
+**Taxonomy addition:** `aliases` and `projects` are added as components (12 → 14; `process` is added later by Defensive invariants for **15 total** — the authoritative closed-space list in the Subsystem prefix taxonomy Mechanical rule is the single source of truth).
 
 **Mechanical rule (the seam spec phase enumerates against):**
 
@@ -1242,11 +1247,11 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - **F10** (investigation gate for the unknown zeroing bug) — closed. Ship the rewrite without blocking on root-cause understanding. If destruction recurs in the new system with no clear cause within 30 days post-ship, file a separate investigation bug; startup-marker tripwires will provide concrete evidence. Until then, treat the original bug as resolved-by-rewrite or detectable-when-it-recurs.
 - **F12** (compress rotated logs) — considered and rejected. Worst-case 30-day window at ~600 MB uncompressed is already trivial; introducing `zgrep` as a precondition for searching anything older than today adds friction at exactly the moment the user is investigating an incident. Greppability outweighs disk savings at portal's scale.
 - **G6, G11** (Component constants reconciliation and prefix taxonomy scope) — closed by the factory pattern: `internal/log` exposes `log.For(component string) *slog.Logger`; each package binds its component once at init; existing `Component*` constants are deleted as part of the migration sweep. Prefix taxonomy subtopic scope explicitly absorbed attr-key vocabulary (G3) and mandatory baseline attrs (G4).
-- **G3, G4** (attr-key vocabulary and mandatory baseline attrs) — closed by the locked attr-key vocabulary (snake_case, 10 canonical keys) and the 4-attr mandatory baseline (`component`, `pid`, `version`, `process_role`) injected at root logger construction.
+- **G3, G4** (attr-key vocabulary and mandatory baseline attrs) — closed by the locked attr-key vocabulary (snake_case, 10 canonical keys) and the 4-attr mandatory baseline (`component`, `pid`, `version`, `process_role`). (Refined by review-004 I6: the baselines are injected **per-record by the configured handler**, not via `root.With(...)` at construction, so `log.For`-loggers cached before `Init` still carry them.)
 - **G7, G10** (PORTAL_LOG_LEVEL default flip user-visible impact and deprecation path for existing `warn` users) — closed. Resolution: release notes only, no in-band breadcrumb. `portal.log` is a forensic artifact users only look at after the fact, so an in-band INFO line announcing the default change is invisible at the moment it would matter. Existing users who explicitly set `PORTAL_LOG_LEVEL=warn` continue to work unchanged. Users without an explicit value get the new INFO baseline; the "more volume than expected" friction is one mental moment + a changelog glance, acceptable cost for the continuous forensic baseline win.
 - **G1** (level edge classes — idempotent no-ops, hysteresis-internal anomalies, recoverable-but-rare) — closed via the placement clarifications added under "Log-level discipline § Placement clarifications": no-ops default to DEBUG (INFO only when the no-op IS the user-visible decision), hysteresis-internal failures stay DEBUG until the threshold trips, recoverable-but-rare events warrant WARN.
 - **G8** (NopLogger sentinel / nil-receiver semantics under slog) — closed by the factory pattern. `log.For(...)` always returns non-nil; the migration mandate is "every consumer holds a `*slog.Logger` from `log.For` or accepts one via DI". Tests use `slog.New(slog.NewTextHandler(io.Discard, nil))` as the silent-logger idiom. No `NopLogger()` sentinel survives the rewrite.
-- **G9** (expected vs unexpected swallowed errors) — closed by the `error_class` attr already in the vocab. DEBUG breadcrumbs carry `error_class=expected|unexpected`; sites that genuinely want production visibility for unexpected swallowed errors emit at WARN instead. Per-site judgment call, not a level-contract refinement.
+- **G9** (expected vs unexpected swallowed errors) — closed by the `error_class` attr already in the vocab. DEBUG breadcrumbs carry `error_class=expected|unexpected`. (Superseded by review-004 I3: the DEBUG-vs-WARN choice for an *unexpected* swallowed error is no longer a per-site judgment call — it is the mechanical postcondition predicate "WARN if work was dropped / postcondition unmet, else DEBUG" in the Log-level discipline table.)
 - **G2** (volume math for reboot/upgrade burst at INFO) — closed. Reboot burst on a 30-pane install at INFO is ~50-100 lines across the first 10 seconds (30 hydrate-helper INFOs + 11 bootstrap-step INFOs + ~5-10 saver lifecycle INFOs + initial capture cycle summaries). Steady-state with 1Hz cycle summaries at INFO peaks at ~8 MB/day even under churn. Both well under the 500 MB cap; no rate limiting or sampling needed. The cap exists as runaway-loop protection, not steady-state ceiling.
 - **G5** (migration plan from existing `state.Logger` printf API to slog) — closed. The factory pattern lock makes this structurally simple: each of ~12 packages gets `var logger = log.For("<component>")` at init, and `state.Logger.Info(component, fmt, args)` call sites become `logger.Info(msg, attrs...)`. Big-bang sweep in one PR — no adapter shim, no co-existence period. The pipe-delimited line format and `state.Logger` type are deleted in the same PR. Test mock surfaces (`bootstrapDeps` and friends) drop the logger mock entirely and accept `*slog.Logger` directly via `slog.New(slog.NewTextHandler(io.Discard, nil))`.
 
@@ -1256,5 +1261,5 @@ Documenting review-set 001 finding resolutions so future-us knows omissions were
 - Scope expansion confirmed and applied: the codebase is instrumented across ~30 enumerated INFO sites (per the locked catalogs in Cycle summary + Lifecycle event + Hook-firing + State-mutation subtopics), plus DEBUG breadcrumbs at every boundary and decision point per the level discipline mechanical rule.
 - Taxonomy final: 15 components, 31 attr keys (10 contextual + 11 cycle-summary + 7 lifecycle + 3 hydrate + 4 baseline — minus overlaps).
 - Rollout: two-PR sequence — Foundation+hydrate proof (PR 1) → 7-day production observation → Full pattern rollout across all subsystems (PR 2). 30-day "no unexplained zeroing" gate starts after PR 2.
-- Review-sets 001, 002, 003 fully drained: 32 findings closed. Review-004 pending walk-through (9 gaps + 3 questions; queued for next session pause).
+- Review-sets 001–004 fully drained: 44 findings closed (001–003: 32; 004: I1–I12). Review-004 was walked one finding at a time, each captured in-place under its owning subtopic. Reviews 005 and 006 were generated against the *since-reverted* review-004 in-place amendments (the cascade that was rolled back in git `ed61436b`/`cbed8200`/`e852fb84`); they were discarded as moot — anything still real will resurface in a fresh review.
 - Discussion convergence: all map entries decided; subtopic write-ups + mechanical rules + closed value spaces + spec-phase-ingestible catalogs all captured.
