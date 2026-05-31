@@ -489,7 +489,7 @@ Lifecycle (set per saver/daemon lifecycle event; enumerated by the Saver and dae
 
 Hydrate (set per hook-firing exec chain event; enumerated by the Hook-firing observability subtopic): `result`, `hook_present`, `bytes`.
 
-Process (set per `process:` lifecycle/diagnostic line; enumerated by the Defensive invariants + Log-level propagation subtopics): `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. (Enrolled per review-007 L1+L2 — emitted by `process: start`/`exec`/`exit` and `process: log-level resolved`, previously absent from the closed space.)
+Process (set per `process:` lifecycle/diagnostic line; enumerated by the Defensive invariants + Log-level propagation subtopics): `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. (Enrolled per review-007 L1+L2 — emitted by `process: start`/`exec`/`exit` and `process: log-level resolved`, previously absent from the closed space.) `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec` (review-008 M3), so the two `syscall.Exec` markers are structurally parallel.
 
 Baseline (auto-injected per-record by the configured handler — see Logger library § Init/For contract): `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -1122,12 +1122,13 @@ Immediately before the `syscall.Exec` call:
 
 ```go
 hookLogger.Info("exec",
-    "path", execPath,         // the binary being exec'd (e.g. "$SHELL" or "sh")
-    "hook_present", hookFound, // bool
+    "target", execPath,        // the binary being exec'd (e.g. "$SHELL" or "sh") — review-008 M3
+    "args", argv,              // its argv (e.g. `-c '<HOOK>; exec $SHELL'`) — parallel with process: exec
+    "hook_present", hookFound, // bool — hydrate-specific extra
 )
 ```
 
-This INFO line is the terminal-point summary for the hydrate helper process (its last action before being replaced by the exec'd command). Per the call-site pattern, it's emitted at every successful exit path.
+This INFO line is the terminal-point summary for the hydrate helper process (its last action before being replaced by the exec'd command). Per the call-site pattern, it's emitted at every successful exit path. **It is structurally parallel with `process: exec` (resolves review-008 M3):** both `syscall.Exec` handoff markers use `target` (the exec'd binary) + `args` (its argv), so `grep` on `target=`/`args=` gives a uniform "what did each process hand off to" view across `process: exec` and `hydrate: exec`. The switch from the earlier `path` attr to `target` is deliberate — `path` remains reserved for the helper's genuine filesystem-path lines (`fifo missing path=…`, `scrollback missing path=…`), which are unchanged.
 
 When `hook_present=true`, the helper exec's `sh -c '<HOOK>; exec $SHELL'`. When `false`, it exec's `$SHELL` directly. The presence/absence is observable via this attr; the hook content itself is in the prior INFO line written by `hookStore` mutations (the state-mutation audit trail), so it's reconstructible via grep history without redundant logging here.
 
