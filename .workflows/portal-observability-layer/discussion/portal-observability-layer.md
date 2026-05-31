@@ -124,6 +124,15 @@ For each `Handle(record)` call into the custom `internal/log` `slog.Handler`:
 
 The above applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
 
+**Hot-path cost (resolves review-007 L7).** The unbuffered-writer constraint (locked in the Defensive invariants I5/I9 resolution) means every record is its own `write(2)`, and the per-`Handle` rotation logic runs on the daemon's 1 Hz tick goroutine. This is intentionally *not* moved off the hot path — the cost is negligible at portal's scale, for record:
+
+- **Steady state:** at INFO the daemon emits ~1 line per tick (the cycle summary). One unbuffered `write(2)` to an `O_APPEND` fd is microseconds; one syscall/sec is immaterial. (DEBUG emits more but is off in production.)
+- **Midnight maintenance:** the first record after local midnight does the symlink swing + `chmod 0400` past-day sweep + retention sweep — a directory listing plus a handful of `chmod`/`unlink` calls, sub-millisecond to low-single-digit-ms, **once per day**.
+- **Budget:** tick period is 1 s and self-supervision tolerates 3 consecutive missed ticks (3 s), so a once-a-day few-ms spike is well within budget.
+- **Gating:** the I2 single-winner sweep gate means only one process per host runs the midnight sweep — often bootstrap or the TUI, not the daemon — so the daemon frequently pays zero sweep cost.
+
+Moving the maintenance to a background goroutine would add synchronisation complexity for no measurable benefit at this scale; rejected.
+
 ---
 
 ## Retention policy and audit
