@@ -895,4 +895,66 @@ Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're co
 
 ---
 
+## Hook-firing observability limit (syscall.Exec)
+
+### Decision
+
+**No wrapper envelope.** Portal exec's hooks via `syscall.Exec`, replacing the helper process, so it can never observe the hook command's own exit status. We accept that architectural limit and instrument everything up to the moment of exec. The hydrate helper logs the lookup decision and the exec target as its terminal-point INFO; post-exec is silent by design. The wrapper-envelope option (capturing exit status via a shell envelope) is preserved as a future consideration but is explicitly NOT in scope.
+
+With these lines, `grep "hydrate:" portal.log` reconstructs every helper invocation up to the exec moment.
+
+### Mechanical rule
+
+The hydrate helper (`cmd/state_hydrate.go`, the `execShellOrHookAndExit` function path) MUST emit log lines at three points in its exec chain.
+
+**1. Hook lookup (DEBUG breadcrumb).** After the helper has computed the structural pane key and queried `hooks.json` for an on-resume hook, but BEFORE the exec call:
+
+```go
+hookLogger.Debug("hook lookup",
+    "hook_key", paneKey,
+    "result", lookupResult,  // "hit" | "miss" | "error"
+)
+```
+
+Where `lookupResult` is `"hit"` if a hook was registered, `"miss"` if no hook for that pane_key, `"error"` if the lookup itself failed (parse error, etc.). On `"error"`, also include the `"error"` attr per *Diagnostic context preservation*. This DEBUG line distinguishes "hooks.json drifted from the saved hook-key" (miss) from "lookup failed for some other reason" (error) from "helper never reached the lookup" (no line at all).
+
+**2. Exec terminal point (INFO).** Immediately before the `syscall.Exec` call:
+
+```go
+hookLogger.Info("exec",
+    "target", execPath,        // the binary being exec'd (e.g. "$SHELL" or "sh")
+    "args", argv,              // its argv (e.g. `-c '<HOOK>; exec $SHELL'`)
+    "hook_present", hookFound, // bool
+)
+```
+
+This INFO line is the terminal-point summary for the hydrate helper process (its last action before being replaced). It is **structurally parallel with `process: exec`** — both `syscall.Exec` handoff markers use `target` (the exec'd binary) + `args` (its argv), so `grep` on `target=`/`args=` gives a uniform "what did each process hand off to" view across `process: exec` and `hydrate: exec`. When `hook_present=true`, the helper exec's `sh -c '<HOOK>; exec $SHELL'`; when `false`, it exec's `$SHELL` directly. The hook content itself is in the prior INFO line written by `hookStore` mutations (the state-mutation audit trail), so it's reconstructible via grep history without redundant logging here.
+
+(`target` is deliberately distinct from `path`, which remains reserved for the helper's genuine filesystem-path lines — `fifo missing path=…`, `scrollback missing path=…`.)
+
+**3. Failure-mode INFO lines (the four exit paths from the inbox seed):**
+
+| Exit path | Code shape (approx.) | Log call |
+|---|---|---|
+| Silent ENOENT — helper opened FIFO and got "no such file or directory" | `cmd/state_hydrate.go` ~line 120 | `hookLogger.Info("fifo missing", "path", fifoPath)` then exec |
+| Timeout — helper waited 3s, signal never arrived | ~line 115 | `hookLogger.Info("signal timeout", "took", "3s")` then exec |
+| Scrollback file missing | ~line 147 | `hookLogger.Info("scrollback missing", "path", scrollbackPath)` then exec |
+| Success — signal arrived, scrollback dumped | ~line 188 | `hookLogger.Info("scrollback replayed", "bytes", n, "took", took)` then exec |
+
+Each exit path's INFO is followed by the exec INFO (rule 2). Two INFO lines per invocation in the failure-mode cases, three in the success case (counting the lookup DEBUG, which is below INFO threshold in production). The repetition is intentional — the exit-path INFO captures *what happened in the helper*; the exec INFO captures *what we handed off to*.
+
+(Line numbers are current-state hints; spec/plan phase pins exact ranges against the live file.)
+
+### Wrapper envelope (NOT in scope)
+
+A future enhancement could wrap the exec'd command in a shell envelope that captures exit status, e.g.:
+
+```sh
+sh -c '<HOOK>; ec=$?; printf "%d\n" "$ec" > /tmp/portal-hook-exit-<pid>; exec $SHELL'
+```
+
+The daemon could then read the exit-status file to log the hook's outcome. Deferred — it introduces shell-quoting hazards, signal-handling complications, and a new file-cleanup concern. If the lookup + exec INFO lines prove insufficient for a future investigation, this is the next layer to consider, in a separate work unit.
+
+---
+
 ## Working Notes
