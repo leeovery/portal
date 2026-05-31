@@ -795,6 +795,8 @@ This yields a clean four-way terminal classification of any `process: start`:
 
 **Externally-killed-process footnote (from review-004 I4).** A process killed by an uncatchable signal (the kill-barrier's escalation to SIGKILL) cannot run code, so it emits no terminal marker — its `process: start` looks "unpaired." That is *not* the alarming case when the kill was deliberate: the **killer records it**. Bootstrap already emits `saver: kill-barrier started/escalated target_pid=X` and `saver: placeholder died` (Saver/daemon lifecycle catalog). So the rule is: **an unpaired `process: start` is alarming only if no `saver:`/`daemon:` line names that pid as an external kill.** (The daemon's clean self-eject path uses `os.Exit(0)` and still emits its own `process: exit`.)
 
+**Lifecycle markers bypass the level filter (resolves review-008 M5).** The `process`-component lifecycle set — `start`, `exit`, `exec`, `panic`, and `log-level resolved` — is emitted **unconditionally by the custom handler, regardless of `PORTAL_LOG_LEVEL`.** These are forensic tripwires (and, for `log-level resolved`, a test anchor), not ordinary application logging. At `PORTAL_LOG_LEVEL=warn`/`error` a normal INFO line would be filtered — which would make the "always-present tripwire" guarantee false and would hide the very line that proves the resolved level took effect (`resolved=warn source=env`) exactly when a test or operator needs it. The handler therefore special-cases this `process` lifecycle set to write through the level gate. They remain semantically INFO for every other purpose (no ERROR pollution). This reconciles the "always-present" framing here with the level filter and with the Log-level-propagation test contract.
+
 **Flush** is handled by the unbuffered-writer constraint locked in the I5 resolution above — no exec-path-specific flush logic is needed.
 
 **`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
@@ -994,7 +996,7 @@ Renders (text mode):
 2026-05-30T14:00:00Z INFO process: log-level resolved resolved=info source=fallback raw="trace" pid=12345 version=0.5.0 process_role=daemon
 ```
 
-**Test assertion contract:** any integration test that sets `PORTAL_LOG_LEVEL` MUST scan `portal.log` for the `process: log-level resolved resolved=<expected> source=env` line for the spawned process (matched by `pid` attr if multiple processes were involved). If the line is absent or `source` is not `env`, the test fails — the env var did not propagate.
+**Test assertion contract:** any integration test that sets `PORTAL_LOG_LEVEL` MUST scan `portal.log` for the `process: log-level resolved resolved=<expected> source=env` line for the spawned process (matched by `pid` attr if multiple processes were involved). If the line is absent or `source` is not `env`, the test fails — the env var did not propagate. This line is emitted **unconditionally** — it bypasses the level filter (see Defensive invariants § "Lifecycle markers bypass the level filter", resolves review-008 M5) — so the assertion holds even when the test deliberately sets a non-INFO level like `warn` or `error`.
 
 A canonical assertion helper SHOULD live in `internal/portaltest`:
 
