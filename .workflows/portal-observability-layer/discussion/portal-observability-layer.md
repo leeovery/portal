@@ -160,15 +160,18 @@ Per-deletion INFO line is required: the 2026-05-28 incident taught that silent d
 
 **Mechanical rule (spec-phase intake):**
 
-On the first `Handle(record)` call of each calendar date (detected via the date-change check from the rotation rule above), the handler runs a retention sweep:
+On the first `Handle(record)` call of each calendar date (detected via the date-change check from the rotation rule above), the handler **attempts to claim the day's sweep, and only the winner runs it** (resolves review-004 I2 + I10):
 
+0. **Single-winner gate.** Attempt to create `${stateDir}/portal.log.swept.<today>` via `O_CREAT|O_EXCL`. On `EEXIST`, another process already owns today's sweep — **return immediately, run nothing, emit nothing.** On success, this process owns the sweep; proceed. (Same single-winner `O_EXCL` primitive the rotation rule uses one section up — the two adjacent rules now share one concurrency stance instead of contradicting.) The sentinel files age out under the same retention window as the logs (they match `portal.log.*`), so they self-clean.
 1. Parse `cutoff := today.AddDate(0, 0, -PORTAL_LOG_RETENTION_DAYS)`. Default `PORTAL_LOG_RETENTION_DAYS = 30`. Invalid env value (non-integer, negative, > 365) → use default and emit one WARN: `log-rotate: invalid PORTAL_LOG_RETENTION_DAYS=<v>, using 30d`.
-2. List `${stateDir}/portal.log.*` files. Extract the date portion of each filename. For each file whose date < `cutoff`:
+2. List `${stateDir}/portal.log.*` files (excluding `portal.log.swept.*` sentinels). Extract the date portion of each filename. For each file whose date < `cutoff`:
    a. Emit one INFO line BEFORE deletion: `log-rotate: deleted path=<filename> retention=<N>d`.
    b. `os.Remove(filename)`. On error, emit one WARN with `error` attr and continue (don't abort the sweep).
-3. The sweep is best-effort and re-entrant; running it twice on the same day is a no-op.
+3. The sweep is best-effort. The single-winner gate (step 0) means it runs at most once per host per day, so the duplicate-INFO / duplicate-WARN floor from N concurrent process startups (the reboot-storm case) cannot occur.
 
-`portal clean` does NOT trigger this sweep on its own; it preserves rotated logs by default. `portal clean --logs` triggers the sweep with `cutoff = today` (i.e. delete every rotated file, leaving only the current one).
+**Why single-winner rather than "re-entrant no-op":** every process's first log call of the day is its `process: start` line (Defensive invariants), so without the gate ALL ~32 reboot-morning processes would each emit the same deletion INFO lines and 31 would then hit `os.Remove` "already gone" WARNs — 32× audit noise on exactly the forensic surface this feature exists to keep clean. The gate makes the deletion breadcrumbs single-sourced.
+
+`portal clean` does NOT trigger this sweep on its own; it preserves rotated logs by default. `portal clean --logs` triggers the sweep with `cutoff = today` (i.e. delete every rotated file, leaving only the current one). **The `portal clean --logs` path BYPASSES the step-0 single-winner gate** — it is an explicit, deliberate user invocation and must always run regardless of any `portal.log.swept.<today>` sentinel; the gate exists only to dedupe the *automatic* per-process-startup sweep. (It also removes stale `portal.log.swept.*` sentinels as part of the clean.)
 
 The above applies to ONE seam: the `slog.Handler` in `internal/log` (and `portal clean --logs`, which calls into the same sweep function).
 
