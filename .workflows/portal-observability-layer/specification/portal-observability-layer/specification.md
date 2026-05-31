@@ -592,4 +592,58 @@ The `process`-component lifecycle set — `start`, `exit`, `exec`, `panic`, and 
 
 ---
 
+## Log-level propagation verification
+
+### Decision
+
+Every portal process emits exactly one additional INFO line as part of its lifecycle init, declaring the resolved log level and how it was resolved. Tests that depend on a specific log level for coverage assert on this line. This closes the silent-degradation gap: if `PORTAL_LOG_LEVEL` fails to propagate (tmux clears it on `respawn-pane`, or a harness forgets to pass it), DEBUG coverage degrades but the test still passes with less output than expected — unless it asserts on this positive marker.
+
+### Mechanical rule
+
+`internal/log.Init(stateDir, version, processRole)` MUST emit one INFO line immediately AFTER the `process: start` line and BEFORE returning:
+
+```go
+log.For("process").Info("log-level resolved",
+    "resolved", resolvedLevelStr,
+    "source", levelSource,
+    "raw", rawEnvValue,
+)
+```
+
+Where:
+- `resolved` is one of `debug` / `info` / `warn` / `error` — the level slog will actually filter at.
+- `source` is one of:
+  - `env` — `PORTAL_LOG_LEVEL` was set to a valid value.
+  - `default` — `PORTAL_LOG_LEVEL` was unset → `info`.
+  - `fallback` — `PORTAL_LOG_LEVEL` was set to an invalid value → fell back to `info` (also emits the WARN defined in the Log-level discipline mechanical rule).
+- `raw` is the raw env var value as observed (empty string if unset, the verbatim string if set — including invalid values).
+
+Renders (text mode):
+```
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=debug source=env raw="DEBUG" pid=12345 version=0.5.0 process_role=daemon
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=info source=default raw="" pid=12345 version=0.5.0 process_role=tui
+2026-05-30T14:00:00Z INFO process: log-level resolved resolved=info source=fallback raw="trace" pid=12345 version=0.5.0 process_role=daemon
+```
+
+This line is emitted **unconditionally** — it bypasses the level filter (see *Defensive invariants* § "Lifecycle markers bypass the level filter") — so the assertion holds even when the test deliberately sets a non-INFO level like `warn` or `error`.
+
+### Test assertion contract
+
+Any integration test that sets `PORTAL_LOG_LEVEL` MUST scan `portal.log` for the `process: log-level resolved resolved=<expected> source=env` line for the spawned process (matched by `pid` attr if multiple processes were involved). If the line is absent or `source` is not `env`, the test fails — the env var did not propagate.
+
+A canonical assertion helper lives in `internal/portaltest`:
+
+```go
+// AssertLogLevelResolved scans portal.log for the process: log-level resolved
+// line matching the given pid and asserts the resolved level matches expected
+// with source="env". Used by integration tests that set PORTAL_LOG_LEVEL.
+func AssertLogLevelResolved(t *testing.T, logPath string, pid int, expected string)
+```
+
+This helper closes the env-propagation gap for ALL daemon-spawning integration tests, not just the test that motivated the assertion.
+
+**Coverage requirement:** every binary entry point that calls `log.Init` automatically emits this line; no separate per-entry-point work needed. The propagation assertion is the test-side coverage requirement.
+
+---
+
 ## Working Notes
