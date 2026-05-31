@@ -383,4 +383,64 @@ Per function authored or amended, spec writers and code reviewers apply this dis
 
 ---
 
+## Log rotation mechanism
+
+### Decision
+
+**Calendar-daily rotation as primary boundary, with a configurable size-cap safety valve, all encapsulated in the library handler.** Replaces the old 1 MiB-threshold scheme (which churned every few hours under load and overwrote its single `.old`, causing the 2026-05-28 evidence loss).
+
+**Rotation ownership — library-level, every-writer date-aware.** The custom `slog.Handler` in every portal process is date-aware:
+- On each write it computes today's filename via `time.Now().Format("2006-01-02")` and ensures the open fd points at today's file.
+- First write of the day across all processes opens the new day's file via `O_CREAT|O_EXCL`. First writer wins the create race atomically; losers detect the file exists and open `O_APPEND` — race-safe on Unix for slog-sized line writes (< `PIPE_BUF`).
+- A symlink `portal.log → portal.log.YYYY-MM-DD` is swung atomically at the boundary so `tail -f portal.log` always follows today's file regardless of which process owns the swing.
+- Daemon-down across midnight is solved by construction — any waking process's first write opens today's file. No explicit catchup logic.
+
+**Boundary, filenames, size cap, immutability:**
+- Calendar boundary: **local midnight** (machine timezone).
+- Filenames: `portal.log.YYYY-MM-DD` for the day's base file; same-day overflow on size-cap appends `.N` (monotonic via `O_CREAT|O_EXCL` retry against highest existing `.N`).
+- Size-cap safety valve: default **500 MB**, configurable via `PORTAL_LOG_ROTATE_SIZE` (K/M/G suffixes, e.g. `500M`, `1G`). Parsed once at handler init. Chosen so it never fires in normal use even at DEBUG steady-state (~20 MB/day) yet catches a runaway within ~1 day before disk fills.
+- Rotated files are immutable: `chmod 0400` once they are no longer today's file.
+
+### Mechanical rule — per `Handle(record)` into the `internal/log` handler
+
+1. Compute `today := time.Now().Format("2006-01-02")`.
+
+2. **Reuse the currently-open fd only while BOTH hold:** (a) no date change — it is for `portal.log.<today>`; AND (b) its inode still matches the current `portal.log` symlink target (`fstat` the open fd, `stat` the symlink target, compare `st_dev`+`st_ino`). Otherwise reopen. Two reopen triggers, handled differently:
+   - **Date change** (new calendar day) → run the full new-day path (steps a–d) plus the Retention sweep (separate rule, see Retention policy).
+   - **Inode mismatch / `ENOENT` on the target, same day** → today's file was unlinked or replaced out from under us mid-day (the unknown-zeroing scenario this defends against — a long-lived daemon's `O_APPEND` fd would otherwise keep writing to the orphaned inode and lose every byte on close — or a peer's size-cap rotation). Reopen by following the current symlink target if it exists (`O_APPEND|O_WRONLY`), else recreate via step a. Do **NOT** run the retention/`chmod` sweeps — the date did not change.
+
+   When a reopen is needed (either trigger):
+   - **(First-run migration guard — clean slate.)** Before swinging the symlink, if `portal.log` exists as a **regular file** (`lstat` shows it is not a symlink), `os.Remove` it; also `os.Remove` any `portal.log.old`. This deletes pre-migration legacy logs on the first run under the new system (the old logger left a regular-file `portal.log` + single `.old`). After the first run `portal.log` is always a symlink, so this guard never fires again.
+   a. Open `${stateDir}/portal.log.<today>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`, mode `0600`.
+   b. On `EEXIST`, retry with `O_APPEND|O_WRONLY` (lost the cross-process create race; another writer beat us).
+   c. Swing the symlink `${stateDir}/portal.log → portal.log.<today>` atomically. The temp link is **pid-scoped** — `portal.log.<pid>.symlink.tmp` — so cross-process swings can never collide on the tmp name (a single process performs at most one swing at a time, so no counter is needed); if this pid's own tmp already exists from a prior crash, `os.Remove` it and recreate. Then `os.Symlink(target, pidTmp)` + `os.Rename(pidTmp, link)` — `Rename` is atomic and last-writer-wins, and every racer's target is identical (`portal.log.<today>`), so a concurrent swing is benign. A tmp leaked by a crash between `Symlink` and `Rename` is reclaimed best-effort on the next swing and by `portal clean`.
+   d. `chmod 0400` any other `portal.log.<date>*` files in `${stateDir}` that are not `<today>` and not already mode 0400. **Strict date-parse, skip otherwise:** only files whose date portion parses as a valid `YYYY-MM-DD` (the `portal.log.<date>` / `portal.log.<date>.<N>` shapes) are candidates; any other `portal.log.*` sibling — the `portal.log.<pid>.symlink.tmp` swing temp, the `portal.log.swept.<date>` sentinel, any future non-log sibling — is **skipped** (never `chmod`'d). This keeps a leaked symlink temp writable so its best-effort reclamation isn't bricked by a `0400`.
+
+3. After fd is open, check `current_size + len(serialized) >= PORTAL_LOG_ROTATE_SIZE`. If true, rotate to `portal.log.<today>.N`:
+   a. Find max existing `N` for today (`portal.log.<today>.*` listing); next N = max + 1, or 1 if none.
+   b. Open `portal.log.<today>.<N>` with `O_CREAT|O_EXCL|O_APPEND|O_WRONLY`.
+   c. On `EEXIST`, retry with `N+1`.
+   d. Swing the symlink to the new file (same pid-scoped-tmp + atomic-rename procedure as step 2c). **Do NOT `chmod 0400` the previous segment**: it is a *same-day* file, a peer process may still hold an open `O_APPEND` fd on it (`chmod` does not evict an already-open writer on Unix), and it is part of today's active write surface. Same-day segments are sealed only when the day rolls over — the next day's step 2d sweep `chmod 0400`s all of yesterday's segments at once. A peer that didn't observe this size-cap rotation simply keeps appending to the prior same-day segment; that splits today's writes across two readable same-day files (the symlink points at the newest), which is acceptable — the size cap is a disk-fill valve, not a correctness boundary.
+
+4. Write the serialized record to the now-current fd.
+
+This applies to ONE seam: the `slog.Handler` in `internal/log`. No call site outside that package implements rotation logic.
+
+### Resolved operational edges
+
+- **DST / timezone.** "Local midnight" is the instant `time.Now().Format("2006-01-02")` yields a new date in the machine's local timezone. Rotation keys on the date **string**, not elapsed duration — so DST 23/25-hour days and mid-life timezone changes are handled by construction: a repeated date appends to the existing file, a forward jump opens a new file. No special handling.
+- **Version upgrade mid-day.** Same date → same file; the new binary's `version` baseline attr simply changes per-record. No special handling.
+- **Missed-day catchup.** Solved by construction — any waking process's first write opens today's file, and step 2d `chmod 0400`s ALL past-day files at once, so a multi-day downtime gap is caught up in a single sweep.
+- **First-startup migration.** Clean slate (see step 2 migration guard): legacy regular-file `portal.log` and `portal.log.old` are deleted on first run. Pre-migration history is not preserved.
+- **Disk-full / `EACCES` / write failures.** Logging never crashes portal (the logger owns no control flow). On open or write failure the handler is best-effort: it attempts a single stderr fallback write for the record, otherwise drops it, and the process continues. `chmod` / `unlink` failures during the day-roll-over and retention sweeps are WARN-and-skip (never abort the sweep). A failed symlink swing leaves the prior symlink in place; writes continue to the open fd.
+
+### Hot-path cost
+
+The unbuffered-writer constraint (see Defensive invariants) means every record is its own `write(2)`, and the per-`Handle` rotation logic runs on the daemon's 1 Hz tick goroutine. This is intentionally not moved off the hot path — the cost is negligible:
+- **Steady state:** at INFO the daemon emits ~1 line/tick; one unbuffered `write(2)` to an `O_APPEND` fd is microseconds.
+- **Midnight maintenance:** the first record after local midnight does the symlink swing + `chmod 0400` past-day sweep + retention sweep — a directory listing plus a handful of `chmod`/`unlink` calls, sub-ms to low-single-digit-ms, **once per day**, well within the 1 s tick / 3 s self-supervision budget.
+- **Gating:** the single-winner sweep gate (see Retention policy) means only one process per host runs the midnight sweep, so the daemon frequently pays zero sweep cost.
+
+---
+
 ## Working Notes
