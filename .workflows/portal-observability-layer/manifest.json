@@ -11,6 +11,21 @@
           "status": "completed"
         }
       }
+    },
+    "specification": {
+      "items": {
+        "portal-observability-layer": {
+          "status": "in-progress",
+          "review_cycle": 0,
+          "finding_gate_mode": "gated",
+          "date": "2026-05-31",
+          "sources": {
+            "portal-observability-layer": {
+              "status": "pending"
+            }
+          }
+        }
+      }
     }
   }
 }
