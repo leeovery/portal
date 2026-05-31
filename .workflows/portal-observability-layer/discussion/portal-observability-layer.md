@@ -699,7 +699,7 @@ Renders (text mode):
 
 (Note: `pid`, `version`, `process_role` are baseline attrs auto-injected; the call site does not pass them.)
 
-The `internal/log` package additionally exposes `func Close(exitCode int)` to be invoked from `main()` via deferred call OR explicit invocation immediately before `os.Exit(N)`. `Close` emits one INFO line:
+The `internal/log` package additionally exposes `func Close(exitCode int)` — a marker-emitter that computes `took` from the package-private `startTime` (captured at `Init`) and emits one INFO line. **`Close` does NOT call `os.Exit`; the logger owns no control flow** (resolves review-004 I5 — mirrors slog's deliberate omission of `Fatal`). It emits:
 
 ```go
 log.For("process").Info("exit",
@@ -715,21 +715,39 @@ Renders:
 
 `startTime` is captured at `Init` time and stored package-private.
 
-**Coverage requirement:** every binary entry point (currently only `main.go`, but extending in principle to any future entry binary) must:
-1. Call `log.Init` BEFORE any other portal code that might log.
-2. Either defer `log.Close(0)` (for normal-return paths) or invoke `log.Close(N)` explicitly before any `os.Exit(N)`.
+**`main` owns the single `os.Exit` (resolves I5).** The prior "defer `Close` OR call it before `os.Exit`" rule was unsound: `os.Exit` skips deferred functions, so Cobra's `Execute()`-error path (`os.Exit(1)`) emitted no `process: exit` — the most operationally-interesting termination class went unmarked, and the Close-defer vs recover-defer ordering was ambiguous. Replaced with the idiomatic "exit only in `main`, everything else returns a code/error" shape (an explicit rule in the Uber and Google Go style guides):
 
-**Panic path:** `Init` MUST also install a `defer func() { if r := recover(); r != nil { ... } }()` in main if practical, emitting `process: panic reason=<r>` at ERROR before re-panicking. Implementation detail deferred to spec.
+```go
+func main() {
+    log.Init(...)
+    code := 0
+    func() {
+        defer func() {
+            if r := recover(); r != nil { log.For("process").Error("panic", "reason", r); code = 2 }
+        }()
+        if err := rootCmd.Execute(); err != nil { code = 1 }
+    }()
+    log.Close(code)   // emits process: exit code=N — does NOT exit
+    os.Exit(code)
+}
+```
+
+- Exactly one terminal marker fires per run: `exit` on clean/error return, `panic` on a recovered panic. No double-emit, no defer-ordering ambiguity, no "if practical" judgment language.
+- **Bare `os.Exit` is prohibited outside `main`** (PR-review reject) — every other function returns an error/code. That prohibition is the enforcement mechanism for "every termination is marked."
+- `Execute()` maps to a return code rather than calling `os.Exit` inside.
+
+**Coverage requirement:** every binary entry point (currently only `main.go`, extending in principle to any future entry binary) calls `log.Init` before any other portal code that might log, and routes all termination through the `main` shape above.
+
+**Flush reduces to "do not buffer the log writer" (resolves the I5/I9 flush concern).** The rotation handler writes directly to the `*os.File` (`O_APPEND`) with no `bufio` wrapper, so a marker is already in the kernel by the time `Info(...)` returns. `os.Exit` and `syscall.Exec` do not discard kernel buffers, so the bytes survive for a later reader — no `Sync()`/flush API and no logger-owned atomic exit/exec helper are needed. **Unbuffered writer is a locked constraint on the rotation handler** (Logger library subtopic).
 
 **Exec-handoff markers (resolves review-004 I9).** `os.Exit` and normal-return paths are covered above, but `syscall.Exec` is neither: it overwrites the process image, runs no deferred functions, and never returns — so `Close` never fires and no `process: exit` line is written. The bare-shell `portal open` happy path (`AttachConnector` → `tmux attach-session`) is exactly this, and it is portal's *most common* termination. Without a marker, a benign tmux handoff leaves an unpaired `process: start` that is indistinguishable from a destructive mid-flight kill — defeating the whole invariant.
 
-Rule: **every `syscall.Exec` call site MUST emit a synchronously-flushed exec-terminal INFO line immediately before the exec, under its owning component.**
+Rule: **every `syscall.Exec` call site MUST emit a plain `exec`-terminal INFO line immediately before the exec, under its owning component.** No logger-owned helper — the call site uses the ordinary logger and then performs its own `syscall.Exec`. The logger never execs (same principle as I5: the logger owns no control flow). Because the writer is unbuffered (see the I5 flush resolution above), the marker is already in the kernel before `syscall.Exec` replaces the image.
 
 ```go
-// log.Exec emits the binary-level exec handoff marker and flushes it to the
-// log fd synchronously (no buffering) BEFORE the caller invokes syscall.Exec.
-// syscall.Exec discards the process image, so an unflushed write is lost.
-func Exec(target string, args []string)
+// At the AttachConnector call site, immediately before syscall.Exec:
+log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv, " "))
+syscall.Exec(tmuxPath, argv, env)
 ```
 
 - `AttachConnector` (bare-shell `portal open` → tmux) emits `process: exec target=tmux args="attach-session -A …"`. This is binary-level lifecycle, so `exec` joins `start` / `exit` / `panic` in the **`process` component's event space**.
@@ -744,7 +762,7 @@ This yields a clean four-way terminal classification of any `process: start`:
 | `process: panic` | Crash, but recorded |
 | *nothing* | Genuinely alarming — process vanished without a terminal marker; investigate |
 
-**Flush-before-exec is load-bearing** (spec-phase intake): the exec line must reach the fd synchronously before `syscall.Exec`. Our handler writes `O_APPEND` directly, so a synchronous `Handle` + no buffering on this path suffices, but the spec MUST state "no buffering / explicit sync on the exec path" explicitly.
+**Flush** is handled by the unbuffered-writer constraint locked in the I5 resolution above — no exec-path-specific flush logic is needed.
 
 **`SwitchConnector` (in-tmux path) is unaffected** — it runs `tmux switch-client` as a subprocess and returns normally, so it gets a proper `process: exit` via `Close`. Only true `syscall.Exec` replace-process sites need the exec marker.
 
