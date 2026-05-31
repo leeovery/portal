@@ -796,7 +796,7 @@ logger.Info("<verb> complete",
 Where:
 - `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
 - `<unit>` is the item being iterated: `sessions`, `panes`, `entries`, `orphans`, `steps`, `files`, etc.
-- Additional sub-categorisation counts ride as attrs on the same summary line.
+- Additional sub-categorisation counts ride as attrs on the same summary line. Defined counts: `natural_churn` — items that ended cleanly mid-cycle by normal action (e.g. a session the user closed during the tick), distinct from a capture failure; `anomalous` — items that failed anomalously without terminating the cycle (each also emits a per-item WARN); `entries_failed` — per-item failures within a batch operation.
 - `took` is always present.
 
 **Per-item event level inside a cycle:**

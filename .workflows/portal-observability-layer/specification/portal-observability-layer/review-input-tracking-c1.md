@@ -31,10 +31,10 @@ Where:
 Spec line 181 (closed-attr cycle-summary group) defines `step` / `windows` / `skipped` parenthetically but not `natural_churn` or `entries_failed`.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Expanded the cycle-summary "Where:" bullet to define the sub-category counts: `natural_churn` (items ended cleanly mid-cycle by normal action, distinct from a capture failure), `anomalous` (items failed anomalously without terminating the cycle; each also emits a per-item WARN), `entries_failed` (per-item failures within a batch operation).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged verbatim into *Cycle-level summary cadence and shape*.
 
 ---
 
