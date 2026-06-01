@@ -147,14 +147,15 @@ func (s *rotatingSink) reopen(today string, dateChanged bool) error {
 		return err
 	}
 
-	// SEAM (Task 2-3 — atomic pid-scoped symlink swing): this task establishes a
-	// MINIMAL symlink (remove-then-symlink) so stat(portal.log) resolves to the
-	// day file and the inode-identity reuse check is meaningful. Task 2-3 upgrades
-	// this to the atomic os.Symlink(target, portal.log.<pid>.symlink.tmp) +
-	// os.Rename(pidTmp, link) swing with crash-leak reclamation. The swing is
-	// best-effort: a failure leaves the prior symlink in place and writes continue
-	// to the freshly-opened fd, so a swing error must NOT fail the write.
-	establishSymlink(s.stateDir, today)
+	// Atomic pid-scoped symlink swing: re-point ${stateDir}/portal.log at the
+	// freshly-opened day file via swingSymlink (os.Symlink to a pid-scoped temp +
+	// atomic os.Rename, with prior-crash temp reclamation). The swing is
+	// BEST-EFFORT: a failure leaves the prior symlink in place and writes continue
+	// to the freshly-opened fd, so a swing error must NOT fail the reopen. The next
+	// Write's inode-identity check then forces a benign retry. Task 2-7 upgrades
+	// this swallowed error into a WARN-and-continue log line.
+	target := portalLogName + "." + today // relative bare filename — same dir.
+	_ = swingSymlink(s.stateDir, target)
 
 	if s.file != nil {
 		_ = s.file.Close()
@@ -194,22 +195,6 @@ func openDayFile(stateDir, today string) (*os.File, uint64, uint64, error) {
 	}
 	dev, ino, _ := devIno(info)
 	return f, dev, ino, nil
-}
-
-// establishSymlink points ${stateDir}/portal.log at portal.log.<today> with a
-// minimal remove-then-symlink. It is best-effort: any error is swallowed so a
-// failed swing never fails the write (the inode-identity check then forces a
-// reopen on the next Write, which is benign). Task 2-3 replaces this with the
-// atomic pid-scoped tmp + rename swing.
-func establishSymlink(stateDir, today string) {
-	link := symlinkPath(stateDir)
-	target := portalLogName + "." + today // relative target — same directory.
-
-	if existing, err := os.Readlink(link); err == nil && existing == target {
-		return // already points at today's file.
-	}
-	_ = os.Remove(link)
-	_ = os.Symlink(target, link)
 }
 
 // probe eagerly opens today's file so a configuration failure (unwritable
