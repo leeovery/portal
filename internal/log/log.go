@@ -124,6 +124,15 @@ func setHandler(h slog.Handler) {
 	swap.store(h)
 }
 
+// currentHandler returns the inner handler currently pinned behind the shared
+// indirection, read directly from the same atomic cell setHandler stores into
+// (without applying any WithAttrs/WithGroup mod chain). It is the unexported
+// read counterpart to setHandler, used by SetTestHandler to capture the
+// previously-pinned handler so it can be restored on test cleanup.
+func currentHandler() slog.Handler {
+	return *swap.inner.Load()
+}
+
 // For returns a component-bound child logger (root.With("component", name)).
 // It is safe to call before Init — root is constructed in this package's init,
 // so For always returns a valid, non-nil *slog.Logger. An empty component is
