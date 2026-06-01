@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 1
 phase: Plan Integrity Review
@@ -43,7 +43,7 @@ The correct structural relationship is: **5-8 depends on 5-7** for the shared `s
 **Proposed**:
 > - Use the package-level `var saverLogger = log.For("saver")` introduced by task 5-7 in `internal/tmux/portal_saver.go` (component `saver` per the closed taxonomy). This task depends on 5-7 for that shared logger var — do NOT re-declare it here (a second `var saverLogger` in the same file is a duplicate-declaration compile error). Tasks 5-7 and 5-8 land in dependency order (5-7 first); 5-7 owns the var declaration, 5-8 only references it. If for any reason 5-8 is implemented in isolation ahead of 5-7, add the var to 5-7's scope first rather than duplicating it here.
 
-**Resolution**: Pending
+**Resolution**: Fixed — task 5-8's first Do bullet rewritten in phase-5-tasks.md and the tick task (tick-af09b2) description to make 5-7 the sole owner of `var saverLogger` and declare 5-8's dependency on it (no re-declaration); added an explicit tick dependency edge `5-8 blocked_by 5-7` (tick-af09b2 blocked by tick-cb4c1b). Approved via `auto`.
 **Notes**: Self-contained, low-risk fix — clarifies an ownership/ordering relationship that is otherwise sound. The `kill-barrier escalated` INFO correctly sits above the Phase-4 (task 4-4) DEBUG breadcrumb, and that cross-phase relationship is well-documented; only the intra-phase shared-var ownership needs the dependency made explicit. If the orchestrator/tick supports `blocked_by`, optionally set 5-8 blocked_by 5-7 to encode the edge structurally.
 
 ---
@@ -68,7 +68,7 @@ This is therefore a readability/granularity note rather than a split mandate: th
 **Proposed**:
 > No content change recommended. The over-length Do-sections are the legitimate "enumerate many call sites of one mechanical change" exception to the ≤5-step heuristic, and each task remains a single coherent, independently-testable TDD cycle. Splitting 1-8 in particular would violate the deliberate "1-8 + 1-9 land together as one big-bang PR" contract. Recorded for user awareness; close as "won't fix / acknowledged" unless the user wants tighter cycles.
 
-**Resolution**: Pending
+**Resolution**: Acknowledged (won't fix) — per the finding's own Proposed recommendation, no content change. The over-length Do-sections are the legitimate "enumerate many call sites of one mechanical change" exception to the ≤5-step heuristic; each remains a single coherent TDD cycle, and splitting 1-8 would break the deliberate "1-8 + 1-9 land together" big-bang contract. Recorded for awareness. Approved via `auto`.
 **Notes**: Raised for transparency against the Task Design scope signal. The plan author appears to have made a conscious, defensible trade-off (atomic mechanical sweeps as single tasks) that is consistent with the big-bang-migration design. No implementation ambiguity results from the length — the bullets are concrete and ordered.
 
 ---
