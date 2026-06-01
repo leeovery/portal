@@ -19,7 +19,8 @@ approved_at: 2026-06-01
 - [ ] All former `state.Logger` call sites and the `*state.Logger` test-mock surfaces (`bootstrapDeps` and friends) compile against `*slog.Logger`; `go test ./...` is green
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
