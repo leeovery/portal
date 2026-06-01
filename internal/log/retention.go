@@ -46,14 +46,44 @@ var removeFunc = os.Remove
 // a correctness boundary — the slip self-heals at ~tens-of-MB cost, so there is
 // no resumable sentinel (rejected as disproportionate complexity).
 func runRetentionSweep(stateDir, today string, gated bool) {
+	// nil forcedDays => resolve the retention window from the environment (the
+	// per-process-startup path). The `portal clean --logs` path threads an
+	// explicit value via runRetentionSweepWithDays instead.
+	runRetentionSweepWithDays(stateDir, today, gated, nil)
+}
+
+// runRetentionSweepWithDays is the shared sweep implementing the retention rule
+// (spec § Retention policy and audit, Mechanical rule steps 0-3). It is the
+// single source of the walk/delete/prune logic — both the per-process-startup
+// path (runRetentionSweep, forcedDays==nil) and the `portal clean --logs` path
+// (SweepLogs, forcedDays!=nil) delegate here so the algorithm is never
+// duplicated.
+//
+// forcedDays selects the retention window:
+//   - forcedDays==nil: resolve PORTAL_LOG_RETENTION_DAYS from the environment
+//     (default 30); an invalid value emits the canonical fallback WARN.
+//   - forcedDays!=nil: use *forcedDays verbatim, bypassing env resolution. The
+//     `--logs` path passes 0 (cutoff == today: delete every prior-day rotated
+//     file, leaving only today's). No invalid-env WARN is emitted on this path —
+//     the value is explicit, not resolved.
+//
+// gated selects the single-winner discipline (step 0) AND the sentinel-prune
+// breadth (step 3):
+//   - gated==true (per-process startup): step 0 claims the day via an
+//     O_CREAT|O_EXCL portal.log.swept.<today> sentinel; EEXIST means another
+//     process owns today's sweep — return immediately, run nothing, emit
+//     nothing. Step 3 prunes only swept.<date> sentinels where date != today
+//     (KEEPS today's live claim).
+//   - gated==false (`portal clean --logs`): step 0 is SKIPPED — an explicit user
+//     invocation always runs regardless of any existing sentinel. Step 3 removes
+//     EVERY swept.* sentinel, today's included (an explicit user clean wants a
+//     clean slate; the next per-process startup re-claims its own gate).
+func runRetentionSweepWithDays(stateDir, today string, gated bool, forcedDays *int) {
 	if gated && !claimSweepGate(stateDir, today) {
 		return // Lost the single-winner gate: another process owns today's sweep.
 	}
 
-	retentionDays, source, raw := resolveRetentionDays(os.Getenv("PORTAL_LOG_RETENTION_DAYS"))
-	if source == sourceFallback {
-		rotateLogger.Warn("invalid PORTAL_LOG_RETENTION_DAYS", "raw", raw, "retention", retentionDays)
-	}
+	retentionDays := resolveSweepRetentionDays(forcedDays)
 
 	cutoff, ok := retentionCutoff(today, retentionDays)
 	if !ok {
@@ -61,7 +91,51 @@ func runRetentionSweep(stateDir, today string, gated bool) {
 	}
 
 	deletePastCutoff(stateDir, cutoff, retentionDays)
-	pruneStaleSentinels(stateDir, today)
+	pruneStaleSentinels(stateDir, today, gated)
+}
+
+// resolveSweepRetentionDays returns the retention-window day count for the
+// sweep. With an explicit forcedDays (the `--logs` path) it is used verbatim and
+// no env resolution or invalid-value WARN occurs. With forcedDays==nil (the
+// per-process path) it resolves PORTAL_LOG_RETENTION_DAYS from the environment,
+// emitting the canonical fallback WARN on an invalid value.
+func resolveSweepRetentionDays(forcedDays *int) int {
+	if forcedDays != nil {
+		return *forcedDays
+	}
+
+	retentionDays, source, raw := resolveRetentionDays(os.Getenv("PORTAL_LOG_RETENTION_DAYS"))
+	if source == sourceFallback {
+		rotateLogger.Warn("invalid PORTAL_LOG_RETENTION_DAYS", "raw", raw, "retention", retentionDays)
+	}
+	return retentionDays
+}
+
+// SweepLogs is the exported entry point onto the shared retention sweep. It
+// computes today's calendar-day key from the injectable clock (nowFunc) and
+// delegates to runRetentionSweepWithDays — both the `portal clean --logs` path
+// (this function) and the per-process day-roll path (runRetentionSweep, wired
+// into the sink's dayRoll seam) run the SAME walk/delete/prune logic; the
+// algorithm is never duplicated.
+//
+// The retentionDays argument is honoured ONLY when gated==false (the explicit
+// `--logs` invocation): it forces the cutoff (0 => cutoff == today, deleting
+// every prior-day rotated file and leaving only today's). When gated==true (the
+// per-process path), retentionDays is ignored and the window is resolved from
+// PORTAL_LOG_RETENTION_DAYS, preserving the env-driven default. The signature is
+// uniform so callers share one entry point; the gated flag selects the policy.
+//
+// The error return is reserved for future failure surfacing; the sweep is
+// best-effort (per-file failures WARN and continue) so SweepLogs currently
+// always returns nil.
+func SweepLogs(stateDir string, retentionDays int, gated bool) error {
+	today := nowFunc().Format(dateLayout)
+	if gated {
+		runRetentionSweepWithDays(stateDir, today, true, nil)
+		return nil
+	}
+	runRetentionSweepWithDays(stateDir, today, false, &retentionDays)
+	return nil
 }
 
 // claimSweepGate creates ${stateDir}/portal.log.swept.<today> via O_CREAT|O_EXCL
@@ -124,13 +198,20 @@ func deletePastCutoff(stateDir string, cutoff time.Time, retentionDays int) {
 	}
 }
 
-// pruneStaleSentinels unlinks every portal.log.swept.<date> sentinel whose date
-// is not today (step 3). The date-cutoff walk (deletePastCutoff) excludes the
-// swept.* family by construction (its date slot is the literal "swept", which
-// pastDayLogDate rejects), so sentinels are reclaimed here by an exact not-today
-// rule rather than by the retention cutoff. An unlink failure emits ONE WARN and
-// the prune CONTINUES.
-func pruneStaleSentinels(stateDir, today string) {
+// pruneStaleSentinels unlinks portal.log.swept.<date> sentinels (step 3). The
+// date-cutoff walk (deletePastCutoff) excludes the swept.* family by
+// construction (its date slot is the literal "swept", which pastDayLogDate
+// rejects), so sentinels are reclaimed here rather than by the retention cutoff.
+// An unlink failure emits ONE WARN and the prune CONTINUES.
+//
+// gated selects the prune breadth:
+//   - gated==true (per-process startup): keep today's sentinel (the live
+//     single-winner claim) and unlink only date != today.
+//   - gated==false (`portal clean --logs`): remove EVERY swept.* sentinel,
+//     today's included. This is --logs-only behaviour — an explicit user clean
+//     wants a clean slate, and the next per-process startup re-claims its own
+//     gate.
+func pruneStaleSentinels(stateDir, today string, gated bool) {
 	matches, err := filepath.Glob(filepath.Join(stateDir, sweptPrefix+"*"))
 	if err != nil {
 		return
@@ -138,8 +219,11 @@ func pruneStaleSentinels(stateDir, today string) {
 
 	for _, path := range matches {
 		date, ok := sweptSentinelDate(filepath.Base(path))
-		if !ok || date == today {
-			continue // Not a swept.<date> sentinel, or today's (the live claim).
+		if !ok {
+			continue // Not a swept.<date> sentinel.
+		}
+		if gated && date == today {
+			continue // Per-process path keeps today's live claim; --logs removes it.
 		}
 		if err := removeFunc(path); err != nil {
 			rotateLogger.Warn("sentinel prune failed", "error", err, "path", path)

@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -55,88 +58,126 @@ var cleanCmd = &cobra.Command{
 			}
 		}
 
-		// Hook cleanup: remove entries for panes that no longer exist.
-		// Log under the bootstrap component so the hook-cleanup tail emits the
-		// same auditable breadcrumbs as bootstrap step 11
-		// (cleanStaleAdapter.CleanStale, which composes the same shared
-		// helper). The handler is configured once by main -> log.Init.
-		logger := bootstrapLogger
-
-		// Load hook store first to check if any hooks exist.
-		hookStore, err := loadHookStore()
-		if err != nil {
+		if err := cleanStaleHooks(w); err != nil {
 			return err
 		}
 
-		// Early-exit Load — drives the persisted==0 short-circuit which
-		// keeps the no-tmux-server ergonomics intact (the panickingPaneLister
-		// integration subtest pins this: the lister MUST NOT be invoked
-		// when persisted==0). The shared helper performs its own Load
-		// after this branch returns; accepting the duplicate ReadFile is
-		// intentional (see option (a) in the parent plan task) — both
-		// Loads observe the same on-disk content and the helper stays
-		// self-contained.
-		//
-		// On Load failure here we fall through to runHookStaleCleanup
-		// rather than emit our own Warn — the helper performs its own
-		// Load, reproduces the same failure deterministically, and emits
-		// the canonical "stale-hook cleanup: hookStore.Load failed" Warn
-		// at its single declaration site. This keeps the format string
-		// declared exactly once across package cmd (acceptance criterion
-		// 1 of the parent plan task). The trade-off is a redundant
-		// ListAllPanes call on the Load-failure path — acceptable because
-		// (a) the helper's swallow policy means ListAllPanes never fails
-		// the user's command, and (b) Load failures are rare (corrupt or
-		// permission-denied hooks.json).
-		//
-		// loadErr is captured (NOT discarded with `_`) so the persisted==0
-		// early-exit only fires when Load actually succeeded with an empty
-		// map. Without the err-gate, a (nil, EACCES) return from Load
-		// satisfies len(nil) == 0 and silently short-circuits past the
-		// helper — re-introducing the "silent at the adapter" defect class
-		// the parent spec set out to eliminate (acceptance criterion 4).
-		existingHooks, loadErr := hookStore.Load()
-
-		// No hooks registered — nothing to clean. Emit a single Debug
-		// breadcrumb so every invocation of portal clean produces at least
-		// one log line (preserves no-tmux-server ergonomics while keeping
-		// the cleanup callsite observable in portal.log). This breadcrumb
-		// stays at the callsite — the shared helper does NOT emit it.
-		// Gated on loadErr == nil so Load failures fall through to the
-		// helper for canonical-Warn emission rather than silently exiting.
-		if loadErr == nil && len(existingHooks) == 0 {
-			logger.Debug("stale-hook cleanup: persisted=0, skipping")
-			return nil
+		// Opt-in log cleanup. Default false => behaviour is byte-identical to
+		// the pre-flag command (rotated logs preserved, no sweep triggered).
+		// When set, run the deliberate user-triggered retention sweep with
+		// cutoff=today (delete every rotated file older than today) and the
+		// single-winner gate bypassed. clean is in the bootstrap-exclusion
+		// list, so this is NOT the automatic per-process sweep.
+		logs, _ := cmd.Flags().GetBool("logs")
+		if logs {
+			cleanRotatedLogs()
 		}
-
-		// Delegate the six-branch algorithm to the shared helper.
-		// swallowListError=true so a transient ListAllPanes failure never
-		// fails the user's command (the Warn lands in portal.log for audit).
-		// onRemoved prints "Removed stale hook: <key>" per removed entry,
-		// preserving the pre-extraction user-facing stdout byte-for-byte.
-		//
-		// Return value is deliberately discarded: with swallowListError=true
-		// the helper already returns nil for ListAllPanes errors. The
-		// remaining return paths are (a) nil on the happy path and (b) a
-		// hookStore.Load / CleanStale error on the destructive branches.
-		// Per spec §Logger plumbing / portal clean: "the subcommand's
-		// RunE continues to return nil for the hook-cleanup tail's
-		// transient failures (matching the existing pre-fix safety-net
-		// posture which already chose silence-and-continue over
-		// user-facing error)". The helper has already emitted the
-		// canonical Warn breadcrumb to portal.log before returning, so
-		// the failure is post-hoc auditable.
-		_ = runHookStaleCleanup(
-			buildCleanPaneLister(),
-			hookStore,
-			logger,
-			true,
-			func(paneID string) {
-				_, _ = fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)
-			},
-		)
 		return nil
 	},
+}
+
+// cleanStaleHooks removes hook entries whose structural pane key is no longer
+// represented by a live pane, printing one "Removed stale hook: <key>" line per
+// removal to w. It is the hook-cleanup tail extracted out of RunE so the opt-in
+// log sweep can run after it regardless of the persisted==0 short-circuit.
+func cleanStaleHooks(w io.Writer) error {
+	// Log under the bootstrap component so the hook-cleanup tail emits the
+	// same auditable breadcrumbs as bootstrap step 11
+	// (cleanStaleAdapter.CleanStale, which composes the same shared
+	// helper). The handler is configured once by main -> log.Init.
+	logger := bootstrapLogger
+
+	// Load hook store first to check if any hooks exist.
+	hookStore, err := loadHookStore()
+	if err != nil {
+		return err
+	}
+
+	// Early-exit Load — drives the persisted==0 short-circuit which
+	// keeps the no-tmux-server ergonomics intact (the panickingPaneLister
+	// integration subtest pins this: the lister MUST NOT be invoked
+	// when persisted==0). The shared helper performs its own Load
+	// after this branch returns; accepting the duplicate ReadFile is
+	// intentional (see option (a) in the parent plan task) — both
+	// Loads observe the same on-disk content and the helper stays
+	// self-contained.
+	//
+	// On Load failure here we fall through to runHookStaleCleanup
+	// rather than emit our own Warn — the helper performs its own
+	// Load, reproduces the same failure deterministically, and emits
+	// the canonical "stale-hook cleanup: hookStore.Load failed" Warn
+	// at its single declaration site. This keeps the format string
+	// declared exactly once across package cmd (acceptance criterion
+	// 1 of the parent plan task). The trade-off is a redundant
+	// ListAllPanes call on the Load-failure path — acceptable because
+	// (a) the helper's swallow policy means ListAllPanes never fails
+	// the user's command, and (b) Load failures are rare (corrupt or
+	// permission-denied hooks.json).
+	//
+	// loadErr is captured (NOT discarded with `_`) so the persisted==0
+	// early-exit only fires when Load actually succeeded with an empty
+	// map. Without the err-gate, a (nil, EACCES) return from Load
+	// satisfies len(nil) == 0 and silently short-circuits past the
+	// helper — re-introducing the "silent at the adapter" defect class
+	// the parent spec set out to eliminate (acceptance criterion 4).
+	existingHooks, loadErr := hookStore.Load()
+
+	// No hooks registered — nothing to clean. Emit a single Debug
+	// breadcrumb so every invocation of portal clean produces at least
+	// one log line (preserves no-tmux-server ergonomics while keeping
+	// the cleanup callsite observable in portal.log). This breadcrumb
+	// stays at the callsite — the shared helper does NOT emit it.
+	// Gated on loadErr == nil so Load failures fall through to the
+	// helper for canonical-Warn emission rather than silently exiting.
+	if loadErr == nil && len(existingHooks) == 0 {
+		logger.Debug("stale-hook cleanup: persisted=0, skipping")
+		return nil
+	}
+
+	// Delegate the six-branch algorithm to the shared helper.
+	// swallowListError=true so a transient ListAllPanes failure never
+	// fails the user's command (the Warn lands in portal.log for audit).
+	// onRemoved prints "Removed stale hook: <key>" per removed entry,
+	// preserving the pre-extraction user-facing stdout byte-for-byte.
+	//
+	// Return value is deliberately discarded: with swallowListError=true
+	// the helper already returns nil for ListAllPanes errors. The
+	// remaining return paths are (a) nil on the happy path and (b) a
+	// hookStore.Load / CleanStale error on the destructive branches.
+	// Per spec §Logger plumbing / portal clean: "the subcommand's
+	// RunE continues to return nil for the hook-cleanup tail's
+	// transient failures (matching the existing pre-fix safety-net
+	// posture which already chose silence-and-continue over
+	// user-facing error)". The helper has already emitted the
+	// canonical Warn breadcrumb to portal.log before returning, so
+	// the failure is post-hoc auditable.
+	_ = runHookStaleCleanup(
+		buildCleanPaneLister(),
+		hookStore,
+		logger,
+		true,
+		func(paneID string) {
+			_, _ = fmt.Fprintf(w, "Removed stale hook: %s\n", paneID)
+		},
+	)
+	return nil
+}
+
+// cleanRotatedLogs runs the `portal clean --logs` retention sweep: cutoff=today
+// (retentionDays=0) with the single-winner gate bypassed (gated=false), reusing
+// the same log.SweepLogs entry point the per-process day-roll path uses (no
+// algorithm duplication). It is best-effort and must not hard-fail the clean: an
+// unresolvable state dir or a sweep failure is logged under the bootstrap
+// component and swallowed.
+func cleanRotatedLogs() {
+	stateDir, err := state.EnsureDir()
+	if err != nil {
+		bootstrapLogger.Warn("clean --logs: state dir unresolvable, skipping log sweep", "error", err)
+		return
+	}
+	if err := log.SweepLogs(stateDir, 0, false); err != nil {
+		bootstrapLogger.Warn("clean --logs: log sweep failed", "error", err)
+	}
 }
 
 // loadProjectStore creates a project store from the configured file path.
@@ -158,5 +199,6 @@ func projectsFilePath() (string, error) {
 }
 
 func init() {
+	cleanCmd.Flags().Bool("logs", false, "also delete rotated portal.log history older than today")
 	rootCmd.AddCommand(cleanCmd)
 }
