@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Logging foundation and call-site migration
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Establish the `internal/log` package (slog-based, swappable-handler indirection, `For`/`Init`/`Close`/`SetTestHandler`) with the locked level contract, `process_role` resolution, and the `main` exit shape; migrate every existing call site off `internal/state.Logger` in one big-bang sweep.
 
@@ -18,7 +19,8 @@ status: draft
 - [ ] All former `state.Logger` call sites and the `*state.Logger` test-mock surfaces (`bootstrapDeps` and friends) compile against `*slog.Logger`; `go test ./...` is green
 
 ### Phase 2: Rotation, retention, and defensive invariants
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Implement the date-aware rotating handler (calendar-daily boundary, `O_CREAT|O_EXCL` first-of-day open, inode-identity reopen, pid-scoped symlink swing, size-cap safety valve, rotated-file immutability), the single-winner retention sweep with per-deletion breadcrumbs, the per-process lifecycle markers (`process: start`/`exit`/`exec`/`panic`), the level-filter bypass for lifecycle markers, and the `log-level resolved` propagation line with its `portaltest` assertion helper.
 
@@ -33,7 +35,8 @@ status: draft
 - [ ] `portaltest.AssertLogLevelResolved` is available and asserts the resolved level with `source=env` for a given pid; disk-full/`chmod`/symlink failures are best-effort and never crash portal
 
 ### Phase 3: State-mutation audit trail for user config files
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Instrument the `hooks`, `aliases`, and `projects` store mutation methods (`Set`/`Remove`/`Save`/`CleanStale`) at the store seam — INFO on success, WARN on `AtomicWrite` failure — with the closed `op` vocabulary, the per-file key attr, `value`/`via` optionals, no-op DEBUG handling, batch summaries, and the one sanctioned `migrateConfigFile` emission site.
 
@@ -47,7 +50,8 @@ status: draft
 - [ ] `migrateConfigFile` emits one INFO per migrated file under the file's owning component with `op=migrate via=migrate`, and `AtomicWrite` remains audit-unaware (no logging inside it, none scattered at callers)
 
 ### Phase 4: Diagnostic context preservation at boundaries
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Sweep the four external-boundary classes (`exec.Cmd`, `internal/tmux` commander, `os` syscalls, `io`/FIFO reads) so every wrapped error embeds stderr/errno/phase context, and close the four enumerated existing-code defects (`defaultIdentifyPS`, `escalateKillToSIGKILL`, `ShowGlobalHooks` asymmetry, uncommented defensive branches).
 
@@ -61,7 +65,8 @@ status: draft
 - [ ] All four enumerated gap-closure sites are fixed per their prescribed remedy (stderr embed, escalation DEBUG breadcrumb, missing WARN branch, code comment)
 
 ### Phase 5: Cycle summaries and saver/daemon lifecycle catalogs
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Instrument every cataloged cycle (daemon tick, bootstrap orchestration + per-step, restore phase A/B, the three clean sweeps) with one INFO summary carrying the closed unit/sub-category counts + `took` and per-item DEBUG/WARN, and emit the closed saver/daemon lifecycle event taxonomy (placeholder created, destroy-unattached off, respawn-daemon, daemon ready, kill-barrier started/escalated, placeholder died; daemon lock acquired, self-eject, shutdown).
 
@@ -75,7 +80,8 @@ status: draft
 - [ ] Hysteresis-internal probe failures are DEBUG per tick with one INFO on the trip; reason value spaces match the closed catalogs
 
 ### Phase 6: Hydrate-helper forensic trail
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 **Goal**: Instrument the hydrate helper's exec chain (`execShellOrHookAndExit` path in `cmd/state_hydrate.go`) with the hook-lookup DEBUG breadcrumb, the four exit-path INFO lines (fifo missing, signal timeout, scrollback missing, scrollback replayed), and the terminal `hydrate: exec` INFO line structurally parallel to `process: exec`.
 
