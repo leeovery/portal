@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 1
 phase: Gap Analysis
@@ -26,10 +26,10 @@ This directly contradicts two adjacent claims:
 This is load-bearing: the entire feature exists to make termination forensically unambiguous via these markers. An implementer copying the shown `main` shape gets a double-emit; an investigator applying the four-way table sees a `start` followed by both `panic` and `exit` with no rule covering that pairing. Two reasonable implementations result: (a) skip `Close` on the panic path so only `process: panic` fires, or (b) accept the pair and document `panic`-then-`exit` as a defined sequence. The spec must pin one.
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Reworked the `main` exit-shape: a `panicked` flag set in the recover handler guards `log.Close(code)` so it is skipped on the panic path — `process: panic` becomes the sole terminal marker. Added a clarifying sentence that the four-way classification stays mutually exclusive.
 
-**Resolution**: Pending
-**Notes**: Priority: Critical — undermines the forensic terminal-marker guarantee that motivates the feature; spec contains a self-contradiction an implementer cannot resolve without guessing.
+**Resolution**: Approved
+**Notes**: Priority: Critical. Logged verbatim into *Defensive invariants*.
 
 ---
 
@@ -45,10 +45,10 @@ This is load-bearing: the entire feature exists to make termination forensically
 Portal has more invocation surfaces than role values: `open`/`x`, `attach`, `bootstrap`, `state daemon`, `state hydrate`, `state signal-hydrate`, `hooks set`/`rm`, `clean`, `alias`, `config`, `version`, `init`. An implementer cannot determine without guessing, e.g.: does `portal attach` map to `tui` or its own role? `portal config`/`alias`/`version`/`init` map to which of the six? Is `portal state signal-hydrate` → `hydrate`? And because `Init` is called before argv is parsed, the mechanism for resolving the role at `Init` time (pre-parse argv inspection? a per-entry-point Init call? a default with later refinement?) is itself unspecified. This blocks task breakdown for the `main`/`Init` wiring and risks inconsistent `process_role` values across binary paths — the exact attr the spec calls "critical for multi-writer disambiguation."
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Added a `process_role` resolution subsection to *The `internal/log` package*: `main` resolves the role from a longest-prefix `os.Args` subcommand-token match before parsing, with a full mapping table covering all 6 values (`daemon`, `hydrate`, `hooks_cli`, `clean`, `tui`, and `bootstrap` as the explicit default/fallback). Baseline-attr table cross-references it.
 
-**Resolution**: Pending
-**Notes**: Priority: Important — forces the implementer to design the invocation→role mapping and the pre-parse resolution mechanism that the spec relies on for forensic disambiguation.
+**Resolution**: Approved
+**Notes**: Priority: Important. `bootstrap` is defined as the default/fallback so the closed value space is fully covered. Logged into *The `internal/log` package*.
 
 ---
 
@@ -64,10 +64,10 @@ The `process: panic` line is written as `log.For("process").Error("panic", "reas
 Given the spec's emphatically closed, group-organized vocabulary and its "no ad-hoc invention at call-site time" rule (lines 228–232), this is an internal inconsistency: a `process:` line carries an attr the Process group does not sanction. Either `reason` should be listed in the Process group (and the "7" count reconciled), or the panic line should use a Process-group key. A reviewer applying the closed-vocabulary rule mechanically would flag the spec's own example as a violation.
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Noted in the Process attr group that `process: panic` carries `reason`, which is defined in the Lifecycle group and cross-listed (not a new key; counted once in the 49-key total).
 
-**Resolution**: Pending
-**Notes**: Priority: Important — closed-vocabulary contradiction in a normative code example; affects the per-group key counts the spec treats as authoritative. (Note: the 49-key total is fixed by scope; resolution likely reassigns/cross-lists `reason` rather than adding a new key — to confirm in discussion.)
+**Resolution**: Approved
+**Notes**: Priority: Important. Cross-listed rather than adding a key — 49-key total preserved.
 
 ---
 
@@ -86,10 +86,10 @@ The "Set where" column says `version` (line 199) and `process_role` (line 200) a
 So "Root logger construction" is the wrong attribution for all three non-`component` baselines; the values arrive via `Init` and are injected per-record by the configured handler. (`pid` is also nominally available at package-init but the same per-record-injection mechanism applies.) An implementer reading the table literally might try to bake `version`/`process_role` into the root logger at package-`init` construction — which is impossible (values unavailable) and contradicts the per-record-injection design that the spec specifically chose to avoid the package-init-children-miss-baselines footgun.
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Corrected the baseline-attr "Set where" column: `pid` captured at `Init` (`os.Getpid()`), `version`/`process_role` passed to `Init`, all three injected per-record by the configured handler — replacing the incorrect "Root logger construction" attribution.
 
-**Resolution**: Pending
-**Notes**: Priority: Important — the "Set where" column misdescribes the injection point in a way that conflicts with the package's stated construction order and injection mechanism; could lead to an unimplementable or wrong wiring.
+**Resolution**: Approved
+**Notes**: Priority: Important. Now consistent with the per-record-injection design and the package construction order.
 
 ---
 
@@ -107,10 +107,10 @@ The timeout failure-mode line is specified as `hookLogger.Info("signal timeout",
 A string `"3s"` would render as `took="3s"` (quoted, per the string rule), whereas every other `took` in the spec renders unquoted (`took=1.2s`, `took=2.1s`). This produces a typed-value inconsistency on one cataloged line that an implementer would copy verbatim. (The success line one row down correctly uses a real `took` variable: `"took", took`.)
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Changed the `signal timeout` cataloged line from `"took", "3s"` (string) to `"took", signalTimeout` (the 3s `time.Duration` constant), with a note that it renders `took=3s` unquoted.
 
-**Resolution**: Pending
-**Notes**: Priority: Minor — single normative example uses a string where the catalog mandates a `time.Duration`; cosmetic rendering drift but on the closed-vocabulary surface.
+**Resolution**: Approved
+**Notes**: Priority: Minor. Now consistent with `took`'s `time.Duration` type and the duration-rendering rule.
 
 ---
 
@@ -126,9 +126,9 @@ The canonical multi-step example logs `log.Debug("fifo opened", "fd", fd, "took"
 Given the spec's hard rule that contributors "MAY NOT introduce new attr names ad hoc" and that "every contributor consults these lists" (lines 228–232), an illustrative example that uses a non-vocabulary attr key undercuts that rule and could lead a copying implementer to believe `fd` is sanctioned. Either add a one-line note that the example's `fd` is illustrative-only (not vocabulary), or replace it with a vocabulary key.
 
 **Proposed Addition**:
-*(leave blank until discussed)*
+Removed the non-vocabulary `fd` attr from the canonical call-site example (`log.Debug("fifo opened", "took", time.Since(start))`), so the illustrative example uses only closed-vocabulary keys.
 
-**Resolution**: Pending
-**Notes**: Priority: Minor — the disclaimer arguably covers it, but the closed-vocabulary discipline is a central, strongly-worded contract, so an example violating it is worth a clarifying note.
+**Resolution**: Approved
+**Notes**: Priority: Minor. Keeps the teaching example consistent with the "no ad-hoc attr names" rule it illustrates.
 
 ---

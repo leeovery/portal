@@ -84,6 +84,21 @@ func SetTestHandler(t *testing.T, h slog.Handler)
 
 The custom handler also owns rotation (see Log rotation mechanism), retention sweeps (see Retention policy), the `component:`-prefix text rendering and the lifecycle-marker level-filter bypass (see Subsystem prefix taxonomy and Defensive invariants). The text-mode line format is fully specified in the Subsystem prefix taxonomy section.
 
+### `process_role` resolution
+
+Because `Init` is called from `main` before any other portal code (and before Cobra parses argv), `main` resolves `process_role` from a lightweight `os.Args` inspection — a longest-prefix match of the leading subcommand tokens against a small static table, matching on subcommand path tokens only (flags ignored) so it needs no full parse. The resolved value is passed to `log.Init`.
+
+| Leading `os.Args[1:]` tokens | `process_role` |
+|---|---|
+| `state daemon` | `daemon` |
+| `state hydrate` / `state signal-hydrate` | `hydrate` |
+| `hooks …` | `hooks_cli` |
+| `clean` | `clean` |
+| `open …` / `x …` / `attach …` / no subcommand (bare `portal`) | `tui` |
+| anything else | `bootstrap` (default/fallback) |
+
+First match wins. `bootstrap` is the explicit default for any invocation not matched above, so the closed 6-value space is fully covered and no invocation is left unmapped.
+
 ### Consumer usage
 
 Every package that logs binds its component name once at package init:
@@ -184,7 +199,7 @@ This list is the **single source of truth** for the component count.
 
 **Hydrate** (set per hook-firing exec-chain event) — 3: `result`, `hook_present`, `bytes`.
 
-**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel.
+**Process** (set per `process:` lifecycle/diagnostic line) — 7: `cmd`, `args`, `target`, `code`, `resolved`, `source`, `raw`. `target` + `args` are the **shared exec-handoff attrs** used by both `process: exec` and `hydrate: exec`, so the two `syscall.Exec` markers are structurally parallel. The `process: panic` line additionally carries `reason` — that key is **defined in the Lifecycle group and cross-listed here** (not a separate key; the 49-key total counts it once).
 
 **Baseline** (auto-injected per-record by the configured handler) — 4: `component` (set per package via `log.For`), `pid`, `version`, `process_role`.
 
@@ -195,9 +210,9 @@ Every line carries these four, injected **per-record** by the configured handler
 | Key | Set where |
 |---|---|
 | `component` | Per-package via `log.For("...")` |
-| `pid` | Root logger construction (`os.Getpid()`) |
-| `version` | Root logger construction (build-time `cmd.version`) |
-| `process_role` | Root logger construction — one of `daemon` / `bootstrap` / `hydrate` / `hooks_cli` / `tui` / `clean`. Identifies which portal binary invocation emitted the line; critical for multi-writer disambiguation on reboot-recovery days. |
+| `pid` | Captured at `Init` (`os.Getpid()`); injected per-record by the configured handler |
+| `version` | Passed to `Init` (build-time `cmd.version`); injected per-record by the configured handler |
+| `process_role` | Passed to `Init` — one of `daemon` / `bootstrap` / `hydrate` / `hooks_cli` / `tui` / `clean` (resolution in *The `internal/log` package* § `process_role` resolution); injected per-record by the configured handler. Identifies which portal binary invocation emitted the line; critical for multi-writer disambiguation on reboot-recovery days. |
 
 Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB/day). They make every line self-describing for forensic use across multi-writer days.
 
@@ -310,7 +325,7 @@ func Process(paneKey, fifoPath string) error {
     if err != nil {
         return err
     }
-    log.Debug("fifo opened", "fd", fd, "took", time.Since(start))
+    log.Debug("fifo opened", "took", time.Since(start))
 
     if err := awaitSignal(fd); err != nil {
         return err
@@ -518,18 +533,25 @@ log.For("process").Info("exit",
 func main() {
     log.Init(...)
     code := 0
+    panicked := false
     func() {
         defer func() {
-            if r := recover(); r != nil { log.For("process").Error("panic", "reason", r); code = 2 }
+            if r := recover(); r != nil {
+                log.For("process").Error("panic", "reason", r)
+                code = 2
+                panicked = true
+            }
         }()
         if err := rootCmd.Execute(); err != nil { code = 1 }
     }()
-    log.Close(code)   // emits process: exit code=N — does NOT exit
+    if !panicked {
+        log.Close(code) // emits process: exit code=N — skipped on the panic path
+    }
     os.Exit(code)
 }
 ```
 
-- Exactly one terminal marker fires per run: `exit` on clean/error return, `panic` on a recovered panic. No double-emit, no defer-ordering ambiguity.
+- Exactly one terminal marker fires per run: `exit` on clean/error return, `panic` on a recovered panic. No double-emit, no defer-ordering ambiguity. On the panic path `process: panic` is the **sole** terminal marker — `Close` is skipped — so the four-way classification stays mutually exclusive.
 - **Bare `os.Exit` is prohibited outside `main`** (PR-review reject) — every other function returns an error/code. This prohibition is the enforcement mechanism for "every termination is marked."
 - `Execute()` maps to a return code rather than calling `os.Exit` inside.
 
@@ -932,7 +954,7 @@ This INFO line is the terminal-point summary for the hydrate helper process (its
 | Exit path | Code shape (approx.) | Log call |
 |---|---|---|
 | Silent ENOENT — helper opened FIFO and got "no such file or directory" | `cmd/state_hydrate.go` ~line 120 | `hookLogger.Info("fifo missing", "path", fifoPath)` then exec |
-| Timeout — helper waited 3s, signal never arrived | ~line 115 | `hookLogger.Info("signal timeout", "took", "3s")` then exec |
+| Timeout — helper waited 3s, signal never arrived | ~line 115 | `hookLogger.Info("signal timeout", "took", signalTimeout)` then exec (where `signalTimeout` is the 3s `time.Duration` constant — renders `took=3s`, not a quoted string) |
 | Scrollback file missing | ~line 147 | `hookLogger.Info("scrollback missing", "path", scrollbackPath)` then exec |
 | Success — signal arrived, scrollback dumped | ~line 188 | `hookLogger.Info("scrollback replayed", "bytes", n, "took", took)` then exec |
 
