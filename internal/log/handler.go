@@ -24,6 +24,27 @@ var stderrFallback io.Writer = os.Stderr
 // as a literal prefix before the colon — never as a key=value pair.
 const componentKey = "component"
 
+// processComponent is the component name carried by the portal-binary lifecycle
+// markers. A record bypasses the level filter only when its component is this
+// value AND its message is in lifecycleBypassMsgs.
+const processComponent = "process"
+
+// lifecycleBypassMsgs is the CLOSED process-lifecycle message set from the spec
+// (§ "Defensive invariants against log destruction" → "Lifecycle markers bypass
+// the level filter"). A record whose component is "process" and whose message is
+// one of these writes through the configured level gate UNCONDITIONALLY — these
+// are forensic tripwires (and, for "log-level resolved", a test anchor) that must
+// appear even at PORTAL_LOG_LEVEL=warn/error. They remain semantically INFO; the
+// bypass is the mechanism, not a level change. Adding to this set requires a spec
+// amendment.
+var lifecycleBypassMsgs = map[string]bool{
+	"start":              true,
+	"exit":               true,
+	"exec":               true,
+	"panic":              true,
+	"log-level resolved": true,
+}
+
 // textHandler is the configured tail/grep-default slog.Handler. It renders one
 // line per record in the form:
 //
@@ -80,11 +101,17 @@ func newTextHandler(w io.Writer, level slog.Leveler, pid int, version, processRo
 	}
 }
 
-// Enabled reports whether a record at the given level should be handled. This is
-// an ordinary level gate against the handler's slog.Leveler — the
-// lifecycle-marker level-filter bypass is Phase 2.
+// Enabled is a COARSE INFO-floor pre-gate, not the authoritative level filter —
+// Handle is (see Handle's doc). slog's Logger.Info calls Enabled(ctx, LevelInfo)
+// first and skips Handle entirely when it returns false, so Enabled MUST admit
+// INFO even when the handler is configured at WARN/ERROR; otherwise a lifecycle
+// INFO marker would be dropped before Handle ever sees its component+msg and
+// could apply the bypass. It admits anything at the INFO floor OR at/above the
+// configured level: at WARN this admits INFO+, at DEBUG it admits DEBUG+. The
+// authoritative drop for non-lifecycle INFO happens in Handle.
 func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level.Level()
+	floor := min(h.level.Level(), slog.LevelInfo)
+	return level >= floor
 }
 
 // Handle renders one line for r and writes it to the sink in a single
@@ -99,6 +126,17 @@ func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 	var b strings.Builder
 
 	component := h.component(r)
+
+	// The HANDLER — not Enabled — is the authoritative level-filter. Enabled is
+	// only a coarse INFO-floor pre-gate (so lifecycle INFO is never skipped before
+	// Handle sees the record's component+msg), which means non-lifecycle INFO
+	// records can reach Handle even when configured at WARN; Handle drops them
+	// here (negligible cost). A process-component record whose msg is in the closed
+	// lifecycle set ALWAYS writes — it bypasses the level gate unconditionally.
+	bypass := component == processComponent && lifecycleBypassMsgs[r.Message]
+	if !bypass && r.Level < h.level.Level() {
+		return nil
+	}
 
 	b.WriteString(r.Time.Format(time.RFC3339Nano))
 	b.WriteByte(' ')
