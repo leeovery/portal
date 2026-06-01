@@ -46,17 +46,27 @@ type rotatingSink struct {
 	ino uint64
 
 	// dayRoll is the day-roll sweep seam, fired ONLY when the calendar date
-	// advances (NOT on a same-day inode-mismatch reopen). Tasks 2-5 (chmod
-	// past-day sweep) and 2-8 (retention sweep) wire their bodies behind this
-	// callback. nil in this task's production wiring — the seam is gated on
-	// dateChanged so the sweeps run only on a real day roll.
+	// advances (NOT on a same-day inode-mismatch reopen), AFTER the new day's
+	// file is open and the symlink is swung (so the sweeps observe today's file
+	// as already opened). Production wiring (newRotatingSink) composes the
+	// day-roll sweeps here; Task 2-5 seals past-day files and Task 2-8 will add
+	// the retention sweep to the same callback. Tests override it to count fires
+	// or inject their own sweep body.
 	dayRoll func()
 }
 
 // newRotatingSink constructs a sink rooted at stateDir. No file is opened until
 // the first Write so a process that never logs touches no disk.
+//
+// The dayRoll seam is wired to the day-roll sweep chain: on a real calendar-day
+// roll it seals all past-day files (Task 2-5, Invariant 1). The closure reads
+// s.date, which reopen sets to today's date BEFORE firing the callback, so the
+// sweep excludes today's file and its same-day segments. Task 2-8 composes the
+// retention sweep onto this same closure next; the seam stays composable.
 func newRotatingSink(stateDir string) *rotatingSink {
-	return &rotatingSink{stateDir: stateDir}
+	s := &rotatingSink{stateDir: stateDir}
+	s.dayRoll = func() { sealPastDayFiles(s.stateDir, s.date) }
+	return s
 }
 
 // Write runs the per-Handle fd-selection step then performs one unbuffered
