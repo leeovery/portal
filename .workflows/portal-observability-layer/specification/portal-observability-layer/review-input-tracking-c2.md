@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 2
 phase: Input Review
@@ -34,7 +34,7 @@ slog four-level model (Debug / Info / Warn / Error) with the semantic contract b
 **Proposed Addition**:
 A short clause under the Log-level discipline Decision (or under Default and invalid-value handling) recording: the WARN→INFO flip affects only the unset case — a user who has explicitly set `PORTAL_LOG_LEVEL` (including `warn`) continues to resolve to that value unchanged; and the default change is deliberately NOT announced via an in-band log line (a `portal.log` notice would be invisible at the after-the-fact moment it would matter), so no "default changed" breadcrumb is emitted. *(Leave blank pending discussion.)*
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged the spec-relevant behaviour into *Log-level discipline* § Default and invalid-value handling (explicit levels honoured unchanged; no in-band "default changed" breadcrumb). The release-notes comms mechanism is explicitly scoped out as a delivery concern.
 
 ---

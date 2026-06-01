@@ -297,6 +297,8 @@ Default `PORTAL_LOG_LEVEL = info`. Invalid env value (any value that is not exac
 bootstrap: invalid PORTAL_LOG_LEVEL raw="<v>" resolved=info
 ```
 
+The WARN→INFO default flip affects only the **unset** case: a user who has explicitly set `PORTAL_LOG_LEVEL` (including `warn` or `error`) continues to resolve to that value unchanged (`source=env`). The default change is deliberately **not** announced by an in-band log line — a `portal.log` notice is invisible at the after-the-fact moment it would matter — so no "default changed" breadcrumb is emitted. (How the flip is communicated to users is a release-notes concern, out of scope here.)
+
 Spec writers MUST verify each new log call site against this table during spec authoring. Code reviewers verify the same at PR review time.
 
 ---
