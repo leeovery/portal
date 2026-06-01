@@ -15,10 +15,10 @@
     "specification": {
       "items": {
         "portal-observability-layer": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 4,
           "finding_gate_mode": "auto",
-          "date": "2026-05-31",
+          "date": "2026-06-01",
           "sources": {
             "portal-observability-layer": {
               "status": "incorporated"
