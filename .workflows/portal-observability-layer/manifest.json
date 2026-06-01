@@ -26,6 +26,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "portal-observability-layer": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "e5ada425f002c95224cd35cb2cf17487b69d2bc6",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
