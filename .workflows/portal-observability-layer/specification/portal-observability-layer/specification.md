@@ -707,6 +707,12 @@ The line's component (prefix) is the store's owning component: `hooks` / `aliase
 
 `write-failed-temp-create` / `write-failed-write` / `write-failed-fsync` / `write-failed-rename`
 
+**Which `error_class` space applies at which WARN site:**
+- A **whole-mutation WARN** (the store's `AtomicWrite` itself failed, so the write did not persist) carries `error_class` from the AtomicWrite phase space above (`write-failed-*`).
+- A **per-entry batch WARN** (one entry failed to process mid-loop while the batch continues) carries `error_class=unexpected` — the swallowed-error classification from the level-discipline table, since that entry's unit of work was dropped.
+
+The two never overlap: phase values describe a failed persist of the whole file; `unexpected` describes a single dropped per-item operation.
+
 **No-op handling:** a `set` call where the entry already exists and the value matches → DEBUG with `op=set-noop`. NOT INFO. Matches the level-discipline placement clarification for idempotent no-ops.
 
 **Batch operations** (e.g. `CleanStale` iterating entries):

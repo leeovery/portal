@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 3
 phase: Gap Analysis
@@ -39,7 +39,7 @@ Impact is narrow (one attr value on the CleanStale per-entry WARN line) and does
 **Proposed Addition**:
 Pin which `error_class` value space applies to which WARN path. Suggested: state explicitly that the **whole-mutation WARN** (when the store's single `AtomicWrite` fails) carries the AtomicWrite phase value (`write-failed-*`), while a **batch per-entry WARN** (a single entry failing mid-loop, before/independent of the end-of-batch write) carries the swallowed-error classification value (`unexpected`) per the level-discipline table — i.e. the two value spaces correspond to two structurally different failure surfaces, not the same one. Optionally tighten the line-188 definition to note this split.
 
-**Resolution**: Pending
-**Notes**: Priority: Minor.
+**Resolution**: Approved
+**Notes**: Priority: Minor. Added a "Which `error_class` space applies at which WARN site" clause to the State-mutation section: whole-mutation WARN (AtomicWrite failed) → `write-failed-*` phase space; per-entry batch WARN (entry dropped mid-loop) → `error_class=unexpected`. The two value spaces map to two structurally distinct failure surfaces and never overlap.
 
 ---
