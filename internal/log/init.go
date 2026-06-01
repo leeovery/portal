@@ -3,7 +3,6 @@ package log
 import (
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -61,23 +60,28 @@ func Init(stateDir, version, processRole string) error {
 	return openErr
 }
 
-// openLogWriter opens the Phase-1 simple (non-rotating) sink: an append-mode
-// portal.log under stateDir. On failure it returns a stderr fallback writer and
-// the open error so Init can surface it advisorily while still installing a
-// usable handler.
+// openLogWriter constructs the date-aware rotating sink for stateDir and probes
+// it with one eager fd-open so a configuration failure (unwritable stateDir) is
+// surfaced to Init synchronously rather than silently on the first record. On
+// probe failure it returns a stderr fallback writer and the open error so Init
+// can surface it advisorily while still installing a usable handler.
 //
-// TODO(phase-2): this is the rotating-handler insertion point. Phase 2 replaces
-// this plain O_APPEND|O_CREATE|O_WRONLY open with the date-aware rotating
-// handler — first-of-day O_CREAT|O_EXCL open plus the portal.log symlink swing
-// and retention sweep. For Phase 1 a plain append open keeps Init end-to-end
-// functional.
+// The sink itself opens lazily (no file is touched until the first Write); the
+// eager probe here exists only to preserve the Phase-1 stderr-fallback-on-open-
+// failure contract. The probe-opened fd is retained by the sink for reuse, so the
+// probe is not wasted work — the next Write reuses it.
+//
+// The rotation machinery (first-of-day O_CREAT|O_EXCL open, inode-identity reopen,
+// minimal portal.log symlink establishment) lives in rotatingSink. Sibling tasks
+// add the atomic pid-scoped symlink swing (2-3), the migration guard (2-4), the
+// chmod past-day sweep (2-5), the size-cap valve (2-6), best-effort write-failure
+// handling (2-7), and the retention sweep (2-8) behind the seams marked in sink.go.
 func openLogWriter(stateDir string) (io.Writer, error) {
-	path := filepath.Join(stateDir, portalLogName)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, logFileMode)
-	if err != nil {
+	sink := newRotatingSink(stateDir)
+	if err := sink.probe(); err != nil {
 		return os.Stderr, err
 	}
-	return f, nil
+	return sink, nil
 }
 
 // Close computes took from the package-private startTime captured at Init. It

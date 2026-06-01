@@ -171,6 +171,63 @@ func TestClose_SafeBeforeAnyInit(t *testing.T) {
 	Close(0)
 }
 
+func TestInit_WritesThroughDateAwareSinkToDatedFileAndSymlink(t *testing.T) {
+	snapshotInitState(t)
+
+	day := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	fixedClock(t, day)
+
+	cached := For("daemon")
+
+	dir := t.TempDir()
+	if err := Init(dir, "0.5.0", "tui"); err != nil {
+		t.Fatalf("Init returned error: %v", err)
+	}
+
+	cached.Info("dated")
+
+	// The record must land in the date-keyed file, proving Init wired the
+	// date-aware rotating sink (not the Phase-1 plain portal.log open).
+	datedPath := filepath.Join(dir, "portal.log.2026-05-29")
+	b, err := os.ReadFile(datedPath)
+	if err != nil {
+		t.Fatalf("reading dated file %s: %v", datedPath, err)
+	}
+	if !strings.Contains(string(b), " daemon: dated ") {
+		t.Errorf("expected record in dated file, got: %q", string(b))
+	}
+
+	// portal.log must be the live-target symlink pointing at today's file.
+	target, err := os.Readlink(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("readlink portal.log: %v", err)
+	}
+	if filepath.Base(target) != "portal.log.2026-05-29" {
+		t.Errorf("portal.log symlink target = %q, want portal.log.2026-05-29", target)
+	}
+}
+
+func TestInit_FallsBackToStderrAndReturnsErrorOnOpenFailure(t *testing.T) {
+	snapshotInitState(t)
+
+	// A stateDir that cannot hold the day file (a regular file in the path)
+	// forces the eager open probe to fail; Init must surface the error
+	// advisorily and still install a usable (stderr-fallback) handler.
+	parent := t.TempDir()
+	blocker := filepath.Join(parent, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed blocker: %v", err)
+	}
+	badDir := filepath.Join(blocker, "state") // path component is a regular file.
+
+	if err := Init(badDir, "0.5.0", "tui"); err == nil {
+		t.Error("expected advisory open error from Init on an unwritable stateDir, got nil")
+	}
+
+	// The handler must still be usable (no panic) even after the open failure.
+	For("daemon").Info("after-failure")
+}
+
 func TestInit_DoesNotImportInternalState(t *testing.T) {
 	fset := token.NewFileSet()
 	files, err := filepath.Glob("*.go")
