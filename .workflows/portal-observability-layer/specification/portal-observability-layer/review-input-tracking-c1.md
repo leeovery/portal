@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-05-31
 cycle: 1
 phase: Input Review
@@ -50,9 +50,9 @@ Four concrete, pre-identified instrumentation defects were called out in the sou
 These are not pure delivery-sequencing concerns; they are named, decided, existing-code gaps that the inbox seed specifically pointed at. The spec instruments by mechanical rule rather than by enumerated site, so the argument that "the boundary-class-1 rule and the swallowed-error level table will catch these anyway" is plausible — but `escalateKillToSIGKILL` (a DEBUG breadcrumb on an escalation path) and `ShowGlobalHooks` (a log-asymmetry fix, where one branch logs and the sibling doesn't) are precisely the kind of site a purely-mechanical pass can skip because nothing about the code shape forces a new log call. Surfacing them here so the spec can decide whether to (a) name them explicitly as worked examples under the relevant mechanical rule, or (b) confirm the mechanical rules subsume them and that the named-site list is intentionally a planning-only artifact.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Added an "Enumerated gap-closure sites" subsection to *Diagnostic context preservation at boundaries* tabulating all four named existing-code defects (`defaultIdentifyPS`, `escalateKillToSIGKILL`, `ShowGlobalHooks`, defensive-branch comments) with the defect and required fix for each, so a purely-mechanical pass cannot skip the breadcrumb/asymmetry sites.
 
-**Resolution**: Pending
-**Notes**: #1 (`defaultIdentifyPS`) is already captured in the boundary-preservation section and is NOT part of this finding — only #2/#3/#4 are at issue.
+**Resolution**: Approved
+**Notes**: #1 (`defaultIdentifyPS`) is already captured in the boundary-preservation Decision; it is included in the table for a single canonical list. The defensive-branch item is a code comment, not a log line.
 
 ---

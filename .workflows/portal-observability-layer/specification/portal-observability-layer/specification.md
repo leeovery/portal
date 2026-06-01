@@ -763,6 +763,17 @@ func CombinedOutputWithContext(cmd *exec.Cmd) ([]byte, error)
 
 Until 3+ sites need it, write the wrapping at each call site directly.
 
+### Enumerated gap-closure sites (existing-code defects to instrument)
+
+Four pre-identified defects in existing code MUST be closed as part of this work. They are named explicitly because a purely-mechanical level/boundary pass can skip a site where nothing about the code shape forces a new log call:
+
+| Site | Defect | Fix |
+|---|---|---|
+| `defaultIdentifyPS` (`internal/state/daemon_identity.go`) | stderr discarded on failure | Boundary class 1 — embed trimmed stderr in the wrapped error (the worked example already shown above) |
+| `escalateKillToSIGKILL` (`internal/tmux/portal_saver.go`) | no breadcrumb on the SIGKILL escalation path | DEBUG breadcrumb at the escalation decision, beneath the `saver: kill-barrier escalated` INFO lifecycle event |
+| `ShowGlobalHooks` | failure-log asymmetry — one branch logs, the sibling failure path does not | add the missing WARN on the unlogged failure branch per the level-discipline table |
+| Defensive branches (various) | branch exists for a non-obvious reason, uncommented | add a "why this branch exists" **code comment** (not a log line) |
+
 ---
 
 ## Cycle-level summary cadence and shape
