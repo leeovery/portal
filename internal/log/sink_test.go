@@ -327,6 +327,64 @@ func TestRotatingSink_RaceFreeUnderConcurrentWrite(t *testing.T) {
 	}
 }
 
+func TestRotatingSink_MigratesLegacyRegularFilePortalLogToSymlinkOnReopen(t *testing.T) {
+	day := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	fixedClock(t, day)
+
+	dir := t.TempDir()
+
+	// Pre-migration slate: a regular-file portal.log plus a single portal.log.old,
+	// exactly what the old logger left behind. The first write under the new sink
+	// must run the migration guard (clearing the legacy slate) and then swing
+	// portal.log into a symlink — guard + swing composing correctly.
+	link := filepath.Join(dir, "portal.log")
+	if err := os.WriteFile(link, []byte("legacy regular log\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy regular-file portal.log: %v", err)
+	}
+	oldPath := filepath.Join(dir, "portal.log.old")
+	if err := os.WriteFile(oldPath, []byte("legacy old\n"), 0o600); err != nil {
+		t.Fatalf("seed legacy portal.log.old: %v", err)
+	}
+
+	s := newRotatingSink(dir)
+	t.Cleanup(func() { _ = s.close() })
+
+	if _, err := s.Write([]byte("first line\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// portal.log must now be a symlink (NOT the legacy regular file) pointing at
+	// today's day file.
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat portal.log after reopen: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("portal.log mode = %v after reopen, want a symlink (guard+swing failed to compose)", info.Mode())
+	}
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("readlink portal.log: %v", err)
+	}
+	if filepath.Base(target) != "portal.log.2026-05-29" {
+		t.Errorf("symlink target = %q, want portal.log.2026-05-29", target)
+	}
+
+	// The legacy portal.log.old must have been removed by the guard.
+	if _, err := os.Lstat(oldPath); !os.IsNotExist(err) {
+		t.Errorf("portal.log.old still present after reopen (lstat err = %v); want removed by guard", err)
+	}
+
+	// The write landed in the fresh day file, not the deleted legacy regular file.
+	b, err := os.ReadFile(filepath.Join(dir, "portal.log.2026-05-29"))
+	if err != nil {
+		t.Fatalf("read day file: %v", err)
+	}
+	if string(b) != "first line\n" {
+		t.Errorf("day file = %q, want %q", string(b), "first line\n")
+	}
+}
+
 // mustIno returns the inode of path, following symlinks.
 func mustIno(t *testing.T, path string) uint64 {
 	t.Helper()

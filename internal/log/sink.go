@@ -137,10 +137,13 @@ func (s *rotatingSink) inodeMatchesSymlink() bool {
 // the symlink-establishment seam ordering: migration-guard (Task 2-4) -> open ->
 // symlink-swing (Task 2-3).
 func (s *rotatingSink) reopen(today string, dateChanged bool) error {
-	// SEAM (Task 2-4 — first-run migration guard): BEFORE opening / swinging the
-	// symlink, if ${stateDir}/portal.log exists as a regular file (lstat shows a
-	// non-symlink), os.Remove it and any portal.log.old, to clear pre-migration
-	// legacy logs on the first run under the new system. Left unimplemented here.
+	// First-run migration guard (Task 2-4): BEFORE swinging the symlink, clear a
+	// pre-migration regular-file portal.log (and any portal.log.old) so the swing
+	// below can claim the portal.log name as a symlink. Best-effort — the returned
+	// error is swallowed (mirrors the swingSymlink swallow), so a guard failure
+	// never aborts the reopen. The very next swing makes portal.log a symlink, so
+	// this guard no-ops on every subsequent reopen.
+	_ = migrationGuard(s.stateDir)
 
 	f, dev, ino, err := openDayFile(s.stateDir, today)
 	if err != nil {

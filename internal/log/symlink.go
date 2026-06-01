@@ -24,6 +24,52 @@ func pidSymlinkTmp(stateDir string, pid int) string {
 	return filepath.Join(stateDir, portalLogName+"."+strconv.Itoa(pid)+".symlink.tmp")
 }
 
+// legacyOldName is the basename of the single rotated file the pre-migration
+// logger left alongside a regular-file portal.log. The new symlink-based scheme
+// never writes it, so the first-run migration guard deletes it as legacy debris.
+const legacyOldName = portalLogName + ".old"
+
+// migrationGuard clears the pre-migration legacy slate so the portal.log name is
+// free to become a symlink on the first reopen under the new scheme. It is
+// invoked from the sink's reopen path BEFORE swingSymlink.
+//
+// Steps: lstat ${stateDir}/portal.log (Lstat, NOT Stat, so a symlink is detected
+// as a symlink rather than followed to its target).
+//   - ENOENT: nothing to clear — the name is already free. Return.
+//   - A symlink: the steady state after the first swing. The guard no-ops,
+//     leaving the link and its target untouched. Return.
+//   - A regular file (the pre-migration legacy log): os.Remove it, and os.Remove
+//     any portal.log.old. Both removals are ENOENT-tolerant best-effort.
+//
+// The guard fires AT MOST ONCE per file lifetime BY CONSTRUCTION: the very next
+// swingSymlink converts portal.log into a symlink, so every subsequent reopen's
+// lstat sees a symlink and the guard no-ops forever after. No "already migrated"
+// flag is needed — the symlink itself is the marker.
+//
+// All removals are best-effort. A removal failure is swallowed (consistent with
+// how swingSymlink's error is swallowed in the reopen path); the WARN emission on
+// such a failure is Task 2-7's territory. The guard never aborts the reopen.
+func migrationGuard(stateDir string) error {
+	link := symlinkPath(stateDir)
+
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		return nil // Absent entirely: the portal.log name is already free.
+	}
+	if err != nil {
+		return nil // Lstat error (best-effort): do not abort the reopen.
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil // Already a symlink: no-op on every run after the first.
+	}
+
+	// A regular file — pre-migration legacy debris. Remove it and any .old sibling
+	// best-effort so the swing can claim the portal.log name as a symlink.
+	_ = os.Remove(link)
+	_ = os.Remove(filepath.Join(stateDir, legacyOldName))
+	return nil
+}
+
 // swingSymlink atomically re-points ${stateDir}/portal.log at target, where
 // target is the BARE day-file filename (e.g. portal.log.<today> or, on size-cap
 // rotation, portal.log.<today>.<N>). The target is stored RELATIVE — just the
