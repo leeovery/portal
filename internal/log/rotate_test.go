@@ -87,7 +87,7 @@ func TestRotatingSink_SealsPastDayFilesOnRealDayRoll(t *testing.T) {
 	set := fixedClock(t, day1)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	if _, err := s.Write([]byte("day-one\n")); err != nil {

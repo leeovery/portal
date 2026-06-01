@@ -77,7 +77,8 @@ func Init(stateDir, version, processRole string) error {
 // chmod past-day sweep (2-5), the size-cap valve (2-6), best-effort write-failure
 // handling (2-7), and the retention sweep (2-8) behind the seams marked in sink.go.
 func openLogWriter(stateDir string) (io.Writer, error) {
-	sink := newRotatingSink(stateDir)
+	rotateSize, _ := resolveRotateSize(os.Getenv("PORTAL_LOG_ROTATE_SIZE"))
+	sink := newRotatingSink(stateDir, rotateSize)
 	if err := sink.probe(); err != nil {
 		return os.Stderr, err
 	}

@@ -50,7 +50,7 @@ func TestRotatingSink_FirstHandleCreatesDayFileViaExclusive(t *testing.T) {
 	fixedClock(t, day)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 
 	if _, err := s.Write([]byte("line one\n")); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -81,7 +81,7 @@ func TestRotatingSink_ReusesFdAcrossSameDayWritesWithMatchingInode(t *testing.T)
 	fixedClock(t, day)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	if _, err := s.Write([]byte("first\n")); err != nil {
@@ -112,7 +112,7 @@ func TestRotatingSink_ReopensOnSameDayInodeMismatchWithoutSweeps(t *testing.T) {
 	fixedClock(t, day)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
@@ -166,7 +166,7 @@ func TestRotatingSink_RecreatesDayFileWhenSymlinkTargetENOENT(t *testing.T) {
 	fixedClock(t, day)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
@@ -204,7 +204,7 @@ func TestRotatingSink_OpensNewDayFileAndFlagsSweepsOnDateChange(t *testing.T) {
 	set := fixedClock(t, day1)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	sweeps := 0
@@ -268,7 +268,7 @@ func TestRotatingSink_FallsBackToAppendOnEEXISTWhenLosingCreateRace(t *testing.T
 		t.Fatalf("seed peer file: %v", err)
 	}
 
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	if _, err := s.Write([]byte("our-line\n")); err != nil {
@@ -289,7 +289,7 @@ func TestRotatingSink_RaceFreeUnderConcurrentWrite(t *testing.T) {
 	fixedClock(t, day)
 
 	dir := t.TempDir()
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	const goroutines = 8
@@ -346,7 +346,7 @@ func TestRotatingSink_MigratesLegacyRegularFilePortalLogToSymlinkOnReopen(t *tes
 		t.Fatalf("seed legacy portal.log.old: %v", err)
 	}
 
-	s := newRotatingSink(dir)
+	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	if _, err := s.Write([]byte("first line\n")); err != nil {

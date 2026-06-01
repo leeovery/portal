@@ -3,6 +3,9 @@ package log
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -18,6 +21,14 @@ const dateLayout = "2006-01-02"
 // field so tests can drive every sink in the package through one swap and the
 // production path pays no per-sink indirection.
 var nowFunc = time.Now
+
+// openSegmentFunc is the test-only seam over os.OpenFile used by the size-cap
+// overflow open. Forcing a genuine EEXIST on a specific segment N is otherwise
+// non-deterministic (it requires a concurrent writer to win the race between our
+// glob-based discovery and our O_EXCL open). Tests swap it to inject os.ErrExist
+// on chosen N values and restore via t.Cleanup; production always uses
+// os.OpenFile. It mirrors the existing symlinkFunc / chmodFunc seam convention.
+var openSegmentFunc = os.OpenFile
 
 // rotatingSink is the date-aware, inode-identity-checked log writer that owns the
 // per-Handle fd-management critical section. It is the io.Writer the textHandler
@@ -45,6 +56,13 @@ type rotatingSink struct {
 	dev uint64
 	ino uint64
 
+	// rotateSize is the size-cap safety valve in bytes, resolved ONCE at
+	// construction (production: resolveRotateSize(os.Getenv("PORTAL_LOG_ROTATE_SIZE"))
+	// passed in via init.go). It is NEVER re-read per Write. When the open file's
+	// current size plus the next record's length would reach this cap, Write rolls
+	// to a fresh same-day portal.log.<today>.<N> segment (see rotateSameDay).
+	rotateSize int64
+
 	// dayRoll is the day-roll sweep seam, fired ONLY when the calendar date
 	// advances (NOT on a same-day inode-mismatch reopen), AFTER the new day's
 	// file is open and the symlink is swung (so the sweeps observe today's file
@@ -55,16 +73,19 @@ type rotatingSink struct {
 	dayRoll func()
 }
 
-// newRotatingSink constructs a sink rooted at stateDir. No file is opened until
-// the first Write so a process that never logs touches no disk.
+// newRotatingSink constructs a sink rooted at stateDir with rotateSize as the
+// resolved size-cap (bytes). No file is opened until the first Write so a process
+// that never logs touches no disk. The cap is resolved ONCE by the caller
+// (init.go via resolveRotateSize) and stored on the sink — Write never re-reads
+// the env.
 //
 // The dayRoll seam is wired to the day-roll sweep chain: on a real calendar-day
 // roll it seals all past-day files (Task 2-5, Invariant 1). The closure reads
 // s.date, which reopen sets to today's date BEFORE firing the callback, so the
 // sweep excludes today's file and its same-day segments. Task 2-8 composes the
 // retention sweep onto this same closure next; the seam stays composable.
-func newRotatingSink(stateDir string) *rotatingSink {
-	s := &rotatingSink{stateDir: stateDir}
+func newRotatingSink(stateDir string, rotateSize int64) *rotatingSink {
+	s := &rotatingSink{stateDir: stateDir, rotateSize: rotateSize}
 	s.dayRoll = func() { sealPastDayFiles(s.stateDir, s.date) }
 	return s
 }
@@ -80,12 +101,124 @@ func (s *rotatingSink) Write(p []byte) (int, error) {
 		return 0, err
 	}
 
-	// SEAM (Task 2-6 — size-cap safety valve): the fd is now current. Before the
-	// write, Task 2-6 checks current_size + len(p) >= PORTAL_LOG_ROTATE_SIZE and,
-	// if exceeded, rotates to portal.log.<today>.<N> + swings the symlink. Left
-	// unimplemented here: this task owns only date/inode-driven reopen.
+	// Size-cap safety valve (rotation rule step 3): the fd is now current. If the
+	// open file's size plus this record would reach the resolved cap, roll to a
+	// fresh same-day portal.log.<today>.<N> segment BEFORE writing so a runaway
+	// cannot fill the disk. Unlike the day roll, the prior segment is NOT sealed —
+	// a peer may still hold an open O_APPEND fd on it (see rotateSameDay).
+	if err := s.rotateIfOverCap(p); err != nil {
+		return 0, err
+	}
 
 	return s.file.Write(p)
+}
+
+// rotateIfOverCap performs the size-cap check (rotation rule step 3) against the
+// open fd: if current_size + len(p) >= s.rotateSize it rotates to the next free
+// same-day segment via rotateSameDay. It must be called with s.mu held and after
+// ensureCurrent has made s.file current. A size that cannot be stat'd is treated
+// as "do not rotate" — the next Write retries the check; a transient stat error
+// must not corrupt the write path.
+func (s *rotatingSink) rotateIfOverCap(p []byte) error {
+	info, err := s.file.Stat()
+	if err != nil {
+		return nil // Cannot determine current size: skip the cap check this Write.
+	}
+	if info.Size()+int64(len(p)) < s.rotateSize {
+		return nil // Below cap (the steady-state path): no rotation.
+	}
+	return s.rotateSameDay(nowFunc().Format(dateLayout))
+}
+
+// rotateSameDay rolls the open fd onto a fresh same-day overflow segment
+// portal.log.<today>.<N> (rotation rule step 3). It discovers the next free N as
+// (max existing .N for today) + 1, opens it O_CREAT|O_EXCL (retrying N+1 on
+// EEXIST so a racing writer or a stale gap is absorbed), swings the portal.log
+// symlink to it, and swaps s.file/date/dev/ino onto the new segment (closing the
+// prior fd in THIS process). It must be called with s.mu held.
+//
+// The previous segment is DELIBERATELY NOT chmod'd: it is a same-day file, a peer
+// process may still hold an open O_APPEND fd on it (chmod does not evict an
+// already-open writer on Unix), and it remains part of today's active write
+// surface. Same-day segments are sealed only on the day roll (sealPastDayFiles,
+// Task 2-5), which chmods all of yesterday's segments at once. A peer that did
+// not observe this rotation simply keeps appending to the prior segment — today's
+// writes split across two readable same-day files with the symlink pointing at
+// the newest. That is acceptable: the size cap is a disk-fill valve, not a
+// correctness boundary.
+func (s *rotatingSink) rotateSameDay(today string) error {
+	f, n, err := s.claimNextSegment(today)
+	if err != nil {
+		return err
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	dev, ino, _ := devIno(info)
+
+	// Swing the symlink to the new segment (bare relative basename — same dir).
+	// Best-effort, mirroring reopen: a swing failure leaves the prior symlink in
+	// place and writes continue to the freshly-opened fd. The next Write's inode
+	// check then forces a benign retry.
+	_ = swingSymlink(s.stateDir, filepath.Base(daySegmentFile(s.stateDir, today, n)))
+
+	if s.file != nil {
+		_ = s.file.Close() // Close THIS process's prior-segment fd; do NOT chmod it.
+	}
+	s.file = f
+	s.date = today
+	s.dev = dev
+	s.ino = ino
+	return nil
+}
+
+// claimNextSegment opens the next free same-day overflow segment for today via
+// O_CREAT|O_EXCL, starting at nextSegmentN and retrying N+1 on EEXIST until a
+// free N is won (another writer beat us to this N, or a stale gap left a claimed
+// N below the discovered max). It returns the open file and the claimed N.
+func (s *rotatingSink) claimNextSegment(today string) (*os.File, int, error) {
+	for n := s.nextSegmentN(today); ; n++ {
+		f, err := openSegmentFunc(daySegmentFile(s.stateDir, today, n), os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY, logFileMode)
+		if errors.Is(err, os.ErrExist) {
+			continue // This N is taken; try N+1.
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		return f, n, nil
+	}
+}
+
+// nextSegmentN returns the next free same-day overflow segment number for today:
+// (max existing portal.log.<today>.<N>) + 1, or 1 when no .N segments exist. A
+// gap (.1 and .3 present) yields max+1 (.4), not the gap (.2) — monotonic past
+// the highest existing N so a claimed-then-vanished segment is never reused. A
+// Glob error (only on a malformed pattern, which this never is) yields 1.
+func (s *rotatingSink) nextSegmentN(today string) int {
+	matches, err := filepath.Glob(filepath.Join(s.stateDir, portalLogName+"."+today+".*"))
+	if err != nil {
+		return 1
+	}
+
+	max := 0
+	prefix := portalLogName + "." + today + "."
+	for _, path := range matches {
+		rest, found := strings.CutPrefix(filepath.Base(path), prefix)
+		if !found {
+			continue
+		}
+		n, err := strconv.Atoi(rest)
+		if err != nil || n <= 0 {
+			continue // Not a numeric .N segment (e.g. a future non-log sibling).
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return max + 1
 }
 
 // ensureCurrent guarantees s.file points at today's live day file, reopening when

@@ -20,3 +20,11 @@ func TestSymlinkPath_JoinsPortalLogOntoStateDir(t *testing.T) {
 		t.Errorf("symlinkPath = %q, want %q", got, want)
 	}
 }
+
+func TestDaySegmentFile_AppendsDotNToDayFile(t *testing.T) {
+	got := daySegmentFile("/var/state", "2026-05-29", 3)
+	want := filepath.Join("/var/state", "portal.log.2026-05-29.3")
+	if got != want {
+		t.Errorf("daySegmentFile = %q, want %q", got, want)
+	}
+}
