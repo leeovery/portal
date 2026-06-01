@@ -102,6 +102,23 @@
           "external_id": "tick-7ac1a9"
         }
       }
+    },
+    "implementation": {
+      "items": {
+        "portal-observability-layer": {
+          "status": "in-progress",
+          "task_gate_mode": "gated",
+          "fix_gate_mode": "gated",
+          "analysis_gate_mode": "gated",
+          "fix_attempts": 0,
+          "analysis_cycle_total": 0,
+          "analysis_cycle_session": 0,
+          "linters": [],
+          "project_skills": [],
+          "current_phase": 1,
+          "current_task": "~"
+        }
+      }
     }
   }
 }
