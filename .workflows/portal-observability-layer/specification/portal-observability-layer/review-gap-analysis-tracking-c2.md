@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 2
 phase: Gap Analysis
@@ -26,8 +26,8 @@ Compounding the ambiguity: the daemon lifecycle catalog (line 889) lists a `daem
 **Proposed Addition**:
 Pin the self-eject emission sequence explicitly: state whether the self-eject path calls `log.Close(0)` (and/or emits `daemon: shutdown reason=self-eject`) *before* `os.Exit(0)`, so the `process: exit` pairing the footnote promises is actually produced; OR, if no pairing is intended, correct line 586 and add the daemon-self-eject case to the four-way classification (an `os.Exit(0)`-without-Close pairing rule) and reconcile the `self-eject` value in the `daemon: shutdown` reason space (remove it, or specify it fires before the exit). Also carve out the daemon self-eject from the "bare `os.Exit` prohibited outside `main`" rule.
 
-**Resolution**: Pending
-**Notes**: Priority: Critical.
+**Resolution**: Approved
+**Notes**: Priority: Critical. Resolved: self-eject is the one sanctioned `os.Exit` exception — it emits `daemon: self-eject`, then `log.Close(0)` (→ `process: exit code=0`), then `os.Exit(0)`; it does NOT run `daemonShutdownFunc`, so `self-eject` was removed from the `daemon: shutdown` reason space (now {sighup, signal, exit}). Updated Defensive invariants (bare-os.Exit carve-out + footnote), the daemon shutdown catalog row, and the reason value spaces.
 
 ---
 
@@ -48,8 +48,8 @@ So `saver: placeholder died` is assigned to the daemon by one section, to bootst
 **Proposed Addition**:
 Pin a single emitter (process + file) for `saver: placeholder died`, reconcile all three sections, and — if both the bootstrap-kill-barrier scenario and the daemon-self-supervision scenario genuinely need a marker — either give each its own catalog row (distinct msg/component) or state explicitly that the same line is emitted from both sites with the same shape. Add the chosen calling location to lines 911–913.
 
-**Resolution**: Pending
-**Notes**: Priority: Important.
+**Resolution**: Approved
+**Notes**: Priority: Important. Pinned emitter = **bootstrap** (`cmd/bootstrap/`), consistent with the spec's own Process/subsystem-boundary principle ("all `saver:` lines are emitted by bootstrap observing the saver from outside"). The daemon-side observation is already covered by the distinct `daemon: self-eject` event. Fixed the catalog row description and added `placeholder died` to the bootstrap calling-code-locations bullet.
 
 ---
 
@@ -67,8 +67,8 @@ This directly conflicts with the spec's emphatically closed attr vocabulary and 
 **Proposed Addition**:
 Replace the `<unit>` example list with values drawn only from the closed cycle-summary vocabulary (`sessions`, `panes`, `entries`, `steps`, `windows`, …) — drop `orphans` and `files`. If a meaningful sweep genuinely needs an `orphans`/`files` count key, add it to the closed vocabulary via the amendment process (and update the 14-count); otherwise remove the "etc." or scope it to "drawn from the closed cycle-summary keys above" so it cannot be read as a license to invent unit keys.
 
-**Resolution**: Pending
-**Notes**: Priority: Important.
+**Resolution**: Approved
+**Notes**: Priority: Important. Dropped `orphans`/`files`, scoped `<unit>` to the closed keys (`sessions`/`panes`/`entries`/`steps`), noted sweeps use outcome keys (`reaped`/`killed`/`skipped`/`unset`), and removed the open-ended "etc." with an explicit no-ad-hoc-invention clause.
 
 ---
 
@@ -86,7 +86,7 @@ A reviewer applying the closed-component table mechanically would expect a `sign
 **Proposed Addition**:
 Tighten the `signal` component description (line 166) to scope it to the signaling *mechanism* (e.g. `EagerSignalHydrate` and the lower-level FIFO signal-send/receive plumbing in `internal/state`), and clarify that the hydrate helper's own terminal signal-receipt outcome lines (`signal timeout`, etc.) render under `hydrate` per the Hook-firing catalog — so the two sections no longer appear to claim the same event for different components.
 
-**Resolution**: Pending
-**Notes**: Priority: Minor. Line-350 precedence rule already resolves the prefix; this is a clarity/forensic-completeness wart, not an implementation fork.
+**Resolution**: Approved
+**Notes**: Priority: Minor. Rescoped the `signal` component to the signaling mechanism and added an inline note that the hydrate helper's exit-path outcome lines render under `hydrate` per the Hook-firing catalog.
 
 ---

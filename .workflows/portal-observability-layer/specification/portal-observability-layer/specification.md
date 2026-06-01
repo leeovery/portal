@@ -163,7 +163,7 @@ This list is the **single source of truth** for the component count.
 | `preview` | TUI scrollback preview page |
 | `saver` | `_portal-saver` session lifecycle |
 | `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`) |
-| `signal` | FIFO signaling — `EagerSignalHydrate`, hydrate-helper signal receipt |
+| `signal` | FIFO signaling **mechanism** — `EagerSignalHydrate` and the lower-level FIFO signal send/receive plumbing in `internal/state`. (The hydrate helper's own exit-path outcome lines — incl. `signal timeout` — render under `hydrate` per the Hook-firing catalog, which governs the helper's exec-chain.) |
 | `log-rotate` | Rotation and retention events |
 | `clean` | `portal clean` command path |
 | `aliases` | `aliases` store mutations |
@@ -555,6 +555,7 @@ func main() {
 
 - Exactly one terminal marker fires per run: `exit` on clean/error return, `panic` on a recovered panic. No double-emit, no defer-ordering ambiguity. On the panic path `process: panic` is the **sole** terminal marker — `Close` is skipped — so the four-way classification stays mutually exclusive.
 - **Bare `os.Exit` is prohibited outside `main`** (PR-review reject) — every other function returns an error/code. This prohibition is the enforcement mechanism for "every termination is marked."
+  - **One sanctioned exception — the daemon self-eject.** The daemon's self-supervision self-eject calls `os.Exit(0)` directly (it must not unwind through another capture/commit cycle on its way out). To stay marked, it FIRST emits `daemon: self-eject ticks=N threshold=N`, THEN calls `log.Close(0)` (which emits `process: exit code=0` and does not itself exit), THEN `os.Exit(0)`. So the termination is fully paired and the four-way classification holds. It does NOT run `daemonShutdownFunc`, so **no `daemon: shutdown` line fires on the self-eject path.**
 - `Execute()` maps to a return code rather than calling `os.Exit` inside.
 
 **Coverage requirement:** every binary entry point (currently only `main.go`) calls `log.Init` before any other portal code that might log, and routes all termination through the `main` shape above.
@@ -583,7 +584,7 @@ This yields a clean four-way terminal classification of any `process: start`:
 | `process: panic` | Crash, but recorded |
 | *nothing* | Genuinely alarming — process vanished without a terminal marker; investigate |
 
-**Externally-killed-process footnote.** A process killed by an uncatchable signal (the kill-barrier's SIGKILL escalation) runs no code, so it emits no terminal marker — its `process: start` looks unpaired. That is not the alarming case when the kill was deliberate: **the killer records it.** Bootstrap emits `saver: kill-barrier started/escalated target_pid=X` and `saver: placeholder died`. So: **an unpaired `process: start` is alarming only if no `saver:`/`daemon:` line names that pid as an external kill.** (The daemon's clean self-eject uses `os.Exit(0)` and still emits its own `process: exit`.)
+**Externally-killed-process footnote.** A process killed by an uncatchable signal (the kill-barrier's SIGKILL escalation) runs no code, so it emits no terminal marker — its `process: start` looks unpaired. That is not the alarming case when the kill was deliberate: **the killer records it.** Bootstrap emits `saver: kill-barrier started/escalated target_pid=X` and `saver: placeholder died`. So: **an unpaired `process: start` is alarming only if no `saver:`/`daemon:` line names that pid as an external kill.** (The daemon's clean self-eject calls `os.Exit(0)` directly but first emits `daemon: self-eject` and then `process: exit code=0` via `log.Close(0)` — see the sanctioned exception above — so it is paired.)
 
 ### Flush — unbuffered writer constraint
 
@@ -830,7 +831,7 @@ logger.Info("<verb> complete",
 
 Where:
 - `<verb>` is the cycle's purpose phrase: `tick`, `sweep`, `step`, `phase`, `orchestration`, `replay`, etc.
-- `<unit>` is the item being iterated: `sessions`, `panes`, `entries`, `orphans`, `steps`, `files`, etc.
+- `<unit>` is the item being iterated, drawn **only** from the closed cycle-summary keys: `sessions`, `panes`, `entries`, `steps`. Sweeps report their outcome keys instead (`reaped` / `killed` / `skipped` / `unset`). A new unit key requires a vocabulary amendment — do not invent one ad hoc.
 - Additional sub-categorisation counts ride as attrs on the same summary line. Defined counts: `natural_churn` — items that ended cleanly mid-cycle by normal action (e.g. a session the user closed during the tick), distinct from a capture failure; `anomalous` — items that failed anomalously without terminating the cycle (each also emits a per-item WARN); `entries_failed` — per-item failures within a batch operation.
 - `took` is always present.
 
@@ -877,7 +878,7 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Bootstrap observes the daemon up and ready (after the 2s readiness barrier) | `daemon ready` | `target_pid` (the daemon pid), `version` (auto-baseline) |
 | Bootstrap initiates the kill-barrier (Component A) for a prior daemon | `kill-barrier started` | `target_pid` (the prior daemon pid being killed) |
 | Bootstrap escalates from `kill-session` to direct SIGKILL on the prior daemon | `kill-barrier escalated` | `target_pid`, `reason="kill-session-timeout"` |
-| Daemon self-supervision observes the saver pane's host process exited | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
+| Bootstrap observes a saver pane's host process has exited (e.g. during the kill-barrier exit-poll) | `placeholder died` | `target_pid` (the dead pid), `reason` ∈ {`signal`, `exit`, `unknown`} |
 
 **Daemon lifecycle events (component: `daemon`):**
 
@@ -886,7 +887,7 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 | Daemon acquires `daemon.lock` (post-pre-check) | `lock acquired` | `pid` (auto-baseline), `tmux_pane` |
 | Daemon's self-supervision counter increments toward eject | (no INFO — DEBUG per the level-discipline "hysteresis-internal failures" clarification) | n/a |
 | Daemon's self-supervision counter trips threshold and ejects | `self-eject` | `ticks` (consecutive-absence count at trip), `threshold` (configured ejection threshold) |
-| Daemon shutdown (any reason) | `shutdown` | `reason` ∈ {`sighup`, `self-eject`, `signal`, `exit`}, `flush_completed` (bool — whether the final commit completed) |
+| Daemon shutdown via the normal return path (SIGHUP, signal, normal exit) | `shutdown` | `reason` ∈ {`sighup`, `signal`, `exit`}, `flush_completed` (bool — whether the final commit completed). **Not emitted on the self-eject path** (which bypasses `daemonShutdownFunc` — see *Defensive invariants* § sanctioned exception). |
 
 ### Process/subsystem boundary
 
@@ -896,7 +897,7 @@ Every site listed below MUST emit exactly one INFO log line at the moment descri
 
 - `kill-barrier escalated reason`: `kill-session-timeout` (only value today; new values require amendment).
 - `placeholder died reason`: `signal` / `exit` / `unknown`.
-- `daemon shutdown reason`: `sighup` / `self-eject` / `signal` / `exit`.
+- `daemon shutdown reason`: `sighup` / `signal` / `exit`. (`self-eject` is **not** a `daemon: shutdown` reason — the self-eject path emits `daemon: self-eject` + `process: exit` instead, see *Defensive invariants* § sanctioned exception.)
 
 Reason value spaces are closed sets per event — spec writers MAY NOT introduce new reason values without amending this catalog.
 
@@ -908,7 +909,7 @@ Tick-rate events (capture loop, self-supervision probe) are NOT INFO. They're co
 
 ### Calling code locations
 
-- `cmd/bootstrap/` — most saver lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation).
+- `cmd/bootstrap/` — all `saver:` lifecycle events (placeholder creation, respawn, kill-barrier, daemon-ready observation, and `placeholder died` — bootstrap observes the saver from outside, per *Subsystem prefix taxonomy* § Process/subsystem boundary).
 - `cmd/state_daemon.go` — daemon lifecycle (`lock acquired`, `self-eject`, `shutdown`). The daemon's process startup is marked by `process: start process_role=daemon`, not a `daemon:` event.
 - `internal/tmux/portal_saver.go` — kill-barrier escalation.
 
