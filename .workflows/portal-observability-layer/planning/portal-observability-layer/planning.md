@@ -18,6 +18,22 @@ approved_at: 2026-06-01
 - [ ] `main` routes all termination through the single-`os.Exit` shape (clean/error/panic) and `internal/state.Logger`, `Component*` constants, the pipe-delimited format, and `NopLogger` are deleted
 - [ ] All former `state.Logger` call sites and the `*state.Logger` test-mock surfaces (`bootstrapDeps` and friends) compile against `*slog.Logger`; `go test ./...` is green
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| portal-observability-layer-1-1 | Create `internal/log` package skeleton with swappable-handler indirection and `For()` | For before Init returns valid non-nil logger, concurrent For/handler-swap, empty component string |
+| portal-observability-layer-1-2 | Resolve log level from `PORTAL_LOG_LEVEL` with INFO default and invalid-value fallback | unset→default info, mixed-case, surrounding whitespace, invalid→fallback info, legacy "warning" no longer accepted |
+| portal-observability-layer-1-3 | Inject per-record baseline attrs (pid/version/process_role) and render component-prefix text in the foundation handler | package-init child created before Init still carries baselines, multi-word values quoted, `time.Duration` default String(), `slog.Group` flattened to dotted keys, component not duplicated in attr list |
+| portal-observability-layer-1-4 | Implement `Init`/`Close` public API with stateDir/version/processRole wiring and startTime capture | second Init re-points handler without panic, pre-Init cached loggers route to configured handler after Init, Close owns no control flow, Close before Init safe |
+| portal-observability-layer-1-5 | Add `SetTestHandler` test-only seam restoring prior handler via `t.Cleanup` | nested swaps restore in correct order, restore on a test that never logged |
+| portal-observability-layer-1-6 | Resolve `process_role` from `os.Args` longest-prefix match against the closed table | bare portal→tui, unknown subcommand→bootstrap, flags interleaved/ignored, `state hydrate` vs `state daemon`, `x`/`attach` aliases→tui |
+| portal-observability-layer-1-7 | Adopt the `main` exit shape: single `os.Exit`, panic recovery, `Close` on non-panic path | Execute error→code 1, recovered panic→code 2 with Close skipped, UsageError→code 2, FatalError silent-exit + `IsSilentExitError` preserved |
+| portal-observability-layer-1-8 | Migrate intermediate logging seams off `*state.Logger` to `*slog.Logger` | nil-receiver no-op contract removed (callers hold a real logger), component becomes an attr not a method arg, `export_test` `VersionWriterLoggerSeam` type change, `bootstrap.Logger`/`NoopLogger`/`BarrierLogger`/`MigrationLogger`/`SetBarrierLogger`/`SetVersionWriterLogger`/`SaverVersionSeams.WriterLogger`/`restore.Orchestrator.Logger` |
+| portal-observability-layer-1-9 | Big-bang rewrite of all production `state.Logger` call sites to `log.For` + slog attrs | `fmt.Sprintf`-in-message converted to attrs, `Component*` constants resolved to literal taxonomy names, attr keys mapped to closed vocabulary, logger-open sites (`state_common`/`state_daemon` rotate=true/`open.go` preview) and `*state.Logger` Deps fields replaced with `*slog.Logger` |
+| portal-observability-layer-1-10 | Delete the legacy `internal/state` logger and migrate its tests off `OpenLogger`/`NopLogger` | tests asserting on the old pipe format, `NopLogger` sentinel usages, `restoretest.OpenTestLogger`/`portaltest` log-read helpers, tests depending on the LevelWarn default |
+
 ### Phase 2: Rotation, retention, and defensive invariants
 status: approved
 approved_at: 2026-06-01
