@@ -83,13 +83,19 @@ type rotatingSink struct {
 // the env.
 //
 // The dayRoll seam is wired to the day-roll sweep chain: on a real calendar-day
-// roll it seals all past-day files (Task 2-5, Invariant 1). The closure reads
-// s.date, which reopen sets to today's date BEFORE firing the callback, so the
-// sweep excludes today's file and its same-day segments. Task 2-8 composes the
-// retention sweep onto this same closure next; the seam stays composable.
+// roll it seals all past-day files (Task 2-5, Invariant 1) AND runs the
+// single-winner retention sweep (Task 2-8) that bounds rotated history and emits
+// per-deletion breadcrumbs. The closure reads s.date, which reopen sets to
+// today's date BEFORE firing the callback, so both sweeps observe today's file as
+// already opened — the deletion INFO lines and the retention WARN land in today's
+// file, never in the file being aged out. seal-then-retention ordering is
+// arbitrary (both key off s.date == today); the seam stays composable.
 func newRotatingSink(stateDir string, rotateSize int64) *rotatingSink {
 	s := &rotatingSink{stateDir: stateDir, rotateSize: rotateSize}
-	s.dayRoll = func() { sealPastDayFiles(s.stateDir, s.date) }
+	s.dayRoll = func() {
+		sealPastDayFiles(s.stateDir, s.date)
+		runRetentionSweep(s.stateDir, s.date, true)
+	}
 	return s
 }
 

@@ -14,12 +14,24 @@ import (
 //
 // Only the helpers consumed by production code are declared here. The
 // `portal.log.<pid>.symlink.tmp` atomic-swing temp builder (Task 2-3) lives
-// alongside its call site in symlink.go (pidSymlinkTmp). The remaining name
-// builder the rotation machinery will need — the `portal.log.swept.<date>`
-// retention sentinel (Task 2-8) — is deliberately NOT added yet: it would be
-// unused-by-production until its owning task wires it, and the `unused` linter
-// (staticcheck U1000) flags unexported functions with no callers. It is
-// introduced alongside its first call site.
+// alongside its call site in symlink.go (pidSymlinkTmp).
+
+// sweptPrefix is the basename prefix of the retention single-winner sentinel:
+// ${stateDir}/portal.log.swept.<date>. It deliberately shadows the date slot of
+// a genuine log file with the literal "swept" segment, so pastDayLogDate's
+// strict YYYY-MM-DD date-parse rejects it — the sentinel is never mistaken for
+// a rotated log and never sealed (Task 2-5) nor deleted by the cutoff walk
+// (Task 2-8); it is pruned only by the exact not-today rule in the retention
+// sweep's step 3.
+const sweptPrefix = portalLogName + ".swept."
+
+// sweptSentinelFile is the retention single-winner sentinel path for a calendar
+// date: ${stateDir}/portal.log.swept.<date>. The first process to create it for
+// <today> (via O_CREAT|O_EXCL) owns that day's retention sweep; all others lose
+// the gate and emit nothing.
+func sweptSentinelFile(stateDir, date string) string {
+	return filepath.Join(stateDir, sweptPrefix+date)
+}
 
 // dayFile is the day's base log file: ${stateDir}/portal.log.<date>, where date
 // is the time.Now().Format("2006-01-02") calendar key.
