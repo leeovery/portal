@@ -52,7 +52,8 @@ approved_at: 2026-06-01
 - [ ] `portaltest.AssertLogLevelResolved` is available and asserts the resolved level with `source=env` for a given pid; disk-full/`chmod`/symlink failures are best-effort and never crash portal
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-01
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
