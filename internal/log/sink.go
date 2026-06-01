@@ -37,8 +37,11 @@ var openSegmentFunc = os.OpenFile
 // mutex, so concurrent Handle calls serialise the reopen + write.
 //
 // The writer is deliberately UNBUFFERED — every record is its own write(2) to the
-// *os.File (no bufio). Best-effort failure handling (stderr fallback) is Task
-// 2-7; this sink surfaces open/write errors to the handler via Write's error.
+// *os.File (no bufio). This sink SURFACES open/write errors to the handler via
+// Write's error; the best-effort policy (swallow + single stderr fallback, never
+// propagate to the slog caller) lives in textHandler.Handle (Task 2-7), which
+// consumes that error. Keeping the sink honest lets probe() detect a
+// configuration failure at Init time while the per-Handle path stays best-effort.
 type rotatingSink struct {
 	// stateDir is the directory the day files and the portal.log symlink live in.
 	// Stored as a plain string; internal/log never imports internal/state.
@@ -110,6 +113,12 @@ func (s *rotatingSink) Write(p []byte) (int, error) {
 		return 0, err
 	}
 
+	// Unbuffered writer is a locked constraint (spec § Defensive invariants —
+	// Flush): the serialized record is written directly to the *os.File O_APPEND
+	// fd with NO bufio wrapper, so the bytes are already in the kernel by the time
+	// the originating Info(...) returns. os.Exit / syscall.Exec do not discard
+	// kernel buffers, so a marker survives for a later reader without any
+	// Sync()/flush. Do NOT introduce a bufio.Writer here.
 	return s.file.Write(p)
 }
 
@@ -298,8 +307,10 @@ func (s *rotatingSink) reopen(today string, dateChanged bool) error {
 	// atomic os.Rename, with prior-crash temp reclamation). The swing is
 	// BEST-EFFORT: a failure leaves the prior symlink in place and writes continue
 	// to the freshly-opened fd, so a swing error must NOT fail the reopen. The next
-	// Write's inode-identity check then forces a benign retry. Task 2-7 upgrades
-	// this swallowed error into a WARN-and-continue log line.
+	// Write's inode-identity check then forces a benign retry. The LOCKED
+	// behaviour (Task 2-7) is "writes continue to the open fd"; a WARN under
+	// log-rotate on the swing failure is acceptable but secondary and is NOT added
+	// here — the error stays swallowed-and-continue.
 	target := portalLogName + "." + today // relative bare filename — same dir.
 	_ = swingSymlink(s.stateDir, target)
 

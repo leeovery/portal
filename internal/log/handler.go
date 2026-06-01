@@ -2,12 +2,22 @@ package log
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// stderrFallback is the best-effort last-resort destination for a serialized
+// record when the primary sink write fails (open/reopen failure or a mid-record
+// write error — disk-full / EACCES / ENOSPC). It is a package var rather than a
+// handler field so the policy is single-sourced and tests can capture the
+// fallback output by swapping it (restoring via t.Cleanup). Production always
+// uses os.Stderr.
+var stderrFallback io.Writer = os.Stderr
 
 // componentKey is the baseline attr key carrying the subsystem name. It is set
 // per-package via For (root.With("component", ...)) and rendered by textHandler
@@ -78,7 +88,13 @@ func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
 }
 
 // Handle renders one line for r and writes it to the sink in a single
-// unbuffered Write.
+// unbuffered Write. The write path is BEST-EFFORT: logging owns no control flow,
+// so an open/reopen failure or a mid-record write error (disk-full / EACCES /
+// ENOSPC) is swallowed here — the serialized record is attempted once on the
+// stderr fallback and Handle ALWAYS returns nil. It never propagates an error to
+// the slog caller and never panics on any I/O failure. (slog ignores a handler's
+// returned error in practice; the explicit nil makes the "logging never crashes
+// portal" contract unambiguous.)
 func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 	var b strings.Builder
 
@@ -118,8 +134,21 @@ func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 
 	b.WriteByte('\n')
 
-	_, err := io.WriteString(h.w, b.String())
-	return err
+	h.bestEffortWrite(b.String())
+	return nil
+}
+
+// bestEffortWrite performs the single unbuffered write of the serialized record
+// to the sink. On any sink error — an open/reopen failure surfaced by the sink,
+// or a mid-record write(2) failure — it drops the record from the primary sink
+// and attempts the line ONCE on the stderr fallback. It never returns an error
+// and never panics: every failure mode is swallowed here so Handle's "always
+// returns nil" contract holds. The stderr fallback write is itself best-effort —
+// if stderr is also gone, there is nowhere left to go and the record is dropped.
+func (h *textHandler) bestEffortWrite(line string) {
+	if _, err := io.WriteString(h.w, line); err != nil {
+		_, _ = fmt.Fprint(stderrFallback, line)
+	}
 }
 
 // component resolves the subsystem prefix from the record's attrs first, then
