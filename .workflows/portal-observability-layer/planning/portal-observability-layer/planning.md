@@ -51,6 +51,27 @@ approved_at: 2026-06-01
 - [ ] `process: start`, `log-level resolved`, `process: exit`, `process: panic`, and `process: exec` markers fire exactly once per the four-way terminal classification and bypass the level filter even at WARN/ERROR
 - [ ] `portaltest.AssertLogLevelResolved` is available and asserts the resolved level with `source=env` for a given pid; disk-full/`chmod`/symlink failures are best-effort and never crash portal
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| portal-observability-layer-2-1 | Parse `PORTAL_LOG_ROTATE_SIZE` and `PORTAL_LOG_RETENTION_DAYS` once at handler init | missing/empty→default, K/M/G suffixes + bare bytes, invalid size string→500M fallback, retention non-integer/negative/>365→30 fallback, lowercase/uppercase suffix |
+| portal-observability-layer-2-2 | Date-aware fd reuse with inode-identity reopen and first-of-day `O_CREAT\|O_EXCL` open | EEXIST create-race→append fallback, same-day inode mismatch (file unlinked mid-day), ENOENT on symlink target→recreate, date-change vs same-day reopen distinction, first Handle ever (no file yet) |
+| portal-observability-layer-2-3 | Pid-scoped atomic symlink swing with crash-leftover reclamation | stale same-pid tmp from prior crash→remove+recreate, concurrent cross-process swing (identical target, last-writer-wins), swing failure leaves prior symlink in place, tmp never collides across pids |
+| portal-observability-layer-2-4 | First-run migration guard deleting legacy regular-file `portal.log` / `portal.log.old` | portal.log is regular file→removed, portal.log already a symlink→guard no-ops, portal.log.old absent→tolerated, portal.log absent entirely→no-op, guard never fires on second run |
+| portal-observability-layer-2-5 | Past-day `chmod 0400` immutability sweep on the day-roll path | strict date-parse skips symlink-tmp + swept sentinel + non-log siblings, already-0400 skipped, multi-day downtime catches all past days at once, chmod failure→WARN-and-continue, same-day segments NOT sealed |
+| portal-observability-layer-2-6 | Same-day size-cap overflow rotation to `portal.log.<today>.N` | max-N discovery (none→1, gaps), EEXIST on N→retry N+1, prior segment NOT chmod'd (peer may hold open fd), peer keeps appending to prior segment (acceptable split), cap never fires in steady state |
+| portal-observability-layer-2-7 | Best-effort write path with stderr fallback and unbuffered-writer guarantee | open failure→stderr fallback+continue, write failure mid-record→drop+continue, disk-full/EACCES never propagates to caller, writer is unbuffered (marker in kernel before Info returns), failed symlink swing→writes continue to open fd |
+| portal-observability-layer-2-8 | Single-winner retention sweep with per-deletion breadcrumbs and sentinel prune | EEXIST gate loss→return immediately (no emit/no run), invalid `PORTAL_LOG_RETENTION_DAYS`→WARN+default 30, INFO breadcrumb BEFORE delete, os.Remove failure→WARN+continue, strict date-parse excludes sentinel/tmp, stale non-today sentinels pruned, partial-sweep crash self-heals next day |
+| portal-observability-layer-2-9 | `portal clean --logs` gate-bypassing sweep with `cutoff=today` | no flag→logs preserved (sweep not triggered), `--logs` bypasses swept.<today> gate, cutoff=today leaves only current file, removes stale swept.* sentinels, reuses the same sweep function (no duplication) |
+| portal-observability-layer-2-10 | Lifecycle-marker level-filter bypass in the handler | process lifecycle msgs emitted at WARN/ERROR level, non-process INFO still filtered at WARN, only the closed lifecycle msg set bypasses (not arbitrary `process:` lines), identification by component+msg |
+| portal-observability-layer-2-11 | `process: start` and `log-level resolved` emission in `Init` (with invalid-level WARN) | start emitted exactly once as final pre-return action, log-level resolved immediately after start, source=env/default/fallback rendering, fallback also emits the bootstrap WARN, both lines bypass the level filter (visible at warn/error), baseline attrs auto-injected not passed |
+| portal-observability-layer-2-12 | `process: exit` emission in `Close` | code attr reflects exitCode, took from startTime non-negative, Close still never calls os.Exit, Close before Init safe (no panic, took bounded), exactly one exit line per Close call |
+| portal-observability-layer-2-13 | `process: panic` emission in the `main` recover block | panic emits ERROR `process: panic` with reason, Close still skipped on panic path (no double terminal marker), non-panic path unchanged, four-way classification stays mutually exclusive |
+| portal-observability-layer-2-14 | `process: exec` marker at the `AttachConnector` bare-shell handoff | exec marker emitted before syscall.Exec (in kernel pre-image-replace), target=tmux + args=joined argv, SwitchConnector path unaffected (gets normal exit via Close), args logged verbatim |
+| portal-observability-layer-2-15 | `portaltest.AssertLogLevelResolved` integration-test assertion helper | matches the correct line by pid attr when multiple processes wrote, fails on absent line (env did not propagate), fails when source≠env, parses the symlink-followed current log, tolerates baseline-attr ordering |
+
 ### Phase 3: State-mutation audit trail for user config files
 status: approved
 approved_at: 2026-06-01
