@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 2
 phase: Plan Integrity Review
@@ -66,7 +66,7 @@ Do bullet 3 (line 600), `[needs-info]` clause:
 
 Also add the matching success-path DEBUG breadcrumb in Do bullet 2 to use `signalLogger` (currently line 599 writes `logger.Debug("fifo signalled", "path", fifoPath)`): change to `signalLogger.Debug("fifo signalled", "path", fifoPath)`. Update the corresponding tick task (`tick-137c05`) description identically.
 
-**Resolution**: Pending
+**Resolution**: Fixed — task 5-11's Solution, Do bullet 1, Do bullet 2 (success-path DEBUG breadcrumb), and Do bullet 3 `[needs-info]` clause rewritten in phase-5-tasks.md and the tick task (tick-137c05) description to use a `signalLogger` package var (NOT a bare `logger`) at both the `cmd/bootstrap` and `internal/state` sites, with the receiver-replacement made explicit so the WARN re-attribution actually takes effect (the function-local `logger := c.Logger` / `internal/state` `logger` parameter would otherwise shadow it). Approved via `auto`.
 **Notes**: Low-risk, self-contained naming-precision fix; no scope or architecture change. It makes 5-11's instruction actually achieve its stated Outcome/Acceptance Criterion and aligns the var name with the uniform Phase-5 `<component>Logger` convention. The `[needs-info]` seam choice (a vs b) and all other content of 5-11 are sound and unchanged. Worth confirming the same `signalLogger` rename is applied to Do bullet 2's success-path DEBUG breadcrumb so all three `signal` emission sites in `cmd/bootstrap` use the one package var.
 
 ---
