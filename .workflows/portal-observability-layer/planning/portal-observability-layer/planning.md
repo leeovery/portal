@@ -88,6 +88,19 @@ approved_at: 2026-06-01
 - [ ] Batch operations (`CleanStale`) emit per-entry DEBUG, per-entry WARN on mid-loop failure, and one INFO summary with `entries` and `entries_failed`
 - [ ] `migrateConfigFile` emits one INFO per migrated file under the file's owning component with `op=migrate via=migrate`, and `AtomicWrite` remains audit-unaware (no logging inside it, none scattered at callers)
 
+#### Tasks
+status: approved
+approved_at: 2026-06-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| portal-observability-layer-3-1 | Expose `AtomicWrite` write-phase sentinels for `error_class` mapping (no logging in `fileutil`) | AtomicWrite stays log-free/audit-unaware, fsync phase has no current AtomicWrite step (close→write-failed-fsync — `[needs-info]`), unknown/wrapped error→safe default phase, sessions.json caller unaffected, errors.Is unwraps through %w |
+| portal-observability-layer-3-2 | Instrument `hooks.Store` `Set`/`Remove` (set/modify/rm + set-noop DEBUG, value/via/error_class) | set-noop (key+event exist, value matches)→DEBUG and skips Save, set-vs-modify from pre-write Load, rm of absent key, value omitted for rm, WARN carries write-failed-* error_class, via=cli (hooks set/rm) vs internal (migrate-rename Save) |
+| portal-observability-layer-3-3 | Instrument `hooks.Store` `CleanStale` batch (per-entry DEBUG, INFO summary, per-entry WARN) | zero removals→no Save + summary handling, whole-batch Save failure→write-failed-* not per-entry unexpected, single batched Save means per-entry WARN reachability (`[needs-info]`), entries_failed omitted when zero |
+| portal-observability-layer-3-4 | Instrument `project.Store` `Upsert`/`Rename`/`Remove`/`CleanStale` (op vocabulary, project/value/via/error_class) | Upsert found→modify / not-found→set / unchanged→set-noop, Rename no-op when path absent (no Save/no INFO), Remove of absent path still Saves, CleanStale batch summary entries/entries_failed, via=cli (TUI) vs internal (session prepare Upsert) |
+| portal-observability-layer-3-5 | Instrument `alias.Store` mutation+persist seam (alias/op/value/via, set-noop) | in-memory Set/Delete separate from persist (emission-point `[needs-info]`), Save uses os.WriteFile not AtomicWrite (error_class phase `[needs-info]`), set/modify/set-noop for alias, Delete of absent alias errors before Save, via=cli, value=path |
+| portal-observability-layer-3-6 | Emit `migrateConfigFile` INFO per migrated file (op=migrate, via=migrate, owning component) | component threaded from the three configFilePath sites, no-op when oldPath absent / newPath exists (no INFO), migrate WARN error_class for os.Rename failure (`[needs-info]`), PR-1-window migration unlogged (accepted), whole-file-move key attr value (`[needs-info]`), AtomicWrite/other callers stay audit-unaware |
+
 ### Phase 4: Diagnostic context preservation at boundaries
 status: approved
 approved_at: 2026-06-01
