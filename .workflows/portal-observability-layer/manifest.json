@@ -37,8 +37,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "portal-observability-layer-1-10",
+          "phase": 2,
+          "task": "~",
           "task_map": {
             "portal-observability-layer-1": "tick-0611e5",
             "portal-observability-layer-1-1": "tick-d7fbba",
