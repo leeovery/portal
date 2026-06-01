@@ -35,8 +35,8 @@
           "spec_commit": "2fb877ad1fa4be26877c5cf6b7451fc821a56a6b",
           "task_list_gate_mode": "auto",
           "author_gate_mode": "auto",
-          "finding_gate_mode": "gated",
-          "review_cycle": 0,
+          "finding_gate_mode": "auto",
+          "review_cycle": 1,
           "phase": 7,
           "task": "~",
           "task_map": {
@@ -96,7 +96,8 @@
             "portal-observability-layer-6-1": "tick-94671c",
             "portal-observability-layer-6-2": "tick-81b237",
             "portal-observability-layer-6-3": "tick-3c06c4",
-            "portal-observability-layer-6-4": "tick-1a48a1"
+            "portal-observability-layer-6-4": "tick-1a48a1",
+            "portal-observability-layer-5-11": "tick-137c05"
           },
           "external_id": "tick-7ac1a9"
         }

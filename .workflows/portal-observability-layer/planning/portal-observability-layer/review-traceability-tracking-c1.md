@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-01
 cycle: 1
 phase: Traceability Review
@@ -111,7 +111,7 @@ Full task body for `phase-5-tasks.md` (append after task 5-10, and bump the fron
 **Spec Reference**: `.workflows/portal-observability-layer/specification/portal-observability-layer/specification.md` § Subsystem prefix taxonomy (Closed component value space — `signal` ownership, single-source-of-truth, Rendering mechanism), § Call-site logging pattern (Mechanical rule); planning Phase 1 task 1-9 `signal` deferral
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed — added task `portal-observability-layer-5-11` (tick-137c05) to Phase 5: phase-5-tasks.md task body appended (front-matter `total` 10→11), planning.md Phase 5 task-table row + acceptance criterion added, tick task created. Approved via `auto`.
 **Notes**: This is the only completeness gap found. It is the direct consequence of Phase 1's explicit "introduced where Phase 5/6 promote them" deferral for `signal` not being honoured by any later phase (unlike the `capture` and `saver` deferrals, which task 5-1 and tasks 5-7/5-8 honour). The proposed task adds no new vocabulary and no new cycle summary — it only homes an existing line to its spec-assigned component and applies the standard call-site pattern to the `signal`-owned plumbing, so it stays within the spec's validated scope. If the reviewer/user judges the `signal` ownership to be satisfied by leaving `EagerSignalHydrate` under `hydrate` (i.e. treats the taxonomy row as advisory rather than binding), this finding can be closed as "won't fix" with that rationale recorded — but the spec's "single source of truth for the component count" framing argues for wiring it.
 
 ---
