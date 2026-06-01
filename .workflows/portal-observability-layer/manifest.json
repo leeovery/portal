@@ -38,7 +38,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "portal-observability-layer-1-9",
+          "task": "portal-observability-layer-1-10",
           "task_map": {
             "portal-observability-layer-1": "tick-0611e5",
             "portal-observability-layer-1-1": "tick-d7fbba",
@@ -48,7 +48,8 @@
             "portal-observability-layer-1-5": "tick-23135b",
             "portal-observability-layer-1-6": "tick-4b786c",
             "portal-observability-layer-1-7": "tick-81899a",
-            "portal-observability-layer-1-8": "tick-f67ea3"
+            "portal-observability-layer-1-8": "tick-f67ea3",
+            "portal-observability-layer-1-9": "tick-f37796"
           },
           "external_id": "tick-7ac1a9"
         }
