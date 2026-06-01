@@ -64,7 +64,7 @@ import (
 //     would-be subprocesses) and the isolated stateDir.
 //  2. Setenv("PORTAL_STATE_DIR", stateDir) — so any in-process or
 //     subprocess code resolving the state dir lands on the isolated
-//     one (openNoRotateLogger, ReadPortalLogSafe, and the saver
+//     one (the log handler, ReadPortalLogSafe, and the saver
 //     pane's `portal state daemon` all observe this).
 //  3. Setenv("PORTAL_LOG_LEVEL", "debug") — the assertions in both
 //     callsites' subtests grep for Debug breadcrumbs that the

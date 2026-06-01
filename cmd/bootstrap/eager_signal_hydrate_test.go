@@ -118,7 +118,7 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 		Markers:  lister,
 		StateDir: stateDir,
 		Signaler: signaler,
-		Logger:   logger,
+		Logger:   logger.Logger().With("component", "hydrate"),
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
@@ -134,8 +134,8 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 	found := false
 	for i, msg := range logger.warnings {
 		if strings.Contains(msg, "eager-signal: write fifo") && strings.Contains(msg, failPath) {
-			if logger.warnComponents[i] != state.ComponentHydrate {
-				t.Errorf("warning component[%d] = %q; want %q", i, logger.warnComponents[i], state.ComponentHydrate)
+			if logger.warnComponents[i] != "hydrate" {
+				t.Errorf("warning component[%d] = %q; want %q", i, logger.warnComponents[i], "hydrate")
 			}
 			found = true
 			break

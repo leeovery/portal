@@ -3,8 +3,6 @@ package restore_test
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -149,9 +147,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 	// Saved 2 panes, live reports 1 → sanity warning expected.
 	mock := &mockCommander{}
 	client := tmux.NewClient(mock)
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	logger := restoretest.OpenTestLogger(t, dir)
+	logger, sink := newCaptureLogger(t)
 
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
@@ -162,12 +158,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 
 	r.ApplySkeletonMarkers(sess, livePanes)
 
-	_ = logger.Close()
-	body, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	bodyStr := string(body)
+	bodyStr := sink.body()
 	if !strings.Contains(bodyStr, "live pane count") {
 		t.Errorf("log body lacks 'live pane count' sanity warning: %q", bodyStr)
 	}

@@ -419,16 +419,10 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	// no UI.
 	connector := buildSessionConnector(client)
 
-	// Open a best-effort logger so the pre-select pipeline can WARN on
-	// select-window / select-pane failures (spec § Pre-select + attach
-	// sequence > step 2/3). Log opening is non-fatal: the pipeline
-	// honours *state.Logger's nil-receiver no-op contract, so a failed
-	// open passes nil through and the rest of openTUI proceeds.
-	previewLogger, err := state.OpenLogger(state.PortalLog(stateDir), false)
-	if err != nil {
-		previewLogger = nil
-	}
-	defer previewLogger.Close()
+	// The pre-select pipeline WARNs on select-window / select-pane failures
+	// (spec § Pre-select + attach sequence > step 2/3) under the preview
+	// component. The handler is configured once by main -> log.Init; there is
+	// no per-process log open here.
 	previewAttacher := tui.NewPreviewAttachPipeline(client, previewLogger)
 
 	cfg := tuiConfig{

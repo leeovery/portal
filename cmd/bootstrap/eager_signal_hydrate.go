@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"log/slog"
+
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -27,8 +29,9 @@ import (
 //     point that bundles state.OpenFIFOForSignal + time.Sleep + the bounded
 //     retry ladder. Tests inject statetest.RecordingFIFOSignaler.
 //   - Logger is optional. When non-nil, per-FIFO write failures are emitted
-//     via Logger.Warn under ComponentHydrate. A nil Logger is tolerated —
-//     EagerSignalHydrate substitutes a no-op default at entry so call sites
+//     via Logger.Warn under the hydrate component (production wiring injects
+//     log.For("hydrate")). A nil Logger is tolerated — EagerSignalHydrate
+//     substitutes the io.Discard-backed discardLogger at entry so call sites
 //     can dispatch unconditionally, mirroring MarkerCleanupCore's contract.
 //
 // Markers and Signaler are mandatory: behaviour with either nil is undefined
@@ -40,7 +43,7 @@ type EagerSignalCore struct {
 	Markers  state.ServerOptionLister
 	StateDir string
 	Signaler state.FIFOSignaler
-	Logger   Logger
+	Logger   *slog.Logger
 }
 
 var _ EagerHydrateSignaler = (*EagerSignalCore)(nil)
@@ -58,10 +61,10 @@ var _ EagerHydrateSignaler = (*EagerSignalCore)(nil)
 //     no FIFO writes attempted.
 //  4. For each paneKey, derive fifoPath := state.FIFOPath(c.StateDir,
 //     paneKey) and call c.Signaler.SendSignal(fifoPath). On error, log via
-//     logger.Warn(state.ComponentHydrate, "eager-signal: write fifo %s:
-//     %v", fifoPath, err) and continue to the next pane — a single failing
-//     FIFO must NEVER abort the loop, otherwise the helpers in the
-//     remaining N-1 sessions stay stuck.
+//     logger.Warn("eager-signal: write fifo failed", "path", fifoPath,
+//     "error", err) under the hydrate component and continue to the next pane
+//     — a single failing FIFO must NEVER abort the loop, otherwise the helpers
+//     in the remaining N-1 sessions stay stuck.
 //  5. Always return nil after the loop. Per-FIFO write failures are
 //     soft warnings per spec §Failure Posture; only marker enumeration
 //     failures travel up via the return value.
@@ -75,7 +78,7 @@ func (c *EagerSignalCore) EagerSignalHydrate() error {
 	// across calls.
 	logger := c.Logger
 	if logger == nil {
-		logger = NoopLogger{}
+		logger = discardLogger
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)
@@ -93,7 +96,7 @@ func (c *EagerSignalCore) EagerSignalHydrate() error {
 			// remaining markers still get their signal. The loop body's
 			// last statement is the warn call, so the implicit fallthrough
 			// to the next iteration is the continuation.
-			logger.Warn(state.ComponentHydrate, "eager-signal: write fifo %s: %v", fifoPath, err)
+			logger.Warn("eager-signal: write fifo failed", "path", fifoPath, "error", err)
 		}
 	}
 	return nil

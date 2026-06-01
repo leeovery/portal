@@ -14,8 +14,10 @@ package tmux_test
 // tmux that the test harness does not expose).
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -29,19 +31,71 @@ import (
 // does not.
 const staleSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`
 
-// recordingLogger captures Info and Warn calls so assertions can verify
-// emission counts and message content. Satisfies tmux.MigrationLogger.
+// recordingLogger is a slog.Handler that captures Info and Warn records so
+// assertions can verify emission counts and message content. Each captured
+// record is rendered as "<component> | <message> <key>=<value>..." so the
+// migration's terse-message-plus-attrs shape (e.g. reaped=4) is inspectable.
+// Use Logger() to obtain a *slog.Logger to pass into RegisterPortalHooks.
 type recordingLogger struct {
 	infos []string
 	warns []string
+	// shared points at the slice-owning recorder so handlers derived via
+	// WithAttrs/WithGroup (notably .With("component", ...)) record into the
+	// same slices; nil on the root.
+	shared *recordingLogger
+	bound  []slog.Attr
 }
 
-func (r *recordingLogger) Info(component, format string, args ...any) {
-	r.infos = append(r.infos, fmt.Sprintf("%s | "+format, append([]any{component}, args...)...))
+// Logger returns a *slog.Logger whose records are captured by this recorder.
+func (r *recordingLogger) Logger() *slog.Logger { return slog.New(r) }
+
+func (r *recordingLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (r *recordingLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
+	next = append(next, r.bound...)
+	next = append(next, attrs...)
+	return &recordingLogger{shared: r.owner(), bound: next}
 }
 
-func (r *recordingLogger) Warn(component, format string, args ...any) {
-	r.warns = append(r.warns, fmt.Sprintf("%s | "+format, append([]any{component}, args...)...))
+func (r *recordingLogger) WithGroup(_ string) slog.Handler {
+	return &recordingLogger{shared: r.owner(), bound: r.bound}
+}
+
+func (r *recordingLogger) owner() *recordingLogger {
+	if r.shared != nil {
+		return r.shared
+	}
+	return r
+}
+
+func (r *recordingLogger) Handle(_ context.Context, rec slog.Record) error {
+	component := ""
+	var trailer strings.Builder
+	emit := func(a slog.Attr) bool {
+		if a.Key == "component" {
+			component = a.Value.String()
+			return true
+		}
+		trailer.WriteString(" ")
+		trailer.WriteString(a.Key)
+		trailer.WriteString("=")
+		trailer.WriteString(a.Value.String())
+		return true
+	}
+	for _, a := range r.bound {
+		emit(a)
+	}
+	rec.Attrs(func(a slog.Attr) bool { return emit(a) })
+	line := fmt.Sprintf("%s | %s%s", component, rec.Message, trailer.String())
+	owner := r.owner()
+	switch rec.Level {
+	case slog.LevelInfo:
+		owner.infos = append(owner.infos, line)
+	case slog.LevelWarn:
+		owner.warns = append(owner.warns, line)
+	}
+	return nil
 }
 
 // countSignalHydrateEntries returns, for each event in
@@ -93,7 +147,7 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	installStaleHooks(t, client)
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
@@ -148,13 +202,13 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 
 	// First bootstrap: evicts and installs.
 	first := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, first); err != nil {
+	if err := tmux.RegisterPortalHooks(client, first.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("first RegisterPortalHooks: %v", err)
 	}
 
 	// Second bootstrap: must be a complete no-op.
 	second := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, second); err != nil {
+	if err := tmux.RegisterPortalHooks(client, second.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("second RegisterPortalHooks: %v", err)
 	}
 
@@ -186,7 +240,7 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
@@ -230,7 +284,7 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
@@ -246,8 +300,8 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	if !strings.Contains(log.infos[0], "evicted 4") {
-		t.Errorf("INFO line = %q, want eviction count = 4", log.infos[0])
+	if !strings.Contains(log.infos[0], "reaped=4") {
+		t.Errorf("INFO line = %q, want eviction count reaped=4", log.infos[0])
 	}
 }
 
@@ -272,7 +326,7 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 	}
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
@@ -347,20 +401,23 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks returned err: %v (per-index migration failures must not error)", err)
 	}
 
-	// At least one WARN line naming the failing event and message.
+	// At least one WARN line reporting the eviction failure. (The failing
+	// event name was previously interpolated into the message; post-migration
+	// the event name has no closed attr key so the terse message no longer
+	// carries it — the WARN signature is asserted on its own.)
 	var sawFailureWarn bool
 	for _, w := range log.warns {
-		if strings.Contains(w, "client-attached") && strings.Contains(w, "failed to evict") {
+		if strings.Contains(w, "failed to evict") {
 			sawFailureWarn = true
 			break
 		}
 	}
 	if !sawFailureWarn {
-		t.Errorf("no WARN line names the failing event with `failed to evict`; warns=%v", log.warns)
+		t.Errorf("no WARN line with `failed to evict`; warns=%v", log.warns)
 	}
 
 	// Successful evictions on other hydration events should trigger the
@@ -400,7 +457,7 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	if err := tmux.RegisterPortalHooks(client, log); err != nil {
+	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
@@ -429,7 +486,7 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	wantSummary := fmt.Sprintf("evicted %d", len(tmux.HydrationTriggerEvents))
+	wantSummary := fmt.Sprintf("reaped=%d", len(tmux.HydrationTriggerEvents))
 	if !strings.Contains(log.infos[0], wantSummary) {
 		t.Errorf("INFO line = %q, want eviction count = %d", log.infos[0], len(tmux.HydrationTriggerEvents))
 	}
@@ -459,7 +516,7 @@ func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	client := tmux.NewClient(mock)
 
 	log := &recordingLogger{}
-	err := tmux.RegisterPortalHooks(client, log)
+	err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap"))
 
 	if err == nil {
 		t.Fatal("expected error from RegisterPortalHooks, got nil")

@@ -1,8 +1,10 @@
 package tmux_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -683,20 +685,65 @@ func TestRegisterPortalHooks(t *testing.T) {
 	})
 }
 
-// recordingMigrationLogger captures Info / Warn invocations for assertion in
-// migration-flow tests. The format string is rendered via fmt.Sprintf so the
-// recorded line is the same shape a production *state.Logger would emit.
+// recordingMigrationLogger is a slog.Handler that captures Info / Warn
+// records for assertion in migration-flow tests. Each captured record is
+// rendered as "[<component>] <message>" so the pre-migration assertions keep
+// working against the post-migration terse-message-plus-component-attr shape.
+// Use Logger() to obtain a *slog.Logger to pass into RegisterPortalHooks.
 type recordingMigrationLogger struct {
 	infos []string
 	warns []string
+	// shared points at the slice-owning recorder so handlers derived via
+	// WithAttrs/WithGroup (notably .With("component", ...)) record into the
+	// same slices; nil on the root.
+	shared *recordingMigrationLogger
+	bound  []slog.Attr
 }
 
-func (r *recordingMigrationLogger) Info(component, format string, args ...any) {
-	r.infos = append(r.infos, fmt.Sprintf("[%s] "+format, append([]any{component}, args...)...))
+// Logger returns a *slog.Logger whose records are captured by this recorder.
+func (r *recordingMigrationLogger) Logger() *slog.Logger { return slog.New(r) }
+
+func (r *recordingMigrationLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (r *recordingMigrationLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
+	next = append(next, r.bound...)
+	next = append(next, attrs...)
+	return &recordingMigrationLogger{shared: r.owner(), bound: next}
 }
 
-func (r *recordingMigrationLogger) Warn(component, format string, args ...any) {
-	r.warns = append(r.warns, fmt.Sprintf("[%s] "+format, append([]any{component}, args...)...))
+func (r *recordingMigrationLogger) WithGroup(_ string) slog.Handler {
+	return &recordingMigrationLogger{shared: r.owner(), bound: r.bound}
+}
+
+func (r *recordingMigrationLogger) owner() *recordingMigrationLogger {
+	if r.shared != nil {
+		return r.shared
+	}
+	return r
+}
+
+func (r *recordingMigrationLogger) Handle(_ context.Context, rec slog.Record) error {
+	component := ""
+	read := func(a slog.Attr) bool {
+		if a.Key == "component" {
+			component = a.Value.String()
+		}
+		return true
+	}
+	for _, a := range r.bound {
+		read(a)
+	}
+	rec.Attrs(read)
+	line := "[" + component + "] " + rec.Message
+	owner := r.owner()
+	switch rec.Level {
+	case slog.LevelInfo:
+		owner.infos = append(owner.infos, line)
+	case slog.LevelWarn:
+		owner.warns = append(owner.warns, line)
+	}
+	return nil
 }
 
 // nonSessionClosedSaveTriggerEvents is the canonical save-trigger event list
@@ -937,7 +984,7 @@ func TestRegisterPortalHooks_SessionClosedMigration(t *testing.T) {
 		client := tmux.NewClient(mock)
 
 		logger := &recordingMigrationLogger{}
-		err := tmux.RegisterPortalHooks(client, logger)
+		err := tmux.RegisterPortalHooks(client, logger.Logger().With("component", "bootstrap"))
 
 		// The migration's ShowGlobalHooks failure surfaces as an aggregate
 		// error consistent with how other step-2 register failures surface
@@ -1019,7 +1066,7 @@ func TestRegisterPortalHooks_SessionClosedMigration(t *testing.T) {
 		logger := &recordingMigrationLogger{}
 		// The unset failure is best-effort and must not propagate; the
 		// follow-up append is still attempted.
-		if err := tmux.RegisterPortalHooks(client, logger); err != nil {
+		if err := tmux.RegisterPortalHooks(client, logger.Logger().With("component", "bootstrap")); err != nil {
 			t.Fatalf("unexpected error from RegisterPortalHooks: %v", err)
 		}
 
@@ -1143,4 +1190,42 @@ func TestRegisterPortalHooks_SessionClosedMigration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestRegisterPortalHooks_EvictionLineEmittedUnderBootstrapComponent is the
+// Task 1-9 acceptance for the hooks-register migration's eviction logging: when
+// migrateHydrationHooks evicts at least one stale un-separated signal-hydrate
+// entry, it emits one INFO summary line, and that line is bound to the
+// component the caller injected (bootstrap, per Phase-1). Hermetic — no real
+// tmux; the MockCommander returns a stale entry on each hydration event.
+func TestRegisterPortalHooks_EvictionLineEmittedUnderBootstrapComponent(t *testing.T) {
+	// Seed one stale (un-separated) signal-hydrate entry on each hydration
+	// event so migrateHydrationHooks evicts them and emits its INFO summary.
+	var b strings.Builder
+	for _, ev := range tmux.HydrationTriggerEvents {
+		fmt.Fprintf(&b, "%s[0] => '%s'\n", ev, staleSignalHydrateCommand)
+	}
+	mock := &MockCommander{RunFunc: dispatchPortalHooks(t, b.String(), nil)}
+	client := tmux.NewClient(mock)
+
+	logger := &recordingMigrationLogger{}
+	if err := tmux.RegisterPortalHooks(client, logger.Logger().With("component", "bootstrap")); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
+	}
+
+	// Exactly one eviction INFO summary, rendered as "[<component>] <msg>" by
+	// recordingMigrationLogger — must carry the bootstrap component and the
+	// canonical eviction phrase.
+	var evictionLines []string
+	for _, line := range logger.infos {
+		if strings.Contains(line, "evicted stale signal-hydrate") {
+			evictionLines = append(evictionLines, line)
+		}
+	}
+	if len(evictionLines) != 1 {
+		t.Fatalf("eviction INFO line count = %d, want 1; infos=%v", len(evictionLines), logger.infos)
+	}
+	if !strings.HasPrefix(evictionLines[0], "[bootstrap] ") {
+		t.Errorf("eviction line %q not bound to the bootstrap component", evictionLines[0])
+	}
 }

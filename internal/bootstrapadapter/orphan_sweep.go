@@ -14,6 +14,8 @@ package bootstrapadapter
 // to a single file lets the rest of internal/bootstrapadapter stay focused.
 
 import (
+	"log/slog"
+
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -32,10 +34,10 @@ import (
 // "explicit fields, fail loud" adapter convention).
 //
 // logger is forwarded to the underlying *OrphanSweepCore so DEBUG / INFO /
-// WARN diagnostics under state.ComponentBootstrap land in portal.log. nil
-// is tolerated — *state.Logger is itself nil-safe, and the core
-// substitutes its no-op default at entry.
-func NewOrphanSweeper(client *tmux.Client, logger *state.Logger) bootstrap.OrphanSweeper {
+// WARN diagnostics under the bootstrap component land in portal.log. nil
+// is tolerated — the core substitutes its io.Discard-backed default at
+// entry.
+func NewOrphanSweeper(client *tmux.Client, logger *slog.Logger) bootstrap.OrphanSweeper {
 	return &bootstrap.OrphanSweepCore{
 		Pgrep: state.PgrepPortalDaemons,
 		SaverPanePID: func() (pid int, present bool, err error) {

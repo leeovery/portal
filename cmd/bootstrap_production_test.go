@@ -13,53 +13,96 @@ package cmd
 // consumed by run_hook_stale_cleanup_test.go.
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// recordedLog captures one Logger emission for post-call assertions.
+// recordedLog captures one Logger emission for post-call assertions. After
+// the observability migration the message is the slog terse phrase and
+// component is the bound component attr; args is no longer captured (data
+// lives in slog attrs).
 type recordedLog struct {
 	level     string
 	component string
-	format    string
-	args      []any
+	message   string
 }
 
-// recordingLogger satisfies bootstrap.Logger by appending every emission
-// to an in-memory slice. Tests inspect entries directly.
+// recordingLogger is a slog.Handler that appends every emission to an
+// in-memory slice. Tests inspect entries directly. Use Logger() to obtain a
+// *slog.Logger to inject into a step core or adapter.
+//
+// WithAttrs accumulates the bound attrs (notably the component bound via
+// .With("component", ...)) and replays them onto every record so the captured
+// recordedLog.component is populated even though production binds the
+// component at the logger, not at each call site.
 type recordingLogger struct {
 	entries []recordedLog
+	// shared points at the entries-owning recorder so handlers derived via
+	// WithAttrs/WithGroup record back into the same slice; nil on the root.
+	shared *recordingLogger
+	bound  []slog.Attr
 }
 
-// Debug records a debug-level emission.
-func (r *recordingLogger) Debug(component, format string, args ...any) {
-	r.entries = append(r.entries, recordedLog{"debug", component, format, args})
+// Logger returns a *slog.Logger whose records are captured by this recorder.
+func (r *recordingLogger) Logger() *slog.Logger { return slog.New(r) }
+
+func (r *recordingLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (r *recordingLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
+	next = append(next, r.bound...)
+	next = append(next, attrs...)
+	return &recordingLogger{shared: r.owner(), bound: next}
 }
 
-// Info records an info-level emission.
-func (r *recordingLogger) Info(component, format string, args ...any) {
-	r.entries = append(r.entries, recordedLog{"info", component, format, args})
+func (r *recordingLogger) WithGroup(_ string) slog.Handler {
+	return &recordingLogger{shared: r.owner(), bound: r.bound}
 }
 
-// Warn records a warn-level emission.
-func (r *recordingLogger) Warn(component, format string, args ...any) {
-	r.entries = append(r.entries, recordedLog{"warn", component, format, args})
+func (r *recordingLogger) owner() *recordingLogger {
+	if r.shared != nil {
+		return r.shared
+	}
+	return r
 }
 
-// Error records an error-level emission.
-func (r *recordingLogger) Error(component, format string, args ...any) {
-	r.entries = append(r.entries, recordedLog{"error", component, format, args})
+func (r *recordingLogger) Handle(_ context.Context, rec slog.Record) error {
+	component := ""
+	read := func(a slog.Attr) bool {
+		if a.Key == "component" {
+			component = a.Value.String()
+		}
+		return true
+	}
+	for _, a := range r.bound {
+		read(a)
+	}
+	rec.Attrs(read)
+	var level string
+	switch rec.Level {
+	case slog.LevelDebug:
+		level = "debug"
+	case slog.LevelInfo:
+		level = "info"
+	case slog.LevelWarn:
+		level = "warn"
+	case slog.LevelError:
+		level = "error"
+	}
+	owner := r.owner()
+	owner.entries = append(owner.entries, recordedLog{level, component, rec.Message})
+	return nil
 }
 
-// Compile-time assertion that recordingLogger satisfies bootstrap.Logger.
-var _ bootstrap.Logger = (*recordingLogger)(nil)
+// Compile-time assertion that recordingLogger satisfies slog.Handler.
+var _ slog.Handler = (*recordingLogger)(nil)
 
 // stubAllPaneLister returns canned panes/err pairs from ListAllPanes.
 type stubAllPaneLister struct {
@@ -106,13 +149,13 @@ func readFileBytes(t *testing.T, path string) []byte {
 }
 
 // countMatching returns the number of recorded log entries matching the
-// given level + component-substring + format-string-equality predicates.
-// Format equality (rather than substring) keeps assertions tight against
-// the adapter's emitted format strings.
-func countMatching(entries []recordedLog, level, component, format string) int {
+// given level + component + message-equality predicates. Message equality
+// (rather than substring) keeps assertions tight against the adapter's
+// emitted terse messages.
+func countMatching(entries []recordedLog, level, component, message string) int {
 	n := 0
 	for _, e := range entries {
-		if e.level == level && e.component == component && e.format == format {
+		if e.level == level && e.component == component && e.message == message {
 			n++
 		}
 	}
@@ -149,7 +192,7 @@ func TestCleanStaleAdapter_CleanStale(t *testing.T) {
 		adapter := &cleanStaleAdapter{
 			lister: lister,
 			store:  store,
-			logger: logger,
+			logger: logger.Logger().With("component", "bootstrap"),
 		}
 
 		err := adapter.CleanStale()
@@ -160,8 +203,8 @@ func TestCleanStaleAdapter_CleanStale(t *testing.T) {
 			t.Errorf("err = %v, want errors.Is == sentinel %v", err, sentinel)
 		}
 
-		const listPanesWarnFmt = "stale-hook cleanup: list-panes failed: %v"
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, listPanesWarnFmt); got != 1 {
+		const listPanesWarnMsg = "stale-hook cleanup: list-panes failed"
+		if got := countMatching(logger.entries, "warn", "bootstrap", listPanesWarnMsg); got != 1 {
 			t.Errorf("list-panes Warn count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
 		}
 	})
@@ -178,15 +221,15 @@ func TestCleanStaleAdapter_CleanStale(t *testing.T) {
 		adapter := &cleanStaleAdapter{
 			lister: lister,
 			store:  store,
-			logger: logger,
+			logger: logger.Logger().With("component", "bootstrap"),
 		}
 
 		if err := adapter.CleanStale(); err != nil {
 			t.Fatalf("CleanStale: %v", err)
 		}
 
-		const entryDebugFmt = "stale-hook cleanup: live=%d persisted=%d"
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 1 {
+		const entryDebugMsg = "stale-hook cleanup counts"
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugMsg); got != 1 {
 			t.Errorf("entry-point Debug count via adapter logger = %d, want 1 (proves the logger field flowed through); entries=%+v", got, logger.entries)
 		}
 	})

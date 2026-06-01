@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,7 +26,7 @@ import (
 type daemonDeps struct {
 	Dir          string
 	Version      string
-	Logger       *state.Logger
+	Logger       *slog.Logger
 	Client       *tmux.Client
 	HashMap      state.HashMap
 	PrevIndex    *state.Index
@@ -202,14 +203,10 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 	lockFile, err := acquireDaemonLock(deps.Dir)
 	if err != nil {
 		if errors.Is(err, state.ErrDaemonLockHeld) {
-			if deps.Logger != nil {
-				deps.Logger.Warn(state.ComponentDaemon, "another daemon holds the lock; exiting")
-			}
+			deps.Logger.Warn("another daemon holds the lock; exiting")
 			return nil
 		}
-		if deps.Logger != nil {
-			deps.Logger.Warn(state.ComponentDaemon, "acquire daemon lock: %v", err)
-		}
+		deps.Logger.Warn("acquire daemon lock failed", "error", err)
 		return fmt.Errorf("acquire daemon lock: %w", err)
 	}
 	if err := state.WritePIDFile(deps.Dir, os.Getpid()); err != nil {
@@ -242,9 +239,7 @@ func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 			} else {
 				consecutiveAbsenceTicks++
 				if consecutiveAbsenceTicks >= selfSupervisionHysteresisTicks {
-					deps.Logger.Info(state.ComponentDaemon,
-						"self-supervision: saver-membership lost for %d consecutive ticks, exiting",
-						consecutiveAbsenceTicks)
+					deps.Logger.Info("self-supervision: saver-membership lost, exiting", "ticks", consecutiveAbsenceTicks)
 					osExit(0)
 					return nil
 				}
@@ -270,7 +265,7 @@ func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 func tick(ctx context.Context, deps *daemonDeps) {
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
-		deps.Logger.Warn(state.ComponentDaemon, "read @portal-restoring: %v", err)
+		deps.Logger.Warn("read @portal-restoring failed", "error", err)
 		return
 	}
 	if restoring {
@@ -284,14 +279,14 @@ func tick(ctx context.Context, deps *daemonDeps) {
 	}
 
 	if err := captureAndCommit(ctx, deps); err != nil {
-		deps.Logger.Warn(state.ComponentDaemon, "tick: %v", err)
+		deps.Logger.Warn("tick failed", "error", err)
 		return
 	}
 
 	deps.LastSaveAt = time.Now()
 
 	if err := os.Remove(state.SaveRequested(deps.Dir)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		deps.Logger.Warn(state.ComponentDaemon, "remove save.requested: %v", err)
+		deps.Logger.Warn("remove save.requested failed", "error", err)
 	}
 }
 
@@ -364,12 +359,12 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 				target := tmux.PaneTarget(sess.Name, win.Index, pane.Index)
 				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
 				if err != nil {
-					deps.Logger.Warn(state.ComponentDaemon, "capture pane %s: %v", target, err)
+					deps.Logger.Warn("capture pane failed", "pane_key", target, "error", err)
 					continue
 				}
 				written, err := state.WriteScrollbackIfChanged(deps.Dir, paneKey, data, hash, deps.HashMap)
 				if err != nil {
-					deps.Logger.Warn(state.ComponentDaemon, "write scrollback %s: %v", paneKey, err)
+					deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
 					continue
 				}
 				if written {
@@ -400,19 +395,19 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 func defaultShutdownFlush(deps *daemonDeps) error {
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
-		deps.Logger.Warn(state.ComponentDaemon, "read @portal-restoring at shutdown: %v; skipping final flush", err)
+		deps.Logger.Warn("read @portal-restoring at shutdown failed; skipping final flush", "error", err)
 		return nil
 	}
 	if restoring {
-		deps.Logger.Info(state.ComponentDaemon, "skipping final flush: @portal-restoring set")
+		deps.Logger.Info("skipping final flush: @portal-restoring set")
 		return nil
 	}
-	deps.Logger.Info(state.ComponentDaemon, "final flush")
+	deps.Logger.Info("final flush")
 	// shutdown flush is non-cancellable — the cancelled context is what
 	// triggered the flush; passing it through would abort the very save we
 	// are exiting to perform.
 	if err := captureAndCommit(context.Background(), deps); err != nil {
-		deps.Logger.Warn(state.ComponentDaemon, "final flush: %v", err)
+		deps.Logger.Warn("final flush failed", "error", err)
 	}
 	return nil
 }
@@ -442,13 +437,15 @@ var stateDaemonCmd = &cobra.Command{
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
 
-		logger, err := state.OpenLogger(state.PortalLog(dir), true)
-		if err != nil {
-			return fmt.Errorf("open log file: %w", err)
-		}
-		defer func() { _ = logger.Close() }()
+		logger := daemonLogger
 
-		logger.Info(state.ComponentDaemon, "starting, version=%s, pid=%d", version, os.Getpid())
+		// version and pid are now baseline attrs injected per-record by the
+		// configured handler (set once via main -> log.Init), so the start
+		// line carries no interpolated values. The OS-process-boundary
+		// "process: start" marker is Phase 2; Phase 5 re-homes daemon
+		// lifecycle. Kept here so no existing log line silently disappears
+		// mid-migration.
+		logger.Info("starting")
 
 		// Defensive dirty-flag clear: a stale save.requested from a crashed or
 		// version-mismatch-restarted daemon must not trigger an immediate save
@@ -479,7 +476,7 @@ var stateDaemonCmd = &cobra.Command{
 		if idx, skip, err := state.ReadIndex(dir); !skip {
 			prevIdx = &idx
 		} else if err != nil {
-			logger.Warn(state.ComponentDaemon, "ReadIndex: %v", err)
+			logger.Warn("ReadIndex failed", "error", err)
 		}
 
 		client := tmux.DefaultClient()

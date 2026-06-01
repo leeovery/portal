@@ -1,6 +1,7 @@
 package state_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,32 +11,15 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// readLogBody returns the contents of a portal.log written by a *state.Logger
-// pointed at path. Helper centralises the open/read/fail flow used by sweep
-// tests that assert on log output.
-func readLogBody(t *testing.T, path string) string {
+// openTestLogger returns a capturing *slog.Logger plus its captureSink so
+// sweep tests can assert on the rendered log body. The dir parameter is
+// retained for call-site compatibility but unused — logging is in-memory now,
+// which means tests can chmod the state directory mid-sweep without breaking
+// log capture.
+func openTestLogger(t *testing.T, dir string) (*slog.Logger, *captureSink) {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read log %s: %v", path, err)
-	}
-	return string(data)
-}
-
-// openTestLogger opens a *state.Logger at dir/portal.log without rotation. The
-// logger is closed via t.Cleanup so its file descriptor is flushed before
-// tests read the log body.
-func openTestLogger(t *testing.T, dir string) (*state.Logger, string) {
-	t.Helper()
-	logPath := filepath.Join(dir, "portal.log")
-	lg, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = lg.Close()
-	})
-	return lg, logPath
+	_ = dir
+	return newCaptureLogger(t)
 }
 
 func TestSweepOrphanFIFOs_RemovesOrphansAndPreservesLiveOnes(t *testing.T) {
@@ -158,7 +142,7 @@ func TestSweepOrphanFIFOs_LogsAndContinuesOnPerFileFailure(t *testing.T) {
 		t.Fatalf("create b: %v", err)
 	}
 
-	lg, logPath := openTestLogger(t, dir)
+	lg, sink := openTestLogger(t, dir)
 
 	// Strip write permission AFTER FIFOs are created so os.Remove fails for
 	// both. Sweep should log warn for both and still return nil.
@@ -173,12 +157,12 @@ func TestSweepOrphanFIFOs_LogsAndContinuesOnPerFileFailure(t *testing.T) {
 		t.Errorf("SweepOrphanFIFOs returned error: %v", err)
 	}
 
-	// Restore permissions so the log can be read.
+	// Restore permissions so the temp-dir cleanup can remove files.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatalf("restore chmod: %v", err)
 	}
 
-	body := readLogBody(t, logPath)
+	body := sink.body()
 	if !strings.Contains(body, a) {
 		t.Errorf("log missing entry for %s; body = %q", a, body)
 	}
@@ -202,13 +186,13 @@ func TestSweepOrphanFIFOs_LogsLinePerRemovedOrphan(t *testing.T) {
 		t.Fatalf("create orphan: %v", err)
 	}
 
-	lg, logPath := openTestLogger(t, dir)
+	lg, sink := openTestLogger(t, dir)
 
 	if err := state.SweepOrphanFIFOs(dir, map[string]struct{}{}, lg); err != nil {
 		t.Fatalf("SweepOrphanFIFOs: %v", err)
 	}
 
-	body := readLogBody(t, logPath)
+	body := sink.body()
 	if !strings.Contains(body, orphan) {
 		t.Errorf("log missing path %s; body = %q", orphan, body)
 	}

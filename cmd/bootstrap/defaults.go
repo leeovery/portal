@@ -35,9 +35,11 @@ package bootstrap
 //     they back fatal-on-failure steps (1, 3, 8) of the bootstrap
 //     sequence and silently degrading would violate the contract.
 //   - Logger: positional; nil tolerated (Run substitutes its internal
-//     NoopLogger at entry).
+//     discardLogger at entry).
 
 import (
+	"log/slog"
+
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -166,7 +168,7 @@ func WithClean(s StaleCleaner) Option {
 func NewWithDefaults(
 	server ServerSeam,
 	stateDir string,
-	logger Logger,
+	logger *slog.Logger,
 	restoring RestoringMarker,
 	opts ...Option,
 ) *Orchestrator {

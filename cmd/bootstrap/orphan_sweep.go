@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"log/slog"
 	"os"
 	"syscall"
 
@@ -20,7 +21,7 @@ func defaultKill(pid int) error {
 // the `_portal-saver` pane's PID, and SIGKILLs every non-legitimate identity-
 // checked candidate. Best-effort: SweepOrphanDaemons never returns a non-nil
 // error — every failure path is logged via Logger.Warn under
-// state.ComponentBootstrap and swallowed.
+// the bootstrap component and swallowed.
 //
 // The concrete *OrphanSweepCore in this file satisfies this interface and is
 // the production implementation. Adapter wiring (production Pgrep /
@@ -86,9 +87,10 @@ type OrphanSweepCore struct {
 	// untrusted; no final flush; same reasoning as Component A.
 	Kill func(pid int) error
 
-	// Logger is optional; nil tolerated. SweepOrphanDaemons substitutes a
-	// no-op default at entry so call sites can dispatch unconditionally.
-	Logger Logger
+	// Logger is optional; nil tolerated. SweepOrphanDaemons substitutes the
+	// io.Discard-backed discardLogger at entry so call sites can dispatch
+	// unconditionally.
+	Logger *slog.Logger
 }
 
 var _ OrphanSweeper = (*OrphanSweepCore)(nil)
@@ -96,33 +98,33 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 // SweepOrphanDaemons enumerates candidate `portal state daemon` PIDs via the
 // Pgrep seam, builds the legitimate set from the SaverPanePID seam, then for
 // each non-legitimate candidate identity-checks via Identify and SIGKILLs via
-// Kill. Best-effort: every failure path emits Logger.Warn under
-// state.ComponentBootstrap and is swallowed. The method returns nil
+// Kill. Best-effort: every failure path emits Logger.Warn under the
+// bootstrap component and is swallowed. The method returns nil
 // unconditionally.
 //
 // Algorithm:
-//  1. Substitute a no-op Logger when none was injected so call sites can
-//     dispatch logger.Debug / .Info / .Warn unconditionally.
+//  1. Substitute the io.Discard-backed discardLogger when none was injected
+//     so call sites can dispatch logger.Debug / .Info / .Warn unconditionally.
 //  2. Apply production defaults for Identify and Kill when those seams are
 //     nil. (Pgrep and SaverPanePID have no defaults — production wiring
 //     must supply them; absence indicates a programmer error.)
-//  3. Invoke Pgrep. On error: WARN ("sweep: pgrep failed: %v") and return
+//  3. Invoke Pgrep. On error: WARN ("sweep: pgrep failed") and return
 //     nil — best-effort posture forbids escalation.
 //  4. Invoke SaverPanePID. Three observable shapes:
 //     - err != nil: WARN ("sweep: list-panes _portal-saver failed,
-//     legitimate set empty: %v") and treat the legitimate set as
+//     legitimate set empty") and treat the legitimate set as
 //     empty; sweep proceeds against ALL pgrep results.
 //     - !present (absent): legitimate set stays empty; no warning.
 //     - present: insert pid into the legitimate set.
 //  5. For each candidate PID that is NOT in the legitimate set AND NOT
 //     equal to os.Getpid() (defensive self-skip):
-//     a. Invoke Identify. On error: WARN ("sweep: identity-check pid=%d
-//     failed, skipping: %v") and continue to the next PID.
-//     b. On result != IdentifyIsPortalDaemon: DEBUG ("sweep: pid=%d not
+//     a. Invoke Identify. On error: WARN ("sweep: identity-check failed,
+//     skipping" with target_pid) and continue to the next PID.
+//     b. On result != IdentifyIsPortalDaemon: DEBUG ("sweep: pid not
 //     identity-checked as portal daemon, skipping") and continue.
-//     c. Invoke Kill. On error: WARN ("sweep: kill pid=%d failed: %v")
-//     and continue. On success: INFO ("sweep: killed orphan daemon
-//     pid=%d") under state.ComponentBootstrap.
+//     c. Invoke Kill. On error: WARN ("sweep: kill failed")
+//     and continue. On success: INFO ("sweep: killed orphan daemon"
+//     with target_pid) under the bootstrap component.
 //  6. Return nil unconditionally.
 //
 // SweepOrphanDaemons never returns a non-nil error — Component B is a best-
@@ -132,7 +134,7 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	logger := c.Logger
 	if logger == nil {
-		logger = NoopLogger{}
+		logger = discardLogger
 	}
 	identify := c.Identify
 	if identify == nil {
@@ -145,7 +147,7 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 
 	candidates, err := c.Pgrep()
 	if err != nil {
-		logger.Warn(state.ComponentBootstrap, "sweep: pgrep failed: %v", err)
+		logger.Warn("sweep: pgrep failed", "error", err)
 		return nil
 	}
 
@@ -153,8 +155,7 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	saverPID, saverPresent, saverErr := c.SaverPanePID()
 	switch {
 	case saverErr != nil:
-		logger.Warn(state.ComponentBootstrap,
-			"sweep: list-panes _portal-saver failed, legitimate set empty: %v", saverErr)
+		logger.Warn("sweep: list-panes _portal-saver failed, legitimate set empty", "error", saverErr)
 	case !saverPresent:
 		// `_portal-saver` absent — legitimate set stays empty; no warn.
 	default:
@@ -176,21 +177,18 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 		}
 		res, err := identify(pid)
 		if err != nil {
-			logger.Warn(state.ComponentBootstrap,
-				"sweep: identity-check pid=%d failed, skipping: %v", pid, err)
+			logger.Warn("sweep: identity-check failed, skipping", "target_pid", pid, "error", err)
 			continue
 		}
 		if res != state.IdentifyIsPortalDaemon {
-			logger.Debug(state.ComponentBootstrap,
-				"sweep: pid=%d not identity-checked as portal daemon, skipping", pid)
+			logger.Debug("sweep: pid not identity-checked as portal daemon, skipping", "target_pid", pid)
 			continue
 		}
 		if err := kill(pid); err != nil {
-			logger.Warn(state.ComponentBootstrap,
-				"sweep: kill pid=%d failed: %v", pid, err)
+			logger.Warn("sweep: kill failed", "target_pid", pid, "error", err)
 			continue
 		}
-		logger.Info(state.ComponentBootstrap, "sweep: killed orphan daemon pid=%d", pid)
+		logger.Info("sweep: killed orphan daemon", "target_pid", pid)
 	}
 	return nil
 }

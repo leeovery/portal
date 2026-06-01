@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
@@ -132,11 +133,12 @@ func BarrierEscalationTimeoutSeam() *time.Duration { return &saver.Barrier.Escal
 func BarrierSendSIGKILLSeam() *func(int) error { return &saver.Barrier.SendSIGKILL }
 
 // BarrierLoggerSeam returns a pointer to the shared saver-barrier Logger
-// seam so tests can install a recording fake satisfying the BarrierLogger
-// interface. The Logger sink is consumed by BOTH the kill-barrier
+// seam so tests can install a capturing *slog.Logger (via
+// log.SetTestHandler or a direct slog.New) and restore the prior value via
+// t.Cleanup. The Logger sink is consumed by BOTH the kill-barrier
 // WARN-on-timeout / escalation paths AND the readiness-barrier
 // WARN-on-timeout path (waitForSaverDaemonReady).
-func BarrierLoggerSeam() *BarrierLogger { return &saver.Barrier.Logger }
+func BarrierLoggerSeam() **slog.Logger { return &saver.Barrier.Logger }
 
 // SaverReadinessPollIntervalSeam returns a pointer to the readiness-barrier
 // PollInterval seam so tests can shrink the poll cadence to keep
@@ -168,9 +170,9 @@ func PortalSaverWriteVersionFileSeam() *func(string, string) error {
 }
 
 // VersionWriterLoggerSeam returns a pointer to the version WriterLogger
-// sink so tests can install a capturing *state.Logger via
+// sink so tests can install a capturing *slog.Logger via
 // SetVersionWriterLogger and restore the prior value via t.Cleanup.
-func VersionWriterLoggerSeam() **state.Logger { return &saver.Version.WriterLogger }
+func VersionWriterLoggerSeam() **slog.Logger { return &saver.Version.WriterLogger }
 
 // WaitForSaverDaemonReadyFnSeam returns a pointer to the operation-level
 // WaitForReady seam so create-branch tests can stub the readiness barrier

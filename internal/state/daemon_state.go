@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -93,16 +94,16 @@ func DaemonAlive(dir string) bool {
 // Note: like WritePIDFile, this deliberately uses plain AtomicWrite — not
 // AtomicWrite0600 — and tolerates the user's umask. The version marker is
 // non-sensitive.
-func WriteVersionFile(dir, version string, logger *Logger) error {
+func WriteVersionFile(dir, version string, logger *slog.Logger) error {
+	logger = loggerOrDiscard(logger)
 	path := DaemonVersion(dir)
 	// Emit the breadcrumb BEFORE the atomic-write side effect so a subsequent
 	// write failure (read-only FS, ENOSPC) still leaves a paper trail of the
-	// caller's intent in portal.log. The pid is evaluated at call time so
-	// daemon and bootstrap-side callers surface distinct pid values. The
-	// "daemon.version write:" prefix is a stable grep contract for Defect 3
-	// investigations — see spec § Change 3. Nil logger is a no-op via
-	// Logger's documented nil-receiver semantics.
-	logger.Debug(ComponentDaemon, "daemon.version write: version=%s pid=%d path=%s", version, os.Getpid(), path)
+	// caller's intent in portal.log. version and pid are now baseline attrs
+	// injected per-record by the configured handler, so they are no longer
+	// passed at this call site. The path attr keeps the grep contract for
+	// Defect 3 investigations — see spec § Change 3.
+	logger.Debug("daemon.version write", "path", path)
 	return fileutil.AtomicWrite(path, []byte(version+"\n"))
 }
 

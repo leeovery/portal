@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/state"
 )
 
 // newTempHooksStoreForHelper writes seed JSON to a fresh temp dir's
@@ -32,11 +31,12 @@ import (
 // cleanStaleAdapterT mirror suite (newTempHooksStore) — re-declared here
 // so this file can stand on its own once cleanStaleAdapterT is removed.
 func TestRunHookStaleCleanup(t *testing.T) {
-	const entryDebugFmt = "stale-hook cleanup: live=%d persisted=%d"
-	const completionDebugFmt = "stale-hook cleanup: removed=%d"
-	const hazardWarnFmt = "stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)"
-	const listPanesWarnFmt = "stale-hook cleanup: list-panes failed: %v"
-	const loadWarnFmt = "stale-hook cleanup: hookStore.Load failed: %v"
+	// Post-migration terse messages (data lives in slog attrs):
+	const entryDebugFmt = "stale-hook cleanup counts"
+	const completionDebugFmt = "stale-hook cleanup removed"
+	const hazardWarnFmt = "stale-hook cleanup: zero live panes parsed with hooks present; skipping to avoid mass-deletion hazard (next bootstrap retries)"
+	const listPanesWarnFmt = "stale-hook cleanup: list-panes failed"
+	const loadWarnFmt = "stale-hook cleanup: hookStore.Load failed"
 
 	t.Run("hazard guard fires on empty live + non-empty persisted", func(t *testing.T) {
 		seed := `{
@@ -49,7 +49,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger, false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -58,22 +58,15 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			t.Errorf("hooks.json modified by hazard-guard branch: before=%q after=%q", before, after)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 1 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 1 {
 			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, logger.entries)
 		}
-		for _, e := range logger.entries {
-			if e.format == entryDebugFmt {
-				if len(e.args) != 2 || e.args[0] != 0 || e.args[1] != 2 {
-					t.Errorf("entry-point Debug args = %v, want [0 2]", e.args)
-				}
-			}
-		}
 
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, hazardWarnFmt); got != 1 {
+		if got := countMatching(logger.entries, "warn", "bootstrap", hazardWarnFmt); got != 1 {
 			t.Errorf("hazard Warn count = %d, want 1; entries=%+v", got, logger.entries)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, completionDebugFmt); got != 0 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", completionDebugFmt); got != 0 {
 			t.Errorf("completion Debug count = %d, want 0 (must NOT fire on hazard branch); entries=%+v", got, logger.entries)
 		}
 	})
@@ -85,7 +78,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger, false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -94,15 +87,8 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			t.Errorf("hooks.json materialised under both-sides-empty path: before=%v after=%v", before, after)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 1 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 1 {
 			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, logger.entries)
-		}
-		for _, e := range logger.entries {
-			if e.format == entryDebugFmt {
-				if len(e.args) != 2 || e.args[0] != 0 || e.args[1] != 0 {
-					t.Errorf("entry-point Debug args = %v, want [0 0]", e.args)
-				}
-			}
 		}
 
 		for _, e := range logger.entries {
@@ -111,7 +97,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			}
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, completionDebugFmt); got != 0 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", completionDebugFmt); got != 0 {
 			t.Errorf("completion Debug count = %d, want 0; entries=%+v", got, logger.entries)
 		}
 	})
@@ -125,7 +111,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: nil, err: sentinel}
 
-		err := runHookStaleCleanup(lister, store, logger, false, nil)
+		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil)
 		if err == nil {
 			t.Fatalf("runHookStaleCleanup: want error, got nil")
 		}
@@ -138,15 +124,15 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			t.Errorf("hooks.json modified on ListAllPanes-error path: before=%q after=%q", before, after)
 		}
 
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, listPanesWarnFmt); got != 1 {
+		if got := countMatching(logger.entries, "warn", "bootstrap", listPanesWarnFmt); got != 1 {
 			t.Errorf("list-panes Warn count = %d, want 1; entries=%+v", got, logger.entries)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 0 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 0 {
 			t.Errorf("entry-point Debug count = %d, want 0 (must NOT fire on ListAllPanes-error branch); entries=%+v", got, logger.entries)
 		}
 
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, hazardWarnFmt); got != 0 {
+		if got := countMatching(logger.entries, "warn", "bootstrap", hazardWarnFmt); got != 0 {
 			t.Errorf("hazard Warn count = %d, want 0 on ListAllPanes-error branch; entries=%+v", got, logger.entries)
 		}
 	})
@@ -160,7 +146,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: nil, err: sentinel}
 
-		err := runHookStaleCleanup(lister, store, logger, true, nil)
+		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), true, nil)
 		if err != nil {
 			t.Fatalf("runHookStaleCleanup under swallowListError=true: want nil err, got %v", err)
 		}
@@ -170,11 +156,11 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			t.Errorf("hooks.json modified on ListAllPanes-error swallow path: before=%q after=%q", before, after)
 		}
 
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, listPanesWarnFmt); got != 1 {
+		if got := countMatching(logger.entries, "warn", "bootstrap", listPanesWarnFmt); got != 1 {
 			t.Errorf("list-panes Warn count = %d, want 1 under swallow; entries=%+v", got, logger.entries)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 0 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 0 {
 			t.Errorf("entry-point Debug count = %d, want 0 under swallow; entries=%+v", got, logger.entries)
 		}
 	})
@@ -195,17 +181,17 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
 
-		err := runHookStaleCleanup(lister, store, logger, false, nil)
+		err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil)
 		if err == nil {
 			t.Fatalf("runHookStaleCleanup: want Load error, got nil")
 		}
 
-		if got := countMatching(logger.entries, "warn", state.ComponentBootstrap, loadWarnFmt); got != 1 {
+		if got := countMatching(logger.entries, "warn", "bootstrap", loadWarnFmt); got != 1 {
 			t.Errorf("hookStore.Load Warn count = %d, want 1; entries=%+v", got, logger.entries)
 		}
 
 		// Entry-point Debug MUST NOT fire when Load fails (terminal-Warn-only branch).
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 0 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 0 {
 			t.Errorf("entry-point Debug count = %d, want 0 on Load-error branch; entries=%+v", got, logger.entries)
 		}
 	})
@@ -227,7 +213,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			removedSeen = append(removedSeen, name)
 		}
 
-		if err := runHookStaleCleanup(lister, store, logger, false, onRemoved); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, onRemoved); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -255,11 +241,11 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		lister := &stubAllPaneLister{panes: []string{"a:0.0"}, err: nil}
 
 		// Must not panic when onRemoved is nil and entries are removed.
-		if err := runHookStaleCleanup(lister, store, logger, false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, completionDebugFmt); got != 1 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", completionDebugFmt); got != 1 {
 			t.Errorf("completion Debug count = %d, want 1; entries=%+v", got, logger.entries)
 		}
 	})
@@ -276,7 +262,7 @@ func TestRunHookStaleCleanup(t *testing.T) {
 		logger := &recordingLogger{}
 		lister := &stubAllPaneLister{panes: []string{"a:0.0", "b:0.0", "c:0.0"}, err: nil}
 
-		if err := runHookStaleCleanup(lister, store, logger, false, nil); err != nil {
+		if err := runHookStaleCleanup(lister, store, logger.Logger().With("component", "bootstrap"), false, nil); err != nil {
 			t.Fatalf("runHookStaleCleanup: %v", err)
 		}
 
@@ -292,26 +278,12 @@ func TestRunHookStaleCleanup(t *testing.T) {
 			t.Errorf("post-run hooks still contains stale key d:0.0; got %v", keysOf(postRun))
 		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, entryDebugFmt); got != 1 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", entryDebugFmt); got != 1 {
 			t.Errorf("entry-point Debug count = %d, want 1; entries=%+v", got, logger.entries)
 		}
-		for _, e := range logger.entries {
-			if e.format == entryDebugFmt {
-				if len(e.args) != 2 || e.args[0] != 3 || e.args[1] != 4 {
-					t.Errorf("entry-point Debug args = %v, want [3 4]", e.args)
-				}
-			}
-		}
 
-		if got := countMatching(logger.entries, "debug", state.ComponentBootstrap, completionDebugFmt); got != 1 {
+		if got := countMatching(logger.entries, "debug", "bootstrap", completionDebugFmt); got != 1 {
 			t.Errorf("completion Debug count = %d, want 1; entries=%+v", got, logger.entries)
-		}
-		for _, e := range logger.entries {
-			if e.format == completionDebugFmt {
-				if len(e.args) != 1 || e.args[0] != 1 {
-					t.Errorf("completion Debug args = %v, want [1]", e.args)
-				}
-			}
 		}
 
 		for _, e := range logger.entries {

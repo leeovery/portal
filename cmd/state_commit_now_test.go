@@ -6,13 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
+
+// installCommitNowLogCapture installs an in-process slog capture sink via
+// log.SetTestHandler so commit-now's daemonLogger (log.For("daemon"))
+// records are captured for assertion. The command body logs through the
+// process-wide swap handler, not a per-process file, so capturing in-process
+// replaces the old "read state.PortalLog(dir)" pattern.
+func installCommitNowLogCapture(t *testing.T) *cmdCaptureSink {
+	t.Helper()
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
+	return sink
+}
 
 // runStateCommitNow executes "portal state commit-now" with stdout/stderr
 // captured and returns the Execute error.
@@ -75,12 +89,12 @@ type commitNowFixture struct {
 	readIdxOverride bool
 
 	// @portal-restoring / save.requested seams.
-	restoring     bool
-	restoringErr  error
+	restoring      bool
+	restoringErr   error
 	restoringCalls int
-	touchCalls    int
-	touchDirs     []string
-	touchErr      error
+	touchCalls     int
+	touchDirs      []string
+	touchErr       error
 }
 
 type commitInvocation struct {
@@ -94,7 +108,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 	prev := commitNowDeps
 	deps := &CommitNowDeps{
 		NewClient: func() state.CaptureClient { return f.client },
-		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *state.Logger) (state.Index, error) {
+		CaptureStructure: func(c state.CaptureClient, skipSet map[string]struct{}, p *state.Index, logger *slog.Logger) (state.Index, error) {
 			f.captureCalls++
 			f.capturePrevs = append(f.capturePrevs, p)
 			f.captureSkipSets = append(f.captureSkipSets, skipSet)
@@ -103,7 +117,7 @@ func installCommitNowDeps(t *testing.T, f *commitNowFixture) {
 			}
 			return f.captureReturn, nil
 		},
-		Commit: func(dir string, idx state.Index, any bool, _ *state.Logger) error {
+		Commit: func(dir string, idx state.Index, any bool, _ *slog.Logger) error {
 			f.commitCalls++
 			f.commitArgs = append(f.commitArgs, commitInvocation{Dir: dir, Idx: idx, AnyScrollbackChanged: any})
 			if f.commitErr != nil {
@@ -402,6 +416,7 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t 
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	sink := installCommitNowLogCapture(t)
 
 	// No sessions.json exists in dir → ReadIndex returns (Index{}, true, nil).
 	f := &commitNowFixture{
@@ -426,16 +441,12 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t 
 	}
 
 	// Log must contain a WARN entry under ComponentDaemon mentioning sessions.json.
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "sessions.json") {
 		t.Errorf("log missing 'sessions.json' marker: %q", logged)
@@ -452,6 +463,7 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnOnCorruptSessionsJSON(t *t
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	sink := installCommitNowLogCapture(t)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -477,16 +489,12 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnOnCorruptSessionsJSON(t *t
 		t.Errorf("prev should be zero-value Index, got: %+v", got)
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 }
 
@@ -628,6 +636,7 @@ func TestStateCommitNow_ShortCircuits_LogsInfoSkipEvent(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
+	sink := installCommitNowLogCapture(t)
 
 	f := &commitNowFixture{
 		client:    &fakeCaptureClient{sessions: nil},
@@ -639,16 +648,12 @@ func TestStateCommitNow_ShortCircuits_LogsInfoSkipEvent(t *testing.T) {
 		t.Fatalf("expected exit 0, got: %v", err)
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "@portal-restoring") {
 		t.Errorf("log missing @portal-restoring marker mention: %q", logged)
@@ -677,6 +682,7 @@ func TestStateCommitNow_ShortCircuits_ExitsZeroWhenSaveRequestedTouchFails(t *te
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	sink := installCommitNowLogCapture(t)
 
 	f := &commitNowFixture{
 		client:    &fakeCaptureClient{sessions: nil},
@@ -694,11 +700,7 @@ func TestStateCommitNow_ShortCircuits_ExitsZeroWhenSaveRequestedTouchFails(t *te
 			f.captureCalls, f.commitCalls)
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry on touch failure: %q", logged)
 	}
@@ -718,6 +720,7 @@ func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) 
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	sink := installCommitNowLogCapture(t)
 
 	// Seed sessions.json so we can verify byte-equivalence post-invocation.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -772,16 +775,12 @@ func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) 
 	}
 
 	// WARN log entry under ComponentDaemon, mentioning the underlying error.
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "tmux unreachable") {
 		t.Errorf("log missing underlying isRestoring error: %q", logged)
@@ -824,7 +823,7 @@ func TestStateCommitNow_ProceedsNormallyWhenRestoringClear(t *testing.T) {
 // --- Failure-path discipline (task 1-3) ---
 //
 // On any failure of CaptureStructure or Commit, commit-now must:
-//   (a) emit an ERROR log under state.ComponentDaemon with the underlying err,
+//   (a) emit an ERROR log under "daemon" with the underlying err,
 //   (b) touch save.requested best-effort (daemon-fallback handoff),
 //   (c) exit non-zero — never panic, never print a Go stack trace.
 //
@@ -879,6 +878,7 @@ func TestStateCommitNow_LogsErrorWhenCaptureStructureFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "error")
+	sink := installCommitNowLogCapture(t)
 
 	f := &commitNowFixture{
 		client:     &fakeCaptureClient{sessions: nil},
@@ -890,16 +890,12 @@ func TestStateCommitNow_LogsErrorWhenCaptureStructureFails(t *testing.T) {
 		t.Fatal("expected non-zero exit")
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing ERROR level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "tmux unreachable") {
 		t.Errorf("log missing underlying capture error: %q", logged)
@@ -1004,6 +1000,7 @@ func TestStateCommitNow_LogsErrorWhenCommitFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "error")
+	sink := installCommitNowLogCapture(t)
 
 	f := &commitNowFixture{
 		client: &fakeCaptureClient{sessions: nil},
@@ -1019,16 +1016,12 @@ func TestStateCommitNow_LogsErrorWhenCommitFails(t *testing.T) {
 		t.Fatal("expected non-zero exit")
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing ERROR level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "component="+"daemon") {
+		t.Errorf("log missing %q component column: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "permission denied") {
 		t.Errorf("log missing underlying commit error: %q", logged)
@@ -1065,6 +1058,7 @@ func TestStateCommitNow_LogsWarnForTouchFailureAlongsidePrimaryError(t *testing.
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+	sink := installCommitNowLogCapture(t)
 
 	f := &commitNowFixture{
 		client: &fakeCaptureClient{sessions: nil},
@@ -1081,11 +1075,7 @@ func TestStateCommitNow_LogsWarnForTouchFailureAlongsidePrimaryError(t *testing.
 		t.Fatal("expected non-zero exit")
 	}
 
-	logData, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	logged := string(logData)
+	logged := sink.body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing primary ERROR entry: %q", logged)
 	}

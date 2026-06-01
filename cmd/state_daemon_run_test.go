@@ -5,13 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -182,14 +184,9 @@ func makeDeps(t *testing.T, dir string, fc *daemonFakeCommander) *daemonDeps {
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
 	}
-	logger, err := state.OpenLogger(state.PortalLog(dir), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
 	return &daemonDeps{
 		Dir:          dir,
-		Logger:       logger,
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Client:       tmux.NewClient(fc),
 		HashMap:      state.HashMap{},
 		TickerPeriod: 1 * time.Millisecond,
@@ -524,17 +521,16 @@ func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{markersErr: errors.New("show-options blew up")}
 	deps := makeDeps(t, dir, fc)
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	deps.Logger = logger
 	deps.LastSaveAt = time.Now()
 	touchSaveRequested(t, dir)
 
 	tick(context.Background(), deps)
 
-	logBytes, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	if !strings.Contains(string(logBytes), "tick:") {
-		t.Errorf("expected tick failure log entry; got:\n%s", logBytes)
+	got := sink.body()
+	if !strings.Contains(got, "tick failed") {
+		t.Errorf("expected tick failure log entry; got:\n%s", got)
 	}
 	if _, err := os.Stat(state.SessionsJSON(dir)); !os.IsNotExist(err) {
 		t.Errorf("sessions.json should not be written on list-markers error; stat=%v", err)
@@ -589,13 +585,13 @@ func TestDaemonTick_LogsAndSkipsOnCommitErrorWithoutAdvancingLastSaveAt(t *testi
 }
 
 func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T) {
-	// "final flush" is INFO; default WARN threshold filters it.
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	sess, panes := oneSession()
 	fc := &daemonFakeCommander{sessionsOut: sess, panesOut: panes}
 	deps := makeDeps(t, dir, fc)
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	deps.Logger = logger
 	deps.TickerPeriod = time.Hour // ensure no ticker firing during test
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -611,12 +607,8 @@ func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T
 	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
 		t.Errorf("final flush did not write sessions.json: %v", err)
 	}
-	logBytes, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	if !strings.Contains(string(logBytes), "final flush") {
-		t.Errorf("expected 'final flush' log entry; got:\n%s", logBytes)
+	if got := sink.body(); !strings.Contains(got, "final flush") {
+		t.Errorf("expected 'final flush' log entry; got:\n%s", got)
 	}
 }
 
@@ -808,6 +800,11 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
+	// The daemon RunE logs via daemonLogger (log.For("daemon")); capture those
+	// records in-process so we can assert no ReadIndex warning was emitted.
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
+
 	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
@@ -823,11 +820,8 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	// Missing-file is a clean skip: no warning about reading sessions.json
 	// should be logged. This is the corrupt-vs-missing classification we
 	// inherit from state.ReadIndex.
-	logPath := filepath.Join(dir, "portal.log")
-	if data, err := os.ReadFile(logPath); err == nil {
-		if strings.Contains(string(data), "ReadIndex") || strings.Contains(string(data), "sessions.json") {
-			t.Errorf("missing sessions.json should not produce a ReadIndex warning; got:\n%s", data)
-		}
+	if data := sink.body(); strings.Contains(data, "ReadIndex") || strings.Contains(data, "sessions.json") {
+		t.Errorf("missing sessions.json should not produce a ReadIndex warning; got:\n%s", data)
 	}
 }
 
@@ -841,6 +835,11 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 		t.Fatalf("seed bad sessions.json: %v", err)
 	}
 
+	// The daemon RunE logs via daemonLogger (log.For("daemon")); capture those
+	// records in-process.
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
+
 	holder := withImmediateRun(t)
 	withDaemonLockFileReset(t)
 
@@ -850,16 +849,12 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 	if (*holder).PrevIndex != nil {
 		t.Errorf("PrevIndex should be nil on decode error; got %+v", *(*holder).PrevIndex)
 	}
-	logBytes, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
 	// state.ReadIndex wraps decode failures with ErrCorruptIndex, whose
-	// message is "sessions.json corrupt" — surface that in the log so the
+	// message is "sessions.json corrupt" — it rides the error attr so the
 	// daemon distinguishes corrupt-content from a missing file or other
 	// read errors.
-	if !strings.Contains(string(logBytes), "sessions.json corrupt") {
-		t.Errorf("expected corrupt-index warning in log; got:\n%s", logBytes)
+	if logged := sink.body(); !strings.Contains(logged, "sessions.json corrupt") {
+		t.Errorf("expected corrupt-index warning in log; got:\n%s", logged)
 	}
 }
 
@@ -1268,17 +1263,11 @@ func TestDefaultDaemonRun_WritesVersionFileFromDepsVersion(t *testing.T) {
 	daemonLockFile = nil
 	t.Cleanup(func() { daemonLockFile = prevLock })
 
-	logger, err := state.OpenLogger(state.PortalLog(dir), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-
 	const want = "regression-sentinel-1.2.3"
 	deps := &daemonDeps{
 		Dir:          dir,
 		Version:      want,
-		Logger:       logger,
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 		TickerPeriod: time.Hour,
 	}
 

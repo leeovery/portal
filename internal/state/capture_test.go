@@ -662,7 +662,7 @@ func TestCaptureStructurePerSessionLogAndContinue(t *testing.T) {
 
 	t.Run("it emits a WARN log entry per failing session naming the session and error", func(t *testing.T) {
 		dir := t.TempDir()
-		logger, logPath := openTestLogger(t, dir)
+		logger, sink := openTestLogger(t, dir)
 
 		mock := &captureMock{
 			listSessions: listSessionsFor("alpha", "bravo", "charlie"),
@@ -684,17 +684,18 @@ func TestCaptureStructurePerSessionLogAndContinue(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		log := readLogBody(t, logPath)
+		log := sink.body()
 		// Exactly two WARN entries: one per failing session.
-		warnCount := strings.Count(log, "| WARN | "+state.ComponentDaemon+" |")
+		warnCount := strings.Count(log, "WARN ")
 		if warnCount != 2 {
-			t.Errorf("WARN entries under ComponentDaemon = %d, want 2; log:\n%s", warnCount, log)
+			t.Errorf("WARN entries = %d, want 2; log:\n%s", warnCount, log)
 		}
-		// Each warn line names its session and includes the underlying error.
-		if !strings.Contains(log, `"alpha"`) {
+		// Each warn line names its session (via the session attr) and includes
+		// the underlying error.
+		if !strings.Contains(log, "session=alpha") {
 			t.Errorf("expected WARN for session alpha; log:\n%s", log)
 		}
-		if !strings.Contains(log, `"bravo"`) {
+		if !strings.Contains(log, "session=bravo") {
 			t.Errorf("expected WARN for session bravo; log:\n%s", log)
 		}
 		if !strings.Contains(log, "bravo-boom-sentinel") {

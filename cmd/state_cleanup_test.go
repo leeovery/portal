@@ -413,10 +413,9 @@ func TestStateCleanup_PurgeIsIdempotentOnMissingStateDir(t *testing.T) {
 // TestStateCleanup_PurgeLogsInfoOnSuccess asserts a successful purge writes an
 // INFO/ComponentDaemon entry to portal.log.
 func TestStateCleanup_PurgeLogsInfoOnSuccess(t *testing.T) {
-	// Use a separate log directory so the log survives the purge of the state
-	// dir we are testing. We point the logger at a fixed path inside logDir
-	// and inject it directly via StateCleanupDeps.Logger.
-	logDir := t.TempDir()
+	// The captured slog logger survives the purge of the state dir under test
+	// (it is in-memory), so no separate on-disk log directory is needed; we
+	// inject it directly via StateCleanupDeps.Logger.
 	stateDir := canonicalTempDir(t)
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
@@ -424,12 +423,7 @@ func TestStateCleanup_PurgeLogsInfoOnSuccess(t *testing.T) {
 		t.Fatalf("EnsureDir: %v", err)
 	}
 
-	logPath := filepath.Join(logDir, "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
 
 	cmder := &recordingCommander{
 		RunFunc: func(args ...string) (string, error) {
@@ -453,18 +447,13 @@ func TestStateCleanup_PurgeLogsInfoOnSuccess(t *testing.T) {
 	if _, _, err := runStateCleanup(t, "--purge"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = logger.Close()
 
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	logged := string(data)
+	logged := sink.body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}
-	if !strings.Contains(logged, state.ComponentDaemon) {
-		t.Errorf("log missing %q component: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "daemon") {
+		t.Errorf("log missing %q component: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "purged state directory") {
 		t.Errorf("log missing purge confirmation: %q", logged)
@@ -894,12 +883,7 @@ func TestStateCleanup_LogsInfoWhenSaverKilledSuccessfully(t *testing.T) {
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
 	}
-	logPath := state.PortalLog(dir)
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
 
 	cmder := &recordingCommander{
 		RunFunc: func(args ...string) (string, error) {
@@ -925,18 +909,13 @@ func TestStateCleanup_LogsInfoWhenSaverKilledSuccessfully(t *testing.T) {
 	if _, _, err := runStateCleanup(t); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_ = logger.Close()
 
-	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	logged := string(data)
+	logged := sink.body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}
-	if !strings.Contains(logged, state.ComponentDaemon) {
-		t.Errorf("log missing %q component: %q", state.ComponentDaemon, logged)
+	if !strings.Contains(logged, "daemon") {
+		t.Errorf("log missing %q component: %q", "daemon", logged)
 	}
 	if !strings.Contains(logged, "killed _portal-saver") {
 		t.Errorf("log missing kill confirmation: %q", logged)

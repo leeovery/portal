@@ -3,11 +3,19 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"syscall"
 	"time"
 
 	"github.com/leeovery/portal/internal/state"
 )
+
+// discardLogger is the canonical silent *slog.Logger used as the default sink
+// for the saver-side barrier and version-writer seams when production wiring
+// has not installed a real logger. It writes to io.Discard so calls are safe
+// no-ops without a nil-pointer risk.
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // PortalSaverName is the tmux session name that hosts the long-running save daemon.
 // The leading underscore marks the session as Portal-internal: Client.ListSessions
@@ -77,27 +85,6 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
 
-// BarrierLogger is the minimal logging seam consumed by BOTH saver-side
-// barriers: killSaverAndWaitForDaemon's WARN-on-timeout / escalation paths
-// AND waitForSaverDaemonReady's WARN-on-readiness-timeout path. A single
-// Warn method is the smallest surface that conveys the spec's observable
-// shape: one WARN-level event per barrier timeout.
-//
-// *state.Logger satisfies this interface structurally; defining a local
-// interface mirrors the MigrationLogger precedent in hooks_register.go,
-// avoiding the import cycle that would otherwise force callers to depend on
-// internal/state directly.
-type BarrierLogger interface {
-	Warn(component, format string, args ...any)
-}
-
-// noopBarrierLogger satisfies BarrierLogger with a no-op Warn so both
-// saver-side barriers (kill and readiness) always have a safe sink when
-// production wiring has not installed a real logger.
-type noopBarrierLogger struct{}
-
-func (noopBarrierLogger) Warn(component, format string, args ...any) {}
-
 // SaverBarrierSeams groups the kill-barrier-specific seams driving
 // killSaverAndWaitForDaemon's poll loop and escalation path, plus the
 // shared WARN-emission Logger sink also consumed by the readiness barrier
@@ -126,16 +113,17 @@ func (noopBarrierLogger) Warn(component, format string, args ...any) {}
 //     Kill-barrier scope only.
 //   - Logger: shared sink for BOTH the kill-barrier WARN-on-timeout /
 //     escalation paths AND the readiness-barrier WARN-on-timeout path
-//     (waitForSaverDaemonReady). Production wiring replaces this with a real
-//     *state.Logger via SetBarrierLogger. Tests install a recording fake via
-//     the seam and reset it through t.Cleanup.
+//     (waitForSaverDaemonReady). Production wiring replaces this with the
+//     bootstrap component's *slog.Logger via SetBarrierLogger. Tests install
+//     a capturing slog handler via log.SetTestHandler. Defaults to the
+//     io.Discard-backed discardLogger so it is never nil.
 type SaverBarrierSeams struct {
 	IsAlive           func(int) bool
 	SendSIGKILL       func(int) error
 	PollInterval      time.Duration
 	Timeout           time.Duration
 	EscalationTimeout time.Duration
-	Logger            BarrierLogger
+	Logger            *slog.Logger
 }
 
 // SaverReadinessSeams groups the readiness-barrier-specific seams driving
@@ -166,23 +154,23 @@ type SaverReadinessSeams struct {
 //     defensively write daemon.version before falling through to
 //     BootstrapPortalSaver. The default wrapper forwards WriterLogger to
 //     state.WriteVersionFile so the bootstrap-side defensive write emits the
-//     same "daemon.version write:" DEBUG breadcrumb as the daemon-startup
-//     call site. A nil sink remains safe: *state.Logger's nil-receiver
-//     semantics degrade Debug to a no-op without panicking.
-//   - WriterLogger: sink for the "daemon.version write:" DEBUG breadcrumb.
-//     Production wiring installs the real *state.Logger via
+//     same "daemon.version write" DEBUG breadcrumb as the daemon-startup
+//     call site. The default sink is the io.Discard-backed discardLogger so
+//     it is never nil.
+//   - WriterLogger: sink for the "daemon.version write" DEBUG breadcrumb.
+//     Production wiring installs the daemon component's *slog.Logger via
 //     SetVersionWriterLogger from internal/bootstrapadapter at the same site
 //     that calls SetBarrierLogger.
 //
 // Wiring-order invariant: callers that fire WriteVersionFile before bootstrap
-// step 2 (RegisterPortalHooks) has run will silently drop the breadcrumb,
-// because WriterLogger is still nil. Today the only production producer is
+// step 2 (RegisterPortalHooks) has run write through the discard default, so
+// the breadcrumb routes to io.Discard. Today the only production producer is
 // EnsurePortalSaverVersion (bootstrap step 5), which always runs after step 2
 // installs the logger — so the breadcrumb is reliable.
 type SaverVersionSeams struct {
 	ReadVersionFile  func(string) (string, error)
 	WriteVersionFile func(dir, version string) error
-	WriterLogger     *state.Logger
+	WriterLogger     *slog.Logger
 }
 
 // SaverOperationSeams groups the two operation-level function seams that
@@ -247,7 +235,7 @@ var saver = SaverSeams{
 		PollInterval:      50 * time.Millisecond,
 		Timeout:           5 * time.Second,
 		EscalationTimeout: 1 * time.Second,
-		Logger:            noopBarrierLogger{},
+		Logger:            discardLogger,
 	},
 
 	Readiness: SaverReadinessSeams{
@@ -260,9 +248,7 @@ var saver = SaverSeams{
 		// WriteVersionFile defaults are wired in init() below to break the
 		// initialization cycle (the wrapper closes over saver itself to
 		// read the current Version.WriterLogger sink at call time).
-		// WriterLogger is left as the zero value (nil *state.Logger).
-		// *state.Logger's nil-receiver contract degrades Debug to a no-op,
-		// so the wrapper is safe to call before production wiring runs.
+		WriterLogger: discardLogger,
 	},
 
 	// Ops defaults (WaitForReady, KillAndWait) wired in init() below;
@@ -284,38 +270,37 @@ func init() {
 	saver.Ops.KillAndWait = killSaverAndWaitForDaemon
 }
 
-// SetBarrierLogger installs a BarrierLogger as the shared sink for BOTH
+// SetBarrierLogger installs a *slog.Logger as the shared sink for BOTH
 // saver-side barriers' WARN emissions: killSaverAndWaitForDaemon's
 // WARN-on-timeout / escalation paths AND waitForSaverDaemonReady's
 // WARN-on-readiness-timeout path. A nil argument is ignored so the package
 // never loses its sink to a programming error in the wiring layer; the
-// default is noopBarrierLogger which already swallows all calls safely.
+// default is the io.Discard-backed discardLogger which already swallows all
+// calls safely.
 //
 // Production wiring calls this once from internal/bootstrapadapter as part
-// of constructing the HookRegistrar, threading the same *state.Logger that
-// the rest of bootstrap uses. *state.Logger structurally satisfies
-// BarrierLogger via its Warn(component, format string, args ...any) method.
-func SetBarrierLogger(l BarrierLogger) {
+// of constructing the HookRegistrar, threading the bootstrap component's
+// *slog.Logger that the rest of bootstrap uses.
+func SetBarrierLogger(l *slog.Logger) {
 	if l == nil {
 		return
 	}
 	saver.Barrier.Logger = l
 }
 
-// SetVersionWriterLogger installs a *state.Logger as the sink for the
-// "daemon.version write:" DEBUG breadcrumb emitted by the bootstrap-side
+// SetVersionWriterLogger installs a *slog.Logger as the sink for the
+// "daemon.version write" DEBUG breadcrumb emitted by the bootstrap-side
 // defensive WriteVersionFile call. A nil argument is ignored so the package
 // never loses its sink to a programming error in the wiring layer; the
-// default (nil) is itself safe via Logger's nil-receiver contract, so
-// callers may also simply skip the call.
+// default is the io.Discard-backed discardLogger.
 //
 // Production wiring calls this once from internal/bootstrapadapter
-// alongside SetBarrierLogger, threading the same *state.Logger that the
-// rest of bootstrap uses. The result is a single grep anchor in portal.log
-// — "daemon.version write:" — that surfaces both the daemon-startup call
-// site and the bootstrap-survived-path defensive repair (spec § Change 3,
-// Acceptance Criterion #9).
-func SetVersionWriterLogger(l *state.Logger) {
+// alongside SetBarrierLogger, threading the daemon component's *slog.Logger.
+// The result is a single grep anchor in portal.log — "daemon.version write"
+// — that surfaces both the daemon-startup call site and the
+// bootstrap-survived-path defensive repair (spec § Change 3, Acceptance
+// Criterion #9).
+func SetVersionWriterLogger(l *slog.Logger) {
 	if l == nil {
 		return
 	}
@@ -425,9 +410,8 @@ func escalateKillToSIGKILL(priorPID int) error {
 	result, err := saver.IdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
 		saver.Barrier.Logger.Warn(
-			state.ComponentBootstrap,
-			"prior daemon (pid=%d) not identity-checked as portal state daemon; skipping SIGKILL",
-			priorPID,
+			"prior daemon not identity-checked as portal state daemon; skipping SIGKILL",
+			"target_pid", priorPID,
 		)
 		return nil
 	}
@@ -437,10 +421,8 @@ func escalateKillToSIGKILL(priorPID int) error {
 		return nil
 	}
 	saver.Barrier.Logger.Warn(
-		state.ComponentBootstrap,
-		"prior daemon (pid=%d) survived SIGKILL escalation within %v",
-		priorPID,
-		saver.Barrier.EscalationTimeout,
+		"prior daemon survived SIGKILL escalation",
+		"target_pid", priorPID,
 	)
 	return nil
 }
@@ -458,8 +440,8 @@ func escalateKillToSIGKILL(priorPID int) error {
 //     PID AND saver.IdentifyDaemon returns IdentifyIsPortalDaemon. This is
 //     the success path.
 //   - Returns nil on timeout AFTER emitting exactly one WARN through the
-//     shared saver.Barrier.Logger sink under state.ComponentBootstrap
-//     containing the literal "saver respawn: daemon did not come up within".
+//     shared saver.Barrier.Logger sink under the bootstrap component
+//     containing the literal "saver respawn: daemon did not come up".
 //     The same Logger seam is consumed by the kill-barrier escalation paths
 //     in killSaverAndWaitForDaemon / escalateKillToSIGKILL — installing it
 //     via SetBarrierLogger wires both barriers' WARN sinks at once. This is
@@ -486,11 +468,7 @@ func waitForSaverDaemonReady(stateDir string) error {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			saver.Barrier.Logger.Warn(
-				state.ComponentBootstrap,
-				"saver respawn: daemon did not come up within %v",
-				saver.Readiness.Timeout,
-			)
+			saver.Barrier.Logger.Warn("saver respawn: daemon did not come up")
 			return nil
 		}
 		<-ticker.C

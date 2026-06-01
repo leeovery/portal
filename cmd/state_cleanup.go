@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -14,15 +15,15 @@ import (
 
 // StateCleanupDeps allows injecting test dependencies for the state cleanup
 // command. When nil, real implementations are used: a tmux.Client built on
-// RealCommander, tmux.UnregisterPortalHooks for hook removal, and a best-effort
-// non-rotating *state.Logger for portal.log entries. When non-nil, Client must
+// RealCommander, tmux.UnregisterPortalHooks for hook removal, and the daemon
+// component's *slog.Logger for portal.log entries. When non-nil, Client must
 // be supplied; Unregister is optional and falls back to
-// tmux.UnregisterPortalHooks; Logger is optional (a nil *state.Logger is a
-// valid no-op).
+// tmux.UnregisterPortalHooks; Logger is optional (a nil Logger falls back to
+// the daemon component's logger).
 type StateCleanupDeps struct {
 	Client     *tmux.Client
 	Unregister func(*tmux.Client) error
-	Logger     *state.Logger
+	Logger     *slog.Logger
 }
 
 // stateCleanupDeps is the package-level injection point for tests. Production
@@ -32,22 +33,23 @@ var stateCleanupDeps *StateCleanupDeps
 // buildStateCleanupDeps returns the tmux client, hook-removal function, and
 // logger the cleanup body should use. When stateCleanupDeps is set (testing),
 // uses the injected dependencies, defaulting Unregister to
-// tmux.UnregisterPortalHooks. Otherwise builds a real tmux client, uses
-// tmux.UnregisterPortalHooks, and opens portal.log via the non-rotating
-// helper. A logger open failure degrades to nil (which the *state.Logger
-// nil-receiver treats as a no-op) so cleanup never aborts on a diagnostics-
-// only failure.
-func buildStateCleanupDeps() (*tmux.Client, func(*tmux.Client) error, *state.Logger) {
+// tmux.UnregisterPortalHooks and Logger to the daemon component's logger.
+// Otherwise builds a real tmux client, uses tmux.UnregisterPortalHooks, and
+// logs under the daemon component via the handler configured once by main ->
+// log.Init.
+func buildStateCleanupDeps() (*tmux.Client, func(*tmux.Client) error, *slog.Logger) {
 	if stateCleanupDeps != nil {
 		unregister := stateCleanupDeps.Unregister
 		if unregister == nil {
 			unregister = tmux.UnregisterPortalHooks
 		}
-		return stateCleanupDeps.Client, unregister, stateCleanupDeps.Logger
+		logger := stateCleanupDeps.Logger
+		if logger == nil {
+			logger = daemonLogger
+		}
+		return stateCleanupDeps.Client, unregister, logger
 	}
-	client := tmux.DefaultClient()
-	logger, _ := openNoRotateLogger()
-	return client, tmux.UnregisterPortalHooks, logger
+	return tmux.DefaultClient(), tmux.UnregisterPortalHooks, daemonLogger
 }
 
 // stateCleanupCmd performs explicit teardown of Portal's resurrection state.
@@ -75,7 +77,6 @@ var stateCleanupCmd = &cobra.Command{
 		purge, _ := cmd.Flags().GetBool("purge")
 
 		client, unregister, logger := buildStateCleanupDeps()
-		defer func() { _ = logger.Close() }()
 
 		var errs []error
 
@@ -105,7 +106,7 @@ var stateCleanupCmd = &cobra.Command{
 // runPurge resolves the state directory and removes it via purgeStateDir,
 // wrapping any error with a "purge state dir" prefix so the joined error
 // message in RunE identifies the failing action.
-func runPurge(logger *state.Logger) error {
+func runPurge(logger *slog.Logger) error {
 	dir, err := state.Dir()
 	if err != nil {
 		return fmt.Errorf("purge state dir: %w", err)
@@ -137,9 +138,9 @@ func runPurge(logger *state.Logger) error {
 // regression test pins this scope.
 //
 // Successful purges and RemoveAll failures are logged at INFO and ERROR
-// respectively under ComponentDaemon. The logger may be nil; *state.Logger's
-// nil-receiver semantics make those calls safe.
-func purgeStateDir(dir string, logger *state.Logger) error {
+// respectively under the daemon component. logger must be a real
+// *slog.Logger.
+func purgeStateDir(dir string, logger *slog.Logger) error {
 	info, err := os.Lstat(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -153,10 +154,10 @@ func purgeStateDir(dir string, logger *state.Logger) error {
 	}
 
 	if err := os.RemoveAll(dir); err != nil {
-		logger.Error(state.ComponentDaemon, "purge failed: %v", err)
+		logger.Error("purge state directory failed", "path", dir, "error", err)
 		return fmt.Errorf("remove all: %w", err)
 	}
-	logger.Info(state.ComponentDaemon, "purged state directory %s", dir)
+	logger.Info("purged state directory", "path", dir)
 	return nil
 }
 
@@ -177,19 +178,19 @@ const killSaverInfoMessage = "killed _portal-saver; daemon will flush final stat
 // at WARN/ComponentDaemon and returned wrapped so RunE can accumulate them.
 // Successful kills emit an INFO/ComponentDaemon line that names the SIGHUP
 // flush behaviour for operator forensics.
-func killSaver(c *tmux.Client, logger *state.Logger) error {
+func killSaver(c *tmux.Client, logger *slog.Logger) error {
 	if !c.HasSession(tmux.PortalSaverName) {
 		return nil
 	}
 	if err := c.KillSession(tmux.PortalSaverName); err != nil {
 		if isSessionAbsentError(err) {
-			logger.Info(state.ComponentDaemon, killSaverInfoMessage)
+			logger.Info(killSaverInfoMessage)
 			return nil
 		}
-		logger.Warn(state.ComponentDaemon, "kill _portal-saver failed: %v", err)
+		logger.Warn("kill _portal-saver failed", "error", err)
 		return err
 	}
-	logger.Info(state.ComponentDaemon, killSaverInfoMessage)
+	logger.Info(killSaverInfoMessage)
 	return nil
 }
 

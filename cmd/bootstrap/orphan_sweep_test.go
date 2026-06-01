@@ -111,7 +111,7 @@ func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     func(pid int) (state.IdentifyResult, error) { return state.IdentifyIsPortalDaemon, nil },
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("expected nil err under pgrep failure; got %v", err)
@@ -122,8 +122,8 @@ func TestSweepOrphanDaemons_pgrepErrorLogsWarnReturnsNil(t *testing.T) {
 	found := false
 	for i, msg := range logger.warnings {
 		if strings.Contains(msg, "pgrep") && strings.Contains(msg, "boom") {
-			if logger.warnComponents[i] != state.ComponentBootstrap {
-				t.Errorf("pgrep Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+			if logger.warnComponents[i] != "bootstrap" {
+				t.Errorf("pgrep Warn component = %q, want %q", logger.warnComponents[i], "bootstrap")
 			}
 			found = true
 			break
@@ -145,7 +145,7 @@ func TestSweepOrphanDaemons_listPanesErrorTreatsLegitimateEmpty(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -156,8 +156,8 @@ func TestSweepOrphanDaemons_listPanesErrorTreatsLegitimateEmpty(t *testing.T) {
 	found := false
 	for i, msg := range logger.warnings {
 		if strings.Contains(msg, "list-panes") && strings.Contains(msg, "_portal-saver") {
-			if logger.warnComponents[i] != state.ComponentBootstrap {
-				t.Errorf("list-panes Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+			if logger.warnComponents[i] != "bootstrap" {
+				t.Errorf("list-panes Warn component = %q, want %q", logger.warnComponents[i], "bootstrap")
 			}
 			found = true
 			break
@@ -215,7 +215,7 @@ func TestSweepOrphanDaemons_identifyTransientErrorSkipped(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -246,7 +246,7 @@ func TestSweepOrphanDaemons_killErrorLogsWarnContinues(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -277,7 +277,7 @@ func TestSweepOrphanDaemons_cleanStateZeroInfo(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return legitPID, true, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -371,7 +371,7 @@ func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     func(pid int) (state.IdentifyResult, error) { return 0, nil },
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -399,7 +399,7 @@ func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
 		SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 		Identify:     identify.fn,
 		Kill:         kill.fn,
-		Logger:       logger,
+		Logger:       logger.Logger().With("component", "bootstrap"),
 	}
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -407,8 +407,8 @@ func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
 	found := false
 	for i, msg := range logger.infos {
 		if strings.Contains(msg, "killed orphan daemon") && strings.Contains(msg, "11001") {
-			if logger.infoComponents[i] != state.ComponentBootstrap {
-				t.Errorf("killed-orphan Info component = %q, want %q", logger.infoComponents[i], state.ComponentBootstrap)
+			if logger.infoComponents[i] != "bootstrap" {
+				t.Errorf("killed-orphan Info component = %q, want %q", logger.infoComponents[i], "bootstrap")
 			}
 			found = true
 			break
@@ -453,7 +453,7 @@ func TestSweepOrphanDaemons_presentVsAbsentTriState(t *testing.T) {
 			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, nil },
 			Identify:     identify.fn,
 			Kill:         kill.fn,
-			Logger:       logger,
+			Logger:       logger.Logger().With("component", "bootstrap"),
 		}
 		if err := c.SweepOrphanDaemons(); err != nil {
 			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -482,7 +482,7 @@ func TestSweepOrphanDaemons_presentVsAbsentTriState(t *testing.T) {
 			SaverPanePID: func() (pid int, present bool, err error) { return 0, true, nil },
 			Identify:     identify.fn,
 			Kill:         kill.fn,
-			Logger:       logger,
+			Logger:       logger.Logger().With("component", "bootstrap"),
 		}
 		if err := c.SweepOrphanDaemons(); err != nil {
 			t.Fatalf("SweepOrphanDaemons returned error: %v", err)
@@ -509,7 +509,7 @@ func TestSweepOrphanDaemons_presentVsAbsentTriState(t *testing.T) {
 			SaverPanePID: func() (pid int, present bool, err error) { return 0, false, sentinel },
 			Identify:     identify.fn,
 			Kill:         kill.fn,
-			Logger:       logger,
+			Logger:       logger.Logger().With("component", "bootstrap"),
 		}
 		if err := c.SweepOrphanDaemons(); err != nil {
 			t.Fatalf("SweepOrphanDaemons returned error: %v", err)

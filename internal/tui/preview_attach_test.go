@@ -1,15 +1,17 @@
 package tui
 
 import (
+	"context"
 	"errors"
-	"os"
+	"fmt"
+	"io"
+	"log/slog"
 	"os/exec"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -73,31 +75,78 @@ func (f *fakePreviewConnector) Connect(name string) error {
 	return f.err
 }
 
-// newTestLogger opens a *state.Logger at a temp portal.log path so tests can
-// read back what was logged. rotate=false to keep the file in place across
-// the test's lifetime. Closed via t.Cleanup.
-func newTestLogger(t *testing.T) (*state.Logger, string) {
-	t.Helper()
-	logPath := filepath.Join(t.TempDir(), "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-	return logger, logPath
+// previewCaptureSink is a slog.Handler that records every record into a text
+// body in the shape "<LEVEL> component=<c> <msg> key=value..." so the
+// preview-attach tests can assert on the level label, the bound component, and
+// per-call attrs after the observability migration retyped the pipeline's
+// logger to *slog.Logger.
+type previewCaptureSink struct {
+	mu    sync.Mutex
+	lines []string
+	// shared points at the lines-owning sink so handlers derived via
+	// WithAttrs/WithGroup (e.g. the .With("component", ...) binding) still
+	// record into the same buffer.
+	shared *previewCaptureSink
+	// bound holds attrs accumulated via WithAttrs (notably the component
+	// binding) so they are rendered on every record the derived handler emits.
+	bound []slog.Attr
 }
 
-// readLog returns the log file's contents as a string, or "" if missing.
-func readLog(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ""
-		}
-		t.Fatalf("read log: %v", err)
+func (s *previewCaptureSink) owner() *previewCaptureSink {
+	if s.shared != nil {
+		return s.shared
 	}
-	return string(b)
+	return s
+}
+
+func (s *previewCaptureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (s *previewCaptureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
+	next = append(next, s.bound...)
+	next = append(next, attrs...)
+	return &previewCaptureSink{shared: s.owner(), bound: next}
+}
+
+func (s *previewCaptureSink) WithGroup(_ string) slog.Handler { return s }
+
+func (s *previewCaptureSink) Handle(_ context.Context, r slog.Record) error {
+	var b strings.Builder
+	b.WriteString(r.Level.String())
+	b.WriteString(" ")
+	b.WriteString(r.Message)
+	for _, a := range s.bound {
+		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
+		return true
+	})
+	owner := s.owner()
+	owner.mu.Lock()
+	owner.lines = append(owner.lines, b.String())
+	owner.mu.Unlock()
+	return nil
+}
+
+func (s *previewCaptureSink) body() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return strings.Join(s.lines, "\n")
+}
+
+// newTestLogger returns a capturing *slog.Logger bound to the preview
+// component plus the sink so tests can read back what was logged.
+func newTestLogger(t *testing.T) (*slog.Logger, *previewCaptureSink) {
+	t.Helper()
+	sink := &previewCaptureSink{}
+	return slog.New(sink).With("component", "preview"), sink
+}
+
+// readLog renders the captured body of a previewCaptureSink.
+func readLog(t *testing.T, sink *previewCaptureSink) string {
+	t.Helper()
+	return sink.body()
 }
 
 // runPipelineCmd invokes the tea.Cmd returned by Run and returns its message.
@@ -174,7 +223,7 @@ func TestPreviewAttachPipelineBailsOnExitError(t *testing.T) {
 
 func TestPreviewAttachPipelineOSLayerHasSessionErrorProceedsAndLogsWarn(t *testing.T) {
 	tm := &fakePreviewAttachTmux{hasPresent: true, hasErr: errors.New("exec: no tmux binary")}
-	logger, logPath := newTestLogger(t)
+	logger, sink := newTestLogger(t)
 	p := &previewAttachPipeline{tmux: tm, logger: logger}
 
 	msg := runPipelineCmd(t, p.Run("foo", 1, 0))
@@ -185,15 +234,15 @@ func TestPreviewAttachPipelineOSLayerHasSessionErrorProceedsAndLogsWarn(t *testi
 	if _, ok := msg.(previewAttachSelectedMsg); !ok {
 		t.Fatalf("message type = %T, want previewAttachSelectedMsg", msg)
 	}
-	content := readLog(t, logPath)
-	if !strings.Contains(content, "WARN") || !strings.Contains(content, state.ComponentPreview) {
+	content := readLog(t, sink)
+	if !strings.Contains(content, "WARN") || !strings.Contains(content, "preview") {
 		t.Errorf("log %q missing WARN + ComponentPreview", content)
 	}
 }
 
 func TestPreviewAttachPipelineSelectWindowErrorLogsAndProceeds(t *testing.T) {
 	tm := &fakePreviewAttachTmux{hasPresent: true, selectWindowErr: errors.New("no such window")}
-	logger, logPath := newTestLogger(t)
+	logger, sink := newTestLogger(t)
 	p := &previewAttachPipeline{tmux: tm, logger: logger}
 
 	msg := runPipelineCmd(t, p.Run("foo", 9, 0))
@@ -204,15 +253,15 @@ func TestPreviewAttachPipelineSelectWindowErrorLogsAndProceeds(t *testing.T) {
 	if _, ok := msg.(previewAttachSelectedMsg); !ok {
 		t.Fatalf("message type = %T, want previewAttachSelectedMsg", msg)
 	}
-	content := readLog(t, logPath)
-	if !strings.Contains(content, "WARN") || !strings.Contains(content, state.ComponentPreview) {
+	content := readLog(t, sink)
+	if !strings.Contains(content, "WARN") || !strings.Contains(content, "preview") {
 		t.Errorf("log %q missing WARN + ComponentPreview for select-window failure", content)
 	}
 }
 
 func TestPreviewAttachPipelineSelectPaneErrorLogsAndProceeds(t *testing.T) {
 	tm := &fakePreviewAttachTmux{hasPresent: true, selectPaneErr: errors.New("no such pane")}
-	logger, logPath := newTestLogger(t)
+	logger, sink := newTestLogger(t)
 	p := &previewAttachPipeline{tmux: tm, logger: logger}
 
 	msg := runPipelineCmd(t, p.Run("foo", 1, 9))
@@ -223,8 +272,8 @@ func TestPreviewAttachPipelineSelectPaneErrorLogsAndProceeds(t *testing.T) {
 	if _, ok := msg.(previewAttachSelectedMsg); !ok {
 		t.Fatalf("message type = %T, want previewAttachSelectedMsg", msg)
 	}
-	content := readLog(t, logPath)
-	if !strings.Contains(content, "WARN") || !strings.Contains(content, state.ComponentPreview) {
+	content := readLog(t, sink)
+	if !strings.Contains(content, "WARN") || !strings.Contains(content, "preview") {
 		t.Errorf("log %q missing WARN + ComponentPreview for select-pane failure", content)
 	}
 }
@@ -235,7 +284,7 @@ func TestPreviewAttachPipelineBothSelectsErrorBothLoggedAndSelectedEmitted(t *te
 		selectWindowErr: errors.New("no window"),
 		selectPaneErr:   errors.New("no pane"),
 	}
-	logger, logPath := newTestLogger(t)
+	logger, sink := newTestLogger(t)
 	p := &previewAttachPipeline{tmux: tm, logger: logger}
 
 	msg := runPipelineCmd(t, p.Run("foo", 1, 0))
@@ -243,32 +292,34 @@ func TestPreviewAttachPipelineBothSelectsErrorBothLoggedAndSelectedEmitted(t *te
 	if _, ok := msg.(previewAttachSelectedMsg); !ok {
 		t.Fatalf("message type = %T, want previewAttachSelectedMsg even after both select failures", msg)
 	}
-	content := readLog(t, logPath)
+	content := readLog(t, sink)
 	warnCount := strings.Count(content, "WARN")
 	if warnCount < 2 {
 		t.Errorf("expected at least 2 WARN entries (one per select failure), got %d in %q", warnCount, content)
 	}
-	if !strings.Contains(content, state.ComponentPreview) {
+	if !strings.Contains(content, "preview") {
 		t.Errorf("expected ComponentPreview in log, got %q", content)
 	}
 }
 
-func TestPreviewAttachPipelineNilLoggerDoesNotPanic(t *testing.T) {
-	// Combine every WARN-trigger so the nil-logger path is exercised across
-	// every Warn call inside Run. *state.Logger has a documented nil-receiver
-	// no-op contract — see internal/state/logger.go.
+func TestPreviewAttachPipelineSilentLoggerDoesNotPanic(t *testing.T) {
+	// Combine every WARN-trigger so every Warn call inside Run is exercised.
+	// Post-migration the pipeline always holds a real *slog.Logger (production
+	// passes log.For("preview")); a silent io.Discard-backed logger must drive
+	// every WARN path without panicking.
 	tm := &fakePreviewAttachTmux{
 		hasPresent:      true,
 		hasErr:          errors.New("os-layer probe failure"),
 		selectWindowErr: errors.New("no window"),
 		selectPaneErr:   errors.New("no pane"),
 	}
-	p := &previewAttachPipeline{tmux: tm, logger: nil}
+	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p := &previewAttachPipeline{tmux: tm, logger: silent}
 
 	// Run-and-execute must not panic.
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("pipeline panicked with nil logger: %v", r)
+			t.Fatalf("pipeline panicked with silent logger: %v", r)
 		}
 	}()
 	_ = runPipelineCmd(t, p.Run("foo", 1, 0))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -86,14 +87,20 @@ func (r *stepRecorder) CleanStale() error {
 	return r.CleanStaleErr
 }
 
-// RecordingLogger captures Debug / Info / Warn / Error invocations so
-// tests can assert that step-entry diagnostics land at DEBUG, best-effort
-// failures via Warn, and fatal failures via Error. Entries are the fully
-// formatted message so tests can verify wrapped causes flow through to
-// portal.log unchanged. The parallel component slices record the
-// component label supplied at each call site so tests can pin component
-// routing (e.g. ComponentBootstrap) without a real on-disk *state.Logger.
-// Exported so external `package bootstrap_test` tests can share it.
+// RecordingLogger is a slog.Handler that captures Debug / Info / Warn /
+// Error records so tests can assert that step-entry diagnostics land at
+// DEBUG, best-effort failures via Warn, and fatal failures via Error.
+//
+// Each captured record is rendered into a level-specific slice of message
+// phrases (the slog message + a flattened "key=value" attr trailer) so the
+// pre-migration substring assertions keep working against the post-migration
+// terse-message-plus-attrs shape. Parallel *Components slices record the
+// component attr supplied via log.For so tests can pin component routing
+// (e.g. "bootstrap") without a real on-disk logger.
+//
+// Use Logger() to obtain a *slog.Logger to inject into a step core's Logger
+// field; the records route back into this recorder. Exported so external
+// `package bootstrap_test` tests can share it.
 type RecordingLogger struct {
 	debugs          []string
 	debugComponents []string
@@ -103,26 +110,112 @@ type RecordingLogger struct {
 	warnComponents  []string
 	errors          []string
 	errorComponents []string
+
+	// shared points at the slice-owning recorder so handlers derived via
+	// WithAttrs/WithGroup record back into the same buffers; nil on the root.
+	shared *RecordingLogger
+	// bound holds attrs accumulated via WithAttrs (notably the component).
+	bound []slog.Attr
 }
 
-func (l *RecordingLogger) Debug(component, format string, args ...any) {
-	l.debugs = append(l.debugs, fmt.Sprintf(format, args...))
-	l.debugComponents = append(l.debugComponents, component)
+// recordingLoggerHandler is the slog.Handler returned by
+// RecordingLogger.WithAttrs/WithGroup. It carries the accumulated bound attrs
+// and replays them onto every record routed back into the owning recorder.
+type recordingLoggerHandler struct {
+	owner *RecordingLogger
+	bound []slog.Attr
 }
 
-func (l *RecordingLogger) Info(component, format string, args ...any) {
-	l.infos = append(l.infos, fmt.Sprintf(format, args...))
-	l.infoComponents = append(l.infoComponents, component)
+func (h *recordingLoggerHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *recordingLoggerHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(h.bound)+len(attrs))
+	next = append(next, h.bound...)
+	next = append(next, attrs...)
+	return &recordingLoggerHandler{owner: h.owner, bound: next}
 }
 
-func (l *RecordingLogger) Warn(component, format string, args ...any) {
-	l.warnings = append(l.warnings, fmt.Sprintf(format, args...))
-	l.warnComponents = append(l.warnComponents, component)
+func (h *recordingLoggerHandler) WithGroup(_ string) slog.Handler {
+	return &recordingLoggerHandler{owner: h.owner, bound: h.bound}
 }
 
-func (l *RecordingLogger) Error(component, format string, args ...any) {
-	l.errors = append(l.errors, fmt.Sprintf(format, args...))
-	l.errorComponents = append(l.errorComponents, component)
+func (h *recordingLoggerHandler) Handle(_ context.Context, r slog.Record) error {
+	return h.owner.record(h.bound, r)
+}
+
+// Logger returns a *slog.Logger whose records are captured by this recorder.
+func (l *RecordingLogger) Logger() *slog.Logger { return slog.New(l) }
+
+// Enabled records every level.
+func (l *RecordingLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+// WithAttrs returns a handler that records the bound attrs (notably the
+// component bound via .With("component", ...)) and replays them onto every
+// record routed back into this recorder. Without accumulating the bound attrs
+// the component — attached by the production logger via log.For/.With, not at
+// each call site — would be lost from the captured records.
+func (l *RecordingLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(l.bound)+len(attrs))
+	next = append(next, l.bound...)
+	next = append(next, attrs...)
+	return &recordingLoggerHandler{owner: l.owner(), bound: next}
+}
+
+// WithGroup is not exercised by these tests; it returns a handler preserving
+// the bound attrs.
+func (l *RecordingLogger) WithGroup(_ string) slog.Handler {
+	return &recordingLoggerHandler{owner: l.owner(), bound: l.bound}
+}
+
+func (l *RecordingLogger) owner() *RecordingLogger {
+	if l.shared != nil {
+		return l.shared
+	}
+	return l
+}
+
+// Handle captures one record into the level-specific slices.
+func (l *RecordingLogger) Handle(_ context.Context, r slog.Record) error {
+	return l.record(l.bound, r)
+}
+
+// record renders a record (prefixed by the supplied bound attrs) into the
+// owning recorder's level slices.
+func (l *RecordingLogger) record(bound []slog.Attr, r slog.Record) error {
+	owner := l.owner()
+	var component string
+	var trailer strings.Builder
+	emit := func(a slog.Attr) bool {
+		if a.Key == "component" {
+			component = a.Value.String()
+			return true
+		}
+		trailer.WriteString(" ")
+		trailer.WriteString(a.Key)
+		trailer.WriteString("=")
+		trailer.WriteString(a.Value.String())
+		return true
+	}
+	for _, a := range bound {
+		emit(a)
+	}
+	r.Attrs(func(a slog.Attr) bool { return emit(a) })
+	msg := r.Message + trailer.String()
+	switch r.Level {
+	case slog.LevelDebug:
+		owner.debugs = append(owner.debugs, msg)
+		owner.debugComponents = append(owner.debugComponents, component)
+	case slog.LevelInfo:
+		owner.infos = append(owner.infos, msg)
+		owner.infoComponents = append(owner.infoComponents, component)
+	case slog.LevelWarn:
+		owner.warnings = append(owner.warnings, msg)
+		owner.warnComponents = append(owner.warnComponents, component)
+	case slog.LevelError:
+		owner.errors = append(owner.errors, msg)
+		owner.errorComponents = append(owner.errorComponents, component)
+	}
+	return nil
 }
 
 // AllEntries returns every recorded log entry across all four levels in
@@ -148,7 +241,7 @@ func (l *RecordingLogger) AllEntries() []string {
 
 // newOrchestrator wires a single stepRecorder into every step seam so the
 // recorded call slice reflects the canonical eleven-step ordering.
-func newOrchestrator(r *stepRecorder, logger Logger) *Orchestrator {
+func newOrchestrator(r *stepRecorder, logger *slog.Logger) *Orchestrator {
 	return &Orchestrator{
 		Server:        r,
 		Hooks:         r,
@@ -207,7 +300,7 @@ func TestOrchestratorRun_propagatesEnsureServerError(t *testing.T) {
 	sentinel := errors.New("server boom")
 	r := &stepRecorder{EnsureServerErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err == nil {
@@ -240,7 +333,7 @@ func TestOrchestratorRun_propagatesRegisterHooksError(t *testing.T) {
 	sentinel := errors.New("register boom")
 	r := &stepRecorder{RegisterErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err == nil {
@@ -273,7 +366,7 @@ func TestOrchestratorRun_propagatesSetRestoringErrorAndSkipsLaterSteps(t *testin
 	sentinel := errors.New("set marker boom")
 	r := &stepRecorder{SetErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err == nil {
@@ -321,7 +414,7 @@ func TestOrchestratorRun_continuesPastEnsureSaverFailureAndAppendsWarning(t *tes
 	sentinel := errors.New("saver boom")
 	r := &stepRecorder{EnsureSaverErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, warnings, err := o.Run(context.Background())
 	if err != nil {
@@ -373,7 +466,7 @@ func TestOrchestratorRun_continuesPastEagerSignalHydrateFailure(t *testing.T) {
 	sentinel := errors.New("eager-signal boom")
 	r := &stepRecorder{EagerSignalHydrateErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -393,7 +486,7 @@ func TestOrchestratorRun_continuesPastEagerSignalHydrateFailure(t *testing.T) {
 	// in portal.log.
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, "step 7 (EagerSignalHydrate) failed") && strings.Contains(msg, sentinel.Error()) {
+		if strings.Contains(msg, "step failed") && strings.Contains(msg, "EagerSignalHydrate") && strings.Contains(msg, sentinel.Error()) {
 			foundCause = true
 			break
 		}
@@ -459,7 +552,7 @@ func TestOrchestratorRun_reportsClearRestoringFailureAsFatal(t *testing.T) {
 	sentinel := errors.New("clear boom")
 	r := &stepRecorder{ClearErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err == nil {
@@ -488,7 +581,7 @@ func TestOrchestratorRun_continuesPastCleanStaleFailure(t *testing.T) {
 	sentinel := errors.New("clean boom")
 	r := &stepRecorder{CleanStaleErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -588,7 +681,7 @@ func TestOrchestratorRun_ensureSaverFailureDoesNotProduceFatalError(t *testing.T
 	sentinel := errors.New("saver boom")
 	r := &stepRecorder{EnsureSaverErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, warnings, err := o.Run(context.Background())
 	if err != nil {
@@ -705,7 +798,7 @@ func TestOrchestratorRun_doesNotEscalateNonCorruptRestoreError(t *testing.T) {
 	sentinel := errors.New("restore boom")
 	r := &stepRecorder{RestoreCorrupt: false, RestoreErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -798,7 +891,7 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	sentinel := errors.New("sweep boom")
 	r := &stepRecorder{SweepErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -818,7 +911,7 @@ func TestOrchestratorRun_continuesPastSweepFailure(t *testing.T) {
 	// <cause>") is preserved verbatim in portal.log.
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 10") {
+		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "SweepOrphanFIFOs") {
 			foundCause = true
 			break
 		}
@@ -889,7 +982,7 @@ func TestOrchestratorRun_continuesPastCleanStaleMarkersFailure(t *testing.T) {
 	sentinel := errors.New("clean stale markers boom")
 	r := &stepRecorder{CleanStaleMarkersErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -909,7 +1002,7 @@ func TestOrchestratorRun_continuesPastCleanStaleMarkersFailure(t *testing.T) {
 	// in portal.log.
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step 9") && strings.Contains(msg, "CleanStaleMarkers") {
+		if strings.Contains(msg, sentinel.Error()) && strings.Contains(msg, "step failed") && strings.Contains(msg, "CleanStaleMarkers") {
 			foundCause = true
 			break
 		}
@@ -951,7 +1044,7 @@ var _ Runner = (*Orchestrator)(nil)
 func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
 	r := &stepRecorder{}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run errored: %v", err)
@@ -982,6 +1075,36 @@ func TestOrchestratorRun_emitsDebugLinePerExecutedStep(t *testing.T) {
 		if matches < 1 {
 			t.Errorf("step %q: expected ≥1 DEBUG line referencing it; got debugs=%v", step, logger.debugs)
 		}
+	}
+}
+
+// TestOrchestratorRun_stepEntryLinesEmitUnderBootstrapComponent is the Task 1-9
+// acceptance for the bootstrap orchestrator's step-entry instrumentation: each
+// "step entering" DEBUG line is bound to component=bootstrap (the component the
+// production wiring binds via log.For("bootstrap")). Binds the component on the
+// injected logger and asserts every recorded "step entering" DEBUG carries it.
+func TestOrchestratorRun_stepEntryLinesEmitUnderBootstrapComponent(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger().With("component", "bootstrap"))
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	var stepEntries int
+	for i, line := range logger.debugs {
+		if !strings.Contains(line, "step entering") {
+			continue
+		}
+		stepEntries++
+		if logger.debugComponents[i] != "bootstrap" {
+			t.Errorf("step-entry DEBUG[%d] component = %q, want %q (line=%q)",
+				i, logger.debugComponents[i], "bootstrap", line)
+		}
+	}
+	if stepEntries == 0 {
+		t.Errorf("expected ≥1 'step entering' DEBUG line; got debugs=%v", logger.debugs)
 	}
 }
 
@@ -1060,7 +1183,7 @@ func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
 	sentinel := errors.New("orphan-sweep boom")
 	r := &stepRecorder{SweepOrphanDaemonsErr: sentinel}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	_, _, err := o.Run(context.Background())
 	if err != nil {
@@ -1077,7 +1200,7 @@ func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
 
 	foundCause := false
 	for _, msg := range logger.warnings {
-		if strings.Contains(msg, "step 4 (SweepOrphanDaemons) failed") && strings.Contains(msg, sentinel.Error()) {
+		if strings.Contains(msg, "step failed") && strings.Contains(msg, "SweepOrphanDaemons") && strings.Contains(msg, sentinel.Error()) {
 			foundCause = true
 			break
 		}
@@ -1113,7 +1236,7 @@ func TestOrchestratorRun_continuesPastSweepOrphanDaemonsFailure(t *testing.T) {
 func TestOrchestratorRun_sweepOrphanDaemonsHappyPathEmitsNoWarn(t *testing.T) {
 	r := &stepRecorder{}
 	logger := &RecordingLogger{}
-	o := newOrchestrator(r, logger)
+	o := newOrchestrator(r, logger.Logger())
 
 	if _, _, err := o.Run(context.Background()); err != nil {
 		t.Fatalf("Run errored: %v", err)

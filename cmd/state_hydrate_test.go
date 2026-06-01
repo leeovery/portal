@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -702,13 +703,7 @@ func TestHydrate_FileMissing_LogsENOENTDistinctly(t *testing.T) {
 
 	signalFIFOAsync(t, fifo)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "le:0.0",
@@ -722,13 +717,8 @@ func TestHydrate_FileMissing_LogsENOENTDistinctly(t *testing.T) {
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "not found") {
 		t.Errorf("log missing distinct ENOENT phrase \"not found\": %q", contents)
 	}
@@ -748,13 +738,7 @@ func TestHydrate_FileMissing_LogsPermissionDistinctly(t *testing.T) {
 
 	signalFIFOAsync(t, fifo)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "lp:0.0",
@@ -768,13 +752,8 @@ func TestHydrate_FileMissing_LogsPermissionDistinctly(t *testing.T) {
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "permission denied") {
 		t.Errorf("log missing distinct permission phrase \"permission denied\": %q", contents)
 	}
@@ -786,13 +765,7 @@ func TestHydrate_FileMissing_LogsGenericIOError(t *testing.T) {
 	stdout := new(bytes.Buffer)
 	stdout.WriteString(hydrateResetPreamble)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: filepath.Join(dir, "sb"), HookKey: "lg:0.0",
@@ -804,13 +777,8 @@ func TestHydrate_FileMissing_LogsGenericIOError(t *testing.T) {
 	if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: genericErr}); err != nil {
 		t.Fatalf("handleHydrateFileMissing: %v", err)
 	}
-	_ = logger.Close()
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "I/O error") {
 		t.Errorf("log missing distinct generic phrase \"I/O error\": %q", contents)
 	}
@@ -826,13 +794,7 @@ func TestHydrate_FileMissing_LogIncludesHookKeyAndFile(t *testing.T) {
 
 	signalFIFOAsync(t, fifo)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	cfg := hydrateConfig{
 		FIFO: fifo, File: scrollback, HookKey: "li:0.0",
@@ -846,10 +808,8 @@ func TestHydrate_FileMissing_LogIncludesHookKeyAndFile(t *testing.T) {
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
-	data, _ := os.ReadFile(logPath)
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "li:0.0") {
 		t.Errorf("log missing --hook-key value: %q", contents)
 	}
@@ -992,7 +952,7 @@ func instantTimeoutOpenFIFO(_ string, _ time.Duration) (*os.File, error) {
 // timeoutCfg builds a hydrateConfig wired for the production timeout path:
 // OpenFIFO returns ErrHydrateTimeout immediately and HandleTimeout points at
 // handleHydrateTimeout. Callers override fields as needed.
-func timeoutCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Writer, cmder *recordingCommander, exec func(string, []string), logger *state.Logger) hydrateConfig {
+func timeoutCfg(t *testing.T, fifo, scrollback, hookKey string, stdout io.Writer, cmder *recordingCommander, exec func(string, []string), logger *slog.Logger) hydrateConfig {
 	t.Helper()
 	return hydrateConfig{
 		FIFO:          fifo,
@@ -1111,26 +1071,15 @@ func TestHydrate_TimeoutLogsWarningNamingHookKey(t *testing.T) {
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-tl__0.0.fifo")
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "tl:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), logger)
 
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", contents)
 	}
@@ -1520,13 +1469,7 @@ func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) 
 	}
 	store := hooks.NewStore(hooksDir)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	t.Setenv("SHELL", "/bin/zsh")
 	exec := &stubExecShell{}
@@ -1536,7 +1479,6 @@ func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) 
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
 	if exec.target != "/bin/zsh" {
 		t.Errorf("ExecShell prog = %q, want /bin/zsh on lookup error", exec.target)
@@ -1545,17 +1487,13 @@ func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) 
 		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
 	}
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	// Exactly one WARN line from the lookup-error branch — count, not just
 	// presence. (The timeout handler logs its own WARN line; the lookup-error
-	// branch contributes the canonical "lookup on-resume hook for" entry.)
-	got := strings.Count(contents, "lookup on-resume hook for")
+	// branch contributes the canonical "lookup on-resume hook failed" entry.)
+	got := strings.Count(contents, "lookup on-resume hook failed")
 	if got != 1 {
-		t.Errorf("log has %d %q lines, want exactly 1: %q", got, "lookup on-resume hook for", contents)
+		t.Errorf("log has %d %q lines, want exactly 1: %q", got, "lookup on-resume hook failed", contents)
 	}
 	if !strings.Contains(contents, "tle:0.0") {
 		t.Errorf("log missing hook-key in lookup-error warning: %q", contents)
@@ -1579,13 +1517,7 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 	}
 	store := hooks.NewStore(hooksDir)
 
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 
 	t.Setenv("SHELL", "/bin/zsh")
 	exec := &stubExecShell{}
@@ -1601,7 +1533,6 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
-	_ = logger.Close()
 
 	if exec.target != "/bin/zsh" {
 		t.Errorf("ExecShell prog = %q, want /bin/zsh on lookup error", exec.target)
@@ -1610,11 +1541,7 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
 	}
 
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read log: %v", readErr)
-	}
-	contents := string(data)
+	contents := sink.body()
 	if !strings.Contains(contents, "lookup on-resume hook") {
 		t.Errorf("log missing degradation warning phrase \"lookup on-resume hook\": %q", contents)
 	}
@@ -1865,54 +1792,8 @@ func TestHydrate_NilHookStoreDegradesToBareShellOnSignalArrived(t *testing.T) {
 	}
 }
 
-// TestHydrate_RunEDefersLoggerClose verifies that the cobra RunE for
-// `portal state hydrate` defers logger.Close() so the portal.log fd is
-// released on RunE return. Production hydrate exec's away on the success and
-// timeout/file-missing paths, so the defer never runs there — but it does run
-// on the early-error and test paths, and a leaked fd in either is a real bug.
-//
-// The seam: hydrateRunFunc is replaced with a no-op that captures the
-// *state.Logger from cfg. After rootCmd.Execute returns, the test calls
-// Close() on the captured logger and asserts the underlying *os.File reports
-// os.ErrClosed — proving the deferred Close already ran. PORTAL_STATE_DIR is
-// set so openNoRotateLogger succeeds and yields a real file-backed logger
-// (a nil-file logger cannot prove closure).
-func TestHydrate_RunEDefersLoggerClose(t *testing.T) {
-	t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-
-	var captured *state.Logger
-	prev := hydrateRunFunc
-	hydrateRunFunc = func(cfg hydrateConfig) error {
-		captured = cfg.Logger
-		return nil
-	}
-	t.Cleanup(func() { hydrateRunFunc = prev })
-
-	outBuf := new(bytes.Buffer)
-	errBuf := new(bytes.Buffer)
-	resetRootCmd()
-	resetStateCmdFlags()
-	rootCmd.SetOut(outBuf)
-	rootCmd.SetErr(errBuf)
-	rootCmd.SetArgs([]string{
-		"state", "hydrate",
-		"--fifo", "/tmp/unused.fifo",
-		"--file", "/tmp/unused.bin",
-		"--hook-key", "k:0.0",
-	})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("rootCmd.Execute: %v\nstderr: %s", err, errBuf.String())
-	}
-
-	if captured == nil {
-		t.Fatal("hydrateRunFunc seam was not invoked; captured logger is nil")
-	}
-
-	// Calling Close on a logger whose deferred Close already ran returns
-	// os.ErrClosed from the underlying *os.File. If the deferred Close had
-	// not run, this Close would have been the first and returned nil.
-	err := captured.Close()
-	if !errors.Is(err, os.ErrClosed) {
-		t.Errorf("expected logger.Close() to return os.ErrClosed (deferred Close already ran), got %v", err)
-	}
-}
+// NOTE: The former TestHydrate_RunEDefersLoggerClose was removed in the
+// observability migration. The hydrate RunE no longer opens or closes a
+// per-process file-backed logger — logging is owned by internal/log's
+// handler (configured once via main -> log.Init), so there is no per-helper
+// fd to defer-close. The behaviour it asserted no longer exists.

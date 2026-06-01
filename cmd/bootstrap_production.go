@@ -12,7 +12,7 @@ package cmd
 //   - internal/bootstrapadapter (Pascal-cased, exported): adapters whose
 //     dependencies are all available from internal/* packages — the
 //     *tmux.Client, the *restore.Orchestrator, the state directory, the
-//     *state.Logger. Test suites import these directly so production-shape
+//     component-bound *slog.Logger. Test suites import these directly so production-shape
 //     wirings are reusable without pulling in the rest of cmd/. Currently:
 //     HookRegistrar, RestoringMarker, NewOrphanSweeper (Component B),
 //     RestoreAdapter, FIFOSweeper.
@@ -37,6 +37,8 @@ package cmd
 //     when they need it.
 
 import (
+	"log/slog"
+
 	"github.com/leeovery/portal/cmd/bootstrap"
 	"github.com/leeovery/portal/internal/bootstrapadapter"
 	"github.com/leeovery/portal/internal/hooks"
@@ -72,7 +74,7 @@ func (a *saverAdapter) EnsureSaver() error {
 type cleanStaleAdapter struct {
 	lister AllPaneLister
 	store  *hooks.Store
-	logger bootstrap.Logger
+	logger *slog.Logger
 }
 
 // CleanStale delegates to runHookStaleCleanup with swallowListError=false
@@ -114,10 +116,11 @@ var commanderFactory = func() tmux.Commander { return &tmux.RealCommander{} }
 // pulled into a helper so buildBootstrapDeps stays a small dispatcher
 // between test-mode and production-mode wiring.
 //
-// Logger: opened via openNoRotateLogger (non-rotating since this is
-// not the daemon). On any error the helper returns a nil logger;
-// state.Logger and bootstrap.Logger both tolerate nil receivers /
-// values, so callers downstream do not have to nil-check.
+// Logger: each step adapter is wired with the component-bound *slog.Logger
+// it logs under (bootstrap for the orchestrator and most steps, restore for
+// the Restore adapter, hydrate for the eager signaler, daemon for the
+// version-writer breadcrumb). The handler is configured once by main ->
+// log.Init.
 //
 // HookStore: when loadHookStore fails (path resolution error) the
 // CleanStale step degrades to bootstrap.NoOpStaleCleaner.
@@ -136,9 +139,12 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	// when it eventually flows through.
 	stateDir, _ := state.Dir()
 
-	// Open a non-rotating logger. Bootstrap is not the daemon so it
-	// must not rename portal.log under another writer.
-	logger, _ := openNoRotateLogger()
+	// Component-bound loggers. The orchestrator and most steps log under the
+	// bootstrap component; the Restore adapter logs under restore, the eager
+	// signaler under hydrate, and the version-writer breadcrumb under daemon.
+	// Rotation and the append-only writer discipline are handler-owned
+	// (Phase 2), so there is no per-process log open here.
+	logger := bootstrapLogger
 
 	// Resolve the hooks store. On failure the CleanStale step is
 	// downgraded to a no-op rather than aborting bootstrap.
@@ -152,12 +158,12 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 	restoreInner := &restore.Orchestrator{
 		Client:   client,
 		StateDir: stateDir,
-		Logger:   logger,
+		Logger:   restoreLogger,
 	}
 
 	orch := &bootstrap.Orchestrator{
 		Server:        client,
-		Hooks:         &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
+		Hooks:         &bootstrapadapter.HookRegistrar{Client: client, Logger: logger, VersionLogger: daemonLogger},
 		Restoring:     &bootstrapadapter.RestoringMarker{Client: client},
 		OrphanSweeper: bootstrapadapter.NewOrphanSweeper(client, logger),
 		Saver:         &saverAdapter{client: client, stateDir: stateDir},
@@ -174,7 +180,7 @@ func buildProductionOrchestrator() (*bootstrap.Orchestrator, *tmux.Client) {
 			Markers:  client,
 			StateDir: stateDir,
 			Signaler: state.DefaultFIFOSignaler{},
-			Logger:   logger,
+			Logger:   hydrateLogger,
 		},
 		StaleMarkers: &bootstrap.MarkerCleanupCore{
 			Markers:  client,

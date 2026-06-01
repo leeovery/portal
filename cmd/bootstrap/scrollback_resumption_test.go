@@ -33,6 +33,7 @@ package bootstrap_test
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ import (
 // *tmux.Client satisfies every seam (Markers via state.ServerOptionLister,
 // Panes via LivePaneLister, Unsetter via MarkerUnsetter) directly, so no
 // closure-implementing-an-interface adapter glue is required.
-func newProductionMarkerCleaner(client *tmux.Client, logger *state.Logger) *bootstrap.MarkerCleanupCore {
+func newProductionMarkerCleaner(client *tmux.Client, logger *slog.Logger) *bootstrap.MarkerCleanupCore {
 	return &bootstrap.MarkerCleanupCore{
 		Markers:  client,
 		Panes:    client,

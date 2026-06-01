@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -20,10 +21,8 @@ import (
 // ListSkeletonMarkers after Restore() completes, so that any leftover
 // hydrate-*.fifo file from a crashed prior bootstrap is removed before new
 // FIFOs are created in the next bootstrap cycle.
-//
-// logger may be nil; nil is treated as a no-op logger so callers do not need
-// to check before calling.
-func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Logger) error {
+func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *slog.Logger) error {
+	logger = loggerOrDiscard(logger)
 	pattern := filepath.Join(dir, "hydrate-*.fifo")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
@@ -33,7 +32,7 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 	for _, path := range matches {
 		fi, err := os.Lstat(path)
 		if err != nil {
-			logger.Warn(ComponentBootstrap, "lstat %s: %v", path, err)
+			logger.Warn("orphan fifo lstat failed", "path", path, "error", err)
 			continue
 		}
 		if fi.Mode()&os.ModeNamedPipe == 0 {
@@ -45,10 +44,10 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *Lo
 			continue
 		}
 		if err := os.Remove(path); err != nil {
-			logger.Warn(ComponentBootstrap, "remove orphan FIFO %s: %v", path, err)
+			logger.Warn("remove orphan fifo failed", "path", path, "error", err)
 			continue
 		}
-		logger.Info(ComponentBootstrap, "removed orphan FIFO %s", path)
+		logger.Info("removed orphan fifo", "path", path)
 	}
 	return nil
 }

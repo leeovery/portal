@@ -170,11 +170,10 @@ func TestSelfEject_PortalSaverAbsent_ExitsCleanly(t *testing.T) {
 		fmt.Sprintf("TMUX=%s,1,0", sock.SocketPath()),
 		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		// PORTAL_LOG_LEVEL=INFO surfaces the self-eject INFO marker into
-		// portal.log. Without this, *state.Logger defaults to LevelWarn
-		// (see internal/state/logger.go parseLevel) and Assertion C's
-		// log-marker substring check would always fail. DEBUG would also
-		// work but adds tick-loop noise that obscures the diagnostic
-		// dump on regression.
+		// portal.log. Set explicitly so Assertion C's log-marker substring
+		// check is robust regardless of any future default-level change.
+		// DEBUG would also work but adds tick-loop noise that obscures the
+		// diagnostic dump on regression.
 		"PORTAL_LOG_LEVEL=INFO",
 	)
 
@@ -985,10 +984,9 @@ func TestSelfEject_LegitimateColdStartDoesNotFalsePositive(t *testing.T) {
 	// resolution order).
 	//
 	// PORTAL_LOG_LEVEL=INFO surfaces the self-supervision INFO marker
-	// into portal.log if (hypothetically) the daemon ejected. Without
-	// this, *state.Logger defaults to LevelWarn and Assertion D's
-	// negative log-marker check would be trivially satisfied even on a
-	// regression.
+	// into portal.log if (hypothetically) the daemon ejected. Set
+	// explicitly so Assertion D's negative log-marker check is not
+	// trivially satisfied by a too-coarse default level on a regression.
 	//
 	// PATH ensures the tmux-respawned daemon can resolve `portal` from
 	// the staged binDir. StagePortalBinary already prepended binDir to

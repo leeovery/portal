@@ -1,8 +1,9 @@
 package tui
 
 import (
+	"log/slog"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -68,7 +69,7 @@ type previewAttachSelectedMsg struct {
 // Spec: § Pre-select + attach sequence (steps 1-3; step 4 is post-TUI).
 type previewAttachPipeline struct {
 	tmux   previewAttachTmux
-	logger *state.Logger
+	logger *slog.Logger
 }
 
 // NewPreviewAttachPipeline is the production constructor for the Enter
@@ -77,13 +78,13 @@ type previewAttachPipeline struct {
 // exported surface; production callers pass concrete types that satisfy
 // it structurally (*tmux.Client satisfies previewAttachTmux).
 //
-// logger may be nil — every Warn call inside Run honours *state.Logger's
-// nil-receiver no-op contract. Passing nil from production sites where a
-// logger could not be opened is intentional and tolerated.
+// logger must be non-nil. Production callers pass log.For("preview") from
+// cmd/open.go; the *slog.Logger always routes through the configured handler
+// (or the pre-Init default), so there is no nil-receiver path to guard.
 //
 // The returned PreviewAttacher is the exported seam consumed by tui.Model
 // via WithPreviewAttachPipeline.
-func NewPreviewAttachPipeline(t previewAttachTmux, logger *state.Logger) PreviewAttacher {
+func NewPreviewAttachPipeline(t previewAttachTmux, logger *slog.Logger) PreviewAttacher {
 	return &previewAttachPipeline{tmux: t, logger: logger}
 }
 
@@ -129,17 +130,20 @@ func (p *previewAttachPipeline) Run(session string, window, pane int) tea.Cmd {
 		}
 		if err != nil {
 			// (true, non-ExitError-err) — OS-layer fault; WARN-and-proceed.
-			p.logger.Warn(state.ComponentPreview, "has-session probe OS-layer error for %q: %v", session, err)
+			p.logger.Warn("has-session probe OS-layer error", "session", session, "error", err)
 		}
 
-		// Step 2: SelectWindow — best-effort.
+		// Step 2: SelectWindow — best-effort. The window index has no closed
+		// attr key (spec: windows is a cycle-summary count only), so it is
+		// dropped; "session" + "error" carry the signal.
 		if err := p.tmux.SelectWindow(session, window); err != nil {
-			p.logger.Warn(state.ComponentPreview, "select-window %q:%d failed: %v", session, window, err)
+			p.logger.Warn("select-window failed", "session", session, "error", err)
 		}
 
-		// Step 3: SelectPane — best-effort.
+		// Step 3: SelectPane — best-effort. Window/pane indices have no closed
+		// attr key, so they are dropped; "session" + "error" carry the signal.
 		if err := p.tmux.SelectPane(session, window, pane); err != nil {
-			p.logger.Warn(state.ComponentPreview, "select-pane %q:%d.%d failed: %v", session, window, pane, err)
+			p.logger.Warn("select-pane failed", "session", session, "error", err)
 		}
 
 		// Step 4: emit selected envelope. The connector handoff happens

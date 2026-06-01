@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -13,13 +14,13 @@ import (
 // state.DefaultFIFOSignaler{} (whose SendSignal delegates to
 // state.SendHydrateSignal — the no-seam production entry point that bundles
 // state.OpenFIFOForSignal + time.Sleep + the bounded retry ladder). Tests
-// inject recording fakes that satisfy state.FIFOSignaler. Logger is optional
-// (a nil *state.Logger is a valid no-op).
+// inject recording fakes that satisfy state.FIFOSignaler. Logger is the
+// hydrate component's *slog.Logger.
 type signalHydrateConfig struct {
 	Session  string
 	StateDir string
 	Client   *tmux.Client
-	Logger   *state.Logger
+	Logger   *slog.Logger
 	Signaler state.FIFOSignaler
 }
 
@@ -37,15 +38,16 @@ type signalHydrateConfig struct {
 // layer. The retry ladder is exhaustively tested in
 // internal/state/signal_hydrate_test.go.
 func runSignalHydrate(cfg signalHydrateConfig) error {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	markers, err := state.ListSkeletonMarkers(cfg.Client)
 	if err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "list skeleton markers: %v", err)
+		cfg.Logger.Warn("list skeleton markers failed", "error", err)
 		return nil
 	}
 
 	panes, err := cfg.Client.ListPanesInSession(cfg.Session)
 	if err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "list panes for %q: %v", cfg.Session, err)
+		cfg.Logger.Warn("list panes for session failed", "session", cfg.Session, "error", err)
 		return nil
 	}
 
@@ -56,7 +58,7 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 		}
 		fifoPath := state.FIFOPath(cfg.StateDir, livePaneKey)
 		if err := cfg.Signaler.SendSignal(fifoPath); err != nil {
-			cfg.Logger.Warn(state.ComponentHydrate, "write fifo %s: %v", fifoPath, err)
+			cfg.Logger.Warn("write fifo failed", "path", fifoPath, "error", err)
 			// Continue — don't touch marker, don't abort other panes.
 		}
 	}
@@ -84,20 +86,16 @@ var stateSignalHydrateCmd = &cobra.Command{
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
 
-		// Open portal.log via the non-daemon append-only path so signal-
-		// hydrate failures (list-markers errors, FIFO write failures) land
-		// in the central log. Per spec § Log Rotation → Concurrent-writer
-		// discipline, only the daemon rotates; this hook-invoked writer
-		// must not. On open failure logger is nil and the *state.Logger
-		// nil-receiver no-ops every call.
-		logger, _ := openNoRotateLogger()
-		defer func() { _ = logger.Close() }()
-
+		// Diagnostics (list-markers errors, FIFO write failures) land in the
+		// central log via the handler configured once by main -> log.Init.
+		// Rotation and the append-only writer discipline are now
+		// handler-owned (Phase 2), so this hook-invoked command no longer
+		// opens or closes a per-process logger.
 		cfg := signalHydrateConfig{
 			Session:  sessionName,
 			StateDir: dir,
 			Client:   tmux.DefaultClient(),
-			Logger:   logger,
+			Logger:   hydrateLogger,
 			Signaler: state.DefaultFIFOSignaler{},
 		}
 		return signalHydrateRunFunc(cfg)

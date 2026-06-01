@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -310,52 +309,11 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	}
 }
 
-// TestSignalHydrate_RunEDefersLoggerClose verifies that the cobra RunE for
-// `portal state signal-hydrate` defers logger.Close() so the portal.log fd is
-// released on RunE return. The production exec path is irrelevant here —
-// signal-hydrate never exec's; the deferred close protects against a leaked fd
-// in tests and any future caller that invokes RunE without exec'ing.
-//
-// The seam: signalHydrateRunFunc is replaced with a no-op that captures the
-// *state.Logger from cfg. After rootCmd.Execute returns, the test calls
-// Close() on the captured logger and asserts the underlying *os.File reports
-// os.ErrClosed — proving the deferred Close already ran. A logger with a nil
-// internal file (open-failure path) cannot prove closure, so the test sets
-// PORTAL_STATE_DIR to a writable temp dir to guarantee the open succeeds.
-func TestSignalHydrate_RunEDefersLoggerClose(t *testing.T) {
-	t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-
-	var captured *state.Logger
-	prev := signalHydrateRunFunc
-	signalHydrateRunFunc = func(cfg signalHydrateConfig) error {
-		captured = cfg.Logger
-		return nil
-	}
-	t.Cleanup(func() { signalHydrateRunFunc = prev })
-
-	outBuf := new(bytes.Buffer)
-	errBuf := new(bytes.Buffer)
-	resetRootCmd()
-	resetStateCmdFlags()
-	rootCmd.SetOut(outBuf)
-	rootCmd.SetErr(errBuf)
-	rootCmd.SetArgs([]string{"state", "signal-hydrate", "any-session"})
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("rootCmd.Execute: %v\nstderr: %s", err, errBuf.String())
-	}
-
-	if captured == nil {
-		t.Fatal("signalHydrateRunFunc seam was not invoked; captured logger is nil")
-	}
-
-	// Calling Close on a logger whose deferred Close already ran returns
-	// os.ErrClosed from the underlying *os.File. If the deferred Close had
-	// not run, this Close would have been the first and returned nil.
-	err := captured.Close()
-	if !errors.Is(err, os.ErrClosed) {
-		t.Errorf("expected logger.Close() to return os.ErrClosed (deferred Close already ran), got %v", err)
-	}
-}
+// NOTE: The former TestSignalHydrate_RunEDefersLoggerClose was removed in the
+// observability migration. The signal-hydrate RunE no longer opens or closes a
+// per-process file-backed logger — logging is owned by internal/log's handler
+// (configured once via main -> log.Init), so there is no per-helper fd to
+// defer-close. The behaviour it asserted no longer exists.
 
 // TestStateSignalHydrate_AcceptsLeadingDashSessionViaCobraExecute exercises
 // the full cobra/pflag argv-parse path with a leading-dash session name (the

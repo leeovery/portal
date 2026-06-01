@@ -50,6 +50,7 @@ package bootstrap_test
 
 import (
 	"errors"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -231,7 +232,7 @@ func TestSweepOrphanDaemons_Integration_CleanStateZeroSignals(t *testing.T) {
 			"(needed to inject a recording Logger)", sweeper)
 	}
 	logger := &bootstrap.RecordingLogger{}
-	core.Logger = logger
+	core.Logger = logger.Logger()
 
 	// 3. Invoke the sweep.
 	if err := sweeper.SweepOrphanDaemons(); err != nil {
@@ -426,7 +427,6 @@ func pidAlive(pid int) bool {
 	return !errors.Is(err, syscall.ESRCH)
 }
 
-// Compile-time guard: bootstrap.RecordingLogger must satisfy
-// bootstrap.Logger so the Scenario B injection compiles even if the
-// interface gains methods.
-var _ bootstrap.Logger = (*bootstrap.RecordingLogger)(nil)
+// Compile-time guard: bootstrap.RecordingLogger must satisfy slog.Handler so
+// its Logger() can be injected into a step core's *slog.Logger field.
+var _ slog.Handler = (*bootstrap.RecordingLogger)(nil)

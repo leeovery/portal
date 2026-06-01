@@ -416,7 +416,7 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
-			Logger:   logger,
+			Logger:   logger.Logger().With("component", "bootstrap"),
 		}
 		if err := c.CleanStaleMarkers(); err != nil {
 			t.Fatalf("CleanStaleMarkers must return nil for zero-panes-with-markers deferral; got %v", err)
@@ -426,23 +426,24 @@ func TestStaleMarkerCleanup_MassUnsetHazardGuard(t *testing.T) {
 		}
 
 		// Locate the deferral Warn entry in-memory. Component routing is
-		// enforced at every Logger.Warn call site by supplying
-		// state.ComponentBootstrap; the recording fake captures the
-		// component alongside the formatted message body so we pin
-		// both: the deferral signature (message body) and the
-		// bootstrap routing (component).
+		// enforced by binding the injected logger to "bootstrap";
+		// the recording handler captures the component attr alongside the
+		// message body so we pin both: the mass-unset-hazard deferral
+		// signature and the bootstrap routing. (The pre-migration "2
+		// marker(s)" count was dropped — the marker-present count has no
+		// closed attr key and the terse message must not interpolate values.)
 		foundDeferral := false
 		for i, msg := range logger.warnings {
-			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "2 marker(s)") {
-				if logger.warnComponents[i] != state.ComponentBootstrap {
-					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "mass-unset hazard") {
+				if logger.warnComponents[i] != "bootstrap" {
+					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], "bootstrap")
 				}
 				foundDeferral = true
 				break
 			}
 		}
 		if !foundDeferral {
-			t.Errorf("expected a Warn entry identifying the stale-marker cleanup deferral with marker count \"2 marker(s)\"; got warnings=%v", logger.warnings)
+			t.Errorf("expected a Warn entry identifying the stale-marker cleanup mass-unset-hazard deferral; got warnings=%v", logger.warnings)
 		}
 	})
 
@@ -774,7 +775,7 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 			Markers:  lister,
 			Panes:    live,
 			Unsetter: unsetter,
-			Logger:   logger,
+			Logger:   logger.Logger().With("component", "bootstrap"),
 		}
 		if err := c.CleanStaleMarkers(); err != nil {
 			t.Fatalf("CleanStaleMarkers must return nil under all-malformed + markers-exist deferral; got %v", err)
@@ -784,24 +785,24 @@ func TestStaleMarkerCleanup_SoftWarningPosture(t *testing.T) {
 		}
 
 		// At least one Warn entry for the deferral itself; mentions the
-		// stale-marker cleanup deferral signature. (Per-line malformed
-		// Warns may also appear — the deferral Warn is what we're
-		// pinning here.) The component is supplied at every Logger.Warn
-		// call site as state.ComponentBootstrap; the recording fake
-		// captures the component alongside the formatted message body
-		// so we pin bootstrap routing here too.
+		// stale-marker cleanup mass-unset-hazard deferral signature.
+		// (Per-line malformed Warns may also appear — the deferral Warn is
+		// what we're pinning here.) The component is bound on the injected
+		// logger as "bootstrap"; the recording handler captures
+		// the component attr alongside the message body so we pin bootstrap
+		// routing here too.
 		foundDeferral := false
 		for i, msg := range logger.warnings {
-			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "marker(s)") {
-				if logger.warnComponents[i] != state.ComponentBootstrap {
-					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], state.ComponentBootstrap)
+			if strings.Contains(msg, "stale-marker cleanup") && strings.Contains(msg, "mass-unset hazard") {
+				if logger.warnComponents[i] != "bootstrap" {
+					t.Errorf("deferral Warn component = %q, want %q", logger.warnComponents[i], "bootstrap")
 				}
 				foundDeferral = true
 				break
 			}
 		}
 		if !foundDeferral {
-			t.Errorf("expected a Warn entry identifying the all-malformed + zero-panes deferral; got warnings=%v", logger.warnings)
+			t.Errorf("expected a Warn entry identifying the all-malformed + zero-panes mass-unset-hazard deferral; got warnings=%v", logger.warnings)
 		}
 	})
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -194,7 +195,7 @@ func TestStateNotify_DoesNotInvokeBootstrap(t *testing.T) {
 // TestStateNotify_LogsWarnOnSaveRequestedCreateFailure asserts that when the
 // save.requested file cannot be created (e.g. its path is already a
 // directory), the notify subsystem emits a WARN entry to portal.log under the
-// state.ComponentNotify tag. This is the task 12-5 acceptance: routine
+// "notify" tag. This is the task 12-5 acceptance: routine
 // notify failure reporting must be visible to portal.log so it can be
 // surfaced via portal state status recent-warnings.
 //
@@ -204,7 +205,12 @@ func TestStateNotify_DoesNotInvokeBootstrap(t *testing.T) {
 func TestStateNotify_LogsWarnOnSaveRequestedCreateFailure(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
-	t.Setenv("PORTAL_LOG_LEVEL", "warn")
+
+	// In-process command body logs via notifyLogger (log.For("notify")), which
+	// routes through the process-wide swap handler. SetTestHandler captures
+	// those records for assertion without spawning a subprocess.
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
 
 	// EnsureDir would normally create the state dir; do it ourselves so we
 	// can plant the blocking directory at save.requested before notify runs.
@@ -221,17 +227,12 @@ func TestStateNotify_LogsWarnOnSaveRequestedCreateFailure(t *testing.T) {
 		t.Fatal("expected non-zero exit when save.requested cannot be created, got nil")
 	}
 
-	logPath := state.PortalLog(dir)
-	data, readErr := os.ReadFile(logPath)
-	if readErr != nil {
-		t.Fatalf("read portal.log: %v", readErr)
-	}
-	logged := string(data)
+	logged := sink.body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
-	if !strings.Contains(logged, "| "+state.ComponentNotify+" |") {
-		t.Errorf("log missing %q component column: %q", state.ComponentNotify, logged)
+	if !strings.Contains(logged, "component="+"notify") {
+		t.Errorf("log missing %q component: %q", "notify", logged)
 	}
 	if !strings.Contains(logged, "save.requested") {
 		t.Errorf("log missing failing path 'save.requested': %q", logged)

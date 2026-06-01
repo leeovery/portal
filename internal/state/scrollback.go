@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,8 @@ type PaneCapturer interface {
 // with no warning (legitimate first-run state); an unreadable directory or
 // individual file is logged at WARN and skipped so seeding always returns a
 // usable map.
-func SeedHashMap(dir string, logger *Logger) HashMap {
+func SeedHashMap(dir string, logger *slog.Logger) HashMap {
+	logger = loggerOrDiscard(logger)
 	hm := HashMap{}
 	sbDir := ScrollbackDir(dir)
 	entries, err := os.ReadDir(sbDir)
@@ -49,7 +51,7 @@ func SeedHashMap(dir string, logger *Logger) HashMap {
 		if errors.Is(err, fs.ErrNotExist) {
 			return hm
 		}
-		logger.Warn(ComponentDaemon, "seed: read scrollback dir %s: %v", sbDir, err)
+		logger.Warn("seed read scrollback dir failed", "path", sbDir, "error", err)
 		return hm
 	}
 	for _, entry := range entries {
@@ -64,7 +66,7 @@ func SeedHashMap(dir string, logger *Logger) HashMap {
 		path := filepath.Join(sbDir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			logger.Warn(ComponentDaemon, "seed: read %s: %v", name, err)
+			logger.Warn("seed read scrollback file failed", "path", path, "error", err)
 			continue
 		}
 		hm[paneKey] = xxhash.Sum64(data)

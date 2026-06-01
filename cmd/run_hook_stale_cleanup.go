@@ -53,9 +53,9 @@ package cmd
 // plan task for the explicit accept-the-double-Load decision (Option a).
 
 import (
-	"github.com/leeovery/portal/cmd/bootstrap"
+	"log/slog"
+
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/state"
 )
 
 // runHookStaleCleanup is the shared implementation of bootstrap step 11
@@ -67,9 +67,10 @@ import (
 // false → return err to the caller (bootstrap step-11 contract); true →
 // return nil after logging the Warn (portal-clean user-boundary contract).
 //
-// A nil logger is tolerated — substituted with bootstrap.NoopLogger so
-// the call sites in this function can invoke logger.Warn / logger.Debug
-// unconditionally.
+// A nil logger is tolerated — substituted with the bootstrap package's
+// discard logger so the call sites in this function can invoke logger.Warn /
+// logger.Debug unconditionally. Production callers pass the bootstrap
+// component's *slog.Logger.
 //
 // A nil onRemoved is tolerated — the per-removed-entry callback is
 // simply skipped when nil (the bootstrap adapter passes nil; portal
@@ -77,17 +78,17 @@ import (
 func runHookStaleCleanup(
 	lister AllPaneLister,
 	store *hooks.Store,
-	logger bootstrap.Logger,
+	logger *slog.Logger,
 	swallowListError bool,
 	onRemoved func(string),
 ) error {
 	if logger == nil {
-		logger = bootstrap.NoopLogger{}
+		logger = bootstrapLogger
 	}
 
 	livePanes, err := lister.ListAllPanes()
 	if err != nil {
-		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: list-panes failed: %v", err)
+		logger.Warn("stale-hook cleanup: list-panes failed", "error", err)
 		if swallowListError {
 			return nil
 		}
@@ -96,11 +97,11 @@ func runHookStaleCleanup(
 
 	persisted, err := store.Load()
 	if err != nil {
-		logger.Warn(state.ComponentBootstrap, "stale-hook cleanup: hookStore.Load failed: %v", err)
+		logger.Warn("stale-hook cleanup: hookStore.Load failed", "error", err)
 		return err
 	}
 
-	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: live=%d persisted=%d", len(livePanes), len(persisted))
+	logger.Debug("stale-hook cleanup counts", "panes", len(livePanes), "entries", len(persisted))
 
 	// Mass-deletion hazard guard — must run before any destructive
 	// CleanStale invocation so a silently-empty live-pane result cannot
@@ -112,9 +113,7 @@ func runHookStaleCleanup(
 			// Empty persisted + empty live: nothing to do, no hazard.
 			return nil
 		}
-		logger.Warn(state.ComponentBootstrap,
-			"stale-hook cleanup: zero live panes parsed with %d hook(s) present; skipping to avoid mass-deletion hazard (next bootstrap retries)",
-			len(persisted))
+		logger.Warn("stale-hook cleanup: zero live panes parsed with hooks present; skipping to avoid mass-deletion hazard (next bootstrap retries)", "entries", len(persisted))
 		return nil
 	}
 
@@ -122,7 +121,7 @@ func runHookStaleCleanup(
 	if err != nil {
 		return err
 	}
-	logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: removed=%d", len(removed))
+	logger.Debug("stale-hook cleanup removed", "reaped", len(removed))
 
 	if onRemoved != nil {
 		for _, name := range removed {

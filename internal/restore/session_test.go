@@ -599,7 +599,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyPairedPanesWhenLiveCountExceeds
 	mock := &mockCommander{RunFunc: restoreRunFunc("0:0\n0:1")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger := restoretest.OpenTestLogger(t, dir)
+	logger, sink := newCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work", nil,
@@ -636,10 +636,9 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyPairedPanesWhenLiveCountExceeds
 	}
 
 	// Warning logged.
-	_ = logger.Close()
-	body, _ := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if !strings.Contains(string(body), "live pane count") {
-		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", string(body))
+	body := sink.body()
+	if !strings.Contains(body, "live pane count") {
+		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", body)
 	}
 }
 
@@ -651,7 +650,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyFirstWhenLiveCountIsLessThanSav
 	mock := &mockCommander{RunFunc: restoreRunFunc("0:0")}
 	client := tmux.NewClient(mock)
 	dir := t.TempDir()
-	logger := restoretest.OpenTestLogger(t, dir)
+	logger, sink := newCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, StateDir: dir, Logger: logger}
 
 	sess := newSession("work", nil,
@@ -682,10 +681,9 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyFirstWhenLiveCountIsLessThanSav
 	}
 
 	// Warning logged.
-	_ = logger.Close()
-	body, _ := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if !strings.Contains(string(body), "live pane count") {
-		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", string(body))
+	body := sink.body()
+	if !strings.Contains(body, "live pane count") {
+		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", body)
 	}
 }
 

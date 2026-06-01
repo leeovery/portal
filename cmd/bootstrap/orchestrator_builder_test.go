@@ -19,6 +19,7 @@ package bootstrap_test
 // is exercised in every Run path.
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/leeovery/portal/cmd/bootstrap"
@@ -41,7 +42,7 @@ type orchestratorOpts struct {
 	StaleMarkers  bootstrap.MarkerCleaner
 	Sweeper       bootstrap.FIFOSweeper
 	Clean         bootstrap.StaleCleaner
-	Logger        bootstrap.Logger
+	Logger        *slog.Logger
 }
 
 // buildIntegrationOrchestrator returns a *bootstrap.Orchestrator wired with
@@ -107,13 +108,12 @@ func buildIntegrationOrchestrator(t *testing.T, client *tmux.Client, opts orches
 // test teardown), and runs state.EnsureDir so callers can immediately write
 // sessions.json / scrollback / FIFOs into the returned path.
 //
-// Paired with restoretest.OpenTestLogger (which writes to
-// <stateDir>/portal.log) the two helpers replace the nine-site stateDir +
-// EnsureDir + OpenLogger preamble previously copy-pasted across the
-// cmd/bootstrap integration tests. They remain split because not every site
-// that needs the stateDir half also needs a real logger (e.g. the
-// orchestrator end-to-end smoke test wires no logger at all and lets the
-// orchestrator substitute its NoopLogger).
+// Paired with restoretest.OpenTestLogger (a silent *slog.Logger factory) the
+// two helpers replace the nine-site stateDir + EnsureDir + log-open preamble
+// previously copy-pasted across the cmd/bootstrap integration tests. They
+// remain split because not every site that needs the stateDir half also needs
+// a logger (e.g. the orchestrator end-to-end smoke test wires no logger at all
+// and lets the orchestrator substitute its discardLogger).
 func newIntegrationStateDir(t *testing.T) string {
 	t.Helper()
 	stateDir := t.TempDir()

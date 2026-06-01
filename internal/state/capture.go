@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -65,9 +66,8 @@ const internalSessionPrefix = "_"
 //
 // logger receives WARN entries when a per-session ShowEnvironment call fails:
 // the failing session is skipped (rather than aborting the whole capture) and
-// one WARN line per skip is written under ComponentDaemon, naming the session
-// and the underlying error. A nil logger is a valid no-op: *Logger methods
-// early-return on nil receiver, so callers may pass nil without guarding.
+// one WARN line per skip is written under the daemon component, naming the
+// session and the underlying error.
 //
 // The per-session error is classified for the post-loop total-failure
 // discriminator: errors that errors.Is to tmuxerr.ErrNoSuchSession are
@@ -83,7 +83,8 @@ const internalSessionPrefix = "_"
 //
 // See specification → Component E (CaptureStructure Per-Session
 // Log-and-Continue).
-func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *Logger) (Index, error) {
+func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index, logger *slog.Logger) (Index, error) {
+	logger = loggerOrDiscard(logger)
 	savedAt := time.Now().UTC()
 	empty := Index{Version: SchemaVersion, SavedAt: savedAt, Sessions: []Session{}}
 
@@ -114,13 +115,11 @@ func CaptureStructure(c CaptureClient, skipSet map[string]struct{}, prev *Index,
 		if err != nil {
 			if errors.Is(err, tmuxerr.ErrNoSuchSession) {
 				naturalChurnCount++
-				logger.Warn(ComponentDaemon,
-					"capture: skipping vanished session %q: %v", name, err)
+				logger.Warn("capture skipping vanished session", "session", name, "error", err)
 				continue
 			}
 			anomalousErrs = append(anomalousErrs, err)
-			logger.Warn(ComponentDaemon,
-				"capture: anomalous error for session %q: %v", name, err)
+			logger.Warn("capture anomalous session error", "session", name, "error", err)
 			continue
 		}
 		sessions = append(sessions, Session{

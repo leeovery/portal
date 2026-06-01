@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/leeovery/portal/internal/hooks"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -23,17 +23,12 @@ var stateMigrateRenameCmd = &cobra.Command{
 			return fmt.Errorf("load hook store: %w", err)
 		}
 
-		// Open portal.log via the non-daemon append-only path so migration
-		// diagnostics (load failures, key collisions, save failures) land in
-		// the central log under state.ComponentHooks. Per spec § Log
-		// Rotation → Concurrent-writer discipline, only the daemon rotates.
-		// On open failure logger is nil and the *state.Logger nil-receiver
-		// no-ops every call so the migration never aborts on a diagnostics-
-		// only failure.
-		logger, _ := openNoRotateLogger()
-		defer func() { _ = logger.Close() }()
-
-		return runMigrateRename(store, args[0], args[1], logger)
+		// Migration diagnostics (load failures, key collisions, save
+		// failures) land in the central log under the hooks component via the
+		// handler configured once by main -> log.Init. Rotation is
+		// handler-owned (Phase 2), so this command no longer opens or closes a
+		// per-process logger.
+		return runMigrateRename(store, args[0], args[1], hooksLogger)
 	},
 }
 
@@ -44,17 +39,16 @@ var stateMigrateRenameCmd = &cobra.Command{
 // Behaviour:
 //   - Missing or malformed hooks.json is treated as empty (no write).
 //   - Zero matches: no write at all (mtime preserved).
-//   - Collision on a destination key: WARN to portal.log under
-//     state.ComponentHooks and overwrite.
-//   - Save failure: WARN to portal.log under state.ComponentHooks and
+//   - Collision on a destination key: WARN to portal.log under the hooks
+//     component and overwrite.
+//   - Save failure: WARN to portal.log under the hooks component and
 //     propagate the error.
 //
-// The logger may be nil; *state.Logger's nil-receiver semantics make those
-// calls safe.
+// logger must be a real *slog.Logger (production passes log.For("hooks")).
 //
 // Map iteration in Go is randomised and mutating during iteration is
 // unspecified. Matching keys are collected first, then rewritten.
-func runMigrateRename(store *hooks.Store, oldName, newName string, logger *state.Logger) error {
+func runMigrateRename(store *hooks.Store, oldName, newName string, logger *slog.Logger) error {
 	if newName == "" {
 		return fmt.Errorf("new name must be non-empty")
 	}
@@ -63,7 +57,7 @@ func runMigrateRename(store *hooks.Store, oldName, newName string, logger *state
 	if err != nil {
 		// Store.Load swallows missing-file and malformed-JSON; a non-nil error
 		// here is a genuine I/O failure.
-		logger.Warn(state.ComponentHooks, "load hooks: %v", err)
+		logger.Warn("load hooks failed", "error", err)
 		return err
 	}
 
@@ -83,14 +77,14 @@ func runMigrateRename(store *hooks.Store, oldName, newName string, logger *state
 		events := h[key]
 		newKey := newName + ":" + strings.TrimPrefix(key, prefix)
 		if _, collision := h[newKey]; collision {
-			logger.Warn(state.ComponentHooks, "collision on %s; overwriting", newKey)
+			logger.Warn("hook key collision; overwriting", "hook_key", newKey)
 		}
 		h[newKey] = events
 		delete(h, key)
 	}
 
 	if err := store.Save(h); err != nil {
-		logger.Warn(state.ComponentHooks, "save failed: %v", err)
+		logger.Warn("save hooks failed", "error", err)
 		return err
 	}
 	return nil

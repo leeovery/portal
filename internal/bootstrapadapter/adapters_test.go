@@ -41,7 +41,7 @@ func TestFIFOSweeper_PropagatesListSkeletonMarkersError(t *testing.T) {
 	s := &bootstrapadapter.FIFOSweeper{
 		Client:   &listerStub{err: sentinel},
 		StateDir: t.TempDir(),
-		Logger:   nil, // *state.Logger is nil-safe; the sweep never reaches it.
+		Logger:   nil, // never dereferenced: Sweep returns on the ListSkeletonMarkers error before reaching the logger.
 	}
 
 	err := s.Sweep()

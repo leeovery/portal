@@ -508,8 +508,8 @@ func WithScrollbackReader(r ScrollbackReader) Option {
 // WithPreviewAttachPipeline wires the PreviewAttacher seam used by the
 // preview page's Enter binding. Production callers pass the pipeline
 // constructed via NewPreviewAttachPipeline (closing over *tmux.Client +
-// a nullable *state.Logger); tests that do not exercise Enter can omit
-// this option, leaving previewAttacher nil.
+// the preview component's *slog.Logger); tests that do not exercise Enter
+// can omit this option, leaving previewAttacher nil.
 func WithPreviewAttachPipeline(p PreviewAttacher) Option {
 	return func(m *Model) {
 		m.previewAttacher = p

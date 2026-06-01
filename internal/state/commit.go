@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,9 +32,8 @@ import (
 // successful write, gcOrphanScrollback removes any .bin files no longer
 // referenced by idx. GC failure is logged but never fails the commit —
 // sessions.json is the source of truth.
-//
-// A nil logger is acceptable; the underlying *Logger methods are nil-safe.
-func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *Logger) error {
+func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *slog.Logger) error {
+	logger = loggerOrDiscard(logger)
 	idx.Canonicalize()
 
 	data, err := EncodeIndex(idx)
@@ -50,7 +50,7 @@ func Commit(dir string, idx Index, anyScrollbackChanged bool, logger *Logger) er
 	}
 
 	if err := gcOrphanScrollback(dir, idx, logger); err != nil {
-		logger.Warn(ComponentDaemon, "gc orphan scrollback: %v", err)
+		logger.Warn("gc orphan scrollback failed", "error", err)
 		// GC failure is non-fatal — sessions.json was committed successfully.
 	}
 
@@ -99,7 +99,7 @@ func ComputeReferencedSet(idx Index) map[string]struct{} {
 // remove failures are logged at WARN and do not abort the sweep — the next
 // successful commit will retry. ENOENT during remove (e.g. concurrent
 // cleanup) is treated as success.
-func gcOrphanScrollback(dir string, idx Index, logger *Logger) error {
+func gcOrphanScrollback(dir string, idx Index, logger *slog.Logger) error {
 	sbDir := ScrollbackDir(dir)
 	entries, err := os.ReadDir(sbDir)
 	if err != nil {
@@ -130,7 +130,7 @@ func gcOrphanScrollback(dir string, idx Index, logger *Logger) error {
 				continue
 			}
 			paneKey := strings.TrimSuffix(name, ".bin")
-			logger.Warn(ComponentDaemon, "gc remove %s: %v", paneKey, err)
+			logger.Warn("gc remove scrollback failed", "pane_key", paneKey, "error", err)
 			// Continue: subsequent files may still be removable.
 		}
 	}

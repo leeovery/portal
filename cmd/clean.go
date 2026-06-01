@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/leeovery/portal/internal/project"
-	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
 )
@@ -57,17 +56,11 @@ var cleanCmd = &cobra.Command{
 		}
 
 		// Hook cleanup: remove entries for panes that no longer exist.
-		// Acquire a non-rotating logger so the hook-cleanup tail emits the
-		// same auditable log breadcrumbs as bootstrap step 11
+		// Log under the bootstrap component so the hook-cleanup tail emits the
+		// same auditable breadcrumbs as bootstrap step 11
 		// (cleanStaleAdapter.CleanStale, which composes the same shared
-		// helper). A nil logger is tolerated — runHookStaleCleanup
-		// substitutes a no-op when nil is passed.
-		logger, _ := openNoRotateLogger()
-		defer func() {
-			if logger != nil {
-				_ = logger.Close()
-			}
-		}()
+		// helper). The handler is configured once by main -> log.Init.
+		logger := bootstrapLogger
 
 		// Load hook store first to check if any hooks exist.
 		hookStore, err := loadHookStore()
@@ -112,7 +105,7 @@ var cleanCmd = &cobra.Command{
 		// Gated on loadErr == nil so Load failures fall through to the
 		// helper for canonical-Warn emission rather than silently exiting.
 		if loadErr == nil && len(existingHooks) == 0 {
-			logger.Debug(state.ComponentBootstrap, "stale-hook cleanup: persisted=0, skipping")
+			logger.Debug("stale-hook cleanup: persisted=0, skipping")
 			return nil
 		}
 

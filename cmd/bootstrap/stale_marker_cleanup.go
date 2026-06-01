@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -10,12 +11,11 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// stale_marker_cleanup.go's Logger field uses the package-local Logger
-// interface (Debug/Warn/Error) — same shape every other orchestrator step
-// seam depends on. *state.Logger satisfies the interface structurally,
-// keeping production wiring (cmd/bootstrap_production.go's inline
-// MarkerCleanupCore literal) untouched while letting tests inject a plain
-// in-memory recording fake instead of opening a real on-disk log file.
+// stale_marker_cleanup.go's Logger field is a *slog.Logger — same shape every
+// other orchestrator step seam depends on. Production wiring
+// (cmd/bootstrap_production.go's inline MarkerCleanupCore literal) injects the
+// bootstrap component's logger; tests install a capturing slog handler via
+// log.SetTestHandler.
 
 // LivePaneLister enumerates live tmux panes via tmux's list-panes -a -F format
 // call. The production adapter delegates to (*tmux.Client).ListAllPanesWithFormat
@@ -51,13 +51,10 @@ type MarkerUnsetter interface {
 // adjacent seams.
 //
 // Logger is optional. When non-nil, soft warnings (per-unset failure,
-// malformed live-pane line) are emitted via Logger.Warn under
-// ComponentBootstrap. A nil Logger is tolerated — CleanStaleMarkers
-// substitutes a no-op default at entry so call sites can dispatch
-// unconditionally. This mirrors the Orchestrator's Logger contract;
-// the field's interface type matches every other orchestrator step seam
-// (HookRegistrar, FIFOSweeper et al.) so tests inject the same
-// RecordingLogger fake used elsewhere in the package.
+// malformed live-pane line) are emitted via Logger.Warn under the bootstrap
+// component. A nil Logger is tolerated — CleanStaleMarkers substitutes the
+// io.Discard-backed discardLogger at entry so call sites can dispatch
+// unconditionally. This mirrors the Orchestrator's Logger contract.
 type MarkerCleanupCore struct {
 	// Markers mirrors FIFOSweeper.Client — *tmux.Client satisfies
 	// state.ServerOptionLister directly via ShowAllServerOptions, so no
@@ -65,7 +62,7 @@ type MarkerCleanupCore struct {
 	Markers  state.ServerOptionLister
 	Panes    LivePaneLister
 	Unsetter MarkerUnsetter
-	Logger   Logger
+	Logger   *slog.Logger
 }
 
 var _ MarkerCleaner = (*MarkerCleanupCore)(nil)
@@ -113,7 +110,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// the receiver's state is not silently rewritten across calls.
 	logger := c.Logger
 	if logger == nil {
-		logger = NoopLogger{}
+		logger = discardLogger
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)
@@ -139,9 +136,10 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 			// Empty markers + empty live: nothing to do, no hazard.
 			return nil
 		}
-		logger.Warn(state.ComponentBootstrap,
-			"stale-marker cleanup: zero live panes parsed with %d marker(s) present; skipping to avoid mass-unset hazard (next bootstrap retries)",
-			len(markers))
+		// The marker-present count has no closed attr key; the message must
+		// not interpolate values, so it is dropped — the hazard signal stands
+		// on its own.
+		logger.Warn("stale-marker cleanup: zero live panes parsed with markers present; skipping to avoid mass-unset hazard (next bootstrap retries)")
 		return nil
 	}
 
@@ -155,7 +153,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 			// Record and continue: a single tmux transient must not
 			// leave the remaining stale markers in place. The
 			// orchestrator (task 2-5) Warn-and-swallows the aggregate.
-			logger.Warn(state.ComponentBootstrap, "stale-marker cleanup: unset %s: %v", name, err)
+			logger.Warn("stale-marker cleanup: unset marker failed", "pane_key", paneKey, "error", err)
 			unsetErrs = append(unsetErrs, fmt.Errorf("unset %s: %w", name, err))
 		}
 	}
@@ -174,13 +172,13 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 // malformed line in the live set would create a spurious "live" entry,
 // while aborting would leave genuinely stale markers in place. Both failure
 // modes are worse than skipping. logger must be non-nil; CleanStaleMarkers
-// substitutes a no-op default before invoking parseLivePaneSet.
-func parseLivePaneSet(raw string, logger Logger) map[string]struct{} {
-	warn := func(line, reason string, args ...any) {
-		logger.Warn(state.ComponentBootstrap,
-			"stale-marker cleanup: malformed live-pane line %q ("+reason+")",
-			append([]any{line}, args...)...)
-	}
+// substitutes the discard default before invoking parseLivePaneSet.
+//
+// The malformed-line text and the per-reason descriptor have no closed attr
+// keys and the message must not interpolate values, so each failure mode uses
+// a distinct terse message; the underlying strconv error rides the "error"
+// attr where available.
+func parseLivePaneSet(raw string, logger *slog.Logger) map[string]struct{} {
 	set := map[string]struct{}{}
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
@@ -190,24 +188,24 @@ func parseLivePaneSet(raw string, logger Logger) map[string]struct{} {
 		// Split on rightmost ':' so session names containing ':' survive.
 		colon := strings.LastIndex(line, ":")
 		if colon < 0 {
-			warn(line, "missing colon")
+			logger.Warn("stale-marker cleanup: malformed live-pane line (missing colon)")
 			continue
 		}
 		session := line[:colon]
 		rest := line[colon+1:]
 		dot := strings.Index(rest, ".")
 		if dot < 0 {
-			warn(line, "missing dot")
+			logger.Warn("stale-marker cleanup: malformed live-pane line (missing dot)")
 			continue
 		}
 		window, err := strconv.Atoi(rest[:dot])
 		if err != nil {
-			warn(line, "window not int: %v", err)
+			logger.Warn("stale-marker cleanup: malformed live-pane line (window not int)", "error", err)
 			continue
 		}
 		pane, err := strconv.Atoi(rest[dot+1:])
 		if err != nil {
-			warn(line, "pane not int: %v", err)
+			logger.Warn("stale-marker cleanup: malformed live-pane line (pane not int)", "error", err)
 			continue
 		}
 		set[state.SanitizePaneKey(session, window, pane)] = struct{}{}

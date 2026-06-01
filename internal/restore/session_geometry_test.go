@@ -3,13 +3,10 @@ package restore_test
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/restore"
-	"github.com/leeovery/portal/internal/restoretest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -208,9 +205,7 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 		},
 	}
 	client := tmux.NewClient(mock)
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	logger := restoretest.OpenTestLogger(t, dir)
+	logger, sink := newCaptureLogger(t)
 	r := &restore.SessionRestorer{Client: client, Logger: logger}
 
 	sess := geometrySession("work",
@@ -238,16 +233,11 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 	// Verify two warn entries land in the log: one for the saved-layout
 	// failure (mentions "falling back to tiled"), one for the tiled fallback
 	// failure.
-	_ = logger.Close() // flush
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	body := string(data)
+	body := sink.body()
 	if !strings.Contains(body, "falling back to tiled") {
 		t.Errorf("log %q lacks first warning about saved-layout failure", body)
 	}
-	if !strings.Contains(body, "tiled also failed") {
+	if !strings.Contains(body, "tiled fallback also failed") {
 		t.Errorf("log %q lacks second warning about tiled fallback failure", body)
 	}
 }

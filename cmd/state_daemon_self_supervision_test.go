@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -421,6 +420,8 @@ func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 
 	fc := &daemonFakeCommander{}
 	deps := makeDeps(t, dir, fc)
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+	deps.Logger = logger
 	deps.TickerPeriod = 1 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -429,24 +430,18 @@ func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	// Force the log file to flush by closing the logger.
-	_ = deps.Logger.Close()
-
-	logBytes, err := os.ReadFile(filepath.Join(dir, "portal.log"))
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	got := string(logBytes)
+	got := sink.body()
 	if !strings.Contains(got, "INFO") {
 		t.Errorf("expected INFO log line; got:\n%s", got)
 	}
-	if !strings.Contains(got, state.ComponentDaemon) {
-		t.Errorf("expected ComponentDaemon = %q in log; got:\n%s", state.ComponentDaemon, got)
+	if !strings.Contains(got, "daemon") {
+		t.Errorf("expected ComponentDaemon = %q in log; got:\n%s", "daemon", got)
 	}
-	if !strings.Contains(got, "self-supervision: saver-membership lost for") {
+	if !strings.Contains(got, "self-supervision: saver-membership lost") {
 		t.Errorf("expected self-supervision log prefix; got:\n%s", got)
 	}
-	want := fmt.Sprintf("%d consecutive", selfSupervisionHysteresisTicks)
+	// The consecutive-tick count now rides the ticks attr.
+	want := fmt.Sprintf("ticks=%d", selfSupervisionHysteresisTicks)
 	if !strings.Contains(got, want) {
 		t.Errorf("expected consecutive-count %q in log; got:\n%s", want, got)
 	}

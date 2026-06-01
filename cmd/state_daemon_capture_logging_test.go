@@ -15,6 +15,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -23,6 +24,79 @@ import (
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
+
+// errorAttrRecorder is a slog.Handler that captures the error-attr value of the
+// first WARN record whose message matches wantMsg, preserving the value as the
+// live error (slog.Any) so a test can assert errors.Is against it — proving the
+// call site passed the wrapped error directly, not its .Error() string.
+type errorAttrRecorder struct {
+	wantMsg string
+	gotErr  error
+	found   bool
+}
+
+func (h *errorAttrRecorder) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *errorAttrRecorder) WithAttrs(_ []slog.Attr) slog.Handler         { return h }
+func (h *errorAttrRecorder) WithGroup(_ string) slog.Handler              { return h }
+
+func (h *errorAttrRecorder) Handle(_ context.Context, r slog.Record) error {
+	if h.found || r.Level != slog.LevelWarn || r.Message != h.wantMsg {
+		return nil
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "error" {
+			if e, ok := a.Value.Any().(error); ok {
+				h.gotErr = e
+				h.found = true
+				return false
+			}
+		}
+		return true
+	})
+	return nil
+}
+
+// TestDaemonTick_CapturePaneFailureErrorAttrIsWrappedError is the Task 1-9
+// acceptance for the error-attr contract: the WARN's "error" attr value is the
+// wrapped error itself (slog.Any), so errors.Is matches the underlying sentinel
+// — the call site does NOT pass err.Error().
+func TestDaemonTick_CapturePaneFailureErrorAttrIsWrappedError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	sess, panes := oneSession()
+	sentinel := errors.New("capture-pane wrapped-sentinel")
+	fc := &daemonFakeCommander{
+		sessionsOut:        sess,
+		panesOut:           panes,
+		captureErrByTarget: map[string]error{"work:0.0": sentinel},
+	}
+
+	rec := &errorAttrRecorder{wantMsg: "capture pane failed"}
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	deps := &daemonDeps{
+		Dir:          dir,
+		Logger:       slog.New(rec).With("component", "daemon"),
+		Client:       tmux.NewClient(fc),
+		HashMap:      state.HashMap{},
+		TickerPeriod: 1 * time.Millisecond,
+		MaxGap:       30 * time.Second,
+		LastSaveAt:   time.Now(),
+	}
+	touchSaveRequested(t, dir)
+
+	tick(context.Background(), deps)
+
+	if !rec.found {
+		t.Fatal("no WARN 'capture pane failed' record with an error attr was captured")
+	}
+	if !errors.Is(rec.gotErr, sentinel) {
+		t.Errorf("error attr does not wrap the sentinel via errors.Is; got %v", rec.gotErr)
+	}
+}
 
 // noSuchSessionCommandErr returns a *tmux.CommandError whose stderr carries
 // tmux's canonical lowercase "no such session" phrasing. The tmux Client's
@@ -37,24 +111,10 @@ func noSuchSessionCommandErr(session string) error {
 	}
 }
 
-// readPortalLog returns the on-disk portal.log body after flushing the
-// supplied logger so subsequent assertions see every write. The
-// captureAndCommit call site this exercises is at
-// cmd/state_daemon.go:325 (state.CaptureStructure(..., deps.Logger)).
-func readPortalLog(t *testing.T, logger *state.Logger, dir string) string {
-	t.Helper()
-	// Flush the logger before reading so buffered writes land on disk.
-	// This is an intentional double-close — makeDeps' t.Cleanup will
-	// also Close the logger at test teardown, but assertions need the
-	// body now. The error from the second close is discarded by the
-	// cleanup (and the first close here) so the redundancy is safe.
-	_ = logger.Close()
-	data, err := os.ReadFile(state.PortalLog(dir))
-	if err != nil {
-		t.Fatalf("read portal.log: %v", err)
-	}
-	return string(data)
-}
+// The captureAndCommit call site these tests exercise is at
+// cmd/state_daemon.go (state.CaptureStructure(..., deps.Logger)). deps.Logger
+// is set to an in-memory capturing *slog.Logger so the per-session WARN lines
+// can be inspected directly via the sink — no on-disk portal.log read.
 
 // TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon is
 // the end-to-end wiring assertion. Two sessions, one succeeds, one returns an
@@ -95,11 +155,7 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 		},
 	}
 
-	logger, err := state.OpenLogger(state.PortalLog(dir), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
 
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
@@ -118,17 +174,17 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 
 	tick(context.Background(), deps)
 
-	log := readPortalLog(t, logger, dir)
+	log := sink.body()
 
 	// Required substrings: WARN level, "daemon" component, failing session
-	// name "B", and a substring of the underlying error.
-	if !strings.Contains(log, " | WARN | ") {
+	// name "B" (via the session attr), and a substring of the underlying error.
+	if !strings.Contains(log, "WARN") {
 		t.Errorf("expected WARN-level entry; log:\n%s", log)
 	}
-	if !strings.Contains(log, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("expected ComponentDaemon (%q) entry; log:\n%s", state.ComponentDaemon, log)
+	if !strings.Contains(log, "component="+"daemon") {
+		t.Errorf("expected ComponentDaemon (%q) entry; log:\n%s", "daemon", log)
 	}
-	if !strings.Contains(log, `"B"`) {
+	if !strings.Contains(log, "session=B") {
 		t.Errorf("expected failing session name %q to appear in WARN body; log:\n%s", "B", log)
 	}
 	if !strings.Contains(log, "bravo-boom-sentinel") {
@@ -163,11 +219,7 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 		},
 	}
 
-	logger, err := state.OpenLogger(state.PortalLog(dir), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
 
 	if _, err := state.EnsureDir(); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
@@ -186,22 +238,20 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 
 	tick(context.Background(), deps)
 
-	log := readPortalLog(t, logger, dir)
+	log := sink.body()
 
-	// Exactly two WARN entries under ComponentDaemon — one per failing
-	// session. (Note: a leak through to other WARN sites — e.g. tick's
-	// own "tick:" wrapper — would cause an extra match; the all-natural-
-	// churn path returns nil error from CaptureStructure so tick must NOT
-	// log a "tick:" wrapper.)
-	warnPrefix := "| WARN | " + state.ComponentDaemon + " |"
-	warnCount := strings.Count(log, warnPrefix)
+	// Exactly two WARN entries — one per failing session. (Note: a leak
+	// through to other WARN sites — e.g. tick's own "tick failed" wrapper —
+	// would cause an extra match; the all-natural-churn path returns nil
+	// error from CaptureStructure so tick must NOT log a tick-failed wrapper.)
+	warnCount := strings.Count(log, "WARN")
 	if warnCount != 2 {
-		t.Errorf("WARN entries under ComponentDaemon = %d, want 2; log:\n%s", warnCount, log)
+		t.Errorf("WARN entries = %d, want 2; log:\n%s", warnCount, log)
 	}
-	if !strings.Contains(log, `"A"`) {
+	if !strings.Contains(log, "session=A") {
 		t.Errorf("expected WARN for session A; log:\n%s", log)
 	}
-	if !strings.Contains(log, `"B"`) {
+	if !strings.Contains(log, "session=B") {
 		t.Errorf("expected WARN for session B; log:\n%s", log)
 	}
 
@@ -219,6 +269,65 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 	if len(committed.Sessions) != 0 {
 		t.Errorf("committed sessions length = %d, want 0 (empty Commit on all-natural-churn)",
 			len(committed.Sessions))
+	}
+}
+
+// TestDaemonTick_CapturePaneFailureLogsWarnWithPaneKey is the Task 1-9
+// acceptance for the daemon's per-pane capture-loop WARN: when
+// state.CaptureAndHashPane fails for a pane, the daemon's tick loop logs one
+// WARN under component=daemon carrying the failing pane's pane_key attr and the
+// wrapped error, then continues the loop. Asserts the closed-vocabulary
+// pane_key attr is present and the error attr carries the wrapped error chain
+// (errors.Is against the captured record), not the .Error() string.
+func TestDaemonTick_CapturePaneFailureLogsWarnWithPaneKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+
+	sess, panes := oneSession() // session "work", window 0, pane 0 → target work:0.0
+	sentinel := errors.New("capture-pane boom-sentinel")
+	fc := &daemonFakeCommander{
+		sessionsOut:        sess,
+		panesOut:           panes,
+		captureErrByTarget: map[string]error{"work:0.0": sentinel},
+	}
+
+	logger, sink := newCaptureLoggerForComponent(t, "daemon")
+
+	if _, err := state.EnsureDir(); err != nil {
+		t.Fatalf("EnsureDir: %v", err)
+	}
+
+	deps := &daemonDeps{
+		Dir:          dir,
+		Logger:       logger,
+		Client:       tmux.NewClient(fc),
+		HashMap:      state.HashMap{},
+		TickerPeriod: 1 * time.Millisecond,
+		MaxGap:       30 * time.Second,
+		LastSaveAt:   time.Now(),
+	}
+	touchSaveRequested(t, dir)
+
+	tick(context.Background(), deps)
+
+	log := sink.body()
+	if !strings.Contains(log, "WARN") {
+		t.Errorf("expected WARN-level entry; log:\n%s", log)
+	}
+	if !strings.Contains(log, "component=daemon") {
+		t.Errorf("expected component=daemon entry; log:\n%s", log)
+	}
+	if !strings.Contains(log, "capture pane failed") {
+		t.Errorf("expected 'capture pane failed' message; log:\n%s", log)
+	}
+	if !strings.Contains(log, "pane_key=work:0.0") {
+		t.Errorf("expected pane_key=work:0.0 attr on the WARN; log:\n%s", log)
+	}
+	// The error attr carries the wrapped error chain (slog.Any semantics), so
+	// the captured rendering includes the sentinel's message verbatim — proving
+	// the WARN passed the error directly, not a pre-formatted string.
+	if !strings.Contains(log, "capture-pane boom-sentinel") {
+		t.Errorf("expected wrapped error text in the WARN; log:\n%s", log)
 	}
 }
 

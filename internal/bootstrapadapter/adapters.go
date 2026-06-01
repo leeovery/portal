@@ -17,6 +17,7 @@ package bootstrapadapter
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/leeovery/portal/internal/restore"
 	"github.com/leeovery/portal/internal/state"
@@ -54,37 +55,42 @@ func (m *RestoringMarker) Clear() error {
 //
 // Logger is forwarded to tmux.RegisterPortalHooks so the one-shot
 // signal-hydrate migration's INFO/WARN diagnostics land in portal.log
-// under the bootstrap component. nil is tolerated: *state.Logger is
-// itself nil-safe and the underlying tmux migration substitutes a no-op
-// MigrationLogger when Logger is nil.
+// under the bootstrap component, and is also installed as the saver-barrier
+// WARN sink (also bootstrap). nil is tolerated: the underlying tmux
+// migration substitutes the io.Discard-backed default when Logger is nil.
+//
+// VersionLogger is installed as the "daemon.version write" breadcrumb sink so
+// the bootstrap-side defensive WriteVersionFile emits under the daemon
+// component — matching the daemon-startup call site (spec § Change 3). It is
+// a separate field from Logger precisely because the breadcrumb is a daemon
+// line while the migration/barrier lines are bootstrap lines. nil is
+// tolerated (the setter ignores nil).
 type HookRegistrar struct {
-	Client *tmux.Client
-	Logger *state.Logger
+	Client        *tmux.Client
+	Logger        *slog.Logger
+	VersionLogger *slog.Logger
 }
 
 // RegisterPortalHooks delegates to tmux.RegisterPortalHooks so the
-// migration logger seam is wired through. *state.Logger satisfies
-// tmux.MigrationLogger structurally.
+// migration logger seam is wired through.
 //
-// As a side-effect, the same *state.Logger is installed as two
+// As a side-effect, the same *slog.Logger is installed as two
 // internal/tmux package-level logger sinks:
 //
-//   - tmux.BarrierLogger — used by BOTH saver-side barriers'
+//   - the saver-barrier Logger — used by BOTH saver-side barriers'
 //     WARN-on-timeout paths: the kill-barrier helper
 //     (killSaverAndWaitForDaemon / escalateKillToSIGKILL) AND the
-//     readiness barrier (waitForSaverDaemonReady). *state.Logger
-//     structurally satisfies BarrierLogger via its Warn(component,
-//     format string, args ...any) method.
-//   - tmux.versionWriterLogger — used by the bootstrap-side defensive
-//     portalSaverWriteVersionFile call site so its "daemon.version write:"
-//     DEBUG breadcrumb lands in portal.log under ComponentDaemon, matching
-//     the daemon-startup call site (spec § Change 3, Acceptance #9).
+//     readiness barrier (waitForSaverDaemonReady).
+//   - the version-writer Logger — used by the bootstrap-side defensive
+//     portalSaverWriteVersionFile call site so its "daemon.version write"
+//     DEBUG breadcrumb lands in portal.log, matching the daemon-startup
+//     call site (spec § Change 3, Acceptance #9).
 //
 // Both setters are idempotent and tolerate a nil argument, so calling
 // them on every RegisterPortalHooks invocation is safe.
 func (r *HookRegistrar) RegisterPortalHooks() error {
 	tmux.SetBarrierLogger(r.Logger)
-	tmux.SetVersionWriterLogger(r.Logger)
+	tmux.SetVersionWriterLogger(r.VersionLogger)
 	return tmux.RegisterPortalHooks(r.Client, r.Logger)
 }
 
@@ -120,10 +126,9 @@ func (a *RestoreAdapter) Restore() (bool, error) { return a.Inner.Restore() }
 // migrating it is mechanical and out of scope for the constructor's
 // introduction.
 //
-// Logger is forwarded into the inner Orchestrator unchanged; *state.Logger
-// is itself nil-safe so a nil logger is tolerated and produces a no-op
-// logging path inside Restore.
-func NewRestoreAdapter(client *tmux.Client, stateDir string, logger *state.Logger) *RestoreAdapter {
+// Logger is forwarded into the inner Orchestrator unchanged; it must be a
+// real *slog.Logger (production passes log.For("restore")).
+func NewRestoreAdapter(client *tmux.Client, stateDir string, logger *slog.Logger) *RestoreAdapter {
 	return &RestoreAdapter{
 		Inner: &restore.Orchestrator{
 			Client:   client,
@@ -164,7 +169,7 @@ func NewRestoreAdapter(client *tmux.Client, stateDir string, logger *state.Logge
 type FIFOSweeper struct {
 	Client   state.ServerOptionLister
 	StateDir string
-	Logger   *state.Logger // nil tolerated; *state.Logger is nil-safe.
+	Logger   *slog.Logger
 }
 
 // Sweep enumerates the live skeleton markers from the tmux server and

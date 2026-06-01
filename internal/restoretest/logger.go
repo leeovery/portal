@@ -1,36 +1,23 @@
 package restoretest
 
 import (
-	"path/filepath"
+	"io"
+	"log/slog"
 	"testing"
-
-	"github.com/leeovery/portal/internal/state"
 )
 
-// OpenTestLogger opens a *state.Logger writing to <stateDir>/portal.log
-// and registers a t.Cleanup that closes it on test completion. This
-// consolidates the OpenLogger + Cleanup preamble that was previously
-// duplicated across 12 integration-test sites in cmd/bootstrap (via the
-// package-private openTestLogger helper) and one sibling site in cmd/
-// (cmd/reattach_integration_test.go's buildReattachOrchestrator).
+// OpenTestLogger returns a silent *slog.Logger (writing to io.Discard) for
+// integration-test sites that need a non-nil logger to satisfy the retyped
+// bootstrap / restore / FIFOSweeper adapters. These tests assert on tmux /
+// state-dir side effects, not on log output, so a discard sink is sufficient.
 //
-// Promotion to internal/restoretest mirrors the precedent set by
-// SeedSessionsJSON / SeedSessionsJSONWithSavedAt and WaitForFileExists:
-// untagged file, exported helper, single source of truth for both
-// default-tagged and integration-tagged callers. The helper itself
-// depends only on stdlib + testing + internal/state, so it is safe to
-// build under default `go test ./...`; the integration-tagged consumer
-// files import it through the same package path.
-//
-// On OpenLogger failure the helper calls t.Fatalf — production tests
-// cannot proceed without a logger when a logger is what the asserted
-// adapter (FIFOSweeper, HookRegistrar, RestoreAdapter) requires.
-func OpenTestLogger(t *testing.T, stateDir string) *state.Logger {
+// The signature keeps the *testing.T-first shape (and the unused stateDir
+// parameter) so the 12+ promoted call sites continue to compile unchanged
+// after the observability migration retyped every logging seam to
+// *slog.Logger. Tests that DO want to capture log output use
+// log.SetTestHandler instead.
+func OpenTestLogger(t *testing.T, stateDir string) *slog.Logger {
 	t.Helper()
-	logger, err := state.OpenLogger(filepath.Join(stateDir, "portal.log"), false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-	return logger
+	_ = stateDir
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

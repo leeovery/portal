@@ -620,6 +620,12 @@ func TestCleanCommand(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		t.Setenv("XDG_CONFIG_HOME", isolatedXDG)
 
+		// Wire the central log handler at the isolated state dir so the clean
+		// command's WARN lands in <XDG>/portal/state/portal.log — production
+		// does this via main -> log.Init; this test drives clean via Execute
+		// without going through main.
+		initTestLogToStateDirAs(t, filepath.Join(isolatedXDG, "portal", "state"), "test", "clean")
+
 		// Write a hooks.json then chmod it to 0o000 so Store.Load's
 		// os.ReadFile returns (nil, EACCES). This is a non-ENOENT read
 		// failure — Store.Load propagates the OS error per its contract
@@ -666,7 +672,7 @@ func TestCleanCommand(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("failed to read portal.log at %s: %v", stateDir, readErr)
 		}
-		const canonicalPrefix = "stale-hook cleanup: hookStore.Load failed:"
+		const canonicalPrefix = "stale-hook cleanup: hookStore.Load failed"
 		if !bytes.Contains(logData, []byte(canonicalPrefix)) {
 			t.Errorf("portal.log missing canonical Load-failure Warn; got:\n%s", string(logData))
 		}

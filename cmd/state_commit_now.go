@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -11,8 +12,8 @@ import (
 
 // errCommitNowFailed is the named sentinel returned from commit-now's RunE on
 // any failure exit. The tmux hook subprocess has nowhere meaningful to
-// surface stderr, so all diagnostics route through state.Logger / portal.log
-// under state.ComponentDaemon. Cobra (with SilenceErrors/SilenceUsage
+// surface stderr, so all diagnostics route through portal.log
+// under the daemon component. Cobra (with SilenceErrors/SilenceUsage
 // inherited from rootCmd) prints nothing; main.go detects this sentinel via
 // IsSilentExitError so the stderr-suppression contract is compile-time-linked
 // across the cmd and main packages rather than relying on the prior
@@ -64,8 +65,8 @@ var commitNowDeps *CommitNowDeps
 //     tmux.DefaultClient.
 type CommitNowDeps struct {
 	ReadIndex        func(dir string) (state.Index, bool, error)
-	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index, logger *state.Logger) (state.Index, error)
-	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *state.Logger) error
+	CaptureStructure func(c state.CaptureClient, skipSet map[string]struct{}, prev *state.Index, logger *slog.Logger) (state.Index, error)
+	Commit           func(dir string, idx state.Index, anyScrollbackChanged bool, logger *slog.Logger) error
 	NewClient        func() state.CaptureClient
 
 	// IsRestoring queries the @portal-restoring server option. When the
@@ -132,7 +133,7 @@ func resolveCommitNowDeps() *CommitNowDeps {
 //
 //   - PrevIndex is sourced from disk via state.ReadIndex. A missing or
 //     corrupt sessions.json falls back to a zero-value PrevIndex and logs
-//     WARN under state.ComponentDaemon — a ReadIndex failure is never a
+//     WARN under the daemon component — a ReadIndex failure is never a
 //     commit-now failure exit per the spec.
 //   - state.CaptureStructure is invoked with a nil skipSet (commit-now never
 //     coordinates with skeleton markers).
@@ -166,11 +167,12 @@ var stateCommitNowCmd = &cobra.Command{
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
 
-		// Non-rotating logger — only the daemon rotates portal.log. A nil
-		// logger here is acceptable; *state.Logger's nil-receiver no-ops every
-		// call so a diagnostics open failure never fails commit-now.
-		logger, _ := openNoRotateLogger()
-		defer func() { _ = logger.Close() }()
+		// Diagnostics land in the central log under the daemon component (the
+		// hook-driven and daemon-driven capture streams stay unified) via the
+		// handler configured once by main -> log.Init. Rotation is
+		// handler-owned (Phase 2), so commit-now no longer opens or closes a
+		// per-process logger.
+		logger := daemonLogger
 
 		deps := resolveCommitNowDeps()
 
@@ -193,11 +195,11 @@ var stateCommitNowCmd = &cobra.Command{
 		restoring, err := deps.IsRestoring()
 		switch {
 		case err != nil:
-			logger.Warn(state.ComponentDaemon, "isRestoring query failed; presuming @portal-restoring marker set to protect in-flight restore: %v", err)
+			logger.Warn("isRestoring query failed; presuming @portal-restoring set to protect in-flight restore", "error", err)
 			touchAfterShortCircuit(logger, dir, deps.TouchSaveRequested)
 			return nil
 		case restoring:
-			logger.Info(state.ComponentDaemon, "commit-now skipped: @portal-restoring set")
+			logger.Info("commit-now skipped: @portal-restoring set")
 			touchAfterShortCircuit(logger, dir, deps.TouchSaveRequested)
 			return nil
 		}
@@ -221,11 +223,11 @@ var stateCommitNowCmd = &cobra.Command{
 // touchAfterShortCircuit performs the best-effort save.requested touch shared
 // by both @portal-restoring short-circuit branches — (true, nil) and the
 // query-error "presume set" branch. A touch failure is logged at WARN under
-// state.ComponentDaemon and swallowed; the short-circuit's exit-0 status
+// the daemon component and swallowed; the short-circuit's exit-0 status
 // dominates per spec § save.requested Touch Failure Handling.
-func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string) error) {
+func touchAfterShortCircuit(logger *slog.Logger, dir string, touch func(string) error) {
 	if terr := touch(dir); terr != nil {
-		logger.Warn(state.ComponentDaemon, "touch save.requested during short-circuit: %v", terr)
+		logger.Warn("touch save.requested during short-circuit failed", "error", terr)
 	}
 }
 
@@ -233,8 +235,11 @@ func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string)
 // primitives. Per spec § commit-now Failure Behaviour and § save.requested
 // Touch Failure Handling:
 //
-//  1. Log the primary failure at ERROR under state.ComponentDaemon so the
-//     daemon-driven and hook-driven capture log streams remain unified.
+//  1. Log the primary failure at ERROR under the daemon component so the
+//     daemon-driven and hook-driven capture log streams remain unified. The
+//     stage argument is a fixed terse phrase at each call site ("capture
+//     structure" / "commit sessions.json"); it is used both as the log
+//     message and as the stage descriptor folded into the wrapped error.
 //  2. Best-effort touch save.requested so the daemon's next scheduled tick
 //     (within 1s when it is alive) commits — bounded fallback recovery for the
 //     resurrection window. Touch errors are logged at WARN and never
@@ -249,10 +254,10 @@ func touchAfterShortCircuit(logger *state.Logger, dir string, touch func(string)
 //     guard prevents the top-level handler from duplicating it. The hook
 //     subprocess has nowhere meaningful to send stderr; user-facing
 //     diagnostics route exclusively through portal.log.
-func failCommitNow(logger *state.Logger, dir string, touch func(string) error, stage string, cause error) error {
-	logger.Error(state.ComponentDaemon, "%s: %v", stage, cause)
+func failCommitNow(logger *slog.Logger, dir string, touch func(string) error, stage string, cause error) error {
+	logger.Error(stage+" failed", "error", cause)
 	if terr := touch(dir); terr != nil {
-		logger.Warn(state.ComponentDaemon, "touch save.requested after %s failure: %v", stage, terr)
+		logger.Warn("touch save.requested after commit-now failure failed", "error", terr)
 	}
 	return fmt.Errorf("%w: %s: %v", errCommitNowFailed, stage, cause)
 }
@@ -260,7 +265,7 @@ func failCommitNow(logger *state.Logger, dir string, touch func(string) error, s
 // loadPrevIndex returns the prior on-disk Index for use as CaptureStructure's
 // prev argument. Both "missing sessions.json" (the clean ENOENT skip) and
 // "exists-but-unusable" (read or decode failure) map to a zero-value Index;
-// either case is logged at WARN under state.ComponentDaemon so the first-ever
+// either case is logged at WARN under the daemon component so the first-ever
 // invocation on a fresh install and a partial-write corruption are both
 // visible in portal.log without aborting the synchronous commit.
 //
@@ -269,14 +274,14 @@ func failCommitNow(logger *state.Logger, dir string, touch func(string) error, s
 // and that goal is satisfied independent of PrevIndex availability. The
 // daemon's next tick will repopulate any per-pane content fields the fresh
 // capture cannot regenerate on its own.
-func loadPrevIndex(dir string, readIndex func(string) (state.Index, bool, error), logger *state.Logger) state.Index {
+func loadPrevIndex(dir string, readIndex func(string) (state.Index, bool, error), logger *slog.Logger) state.Index {
 	idx, skip, err := readIndex(dir)
 	if err != nil {
-		logger.Warn(state.ComponentDaemon, "read sessions.json: %v; proceeding with zero-value PrevIndex", err)
+		logger.Warn("read sessions.json failed; proceeding with zero-value PrevIndex", "error", err)
 		return state.Index{}
 	}
 	if skip {
-		logger.Warn(state.ComponentDaemon, "sessions.json absent; proceeding with zero-value PrevIndex")
+		logger.Warn("sessions.json absent; proceeding with zero-value PrevIndex")
 		return state.Index{}
 	}
 	return idx

@@ -252,7 +252,7 @@ func TestBootstrapPortalSaver_CleanBootstrap_EndState(t *testing.T) {
 //     observed.
 //  6. Assert portal.log contains ZERO "no such session: _portal-saver"
 //     entries (covers any daemon-side cascade routed through the
-//     state.Logger).
+//     central log handler).
 //  7. Assert BootstrapPortalSaver itself returned nil AND that no
 //     returned-error path (if non-nil) contains "no such session:
 //     _portal-saver" — the bootstrap-side substring detector is the

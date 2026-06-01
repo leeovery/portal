@@ -1,8 +1,10 @@
 package tmux_test
 
 import (
+	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1222,14 +1224,62 @@ func TestEnsurePortalSaverVersion_DoesNotWriteDaemonVersionOnKillPath(t *testing
 // killSaverAndWaitForDaemon tests
 // ----------------------------------------------------------------------------
 
-// recordingBarrierLogger captures Warn calls so assertions can verify emission
-// counts and ordering. Satisfies tmux.BarrierLogger.
+// recordingBarrierLogger is a slog.Handler that captures WARN records so
+// assertions can verify emission counts and ordering. Each captured WARN is
+// stored as "<component> | <message>" so the pre-migration prefix assertions
+// keep working against the post-migration terse-message-plus-component-attr
+// shape. Use Logger() to obtain a *slog.Logger to install via the barrier
+// seam.
 type recordingBarrierLogger struct {
 	warns []string
+	// shared points at the warns-owning recorder so handlers derived via
+	// WithAttrs/WithGroup (notably the .With("component", ...) binding) record
+	// into the same slice; nil on the root.
+	shared *recordingBarrierLogger
+	bound  []slog.Attr
 }
 
-func (r *recordingBarrierLogger) Warn(component, format string, args ...any) {
-	r.warns = append(r.warns, component+" | "+format)
+// Logger returns a *slog.Logger whose records are captured by this recorder.
+func (r *recordingBarrierLogger) Logger() *slog.Logger { return slog.New(r) }
+
+func (r *recordingBarrierLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (r *recordingBarrierLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
+	next = append(next, r.bound...)
+	next = append(next, attrs...)
+	return &recordingBarrierLogger{shared: r.owner(), bound: next}
+}
+
+func (r *recordingBarrierLogger) WithGroup(_ string) slog.Handler {
+	return &recordingBarrierLogger{shared: r.owner(), bound: r.bound}
+}
+
+func (r *recordingBarrierLogger) owner() *recordingBarrierLogger {
+	if r.shared != nil {
+		return r.shared
+	}
+	return r
+}
+
+func (r *recordingBarrierLogger) Handle(_ context.Context, rec slog.Record) error {
+	if rec.Level != slog.LevelWarn {
+		return nil
+	}
+	component := ""
+	read := func(a slog.Attr) bool {
+		if a.Key == "component" {
+			component = a.Value.String()
+		}
+		return true
+	}
+	for _, a := range r.bound {
+		read(a)
+	}
+	rec.Attrs(read)
+	owner := r.owner()
+	owner.warns = append(owner.warns, component+" | "+rec.Message)
+	return nil
 }
 
 // swapSeam swaps the value at ptr to v for the duration of the test and
@@ -1269,10 +1319,13 @@ func installBarrierTimeout(t *testing.T, d time.Duration) {
 	swapSeam(t, tmux.BarrierTimeoutSeam(), d)
 }
 
-// installBarrierLogger swaps the WARN-emission seam for a recorder.
-func installBarrierLogger(t *testing.T, log tmux.BarrierLogger) {
+// installBarrierLogger swaps the WARN-emission seam for a recorder. The
+// recorder's logger is bound to the bootstrap component (matching production
+// wiring via SetBarrierLogger) so captured WARNs carry the expected component
+// attr.
+func installBarrierLogger(t *testing.T, log *recordingBarrierLogger) {
 	t.Helper()
-	swapSeam(t, tmux.BarrierLoggerSeam(), log)
+	swapSeam(t, tmux.BarrierLoggerSeam(), log.Logger().With("component", "bootstrap"))
 }
 
 // snapshotDir returns a map of every regular file in dir keyed by relative
@@ -1866,7 +1919,7 @@ func TestSetBarrierLogger_RoutesWarnOnTimeoutThroughInstalledLogger(t *testing.T
 	t.Cleanup(func() { *loggerSeam = prevLogger })
 
 	recorder := &recordingBarrierLogger{}
-	tmux.SetBarrierLogger(recorder)
+	tmux.SetBarrierLogger(recorder.Logger().With("component", "bootstrap"))
 
 	installBarrierPollInterval(t, 1*time.Millisecond)
 	installBarrierTimeout(t, 10*time.Millisecond)
@@ -1888,8 +1941,8 @@ func TestSetBarrierLogger_RoutesWarnOnTimeoutThroughInstalledLogger(t *testing.T
 	}
 	// WARN must land under ComponentBootstrap. recordingBarrierLogger encodes
 	// the component as the prefix before " | " in each captured warn.
-	if !strings.HasPrefix(recorder.warns[0], state.ComponentBootstrap+" | ") {
-		t.Errorf("WARN component prefix = %q, want %q", recorder.warns[0], state.ComponentBootstrap+" | ")
+	if !strings.HasPrefix(recorder.warns[0], "bootstrap"+" | ") {
+		t.Errorf("WARN component prefix = %q, want %q", recorder.warns[0], "bootstrap"+" | ")
 	}
 }
 
@@ -1902,10 +1955,11 @@ func TestSetBarrierLogger_IgnoresNilLogger(t *testing.T) {
 	t.Cleanup(func() { *loggerSeam = prevLogger })
 
 	recorder := &recordingBarrierLogger{}
-	tmux.SetBarrierLogger(recorder)
+	installed := recorder.Logger().With("component", "bootstrap")
+	tmux.SetBarrierLogger(installed)
 	tmux.SetBarrierLogger(nil) // must be a no-op
 
-	if *loggerSeam != tmux.BarrierLogger(recorder) {
+	if *loggerSeam != installed {
 		t.Errorf("SetBarrierLogger(nil) overwrote the previously installed logger")
 	}
 }
@@ -2509,21 +2563,60 @@ func TestEnsurePortalSaverVersion_Alive_CurrentDev_DoesNotInvokeDefensiveWrite(t
 	}
 }
 
+// recordingSlogHandler captures records so tests can assert on message,
+// level, component, and attrs after the observability migration retyped the
+// version-writer sink to *slog.Logger.
+type recordingSlogHandler struct {
+	records []slog.Record
+	// shared points at the records-owning handler so handlers derived via
+	// WithAttrs/WithGroup record into the same slice; nil on the root.
+	shared *recordingSlogHandler
+	bound  []slog.Attr
+}
+
+func (h *recordingSlogHandler) owner() *recordingSlogHandler {
+	if h.shared != nil {
+		return h.shared
+	}
+	return h
+}
+
+func (h *recordingSlogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (h *recordingSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(h.bound)+len(attrs))
+	next = append(next, h.bound...)
+	next = append(next, attrs...)
+	return &recordingSlogHandler{shared: h.owner(), bound: next}
+}
+
+func (h *recordingSlogHandler) WithGroup(_ string) slog.Handler {
+	return &recordingSlogHandler{shared: h.owner(), bound: h.bound}
+}
+
+func (h *recordingSlogHandler) Handle(_ context.Context, r slog.Record) error {
+	// Merge the accumulated WithAttrs (notably the bound component) onto the
+	// stored record so assertions reading r.Attrs see them, matching how the
+	// production handler resolves component from the .With binding.
+	rec := r.Clone()
+	rec.AddAttrs(h.bound...)
+	owner := h.owner()
+	owner.records = append(owner.records, rec)
+	return nil
+}
+
 // TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb pins
 // spec § Change 3 / Acceptance Criterion #9: every state.WriteVersionFile
-// call emits one DEBUG breadcrumb prefixed "daemon.version write:" containing
-// version, caller pid, and destination path — including the bootstrap-side
-// defensive call. Guards against the wrapper reverting to passing nil.
+// call emits one DEBUG breadcrumb "daemon.version write" carrying the
+// destination path attr — including the bootstrap-side defensive call.
+// (version and pid are now baseline attrs injected per-record by the
+// configured handler, no longer at the call site.) Guards against the
+// wrapper reverting to passing nil.
 func TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb(t *testing.T) {
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "debug")
 
-	lg, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = lg.Close() })
+	rec := &recordingSlogHandler{}
+	lg := slog.New(rec).With("component", "daemon")
 
 	// Save and restore the prior package-level logger sink via the test seam
 	// so this test cannot leak its capturing logger into siblings.
@@ -2542,31 +2635,35 @@ func TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb(t *testing.
 		t.Fatalf("portalSaverWriteVersionFile: %v", err)
 	}
 
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
+	var breadcrumbs []slog.Record
+	for _, r := range rec.records {
+		if r.Message == "daemon.version write" {
+			breadcrumbs = append(breadcrumbs, r)
+		}
 	}
-	log := string(data)
-
-	if count := strings.Count(log, "daemon.version write:"); count != 1 {
-		t.Fatalf("expected exactly 1 'daemon.version write:' breadcrumb, got %d. log:\n%s", count, log)
+	if len(breadcrumbs) != 1 {
+		t.Fatalf("expected exactly 1 'daemon.version write' breadcrumb, got %d: %v", len(breadcrumbs), rec.records)
 	}
-	if !strings.Contains(log, "| DEBUG |") {
-		t.Errorf("breadcrumb not DEBUG level:\n%s", log)
+	b := breadcrumbs[0]
+	if b.Level != slog.LevelDebug {
+		t.Errorf("breadcrumb level = %v, want DEBUG", b.Level)
 	}
-	if !strings.Contains(log, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("breadcrumb component != %q:\n%s", state.ComponentDaemon, log)
+	var gotComponent, gotPath string
+	b.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case "component":
+			gotComponent = a.Value.String()
+		case "path":
+			gotPath = a.Value.String()
+		}
+		return true
+	})
+	if gotComponent != "daemon" {
+		t.Errorf("breadcrumb component = %q, want %q", gotComponent, "daemon")
 	}
-	if !strings.Contains(log, "version=v9.9.9") {
-		t.Errorf("breadcrumb missing version token:\n%s", log)
-	}
-	wantPID := "pid=" + strconv.Itoa(os.Getpid())
-	if !strings.Contains(log, wantPID) {
-		t.Errorf("breadcrumb missing %q:\n%s", wantPID, log)
-	}
-	wantPath := "path=" + filepath.Join(dir, "daemon.version")
-	if !strings.Contains(log, wantPath) {
-		t.Errorf("breadcrumb missing %q:\n%s", wantPath, log)
+	wantPath := filepath.Join(dir, "daemon.version")
+	if gotPath != wantPath {
+		t.Errorf("breadcrumb path = %q, want %q", gotPath, wantPath)
 	}
 }
 
@@ -2574,14 +2671,7 @@ func TestSetVersionWriterLogger_BootstrapWrapperEmitsDebugBreadcrumb(t *testing.
 // SetVersionWriterLogger(nil) leaves the previously-installed logger in
 // place, matching the SetBarrierLogger nil-tolerance contract.
 func TestSetVersionWriterLogger_IgnoresNilLogger(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	t.Setenv("PORTAL_LOG_LEVEL", "debug")
-	lg, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = lg.Close() })
+	lg := slog.New(&recordingSlogHandler{}).With("component", "daemon")
 
 	loggerSeam := tmux.VersionWriterLoggerSeam()
 	prev := *loggerSeam
@@ -2655,7 +2745,7 @@ func TestPortalSaverDaemonCommand_LiteralValue(t *testing.T) {
 //   - bound wall-clock by saverReadinessTimeout,
 //   - on timeout, emit exactly one WARN via the shared saverBarrier.Logger
 //     sink (installed via SetBarrierLogger; same Logger consumed by the kill
-//     barrier) under state.ComponentBootstrap with the literal grep-anchor
+//     barrier) under "bootstrap" with the literal grep-anchor
 //     and return nil.
 //
 // Tests use the directly-exported helper tmux.WaitForSaverDaemonReady so they
@@ -2863,7 +2953,7 @@ func TestWaitForSaverDaemonReady_TimesOutAndEmitsWarnWhenDaemonNeverIdentifies(t
 	if len(log.warns) != 1 {
 		t.Fatalf("expected exactly 1 WARN line on timeout, got %d: %v", len(log.warns), log.warns)
 	}
-	want := state.ComponentBootstrap + " | saver respawn: daemon did not come up within"
+	want := "bootstrap" + " | saver respawn: daemon did not come up"
 	if !strings.HasPrefix(log.warns[0], want) {
 		t.Errorf("WARN line %q must begin with %q", log.warns[0], want)
 	}
@@ -3132,7 +3222,7 @@ func assertKillNewSetRespawnOrdering(t *testing.T, calls [][]string) {
 		t.Fatalf("missing call: kill=%d new=%d set=%d respawn=%d (calls=%v)",
 			killIdx, newIdx, setIdx, respawnIdx, calls)
 	}
-	if !(killIdx < newIdx && newIdx < setIdx && setIdx < respawnIdx) {
+	if killIdx >= newIdx || newIdx >= setIdx || setIdx >= respawnIdx {
 		t.Errorf("expected ordering kill < new < set < respawn; got kill=%d new=%d set=%d respawn=%d (calls=%v)",
 			killIdx, newIdx, setIdx, respawnIdx, calls)
 	}
@@ -3338,7 +3428,7 @@ func TestEnsurePortalSaverVersion_NotAlive_SkipsKillAndStillUsesNewOrdering(t *t
 	if newIdx == -1 || setIdx == -1 || respawnIdx == -1 {
 		t.Fatalf("missing call: new=%d set=%d respawn=%d (calls=%v)", newIdx, setIdx, respawnIdx, mock.Calls)
 	}
-	if !(newIdx < setIdx && setIdx < respawnIdx) {
+	if newIdx >= setIdx || setIdx >= respawnIdx {
 		t.Errorf("expected ordering new < set < respawn on no-kill path; got new=%d set=%d respawn=%d (calls=%v)",
 			newIdx, setIdx, respawnIdx, mock.Calls)
 	}

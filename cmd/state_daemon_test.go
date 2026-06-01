@@ -181,10 +181,11 @@ func TestStateDaemon_CreatesStateDirectoryIfMissing(t *testing.T) {
 }
 
 func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
-	// "starting, version=..." is INFO; default WARN threshold filters it.
+	// "starting" is INFO; default WARN threshold filters it.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
 
 	_ = withImmediateRun(t)
 	withDaemonLockFileReset(t)
@@ -258,6 +259,7 @@ func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
 	withDaemonLockFileReset(t)
 
 	fc := &fakeCommander{getValue: "1"}
@@ -293,6 +295,7 @@ func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
 	withDaemonLockFileReset(t)
 
 	fc := &fakeCommander{getErr: tmux.ErrOptionNotFound}
@@ -366,10 +369,12 @@ func TestStateDaemon_ReturnsErrorWhenStateDirNotWritable(t *testing.T) {
 }
 
 func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
-	// "starting, version=..., pid=..." is INFO; default WARN threshold filters it.
+	// "starting" is INFO; version/pid ride as baseline attrs injected by the
+	// configured handler. Default WARN threshold filters INFO, so bump to info.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "vX.Y.Z")
 
 	prev := version
 	version = "vX.Y.Z"
@@ -597,6 +602,7 @@ func TestStateDaemon_ReturnsErrorAndLogsWarnOnNonContentionLockFailure(t *testin
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
 	withDaemonLockFileReset(t)
 
 	sentinel := errors.New("flock: permission denied")
@@ -681,6 +687,7 @@ func TestStateDaemon_EmitsWarnOnLockContention(t *testing.T) {
 	t.Setenv("PORTAL_LOG_LEVEL", "warn")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
 	withDaemonLockFileReset(t)
 
 	withAcquireDaemonLockFake(t, func(_ string) (*os.File, error) {

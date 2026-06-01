@@ -1,7 +1,6 @@
 package state_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,53 +10,25 @@ import (
 	"github.com/leeovery/portal/internal/state"
 )
 
-// openDebugLogger opens a real *state.Logger at logPath with DEBUG level so
-// breadcrumb entries are retained, and registers cleanup to close it.
-func openDebugLogger(t *testing.T, logPath string) *state.Logger {
-	t.Helper()
-	t.Setenv("PORTAL_LOG_LEVEL", "debug")
-	lg, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = lg.Close() })
-	return lg
-}
-
-func readLog(t *testing.T, logPath string) string {
-	t.Helper()
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	return string(data)
-}
-
+// TestWriteVersionFile_EmitsBreadcrumb pins the post-migration breadcrumb
+// shape: a DEBUG record "daemon.version write" carrying the destination path
+// attr. version and pid are now baseline attrs injected per-record by the
+// configured handler (set once via main -> log.Init), so they are no longer
+// emitted at this call site.
 func TestWriteVersionFile_EmitsBreadcrumb(t *testing.T) {
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	lg := openDebugLogger(t, logPath)
+	lg, sink := newCaptureLogger(t)
 
 	if err := state.WriteVersionFile(dir, "1.2.3", lg); err != nil {
 		t.Fatalf("WriteVersionFile: %v", err)
 	}
 
-	log := readLog(t, logPath)
-	if !strings.Contains(log, "daemon.version write:") {
-		t.Fatalf("log missing prefix 'daemon.version write:':\n%s", log)
+	log := sink.body()
+	if !strings.Contains(log, "daemon.version write") {
+		t.Fatalf("log missing message 'daemon.version write':\n%s", log)
 	}
-	if !strings.Contains(log, "| DEBUG |") {
+	if !strings.Contains(log, "DEBUG") {
 		t.Errorf("breadcrumb is not DEBUG level:\n%s", log)
-	}
-	if !strings.Contains(log, "| "+state.ComponentDaemon+" |") {
-		t.Errorf("breadcrumb component != %q:\n%s", state.ComponentDaemon, log)
-	}
-	if !strings.Contains(log, "version=1.2.3") {
-		t.Errorf("breadcrumb missing version token:\n%s", log)
-	}
-	wantPID := fmt.Sprintf("pid=%d", os.Getpid())
-	if !strings.Contains(log, wantPID) {
-		t.Errorf("breadcrumb missing %q:\n%s", wantPID, log)
 	}
 	wantPath := "path=" + filepath.Join(dir, "daemon.version")
 	if !strings.Contains(log, wantPath) {
@@ -65,6 +36,9 @@ func TestWriteVersionFile_EmitsBreadcrumb(t *testing.T) {
 	}
 }
 
+// TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails pins that the
+// breadcrumb is emitted BEFORE the atomic-write side effect, so a write
+// failure still leaves the paper trail.
 func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission-based write-failure test relies on POSIX semantics")
@@ -74,8 +48,7 @@ func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 	}
 
 	parent := t.TempDir()
-	logPath := filepath.Join(parent, "portal.log")
-	lg := openDebugLogger(t, logPath)
+	lg, sink := newCaptureLogger(t)
 
 	roDir := filepath.Join(parent, "ro")
 	if err := os.Mkdir(roDir, 0o500); err != nil {
@@ -89,27 +62,28 @@ func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 		t.Fatalf("WriteVersionFile to read-only dir succeeded; want error")
 	}
 
-	log := readLog(t, logPath)
-	if !strings.Contains(log, "daemon.version write:") {
+	log := sink.body()
+	if !strings.Contains(log, "daemon.version write") {
 		t.Fatalf("breadcrumb missing after failed write:\n%s", log)
 	}
-	if !strings.Contains(log, "version=9.9.9") {
-		t.Errorf("breadcrumb missing version token after failed write:\n%s", log)
+	wantPath := "path=" + filepath.Join(roDir, "daemon.version")
+	if !strings.Contains(log, wantPath) {
+		t.Errorf("breadcrumb missing path attr after failed write:\n%s", log)
 	}
 }
 
+// TestWriteVersionFile_EmitsExactlyOneBreadcrumbPerCall pins one breadcrumb
+// per call.
 func TestWriteVersionFile_EmitsExactlyOneBreadcrumbPerCall(t *testing.T) {
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "portal.log")
-	lg := openDebugLogger(t, logPath)
+	lg, sink := newCaptureLogger(t)
 
 	if err := state.WriteVersionFile(dir, "v-once", lg); err != nil {
 		t.Fatalf("WriteVersionFile: %v", err)
 	}
 
-	log := readLog(t, logPath)
-	count := strings.Count(log, "daemon.version write:")
+	count := strings.Count(sink.body(), "daemon.version write")
 	if count != 1 {
-		t.Fatalf("expected exactly 1 breadcrumb, got %d. log:\n%s", count, log)
+		t.Fatalf("expected exactly 1 breadcrumb, got %d. log:\n%s", count, sink.body())
 	}
 }

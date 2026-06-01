@@ -24,6 +24,7 @@ package restore
 
 import (
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -49,7 +50,7 @@ import (
 type SessionRestorer struct {
 	Client   *tmux.Client
 	StateDir string
-	Logger   *state.Logger
+	Logger   *slog.Logger
 }
 
 // savedPaneArmInfo is the per-pane data retained from the create phase so the
@@ -198,7 +199,9 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 	}
 
 	if len(livePanes) != len(armInfos) {
-		r.Logger.Warn(state.ComponentRestore, "session %q: live pane count %d != saved count %d (pairing up to shorter list)", sess.Name, len(livePanes), len(armInfos))
+		// live/saved counts have no paired closed attr keys and the message
+		// must not interpolate values; "session" identifies the mismatch.
+		r.logger().Warn("live pane count differs from saved count (pairing up to shorter list)", "session", sess.Name)
 	}
 
 	pairCount := len(armInfos)
@@ -310,9 +313,9 @@ func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, la
 	if err == nil {
 		return
 	}
-	r.Logger.Warn(state.ComponentRestore, "select-layout %s:%d %q failed: %v; falling back to tiled", session, window, layout, err)
+	r.logger().Warn("select-layout failed; falling back to tiled", "session", session, "error", err)
 	if err := r.Client.SelectLayout(session, window, "tiled"); err != nil {
-		r.Logger.Warn(state.ComponentRestore, "select-layout %s:%d tiled also failed: %v", session, window, err)
+		r.logger().Warn("select-layout tiled fallback also failed", "session", session, "error", err)
 	}
 }
 
@@ -320,7 +323,7 @@ func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, la
 // logged and ignored.
 func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
 	if err := r.Client.SelectPane(session, window, pane); err != nil {
-		r.Logger.Warn(state.ComponentRestore, "select-pane %s:%d.%d failed: %v", session, window, pane, err)
+		r.logger().Warn("select-pane failed", "session", session, "error", err)
 	}
 }
 
@@ -328,7 +331,7 @@ func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
 // Failure is logged and ignored.
 func (r *SessionRestorer) applyZoom(session string, window, pane int) {
 	if err := r.Client.ResizePaneZoom(session, window, pane); err != nil {
-		r.Logger.Warn(state.ComponentRestore, "resize-pane -Z %s:%d.%d failed: %v", session, window, pane, err)
+		r.logger().Warn("resize-pane -Z failed", "session", session, "error", err)
 	}
 }
 
@@ -374,7 +377,9 @@ func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedC
 	if liveCount == savedCount {
 		return
 	}
-	r.Logger.Warn(state.ComponentRestore, "session %q live pane count %d != saved count %d", name, liveCount, savedCount)
+	// live/saved counts have no paired closed attr keys and the message must
+	// not interpolate values; "session" identifies the mismatch.
+	r.logger().Warn("live pane count differs from saved count", "session", name)
 }
 
 // setSkeletonMarker writes the `@portal-skeleton-<liveKey>` server option for
@@ -382,7 +387,7 @@ func (r *SessionRestorer) warnOnPaneCountMismatch(name string, liveCount, savedC
 // does not block markers for the rest.
 func (r *SessionRestorer) setSkeletonMarker(sessionName, liveKey string) {
 	if err := state.SetSkeletonMarker(r.Client, liveKey); err != nil {
-		r.Logger.Warn(state.ComponentRestore, "set-option %s on %q: %v", state.SkeletonMarkerPrefix+liveKey, sessionName, err)
+		r.logger().Warn("set skeleton marker failed", "session", sessionName, "pane_key", liveKey, "error", err)
 	}
 }
 
@@ -400,7 +405,9 @@ func (r *SessionRestorer) applyEnvironment(sess state.Session) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		if err := r.Client.SetSessionEnvironment(sess.Name, k, sess.Environment[k]); err != nil {
-			r.Logger.Warn(state.ComponentRestore, "set-environment %s on %q: %v", k, sess.Name, err)
+			// The env var name has no closed attr key and the message must not
+			// interpolate values; "session" + "error" carry the signal.
+			r.logger().Warn("set-environment failed", "session", sess.Name, "error", err)
 			// Continue per spec — environment is best-effort.
 		}
 	}

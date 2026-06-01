@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
@@ -47,12 +48,24 @@ type hydrateConfig struct {
 	HookKey           string
 	Stdout            io.Writer
 	Client            *tmux.Client
-	Logger            *state.Logger
+	Logger            *slog.Logger
 	HookStore         *hooks.Store
 	ExecShell         func(prog string, args []string)
 	OpenFIFO          func(path string, timeout time.Duration) (*os.File, error)
 	HandleFileMissing func(cfg hydrateConfig, ctx hydrateFileMissingContext) error
 	HandleTimeout     func(cfg hydrateConfig) error
+}
+
+// hydrateLoggerOrDefault returns logger when non-nil, else the package's
+// component-bound hydrateLogger. The hydrate entry points normalize cfg.Logger
+// through this so a caller (or test) that leaves Logger nil never panics on a
+// *slog.Logger nil-receiver — preserving the nil-tolerant contract the legacy
+// bespoke logger provided.
+func hydrateLoggerOrDefault(logger *slog.Logger) *slog.Logger {
+	if logger == nil {
+		return hydrateLogger
+	}
+	return logger
 }
 
 // hydrateFileMissingContext carries the underlying cause of a file-missing
@@ -96,6 +109,7 @@ func openFIFOWithTimeout(path string, timeout time.Duration) (*os.File, error) {
 // In production ExecShell calls syscall.Exec and never returns; the trailing
 // `return nil` is reached only in tests.
 func runHydrate(cfg hydrateConfig) error {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	// 1. Block on FIFO until signal arrives or timeout fires.
 	f, err := cfg.OpenFIFO(cfg.FIFO, hydrateTimeout)
 	if err != nil {
@@ -226,13 +240,14 @@ func resolveShell() string {
 // so the pane lands in a usable shell rather than failing closed when
 // hooks.json is unreadable.
 func execShellOrHookAndExit(cfg hydrateConfig) {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	if cfg.HookStore == nil {
 		execShellAndExit(cfg)
 		return
 	}
 	command, found, err := hooks.LookupOnResume(cfg.HookStore, cfg.HookKey)
 	if err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "lookup on-resume hook for %s: %v", cfg.HookKey, err)
+		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
 		execShellAndExit(cfg)
 		return
 	}
@@ -258,6 +273,7 @@ func execShellOrHookAndExit(cfg hydrateConfig) {
 // unlinked at the os.Remove above provides no retry — the next attach would
 // just re-fire ENOENT. Clearing the marker is the correct recovery contract.
 func handleHydrateTimeout(cfg hydrateConfig) error {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	// 1. Reset preamble only — no scrollback dump, no postamble.
 	_, _ = io.WriteString(cfg.Stdout, hydrateResetPreamble)
 
@@ -269,7 +285,7 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 
 	// 3. Log a warning naming the hook-key + FIFO so operators can correlate
 	// the entry with the affected pane in the saved sessions.json.
-	cfg.Logger.Warn(state.ComponentHydrate, "timeout waiting for signal on --hook-key=%s --fifo=%s", cfg.HookKey, cfg.FIFO)
+	cfg.Logger.Warn("timeout waiting for hydrate signal", "hook_key", cfg.HookKey, "path", cfg.FIFO)
 
 	unsetSkeletonMarkerOrLog(cfg)
 	// Recovery path matches handleHydrateFileMissing: marker unset above; runHydrate's exec fall-through still pays the 100ms settle sleep before exec (preserved per spec — same posture as the success path).
@@ -288,16 +304,17 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 // io.Copy failure, the partial bytes already streamed to stdout are left in
 // place — no rollback. The pane lands in a degraded-but-usable shell.
 func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) error {
+	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	// 1. Log a distinct WARN entry per failure cause so operators can tell
 	// missing files (likely GC race) apart from permission misconfiguration
 	// or transient disk I/O errors.
 	switch {
 	case errors.Is(ctx.Cause, fs.ErrNotExist):
-		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file not found for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+		cfg.Logger.Warn("scrollback file not found", "hook_key", cfg.HookKey, "path", cfg.File)
 	case errors.Is(ctx.Cause, fs.ErrPermission):
-		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file unreadable (permission denied) for --hook-key=%s --file=%s", cfg.HookKey, cfg.File)
+		cfg.Logger.Warn("scrollback file unreadable (permission denied)", "hook_key", cfg.HookKey, "path", cfg.File)
 	default:
-		cfg.Logger.Warn(state.ComponentHydrate, "scrollback file I/O error for --hook-key=%s --file=%s: %v", cfg.HookKey, cfg.File, ctx.Cause)
+		cfg.Logger.Warn("scrollback file I/O error", "hook_key", cfg.HookKey, "path", cfg.File, "error", ctx.Cause)
 	}
 
 	// 2. Deliberately NO 100ms sleep — nothing was fully dumped, so there is
@@ -321,7 +338,7 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 // bootstrap, which will re-skeleton the pane and clear it.
 func unsetSkeletonMarkerOrLog(cfg hydrateConfig) {
 	if err := state.UnsetSkeletonMarkerForFIFO(cfg.Client, cfg.FIFO); err != nil {
-		cfg.Logger.Warn(state.ComponentHydrate, "unset marker %s: %v", state.SkeletonMarkerPrefix+state.PaneKeyFromFIFOPath(cfg.FIFO), err)
+		cfg.Logger.Warn("unset skeleton marker failed", "pane_key", state.PaneKeyFromFIFOPath(cfg.FIFO), "error", err)
 	}
 }
 
@@ -361,29 +378,18 @@ var stateHydrateCmd = &cobra.Command{
 		// shell — better than failing closed in the per-pane helper.
 		store, _ := loadHookStore()
 
-		// Open portal.log via the non-daemon append-only path so hydrate
-		// diagnostics (timeouts, file-missing, marker-unset failures) land in
-		// the central log file. Per spec § Log Rotation → Concurrent-writer
-		// discipline, only the daemon rotates; the helper's writer must not.
-		// On open failure, logger is nil and the *state.Logger nil-receiver
-		// no-ops every call so the helper degrades to "no logging" rather
-		// than aborting the per-pane recovery.
-		//
-		// In production, the helper exec's away (syscall.Exec replaces the
-		// process), so this defer never runs on the success path. It exists
-		// for non-exec error paths and tests that short-circuit via
-		// hydrateRunFunc — where leaking the fd would surface as a
-		// reproducible test leak.
-		logger, _ := openNoRotateLogger()
-		defer func() { _ = logger.Close() }()
-
+		// Diagnostics (timeouts, file-missing, marker-unset failures) land in
+		// the central log file via the handler configured once by main ->
+		// log.Init. Rotation and the append-only writer discipline are now
+		// handler-owned (Phase 2), so the helper no longer opens or closes a
+		// per-process logger.
 		cfg := hydrateConfig{
 			FIFO:              fifo,
 			File:              file,
 			HookKey:           hookKey,
 			Stdout:            cmd.OutOrStdout(),
 			Client:            tmux.DefaultClient(),
-			Logger:            logger,
+			Logger:            hydrateLogger,
 			HookStore:         store,
 			ExecShell:         defaultExecShell,
 			OpenFIFO:          openFIFOWithTimeout,

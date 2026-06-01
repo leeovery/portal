@@ -25,18 +25,16 @@
 //     spec's End-State Verification section forbids under steady state.
 //
 // Logger capture mechanism:
-//   The production `bootstrapadapter.NewOrphanSweeper(client, *state.Logger)`
-//   takes a concrete `*state.Logger`, not the `bootstrap.Logger`
-//   interface — so we cannot pass a `bootstrap.RecordingLogger`
-//   directly into the adapter constructor. Instead we mirror the pattern
+//   The production `bootstrapadapter.NewOrphanSweeper(client, *slog.Logger)`
+//   takes a concrete `*slog.Logger` — so we mirror the pattern
 //   from TestSweepOrphanDaemons_Integration_CleanStateZeroSignals (this
 //   same _test package): call `NewOrphanSweeper(client, nil)`,
 //   type-assert to `*bootstrap.OrphanSweepCore`, and overwrite the
-//   `Logger` field with a `bootstrap.RecordingLogger`. The production
-//   fields the adapter set (`Pgrep`,
+//   `Logger` field with a capturing `bootstrap.RecordingLogger`'s
+//   `*slog.Logger`. The production fields the adapter set (`Pgrep`,
 //   `SaverPanePID`) are preserved — only the Logger seam is swapped.
 //   `BootstrapPortalSaver` itself does not take a logger (it writes
-//   directly to the package's default state.Logger via portal.log) and
+//   to the central portal.log via the package handler) and
 //   so contributes to the forbidden-string assertion only via the
 //   captured-logger entries when its callee path emits via the same
 //   logger sink. The forbidden-strings assertion here is therefore
@@ -85,7 +83,7 @@ func TestCompositeBootstrap_ConvergesPgrepToOneWithin6s(t *testing.T) {
 			sweeper)
 	}
 	logger := &bootstrap.RecordingLogger{}
-	core.Logger = logger
+	core.Logger = logger.Logger()
 
 	// Capture `start` IMMEDIATELY before the bootstrap slice fires. The
 	// 6 s convergence budget is measured against this instant — matches

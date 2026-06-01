@@ -3,10 +3,9 @@ package tmux
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
-
-	"github.com/leeovery/portal/internal/state"
 )
 
 // saveTriggerEvents lists every tmux event on which Portal registers a
@@ -163,27 +162,6 @@ var portalHookCategories = []hookCategory{
 // reference a single source of truth.
 const sessionClosedEvent = "session-closed"
 
-// MigrationLogger is the minimal logging seam migrateHydrationHooks and
-// migrateSessionClosedHook need. Two methods (Info, Warn) is the smallest
-// surface that conveys the spec's observable shape: a single INFO line
-// summarising eviction count, plus a per-failure WARN line on
-// UnsetGlobalHookAt errors.
-//
-// *state.Logger satisfies this interface structurally and is the production
-// implementation. The interface is retained as an in-memory test seam so
-// hooks_register_test.go and hooks_migration_test.go can assert on emitted
-// diagnostics via recordingMigrationLogger without touching the file-backed
-// *state.Logger.
-//
-// A nil MigrationLogger is tolerated by every consumer: callers (production
-// and tests alike) may pass nil and the fallback substitutes a
-// (*state.Logger)(nil) — whose Info/Warn methods are documented no-ops on
-// nil receiver — so the migration code path always has a safe sink.
-type MigrationLogger interface {
-	Info(component, format string, args ...any)
-	Warn(component, format string, args ...any)
-}
-
 // staleSignalHydratePrefix is one of the two substrings the eviction
 // predicate requires: every Portal-authored signal-hydrate hook body
 // begins with `command -v portal >/dev/null 2>&1 &&` regardless of vintage.
@@ -223,15 +201,19 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 // "show-hooks failed: %w" and aborts the migration before any unset call.
 //
 // When at least one entry was evicted across all events, the function
-// emits a single INFO line of the form "evicted N stale signal-hydrate
-// hook(s) lacking '--' separator". Bootstraps with no evictions are silent.
+// emits a single INFO line "evicted stale signal-hydrate hooks" carrying the
+// eviction count under the "reaped" cycle-summary attr. Bootstraps with no
+// evictions are silent.
 //
 // Sealed inside RegisterPortalHooks: it is unexported to ensure exactly one
 // canonical entry point for "hook installation". A second invocation against
 // the same hook table is a no-op (idempotent).
-func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
+//
+// log must be non-nil; callers pass a real *slog.Logger (production) or the
+// io.Discard-backed discardLogger.
+func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
 	if log == nil {
-		log = (*state.Logger)(nil)
+		log = discardLogger
 	}
 
 	raw, err := c.ShowGlobalHooks()
@@ -255,7 +237,9 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 
 		for _, idx := range staleIndices {
 			if err := c.UnsetGlobalHookAt(event, idx); err != nil {
-				log.Warn(state.ComponentBootstrap, "failed to evict stale signal-hydrate hook on %s at index %d: %v", event, idx, err)
+				// event name and hook index have no closed attr keys; "error"
+				// carries the signal.
+				log.Warn("failed to evict stale signal-hydrate hook", "error", err)
 				continue
 			}
 			evicted++
@@ -263,7 +247,7 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 	}
 
 	if evicted > 0 {
-		log.Info(state.ComponentBootstrap, "evicted %d stale signal-hydrate hook(s) lacking '--' separator", evicted)
+		log.Info("evicted stale signal-hydrate hooks lacking '--' separator", "reaped", evicted)
 	}
 
 	return evicted, nil
@@ -301,14 +285,14 @@ func migrateHydrationHooks(c *Client, log MigrationLogger) (int, error) {
 // "show-hooks failed: %w") or when the AppendGlobalHook call fails — both
 // surface to RegisterPortalHooks as folded entries in the errors.Join
 // aggregate, consistent with other step-2 register failures.
-func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
+func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 	if log == nil {
-		log = (*state.Logger)(nil)
+		log = discardLogger
 	}
 
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
-		log.Warn(state.ComponentBootstrap, "session-closed migration skipped: show-hooks failed: %v", err)
+		log.Warn("session-closed migration skipped: show-hooks failed", "error", err)
 		return fmt.Errorf("show-hooks failed: %w", err)
 	}
 
@@ -330,9 +314,9 @@ func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
 	sort.Sort(sort.Reverse(sort.IntSlice(staleIndices)))
 	for _, idx := range staleIndices {
 		if err := c.UnsetGlobalHookAt(sessionClosedEvent, idx); err != nil {
-			log.Warn(state.ComponentBootstrap,
-				"failed to evict stale notify hook on %s at index %d: %v",
-				sessionClosedEvent, idx, err)
+			// event name and hook index have no closed attr keys; "error"
+			// carries the signal.
+			log.Warn("failed to evict stale notify hook", "error", err)
 			continue
 		}
 	}
@@ -347,10 +331,10 @@ func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
 }
 
 // RegisterPortalHooks idempotently registers Portal's full hook table,
-// threading a MigrationLogger through to migrateHydrationHooks and
-// migrateSessionClosedHook so the bootstrap-step *state.Logger can capture
-// eviction diagnostics. A nil log is tolerated and falls through to a
-// no-op sink.
+// threading a *slog.Logger through to migrateHydrationHooks and
+// migrateSessionClosedHook so the bootstrap-step logger can capture
+// eviction diagnostics. A nil log is tolerated and falls through to the
+// io.Discard-backed discardLogger.
 //
 // Categories are processed in the order declared in portalHookCategories;
 // within each category, events are processed in the order declared in the
@@ -373,9 +357,9 @@ func migrateSessionClosedHook(c *Client, log MigrationLogger) error {
 // On any failures the returned error is an errors.Join aggregate; each leaf
 // error names the failing event and wraps the underlying tmux error so
 // callers can use errors.Is on a sentinel.
-func RegisterPortalHooks(c *Client, log MigrationLogger) error {
+func RegisterPortalHooks(c *Client, log *slog.Logger) error {
 	if log == nil {
-		log = (*state.Logger)(nil)
+		log = discardLogger
 	}
 
 	var errs []error

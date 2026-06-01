@@ -2,6 +2,7 @@ package state_test
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,18 +17,11 @@ type captureFunc func(target string) (string, error)
 
 func (f captureFunc) CapturePane(target string) (string, error) { return f(target) }
 
-// openTempLogger opens a Logger writing to a fresh file in t.TempDir and
-// returns the logger plus the log path. The logger is closed via t.Cleanup so
-// callers can read the log file's contents after the call under test.
-func openTempLogger(t *testing.T) (*state.Logger, string) {
+// openTempLogger returns a capturing *slog.Logger plus the captureSink so
+// callers can inspect the rendered log body after the call under test.
+func openTempLogger(t *testing.T) (*slog.Logger, *captureSink) {
 	t.Helper()
-	logPath := filepath.Join(t.TempDir(), "portal.log")
-	logger, err := state.OpenLogger(logPath, false)
-	if err != nil {
-		t.Fatalf("OpenLogger: %v", err)
-	}
-	t.Cleanup(func() { _ = logger.Close() })
-	return logger, logPath
+	return newCaptureLogger(t)
 }
 
 func TestSeedHashMap(t *testing.T) {
@@ -151,7 +145,7 @@ func TestSeedHashMap(t *testing.T) {
 		// Restore mode so t.TempDir cleanup can remove the file.
 		t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
 
-		logger, logPath := openTempLogger(t)
+		logger, sink := openTempLogger(t)
 
 		hm := state.SeedHashMap(dir, logger)
 
@@ -164,15 +158,9 @@ func TestSeedHashMap(t *testing.T) {
 			t.Errorf("hm contains entry for unreadable file: %v", hm)
 		}
 
-		// Logger must have produced a warning mentioning the file.
-		if err := logger.Close(); err != nil {
-			t.Fatalf("close logger: %v", err)
-		}
-		logBytes, err := os.ReadFile(logPath)
-		if err != nil {
-			t.Fatalf("read log: %v", err)
-		}
-		log := string(logBytes)
+		// Logger must have produced a warning mentioning the file (via the
+		// path attr).
+		log := sink.body()
 		if !strings.Contains(log, "WARN") {
 			t.Errorf("log does not contain WARN: %q", log)
 		}

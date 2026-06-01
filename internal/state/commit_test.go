@@ -322,7 +322,7 @@ func TestCommit_DoesNotReturnErrorWhenGCFails(t *testing.T) {
 		t.Skip("cannot make a directory unwritable as root")
 	}
 	dir := t.TempDir()
-	logger, logPath := openTempLogger(t)
+	logger, sink := openTempLogger(t)
 
 	// Pre-populate an orphan to give GC something to remove.
 	writeOrphan(t, dir, "orphan.bin", []byte("orphan"))
@@ -342,14 +342,7 @@ func TestCommit_DoesNotReturnErrorWhenGCFails(t *testing.T) {
 	}
 
 	// Logger should record a warn about gc.
-	if err := logger.Close(); err != nil {
-		t.Fatalf("close logger: %v", err)
-	}
-	logBytes, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read log: %v", err)
-	}
-	log := string(logBytes)
+	log := sink.body()
 	if !strings.Contains(log, "WARN") {
 		t.Errorf("expected WARN entry in log; got %q", log)
 	}

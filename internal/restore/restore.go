@@ -3,6 +3,7 @@ package restore
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/leeovery/portal/internal/state"
@@ -29,7 +30,7 @@ import (
 type Orchestrator struct {
 	Client   *tmux.Client
 	StateDir string
-	Logger   *state.Logger
+	Logger   *slog.Logger
 }
 
 // Restore is the bootstrap entry point. Returns (false, nil) on the happy
@@ -77,7 +78,7 @@ func (o *Orchestrator) handleReadIndexSkip(err error) (bool, error) {
 	if err == nil {
 		return false, nil
 	}
-	o.Logger.Warn(state.ComponentRestore, "ReadIndex: %v", err)
+	o.logger().Warn("ReadIndex failed", "error", err)
 	if errors.Is(err, state.ErrCorruptIndex) {
 		return true, fmt.Errorf("restore: %w", err)
 	}
@@ -91,7 +92,7 @@ func (o *Orchestrator) handleReadIndexSkip(err error) (bool, error) {
 func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 	names, err := o.Client.ListSessionNames()
 	if err != nil {
-		o.Logger.Warn(state.ComponentRestore, "list-sessions: %v", err)
+		o.logger().Warn("list-sessions failed", "error", err)
 		return nil, false
 	}
 	set := make(map[string]struct{}, len(names))
@@ -109,7 +110,7 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 // gathered from list-panes.
 func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
 	if strings.HasPrefix(sess.Name, "_") {
-		o.Logger.Warn(state.ComponentRestore, "skipping underscore-prefixed session %q", sess.Name)
+		o.logger().Warn("skipping underscore-prefixed session", "session", sess.Name)
 		return
 	}
 
@@ -124,7 +125,7 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 
 	livePanes, err := sr.Restore(sess)
 	if err != nil {
-		o.Logger.Warn(state.ComponentRestore, "Restore %q: %v", sess.Name, err)
+		o.logger().Warn("restore session failed", "session", sess.Name, "error", err)
 		return
 	}
 
@@ -138,12 +139,15 @@ func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveS
 // is well-formed enough to attempt restoration.
 func (o *Orchestrator) validateTopology(sess state.Session) bool {
 	if len(sess.Windows) == 0 {
-		o.Logger.Warn(state.ComponentRestore, "session %q has zero windows; skipping", sess.Name)
+		o.logger().Warn("session has zero windows; skipping", "session", sess.Name)
 		return false
 	}
 	for _, w := range sess.Windows {
 		if len(w.Panes) == 0 {
-			o.Logger.Warn(state.ComponentRestore, "session %q window %d has zero panes; skipping session", sess.Name, w.Index)
+			// The bare window index has no closed attr key and the message
+			// must not interpolate values (spec § Call-site logging pattern,
+			// Prohibited), so it is dropped; "session" identifies the skip.
+			o.logger().Warn("session window has zero panes; skipping session", "session", sess.Name)
 			return false
 		}
 	}

@@ -11,7 +11,7 @@
 //   - the orchestrator's eleven-step ordering and soft-warning wiring
 //     (step 11 must NOT escalate to a fatal abort under either mode),
 //   - the production *cleanStaleAdapter (composition: real
-//     *tmux.Client + real *hooks.Store + real *state.Logger),
+//     *tmux.Client + real *hooks.Store + real *slog.Logger),
 //   - the Change 4 logging contract (entry-point Debug vs terminal
 //     Warn distinguishing mode (a) from mode (b)),
 //   - the byte-identical hooks.json invariant ("no wipe").

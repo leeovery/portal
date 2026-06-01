@@ -18,11 +18,10 @@ import (
 // minimal because tmux invokes it from hook contexts on every structural
 // event.
 //
-// Diagnostics route through portal.log under state.ComponentNotify. The
-// logger is opened only after EnsureDir succeeds (the log file lives inside
-// the state directory); an EnsureDir failure therefore returns the wrapped
-// error without a log line — the only surviving stderr path is the cobra
-// error printer, which is the documented "fatal pre-logger" exception.
+// Diagnostics route through portal.log under the notify component. An
+// EnsureDir failure returns the wrapped error before any diagnostics are
+// emitted — the only surviving stderr path is the cobra error printer, the
+// documented "fatal pre-state-dir" exception.
 var stateNotifyCmd = &cobra.Command{
 	Use:    "notify",
 	Short:  "Bump the save-requested marker (internal, invoked by tmux hooks)",
@@ -36,17 +35,12 @@ var stateNotifyCmd = &cobra.Command{
 			return fmt.Errorf("ensure state dir: %w", err)
 		}
 
-		// Open portal.log via the non-daemon append-only path so notify
-		// failures (save.requested create/truncate failures) land in the
-		// central log under state.ComponentNotify. Per spec § Log Rotation
-		// → Concurrent-writer discipline, only the daemon rotates. On open
-		// failure logger is nil and the *state.Logger nil-receiver no-ops
-		// every call so notify never aborts on a diagnostics-only failure.
-		logger, _ := openNoRotateLogger()
-		defer func() { _ = logger.Close() }()
-
+		// Diagnostics (save.requested create/truncate failures) land in the
+		// central log under the notify component via the handler configured
+		// once by main -> log.Init. Rotation is handler-owned (Phase 2), so
+		// notify no longer opens or closes a per-process logger.
 		if err := state.TouchSaveRequested(dir); err != nil {
-			logger.Warn(state.ComponentNotify, "touch save.requested at %s: %v", state.SaveRequested(dir), err)
+			notifyLogger.Warn("touch save.requested failed", "path", state.SaveRequested(dir), "error", err)
 			return fmt.Errorf("notify: %w", err)
 		}
 		return nil
