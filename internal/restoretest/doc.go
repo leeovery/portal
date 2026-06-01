@@ -8,8 +8,9 @@
 //	    fixture builders, defined in sessions_json.go.
 //	  - WaitForFileExists — sentinel-file polling helper, defined in
 //	    waitfor_file_exists.go.
-//	  - OpenTestLogger — silent *slog.Logger factory for adapter tests,
-//	    defined in logger.go.
+//	  - OpenTestLogger — *slog.Logger factory that writes a text-format
+//	    audit trail to <stateDir>/portal.log for integration tests that
+//	    read portal.log content; defined in logger.go.
 //	  These run under default `go test ./...` and have no dependency on
 //	  tmux fixtures.
 //
