@@ -174,3 +174,14 @@ approved_at: 2026-06-01
 - [ ] Each of the four exit paths emits its cataloged INFO line (`fifo missing`, `signal timeout` with `took=3s`, `scrollback missing`, `scrollback replayed` with `bytes`/`took`) followed by the exec INFO
 - [ ] The terminal `hydrate: exec` INFO carries `target`, `args`, and `hook_present`, structurally parallel with `process: exec`; `target` is distinct from the reserved `path` attr
 - [ ] Exact line ranges in `cmd/state_hydrate.go` are pinned against the live file (the spec's line numbers are hints), and `grep "hydrate:" portal.log` reconstructs every invocation up to the exec moment
+
+#### Tasks
+status: approved
+approved_at: 2026-06-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| portal-observability-layer-6-1 | Emit hook-lookup DEBUG breadcrumb and terminal `hydrate: exec` INFO in `execShellOrHookAndExit` | nil HookStore→result=miss (not error), lookup error includes `error` attr + degrades to bare $SHELL, found=true→`sh -c` chain target=/bin/sh hook_present=true, found=false→bare $SHELL hook_present=false, `target` distinct from reserved `path` attr, `args` rendered verbatim incl embedded quotes, unbuffered-writer marker-in-kernel-before-exec, structurally parallel to `process: exec` |
+| portal-observability-layer-6-2 | Emit the FIFO-timeout exit-path INFO `hydrate: signal timeout took=3s` before exec | `took` is the `hydrateTimeout` `time.Duration` (renders `took=3s` not quoted), INFO precedes the exec INFO, handler marker-unset/FIFO-unlink/WARN unchanged, nil-`HandleTimeout` fall-through unaffected, 100ms settle sleep posture preserved |
+| portal-observability-layer-6-3 | Emit the file-missing exit-path INFO `hydrate: scrollback missing path=…` (and any FIFO-absence INFO) before exec | scrollback ENOENT/permission/generic-I/O all emit one `scrollback missing` INFO with `path`, mid-stream io.Copy failure shares it, `path`=cfg.File for scrollback vs cfg.FIFO for fifo-absence, INFO precedes exec INFO, existing per-cause WARN lines retained, `fifo missing` vs `scrollback missing` row mapping against live handler `[needs-info]` |
+| portal-observability-layer-6-4 | Emit the success exit-path INFO `hydrate: scrollback replayed bytes=N took=T` threading copied-byte count and replay duration | `bytes`=n captured from `io.Copy` (currently discarded), `took` measured across the replay (no start currently captured), zero-byte scrollback→bytes=0 still emits, 5MB file bytes count exact, INFO after settle-sleep + marker-unset and before exec INFO, success path reaches `execShellOrHookAndExit` exactly once |
