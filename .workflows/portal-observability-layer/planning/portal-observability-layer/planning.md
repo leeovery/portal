@@ -116,6 +116,19 @@ approved_at: 2026-06-01
 - [ ] The `"error"` attr at log sites passes the wrapped error directly (not `.Error()`) so the handler renders the full chain
 - [ ] All four enumerated gap-closure sites are fixed per their prescribed remedy (stderr embed, escalation DEBUG breadcrumb, missing WARN branch, code comment)
 
+#### Tasks
+status: approved
+approved_at: 2026-06-01
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| portal-observability-layer-4-1 | Embed exit-status + trimmed stderr in the three production `exec.Cmd` boundary sites (`defaultIdentifyPS`, `PgrepPortalDaemons`, `resolver.RealCommandRunner.Run`) | PATH-lookup `*exec.Error` has no exit code/stderr, signal-killed vs non-zero-exit rendering, empty stderr renders cleanly, pgrep status-1-no-matches stays `(nil,nil)` not wrapped, gitroot expected not-a-repo failure still swallowed to `dir`, optional `log.CombinedOutputWithContext` helper at the 3-site threshold |
+| portal-observability-layer-4-2 | Embed exit code + tmux argv + trimmed stderr in `RealCommander.Run`/`RunRaw` and verify `ErrNoSuchSession`/`ErrEmptyPaneList` sentinel detection | `cmd.Stderr`-nil precondition preserved (`ExitError.Stderr` auto-populated), PATH-lookup `*exec.Error` carries argv but empty stderr, multi-`%w` sentinel chain still recoverable via `errors.As(&CommandError)`, `RunRaw` verbatim path unaffected, argv with spaces/quotes rendered intact |
+| portal-observability-layer-4-3 | Audit `os`-syscall and `io`/FIFO read boundaries for `%w` path/errno preservation and EOF/timeout=`expected` classification | ENOENT-on-open = expected `(nil,nil)` not wrapped, mid-stream `Read` error wraps with path, EOF terminator is expected not failure, fifo open timeout = expected, `errors.Is` unwraps through `%w` to `fs.ErrPermission`/`fs.ErrNotExist`, no `errors.New(...)` that drops `*os.PathError` |
+| portal-observability-layer-4-4 | Add the SIGKILL-escalation DEBUG breadcrumb in `escalateKillToSIGKILL` | fires only on `IdentifyIsPortalDaemon` escalation branch (not the skip-WARN branch), `pid` attr present, fires before the SIGKILL syscall (no statement between identity-check and signal), nil/noop logger sink safe |
+| portal-observability-layer-4-5 | Close the `ShowGlobalHooks` failure-log asymmetry with the missing WARN branch | identify the silent consuming branch (`RegisterHookIfAbsent`/`migrateHydrationHooks` vs `migrateSessionClosedHook` which already WARNs), `error` attr passes wrapped `err` directly, WARN fires once per failure (no double-log into the aggregate), `error_class=unexpected`, return/abort behaviour unchanged |
+| portal-observability-layer-4-6 | Comment the uncommented defensive branches in the phase's boundary code | comment-only (no log line, no behaviour change), already-commented branches skipped, scope limited to boundary code touched this phase ("various" per spec) |
+
 ### Phase 5: Cycle summaries and saver/daemon lifecycle catalogs
 status: approved
 approved_at: 2026-06-01
