@@ -19,9 +19,12 @@
 // Test-only. Importing this package from non-*_test.go files is
 // prohibited — most exported helpers take a *testing.T parameter
 // which enforces this structurally (the testing import would fail
-// production builds). The exceptions (e.g. SnapshotStateDir,
-// DiffFingerprints, FormatDelta, Fingerprint, ReadPortalLogSafe) are
-// consumed from *_test.go files in sibling packages by contributor
-// discipline — they have no production-side callers and are not
-// intended to grow any.
+// production builds). AssertLogLevelResolved, which scans portal.log
+// for the process: log-level resolved marker to prove PORTAL_LOG_LEVEL
+// propagated to a spawned process, takes *testing.T first and so stays
+// in that structurally-protected majority. The exceptions (e.g.
+// SnapshotStateDir, DiffFingerprints, FormatDelta, Fingerprint,
+// ReadPortalLogSafe) are consumed from *_test.go files in sibling
+// packages by contributor discipline — they have no production-side
+// callers and are not intended to grow any.
 package portaltest
