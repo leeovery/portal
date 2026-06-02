@@ -37,12 +37,39 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 )
 
 // discardLogger is the canonical silent *slog.Logger used as the default
 // sink when a step core or the Orchestrator is constructed without a real
 // logger injected. It writes to io.Discard so calls are safe no-ops.
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// totalSteps is the fixed step count carried verbatim on the
+// orchestration-complete summary's steps attr. The eleven-step sequence is a
+// load-bearing contract; this constant is the single source of truth for the
+// summary line.
+const totalSteps = 11
+
+// Closed StepName set — the canonical step= value for BOTH the per-step
+// entering DEBUG breadcrumb and the per-step "step complete" INFO summary, so
+// the two lines for a given step always agree. One literal per step; no
+// ad-hoc names. The @portal-restoring marker steps are normalized to
+// stepSetRestoring / stepClearRestoring (not "Set @portal-restoring") so the
+// step= attr is a stable identifier rather than a prose phrase.
+const (
+	stepEnsureServer       = "EnsureServer"
+	stepRegisterHooks      = "RegisterPortalHooks"
+	stepSetRestoring       = "SetRestoring"
+	stepSweepOrphanDaemons = "SweepOrphanDaemons"
+	stepEnsureSaver        = "EnsureSaver"
+	stepRestore            = "Restore"
+	stepEagerSignalHydrate = "EagerSignalHydrate"
+	stepClearRestoring     = "ClearRestoring"
+	stepCleanStaleMarkers  = "CleanStaleMarkers"
+	stepSweepOrphanFIFOs   = "SweepOrphanFIFOs"
+	stepCleanStale         = "CleanStale"
+)
 
 // Runner is the abstraction cmd/root.go depends on so PersistentPreRunE
 // does not import the concrete *Orchestrator type. Orchestrator implicitly
@@ -166,15 +193,22 @@ type StaleCleaner interface {
 // package stays pure (interfaces + Run) so the ordering contract is
 // independently testable.
 //
-// Logger is the sink for failure diagnostics. Run substitutes the
-// io.Discard-backed discardLogger when it is nil, so step sites can dispatch
-// unconditionally. Step-entry diagnostics emit via Debug — per the spec's
-// Observability section, bootstrap events are logged at DEBUG so
-// PORTAL_LOG_LEVEL=debug surfaces the step boundary an operator scans when a
-// session fails to come back; production runs (default INFO) drop these
-// lines. Soft failures emit via Warn; fatal failures emit via Error before
-// the orchestrator returns the wrapped *FatalError so the same line lands in
-// portal.log under the bootstrap component as well as on stderr.
+// Logger is the sink for failure diagnostics and cycle summaries. Run
+// substitutes the io.Discard-backed discardLogger when it is nil, so step
+// sites can dispatch unconditionally. Per the spec's cycle-summary cadence,
+// each step emits a per-step entering DEBUG breadcrumb (surfaced only at
+// PORTAL_LOG_LEVEL=debug) plus, on the non-fatal continuation path, one INFO
+// "step complete step=<StepName> took=T" summary; the Return post-step
+// boundary emits one INFO "orchestration complete steps=11 warnings=N took=T".
+// The closed StepName set (the step* consts) is the single source of truth
+// shared by the entering breadcrumb and the step-complete summary so their
+// step= attrs always agree. A fatal abort at a fatal step (EnsureServer,
+// RegisterPortalHooks, SetRestoring, ClearRestoring) emits neither a
+// step-complete for the aborting step nor the orchestration summary — the
+// fatal ERROR line is the terminal record. Soft failures emit via Warn; fatal
+// failures emit via Error before the orchestrator returns the wrapped
+// *FatalError so the same line lands in portal.log under the bootstrap
+// component as well as on stderr.
 type Orchestrator struct {
 	Server        ServerBootstrapper
 	Hooks         HookRegistrar
@@ -225,26 +259,39 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger = discardLogger
 	}
 
+	// orchestrationStart anchors the took attr on the Return-boundary
+	// orchestration-complete summary; per-step starts (stepStart) anchor the
+	// took attr on each step-complete summary.
+	orchestrationStart := time.Now()
+
 	var warnings []Warning
 
-	// Step 1 — EnsureServer.
-	o.Logger.Debug("step entering", "step", "EnsureServer")
+	// Step 1 — EnsureServer (fatal on failure).
+	o.Logger.Debug("step entering", "step", stepEnsureServer)
+	stepStart := time.Now()
 	serverStarted, err := o.Server.EnsureServer()
 	if err != nil {
+		// Fatal abort: o.fatalf logs the terminal ERROR line; emit no
+		// step-complete for the aborting step and no orchestration summary.
 		return false, nil, o.fatalf("start tmux server", err)
 	}
+	o.Logger.Info("step complete", "step", stepEnsureServer, "took", time.Since(stepStart))
 
-	// Step 2 — RegisterPortalHooks.
-	o.Logger.Debug("step entering", "step", "RegisterPortalHooks")
+	// Step 2 — RegisterPortalHooks (fatal on failure).
+	o.Logger.Debug("step entering", "step", stepRegisterHooks)
+	stepStart = time.Now()
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
 		return serverStarted, nil, o.fatalf("register tmux hooks", err)
 	}
+	o.Logger.Info("step complete", "step", stepRegisterHooks, "took", time.Since(stepStart))
 
-	// Step 3 — Set @portal-restoring (MUST precede steps 4 and 5).
-	o.Logger.Debug("step entering", "step", "Set @portal-restoring")
+	// Step 3 — Set @portal-restoring (MUST precede steps 4 and 5; fatal on failure).
+	o.Logger.Debug("step entering", "step", stepSetRestoring)
+	stepStart = time.Now()
 	if err := o.Restoring.Set(); err != nil {
 		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
 	}
+	o.Logger.Info("step complete", "step", stepSetRestoring, "took", time.Since(stepStart))
 
 	// Step 4 — SweepOrphanDaemons (best-effort). Enumerates every live
 	// `portal state daemon` process via pgrep, builds the legitimate set
@@ -255,19 +302,23 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// non-nil err is logged and swallowed — orphan-sweep failures must
 	// never block PersistentPreRunE; the next bootstrap will sweep any
 	// survivors.
-	o.Logger.Debug("step entering", "step", "SweepOrphanDaemons")
+	o.Logger.Debug("step entering", "step", stepSweepOrphanDaemons)
+	stepStart = time.Now()
 	if err := o.OrphanSweeper.SweepOrphanDaemons(); err != nil {
-		o.Logger.Warn("step failed", "step", "SweepOrphanDaemons", "error", err)
+		o.Logger.Warn("step failed", "step", stepSweepOrphanDaemons, "error", err)
 		// Continue per spec — best-effort sweep, next bootstrap retries.
 	}
+	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, "took", time.Since(stepStart))
 
 	// Step 5 — EnsureSaver (best-effort).
-	o.Logger.Debug("step entering", "step", "EnsureSaver")
+	o.Logger.Debug("step entering", "step", stepEnsureSaver)
+	stepStart = time.Now()
 	if err := o.Saver.EnsureSaver(); err != nil {
 		warnings = append(warnings, SaverDownWarning())
-		o.Logger.Warn("step failed", "step", "EnsureSaver", "error", err)
+		o.Logger.Warn("step failed", "step", stepEnsureSaver, "error", err)
 		// Continue per spec — saves paused, user not blocked.
 	}
+	o.Logger.Info("step complete", "step", stepEnsureSaver, "took", time.Since(stepStart))
 
 	// Step 6 — Restore. The Restorer contract returns (corrupt, err) so
 	// the orchestrator can branch on a typed signal rather than walking
@@ -276,19 +327,21 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// (false, err) result is a contract violation and is handled
 	// defensively as a soft per-session failure to keep step 6 from
 	// escalating to a PersistentPreRunE abort.
-	o.Logger.Debug("step entering", "step", "Restore")
+	o.Logger.Debug("step entering", "step", stepRestore)
+	stepStart = time.Now()
 	corrupt, restoreErr := o.Restore.Restore()
 	switch {
 	case corrupt:
 		warnings = append(warnings, CorruptSessionsJSONWarning())
 		if restoreErr != nil {
-			o.Logger.Warn("step failed: corrupt sessions.json", "step", "Restore", "error", restoreErr)
+			o.Logger.Warn("step failed: corrupt sessions.json", "step", stepRestore, "error", restoreErr)
 		}
 	case restoreErr != nil:
 		// Defensive: contract says corrupt=false implies err==nil. Log
 		// and continue — soft per-session failures must not abort.
-		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", "Restore", "error", restoreErr)
+		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", stepRestore, "error", restoreErr)
 	}
+	o.Logger.Info("step complete", "step", stepRestore, "took", time.Since(stepStart))
 
 	// Step 7 — EagerSignalHydrate (best-effort). Runs while
 	// @portal-restoring is still set so daemon captureAndCommit
@@ -297,17 +350,21 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// map and writes the hydrate signal byte to each pane's FIFO. A
 	// non-nil err is logged and swallowed — eager signaling failures
 	// must never block PersistentPreRunE.
-	o.Logger.Debug("step entering", "step", "EagerSignalHydrate")
+	o.Logger.Debug("step entering", "step", stepEagerSignalHydrate)
+	stepStart = time.Now()
 	if err := o.EagerSignaler.EagerSignalHydrate(); err != nil {
-		o.Logger.Warn("step failed", "step", "EagerSignalHydrate", "error", err)
+		o.Logger.Warn("step failed", "step", stepEagerSignalHydrate, "error", err)
 		// Continue per spec.
 	}
+	o.Logger.Info("step complete", "step", stepEagerSignalHydrate, "took", time.Since(stepStart))
 
 	// Step 8 — Clear @portal-restoring (fatal on failure).
-	o.Logger.Debug("step entering", "step", "Clear @portal-restoring")
+	o.Logger.Debug("step entering", "step", stepClearRestoring)
+	stepStart = time.Now()
 	if err := o.Restoring.Clear(); err != nil {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
+	o.Logger.Info("step complete", "step", stepClearRestoring, "took", time.Since(stepStart))
 
 	// Step 9 — CleanStaleMarkers (best-effort). Runs strictly after Clear
 	// (step 8) so it observes the post-restore tmux state, and strictly
@@ -315,11 +372,13 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// are unset first, allowing those FIFOs to be reclaimed in the same
 	// bootstrap. A non-nil err is logged and swallowed — a stale-marker
 	// cleanup failure must never block PersistentPreRunE.
-	o.Logger.Debug("step entering", "step", "CleanStaleMarkers")
+	o.Logger.Debug("step entering", "step", stepCleanStaleMarkers)
+	stepStart = time.Now()
 	if err := o.StaleMarkers.CleanStaleMarkers(); err != nil {
-		o.Logger.Warn("step failed", "step", "CleanStaleMarkers", "error", err)
+		o.Logger.Warn("step failed", "step", stepCleanStaleMarkers, "error", err)
 		// Continue per spec.
 	}
+	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, "took", time.Since(stepStart))
 
 	// Step 10 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
 	// daemon's suppression window has closed and after CleanStaleMarkers
@@ -328,22 +387,28 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// step 6 are still observable (those outlive @portal-restoring and
 	// are cleared per-pane on hydration). A non-nil err is logged and
 	// swallowed — a stuck FIFO must never block PersistentPreRunE.
-	o.Logger.Debug("step entering", "step", "SweepOrphanFIFOs")
+	o.Logger.Debug("step entering", "step", stepSweepOrphanFIFOs)
+	stepStart = time.Now()
 	if err := o.Sweeper.Sweep(); err != nil {
-		o.Logger.Warn("step failed", "step", "SweepOrphanFIFOs", "error", err)
+		o.Logger.Warn("step failed", "step", stepSweepOrphanFIFOs, "error", err)
 		// Continue per spec.
 	}
+	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, "took", time.Since(stepStart))
 
 	// Step 11 — CleanStale (best-effort).
-	o.Logger.Debug("step entering", "step", "CleanStale")
+	o.Logger.Debug("step entering", "step", stepCleanStale)
+	stepStart = time.Now()
 	if err := o.Clean.CleanStale(); err != nil {
-		o.Logger.Warn("step failed", "step", "CleanStale", "error", err)
+		o.Logger.Warn("step failed", "step", stepCleanStale, "error", err)
 		// Continue per spec.
 	}
+	o.Logger.Info("step complete", "step", stepCleanStale, "took", time.Since(stepStart))
 
 	// Return — post-step boundary (not numbered). Step 6 never produces a
-	// fatal error; warnings already carry the user-facing surface.
-	o.Logger.Debug("bootstrap returning", "warnings", len(warnings))
+	// fatal error; warnings already carry the user-facing surface. The
+	// orchestration-complete INFO is the cycle summary an operator greps to
+	// reconstruct a bootstrap run without scrolling per-step lines.
+	o.Logger.Info("orchestration complete", "steps", totalSteps, "warnings", len(warnings), "took", time.Since(orchestrationStart))
 	return serverStarted, warnings, nil
 }
 

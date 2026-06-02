@@ -1108,6 +1108,276 @@ func TestOrchestratorRun_stepEntryLinesEmitUnderBootstrapComponent(t *testing.T)
 	}
 }
 
+// closedStepNames is the canonical step-name set, in step order, shared by
+// the entering-DEBUG breadcrumbs and the "step complete" INFO summaries. The
+// names are normalized to the closed set (e.g. "SetRestoring", not
+// "Set @portal-restoring") so step= is consistent across both lines.
+var closedStepNames = []string{
+	"EnsureServer",
+	"RegisterPortalHooks",
+	"SetRestoring",
+	"SweepOrphanDaemons",
+	"EnsureSaver",
+	"Restore",
+	"EagerSignalHydrate",
+	"ClearRestoring",
+	"CleanStaleMarkers",
+	"SweepOrphanFIFOs",
+	"CleanStale",
+}
+
+// stepCompleteNames extracts the step= attr value from every "step complete"
+// INFO line in order, so tests can assert the closed StepName set fires in
+// step order. The RecordingLogger renders attrs as " key=value", so a
+// "step complete" line reads "step complete step=<Name> took=<dur>".
+func stepCompleteNames(infos []string) []string {
+	var out []string
+	for _, line := range infos {
+		if !strings.HasPrefix(line, "step complete ") {
+			continue
+		}
+		const key = "step="
+		idx := strings.Index(line, key)
+		if idx == -1 {
+			continue
+		}
+		rest := line[idx+len(key):]
+		if sp := strings.IndexByte(rest, ' '); sp != -1 {
+			rest = rest[:sp]
+		}
+		out = append(out, rest)
+	}
+	return out
+}
+
+// TestOrchestratorRun_emitsStepCompletePerStepInOrder is the task-5-2
+// acceptance: a clean bootstrap emits eleven INFO "step complete" lines, one
+// per step, carrying the closed StepName set in step order.
+func TestOrchestratorRun_emitsStepCompletePerStepInOrder(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	got := stepCompleteNames(logger.infos)
+	if !equalCalls(got, closedStepNames) {
+		t.Errorf("step complete names = %v, want %v", got, closedStepNames)
+	}
+}
+
+// TestOrchestratorRun_emitsStepCompleteUnderBootstrapComponent pins the
+// "step complete" INFO lines to component=bootstrap, matching the production
+// wiring's log.For("bootstrap").
+func TestOrchestratorRun_emitsStepCompleteUnderBootstrapComponent(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger().With("component", "bootstrap"))
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	var stepCompletes int
+	for i, line := range logger.infos {
+		if !strings.HasPrefix(line, "step complete ") {
+			continue
+		}
+		stepCompletes++
+		if logger.infoComponents[i] != "bootstrap" {
+			t.Errorf("step-complete INFO[%d] component = %q, want %q (line=%q)",
+				i, logger.infoComponents[i], "bootstrap", line)
+		}
+	}
+	if stepCompletes != len(closedStepNames) {
+		t.Errorf("step complete INFO count = %d, want %d; infos=%v",
+			stepCompletes, len(closedStepNames), logger.infos)
+	}
+}
+
+// TestOrchestratorRun_emitsOrchestrationCompleteOnCleanBootstrap is the
+// task-5-2 acceptance for the Return-boundary summary: a clean bootstrap emits
+// one INFO "orchestration complete steps=11 warnings=0 took=T".
+func TestOrchestratorRun_emitsOrchestrationCompleteOnCleanBootstrap(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	matches := 0
+	for _, line := range logger.infos {
+		if !strings.HasPrefix(line, "orchestration complete ") {
+			continue
+		}
+		matches++
+		if !strings.Contains(line, "steps=11") {
+			t.Errorf("orchestration complete line missing steps=11: %q", line)
+		}
+		if !strings.Contains(line, "warnings=0") {
+			t.Errorf("orchestration complete line missing warnings=0: %q", line)
+		}
+		if !strings.Contains(line, "took=") {
+			t.Errorf("orchestration complete line missing took=: %q", line)
+		}
+	}
+	if matches != 1 {
+		t.Errorf("expected exactly one orchestration complete INFO; got %d (infos=%v)", matches, logger.infos)
+	}
+}
+
+// TestOrchestratorRun_orchestrationCompleteReportsAccumulatedWarnings proves
+// the orchestration summary's warnings attr reflects the accumulated
+// soft-warning count: saver down (step 5) + corrupt sessions.json (step 6) = 2.
+func TestOrchestratorRun_orchestrationCompleteReportsAccumulatedWarnings(t *testing.T) {
+	r := &stepRecorder{
+		EnsureSaverErr: errors.New("saver boom"),
+		RestoreCorrupt: true,
+		RestoreErr:     fmt.Errorf("restore: %w", state.ErrCorruptIndex),
+	}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	_, warnings, err := o.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run must treat both as soft; got %v", err)
+	}
+	if len(warnings) != 2 {
+		t.Fatalf("warnings len = %d, want 2; got %#v", len(warnings), warnings)
+	}
+
+	matches := 0
+	for _, line := range logger.infos {
+		if !strings.HasPrefix(line, "orchestration complete ") {
+			continue
+		}
+		matches++
+		if !strings.Contains(line, "warnings=2") {
+			t.Errorf("orchestration complete line missing warnings=2: %q", line)
+		}
+		if !strings.Contains(line, "steps=11") {
+			t.Errorf("orchestration complete line missing steps=11: %q", line)
+		}
+	}
+	if matches != 1 {
+		t.Errorf("expected exactly one orchestration complete INFO; got %d (infos=%v)", matches, logger.infos)
+	}
+}
+
+// TestOrchestratorRun_fatalStep1ShortCircuitsBeforeSummaries proves a fatal
+// abort at step 1 (EnsureServer) emits neither a "step complete" for the
+// aborting step nor the orchestration summary — the fatal ERROR line is the
+// terminal record.
+func TestOrchestratorRun_fatalStep1ShortCircuitsBeforeSummaries(t *testing.T) {
+	r := &stepRecorder{EnsureServerErr: errors.New("server boom")}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	_, _, err := o.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected fatal error, got nil")
+	}
+
+	for _, line := range logger.infos {
+		if strings.HasPrefix(line, "step complete ") {
+			t.Errorf("no step complete must fire on a fatal step-1 abort; got %q", line)
+		}
+		if strings.HasPrefix(line, "orchestration complete ") {
+			t.Errorf("orchestration summary must not fire on a fatal step-1 abort; got %q", line)
+		}
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected the fatal ERROR line as the terminal record")
+	}
+}
+
+// TestOrchestratorRun_fatalStep8ShortCircuitsBeforeSummary proves a fatal
+// abort at step 8 (ClearRestoring) emits no "step complete" for step 8 and no
+// orchestration summary, while the earlier steps' "step complete" lines still
+// fire.
+func TestOrchestratorRun_fatalStep8ShortCircuitsBeforeSummary(t *testing.T) {
+	r := &stepRecorder{ClearErr: errors.New("clear boom")}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	_, _, err := o.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected fatal error, got nil")
+	}
+
+	for _, line := range logger.infos {
+		if strings.HasPrefix(line, "orchestration complete ") {
+			t.Errorf("orchestration summary must not fire on a fatal step-8 abort; got %q", line)
+		}
+	}
+
+	got := stepCompleteNames(logger.infos)
+	for _, name := range got {
+		if name == "ClearRestoring" {
+			t.Errorf("no step complete must fire for the aborting step 8 (ClearRestoring); got %v", got)
+		}
+	}
+	// Steps before the abort still emit their step complete lines.
+	wantBefore := []string{
+		"EnsureServer",
+		"RegisterPortalHooks",
+		"SetRestoring",
+		"SweepOrphanDaemons",
+		"EnsureSaver",
+		"Restore",
+		"EagerSignalHydrate",
+	}
+	if !equalCalls(got, wantBefore) {
+		t.Errorf("step complete names before step-8 abort = %v, want %v", got, wantBefore)
+	}
+	if len(logger.errors) == 0 {
+		t.Error("expected the fatal ERROR line as the terminal record")
+	}
+}
+
+// TestOrchestratorRun_retainsEnteringDebugWithNormalizedNames proves the
+// per-step entering DEBUG breadcrumbs survive, carrying the normalized closed
+// step names (so SetRestoring / ClearRestoring, not "Set @portal-restoring").
+func TestOrchestratorRun_retainsEnteringDebugWithNormalizedNames(t *testing.T) {
+	r := &stepRecorder{}
+	logger := &RecordingLogger{}
+	o := newOrchestrator(r, logger.Logger())
+
+	if _, _, err := o.Run(context.Background()); err != nil {
+		t.Fatalf("Run errored: %v", err)
+	}
+
+	var enteringNames []string
+	for _, line := range logger.debugs {
+		if !strings.HasPrefix(line, "step entering ") {
+			continue
+		}
+		const key = "step="
+		idx := strings.Index(line, key)
+		if idx == -1 {
+			continue
+		}
+		rest := line[idx+len(key):]
+		if sp := strings.IndexByte(rest, ' '); sp != -1 {
+			rest = rest[:sp]
+		}
+		enteringNames = append(enteringNames, rest)
+	}
+	if !equalCalls(enteringNames, closedStepNames) {
+		t.Errorf("entering DEBUG step names = %v, want %v", enteringNames, closedStepNames)
+	}
+	// Guard against the un-normalized legacy names leaking back.
+	for _, line := range logger.debugs {
+		if strings.Contains(line, "Set @portal-restoring") || strings.Contains(line, "Clear @portal-restoring") {
+			t.Errorf("entering DEBUG must use normalized names, not legacy %q", line)
+		}
+	}
+}
+
 // countCalls returns how many times name appears in calls.
 func countCalls(calls []string, name string) int {
 	n := 0
