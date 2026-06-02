@@ -84,6 +84,33 @@ Notes on the table:
 
 The eviction predicate matches **only Portal-authored command bodies** (the `portalCommandSubstrings` substring discipline already used by the teardown path). A user-authored or other-plugin hook on the same event — including on `pane-focus-out` / `window-layout-changed` — is never matched and survives every registration untouched. This is a hard requirement: the original design deliberately chose `set-hook -ga` (append) over `-g` (replace) specifically to coexist with user `.tmux.conf` hooks, and the fix must preserve that coexistence.
 
+## Migration-Helper Consolidation
+
+The current code carries three distinct registration shapes, two of which exist only because append-if-absent could not self-heal:
+
+- `RegisterHookIfAbsent` — append-if-absent dedup (the defective path).
+- `migrateHydrationHooks` — one-shot eviction of legacy un-separated `signal-hydrate` bodies.
+- `migrateSessionClosedHook` — exact-match eviction of stale `notifyCommand` on `session-closed`, then append `commitNowCommand`.
+
+**Decision: fold all three into the single per-event ensure-exactly-one path; delete `migrateHydrationHooks` and `migrateSessionClosedHook`.**
+
+The ensure-exactly-one algorithm with the per-event parameter table (see "Registration Redesign") already does everything the two helpers did:
+
+- Hydration: matching on `portal state signal-hydrate` evicts the legacy un-separated body *and* any duplicate, converging to the `--` form — exactly `migrateHydrationHooks`' job, now intrinsic.
+- session-closed: matching on `portal state notify` + `portal state commit-now` evicts the stale pre-fix notify *and* duplicate commit-nows, converging to one `commitNowCommand` — exactly `migrateSessionClosedHook`' job, now intrinsic.
+
+This yields the investigation's stated goal: one declarative code path, net code removal, and nothing that ever has to be removed later (no run-once migration cruft).
+
+### One behavioral change to record
+
+`migrateSessionClosedHook` evicts the stale notify via **exact-string** match (against the historical `notifyCommand` literal), chosen so it could never remove a user-customised hook like `portal state notify --debug`. The unified path uses **substring** match (`portal state notify`), consistent with how the teardown path (`UnregisterPortalHooks`) already identifies Portal entries.
+
+Consequence: a hypothetical user-authored hook whose body merely *contains* `portal state notify` on a Portal-managed event would now be treated as Portal-owned and evicted. This is assessed as acceptable — these are Portal-internal subcommands users do not hand-author, and the change makes the register and teardown predicates identical (one definition of "Portal-owned," no drift). The spec adopts the substring predicate uniformly.
+
+### What is intentionally *not* consolidated
+
+The legacy `portal state migrate-rename` substring stays in the teardown path's `portalCommandSubstrings` (so `portal hooks reset` still reaps stale migrate-rename entries from very old binaries). Registration does not install or converge migrate-rename — it is not a current Portal hook category and is left exactly as-is.
+
 ---
 
 ## Working Notes
