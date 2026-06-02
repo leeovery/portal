@@ -805,6 +805,311 @@ func TestCleanStale(t *testing.T) {
 	})
 }
 
+func TestCleanStaleLogging(t *testing.T) {
+	t.Run("emits per-entry DEBUG and one INFO summary with entries=N when removing N hooks", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "cmd0", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("my-session:0.1", "on-resume", "cmd1", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("my-session:0.2", "on-resume", "cmd2", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		sink := installCapture(t)
+		// Keep only 0.0 live -> 0.1 and 0.2 are stale (N=2).
+		removed, err := store.CleanStale([]string{"my-session:0.0"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(removed) != 2 {
+			t.Fatalf("got %d removed, want 2", len(removed))
+		}
+
+		recs := sink.all()
+
+		var debugs []captureRecord
+		var infos []captureRecord
+		for _, r := range recs {
+			if r.msg != "clean-stale" {
+				t.Errorf("unexpected msg %q in %+v", r.msg, r)
+				continue
+			}
+			if got := r.attrString(t, "component"); got != "hooks" {
+				t.Errorf("component = %q, want %q", got, "hooks")
+			}
+			switch r.level {
+			case slog.LevelDebug:
+				debugs = append(debugs, r)
+			case slog.LevelInfo:
+				infos = append(infos, r)
+			default:
+				t.Errorf("unexpected level %v in %+v", r.level, r)
+			}
+		}
+
+		if len(debugs) != 2 {
+			t.Fatalf("got %d DEBUG clean-stale records, want 2: %+v", len(debugs), debugs)
+		}
+		debugKeys := make(map[string]bool, len(debugs))
+		for _, r := range debugs {
+			if got := r.attrString(t, "via"); got != "internal" {
+				t.Errorf("DEBUG via = %q, want %q", got, "internal")
+			}
+			debugKeys[r.attrString(t, "hook_key")] = true
+		}
+		for _, want := range []string{"my-session:0.1", "my-session:0.2"} {
+			if !debugKeys[want] {
+				t.Errorf("missing DEBUG clean-stale for hook_key %q: %+v", want, debugs)
+			}
+		}
+
+		if len(infos) != 1 {
+			t.Fatalf("got %d INFO summary records, want 1: %+v", len(infos), infos)
+		}
+		summary := infos[0]
+		if got := summary.attrString(t, "entries"); got != "2" {
+			t.Errorf("summary entries = %q, want %q", got, "2")
+		}
+		if got := summary.attrString(t, "via"); got != "internal" {
+			t.Errorf("summary via = %q, want %q", got, "internal")
+		}
+		if _, ok := summary.attrs["took"]; !ok {
+			t.Errorf("summary missing took attr: %+v", summary.attrs)
+		}
+	})
+
+	t.Run("omits entries_failed from the summary when no per-entry failures occur", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "cmd0", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+		if err := store.Set("my-session:0.1", "on-resume", "cmd1", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		sink := installCapture(t)
+		if _, err := store.CleanStale([]string{"my-session:0.0"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var summary captureRecord
+		var found bool
+		for _, r := range sink.all() {
+			if r.level == slog.LevelInfo && r.msg == "clean-stale" {
+				summary = r
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no INFO clean-stale summary captured: %+v", sink.all())
+		}
+		if _, ok := summary.attrs["entries_failed"]; ok {
+			t.Errorf("summary must omit entries_failed when no failures: %+v", summary.attrs)
+		}
+	})
+
+	t.Run("emits WARN with write-failed-* error_class (not unexpected) when the batched Save fails", func(t *testing.T) {
+		// Seed two entries on a writable path, then lock the parent dir 0500 so
+		// the subsequent CleanStale Save fails at AtomicWrite's temp-create
+		// phase. (readOnlyDirPath gives a path under an already-locked dir, which
+		// would block the seed write — we need the seed to succeed first.)
+		dir := t.TempDir()
+		seeded := filepath.Join(dir, "hooks.json")
+		if err := os.WriteFile(seeded, []byte(`{"a:0.0":{"on-resume":"x"},"b:0.0":{"on-resume":"y"}}`), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatalf("chmod parent dir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+		store := hooks.NewStore(seeded)
+		sink := installCapture(t)
+
+		// No live keys -> both entries stale -> Save attempted -> fails.
+		_, err := store.CleanStale([]string{})
+		if err == nil {
+			t.Fatal("expected error from CleanStale on read-only dir, got nil")
+		}
+		if !errors.Is(err, fileutil.ErrWriteTempCreate) {
+			t.Errorf("returned error not classified as temp-create: %v", err)
+		}
+
+		var warn captureRecord
+		var found bool
+		for _, r := range sink.all() {
+			if r.level == slog.LevelWarn && r.msg == "clean-stale" {
+				warn = r
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no WARN clean-stale record captured: %+v", sink.all())
+		}
+		if got := warn.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := warn.attrString(t, "via"); got != "internal" {
+			t.Errorf("via = %q, want %q", got, "internal")
+		}
+		if got := warn.attrString(t, "entries"); got != "2" {
+			t.Errorf("entries = %q, want %q", got, "2")
+		}
+		if got := warn.attrString(t, "error_class"); got != "write-failed-temp-create" {
+			t.Errorf("error_class = %q, want %q (must be write-failed-*, not unexpected)", got, "write-failed-temp-create")
+		}
+		if _, ok := warn.attrs["took"]; !ok {
+			t.Errorf("WARN missing took attr: %+v", warn.attrs)
+		}
+		errVal, ok := warn.attrs["error"]
+		if !ok {
+			t.Fatalf("WARN record missing error attr: %+v", warn.attrs)
+		}
+		loggedErr, ok := errVal.Any().(error)
+		if !ok {
+			t.Fatalf("error attr is not an error value: %T", errVal.Any())
+		}
+		if !errors.Is(loggedErr, fileutil.ErrWriteTempCreate) {
+			t.Errorf("logged error attr does not wrap the temp-create sentinel: %v", loggedErr)
+		}
+	})
+
+	t.Run("emits no summary and skips Save when zero entries are removed", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("my-session:0.0", "on-resume", "cmd0", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		infoBefore, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+
+		sink := installCapture(t)
+		removed, err := store.CleanStale([]string{"my-session:0.0"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(removed) != 0 {
+			t.Fatalf("got %d removed, want 0", len(removed))
+		}
+
+		if recs := sink.all(); len(recs) != 0 {
+			t.Errorf("zero-removal CleanStale emitted %d records, want 0: %+v", len(recs), recs)
+		}
+
+		infoAfter, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+		if !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
+			t.Error("file was modified on a zero-removal CleanStale (Save should be skipped)")
+		}
+	})
+}
+
+func TestSaveAuditedLogging(t *testing.T) {
+	t.Run("emits one INFO with op, entries=N and via on success", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		h["a:0.0"] = map[string]string{"on-resume": "x"}
+		h["b:0.0"] = map[string]string{"on-resume": "y"}
+
+		sink := installCapture(t)
+		if err := store.SaveAudited(h, "modify", 2, "internal"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.level)
+		}
+		if rec.msg != "modify" {
+			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "entries"); got != "2" {
+			t.Errorf("entries = %q, want %q", got, "2")
+		}
+		if got := rec.attrString(t, "via"); got != "internal" {
+			t.Errorf("via = %q, want %q", got, "internal")
+		}
+
+		// Side effect: the file was actually persisted.
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to reload: %v", err)
+		}
+		if len(loaded) != 2 {
+			t.Errorf("got %d persisted keys, want 2", len(loaded))
+		}
+	})
+
+	t.Run("emits one WARN with write-failed-* error_class on Save failure", func(t *testing.T) {
+		path := readOnlyDirPath(t)
+		store := hooks.NewStore(path)
+		sink := installCapture(t)
+
+		h := map[string]map[string]string{"a:0.0": {"on-resume": "x"}}
+		err := store.SaveAudited(h, "modify", 1, "internal")
+		if err == nil {
+			t.Fatal("expected error from SaveAudited on read-only dir, got nil")
+		}
+		if !errors.Is(err, fileutil.ErrWriteTempCreate) {
+			t.Errorf("returned error not classified as temp-create: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.level)
+		}
+		if rec.msg != "modify" {
+			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "entries"); got != "1" {
+			t.Errorf("entries = %q, want %q", got, "1")
+		}
+		if got := rec.attrString(t, "via"); got != "internal" {
+			t.Errorf("via = %q, want %q", got, "internal")
+		}
+		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
+			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
+		}
+		errVal, ok := rec.attrs["error"]
+		if !ok {
+			t.Fatalf("WARN record missing error attr: %+v", rec.attrs)
+		}
+		loggedErr, ok := errVal.Any().(error)
+		if !ok {
+			t.Fatalf("error attr is not an error value: %T", errVal.Any())
+		}
+		if !errors.Is(loggedErr, fileutil.ErrWriteTempCreate) {
+			t.Errorf("logged error attr does not wrap the temp-create sentinel: %v", loggedErr)
+		}
+	})
+}
+
 func TestSetLogging(t *testing.T) {
 	t.Run("emits INFO op=set with value and via=cli for a new hook key", func(t *testing.T) {
 		dir := t.TempDir()

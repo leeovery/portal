@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/log"
 )
 
 // silentLogger is a discard *slog.Logger used by migrate-rename tests that
@@ -189,6 +190,47 @@ func TestRunMigrateRename_CollisionLogsAndOverwrites(t *testing.T) {
 	}
 }
 
+func TestRunMigrateRename_EmitsInternalSaveBreadcrumb(t *testing.T) {
+	store, path := newMigrateStore(t)
+	writeHooksJSON(t, path, map[string]map[string]string{
+		"work:0.0": {"on-resume": "a"},
+		"work:0.1": {"on-resume": "b"},
+		"work:1.0": {"on-resume": "c"},
+	})
+
+	// The Save breadcrumb is emitted at the store seam (SaveAudited ->
+	// log.For("hooks")), which routes through the process-wide swap handler —
+	// NOT through the *slog.Logger injected into runMigrateRename (that one
+	// carries only the collision / load diagnostics). Capture via
+	// SetTestHandler to observe the store-seam breadcrumb.
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
+
+	if err := runMigrateRename(store, "work", "play", silentLogger()); err != nil {
+		t.Fatalf("runMigrateRename: %v", err)
+	}
+
+	body := sink.body()
+	// Exactly one audit breadcrumb for the persisted rewrite: INFO modify with
+	// entries=N (the number of rewritten keys) and via=internal, under hooks.
+	if !strings.Contains(body, "INFO modify") {
+		t.Errorf("expected INFO modify breadcrumb; got %q", body)
+	}
+	if !strings.Contains(body, "component=hooks") {
+		t.Errorf("expected component=hooks; got %q", body)
+	}
+	if !strings.Contains(body, "entries=3") {
+		t.Errorf("expected entries=3 (3 rewritten keys); got %q", body)
+	}
+	if !strings.Contains(body, "via=internal") {
+		t.Errorf("expected via=internal; got %q", body)
+	}
+	// Terse message: no value interpolation, single summary line for the batch.
+	if strings.Count(body, "INFO modify") != 1 {
+		t.Errorf("expected exactly one INFO modify breadcrumb; got %q", body)
+	}
+}
+
 func TestRunMigrateRename_MalformedJSONIsNoOp(t *testing.T) {
 	store, path := newMigrateStore(t)
 	if err := os.WriteFile(path, []byte("{not-valid-json"), 0o644); err != nil {
@@ -264,21 +306,30 @@ func TestRunMigrateRename_SaveFailurePropagatesAndWarns(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	logger, sink := newMigrateLogger(t)
-	err := runMigrateRename(store, "old", "new", logger)
+	// The save-failure WARN is now emitted at the store seam (SaveAudited),
+	// which routes through the process-wide swap handler — capture it via
+	// SetTestHandler. It is the terse audit WARN (op=modify) carrying the
+	// write-failed-* error_class, not the old hand-rolled "save hooks failed".
+	sink := &cmdCaptureSink{}
+	log.SetTestHandler(t, sink)
+
+	err := runMigrateRename(store, "old", "new", silentLogger())
 	if err == nil {
 		t.Fatal("expected save failure error, got nil")
 	}
 
 	msg := sink.body()
-	if !strings.Contains(msg, "WARN") {
-		t.Errorf("expected WARN level on save failure; got %q", msg)
+	if !strings.Contains(msg, "WARN modify") {
+		t.Errorf("expected WARN modify breadcrumb on save failure; got %q", msg)
 	}
 	if !strings.Contains(msg, "component=hooks") {
 		t.Errorf("expected component %q on save-failure log; got %q", "hooks", msg)
 	}
-	if !strings.Contains(msg, "save hooks failed") {
-		t.Errorf("expected 'save hooks failed' in log; got %q", msg)
+	if !strings.Contains(msg, "via=internal") {
+		t.Errorf("expected via=internal on save-failure log; got %q", msg)
+	}
+	if !strings.Contains(msg, "error_class=write-failed-") {
+		t.Errorf("expected write-failed-* error_class on save-failure log; got %q", msg)
 	}
 }
 

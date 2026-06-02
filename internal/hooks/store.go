@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
@@ -67,6 +68,32 @@ func (s *Store) Save(h hooksFile) error {
 	}
 
 	return fileutil.AtomicWrite(s.path, data)
+}
+
+// SaveAudited persists h via Save and emits one audit breadcrumb under the
+// hooks component, keeping audit emission at the store seam (the chokepoint
+// that can't be forgotten) rather than scattered at callers.
+//
+// It is the persistence path for bulk rewrites that have no single per-file
+// key — e.g. the migrate-rename N-key rewrite, which is treated as a batch
+// op=modify. A per-key breadcrumb would be wrong there (there is no single
+// affected key), so the breadcrumb carries entries=N instead of hook_key.
+//
+//   - On success: INFO with the given op, entries=N, and via.
+//   - On failure: WARN with op, entries=N, via, the wrapped error and its
+//     write-failed-* error_class; the error is returned.
+//
+// h is the same map type Store.Load returns, so cmd-layer callers can pass the
+// value they loaded and rewrote without referencing the unexported alias.
+func (s *Store) SaveAudited(h hooksFile, op string, entries int, via string) error {
+	if err := s.Save(h); err != nil {
+		logger.Warn(op, "entries", entries, "via", via,
+			"error", err, "error_class", fileutil.ClassifyWriteError(err))
+		return err
+	}
+
+	logger.Info(op, "entries", entries, "via", via)
+	return nil
 }
 
 // Set adds or overwrites a hook for the given key and event.
@@ -195,7 +222,25 @@ func (s *Store) List() ([]Hook, error) {
 // CleanStale removes hook entries for keys not present in liveKeys.
 // Returns the removed keys. The file is only saved if at least one entry
 // was removed.
+//
+// CleanStale is a batch mutation and follows the batch-summary breadcrumb
+// shape: one DEBUG per removed key, then exactly one INFO summary (op
+// clean-stale, entries=N, via=internal, took=<elapsed>) on a successful
+// whole-batch Save, or one WARN carrying the wrapped error and its
+// write-failed-* error_class on a Save failure. via is always "internal"
+// because CleanStale is only ever invoked by code-driven cleanup, never a
+// user-facing command.
+//
+// [needs-info, resolved-in-comment] The spec's batch contract mentions a
+// per-entry WARN with error_class=unexpected on a mid-loop failure. That has
+// no reachable site here: the kept/removed partition is computed entirely in
+// memory and persistence is a SINGLE batched Save of the kept map. There is no
+// point at which one entry can fail while the batch continues — the only
+// failure mode is the whole-batch Save below, which is write-failed-* (not
+// unexpected). We do NOT fabricate a synthetic per-entry failure path.
 func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
+	start := time.Now()
+
 	h, err := s.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load hooks: %w", err)
@@ -217,11 +262,29 @@ func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 		}
 	}
 
-	if len(removed) > 0 {
-		if err := s.Save(kept); err != nil {
-			return nil, fmt.Errorf("failed to save after cleaning stale hooks: %w", err)
-		}
+	// Zero-removal case: a clean that removes nothing is an idempotent no-op.
+	// Preserve the existing skip (no Save) and emit NO summary — the
+	// batch-summary INFO is reserved for batches that did work; an idempotent
+	// no-op must not clutter the INFO baseline.
+	if len(removed) == 0 {
+		return removed, nil
 	}
+
+	for _, key := range removed {
+		logger.Debug("clean-stale", "hook_key", key, "via", "internal")
+	}
+
+	if err := s.Save(kept); err != nil {
+		// Whole-batch persist failure: error_class is a write-failed-* value
+		// from the AtomicWrite phase space, NOT "unexpected".
+		logger.Warn("clean-stale", "entries", len(removed), "via", "internal",
+			"error", err, "error_class", fileutil.ClassifyWriteError(err), "took", time.Since(start))
+		return nil, fmt.Errorf("failed to save after cleaning stale hooks: %w", err)
+	}
+
+	// entries_failed is omitted: there is no per-entry failure path (see the
+	// [needs-info] note above), so M is always 0 and the attr stays absent.
+	logger.Info("clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
 
 	return removed, nil
 }

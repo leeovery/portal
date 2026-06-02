@@ -83,11 +83,14 @@ func runMigrateRename(store *hooks.Store, oldName, newName string, logger *slog.
 		delete(h, key)
 	}
 
-	if err := store.Save(h); err != nil {
-		logger.Warn("save hooks failed", "error", err)
-		return err
-	}
-	return nil
+	// Persist through the store's audited seam so the rewrite leaves a
+	// breadcrumb in portal.log under the hooks component. The bulk rewrite has
+	// no single per-file key, so it is recorded as a batch op=modify with
+	// entries=N where N is the number of rewritten keys (len(toMigrate)) — the
+	// meaningful count of entries actually changed by this migration. The
+	// audited method owns both the success INFO and the save-failure WARN, so
+	// the previous hand-rolled save-fail WARN here is removed (no double WARN).
+	return store.SaveAudited(h, "modify", len(toMigrate), "internal")
 }
 
 func init() {
