@@ -32,7 +32,7 @@
         "state-notify-cascade-on-binary-upgrade": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "2bcc7819aec59bd0bcefceede4c6f739483eab65",
+          "spec_commit": "eb73e7f2157a8c2badf6bcb469579cce7401a8ff",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
