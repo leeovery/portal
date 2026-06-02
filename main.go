@@ -34,9 +34,10 @@ func main() {
 
 	code, panicked := run()
 
-	// Close is the marker-emitter for the non-panic path only. A recovered
-	// panic deliberately skips it (the panic emission is Phase 2 and must not
-	// race a half-torn-down logger). os.Exit owns control flow.
+	// Close is the process: exit marker-emitter for the non-panic path only. A
+	// recovered panic deliberately skips it — run() already emitted process:
+	// panic as that path's sole terminal marker, so calling Close here would
+	// double-emit and break the four-way classification. os.Exit owns control flow.
 	if !panicked {
 		log.Close(code)
 	}
@@ -51,9 +52,13 @@ func run() (code int, panicked bool) {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Phase 2 seam: emit the "process: panic" record here via
-				// log.For("process").Error("panic", ...) before the divergent
-				// process tears down. Phase 1 only proves the exit shape.
+				// process: panic is the SOLE terminal marker on the recovered-panic
+				// path — emitted BEFORE we set panicked so main's !panicked gate
+				// skips Close (no process: exit double-emit). ERROR per the spec's
+				// "line immediately preceding panic/exit -> Error"; reason carries
+				// the recovered value verbatim (r is any; slog renders it). reason
+				// is the cross-listed Lifecycle key, not a new Process key.
+				log.For("process").Error("panic", "reason", r)
 				code = 2
 				panicked = true
 			}

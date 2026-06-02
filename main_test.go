@@ -7,6 +7,7 @@ import (
 
 	"github.com/leeovery/portal/cmd"
 	"github.com/leeovery/portal/cmd/bootstrap"
+	"github.com/leeovery/portal/internal/log"
 )
 
 // withSeams installs test doubles for executeFunc/errOut and restores the
@@ -115,6 +116,10 @@ func TestRun(t *testing.T) {
 	})
 
 	t.Run("it recovers a panic to code 2 and skips Close", func(t *testing.T) {
+		// Capture the process: panic emission so the recover block's new ERROR
+		// marker (Task 2-13) does not leak to the default stderr handler. The
+		// code=2/panicked=true contract is unchanged.
+		log.SetTestHandler(t, &captureHandler{})
 		withSeams(t, func() error { panic("kaboom") })
 
 		code, panicked := run()
