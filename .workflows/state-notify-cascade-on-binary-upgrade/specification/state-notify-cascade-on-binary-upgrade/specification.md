@@ -31,6 +31,26 @@ The same blind spot **also breaks teardown**: `UnregisterPortalHooks` (used by `
 - Idempotency was only ever verified against events that `show-hooks -g` *does* enumerate (string-fixture commanders and tmux fixtures where the global read returns everything). The real tmux 3.6b global-enumeration blind spot was never modelled.
 - No upper-bound assertion on hook-array length anywhere — the stacking is silent.
 
+## Solution Strategy
+
+Make Portal stop depending on tmux's global hook view entirely. The fix is a single architectural shift applied uniformly:
+
+**Read hooks per-event, not globally.** Replace every `show-hooks -g` (global, no-arg) read with `show-hooks -g <event>` (per-event), used uniformly for *every* Portal-managed event. The global enumeration is the source of the blind spot; per-event reads are not blind (verified live: `show-hooks -g pane-focus-out` returns the entry that the no-arg form omits).
+
+**Registration becomes declarative — "ensure exactly one."** For each Portal-managed event, read that event's entries, identify the Portal-authored ones for its category, and converge to exactly one entry carrying the current desired command body. Convergence = unset every matching Portal entry (reverse index order), then append one. The append-if-absent discipline is replaced by ensure-exactly-one.
+
+**Cleanup is intrinsic, not bolted on.** Because registration now reads what's actually there per-event and converges to exactly one, the existing 139-deep stacks collapse to 1 as an ordinary side effect of the next bootstrap. There is **no dedicated run-once cleanup migration** — that would be permanent cruft that runs once then sits forever and can never be safely removed.
+
+### Why uniform per-event (not just the two known-blind events)
+
+Special-casing the blind set was explicitly rejected. The blind set is tmux-version-specific (observed in 3.6b); maintaining a hardcoded "these events are blind" list re-introduces the exact hidden-coupling assumption that caused this bug, and would silently regress if a future tmux version hides a different event. Uniform per-event reads remove the assumption entirely at negligible cost (one extra tmux invocation per event at bootstrap).
+
+### Concrete mechanism
+
+- **New tmux client seam:** `ShowGlobalHooksForEvent(event)` → runs `show-hooks -g <event>`. Output format is byte-identical to the global form (`pane-focus-out[0] run-shell "…"`), so the existing `ParseShowHooks` parser needs **zero changes**.
+- **Delete `ShowGlobalHooks` (the no-arg global read).** It is the defect's single point of entry; with both registration and unregistration on the per-event seam, nothing should retain it. (Any remaining caller is migrated or the read is removed.)
+- **Reuse existing, tested primitives:** the per-event eviction half already exists in `UnregisterPortalHooks` — `portalEntriesFor` + `containsAny(portalCommandSubstrings)` for Portal-only matching, reverse-index `UnsetGlobalHookAt` for removal, `AppendGlobalHook` for the single append.
+
 ---
 
 ## Working Notes
