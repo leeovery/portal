@@ -3,7 +3,6 @@ package tmux
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"syscall"
 	"time"
@@ -19,12 +18,6 @@ import (
 // against a discard sink. Today its sole consumer is the SIGKILL-escalation
 // DEBUG breadcrumb in escalateKillToSIGKILL.
 var saverLogger = log.For("saver")
-
-// discardLogger is the canonical silent *slog.Logger used as the default sink
-// for the saver-side barrier and version-writer seams when production wiring
-// has not installed a real logger. It writes to io.Discard so calls are safe
-// no-ops without a nil-pointer risk.
-var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // PortalSaverName is the tmux session name that hosts the long-running save daemon.
 // The leading underscore marks the session as Portal-internal: Client.ListSessions
@@ -125,7 +118,7 @@ const portalSaverMaxAttempts = 3
 //     (waitForSaverDaemonReady). Production wiring replaces this with the
 //     bootstrap component's *slog.Logger via SetBarrierLogger. Tests install
 //     a capturing slog handler via log.SetTestHandler. Defaults to the
-//     io.Discard-backed discardLogger so it is never nil.
+//     io.Discard-backed log.Discard() so it is never nil.
 type SaverBarrierSeams struct {
 	IsAlive           func(int) bool
 	SendSIGKILL       func(int) error
@@ -164,7 +157,7 @@ type SaverReadinessSeams struct {
 //     BootstrapPortalSaver. The default wrapper forwards WriterLogger to
 //     state.WriteVersionFile so the bootstrap-side defensive write emits the
 //     same "daemon.version write" DEBUG breadcrumb as the daemon-startup
-//     call site. The default sink is the io.Discard-backed discardLogger so
+//     call site. The default sink is the io.Discard-backed log.Discard() so
 //     it is never nil.
 //   - WriterLogger: sink for the "daemon.version write" DEBUG breadcrumb.
 //     Production wiring installs the daemon component's *slog.Logger via
@@ -244,7 +237,7 @@ var saver = SaverSeams{
 		PollInterval:      50 * time.Millisecond,
 		Timeout:           5 * time.Second,
 		EscalationTimeout: 1 * time.Second,
-		Logger:            discardLogger,
+		Logger:            log.Discard(),
 	},
 
 	Readiness: SaverReadinessSeams{
@@ -257,7 +250,7 @@ var saver = SaverSeams{
 		// WriteVersionFile defaults are wired in init() below to break the
 		// initialization cycle (the wrapper closes over saver itself to
 		// read the current Version.WriterLogger sink at call time).
-		WriterLogger: discardLogger,
+		WriterLogger: log.Discard(),
 	},
 
 	// Ops defaults (WaitForReady, KillAndWait) wired in init() below;
@@ -284,7 +277,7 @@ func init() {
 // WARN-on-timeout / escalation paths AND waitForSaverDaemonReady's
 // WARN-on-readiness-timeout path. A nil argument is ignored so the package
 // never loses its sink to a programming error in the wiring layer; the
-// default is the io.Discard-backed discardLogger which already swallows all
+// default is the io.Discard-backed log.Discard() which already swallows all
 // calls safely.
 //
 // Production wiring calls this once from internal/bootstrapadapter as part
@@ -301,7 +294,7 @@ func SetBarrierLogger(l *slog.Logger) {
 // "daemon.version write" DEBUG breadcrumb emitted by the bootstrap-side
 // defensive WriteVersionFile call. A nil argument is ignored so the package
 // never loses its sink to a programming error in the wiring layer; the
-// default is the io.Discard-backed discardLogger.
+// default is the io.Discard-backed log.Discard().
 //
 // Production wiring calls this once from internal/bootstrapadapter
 // alongside SetBarrierLogger, threading the daemon component's *slog.Logger.

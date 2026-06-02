@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -53,9 +54,10 @@ type MarkerUnsetter interface {
 //
 // Logger is optional. When non-nil, soft warnings (per-unset failure,
 // malformed live-pane line) are emitted via Logger.Warn under the bootstrap
-// component. A nil Logger is tolerated — CleanStaleMarkers substitutes the
-// io.Discard-backed discardLogger at entry so call sites can dispatch
-// unconditionally. This mirrors the Orchestrator's Logger contract.
+// component. A nil Logger is tolerated — CleanStaleMarkers routes it through
+// the shared internal/log discard sink via log.OrDiscard at entry so call
+// sites can dispatch unconditionally. This mirrors the Orchestrator's Logger
+// contract.
 type MarkerCleanupCore struct {
 	// Markers mirrors FIFOSweeper.Client — *tmux.Client satisfies
 	// state.ServerOptionLister directly via ShowAllServerOptions, so no
@@ -118,10 +120,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// invoke logger.Warn unconditionally, matching the Orchestrator's
 	// Logger contract. Use a local var rather than mutating c.Logger so
 	// the receiver's state is not silently rewritten across calls.
-	logger := c.Logger
-	if logger == nil {
-		logger = discardLogger
-	}
+	logger := log.OrDiscard(c.Logger)
 
 	start := time.Now()
 	var unset int

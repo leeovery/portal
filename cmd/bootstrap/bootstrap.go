@@ -35,17 +35,11 @@ package bootstrap
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
 )
-
-// discardLogger is the canonical silent *slog.Logger used as the default
-// sink when a step core or the Orchestrator is constructed without a real
-// logger injected. It writes to io.Discard so calls are safe no-ops.
-var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // cleanLogger is the clean-component-bound logger used for the two
 // cmd/bootstrap clean-sweep cycle summaries (orphan-daemon sweep, marker
@@ -207,8 +201,8 @@ type StaleCleaner interface {
 // independently testable.
 //
 // Logger is the sink for failure diagnostics and cycle summaries. Run
-// substitutes the io.Discard-backed discardLogger when it is nil, so step
-// sites can dispatch unconditionally. Per the spec's cycle-summary cadence,
+// substitutes the shared internal/log discard sink via log.OrDiscard when it
+// is nil, so step sites can dispatch unconditionally. Per the spec's cycle-summary cadence,
 // each step emits a per-step entering DEBUG breadcrumb (surfaced only at
 // PORTAL_LOG_LEVEL=debug) plus, on the non-fatal continuation path, one INFO
 // "step complete step=<StepName> took=T" summary; the Return post-step
@@ -268,9 +262,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	// Substitute a discard Logger when none was injected so step sites can
 	// call o.Logger.Warn / o.Logger.Error unconditionally. Tests that pass
 	// nil for the Logger field rely on this default.
-	if o.Logger == nil {
-		o.Logger = discardLogger
-	}
+	o.Logger = log.OrDiscard(o.Logger)
 
 	// orchestrationStart anchors the took attr on the Return-boundary
 	// orchestration-complete summary; per-step starts (stepStart) anchor the

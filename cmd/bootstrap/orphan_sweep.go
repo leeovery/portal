@@ -6,6 +6,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -88,9 +89,9 @@ type OrphanSweepCore struct {
 	// untrusted; no final flush; same reasoning as Component A.
 	Kill func(pid int) error
 
-	// Logger is optional; nil tolerated. SweepOrphanDaemons substitutes the
-	// io.Discard-backed discardLogger at entry so call sites can dispatch
-	// unconditionally.
+	// Logger is optional; nil tolerated. SweepOrphanDaemons routes it through
+	// the shared internal/log discard sink via log.OrDiscard at entry so call
+	// sites can dispatch unconditionally.
 	Logger *slog.Logger
 }
 
@@ -104,7 +105,7 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 // unconditionally.
 //
 // Algorithm:
-//  1. Substitute the io.Discard-backed discardLogger when none was injected
+//  1. Route the Logger through log.OrDiscard so a nil sink discards
 //     so call sites can dispatch logger.Debug / .Info / .Warn unconditionally.
 //  2. Apply production defaults for Identify and Kill when those seams are
 //     nil. (Pgrep and SaverPanePID have no defaults — production wiring
@@ -137,10 +138,7 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 // surface a returned error as a redundant Warn line. The nil return is the
 // canonical "step completed" signal regardless of internal failures.
 func (c *OrphanSweepCore) SweepOrphanDaemons() error {
-	logger := c.Logger
-	if logger == nil {
-		logger = discardLogger
-	}
+	logger := log.OrDiscard(c.Logger)
 	identify := c.Identify
 	if identify == nil {
 		identify = state.IdentifyDaemon

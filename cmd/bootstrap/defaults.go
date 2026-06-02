@@ -34,8 +34,8 @@ package bootstrap
 //   - Server, Restoring: positional; mandatory; have no NoOp form because
 //     they back fatal-on-failure steps (1, 3, 8) of the bootstrap
 //     sequence and silently degrading would violate the contract.
-//   - Logger: positional; nil tolerated (Run substitutes its internal
-//     discardLogger at entry).
+//   - Logger: positional; nil tolerated (Run routes it through the shared
+//     internal/log discard sink via log.OrDiscard at entry).
 
 import (
 	"log/slog"

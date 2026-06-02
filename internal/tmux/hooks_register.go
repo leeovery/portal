@@ -224,19 +224,17 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 // canonical entry point for "hook installation". A second invocation against
 // the same hook table is a no-op (idempotent).
 //
-// log must be non-nil; callers pass a real *slog.Logger (production) or the
-// io.Discard-backed discardLogger.
-func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
-	if log == nil {
-		log = discardLogger
-	}
+// A nil logger is tolerated and falls through to the shared internal/log
+// discard sink via log.OrDiscard.
+func migrateHydrationHooks(c *Client, logger *slog.Logger) (int, error) {
+	logger = log.OrDiscard(logger)
 
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
 		// Failure aborts the hydration-hook migration (a unit of work) →
 		// WARN error_class=unexpected per the level table. Wrapped err passed
 		// directly so the *CommandError stderr surfaces.
-		log.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return 0, fmt.Errorf("show-hooks failed: %w", err)
 	}
 
@@ -258,7 +256,7 @@ func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
 			if err := c.UnsetGlobalHookAt(event, idx); err != nil {
 				// event name and hook index have no closed attr keys; "error"
 				// carries the signal.
-				log.Warn("failed to evict stale signal-hydrate hook", "error", err)
+				logger.Warn("failed to evict stale signal-hydrate hook", "error", err)
 				continue
 			}
 			evicted++
@@ -266,7 +264,7 @@ func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
 	}
 
 	if evicted > 0 {
-		log.Info("evicted stale signal-hydrate hooks lacking '--' separator", "reaped", evicted)
+		logger.Info("evicted stale signal-hydrate hooks lacking '--' separator", "reaped", evicted)
 	}
 
 	return evicted, nil
@@ -304,10 +302,8 @@ func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
 // "show-hooks failed: %w") or when the AppendGlobalHook call fails — both
 // surface to RegisterPortalHooks as folded entries in the errors.Join
 // aggregate, consistent with other step-2 register failures.
-func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
-	if log == nil {
-		log = discardLogger
-	}
+func migrateSessionClosedHook(c *Client, logger *slog.Logger) error {
+	logger = log.OrDiscard(logger)
 
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
@@ -315,7 +311,7 @@ func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 		// WARN error_class=unexpected, normalized to the uniform shape shared
 		// with the two sibling show-hooks branches. Wrapped err passed
 		// directly so the *CommandError stderr surfaces.
-		log.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return fmt.Errorf("show-hooks failed: %w", err)
 	}
 
@@ -339,7 +335,7 @@ func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 		if err := c.UnsetGlobalHookAt(sessionClosedEvent, idx); err != nil {
 			// event name and hook index have no closed attr keys; "error"
 			// carries the signal.
-			log.Warn("failed to evict stale notify hook", "error", err)
+			logger.Warn("failed to evict stale notify hook", "error", err)
 			continue
 		}
 	}
@@ -356,8 +352,8 @@ func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 // RegisterPortalHooks idempotently registers Portal's full hook table,
 // threading a *slog.Logger through to migrateHydrationHooks and
 // migrateSessionClosedHook so the bootstrap-step logger can capture
-// eviction diagnostics. A nil log is tolerated and falls through to the
-// io.Discard-backed discardLogger.
+// eviction diagnostics. A nil logger is tolerated and falls through to the
+// shared internal/log discard sink via log.OrDiscard.
 //
 // Categories are processed in the order declared in portalHookCategories;
 // within each category, events are processed in the order declared in the
@@ -380,21 +376,19 @@ func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 // On any failures the returned error is an errors.Join aggregate; each leaf
 // error names the failing event and wraps the underlying tmux error so
 // callers can use errors.Is on a sentinel.
-func RegisterPortalHooks(c *Client, log *slog.Logger) error {
-	if log == nil {
-		log = discardLogger
-	}
+func RegisterPortalHooks(c *Client, logger *slog.Logger) error {
+	logger = log.OrDiscard(logger)
 
 	var errs []error
 
-	if _, err := migrateHydrationHooks(c, log); err != nil {
+	if _, err := migrateHydrationHooks(c, logger); err != nil {
 		errs = append(errs, fmt.Errorf("migrate hydration hooks: %w", err))
 	}
 
 	for _, cat := range portalHookCategories {
 		for _, event := range cat.events {
 			if event == sessionClosedEvent {
-				if err := migrateSessionClosedHook(c, log); err != nil {
+				if err := migrateSessionClosedHook(c, logger); err != nil {
 					errs = append(errs, fmt.Errorf("register hook on %s: %w", event, err))
 				}
 				continue
