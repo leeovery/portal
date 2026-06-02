@@ -8,7 +8,7 @@
     "investigation": {
       "items": {
         "state-notify-cascade-on-binary-upgrade": {
-          "status": "in-progress"
+          "status": "completed"
         }
       }
     }
