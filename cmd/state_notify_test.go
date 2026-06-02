@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -209,7 +210,7 @@ func TestStateNotify_LogsWarnOnSaveRequestedCreateFailure(t *testing.T) {
 	// In-process command body logs via notifyLogger (log.For("notify")), which
 	// routes through the process-wide swap handler. SetTestHandler captures
 	// those records for assertion without spawning a subprocess.
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 
 	// EnsureDir would normally create the state dir; do it ourselves so we
@@ -227,7 +228,7 @@ func TestStateNotify_LogsWarnOnSaveRequestedCreateFailure(t *testing.T) {
 		t.Fatal("expected non-zero exit when save.requested cannot be created, got nil")
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}

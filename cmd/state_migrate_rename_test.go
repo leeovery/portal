@@ -13,6 +13,7 @@ import (
 
 	"github.com/leeovery/portal/internal/hooks"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
 // silentLogger is a discard *slog.Logger used by migrate-rename tests that
@@ -33,7 +34,7 @@ func newMigrateStore(t *testing.T) (*hooks.Store, string) {
 
 // newMigrateLogger returns a capturing *slog.Logger bound to the hooks
 // component plus its sink so tests can read the rendered log body back.
-func newMigrateLogger(t *testing.T) (*slog.Logger, *cmdCaptureSink) {
+func newMigrateLogger(t *testing.T) (*slog.Logger, *logtest.Sink) {
 	t.Helper()
 	return newCaptureLoggerForComponent(t, "hooks")
 }
@@ -173,7 +174,7 @@ func TestRunMigrateRename_CollisionLogsAndOverwrites(t *testing.T) {
 	if _, ok := got["old:0.0"]; ok {
 		t.Errorf("old:0.0 should have been removed")
 	}
-	msg := sink.body()
+	msg := sink.Body()
 	if !strings.Contains(msg, "WARN") {
 		t.Errorf("expected WARN level on collision; got %q", msg)
 	}
@@ -203,14 +204,14 @@ func TestRunMigrateRename_EmitsInternalSaveBreadcrumb(t *testing.T) {
 	// NOT through the *slog.Logger injected into runMigrateRename (that one
 	// carries only the collision / load diagnostics). Capture via
 	// SetTestHandler to observe the store-seam breadcrumb.
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 
 	if err := runMigrateRename(store, "work", "play", silentLogger()); err != nil {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	// Exactly one audit breadcrumb for the persisted rewrite: INFO modify with
 	// entries=N (the number of rewritten keys) and via=internal, under hooks.
 	if !strings.Contains(body, "INFO modify") {
@@ -310,7 +311,7 @@ func TestRunMigrateRename_SaveFailurePropagatesAndWarns(t *testing.T) {
 	// which routes through the process-wide swap handler — capture it via
 	// SetTestHandler. It is the terse audit WARN (op=modify) carrying the
 	// write-failed-* error_class, not the old hand-rolled "save hooks failed".
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 
 	err := runMigrateRename(store, "old", "new", silentLogger())
@@ -318,7 +319,7 @@ func TestRunMigrateRename_SaveFailurePropagatesAndWarns(t *testing.T) {
 		t.Fatal("expected save failure error, got nil")
 	}
 
-	msg := sink.body()
+	msg := sink.Body()
 	if !strings.Contains(msg, "WARN modify") {
 		t.Errorf("expected WARN modify breadcrumb on save failure; got %q", msg)
 	}
@@ -403,7 +404,7 @@ func TestRunMigrateRename_EmitsHooksComponentToLogger(t *testing.T) {
 		t.Fatalf("runMigrateRename: %v", err)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}

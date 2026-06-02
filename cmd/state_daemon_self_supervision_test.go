@@ -432,7 +432,7 @@ func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	got := sink.body()
+	got := sink.Body()
 	if !strings.Contains(got, "INFO") {
 		t.Errorf("expected INFO log line; got:\n%s", got)
 	}

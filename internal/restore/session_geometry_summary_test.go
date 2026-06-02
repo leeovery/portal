@@ -16,7 +16,7 @@ import (
 func geometrySummaryLine(t *testing.T, sink *captureSink) string {
 	t.Helper()
 	var found []string
-	for _, line := range sink.lines {
+	for _, line := range sink.Lines() {
 		if strings.Contains(line, "geometry complete") {
 			found = append(found, line)
 		}
@@ -47,7 +47,7 @@ func TestApplyWindowGeometry_EmitsGeometryCompleteSummaryOnCleanReplay(t *testin
 
 	line := geometrySummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one geometry-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one geometry-complete summary; sink body:\n%s", sink.Body())
 	}
 	if !strings.HasPrefix(line, "INFO ") {
 		t.Errorf("summary level = %q, want INFO", line)
@@ -148,8 +148,8 @@ func TestApplyWindowGeometry_SelectLayoutFailureIncrementsAnomalousAndRetainsWar
 		t.Errorf("summary %q: select-layout failure must increment anomalous to 1", line)
 	}
 	// Existing per-step WARN must still fire.
-	if !strings.Contains(sink.body(), "falling back to tiled") {
-		t.Errorf("per-step WARN about saved-layout failure must still fire; body:\n%s", sink.body())
+	if !strings.Contains(sink.Body(), "falling back to tiled") {
+		t.Errorf("per-step WARN about saved-layout failure must still fire; body:\n%s", sink.Body())
 	}
 	// Replay continues to the next step (select-pane).
 	if findCallTarget(mock.Calls, "select-pane", "=work:0.0") < 0 {
@@ -182,7 +182,7 @@ func TestApplyWindowGeometry_DoubleLayoutFailureIsOneAnomalous(t *testing.T) {
 	if !strings.Contains(line, "anomalous=1") {
 		t.Errorf("summary %q: double-layout-failure must be ONE anomalous, not two", line)
 	}
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, "falling back to tiled") {
 		t.Errorf("first per-step WARN must still fire; body:\n%s", body)
 	}
@@ -214,8 +214,8 @@ func TestApplyWindowGeometry_SelectPaneFailureIncrementsAnomalous(t *testing.T) 
 	if !strings.Contains(line, "anomalous=1") {
 		t.Errorf("summary %q: select-pane failure must increment anomalous", line)
 	}
-	if !strings.Contains(sink.body(), "select-pane failed") {
-		t.Errorf("per-step select-pane WARN must still fire; body:\n%s", sink.body())
+	if !strings.Contains(sink.Body(), "select-pane failed") {
+		t.Errorf("per-step select-pane WARN must still fire; body:\n%s", sink.Body())
 	}
 }
 
@@ -242,8 +242,8 @@ func TestApplyWindowGeometry_ZoomFailureIncrementsAnomalous(t *testing.T) {
 	if !strings.Contains(line, "anomalous=1") {
 		t.Errorf("summary %q: zoom failure must increment anomalous", line)
 	}
-	if !strings.Contains(sink.body(), "resize-pane -Z failed") {
-		t.Errorf("per-step zoom WARN must still fire; body:\n%s", sink.body())
+	if !strings.Contains(sink.Body(), "resize-pane -Z failed") {
+		t.Errorf("per-step zoom WARN must still fire; body:\n%s", sink.Body())
 	}
 }
 

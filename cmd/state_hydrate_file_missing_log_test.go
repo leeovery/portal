@@ -95,7 +95,7 @@ func TestHydrateFileMissingLog_ENOENT_EmitsScrollbackMissingPath(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	info := scrollbackMissingINFO(t, sink.body())
+	info := scrollbackMissingINFO(t, sink.Body())
 	if !strings.Contains(info, "path="+scrollback) {
 		t.Errorf("scrollback missing INFO missing path=%s: %q", scrollback, info)
 	}
@@ -122,7 +122,7 @@ func TestHydrateFileMissingLog_Permission_EmitsOneScrollbackMissingINFO(t *testi
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	// Exactly one INFO scrollback missing — not one per cause.
 	if n := countLogLines(body, "INFO", "scrollback missing"); n != 1 {
 		t.Fatalf("want exactly one INFO scrollback missing, got %d: %q", n, body)
@@ -153,7 +153,7 @@ func TestHydrateFileMissingLog_GenericIO_EmitsOneScrollbackMissingINFO(t *testin
 		t.Fatalf("handleHydrateFileMissing: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	if n := countLogLines(body, "INFO", "scrollback missing"); n != 1 {
 		t.Fatalf("want exactly one INFO scrollback missing for generic I/O, got %d: %q", n, body)
 	}
@@ -187,7 +187,7 @@ func TestHydrateFileMissingLog_MidStreamCopy_SharesScrollbackMissingINFO(t *test
 		t.Fatalf("handleHydrateFileMissing: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	if n := countLogLines(body, "INFO", "scrollback missing"); n != 1 {
 		t.Fatalf("want exactly one INFO scrollback missing for mid-stream copy failure, got %d: %q", n, body)
 	}
@@ -212,7 +212,7 @@ func TestHydrateFileMissingLog_PathAttrIsFileAndPrecedesExecINFO(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 
 	// path attr value is cfg.File, NOT the exec INFO's target= attr.
 	info := scrollbackMissingINFO(t, body)
@@ -260,7 +260,7 @@ func TestHydrateFileMissingLog_PreservesPerCauseWARNsAndNoSettleSleep(t *testing
 	}
 	elapsed := time.Since(start)
 
-	body := sink.body()
+	body := sink.Body()
 
 	// Per-cause WARN retained exactly once.
 	if n := strings.Count(body, "scrollback file not found"); n != 1 {
@@ -324,7 +324,7 @@ func TestHydrateFifoMissingLog_EmitsFifoMissingPathOnNonTimeoutOpenError(t *test
 	}
 
 	// The fifo-missing INFO carries path=<cfg.FIFO>.
-	body := sink.body()
+	body := sink.Body()
 	info := execLogLine(t, body, "INFO", "fifo missing")
 	if !strings.Contains(info, "path="+fifo) {
 		t.Errorf("fifo missing INFO missing path=%s: %q", fifo, info)

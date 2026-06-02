@@ -116,7 +116,7 @@ func TestOrchestrator_NoOpWhenSessionsJSONAbsent(t *testing.T) {
 		t.Errorf("expected no tmux calls when sessions.json absent; got %v", mock.Calls)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	if len(body) != 0 {
 		t.Errorf("expected empty log; got %q", string(body))
 	}
@@ -141,7 +141,7 @@ func TestOrchestrator_ReturnsWrappedErrCorruptIndexAndLogsWhenSessionsJSONCorrup
 		t.Errorf("errors.Is(err, state.ErrCorruptIndex) = false; want true. err=%v", err)
 	}
 
-	bodyStr := sink.body()
+	bodyStr := sink.Body()
 	if !strings.Contains(bodyStr, "WARN") || !strings.Contains(bodyStr, "ReadIndex") {
 		t.Errorf("log %q lacks WARN/ReadIndex entry", bodyStr)
 	}
@@ -251,7 +251,7 @@ func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
 		t.Errorf("new-session calls = %d, want 0 (live session must be skipped)", got)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	if strings.Contains(string(body), "WARN") {
 		t.Errorf("expected no log entries on silent live-skip; got %q", string(body))
 	}
@@ -279,7 +279,7 @@ func TestOrchestrator_SkipsUnderscorePrefixedSessions(t *testing.T) {
 		t.Errorf("new-session calls = %d, want 0 (underscore-prefixed must be skipped)", got)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	if !strings.Contains(string(body), "underscore-prefixed") {
 		t.Errorf("expected log entry mentioning underscore-prefixed; got %q", string(body))
 	}
@@ -302,7 +302,7 @@ func TestOrchestrator_LogsAndSkipsZeroWindowSession(t *testing.T) {
 		t.Errorf("new-session calls = %d, want 0 (zero-window must be skipped)", got)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	bodyStr := string(body)
 	if !strings.Contains(bodyStr, "zero windows") {
 		t.Errorf("expected log entry mentioning zero windows; got %q", bodyStr)
@@ -331,7 +331,7 @@ func TestOrchestrator_LogsAndSkipsZeroPaneWindow(t *testing.T) {
 		t.Errorf("new-session calls = %d, want 0 (zero-pane window must be skipped)", got)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	bodyStr := string(body)
 	if !strings.Contains(bodyStr, "zero panes") {
 		t.Errorf("expected log entry mentioning zero panes; got %q", bodyStr)
@@ -400,7 +400,7 @@ func TestOrchestrator_IsolatesPerSessionErrors(t *testing.T) {
 		t.Errorf("expected ok-session marker %q to be set despite broken-session failure; calls: %v", wantMarker, mock.Calls)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	if !strings.Contains(string(body), "broken") {
 		t.Errorf("expected log to mention broken session; got %q", string(body))
 	}
@@ -432,7 +432,7 @@ func TestOrchestrator_LogsAndReturnsNilWhenListSessionsFails(t *testing.T) {
 		t.Errorf("new-session calls = %d, want 0 when list-sessions fails", got)
 	}
 
-	body := []byte(sink.body())
+	body := []byte(sink.Body())
 	bodyStr := string(body)
 	if !strings.Contains(bodyStr, "list-sessions") {
 		t.Errorf("expected log entry mentioning list-sessions; got %q", bodyStr)
@@ -474,7 +474,7 @@ func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
 func skeletonSummaryLine(t *testing.T, sink *captureSink) string {
 	t.Helper()
 	var found []string
-	for _, line := range sink.lines {
+	for _, line := range sink.Lines() {
 		if strings.Contains(line, "skeleton complete") {
 			found = append(found, line)
 		}
@@ -530,7 +530,7 @@ func TestOrchestrator_EmitsSkeletonCompleteSummaryAfterRestoringSessions(t *test
 
 	line := skeletonSummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
 	}
 	if !strings.HasPrefix(line, "INFO ") {
 		t.Errorf("summary level = %q, want INFO. line=%q", line, line)
@@ -573,7 +573,7 @@ func TestOrchestrator_SkeletonSummaryExcludesLiveSkippedSession(t *testing.T) {
 
 	line := skeletonSummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
 	}
 	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
 		if !strings.Contains(line, want) {
@@ -608,7 +608,7 @@ func TestOrchestrator_SkeletonSummaryExcludesUnderscorePrefixedSession(t *testin
 
 	line := skeletonSummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
 	}
 	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
 		if !strings.Contains(line, want) {
@@ -644,7 +644,7 @@ func TestOrchestrator_SkeletonSummaryExcludesInvalidTopologySessions(t *testing.
 
 	line := skeletonSummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
 	}
 	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
 		if !strings.Contains(line, want) {
@@ -692,7 +692,7 @@ func TestOrchestrator_SkeletonSummaryExcludesRestoreErroredSessionButKeepsWarn(t
 
 	line := skeletonSummaryLine(t, sink)
 	if line == "" {
-		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.Body())
 	}
 	// Only "ok" was restored: sessions=1, windows=1, panes=1.
 	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
@@ -701,7 +701,7 @@ func TestOrchestrator_SkeletonSummaryExcludesRestoreErroredSessionButKeepsWarn(t
 		}
 	}
 	// The per-session WARN for "broken" must still fire.
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, "WARN") || !strings.Contains(body, "broken") {
 		t.Errorf("expected per-session WARN for broken session; body:\n%s", body)
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -528,7 +529,7 @@ func TestDaemonTick_LogsAndSkipsOnShowOptionsError(t *testing.T) {
 
 	tick(context.Background(), deps)
 
-	got := sink.body()
+	got := sink.Body()
 	if !strings.Contains(got, "tick failed") {
 		t.Errorf("expected tick failure log entry; got:\n%s", got)
 	}
@@ -607,7 +608,7 @@ func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T
 	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
 		t.Errorf("final flush did not write sessions.json: %v", err)
 	}
-	if got := sink.body(); !strings.Contains(got, "shutdown") || !strings.Contains(got, "flush_completed=true") {
+	if got := sink.Body(); !strings.Contains(got, "shutdown") || !strings.Contains(got, "flush_completed=true") {
 		t.Errorf("expected a 'shutdown' INFO with flush_completed=true; got:\n%s", got)
 	}
 }
@@ -802,7 +803,7 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 
 	// The daemon RunE logs via daemonLogger (log.For("daemon")); capture those
 	// records in-process so we can assert no ReadIndex warning was emitted.
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 
 	holder := withImmediateRun(t)
@@ -820,7 +821,7 @@ func TestDaemonStartup_HandlesMissingSessionsJSONAsNilPrev(t *testing.T) {
 	// Missing-file is a clean skip: no warning about reading sessions.json
 	// should be logged. This is the corrupt-vs-missing classification we
 	// inherit from state.ReadIndex.
-	if data := sink.body(); strings.Contains(data, "ReadIndex") || strings.Contains(data, "sessions.json") {
+	if data := sink.Body(); strings.Contains(data, "ReadIndex") || strings.Contains(data, "sessions.json") {
 		t.Errorf("missing sessions.json should not produce a ReadIndex warning; got:\n%s", data)
 	}
 }
@@ -837,7 +838,7 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 
 	// The daemon RunE logs via daemonLogger (log.For("daemon")); capture those
 	// records in-process.
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 
 	holder := withImmediateRun(t)
@@ -853,7 +854,7 @@ func TestDaemonStartup_LogsWarningOnUndecodableSessionsJSON(t *testing.T) {
 	// message is "sessions.json corrupt" — it rides the error attr so the
 	// daemon distinguishes corrupt-content from a missing file or other
 	// read errors.
-	if logged := sink.body(); !strings.Contains(logged, "sessions.json corrupt") {
+	if logged := sink.Body(); !strings.Contains(logged, "sessions.json corrupt") {
 		t.Errorf("expected corrupt-index warning in log; got:\n%s", logged)
 	}
 }

@@ -17,7 +17,7 @@ import (
 )
 
 // execLogLine returns the single captured line whose message is the given
-// terse phrase (rendered by cmdCaptureSink as "<LEVEL> <msg> key=value..."),
+// terse phrase (rendered by logtest.Sink as "<LEVEL> <msg> key=value..."),
 // matched on the "<LEVEL> <msg>" prefix so an attr value that happens to
 // contain the phrase cannot false-match. Fails the test if zero or more than
 // one line matches.
@@ -55,7 +55,7 @@ func TestHydrateExecLog_NilHookStore_MissThenBareShellExec(t *testing.T) {
 		t.Errorf("ExecShell target = %q, want /bin/zsh (nil store → bare shell)", exec.target)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
 	if !strings.Contains(dbg, "hook_key=nil:0.0") {
 		t.Errorf("DEBUG line missing hook_key=nil:0.0: %q", dbg)
@@ -106,7 +106,7 @@ func TestHydrateExecLog_LookupError_ErrorResultWithAttrWarnRetainedBareShell(t *
 		t.Errorf("ExecShell target = %q, want /bin/zsh (lookup error → bare shell)", exec.target)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
 	if !strings.Contains(dbg, "result=error") {
 		t.Errorf("lookup error must map to result=error: %q", dbg)
@@ -154,7 +154,7 @@ func TestHydrateExecLog_UnregisteredPaneKey_MissThenBareShellExec(t *testing.T) 
 		t.Errorf("ExecShell target = %q, want /bin/zsh (no hook → bare shell)", exec.target)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
 	if !strings.Contains(dbg, "result=miss") {
 		t.Errorf("unregistered pane key must map to result=miss: %q", dbg)
@@ -193,7 +193,7 @@ func TestHydrateExecLog_RegisteredHook_HitThenHookChainExec(t *testing.T) {
 		t.Errorf("ExecShell target = %q, want /bin/sh (hook chain)", exec.target)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	dbg := execLogLine(t, body, "DEBUG", "hook lookup")
 	if !strings.Contains(dbg, "result=hit") {
 		t.Errorf("registered hook must map to result=hit: %q", dbg)
@@ -233,7 +233,7 @@ func TestHydrateExecLog_HitRendersArgsVerbatimIncludingEmbeddedQuotes(t *testing
 	}
 	execShellOrHookAndExit(cfg)
 
-	body := sink.body()
+	body := sink.Body()
 	info := execLogLine(t, body, "INFO", "exec")
 	// args = "sh -c " + "<rawCmd>; exec /bin/zsh", embedded quotes verbatim.
 	wantArgs := "args=sh -c " + rawCmd + "; exec /bin/zsh"
@@ -262,7 +262,7 @@ func TestHydrateExecLog_ExecInfoUsesTargetAttrNotPath(t *testing.T) {
 	}
 	execShellOrHookAndExit(cfg)
 
-	info := execLogLine(t, sink.body(), "INFO", "exec")
+	info := execLogLine(t, sink.Body(), "INFO", "exec")
 	if !strings.Contains(info, "target=") {
 		t.Errorf("exec INFO must use the target attr: %q", info)
 	}
@@ -316,7 +316,7 @@ func TestHydrateExecLog_ExecInfoEmittedImmediatelyBeforeExecShell(t *testing.T) 
 					// Snapshot the captured log at the instant of handoff: the
 					// exec INFO must already be present (it is the immediately-
 					// preceding statement).
-					bodyAtExec = sink.body()
+					bodyAtExec = sink.Body()
 				},
 			}
 			execShellOrHookAndExit(cfg)

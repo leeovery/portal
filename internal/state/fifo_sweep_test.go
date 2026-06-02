@@ -8,18 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
-// openTestLogger returns a capturing *slog.Logger plus its captureSink so
+// openTestLogger returns a capturing *slog.Logger plus its logtest.Sink so
 // sweep tests can assert on the rendered log body. The dir parameter is
 // retained for call-site compatibility but unused — logging is in-memory now,
 // which means tests can chmod the state directory mid-sweep without breaking
 // log capture.
-func openTestLogger(t *testing.T, dir string) (*slog.Logger, *captureSink) {
+func openTestLogger(t *testing.T, dir string) (*slog.Logger, *logtest.Sink) {
 	t.Helper()
 	_ = dir
-	return newCaptureLogger(t)
+	return logtest.NewCaptureLogger(t)
 }
 
 func TestSweepOrphanFIFOs_RemovesOrphansAndPreservesLiveOnes(t *testing.T) {
@@ -162,7 +163,7 @@ func TestSweepOrphanFIFOs_LogsAndContinuesOnPerFileFailure(t *testing.T) {
 		t.Fatalf("restore chmod: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, a) {
 		t.Errorf("log missing entry for %s; body = %q", a, body)
 	}

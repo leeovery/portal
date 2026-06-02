@@ -117,7 +117,7 @@ func TestHydrateTimeoutLog_EmitsSignalTimeoutTookOnTimeoutPath(t *testing.T) {
 	}
 
 	// Exactly one INFO "signal timeout" line, rendering took=3s (unquoted).
-	info := execLogLine(t, sink.body(), "INFO", "signal timeout")
+	info := execLogLine(t, sink.Body(), "INFO", "signal timeout")
 	if !strings.Contains(info, "took=3s") {
 		t.Errorf("signal timeout INFO missing took=3s: %q", info)
 	}
@@ -161,7 +161,7 @@ func TestHydrateTimeoutLog_SignalTimeoutPrecedesExecINFO(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 	signalIdx := strings.Index(body, "INFO signal timeout")
 	execIdx := strings.Index(body, "INFO exec")
 	if signalIdx < 0 {
@@ -187,7 +187,7 @@ func TestHydrateTimeoutLog_PreservesWarnUnlinkAndMarkerUnset(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 
 	// Existing WARN still fires exactly once.
 	if n := strings.Count(body, "timeout waiting for hydrate signal"); n != 1 {
@@ -238,7 +238,7 @@ func TestHydrateTimeoutLog_NilHandleTimeout_NoSignalTimeoutNoExec(t *testing.T) 
 	if exec.called {
 		t.Error("ExecShell must NOT be called on the nil-HandleTimeout fall-through")
 	}
-	if strings.Contains(sink.body(), "signal timeout") {
-		t.Errorf("nil-HandleTimeout fall-through must NOT emit signal timeout: %q", sink.body())
+	if strings.Contains(sink.Body(), "signal timeout") {
+		t.Errorf("nil-HandleTimeout fall-through must NOT emit signal timeout: %q", sink.Body())
 	}
 }

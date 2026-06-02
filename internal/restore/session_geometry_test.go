@@ -233,7 +233,7 @@ func TestApplyWindowGeometry_LogsAndContinuesWhenTiledFallbackAlsoFails(t *testi
 	// Verify two warn entries land in the log: one for the saved-layout
 	// failure (mentions "falling back to tiled"), one for the tiled fallback
 	// failure.
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, "falling back to tiled") {
 		t.Errorf("log %q lacks first warning about saved-layout failure", body)
 	}

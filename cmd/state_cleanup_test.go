@@ -448,7 +448,7 @@ func TestStateCleanup_PurgeLogsInfoOnSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}
@@ -910,7 +910,7 @@ func TestStateCleanup_LogsInfoWhenSaverKilledSuccessfully(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}

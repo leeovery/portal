@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -26,9 +27,9 @@ import (
 // returned logger (self-eject INFO) and via log.Close(0) -> log.For("process")
 // (process: exit) interleave in the one sink.lines buffer in emission order,
 // which lets a test assert their relative order.
-func newSharedSelfEjectCapture(t *testing.T) (*cmdCaptureSink, *daemonDeps) {
+func newSharedSelfEjectCapture(t *testing.T) (*logtest.Sink, *daemonDeps) {
 	t.Helper()
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	// Route log.For(...) (process: exit via log.Close) through the sink.
 	log.SetTestHandler(t, sink)
 	// deps.Logger is the same sink, pre-bound to component=daemon.
@@ -62,7 +63,7 @@ func TestDaemonSelfEject_EmitsCatalogedEventAtTrip(t *testing.T) {
 	wantThreshold := fmt.Sprintf("threshold=%d", selfSupervisionHysteresisTicks)
 	if n := countLines(sink, "INFO", "self-eject", "component=daemon", want, wantThreshold); n != 1 {
 		t.Errorf("expected exactly one cataloged self-eject INFO with %s %s; got %d in:\n%s",
-			want, wantThreshold, n, sink.body())
+			want, wantThreshold, n, sink.Body())
 	}
 }
 
@@ -89,8 +90,8 @@ func TestDaemonSelfEject_RemovesLegacyInfoLine(t *testing.T) {
 	done := runDaemonLoopUntilEject(t, deps, ctx)
 	<-done
 
-	if strings.Contains(sink.body(), "self-supervision: saver-membership lost") {
-		t.Errorf("legacy 'self-supervision: saver-membership lost' INFO line still present in:\n%s", sink.body())
+	if strings.Contains(sink.Body(), "self-supervision: saver-membership lost") {
+		t.Errorf("legacy 'self-supervision: saver-membership lost' INFO line still present in:\n%s", sink.Body())
 	}
 }
 
@@ -114,9 +115,7 @@ func TestDaemonSelfEject_OrderSelfEjectThenProcessExitThenOsExit(t *testing.T) {
 	var exitCalls int32
 	withOsExitFake(t, func(_ int) {
 		atomic.AddInt32(&exitCalls, 1)
-		sink.mu.Lock()
-		linesAtExit = append([]string(nil), sink.lines...)
-		sink.mu.Unlock()
+		linesAtExit = sink.Lines()
 		panic("osExit invoked")
 	})
 
@@ -174,7 +173,7 @@ func TestDaemonSelfEject_ProcessExitCarriesCodeZero(t *testing.T) {
 	<-done
 
 	if n := countLines(sink, "INFO", "exit", "component=process", "code=0"); n != 1 {
-		t.Errorf("expected exactly one process: exit INFO with code=0 (via log.Close(0)); got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one process: exit INFO with code=0 (via log.Close(0)); got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -212,7 +211,7 @@ func TestDaemonSelfEject_DoesNotEmitShutdownLine(t *testing.T) {
 		t.Errorf("daemonShutdownFunc invoked %d times on eject path; want 0", got)
 	}
 	if n := countLines(sink, "shutdown"); n != 0 {
-		t.Errorf("expected no 'shutdown' line on self-eject path; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected no 'shutdown' line on self-eject path; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -261,11 +260,11 @@ func TestDaemonSelfEject_BelowThresholdEmitsDebugOnly(t *testing.T) {
 	// At least N-1 DEBUG breadcrumbs must have fired (one per failing tick).
 	wantThreshold := fmt.Sprintf("threshold=%d", N)
 	if n := countLines(sink, "DEBUG", "saver-membership probe failed", wantThreshold); n < N-1 {
-		t.Errorf("expected at least %d DEBUG probe-failure breadcrumbs; got %d in:\n%s", N-1, n, sink.body())
+		t.Errorf("expected at least %d DEBUG probe-failure breadcrumbs; got %d in:\n%s", N-1, n, sink.Body())
 	}
 	// No INFO self-eject line — the trip never happened.
 	if n := countLines(sink, "INFO", "self-eject"); n != 0 {
-		t.Errorf("expected no self-eject INFO below threshold; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected no self-eject INFO below threshold; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -318,7 +317,7 @@ func TestDaemonSelfEject_PassingProbeResetsCounter(t *testing.T) {
 		t.Fatalf("osExit invoked %d times despite counter reset; want 0", got)
 	}
 	if n := countLines(sink, "INFO", "self-eject"); n != 0 {
-		t.Errorf("expected no self-eject INFO when counter resets; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected no self-eject INFO when counter resets; got %d in:\n%s", n, sink.Body())
 	}
 	// Sanity: the full reset script ran.
 	if got := probeCalls(); got < int32(2*N-1) {

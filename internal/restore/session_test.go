@@ -636,7 +636,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyPairedPanesWhenLiveCountExceeds
 	}
 
 	// Warning logged.
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, "live pane count") {
 		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", body)
 	}
@@ -681,7 +681,7 @@ func TestSessionRestorer_ArmPanesWarnsAndArmsOnlyFirstWhenLiveCountIsLessThanSav
 	}
 
 	// Warning logged.
-	body := sink.body()
+	body := sink.Body()
 	if !strings.Contains(body, "live pane count") {
 		t.Errorf("log body lacks 'live pane count' mismatch warning: %q", body)
 	}

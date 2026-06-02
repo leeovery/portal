@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -17,13 +18,13 @@ import (
 // emitted at this call site.
 func TestWriteVersionFile_EmitsBreadcrumb(t *testing.T) {
 	dir := t.TempDir()
-	lg, sink := newCaptureLogger(t)
+	lg, sink := logtest.NewCaptureLogger(t)
 
 	if err := state.WriteVersionFile(dir, "1.2.3", lg); err != nil {
 		t.Fatalf("WriteVersionFile: %v", err)
 	}
 
-	log := sink.body()
+	log := sink.Body()
 	if !strings.Contains(log, "daemon.version write") {
 		t.Fatalf("log missing message 'daemon.version write':\n%s", log)
 	}
@@ -48,7 +49,7 @@ func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 	}
 
 	parent := t.TempDir()
-	lg, sink := newCaptureLogger(t)
+	lg, sink := logtest.NewCaptureLogger(t)
 
 	roDir := filepath.Join(parent, "ro")
 	if err := os.Mkdir(roDir, 0o500); err != nil {
@@ -62,7 +63,7 @@ func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 		t.Fatalf("WriteVersionFile to read-only dir succeeded; want error")
 	}
 
-	log := sink.body()
+	log := sink.Body()
 	if !strings.Contains(log, "daemon.version write") {
 		t.Fatalf("breadcrumb missing after failed write:\n%s", log)
 	}
@@ -76,14 +77,14 @@ func TestWriteVersionFile_EmitsBreadcrumbEvenWhenWriteFails(t *testing.T) {
 // per call.
 func TestWriteVersionFile_EmitsExactlyOneBreadcrumbPerCall(t *testing.T) {
 	dir := t.TempDir()
-	lg, sink := newCaptureLogger(t)
+	lg, sink := logtest.NewCaptureLogger(t)
 
 	if err := state.WriteVersionFile(dir, "v-once", lg); err != nil {
 		t.Fatalf("WriteVersionFile: %v", err)
 	}
 
-	count := strings.Count(sink.body(), "daemon.version write")
+	count := strings.Count(sink.Body(), "daemon.version write")
 	if count != 1 {
-		t.Fatalf("expected exactly 1 breadcrumb, got %d. log:\n%s", count, sink.body())
+		t.Fatalf("expected exactly 1 breadcrumb, got %d. log:\n%s", count, sink.Body())
 	}
 }

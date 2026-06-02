@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cespare/xxhash/v2"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -17,11 +18,11 @@ type captureFunc func(target string) (string, error)
 
 func (f captureFunc) CapturePane(target string) (string, error) { return f(target) }
 
-// openTempLogger returns a capturing *slog.Logger plus the captureSink so
+// openTempLogger returns a capturing *slog.Logger plus the logtest.Sink so
 // callers can inspect the rendered log body after the call under test.
-func openTempLogger(t *testing.T) (*slog.Logger, *captureSink) {
+func openTempLogger(t *testing.T) (*slog.Logger, *logtest.Sink) {
 	t.Helper()
-	return newCaptureLogger(t)
+	return logtest.NewCaptureLogger(t)
 }
 
 func TestSeedHashMap(t *testing.T) {
@@ -160,7 +161,7 @@ func TestSeedHashMap(t *testing.T) {
 
 		// Logger must have produced a warning mentioning the file (via the
 		// path attr).
-		log := sink.body()
+		log := sink.Body()
 		if !strings.Contains(log, "WARN") {
 			t.Errorf("log does not contain WARN: %q", log)
 		}

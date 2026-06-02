@@ -158,7 +158,7 @@ func TestApplySkeletonMarkers_LogsSanityWarningOnPaneCountMismatch(t *testing.T)
 
 	r.ApplySkeletonMarkers(sess, livePanes)
 
-	bodyStr := sink.body()
+	bodyStr := sink.Body()
 	if !strings.Contains(bodyStr, "live pane count") {
 		t.Errorf("log body lacks 'live pane count' sanity warning: %q", bodyStr)
 	}

@@ -342,7 +342,7 @@ func TestCommit_DoesNotReturnErrorWhenGCFails(t *testing.T) {
 	}
 
 	// Logger should record a warn about gc.
-	log := sink.body()
+	log := sink.Body()
 	if !strings.Contains(log, "WARN") {
 		t.Errorf("expected WARN entry in log; got %q", log)
 	}

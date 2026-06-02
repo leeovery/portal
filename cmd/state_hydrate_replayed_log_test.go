@@ -69,7 +69,7 @@ func TestHydrateReplayedLog_EmitsScrollbackReplayedBytesTookOnSuccessPath(t *tes
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	info := execLogLine(t, sink.body(), "INFO", "scrollback replayed")
+	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
 	if !strings.Contains(info, fmt.Sprintf("bytes=%d", len(payload))) {
 		t.Errorf("scrollback replayed INFO missing bytes=%d: %q", len(payload), info)
 	}
@@ -98,7 +98,7 @@ func TestHydrateReplayedLog_BytesEqualsCopyCountForPopulatedFile(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	info := execLogLine(t, sink.body(), "INFO", "scrollback replayed")
+	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
 	if !strings.Contains(info, fmt.Sprintf("bytes=%d", len(payload))) {
 		t.Errorf("bytes must equal io.Copy count (%d): %q", len(payload), info)
 	}
@@ -122,7 +122,7 @@ func TestHydrateReplayedLog_ZeroByteScrollbackEmitsBytesZero(t *testing.T) {
 	}
 
 	// An empty replay is still a successful rehydration — the INFO still fires.
-	info := execLogLine(t, sink.body(), "INFO", "scrollback replayed")
+	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
 	if !strings.Contains(info, "bytes=0") {
 		t.Errorf("zero-byte scrollback must emit bytes=0: %q", info)
 	}
@@ -147,7 +147,7 @@ func TestHydrateReplayedLog_FiveMegabyteFileReportsExactByteCount(t *testing.T) 
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	info := execLogLine(t, sink.body(), "INFO", "scrollback replayed")
+	info := execLogLine(t, sink.Body(), "INFO", "scrollback replayed")
 	if !strings.Contains(info, fmt.Sprintf("bytes=%d", size)) {
 		t.Errorf("5MB file must report exact byte count bytes=%d: %q", size, info)
 	}
@@ -281,7 +281,7 @@ func TestHydrateReplayedLog_PrecedesExecINFOAndFiresOnce(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	body := sink.body()
+	body := sink.Body()
 
 	// Fires exactly once.
 	if n := countLogLines(body, "INFO", "scrollback replayed"); n != 1 {
@@ -313,8 +313,8 @@ func TestHydrateReplayedLog_NotEmittedOnTimeoutPath(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	if strings.Contains(sink.body(), "scrollback replayed") {
-		t.Errorf("timeout path must NOT emit scrollback replayed: %q", sink.body())
+	if strings.Contains(sink.Body(), "scrollback replayed") {
+		t.Errorf("timeout path must NOT emit scrollback replayed: %q", sink.Body())
 	}
 }
 
@@ -332,7 +332,7 @@ func TestHydrateReplayedLog_NotEmittedOnFileMissingPath(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	if strings.Contains(sink.body(), "scrollback replayed") {
-		t.Errorf("file-missing path must NOT emit scrollback replayed: %q", sink.body())
+	if strings.Contains(sink.Body(), "scrollback replayed") {
+		t.Errorf("file-missing path must NOT emit scrollback replayed: %q", sink.Body())
 	}
 }

@@ -174,7 +174,7 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 
 	tick(context.Background(), deps)
 
-	log := sink.body()
+	log := sink.Body()
 
 	// Required substrings: WARN level, "daemon" component, failing session
 	// name "B" (via the session attr), and a substring of the underlying error.
@@ -238,7 +238,7 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 
 	tick(context.Background(), deps)
 
-	log := sink.body()
+	log := sink.Body()
 
 	// Exactly two WARN entries — one per failing session. (Note: a leak
 	// through to other WARN sites — e.g. tick's own "tick failed" wrapper —
@@ -310,7 +310,7 @@ func TestDaemonTick_CapturePaneFailureLogsWarnWithPaneKey(t *testing.T) {
 
 	tick(context.Background(), deps)
 
-	log := sink.body()
+	log := sink.Body()
 	if !strings.Contains(log, "WARN") {
 		t.Errorf("expected WARN-level entry; log:\n%s", log)
 	}

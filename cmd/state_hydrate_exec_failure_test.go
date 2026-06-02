@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
 // newSharedExecFailureCapture installs a single capture sink as the
@@ -26,9 +27,9 @@ import (
 // returned logger (the exec-failure WARN) and by log.Close(1) -> the process
 // component (process: exit) interleave in the one sink.lines buffer in emission
 // order, so a test can assert their relative ordering.
-func newSharedExecFailureCapture(t *testing.T) (*cmdCaptureSink, *slog.Logger) {
+func newSharedExecFailureCapture(t *testing.T) (*logtest.Sink, *slog.Logger) {
 	t.Helper()
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	// Route both log.For("process") (process: exit via log.Close) and the
 	// hydrate-component WARN through the same sink.
 	log.SetTestHandler(t, sink)
@@ -63,9 +64,7 @@ func TestDefaultExecShell_ExecFailure_MarksTerminationBeforeExit(t *testing.T) {
 	withOsExitFake(t, func(code int) {
 		atomic.AddInt32(&exitCalls, 1)
 		atomic.StoreInt32(&exitCode, int32(code))
-		sink.mu.Lock()
-		linesAtExit = append([]string(nil), sink.lines...)
-		sink.mu.Unlock()
+		linesAtExit = sink.Lines()
 		panic("osExit invoked")
 	})
 

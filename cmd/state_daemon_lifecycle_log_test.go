@@ -12,16 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
 // countLines returns the number of captured lines whose rendered text contains
 // every supplied substring.
-func countLines(sink *cmdCaptureSink, substrs ...string) int {
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
+func countLines(sink *logtest.Sink, substrs ...string) int {
 	n := 0
-	for _, line := range sink.lines {
+	for _, line := range sink.Lines() {
 		all := true
 		for _, s := range substrs {
 			if !strings.Contains(line, s) {
@@ -62,7 +61,7 @@ func TestDefaultDaemonRun_EmitsLockAcquiredWithTmuxPane(t *testing.T) {
 	}
 
 	if n := countLines(sink, "INFO", "lock acquired", "component=daemon", "tmux_pane=%42"); n != 1 {
-		t.Errorf("expected exactly one 'lock acquired' INFO with tmux_pane=%%42; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one 'lock acquired' INFO with tmux_pane=%%42; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -93,10 +92,10 @@ func TestDefaultDaemonRun_NoLockAcquiredAndKeepsWarnWhenLockHeld(t *testing.T) {
 	}
 
 	if n := countLines(sink, "lock acquired"); n != 0 {
-		t.Errorf("expected no 'lock acquired' line on lock-held path; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected no 'lock acquired' line on lock-held path; got %d in:\n%s", n, sink.Body())
 	}
 	if n := countLines(sink, "WARN", "another daemon holds the lock"); n != 1 {
-		t.Errorf("expected exactly one contention WARN; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one contention WARN; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -128,10 +127,10 @@ func TestDefaultDaemonRun_NoLockAcquiredAndKeepsWarnOnLockError(t *testing.T) {
 	}
 
 	if n := countLines(sink, "lock acquired"); n != 0 {
-		t.Errorf("expected no 'lock acquired' line on lock-error path; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected no 'lock acquired' line on lock-error path; got %d in:\n%s", n, sink.Body())
 	}
 	if n := countLines(sink, "WARN", "acquire daemon lock failed"); n != 1 {
-		t.Errorf("expected exactly one lock-error WARN; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one lock-error WARN; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -160,7 +159,7 @@ func TestDefaultShutdownFlush_EmitsShutdownSighupFlushCompletedTrueOnCleanFlush(
 		t.Errorf("clean flush did not write sessions.json: %v", err)
 	}
 	if n := countLines(sink, "INFO", "shutdown", "reason=sighup", "flush_completed=true"); n != 1 {
-		t.Errorf("expected exactly one shutdown INFO reason=sighup flush_completed=true; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one shutdown INFO reason=sighup flush_completed=true; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -185,7 +184,7 @@ func TestDefaultShutdownFlush_EmitsShutdownFlushCompletedFalseOnRestoringSkip(t 
 		t.Errorf("flush ran list-sessions despite restoring marker: %v", got)
 	}
 	if n := countLines(sink, "INFO", "shutdown", "flush_completed=false"); n != 1 {
-		t.Errorf("expected exactly one shutdown INFO flush_completed=false on restoring-skip; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one shutdown INFO flush_completed=false on restoring-skip; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -210,10 +209,10 @@ func TestDefaultShutdownFlush_EmitsShutdownFlushCompletedFalseWhenFinalCaptureEr
 	}
 
 	if n := countLines(sink, "WARN", "final flush failed"); n != 1 {
-		t.Errorf("expected the final-flush-failed WARN; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected the final-flush-failed WARN; got %d in:\n%s", n, sink.Body())
 	}
 	if n := countLines(sink, "INFO", "shutdown", "reason=signal", "flush_completed=false"); n != 1 {
-		t.Errorf("expected exactly one shutdown INFO flush_completed=false when capture errors; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one shutdown INFO flush_completed=false when capture errors; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -253,7 +252,7 @@ func TestShutdownReason_MapsSigtermToSignalEndToEnd(t *testing.T) {
 	}
 
 	if n := countLines(sink, "INFO", "shutdown", "reason=signal"); n != 1 {
-		t.Errorf("expected reason=signal for SIGTERM; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected reason=signal for SIGTERM; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -272,7 +271,7 @@ func TestShutdownReason_NoRecordedSignalRendersExitEndToEnd(t *testing.T) {
 	}
 
 	if n := countLines(sink, "INFO", "shutdown", "reason=exit"); n != 1 {
-		t.Errorf("expected reason=exit with no recorded signal; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected reason=exit with no recorded signal; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -292,7 +291,7 @@ func TestDefaultShutdownFlush_EmitsExactlyOneShutdownLinePerInvocation(t *testin
 	}
 
 	if n := countLines(sink, "shutdown", "reason="); n != 1 {
-		t.Errorf("expected exactly one shutdown line per invocation; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one shutdown line per invocation; got %d in:\n%s", n, sink.Body())
 	}
 }
 
@@ -320,9 +319,9 @@ func TestDefaultShutdownFlush_EmitsShutdownFlushCompletedFalseOnRestoringReadErr
 		t.Errorf("flush ran list-sessions despite restoring-read error: %v", got)
 	}
 	if n := countLines(sink, "WARN", "read @portal-restoring at shutdown failed"); n != 1 {
-		t.Errorf("expected the restoring-read-error WARN; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected the restoring-read-error WARN; got %d in:\n%s", n, sink.Body())
 	}
 	if n := countLines(sink, "INFO", "shutdown", "flush_completed=false"); n != 1 {
-		t.Errorf("expected exactly one shutdown INFO flush_completed=false on read-error; got %d in:\n%s", n, sink.body())
+		t.Errorf("expected exactly one shutdown INFO flush_completed=false on read-error; got %d in:\n%s", n, sink.Body())
 	}
 }

@@ -719,7 +719,7 @@ func TestHydrate_FileMissing_LogsENOENTDistinctly(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "not found") {
 		t.Errorf("log missing distinct ENOENT phrase \"not found\": %q", contents)
 	}
@@ -754,7 +754,7 @@ func TestHydrate_FileMissing_LogsPermissionDistinctly(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "permission denied") {
 		t.Errorf("log missing distinct permission phrase \"permission denied\": %q", contents)
 	}
@@ -779,7 +779,7 @@ func TestHydrate_FileMissing_LogsGenericIOError(t *testing.T) {
 		t.Fatalf("handleHydrateFileMissing: %v", err)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "I/O error") {
 		t.Errorf("log missing distinct generic phrase \"I/O error\": %q", contents)
 	}
@@ -810,7 +810,7 @@ func TestHydrate_FileMissing_LogIncludesHookKeyAndFile(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "li:0.0") {
 		t.Errorf("log missing --hook-key value: %q", contents)
 	}
@@ -1080,7 +1080,7 @@ func TestHydrate_TimeoutLogsWarningNamingHookKey(t *testing.T) {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", contents)
 	}
@@ -1488,7 +1488,7 @@ func TestHydrate_Timeout_LookupError_ExecsBareShellAndLogsWarning(t *testing.T) 
 		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	// Exactly one WARN line from the lookup-error branch — count, not just
 	// presence. (The timeout handler logs its own WARN line; the lookup-error
 	// branch contributes the canonical "lookup on-resume hook failed" entry.)
@@ -1542,7 +1542,7 @@ func TestHydrate_LookupErrorDegradesToBareShellAndLogsWarning(t *testing.T) {
 		t.Errorf("ExecShell args = %#v, want [/bin/zsh] on lookup error", exec.args)
 	}
 
-	contents := sink.body()
+	contents := sink.Body()
 	if !strings.Contains(contents, "lookup on-resume hook") {
 		t.Errorf("log missing degradation warning phrase \"lookup on-resume hook\": %q", contents)
 	}
@@ -1854,7 +1854,7 @@ func TestHydrate_FileMissing_ClassifiesCauseFromRawChain(t *testing.T) {
 			if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: tc.cause}); err != nil {
 				t.Fatalf("handleHydrateFileMissing: %v", err)
 			}
-			body := sink.body()
+			body := sink.Body()
 			if !strings.Contains(body, tc.phrase) {
 				t.Errorf("log missing classification phrase %q for %s cause; body = %q", tc.phrase, tc.name, body)
 			}

@@ -684,7 +684,7 @@ func TestCaptureStructurePerSessionLogAndContinue(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		log := sink.body()
+		log := sink.Body()
 		// Exactly two WARN entries: one per failing session.
 		warnCount := strings.Count(log, "WARN ")
 		if warnCount != 2 {

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
@@ -21,9 +22,9 @@ import (
 // records are captured for assertion. The command body logs through the
 // process-wide swap handler, not a per-process file, so capturing in-process
 // replaces the old "read state.PortalLog(dir)" pattern.
-func installCommitNowLogCapture(t *testing.T) *cmdCaptureSink {
+func installCommitNowLogCapture(t *testing.T) *logtest.Sink {
 	t.Helper()
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 	return sink
 }
@@ -441,7 +442,7 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnWhenSessionsJSONMissing(t 
 	}
 
 	// Log must contain a WARN entry under ComponentDaemon mentioning sessions.json.
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
@@ -489,7 +490,7 @@ func TestStateCommitNow_FallsBackToZeroPrevAndLogsWarnOnCorruptSessionsJSON(t *t
 		t.Errorf("prev should be zero-value Index, got: %+v", got)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
@@ -648,7 +649,7 @@ func TestStateCommitNow_ShortCircuits_LogsInfoSkipEvent(t *testing.T) {
 		t.Fatalf("expected exit 0, got: %v", err)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "INFO") {
 		t.Errorf("log missing INFO level entry: %q", logged)
 	}
@@ -700,7 +701,7 @@ func TestStateCommitNow_ShortCircuits_ExitsZeroWhenSaveRequestedTouchFails(t *te
 			f.captureCalls, f.commitCalls)
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry on touch failure: %q", logged)
 	}
@@ -775,7 +776,7 @@ func TestStateCommitNow_TreatsIsRestoringErrorAsMarkerPresumedSet(t *testing.T) 
 	}
 
 	// WARN log entry under ComponentDaemon, mentioning the underlying error.
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "WARN") {
 		t.Errorf("log missing WARN level entry: %q", logged)
 	}
@@ -890,7 +891,7 @@ func TestStateCommitNow_LogsErrorWhenCaptureStructureFails(t *testing.T) {
 		t.Fatal("expected non-zero exit")
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing ERROR level entry: %q", logged)
 	}
@@ -1016,7 +1017,7 @@ func TestStateCommitNow_LogsErrorWhenCommitFails(t *testing.T) {
 		t.Fatal("expected non-zero exit")
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing ERROR level entry: %q", logged)
 	}
@@ -1075,7 +1076,7 @@ func TestStateCommitNow_LogsWarnForTouchFailureAlongsidePrimaryError(t *testing.
 		t.Fatal("expected non-zero exit")
 	}
 
-	logged := sink.body()
+	logged := sink.Body()
 	if !strings.Contains(logged, "ERROR") {
 		t.Errorf("log missing primary ERROR entry: %q", logged)
 	}

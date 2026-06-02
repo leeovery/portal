@@ -1,16 +1,13 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
 // initTestLogToStateDir wires the production internal/log handler so log
@@ -42,74 +39,14 @@ func initTestLogToStateDirAs(t *testing.T, dir, version, processRole string) {
 	}
 }
 
-// cmdCaptureSink is a slog.Handler used by the cmd package's in-process
-// logging tests. It records every record and renders a text body in the
-// shape "<LEVEL> component=<c> <msg> key=value..." so the existing substring
-// assertions (level label, component, message phrase, attrs) keep working
-// after the observability migration retyped every cmd-layer logging seam to
-// *slog.Logger.
-type cmdCaptureSink struct {
-	mu    sync.Mutex
-	lines []string
-	// shared points at the lines-owning sink so handlers derived via
-	// WithAttrs/WithGroup (notably the .With("component", ...) binding) record
-	// into the same buffer; nil on the root sink.
-	shared *cmdCaptureSink
-	// bound holds attrs accumulated via WithAttrs so the component (bound at
-	// the logger, not at each call site) is rendered on every record.
-	bound []slog.Attr
-}
-
-func (s *cmdCaptureSink) owner() *cmdCaptureSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *cmdCaptureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *cmdCaptureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &cmdCaptureSink{shared: s.owner(), bound: next}
-}
-
-func (s *cmdCaptureSink) WithGroup(_ string) slog.Handler {
-	return &cmdCaptureSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *cmdCaptureSink) Handle(_ context.Context, r slog.Record) error {
-	var b strings.Builder
-	b.WriteString(r.Level.String())
-	b.WriteString(" ")
-	b.WriteString(r.Message)
-	for _, a := range s.bound {
-		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
-		return true
-	})
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.lines = append(owner.lines, b.String())
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *cmdCaptureSink) body() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return strings.Join(s.lines, "\n")
-}
-
-// newCaptureLoggerForComponent returns a capturing *slog.Logger bound to the
-// given component plus its sink, so a cmd test can inject the logger into a
-// *Deps / config struct and assert on the rendered body.
-func newCaptureLoggerForComponent(t *testing.T, component string) (*slog.Logger, *cmdCaptureSink) {
+// newCaptureLoggerForComponent is a thin wrapper over the shared
+// logtest.Sink that binds the given component so it renders on every line
+// (matching production text output). It returns the bound *slog.Logger plus
+// the sink, so a cmd test can inject the logger into a *Deps / config struct
+// and assert on the rendered body. The capture-handler base lives in
+// internal/logtest.
+func newCaptureLoggerForComponent(t *testing.T, component string) (*slog.Logger, *logtest.Sink) {
 	t.Helper()
-	sink := &cmdCaptureSink{}
+	sink := &logtest.Sink{}
 	return slog.New(sink).With("component", component), sink
 }
