@@ -98,13 +98,17 @@ var daemonTickLoopFunc = defaultDaemonTickLoop
 // Production callers leave it at the default.
 var acquireDaemonLock = state.AcquireDaemonLock
 
-// osExit is the package-level seam over os.Exit, used exclusively by the
-// Component D self-eject path. Tests swap this var to a recorder so the test
-// process is not actually terminated when the eject fires.
+// osExit is the package-level seam over os.Exit. Two marked-termination call
+// sites route through it: the Component D daemon self-eject (the spec's single
+// sanctioned bare-exit exception) and the hydrate helper's exec-failure
+// fall-through (defaultExecShell — Task 8-3). Both pair a terminal marker
+// (self-eject INFO / exec-failure WARN) plus log.Close(N) BEFORE the exit, so
+// neither vanishes unmarked. Tests swap this var to a recorder so the test
+// process is not actually terminated when either path fires.
 //
 // Production callers leave it at os.Exit. Direct use of os.Exit anywhere in
-// this package is forbidden — always go through osExit so the eject path is
-// observable in tests.
+// this package is forbidden — always go through osExit so the exit paths stay
+// observable in tests (and so "no bare os.Exit outside main" holds).
 var osExit = os.Exit
 
 // saverMembershipProbe is the package-level seam consumed by Component D's

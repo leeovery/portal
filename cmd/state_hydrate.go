@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -429,11 +430,32 @@ func unsetSkeletonMarkerOrLog(cfg hydrateConfig) {
 // defaultExecShell is the production ExecShell seam: hand the process off via
 // syscall.Exec. The (prog, args) shape lets callers pass either a bare-shell
 // invocation ([prog]) or a hook-chain invocation (`/bin/sh`, [`sh`, `-c`,
-// `<cmd>; exec $SHELL`]). syscall.Exec only returns on error; if it does, the
-// helper exits 1 so the pane closes rather than dangling without a shell.
+// `<cmd>; exec $SHELL`]). syscall.Exec only returns on error.
+//
+// On the happy path syscall.Exec replaces the process image and never returns —
+// the immediately-preceding "hydrate: exec" INFO (emitted by the caller) is the
+// terminal marker for that handoff. Nothing below runs.
+//
+// If syscall.Exec DOES return (exec failed — e.g. the shell binary is missing
+// or unexecutable), the helper must still terminate non-zero so the pane closes
+// rather than dangling without a shell. But a bare os.Exit(1) here would be a
+// second, un-sanctioned unmarked exit (spec § Defensive invariants — "bare
+// os.Exit is prohibited outside main"): it would leave the just-emitted
+// "hydrate: exec" INFO as a phantom handoff (announcing an exec that did not
+// happen) and the process would vanish without a terminal marker. To stay
+// inside the "every termination is marked" contract this path mirrors the
+// daemon self-eject's Close-before-exit discipline (the one sanctioned bare
+// exit): FIRST a WARN naming the exec failure, THEN log.Close(1) (which emits
+// "process: exit code=1" and does NOT itself exit), THEN osExit(1). Routing
+// through the package-level osExit seam (NOT a bare os.Exit) keeps the path
+// observable in tests and keeps "no bare os.Exit outside main" intact — the
+// daemon self-eject remains the only direct-os.Exit caller, via the same seam.
 func defaultExecShell(prog string, args []string) {
-	_ = syscall.Exec(prog, args, os.Environ())
-	os.Exit(1)
+	err := syscall.Exec(prog, args, os.Environ())
+	// Unreachable on success — syscall.Exec replaced the image above.
+	hydrateLogger.Warn("exec handoff failed", "target", prog, "args", strings.Join(args, " "), "error", err)
+	log.Close(1)
+	osExit(1)
 }
 
 // hydrateRunFunc is a package-level seam tests use to short-circuit the
