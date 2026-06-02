@@ -127,9 +127,17 @@ So the stacking is monotonic: every `portal open` / `x` / attach (each runs boot
 - Every install on tmux ≥ (whatever version exhibits the `show-hooks -g` blind spot — at least 3.6b). Hook count on `pane-focus-out` / `window-layout-changed` grows by 2 per `portal open` forever.
 - Each session-switch / layout change → N× `state notify` fork+exec + N× `save.requested` touch + N× tmux job dispatch + ~3N log lines.
 
+**The existing teardown path is broken by the SAME blind spot (validated):**
+- `UnregisterPortalHooks` (`internal/tmux/hooks_unregister.go:64-89`) also reads via `c.ShowGlobalHooks()` (no-arg `show-hooks -g`) and iterates `ParseShowHooks(raw)[event]`. For the two blind events that slice is empty, so it sees **zero** Portal entries on the 139-deep arrays and removes nothing. `portal hooks reset` / any `UnregisterPortalHooks` consumer **cannot currently undo this bug.** Independently reproduced (3 stacked → global enumeration shows 0 → per-index `set-hook -gu 'pane-focus-out[N]'` does clear them).
+- **Consequence for the fix:** the mandatory cleanup migration must NOT reuse the global-enumeration path — it would inherit the blind spot and silently no-op. Per-event enumeration (`show-hooks -g <event>`) is the safe primitive for **both** dedup and cleanup. Reverse-index unset (already the pattern in `hooks_unregister.go`) is needed to reap at depth 139.
+
 **Potentially affected:**
-- `hooks-and-saver-vanish-after-recent-fixes` (open inbox bug) — a high-rate `save.requested` write storm puts the daemon capture loop under sustained pressure exactly when the wipes were observed. Plausible common cause; worth cross-checking.
+- `hooks-and-saver-vanish-after-recent-fixes` (open inbox bug) — a high-rate `save.requested` write storm puts the daemon capture loop under sustained pressure exactly when the wipes were observed. Plausible common cause; worth cross-checking. (Cross-link is a *lead*, not a confirmed finding — no code traced for the capture-loop-pressure chain.)
 - Any other Portal hook registered on a pane/window-scoped event via the same `RegisterHookIfAbsent` path would stack the same way (currently only these two qualify).
+
+### Resolved: the blind-spot event class (was an open question)
+
+Probed on an isolated tmux 3.6b server — events that `set` successfully but are **omitted** from global `show-hooks -g`: all `pane-*` (`pane-focus-in/out`, `pane-died`, `pane-exited`, `pane-set-clipboard`, `pane-mode-changed`) and the geometry/rename `window-*` (`window-layout-changed`, `window-pane-changed`, `window-renamed`, `window-resized`). **Enumerated (safe):** all `session-*`, `window-linked`, `window-unlinked`, all `client-*`, all `alert-*`. So Portal's `saveTriggerEvents` contains exactly two blind events; the hydration events (`client-attached`, `client-session-changed`) and `session-closed` are all enumerated → genuinely at 1. The regression test should model this exact tmux 3.6b shape.
 
 ---
 
