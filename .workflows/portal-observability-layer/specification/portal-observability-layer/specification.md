@@ -231,7 +231,7 @@ Baseline attrs add ~50 bytes per line — negligible at INFO steady-state (~3 MB
 - `<component>` is read from the bound `component` attr and emitted as a literal prefix immediately before the colon. It is **not** also rendered in the attrs key=value list.
 - `<msg>` is the slog record's message field.
 - `<attrs>` are emitted space-separated `key=value` in order: contextual attrs (in `slog.Record` order), then the three remaining baselines (`pid`, `version`, `process_role`).
-- Multi-word string values are quoted with `"`.
+- Multi-word string values are quoted with `"`. **Single-token values are emitted unquoted** — so e.g. `raw=trace` / `raw=` render without quotes (the `raw="<v>"` forms shown in the illustrative example lines elsewhere in this spec are slog-default-style sketches, not the text-mode contract; only a value containing whitespace, e.g. an invalid `raw="de bug"`, is quoted).
 - `time.Duration` values render with Go's default `String()` (e.g. `1.234s`).
 - `slog.Group` attrs flatten to **dotted keys** (`group.key=value`), mirroring the JSON handler's nesting.
 
@@ -962,8 +962,8 @@ This INFO line is the terminal-point summary for the hydrate helper process (its
 
 | Exit path | Code shape (approx.) | Log call |
 |---|---|---|
-| Silent ENOENT — helper opened FIFO and got "no such file or directory" | `cmd/state_hydrate.go` ~line 120 | `hookLogger.Info("fifo missing", "path", fifoPath)` then exec |
-| Timeout — helper waited 3s, signal never arrived | ~line 115 | `hookLogger.Info("signal timeout", "took", signalTimeout)` then exec (where `signalTimeout` is the 3s `time.Duration` constant — renders `took=3s`, not a quoted string) |
+| Silent ENOENT — helper opened FIFO and got "no such file or directory" | `cmd/state_hydrate.go` ~line 120 | `hookLogger.Info("fifo missing", "path", fifoPath)`. **(Implementation erratum: a missing FIFO surfaces as an immediate ENOENT from the open and the helper hard-returns the wrapped error rather than exec'ing — so this row does NOT reach the exec handoff. The remaining three rows do exec.)** |
+| Timeout — helper waited 3s, signal never arrived | ~line 115 | `hookLogger.Info("signal timeout", "took", hydrateTimeout)` then exec (where `hydrateTimeout` — the spec's working name for this 3s `time.Duration` constant — renders `took=3s`, not a quoted string) |
 | Scrollback file missing | ~line 147 | `hookLogger.Info("scrollback missing", "path", scrollbackPath)` then exec |
 | Success — signal arrived, scrollback dumped | ~line 188 | `hookLogger.Info("scrollback replayed", "bytes", n, "took", took)` then exec |
 

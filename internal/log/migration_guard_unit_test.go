@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// legacyOld is the basename of the pre-migration single rotated file the old
-// logger left alongside a regular-file portal.log.
-const legacyOld = "portal.log.old"
-
 func TestMigrationGuard_RemovesLegacyRegularFilePortalLog(t *testing.T) {
 	dir := t.TempDir()
 
@@ -35,7 +31,7 @@ func TestMigrationGuard_RemovesPortalLogOldAlongsideRegularFile(t *testing.T) {
 	if err := os.WriteFile(symlinkPath(dir), []byte("legacy log\n"), 0o600); err != nil {
 		t.Fatalf("seed regular-file portal.log: %v", err)
 	}
-	oldPath := filepath.Join(dir, legacyOld)
+	oldPath := filepath.Join(dir, legacyOldName)
 	if err := os.WriteFile(oldPath, []byte("legacy old\n"), 0o600); err != nil {
 		t.Fatalf("seed portal.log.old: %v", err)
 	}
@@ -122,7 +118,7 @@ func TestMigrationGuard_DoesNotFireOnSecondRunAfterSymlinkExists(t *testing.T) {
 	if err := os.WriteFile(symlinkPath(dir), []byte("legacy log\n"), 0o600); err != nil {
 		t.Fatalf("seed regular-file portal.log: %v", err)
 	}
-	oldPath := filepath.Join(dir, legacyOld)
+	oldPath := filepath.Join(dir, legacyOldName)
 	if err := os.WriteFile(oldPath, []byte("legacy old\n"), 0o600); err != nil {
 		t.Fatalf("seed portal.log.old: %v", err)
 	}

@@ -101,6 +101,14 @@ func TestHydrateReplayedLog_BytesEqualsCopyCountForPopulatedFile(t *testing.T) {
 	if !strings.Contains(info, fmt.Sprintf("bytes=%d", len(payload))) {
 		t.Errorf("bytes must equal io.Copy count (%d): %q", len(payload), info)
 	}
+
+	// Pin bytes as a structured slog.KindInt64 attr (the rendered bytes=N is
+	// indistinguishable from a stringified count), mirroring the took Kind
+	// assertion in TestHydrateReplayedLog_TookIsDurationAcrossReplayNotSettleSleep.
+	rec := scrollbackReplayedRecord(t, sink)
+	if got := rec.IntAttr(t, "bytes"); got != int64(len(payload)) {
+		t.Errorf("bytes attr = %d, want %d", got, len(payload))
+	}
 }
 
 func TestHydrateReplayedLog_ZeroByteScrollbackEmitsBytesZero(t *testing.T) {

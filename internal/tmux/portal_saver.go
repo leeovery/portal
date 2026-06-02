@@ -15,7 +15,9 @@ import (
 // must render under the saver component regardless of the bootstrap-component
 // WARN sink threaded through saver.Barrier.Logger. log.For never returns nil
 // (root is constructed at package init), so calls are safe at any level and
-// against a discard sink. Today its sole consumer is the SIGKILL-escalation
+// against a discard sink. Its consumers are the saver-lifecycle events
+// (placeholder created, destroy-unattached off, respawn-daemon, daemon ready,
+// kill-barrier started/escalated, placeholder died) and the SIGKILL-escalation
 // DEBUG breadcrumb in escalateKillToSIGKILL.
 var saverLogger = log.For("saver")
 

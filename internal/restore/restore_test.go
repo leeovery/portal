@@ -338,6 +338,35 @@ func TestOrchestrator_LogsAndSkipsZeroPaneWindow(t *testing.T) {
 	}
 }
 
+// TestOrchestrator_NoGeometrySummaryForZeroPaneSession locks the phase-B
+// criterion (task 5-4) that a session rejected before geometry replay emits no
+// "geometry complete" summary. A zero-pane-window session is gated out upstream
+// (validateTopology / sr.Restore) so ApplyWindowGeometry is never reached; this
+// asserts that contract end-to-end through Orchestrator.Restore rather than
+// relying on the upstream guard staying in place.
+func TestOrchestrator_NoGeometrySummaryForZeroPaneSession(t *testing.T) {
+	dir := t.TempDir()
+	sess := state.Session{
+		Name: "work",
+		Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{}},
+		},
+	}
+	writeValidIndex(t, dir, []state.Session{sess})
+
+	rf := &orchestratorRunFunc{listSessionsOut: ""}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	if strings.Contains(sink.Body(), "geometry complete") {
+		t.Errorf("zero-pane session must not emit a geometry-complete summary; got %q", sink.Body())
+	}
+}
+
 func TestOrchestrator_IsolatesPerSessionErrors(t *testing.T) {
 	// First session: "broken" — uses a non-existent state subdir for FIFO
 	// creation so Restore returns an error. Second session: "ok" — succeeds.

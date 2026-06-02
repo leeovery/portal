@@ -11,9 +11,8 @@ import (
 
 // forbiddenLegacySymbols are the legacy bespoke-logger references that the
 // observability migration removed from all PRODUCTION (non-_test.go) source.
-// They survive only in internal/state/logger.go (the legacy type itself, kept
-// until its dedicated deletion task) and its unit test — both explicitly
-// excluded below.
+// The legacy type itself has been deleted (internal/state/logger.go is gone),
+// so no production file may reference any of these symbols.
 var forbiddenLegacySymbols = []string{
 	"state.Component",
 	"state.OpenLogger",
@@ -21,12 +20,10 @@ var forbiddenLegacySymbols = []string{
 	"openNoRotateLogger",
 }
 
-// excludedFromGuard are the only production files permitted to reference the
-// legacy logger symbols: the legacy type's own declaration. (Its unit test is
-// excluded by the *_test.go skip below.)
-var excludedFromGuard = map[string]bool{
-	filepath.Join("internal", "state", "logger.go"): true,
-}
+// excludedFromGuard lists production files permitted to reference the legacy
+// logger symbols. The legacy type's declaration was deleted with its dedicated
+// migration task, so the set is now empty: every production file is in scope.
+var excludedFromGuard = map[string]bool{}
 
 // TestNoLegacyLoggerInProductionSource walks every production .go file in the
 // repository and fails if any references a forbidden legacy-logger symbol.
