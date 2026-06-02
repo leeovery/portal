@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -214,6 +215,13 @@ func runHydrate(cfg hydrateConfig) error {
 // returns.
 func execShellAndExit(cfg hydrateConfig) {
 	shell := resolveShell()
+	// Terminal hydrate: exec INFO — the helper's last action before the image
+	// is replaced. Emitted as the IMMEDIATELY-PRECEDING statement to ExecShell
+	// (no statement in between): the unbuffered writer (spec § Defensive
+	// invariants → Flush) puts the marker in the kernel before syscall.Exec
+	// replaces the process. Structurally parallel to process: exec — target is
+	// the exec'd binary, args its space-joined argv. (Mirrors Task 2-14.)
+	cfg.Logger.Info("exec", "target", shell, "args", strings.Join([]string{shell}, " "), "hook_present", false)
 	cfg.ExecShell(shell, []string{shell})
 }
 
@@ -246,22 +254,38 @@ func resolveShell() string {
 func execShellOrHookAndExit(cfg hydrateConfig) {
 	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
 	if cfg.HookStore == nil {
+		// A nil store degrades to a bare shell — that is a "miss", NOT an
+		// "error" (the lookup never ran; nothing failed). No error attr.
+		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
 		execShellAndExit(cfg)
 		return
 	}
 	command, found, err := hooks.LookupOnResume(cfg.HookStore, cfg.HookKey)
 	if err != nil {
+		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "error", "error", err)
 		cfg.Logger.Warn("lookup on-resume hook failed", "hook_key", cfg.HookKey, "error", err)
 		execShellAndExit(cfg)
 		return
 	}
 	if !found {
+		// No hook / missing-or-malformed hooks.json → ("", false, nil) → miss.
+		cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "miss")
 		execShellAndExit(cfg)
 		return
 	}
+	cfg.Logger.Debug("hook lookup", "hook_key", cfg.HookKey, "result", "hit")
 	shell := resolveShell()
 	chained := command + "; exec " + shell
-	cfg.ExecShell("/bin/sh", []string{"sh", "-c", chained})
+	args := []string{"sh", "-c", chained}
+	// Terminal hydrate: exec INFO — the IMMEDIATELY-PRECEDING statement to
+	// ExecShell (no statement in between): the unbuffered writer (spec §
+	// Defensive invariants → Flush) puts the marker in the kernel before
+	// syscall.Exec replaces the process. Structurally parallel to process:
+	// exec — target is the exec'd binary, args its space-joined argv (verbatim,
+	// incl any embedded quotes in the registered hook command). (Mirrors Task
+	// 2-14.)
+	cfg.Logger.Info("exec", "target", "/bin/sh", "args", strings.Join(args, " "), "hook_present", true)
+	cfg.ExecShell("/bin/sh", args)
 }
 
 // handleHydrateTimeout is invoked when openFIFOWithTimeout returns
