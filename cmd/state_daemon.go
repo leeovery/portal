@@ -587,13 +587,12 @@ var stateDaemonCmd = &cobra.Command{
 
 		logger := daemonLogger
 
-		// version and pid are now baseline attrs injected per-record by the
-		// configured handler (set once via main -> log.Init), so the start
-		// line carries no interpolated values. The OS-process-boundary
-		// "process: start" marker is Phase 2; Phase 5 re-homes daemon
-		// lifecycle. Kept here so no existing log line silently disappears
-		// mid-migration.
-		logger.Info("starting")
+		// Daemon startup is observable via "process: start process_role=daemon"
+		// (emitted by log.Init in main) plus the cataloged "daemon: lock
+		// acquired" — see spec § Saver and daemon lifecycle event taxonomy →
+		// Process/subsystem boundary. The previously-emitted "daemon: starting"
+		// INFO was a redundant subsystem milestone (same instant, same data) and
+		// has been dropped.
 
 		// Defensive dirty-flag clear: a stale save.requested from a crashed or
 		// version-mismatch-restarted daemon must not trigger an immediate save

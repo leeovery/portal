@@ -181,7 +181,9 @@ func TestStateDaemon_CreatesStateDirectoryIfMissing(t *testing.T) {
 }
 
 func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
-	// "starting" is INFO; default WARN threshold filters it.
+	// The cataloged "daemon: lock acquired" INFO marks startup observably; the
+	// redundant "daemon: starting" line was dropped per spec § Process/subsystem
+	// boundary. Both are INFO, filtered by the default WARN threshold, so bump.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -199,8 +201,38 @@ func TestStateDaemon_OpensLogFileInStateDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("portal.log not created: %v", err)
 	}
-	if !strings.Contains(string(data), "starting") {
+	if !strings.Contains(string(data), "daemon: lock acquired") {
 		t.Errorf("startup log line missing; got:\n%s", data)
+	}
+}
+
+// TestStateDaemon_DoesNotEmitStartingINFO pins the spec drop: the daemon RunE
+// no longer emits the uncataloged "daemon: starting" INFO (spec § Saver and
+// daemon lifecycle event taxonomy → Process/subsystem boundary). Startup stays
+// observable via "process: start process_role=daemon" + "daemon: lock acquired".
+func TestStateDaemon_DoesNotEmitStartingINFO(t *testing.T) {
+	t.Setenv("PORTAL_LOG_LEVEL", "info")
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	initTestLogToStateDir(t, dir, "test")
+
+	_ = withImmediateRun(t)
+	withDaemonLockFileReset(t)
+
+	if _, _, err := runStateDaemon(t); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("portal.log not created: %v", err)
+	}
+	if strings.Contains(string(data), "daemon: starting") {
+		t.Errorf("daemon must not emit an uncataloged 'starting' INFO; got:\n%s", data)
+	}
+	// Startup observability is preserved by the cataloged lock-acquired event.
+	if !strings.Contains(string(data), "daemon: lock acquired") {
+		t.Errorf("expected 'daemon: lock acquired' to preserve startup observability; got:\n%s", data)
 	}
 }
 
@@ -375,8 +407,10 @@ func TestStateDaemon_ReturnsErrorWhenStateDirNotWritable(t *testing.T) {
 }
 
 func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
-	// "starting" is INFO; version/pid ride as baseline attrs injected by the
-	// configured handler. Default WARN threshold filters INFO, so bump to info.
+	// version/pid ride as baseline attrs injected by the configured handler onto
+	// the cataloged "daemon: lock acquired" startup line (the redundant
+	// "daemon: starting" line was dropped per spec). Both are INFO; the default
+	// WARN threshold filters INFO, so bump to info.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -398,6 +432,9 @@ func TestStateDaemon_StartupLogIncludesVersionAndPID(t *testing.T) {
 		t.Fatalf("read log: %v", err)
 	}
 	got := string(data)
+	if !strings.Contains(got, "daemon: lock acquired") {
+		t.Errorf("startup log missing cataloged 'lock acquired' line; got:\n%s", got)
+	}
 	if !strings.Contains(got, "vX.Y.Z") {
 		t.Errorf("startup log missing version; got:\n%s", got)
 	}
