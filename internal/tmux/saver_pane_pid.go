@@ -67,6 +67,32 @@ func saverPanePID(c *Client, sessionName string) (int, error) {
 	return 0, fmt.Errorf("list-panes -t %s: %w", sessionName, ErrEmptyPaneList)
 }
 
+// SaverPaneID returns the tmux pane id (#{pane_id}, e.g. "%42") of the first
+// pane in the named session via `tmux list-panes -t =<session> -F #{pane_id}`.
+// It is the contextual-attr source for the saver-lifecycle observability events
+// (placeholder-created / destroy-unattached-off) emitted by bootstrap observing
+// the saver from outside — the tmux_pane attr in the closed lifecycle vocabulary.
+//
+// The "=" prefix forces tmux's exact-match target resolution — uniform with
+// HasSession / saverPanePID — so a prefix collision can never resolve to the
+// wrong session. Returns the first non-empty line trimmed; the saver session
+// hosts exactly one pane, but the helper tolerates multi-line output by taking
+// the first non-empty line. Errors from the underlying command are wrapped with
+// a contextual prefix and returned verbatim (boundary class 2 — the commander
+// already embeds the tmux argv + stderr).
+func (c *Client) SaverPaneID(sessionName string) (string, error) {
+	out, err := c.cmd.Run("list-panes", "-t", "="+sessionName, "-F", "#{pane_id}")
+	if err != nil {
+		return "", fmt.Errorf("list-panes -t %s -F #{pane_id}: %w", sessionName, err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("list-panes -t %s -F #{pane_id}: %w", sessionName, ErrEmptyPaneList)
+}
+
 // SaverPanePIDOrAbsent is a thin wrapper over the unexported saverPanePID
 // that centralizes the "session absent or pane list empty → absent" sentinel
 // collapse used by both bootstrap step 4's orphan-sweep adapter and

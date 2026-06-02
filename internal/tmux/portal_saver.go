@@ -484,7 +484,12 @@ func waitForSaverDaemonReady(stateDir string) error {
 	defer ticker.Stop()
 
 	for {
-		if isSaverDaemonReady(stateDir) {
+		if pid, ready := isSaverDaemonReady(stateDir); ready {
+			// Readiness-barrier success — bootstrap observes the daemon up and
+			// ready. pid is the daemon.pid isSaverDaemonReady already read and
+			// identified, reused here for the target_pid attr (no redundant
+			// re-read). version is the auto-injected baseline — do NOT pass it.
+			saverLogger.Info("daemon ready", "target_pid", pid)
 			return nil
 		}
 		if !time.Now().Before(deadline) {
@@ -496,20 +501,25 @@ func waitForSaverDaemonReady(stateDir string) error {
 }
 
 // isSaverDaemonReady is one tick of the readiness barrier: read daemon.pid,
-// identify it, and return true iff the PID is alive AND identifies as a
+// identify it, and return (pid, true) iff the PID is alive AND identifies as a
 // portal state daemon. Any other observable shape (read error, transient
-// identify error, IdentifyDead, IdentifyNotPortalDaemon) returns false so
-// the caller continues polling.
-func isSaverDaemonReady(stateDir string) bool {
+// identify error, IdentifyDead, IdentifyNotPortalDaemon) returns (0, false) so
+// the caller continues polling. Returning the identified pid lets the success
+// branch reuse it for the daemon-ready lifecycle event without a redundant
+// daemon.pid re-read.
+func isSaverDaemonReady(stateDir string) (int, bool) {
 	pid, err := saver.ReadPID(stateDir)
 	if err != nil {
-		return false
+		return 0, false
 	}
 	result, err := saver.IdentifyDaemon(pid)
 	if err != nil {
-		return false
+		return 0, false
 	}
-	return result == state.IdentifyIsPortalDaemon
+	if result != state.IdentifyIsPortalDaemon {
+		return 0, false
+	}
+	return pid, true
 }
 
 // BootstrapPortalSaver ensures the _portal-saver session exists and is hosting
@@ -559,22 +569,51 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 		sessionPresent = false
 	}
 
+	// paneID is the placeholder pane's tmux id (#{pane_id}), the tmux_pane
+	// contextual attr on the saver-lifecycle observability events emitted by
+	// bootstrap observing the saver from outside. Queried once on the create
+	// branch (for placeholder-created), reused for destroy-unattached-off and
+	// respawn-daemon; queried at the set-option site on the alive happy path
+	// where no create ran. Best-effort: a failed read leaves it empty rather
+	// than aborting the bootstrap for an observability miss.
+	var paneID string
+
 	createdSession := false
 	if !sessionPresent {
 		if err := createPortalSaverWithRetry(c); err != nil {
 			return err
 		}
 		createdSession = true
+
+		paneID, _ = c.SaverPaneID(PortalSaverName)
+		saverLogger.Info("placeholder created", "tmux_pane", paneID)
 	}
 
 	if err := c.SetSessionOption(PortalSaverName, "destroy-unattached", "off"); err != nil {
 		return fmt.Errorf("bootstrap _portal-saver: set destroy-unattached: %w", err)
 	}
+	if !createdSession {
+		// Alive happy path — the create branch did not run, so the pane id has
+		// not yet been queried. Read it here for the destroy-unattached-off
+		// event (best-effort).
+		paneID, _ = c.SaverPaneID(PortalSaverName)
+	}
+	saverLogger.Info("destroy-unattached off", "tmux_pane", paneID)
 
 	if createdSession {
+		// Capture the placeholder pid before the respawn and the daemon pid
+		// after, around respawn-pane -k, for the respawn-daemon lifecycle
+		// event. Both reads are best-effort: a read miss logs a WARN with the
+		// wrapped error and still emits respawn-daemon with the pid it has
+		// (0 for the missing one) — an observability pid-read miss must never
+		// abort the bootstrap.
+		fromPID := saverPanePIDBestEffort(c)
 		if err := c.RespawnPane(PortalSaverName, portalSaverDaemonCommand); err != nil {
 			return fmt.Errorf("bootstrap _portal-saver: respawn daemon: %w", err)
 		}
+		toPID := saverPanePIDBestEffort(c)
+		saverLogger.Info("respawn-daemon", "from_pid", fromPID, "to_pid", toPID, "tmux_pane", paneID)
+
 		// Readiness barrier: poll daemon.pid + IdentifyDaemon until the
 		// freshly-respawned daemon is observably up, bounded to
 		// saver.Readiness.Timeout. Routed through waitForSaverDaemonReadyFn so
@@ -587,6 +626,20 @@ func BootstrapPortalSaver(c *Client, stateDir string) error {
 	}
 
 	return nil
+}
+
+// saverPanePIDBestEffort reads the _portal-saver pane pid for the respawn-daemon
+// lifecycle event's from_pid/to_pid attrs. On a read failure it logs one WARN
+// under the saver component with the wrapped error and returns 0 — the caller
+// still emits respawn-daemon with whatever pid it obtained. An observability
+// pid-read miss must never abort the bootstrap.
+func saverPanePIDBestEffort(c *Client) int {
+	pid, err := saverPanePID(c, PortalSaverName)
+	if err != nil {
+		saverLogger.Warn("saver respawn: pane-pid read failed", "error", err)
+		return 0
+	}
+	return pid
 }
 
 // EnsurePortalSaverVersion bootstraps _portal-saver while honoring the

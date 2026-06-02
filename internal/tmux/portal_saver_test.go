@@ -65,16 +65,24 @@ func init() {
 // command. A nil handler causes the run helper to t.Fatalf — tests opt in to
 // each command they expect.
 type portalSaverScript struct {
-	hasSession   func(call int) (string, error) // tmux has-session -t <name>
-	newSession   func(call int) (string, error) // tmux new-session -d -s <name> [cmd]
-	killSession  func(call int) (string, error) // tmux kill-session -t <name>
-	setOption    func(call int) (string, error) // tmux set-option -t <sess> <name> <value>
-	respawnPane  func(call int) (string, error) // tmux respawn-pane -k -t <target> <cmd>
+	hasSession  func(call int) (string, error) // tmux has-session -t <name>
+	newSession  func(call int) (string, error) // tmux new-session -d -s <name> [cmd]
+	killSession func(call int) (string, error) // tmux kill-session -t <name>
+	setOption   func(call int) (string, error) // tmux set-option -t <sess> <name> <value>
+	respawnPane func(call int) (string, error) // tmux respawn-pane -k -t <target> <cmd>
+	// listPanes handles tmux list-panes -t =<name> -F <format> calls issued by
+	// the saver lifecycle observability events (Task 5-7): #{pane_id} for
+	// placeholder-created / destroy-unattached-off, #{pane_pid} for the
+	// respawn-daemon from_pid/to_pid reads. The first arg is the -F format. A
+	// nil handler defaults to a benign response so the many pre-5-7 tests that
+	// do not care about pane-id/pane-pid output need no per-test change.
+	listPanes    func(format string, call int) (string, error)
 	hasSessionN  int
 	newSessionN  int
 	killSessionN int
 	setOptionN   int
 	respawnPaneN int
+	listPanesN   int
 }
 
 func (s *portalSaverScript) run(t *testing.T) func(args ...string) (string, error) {
@@ -120,11 +128,34 @@ func (s *portalSaverScript) run(t *testing.T) func(args ...string) (string, erro
 				return "", nil
 			}
 			return s.respawnPane(s.respawnPaneN)
+		case "list-panes":
+			s.listPanesN++
+			format := saverScriptListPanesFormat(args)
+			if s.listPanes == nil {
+				// Benign default: a pane id for #{pane_id}, a pid for
+				// #{pane_pid}. Lets pre-5-7 tests ignore these calls.
+				if format == "#{pane_id}" {
+					return "%0\n", nil
+				}
+				return "1\n", nil
+			}
+			return s.listPanes(format, s.listPanesN)
 		default:
 			t.Fatalf("unexpected command: %v", args)
 			return "", nil
 		}
 	}
+}
+
+// saverScriptListPanesFormat extracts the -F format argument from a list-panes
+// argv (the token immediately after "-F"), defaulting to "" when absent.
+func saverScriptListPanesFormat(args []string) string {
+	for i, a := range args {
+		if a == "-F" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // countCalls returns counts of calls dispatched on argv[0].
@@ -443,6 +474,12 @@ func TestBootstrapPortalSaver_ConcurrentRaceTreatsExistingSessionAsSuccess_AndSt
 			case "respawn-pane":
 				respawnPaneCall++
 				return "", nil
+			case "list-panes":
+				// Task 5-7 saver lifecycle observability reads; benign.
+				if saverScriptListPanesFormat(args) == "#{pane_id}" {
+					return "%0\n", nil
+				}
+				return "1\n", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
 				return "", nil
@@ -689,6 +726,12 @@ func TestBootstrapPortalSaver_RetriesNewSessionUpTo3TimesOnTransientFailure(t *t
 				return "", nil
 			case "respawn-pane":
 				return "", nil
+			case "list-panes":
+				// Task 5-7 saver lifecycle observability reads; benign.
+				if saverScriptListPanesFormat(args) == "#{pane_id}" {
+					return "%0\n", nil
+				}
+				return "1\n", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
 				return "", nil
@@ -839,6 +882,12 @@ func TestBootstrapPortalSaver_NoRedundantCreateOnConcurrentBootstrapRace(t *test
 				return "", nil
 			case "respawn-pane":
 				return "", nil
+			case "list-panes":
+				// Task 5-7 saver lifecycle observability reads; benign.
+				if saverScriptListPanesFormat(args) == "#{pane_id}" {
+					return "%0\n", nil
+				}
+				return "1\n", nil
 			default:
 				t.Fatalf("unexpected command: %v", args)
 				return "", nil
@@ -876,6 +925,7 @@ type versionScenario struct {
 	newSessionCalls  int
 	setOptionCalls   int
 	respawnPaneCalls int
+	listPanesCalls   int
 }
 
 func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error) {
@@ -911,6 +961,15 @@ func (s *versionScenario) run(t *testing.T) func(args ...string) (string, error)
 		case "respawn-pane":
 			s.respawnPaneCalls++
 			return "", s.respawnPaneErr
+		case "list-panes":
+			s.listPanesCalls++
+			// Benign default for the Task 5-7 saver lifecycle observability
+			// reads (#{pane_id} for the destroy-unattached-off / placeholder
+			// events, #{pane_pid} for respawn-daemon from_pid/to_pid).
+			if saverScriptListPanesFormat(args) == "#{pane_id}" {
+				return "%0\n", nil
+			}
+			return "1\n", nil
 		default:
 			t.Fatalf("unexpected command: %v", args)
 			return "", nil
