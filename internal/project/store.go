@@ -19,10 +19,10 @@ import (
 // portal.log` reconstructs the change history. Importing internal/log
 // introduces no cycle — internal/log depends only on the standard library.
 //
-// project attr convention: the spec renders project=<name> loosely, but the
-// addressable identifying key here is the PATH (the value Upsert/Rename/Remove
-// all match on). So the `project` attr carries the PATH, and the `value` attr
-// carries the NAME where relevant.
+// Attr-key convention (per the closed attr-key vocabulary): the `project` attr
+// carries the project NAME, the `path` attr carries the filesystem PATH (which
+// is also the addressable match key Upsert/Rename/Remove all key on), and the
+// `value` attr carries the verbatim new value for set/modify.
 //
 // Message-shape: the op verb is BOTH the slog message (preserving the
 // `projects: <verb>` catalog shape and grep idiom) AND a required "op" attr
@@ -139,12 +139,12 @@ func (s *Store) Upsert(path, name, via string) error {
 	}
 
 	if err := s.Save(projects); err != nil {
-		logger.Warn(op, "op", op, "project", path, "value", name, "via", via,
+		logger.Warn(op, "op", op, "project", name, "path", path, "value", name, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "op", op, "project", path, "value", name, "via", via)
+	logger.Info(op, "op", op, "project", name, "path", path, "value", name, "via", via)
 	return nil
 }
 
@@ -216,7 +216,7 @@ func (s *Store) CleanStale() ([]Project, error) {
 	}
 
 	for _, p := range removed {
-		logger.Debug("clean-stale", "op", "clean-stale", "project", p.Path, "via", "internal")
+		logger.Debug("clean-stale", "op", "clean-stale", "project", p.Name, "path", p.Path, "via", "internal")
 	}
 
 	if err := s.Save(kept); err != nil {
@@ -254,11 +254,11 @@ func (s *Store) Rename(path, newName, via string) error {
 		if projects[i].Path == path {
 			projects[i].Name = newName
 			if err := s.Save(projects); err != nil {
-				logger.Warn("modify", "op", "modify", "project", path, "value", newName, "via", via,
+				logger.Warn("modify", "op", "modify", "project", newName, "path", path, "value", newName, "via", via,
 					"error", err, "error_class", fileutil.ClassifyWriteError(err))
 				return err
 			}
-			logger.Info("modify", "op", "modify", "project", path, "value", newName, "via", via)
+			logger.Info("modify", "op", "modify", "project", newName, "path", path, "value", newName, "via", via)
 			return nil
 		}
 	}
@@ -284,16 +284,26 @@ func (s *Store) Remove(path, via string) error {
 		return fmt.Errorf("failed to load projects: %w", err)
 	}
 
+	// Resolve the removed entry's name (for the project attr) before deleting.
+	// An absent path has no matching entry, so name stays empty.
+	var name string
+	for _, p := range projects {
+		if p.Path == path {
+			name = p.Name
+			break
+		}
+	}
+
 	filtered := slices.DeleteFunc(projects, func(p Project) bool {
 		return p.Path == path
 	})
 
 	if err := s.Save(filtered); err != nil {
-		logger.Warn("rm", "op", "rm", "project", path, "via", via,
+		logger.Warn("rm", "op", "rm", "project", name, "path", path, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info("rm", "op", "rm", "project", path, "via", via)
+	logger.Info("rm", "op", "rm", "project", name, "path", path, "via", via)
 	return nil
 }

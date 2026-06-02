@@ -145,11 +145,15 @@ func TestUpsertLogging(t *testing.T) {
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
-		// project attr = the identifying PATH (matches Remove/Rename/Upsert key).
-		if got := rec.attrString(t, "project"); got != "/code/portal" {
-			t.Errorf("project = %q, want %q", got, "/code/portal")
+		// project attr = the project NAME (per the closed-vocabulary definition).
+		if got := rec.attrString(t, "project"); got != "portal" {
+			t.Errorf("project = %q, want %q", got, "portal")
 		}
-		// value attr carries the name.
+		// path attr = the filesystem path.
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
+		}
+		// value attr carries the verbatim new value (the name being set).
 		if got := rec.attrString(t, "value"); got != "portal" {
 			t.Errorf("value = %q, want %q", got, "portal")
 		}
@@ -184,8 +188,12 @@ func TestUpsertLogging(t *testing.T) {
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
-		if got := rec.attrString(t, "project"); got != "/code/portal" {
-			t.Errorf("project = %q, want %q", got, "/code/portal")
+		// project attr = the (new) project NAME; path attr = filesystem path.
+		if got := rec.attrString(t, "project"); got != "portal-renamed" {
+			t.Errorf("project = %q, want %q", got, "portal-renamed")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
 		}
 		if got := rec.attrString(t, "value"); got != "portal-renamed" {
 			t.Errorf("value = %q, want %q", got, "portal-renamed")
@@ -220,6 +228,12 @@ func TestUpsertLogging(t *testing.T) {
 		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
+		}
+		if got := rec.attrString(t, "project"); got != "portal" {
+			t.Errorf("project = %q, want %q", got, "portal")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
 		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
@@ -265,8 +279,12 @@ func TestRenameLogging(t *testing.T) {
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
-		if got := rec.attrString(t, "project"); got != "/code/portal" {
-			t.Errorf("project = %q, want %q", got, "/code/portal")
+		// project attr = the (new) project NAME; path attr = filesystem path.
+		if got := rec.attrString(t, "project"); got != "portal-new" {
+			t.Errorf("project = %q, want %q", got, "portal-new")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
 		}
 		if got := rec.attrString(t, "value"); got != "portal-new" {
 			t.Errorf("value = %q, want %q", got, "portal-new")
@@ -342,6 +360,12 @@ func TestRenameLogging(t *testing.T) {
 		if got := rec.attrString(t, "op"); got != "modify" {
 			t.Errorf("op = %q, want %q", got, "modify")
 		}
+		if got := rec.attrString(t, "project"); got != "portal-new" {
+			t.Errorf("project = %q, want %q", got, "portal-new")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
+		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
 		}
@@ -386,8 +410,12 @@ func TestRemoveLogging(t *testing.T) {
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
-		if got := rec.attrString(t, "project"); got != "/code/portal" {
-			t.Errorf("project = %q, want %q", got, "/code/portal")
+		// project attr = the project NAME of the removed entry; path = filesystem path.
+		if got := rec.attrString(t, "project"); got != "portal" {
+			t.Errorf("project = %q, want %q", got, "portal")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
 		}
 		if got := rec.attrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
@@ -420,8 +448,13 @@ func TestRemoveLogging(t *testing.T) {
 		if got := rec.attrString(t, "op"); got != "rm" {
 			t.Errorf("op = %q, want %q", got, "rm")
 		}
-		if got := rec.attrString(t, "project"); got != "/code/absent" {
-			t.Errorf("project = %q, want %q", got, "/code/absent")
+		// Absent path: the filesystem path is still logged under path; there is no
+		// matching entry, so the project NAME is empty.
+		if got := rec.attrString(t, "path"); got != "/code/absent" {
+			t.Errorf("path = %q, want %q", got, "/code/absent")
+		}
+		if got := rec.attrString(t, "project"); got != "" {
+			t.Errorf("project = %q, want empty (no matching entry)", got)
 		}
 		if got := rec.attrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
@@ -450,6 +483,9 @@ func TestRemoveLogging(t *testing.T) {
 		}
 		if got := rec.attrString(t, "op"); got != "rm" {
 			t.Errorf("op = %q, want %q", got, "rm")
+		}
+		if got := rec.attrString(t, "path"); got != "/code/portal" {
+			t.Errorf("path = %q, want %q", got, "/code/portal")
 		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
@@ -522,16 +558,24 @@ func TestCleanStaleLogging(t *testing.T) {
 		if len(debugs) != 2 {
 			t.Fatalf("got %d DEBUG clean-stale records, want 2: %+v", len(debugs), debugs)
 		}
+		// project attr = the project NAME; path attr = the filesystem path.
+		debugNames := make(map[string]bool, len(debugs))
 		debugPaths := make(map[string]bool, len(debugs))
 		for _, r := range debugs {
 			if got := r.attrString(t, "via"); got != "internal" {
 				t.Errorf("DEBUG via = %q, want %q", got, "internal")
 			}
-			debugPaths[r.attrString(t, "project")] = true
+			debugNames[r.attrString(t, "project")] = true
+			debugPaths[r.attrString(t, "path")] = true
+		}
+		for _, want := range []string{"gone1", "gone2"} {
+			if !debugNames[want] {
+				t.Errorf("missing DEBUG clean-stale for project name %q: %+v", want, debugs)
+			}
 		}
 		for _, want := range []string{stale1, stale2} {
 			if !debugPaths[want] {
-				t.Errorf("missing DEBUG clean-stale for project %q: %+v", want, debugs)
+				t.Errorf("missing DEBUG clean-stale for path %q: %+v", want, debugs)
 			}
 		}
 
