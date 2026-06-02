@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -82,7 +83,7 @@ func (o *Orchestrator) Restore() (bool, error) {
 		"sessions", restoredSessions,
 		"windows", restoredWindows,
 		"panes", restoredPanes,
-		"took", time.Since(start),
+		log.Took(start),
 	)
 	return false, nil
 }

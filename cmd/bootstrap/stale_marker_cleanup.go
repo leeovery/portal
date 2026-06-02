@@ -130,7 +130,7 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	// post-loop) and NOT on the two List-error returns above, which emit
 	// nothing. unset counts successful unsets only.
 	summarise := func() {
-		cleanLogger.Info("marker sweep complete", "unset", unset, "took", time.Since(start))
+		cleanLogger.Info("marker sweep complete", "unset", unset, log.Took(start))
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)

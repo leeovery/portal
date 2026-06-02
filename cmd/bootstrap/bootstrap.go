@@ -280,7 +280,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// step-complete for the aborting step and no orchestration summary.
 		return false, nil, o.fatalf("start tmux server", err)
 	}
-	o.Logger.Info("step complete", "step", stepEnsureServer, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepEnsureServer, log.Took(stepStart))
 
 	// Step 2 — RegisterPortalHooks (fatal on failure).
 	o.Logger.Debug("step entering", "step", stepRegisterHooks)
@@ -288,7 +288,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	if err := o.Hooks.RegisterPortalHooks(); err != nil {
 		return serverStarted, nil, o.fatalf("register tmux hooks", err)
 	}
-	o.Logger.Info("step complete", "step", stepRegisterHooks, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepRegisterHooks, log.Took(stepStart))
 
 	// Step 3 — Set @portal-restoring (MUST precede steps 4 and 5; fatal on failure).
 	o.Logger.Debug("step entering", "step", stepSetRestoring)
@@ -296,7 +296,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	if err := o.Restoring.Set(); err != nil {
 		return serverStarted, nil, o.fatalf("set @portal-restoring marker", err)
 	}
-	o.Logger.Info("step complete", "step", stepSetRestoring, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepSetRestoring, log.Took(stepStart))
 
 	// Step 4 — SweepOrphanDaemons (best-effort). Enumerates every live
 	// `portal state daemon` process via pgrep, builds the legitimate set
@@ -313,7 +313,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepSweepOrphanDaemons, "error", err)
 		// Continue per spec — best-effort sweep, next bootstrap retries.
 	}
-	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepSweepOrphanDaemons, log.Took(stepStart))
 
 	// Step 5 — EnsureSaver (best-effort).
 	o.Logger.Debug("step entering", "step", stepEnsureSaver)
@@ -323,7 +323,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepEnsureSaver, "error", err)
 		// Continue per spec — saves paused, user not blocked.
 	}
-	o.Logger.Info("step complete", "step", stepEnsureSaver, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepEnsureSaver, log.Took(stepStart))
 
 	// Step 6 — Restore. The Restorer contract returns (corrupt, err) so
 	// the orchestrator can branch on a typed signal rather than walking
@@ -346,7 +346,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		// and continue — soft per-session failures must not abort.
 		o.Logger.Warn("step returned non-corrupt error (treated as soft per Restorer contract)", "step", stepRestore, "error", restoreErr)
 	}
-	o.Logger.Info("step complete", "step", stepRestore, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepRestore, log.Took(stepStart))
 
 	// Step 7 — EagerSignalHydrate (best-effort). Runs while
 	// @portal-restoring is still set so daemon captureAndCommit
@@ -361,7 +361,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepEagerSignalHydrate, "error", err)
 		// Continue per spec.
 	}
-	o.Logger.Info("step complete", "step", stepEagerSignalHydrate, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepEagerSignalHydrate, log.Took(stepStart))
 
 	// Step 8 — Clear @portal-restoring (fatal on failure).
 	o.Logger.Debug("step entering", "step", stepClearRestoring)
@@ -369,7 +369,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 	if err := o.Restoring.Clear(); err != nil {
 		return serverStarted, warnings, o.fatalf("clear @portal-restoring marker", err)
 	}
-	o.Logger.Info("step complete", "step", stepClearRestoring, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepClearRestoring, log.Took(stepStart))
 
 	// Step 9 — CleanStaleMarkers (best-effort). Runs strictly after Clear
 	// (step 8) so it observes the post-restore tmux state, and strictly
@@ -383,7 +383,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepCleanStaleMarkers, "error", err)
 		// Continue per spec.
 	}
-	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepCleanStaleMarkers, log.Took(stepStart))
 
 	// Step 10 — SweepOrphanFIFOs (best-effort). Runs after Clear so the
 	// daemon's suppression window has closed and after CleanStaleMarkers
@@ -398,7 +398,7 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepSweepOrphanFIFOs, "error", err)
 		// Continue per spec.
 	}
-	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepSweepOrphanFIFOs, log.Took(stepStart))
 
 	// Step 11 — CleanStale (best-effort).
 	o.Logger.Debug("step entering", "step", stepCleanStale)
@@ -407,13 +407,13 @@ func (o *Orchestrator) Run(ctx context.Context) (bool, []Warning, error) {
 		o.Logger.Warn("step failed", "step", stepCleanStale, "error", err)
 		// Continue per spec.
 	}
-	o.Logger.Info("step complete", "step", stepCleanStale, "took", time.Since(stepStart))
+	o.Logger.Info("step complete", "step", stepCleanStale, log.Took(stepStart))
 
 	// Return — post-step boundary (not numbered). Step 6 never produces a
 	// fatal error; warnings already carry the user-facing surface. The
 	// orchestration-complete INFO is the cycle summary an operator greps to
 	// reconstruct a bootstrap run without scrolling per-step lines.
-	o.Logger.Info("orchestration complete", "steps", totalSteps, "warnings", len(warnings), "took", time.Since(orchestrationStart))
+	o.Logger.Info("orchestration complete", "steps", totalSteps, "warnings", len(warnings), log.Took(orchestrationStart))
 	return serverStarted, warnings, nil
 }
 

@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -289,7 +290,7 @@ func (r *SessionRestorer) ApplyWindowGeometry(sess state.Session, livePanes []tm
 
 	r.logger().Info("geometry complete",
 		"panes", panes,
-		"took", time.Since(start),
+		log.Took(start),
 		"anomalous", anomalous,
 	)
 }

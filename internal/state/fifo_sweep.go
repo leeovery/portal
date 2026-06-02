@@ -97,6 +97,6 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, callerLogg
 		reaped++
 		cleanLogger.Debug("orphan fifo reaped", "path", path)
 	}
-	cleanLogger.Info("orphan-fifo sweep complete", "reaped", reaped, "skipped", skipped, "took", time.Since(start))
+	cleanLogger.Info("orphan-fifo sweep complete", "reaped", reaped, "skipped", skipped, log.Took(start))
 	return nil
 }

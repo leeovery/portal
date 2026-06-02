@@ -205,6 +205,6 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	// the Pgrep-succeeded path — the Pgrep-fail early return above emits no
 	// summary. killed counts successful SIGKILLs only (identity-skips and
 	// kill-failures are excluded).
-	cleanLogger.Info("orphan-daemon sweep complete", "killed", killed, "took", time.Since(start))
+	cleanLogger.Info("orphan-daemon sweep complete", "killed", killed, log.Took(start))
 	return nil
 }

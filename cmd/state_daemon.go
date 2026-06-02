@@ -493,7 +493,7 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		"panes", panes,
 		"natural_churn", naturalChurn,
 		"anomalous", anomalous,
-		"took", time.Since(start),
+		log.Took(start),
 	)
 	return nil
 }

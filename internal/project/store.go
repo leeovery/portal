@@ -223,13 +223,13 @@ func (s *Store) CleanStale() ([]Project, error) {
 		// Whole-batch persist failure: error_class is a write-failed-* value
 		// from the AtomicWrite phase space, NOT "unexpected".
 		logger.Warn("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal",
-			"error", err, "error_class", fileutil.ClassifyWriteError(err), "took", time.Since(start))
+			"error", err, "error_class", fileutil.ClassifyWriteError(err), log.Took(start))
 		return nil, fmt.Errorf("failed to save after cleaning stale projects: %w", err)
 	}
 
 	// entries_failed is omitted: there is no per-entry failure path (see the
 	// [needs-info] note above), so M is always 0 and the attr stays absent.
-	logger.Info("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
+	logger.Info("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal", log.Took(start))
 
 	return removed, nil
 }
