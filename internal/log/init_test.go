@@ -164,6 +164,10 @@ func TestClose_ReturnsWithoutTerminatingProcess(t *testing.T) {
 func TestClose_SafeBeforeAnyInit(t *testing.T) {
 	snapshotInitState(t)
 
+	// Capture the now-real Close emission so it does not leak to the pre-Init
+	// stderr default; the no-panic contract is what this test asserts.
+	SetTestHandler(t, &recordingHandler{})
+
 	// Reset startTime to its zero value to model a never-Init'd process.
 	startTime = time.Time{}
 

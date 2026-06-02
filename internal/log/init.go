@@ -127,27 +127,34 @@ func openLogWriter(stateDir string) (io.Writer, error) {
 	return sink, nil
 }
 
-// Close computes took from the package-private startTime captured at Init. It
-// owns NO control flow — it does NOT call os.Exit. main owns the single
+// Close emits exactly one "process: exit" INFO marker — the terminal half of
+// the per-process lifecycle pairing (spec § Defensive invariants — process: exit
+// and the main exit shape). The line carries the passed exitCode verbatim (0
+// clean, 1 error, 2 usage/panic) and took computed from the package-private
+// startTime captured at Init. The baseline attrs (pid/version/process_role) are
+// auto-injected per-record by the handler — Close does NOT pass them.
+//
+// Close owns NO control flow — it does NOT call os.Exit. main owns the single
 // os.Exit; Close is purely a marker-emitter so it can run on Cobra's
-// Execute-error return path (which os.Exit would skip if deferred).
+// Execute-error return path (which os.Exit would skip if deferred). The "exit"
+// message is in the closed process-lifecycle set, so the handler bypasses the
+// level filter and the line appears even at PORTAL_LOG_LEVEL=warn/error.
 //
-// Close is safe to call before any Init: startTime is then the zero value and
-// computeTook returns a large but harmless duration without panicking.
+// Exactly one exit line fires per Close call (no double-emit). On the panic path
+// main skips Close (Task 2-13) so exit and panic never both fire.
 //
-// TODO(phase-2): emit the "process: exit" INFO line here via
-// log.For("process").Info("exit", "code", exitCode, "took", computeTook()).
-// Phase 1 lands the signature, the took computation, and the no-control-flow
-// guarantee so main (Task 1-7) can call Close; the marker emission body is
-// Phase 2.
+// Close is safe to call before any Init: startTime is then the zero value, so
+// computeTook returns a large-but-bounded (finite, non-negative) duration and
+// the line still renders — it routes to the pre-Init default stderr-text handler
+// held behind the swap indirection (always a valid handler, so no nil-deref) and
+// never panics.
 func Close(exitCode int) {
-	_ = exitCode
-	_ = computeTook()
+	For(processComponent).Info("exit", "code", exitCode, "took", computeTook())
 }
 
 // computeTook returns the elapsed time since the startTime captured at Init.
-// Factored out so the took computation is a single named, testable seam shared
-// by Close and the Phase-2 "process: exit" emission.
+// Factored out as a single named, testable seam so the took attr on the
+// "process: exit" line emitted by Close is computed in exactly one place.
 func computeTook() time.Duration {
 	return time.Since(startTime)
 }
