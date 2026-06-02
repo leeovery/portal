@@ -370,7 +370,9 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 		return nil
 	}
 
-	// Prior daemon alive — issue kill-session once and wait for exit.
+	// Prior daemon alive — issue kill-session once and wait for exit. Kill
+	// error tolerated: the session may have auto-destroyed between probe and
+	// kill (already absent), which is equivalent to a successful kill here.
 	_ = c.KillSession(PortalSaverName)
 
 	if waitForPriorPIDExit(priorPID, saver.Barrier.Timeout) {

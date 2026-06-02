@@ -138,7 +138,11 @@ func runHydrate(cfg hydrateConfig) error {
 	// even a 0-byte read can mean "writer closed" which is still arrival.
 	buf := make([]byte, 1)
 	_, _ = f.Read(buf)
+	// Close error is irrelevant once the signal byte has been observed — the
+	// fd has served its only purpose (blocking until the writer arrived).
 	_ = f.Close()
+	// FIFO unlink is best-effort cleanup; a residual hydrate-*.fifo is reclaimed
+	// by the next bootstrap's orphan-FIFO sweep, so a failure here is harmless.
 	_ = os.Remove(cfg.FIFO)
 
 	// 3. Reset preamble — cursor visible, exit alt-screen, SGR reset. Emitted

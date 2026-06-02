@@ -130,7 +130,7 @@
           "project_skills": [
             ".claude/skills/golang-pro"
           ],
-          "current_phase": 4,
+          "current_phase": 5,
           "current_task": "portal-observability-layer-2-1",
           "completed_tasks": [
             "portal-observability-layer-1-1",
@@ -168,12 +168,14 @@
             "portal-observability-layer-4-2",
             "portal-observability-layer-4-3",
             "portal-observability-layer-4-4",
-            "portal-observability-layer-4-5"
+            "portal-observability-layer-4-5",
+            "portal-observability-layer-4-6"
           ],
           "completed_phases": [
             1,
             2,
-            3
+            3,
+            4
           ]
         }
       }

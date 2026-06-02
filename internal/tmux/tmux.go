@@ -187,6 +187,9 @@ func (c *Client) NewSession(name, dir, shellCommand string) error {
 func (c *Client) ListSessions() ([]Session, error) {
 	output, err := c.cmd.Run("list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}")
 	if err != nil {
+		// A list-sessions error is the canonical "no server running" signal
+		// (tmux exits non-zero when there are no sessions). Collapse it to the
+		// valid zero-sessions state rather than surfacing a spurious error.
 		return []Session{}, nil
 	}
 
