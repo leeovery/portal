@@ -373,9 +373,22 @@ func killSaverAndWaitForDaemon(c *Client, stateDir string) error {
 	// Prior daemon alive — issue kill-session once and wait for exit. Kill
 	// error tolerated: the session may have auto-destroyed between probe and
 	// kill (already absent), which is equivalent to a successful kill here.
+	// The started INFO is the kill-barrier lifecycle event recording that the
+	// barrier committed to killing a confirmed-live prior daemon; it is emitted
+	// only here (not on the two tolerant-kill shortcuts above) so an unpaired
+	// process: start for priorPID is explained by a saver: line (spec §
+	// Defensive invariants — Externally-killed-process footnote).
+	saverLogger.Info("kill-barrier started", "target_pid", priorPID)
 	_ = c.KillSession(PortalSaverName)
 
 	if waitForPriorPIDExit(priorPID, saver.Barrier.Timeout) {
+		// Observed exit after kill-session. The barrier's proximate action was
+		// signal delivery (kill-session delivers SIGHUP), and the barrier
+		// observes only liveness (alive→false), not catch-vs-kill — so reason
+		// is the honest "signal". See escalateKillToSIGKILL for the shared
+		// reason rationale; "exit"/"unknown" are reserved closed-reason values
+		// the forced-kill barrier paths never produce.
+		saverLogger.Info("placeholder died", "target_pid", priorPID, "reason", "signal")
 		return nil
 	}
 
@@ -414,17 +427,18 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 // structural safety net.
 //
 // The identity-check → SIGKILL pairing is the spec's load-bearing
-// residual-recycle-window invariant: the ONLY statement permitted between the
-// identity check passing and the signal is the single DEBUG breadcrumb below.
-// That breadcrumb is non-mutating — it does not touch priorPID, the process
-// table, or any state that could let the PID recycle. It is a kernel-side write
-// to an unbuffered O_APPEND fd (microseconds), not a scheduling window that
-// materially widens the recycle race versus the pre-existing function-call
-// overhead. A future reviewer MUST NOT "fix" the invariant by deleting the
-// breadcrumb: it is the forensic record that the SIGKILL decision was committed
-// (the decision-point DEBUG beneath the saver: kill-barrier escalated INFO
-// lifecycle event), and it sits deliberately adjacent — immediately preceding —
-// the SendSIGKILL seam call.
+// residual-recycle-window invariant: the ONLY statements permitted between the
+// identity check passing and the signal are the two log lines below — the
+// "kill-barrier escalated" INFO lifecycle event and the "kill-barrier
+// escalating to SIGKILL" DEBUG breadcrumb, in that order. BOTH are non-mutating
+// — neither touches priorPID, the process table, or any state that could let
+// the PID recycle. Each is a kernel-side write to an unbuffered O_APPEND fd
+// (microseconds), not a scheduling window that materially widens the recycle
+// race versus the pre-existing function-call overhead. A future reviewer MUST
+// NOT "fix" the invariant by deleting either line: the INFO is the catalogued
+// lifecycle record that the SIGKILL decision was committed, and the DEBUG
+// breadcrumb is the decision-point forensic detail beneath it. They sit
+// deliberately adjacent — immediately preceding — the SendSIGKILL seam call.
 func escalateKillToSIGKILL(priorPID int) error {
 	result, err := saver.IdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
@@ -434,10 +448,23 @@ func escalateKillToSIGKILL(priorPID int) error {
 		)
 		return nil
 	}
+	// escalated is the kill-barrier lifecycle event recording the decision to
+	// escalate from kill-session to a direct SIGKILL. reason="kill-session-timeout"
+	// is the only value in this event's closed reason space (spec § Reason value
+	// spaces). It is emitted ABOVE the Phase-4 DEBUG breadcrumb so the order is
+	// escalated INFO → decision-point DEBUG → SendSIGKILL; both are non-mutating
+	// statements immediately preceding the seam call and do not widen the
+	// residual recycle window (see this function's docstring).
+	saverLogger.Info("kill-barrier escalated", "target_pid", priorPID, "reason", "kill-session-timeout")
 	saverLogger.Debug("kill-barrier escalating to SIGKILL", "target_pid", priorPID)
 	_ = saver.Barrier.SendSIGKILL(priorPID)
 
 	if waitForPriorPIDExit(priorPID, saver.Barrier.EscalationTimeout) {
+		// Observed exit after SIGKILL. reason="signal" matches the kill-session
+		// exit branch: the barrier's proximate action was signal delivery
+		// (SIGKILL) and it observes only liveness, not catch-vs-kill. The same
+		// reserved-value note applies — "exit"/"unknown" are not produced here.
+		saverLogger.Info("placeholder died", "target_pid", priorPID, "reason", "signal")
 		return nil
 	}
 	saver.Barrier.Logger.Warn(

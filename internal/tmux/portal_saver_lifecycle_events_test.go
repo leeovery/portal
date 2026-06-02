@@ -486,3 +486,397 @@ func TestWaitForSaverDaemonReady_EmitsNoDaemonReadyAndKeepsWarnOnTimeout(t *test
 		t.Errorf("expected exactly 1 WARN on timeout, got %d: %v", len(barrierLog.warns), barrierLog.warns)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Task 5-8: kill-barrier lifecycle INFO events under component "saver" emitted
+// by killSaverAndWaitForDaemon / escalateKillToSIGKILL.
+//
+//   - kill-barrier started   target_pid=X            (prior daemon alive, before kill-session)
+//   - kill-barrier escalated target_pid=X reason=kill-session-timeout
+//                                                     (IdentifyIsPortalDaemon escalation branch only)
+//   - placeholder died       target_pid=X reason=signal
+//                                                     (observed-exit poll branches: kill-session-exit
+//                                                      and post-SIGKILL-exit)
+//
+// These are ADDITIVE INFO events: the at-most-one-WARN-per-invocation contract
+// of the kill barrier is preserved unchanged.
+//
+// Spec reference: § Saver and daemon lifecycle event taxonomy (saver event
+// table, closed reason value spaces); § Defensive invariants (Externally-
+// killed-process footnote — the killer records the kill).
+// ----------------------------------------------------------------------------
+
+// firstSaverIndex returns the 0-based ordinal of the first component=saver
+// record with the supplied message in emission order, or -1 if absent. Used to
+// assert relative ordering of lifecycle events on the same captured stream
+// (e.g. escalated INFO before the SIGKILL-escalation DEBUG breadcrumb).
+func (s *saverEventSink) firstSaverIndex(msg string) int {
+	for i, r := range s.all() {
+		comp, ok := r.attrs["component"]
+		if !ok || comp.String() != "saver" || r.msg != msg {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func TestKillSaverAndWaitForDaemon_EmitsKillBarrierStartedWhenPriorDaemonAlive(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 500*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	// Alive for the first two probes (initial check + first tick), then dead.
+	calls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		calls++
+		return calls < 3
+	})
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	// killSession must run AFTER the started INFO has been recorded. Snapshot
+	// the started-event count at kill-session time to pin the ordering.
+	startedAtKillTime := -1
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) {
+			startedAtKillTime = len(sink.saverEvents("kill-barrier started"))
+			return "", nil
+		},
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	rec := sink.onlySaverEvent(t, "kill-barrier started")
+	if rec.level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.level)
+	}
+	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+		t.Errorf("target_pid = %d, want 4321", got)
+	}
+	if startedAtKillTime != 1 {
+		t.Errorf("kill-barrier started must be emitted BEFORE kill-session (count at kill time = %d, want 1)", startedAtKillTime)
+	}
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on clean exit, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_NoKillBarrierStartedOnNoPriorPIDShortcut(t *testing.T) {
+	installBarrierReadPID(t, func(string) (int, error) {
+		return 0, errors.New("daemon.pid absent")
+	})
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if evs := sink.saverEvents("kill-barrier started"); len(evs) != 0 {
+		t.Errorf("expected 0 kill-barrier started events on no-prior-PID shortcut, got %d: %+v", len(evs), evs)
+	}
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on tolerant-kill shortcut, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_NoKillBarrierStartedWhenPriorDaemonAlreadyDead(t *testing.T) {
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+	installBarrierIsAlive(t, func(int) bool { return false }) // already dead
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if evs := sink.saverEvents("kill-barrier started"); len(evs) != 0 {
+		t.Errorf("expected 0 kill-barrier started events when prior daemon already dead, got %d: %+v", len(evs), evs)
+	}
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on already-dead shortcut, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_EmitsKillBarrierEscalatedAboveDebugBreadcrumbOnPortalDaemonBranch(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	// Snapshot the escalated-INFO count at SIGKILL time. Since both the escalated
+	// INFO and the DEBUG breadcrumb precede SendSIGKILL, the escalated INFO must
+	// already be recorded when SIGKILL fires.
+	killCalls := 0
+	escalatedAtKillTime := -1
+	installBarrierSendSIGKILL(t, func(int) error {
+		escalatedAtKillTime = len(sink.saverEvents("kill-barrier escalated"))
+		killCalls++
+		return nil
+	})
+	// Alive during session-kill poll; dead immediately after SIGKILL.
+	installBarrierIsAlive(t, func(int) bool { return killCalls == 0 })
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	rec := sink.onlySaverEvent(t, "kill-barrier escalated")
+	if rec.level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.level)
+	}
+	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+		t.Errorf("target_pid = %d, want 4321", got)
+	}
+	if got := rec.attrString(t, "reason"); got != "kill-session-timeout" {
+		t.Errorf("reason = %q, want %q", got, "kill-session-timeout")
+	}
+
+	// escalated INFO must precede SIGKILL.
+	if escalatedAtKillTime != 1 {
+		t.Errorf("kill-barrier escalated must be emitted BEFORE SIGKILL (count at kill time = %d, want 1)", escalatedAtKillTime)
+	}
+
+	// The existing Phase-4 DEBUG breadcrumb must still be present exactly once,
+	// and the escalated INFO must come BEFORE it.
+	breadcrumbIdx := sink.firstSaverIndex("kill-barrier escalating to SIGKILL")
+	if breadcrumbIdx < 0 {
+		t.Fatalf("expected the existing DEBUG breadcrumb %q to still be present: %+v", "kill-barrier escalating to SIGKILL", sink.all())
+	}
+	if breadcrumbs := sink.saverEvents("kill-barrier escalating to SIGKILL"); len(breadcrumbs) != 1 {
+		t.Errorf("expected exactly 1 DEBUG breadcrumb, got %d: %+v", len(breadcrumbs), breadcrumbs)
+	}
+	escalatedIdx := sink.firstSaverIndex("kill-barrier escalated")
+	if escalatedIdx < 0 || escalatedIdx >= breadcrumbIdx {
+		t.Errorf("escalated INFO (idx %d) must precede the DEBUG breadcrumb (idx %d)", escalatedIdx, breadcrumbIdx)
+	}
+
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on clean escalation, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_NoKillBarrierEscalatedAndKeepsSingleWarnOnIdentitySkip(t *testing.T) {
+	cases := []struct {
+		name   string
+		result state.IdentifyResult
+		idErr  error
+	}{
+		{"IdentifyDead", state.IdentifyDead, nil},
+		{"IdentifyNotPortalDaemon", state.IdentifyNotPortalDaemon, nil},
+		{"TransientError", 0, errors.New("ps exec failed: transient")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			installBarrierPollInterval(t, 1*time.Millisecond)
+			installBarrierTimeout(t, 5*time.Millisecond)
+			installBarrierEscalationTimeout(t, 5*time.Millisecond)
+			installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+			installBarrierIsAlive(t, func(int) bool { return true })
+
+			installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+				return tc.result, tc.idErr
+			})
+
+			killCalls := 0
+			installBarrierSendSIGKILL(t, func(int) error {
+				killCalls++
+				return nil
+			})
+
+			barrierLog := &recordingBarrierLogger{}
+			installBarrierLogger(t, barrierLog)
+			sink := installSaverEventSink(t)
+
+			script := &portalSaverScript{
+				killSession: func(int) (string, error) { return "", nil },
+			}
+			mock := &MockCommander{RunFunc: script.run(t)}
+			client := tmux.NewClient(mock)
+
+			if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+				t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+			}
+
+			if killCalls != 0 {
+				t.Errorf("expected 0 SIGKILL seam calls on identity-skip branch, got %d", killCalls)
+			}
+			if evs := sink.saverEvents("kill-barrier escalated"); len(evs) != 0 {
+				t.Errorf("expected 0 kill-barrier escalated events on identity-skip branch, got %d: %+v", len(evs), evs)
+			}
+			if len(barrierLog.warns) != 1 {
+				t.Errorf("expected exactly 1 WARN on identity-skip branch, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+			}
+		})
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_EmitsPlaceholderDiedReasonSignalOnKillSessionExit(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 500*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	// Alive for the initial check + first tick, then dead — observed exit after
+	// kill-session, never reaching escalation.
+	calls := 0
+	installBarrierIsAlive(t, func(int) bool {
+		calls++
+		return calls < 3
+	})
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	rec := sink.onlySaverEvent(t, "placeholder died")
+	if rec.level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.level)
+	}
+	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+		t.Errorf("target_pid = %d, want 4321", got)
+	}
+	if got := rec.attrString(t, "reason"); got != "signal" {
+		t.Errorf("reason = %q, want %q", got, "signal")
+	}
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on observed exit, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+func TestKillSaverAndWaitForDaemon_EmitsPlaceholderDiedReasonSignalOnPostSIGKILLExit(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 500*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	// Alive during the session-kill poll (forces escalation); dead immediately
+	// after SIGKILL — observed exit on the post-SIGKILL poll branch.
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+	installBarrierIsAlive(t, func(int) bool { return killCalls == 0 })
+
+	barrierLog := &recordingBarrierLogger{}
+	installBarrierLogger(t, barrierLog)
+	sink := installSaverEventSink(t)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	rec := sink.onlySaverEvent(t, "placeholder died")
+	if rec.level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.level)
+	}
+	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+		t.Errorf("target_pid = %d, want 4321", got)
+	}
+	if got := rec.attrString(t, "reason"); got != "signal" {
+		t.Errorf("reason = %q, want %q", got, "signal")
+	}
+	if len(barrierLog.warns) != 0 {
+		t.Errorf("expected 0 WARN lines on post-SIGKILL observed exit, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+	}
+}
+
+// TestKillSaverAndWaitForDaemon_PreservesAtMostOneWarnContractAcrossLifecycleEvents
+// pins the at-most-one-WARN-per-invocation contract on the WARN-emitting paths
+// after the additive INFO events. The escalation-survive path (SIGKILL sent but
+// the process never exits) and the timeout-then-identity-skip path each emit
+// exactly one WARN.
+func TestKillSaverAndWaitForDaemon_PreservesAtMostOneWarnContractAcrossLifecycleEvents(t *testing.T) {
+	t.Run("escalation survives SIGKILL", func(t *testing.T) {
+		installBarrierPollInterval(t, 1*time.Millisecond)
+		installBarrierTimeout(t, 5*time.Millisecond)
+		installBarrierEscalationTimeout(t, 5*time.Millisecond)
+		installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+		installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+			return state.IdentifyIsPortalDaemon, nil
+		})
+		installBarrierSendSIGKILL(t, func(int) error { return nil })
+		installBarrierIsAlive(t, func(int) bool { return true }) // never dies
+
+		barrierLog := &recordingBarrierLogger{}
+		installBarrierLogger(t, barrierLog)
+		sink := installSaverEventSink(t)
+
+		script := &portalSaverScript{
+			killSession: func(int) (string, error) { return "", nil },
+		}
+		mock := &MockCommander{RunFunc: script.run(t)}
+		client := tmux.NewClient(mock)
+
+		if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+			t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+		}
+
+		if len(barrierLog.warns) != 1 {
+			t.Errorf("expected exactly 1 WARN on escalation-survive path, got %d: %v", len(barrierLog.warns), barrierLog.warns)
+		}
+		// started + escalated INFO emitted; placeholder died NOT (process never exited).
+		if evs := sink.saverEvents("kill-barrier started"); len(evs) != 1 {
+			t.Errorf("expected 1 kill-barrier started, got %d", len(evs))
+		}
+		if evs := sink.saverEvents("kill-barrier escalated"); len(evs) != 1 {
+			t.Errorf("expected 1 kill-barrier escalated, got %d", len(evs))
+		}
+		if evs := sink.saverEvents("placeholder died"); len(evs) != 0 {
+			t.Errorf("expected 0 placeholder died on never-exits path, got %d: %+v", len(evs), evs)
+		}
+	})
+}
