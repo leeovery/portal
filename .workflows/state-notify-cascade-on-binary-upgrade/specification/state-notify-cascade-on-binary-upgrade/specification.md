@@ -51,6 +51,39 @@ Special-casing the blind set was explicitly rejected. The blind set is tmux-vers
 - **Delete `ShowGlobalHooks` (the no-arg global read).** It is the defect's single point of entry; with both registration and unregistration on the per-event seam, nothing should retain it. (Any remaining caller is migrated or the read is removed.)
 - **Reuse existing, tested primitives:** the per-event eviction half already exists in `UnregisterPortalHooks` — `portalEntriesFor` + `containsAny(portalCommandSubstrings)` for Portal-only matching, reverse-index `UnsetGlobalHookAt` for removal, `AppendGlobalHook` for the single append.
 
+## Registration Redesign — "Ensure Exactly One"
+
+`RegisterPortalHooks` is rebuilt so that, for every Portal-managed event, it converges that event's hook array to **exactly one** Portal entry carrying the current desired command body — reading per-event throughout.
+
+### Per-event convergence algorithm
+
+For each managed event, given the event's *eviction fingerprint(s)* and its *desired body*:
+
+1. Read the event's entries via `ShowGlobalHooksForEvent(event)` → `ParseShowHooks`.
+2. Collect the Portal-authored entries — those whose command body contains any of the event's eviction fingerprint(s). (User/other-plugin entries are not matched and are never touched.)
+3. **Idempotent fast path:** if exactly one Portal-authored entry exists and its body already equals the desired body, do nothing — no unset, no append, no churn.
+4. Otherwise converge: unset every Portal-authored entry via `UnsetGlobalHookAt` in **descending index order** (so a removal never shifts a not-yet-processed index), then `AppendGlobalHook(event, desiredBody)` exactly once.
+
+This collapses any depth-N stack (including the live 139-deep ones) to a single entry, and migrates a stale legacy body to the current one, as an ordinary side effect of bootstrap step 2 — no separate cleanup pass.
+
+### Per-event parameters
+
+| Event(s) | Eviction fingerprint(s) | Desired body |
+|---|---|---|
+| `session-created`, `session-renamed`, `window-linked`, `window-unlinked`, `window-layout-changed`, `pane-focus-out` | `portal state notify` | `notifyCommand` |
+| `session-closed` | `portal state notify`, `portal state commit-now` | `commitNowCommand` |
+| `client-attached`, `client-session-changed` | `portal state signal-hydrate` | `signalHydrateCommand` (the `--`-separated form) |
+
+Notes on the table:
+
+- **`session-closed`** lists both `portal state notify` and `portal state commit-now` as eviction fingerprints: this evicts a stale pre-fix `notifyCommand` left by an older binary *and* collapses any duplicate `commit-now` entries, converging to one `commitNowCommand`. (This replaces the historical session-closed special case — see "Migration-Helper Consolidation".)
+- **Hydration events** match on `portal state signal-hydrate`, which catches both the legacy un-separated body and the current `--` form, converging to the current one. (This replaces the historical hydration special case — see "Migration-Helper Consolidation".)
+- Eviction is scoped to each event's **own category fingerprint(s)**. A legacy cross-category entry (e.g. a stale `portal state migrate-rename` on `session-renamed` from a very old binary) is *not* reaped by registration — it remains the responsibility of the teardown/clean path. Registration's job is solely "ensure exactly one of *this* event's desired body."
+
+### User-hook coexistence guarantee
+
+The eviction predicate matches **only Portal-authored command bodies** (the `portalCommandSubstrings` substring discipline already used by the teardown path). A user-authored or other-plugin hook on the same event — including on `pane-focus-out` / `window-layout-changed` — is never matched and survives every registration untouched. This is a hard requirement: the original design deliberately chose `set-hook -ga` (append) over `-g` (replace) specifically to coexist with user `.tmux.conf` hooks, and the fix must preserve that coexistence.
+
 ---
 
 ## Working Notes
