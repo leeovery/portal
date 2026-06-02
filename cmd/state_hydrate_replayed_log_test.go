@@ -18,16 +18,15 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -153,80 +152,23 @@ func TestHydrateReplayedLog_FiveMegabyteFileReportsExactByteCount(t *testing.T) 
 	}
 }
 
-// replayDurationSink records the slog.Value of every record's attrs (incl. the
-// component bound via WithAttrs) so a test can assert the took attr's Kind —
-// substring rendering cannot distinguish a slog.KindDuration took attr from a
-// stringified one. Mirrors durationCaptureSink (timeout-log tests) scoped here.
-type replayDurationSink struct {
-	mu      sync.Mutex
-	records []replayDurationRecord
-	shared  *replayDurationSink
-	bound   []slog.Attr
-}
-
-type replayDurationRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *replayDurationSink) owner() *replayDurationSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *replayDurationSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *replayDurationSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &replayDurationSink{shared: s.owner(), bound: next}
-}
-
-func (s *replayDurationSink) WithGroup(_ string) slog.Handler {
-	return &replayDurationSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *replayDurationSink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := replayDurationRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *replayDurationSink) all() []replayDurationRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]replayDurationRecord, len(s.records))
-	copy(out, s.records)
-	return out
-}
-
-func (s *replayDurationSink) scrollbackReplayedRecord(t *testing.T) replayDurationRecord {
+// scrollbackReplayedRecord returns the single captured record whose
+// component=hydrate and msg="scrollback replayed", failing if not exactly one
+// was emitted. It is a thin filter over the shared logtest.Sink so the test can
+// assert the took attr's Kind (substring rendering cannot distinguish a
+// slog.KindDuration took attr from a stringified one).
+func scrollbackReplayedRecord(t *testing.T, sink *logtest.Sink) logtest.Record {
 	t.Helper()
-	var out []replayDurationRecord
-	for _, r := range s.all() {
-		comp, ok := r.attrs["component"]
-		if !ok || comp.String() != "hydrate" || r.msg != "scrollback replayed" {
+	var out []logtest.Record
+	for _, r := range sink.Records() {
+		comp, ok := r.Attrs["component"]
+		if !ok || comp.String() != "hydrate" || r.Msg != "scrollback replayed" {
 			continue
 		}
 		out = append(out, r)
 	}
 	if len(out) != 1 {
-		t.Fatalf("expected exactly 1 hydrate: scrollback replayed record, got %d: %+v", len(out), s.all())
+		t.Fatalf("expected exactly 1 hydrate: scrollback replayed record, got %d: %+v", len(out), sink.Records())
 	}
 	return out[0]
 }
@@ -241,18 +183,17 @@ func TestHydrateReplayedLog_TookIsDurationAcrossReplayNotSettleSleep(t *testing.
 
 	signalFIFOAsync(t, fifo)
 
-	sink := &replayDurationSink{}
-	logger := slog.New(sink).With("component", "hydrate")
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 	cfg := replayCfg(t, fifo, scrollback, "dur:0.0", io.Discard, (&stubExecShell{}).fn(), logger)
 
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	rec := sink.scrollbackReplayedRecord(t)
-	took, ok := rec.attrs["took"]
+	rec := scrollbackReplayedRecord(t, sink)
+	took, ok := rec.Attrs["took"]
 	if !ok {
-		t.Fatalf("scrollback replayed record missing took attr: %+v", rec.attrs)
+		t.Fatalf("scrollback replayed record missing took attr: %+v", rec.Attrs)
 	}
 	if took.Kind() != slog.KindDuration {
 		t.Errorf("took kind = %v, want Duration (must be the measured time.Duration, not stringified)", took.Kind())

@@ -15,87 +15,32 @@
 package state_test
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 )
 
-// fifoSummarySink is a slog.Handler that records every emitted record with its
-// level, message, and attrs (including the component attr bound via WithAttrs by
-// log.For). The summary tests assert on the structured record (component=clean,
-// msg, reaped/skipped int attrs, took rendered as a duration, path on the
-// demoted DEBUG), so a substring sink would be too lossy.
+// fifoSummarySink is a thin wrapper over the shared logtest.Sink that adds the
+// orphan-fifo sweep's component+message record filtering. The summary tests
+// assert on the structured record (component=clean, msg, reaped/skipped int
+// attrs, took rendered as a duration, path on the demoted DEBUG) via the sink's
+// shared accessors.
 type fifoSummarySink struct {
-	mu      sync.Mutex
-	records []fifoSummaryRecord
-	shared  *fifoSummarySink
-	bound   []slog.Attr
-}
-
-type fifoSummaryRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *fifoSummarySink) owner() *fifoSummarySink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *fifoSummarySink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *fifoSummarySink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &fifoSummarySink{shared: s.owner(), bound: next}
-}
-
-func (s *fifoSummarySink) WithGroup(_ string) slog.Handler {
-	return &fifoSummarySink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *fifoSummarySink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := fifoSummaryRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *fifoSummarySink) all() []fifoSummaryRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]fifoSummaryRecord, len(s.records))
-	copy(out, s.records)
-	return out
+	*logtest.Sink
 }
 
 // summariesFor returns every record whose component matches comp and msg matches.
-func (s *fifoSummarySink) summariesFor(comp, msg string) []fifoSummaryRecord {
-	var out []fifoSummaryRecord
-	for _, r := range s.all() {
-		c, ok := r.attrs["component"]
-		if !ok || c.String() != comp || r.msg != msg {
+func (s *fifoSummarySink) summariesFor(comp, msg string) []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		c, ok := r.Attrs["component"]
+		if !ok || c.String() != comp || r.Msg != msg {
 			continue
 		}
 		out = append(out, r)
@@ -105,24 +50,24 @@ func (s *fifoSummarySink) summariesFor(comp, msg string) []fifoSummaryRecord {
 
 // onlySummary asserts exactly one record with the given component+msg was
 // emitted and returns it.
-func (s *fifoSummarySink) onlySummary(t *testing.T, comp, msg string) fifoSummaryRecord {
+func (s *fifoSummarySink) onlySummary(t *testing.T, comp, msg string) logtest.Record {
 	t.Helper()
 	sums := s.summariesFor(comp, msg)
 	if len(sums) != 1 {
-		t.Fatalf("expected exactly 1 %q %q summary, got %d: %+v", comp, msg, len(sums), s.all())
+		t.Fatalf("expected exactly 1 %q %q summary, got %d: %+v", comp, msg, len(sums), s.Records())
 	}
 	return sums[0]
 }
 
 // matching returns every record whose level+msg match and whose component
 // equals comp.
-func (s *fifoSummarySink) matching(level slog.Level, comp, msg string) []fifoSummaryRecord {
-	var out []fifoSummaryRecord
-	for _, r := range s.all() {
-		if r.level != level || r.msg != msg {
+func (s *fifoSummarySink) matching(level slog.Level, comp, msg string) []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		if r.Level != level || r.Msg != msg {
 			continue
 		}
-		c, ok := r.attrs["component"]
+		c, ok := r.Attrs["component"]
 		if !ok || c.String() != comp {
 			continue
 		}
@@ -131,33 +76,10 @@ func (s *fifoSummarySink) matching(level slog.Level, comp, msg string) []fifoSum
 	return out
 }
 
-func (r fifoSummaryRecord) intAttr(t *testing.T, key string) int64 {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("summary missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindInt64 {
-		t.Fatalf("attr %q kind = %v, want Int64: %+v", key, v.Kind(), v)
-	}
-	return v.Int64()
-}
-
-func (r fifoSummaryRecord) requireDuration(t *testing.T, key string) {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("summary missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindDuration {
-		t.Errorf("attr %q kind = %v, want Duration", key, v.Kind())
-	}
-}
-
 func installFIFOSummarySink(t *testing.T) *fifoSummarySink {
 	t.Helper()
-	sink := &fifoSummarySink{}
-	log.SetTestHandler(t, sink)
+	sink := &fifoSummarySink{Sink: &logtest.Sink{}}
+	log.SetTestHandler(t, sink.Sink)
 	return sink
 }
 
@@ -182,16 +104,16 @@ func TestSweepOrphanFIFOs_EmitsCleanSummaryCountingReapedAndSkipped(t *testing.T
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("summary level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "reaped"); got != 2 {
+	if got := rec.IntAttr(t, "reaped"); got != 2 {
 		t.Errorf("reaped = %d, want 2", got)
 	}
-	if got := rec.intAttr(t, "skipped"); got != 1 {
+	if got := rec.IntAttr(t, "skipped"); got != 1 {
 		t.Errorf("skipped = %d, want 1 (live-marker-protected)", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 func TestSweepOrphanFIFOs_EmitsZeroReapedZeroSkippedForMissingStateDir(t *testing.T) {
@@ -203,13 +125,13 @@ func TestSweepOrphanFIFOs_EmitsZeroReapedZeroSkippedForMissingStateDir(t *testin
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if got := rec.intAttr(t, "reaped"); got != 0 {
+	if got := rec.IntAttr(t, "reaped"); got != 0 {
 		t.Errorf("reaped = %d, want 0 (loop runs zero times)", got)
 	}
-	if got := rec.intAttr(t, "skipped"); got != 0 {
+	if got := rec.IntAttr(t, "skipped"); got != 0 {
 		t.Errorf("skipped = %d, want 0 (loop runs zero times)", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 func TestSweepOrphanFIFOs_PreservedNonFIFOCountsAsSkipped(t *testing.T) {
@@ -233,10 +155,10 @@ func TestSweepOrphanFIFOs_PreservedNonFIFOCountsAsSkipped(t *testing.T) {
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if got := rec.intAttr(t, "reaped"); got != 0 {
+	if got := rec.IntAttr(t, "reaped"); got != 0 {
 		t.Errorf("reaped = %d, want 0", got)
 	}
-	if got := rec.intAttr(t, "skipped"); got != 1 {
+	if got := rec.IntAttr(t, "skipped"); got != 1 {
 		t.Errorf("skipped = %d, want 1 (non-FIFO sibling)", got)
 	}
 }
@@ -280,23 +202,23 @@ func TestSweepOrphanFIFOs_RemoveFailureWarnsOnLoggerAndCountsAsSkipped(t *testin
 	// wrapped error attr (the os.Remove error).
 	warns := sink.matching(slog.LevelWarn, "bootstrap", "remove orphan fifo failed")
 	if len(warns) != 2 {
-		t.Fatalf("expected 2 remove-failure WARNs under bootstrap, got %d: %+v", len(warns), sink.all())
+		t.Fatalf("expected 2 remove-failure WARNs under bootstrap, got %d: %+v", len(warns), sink.Records())
 	}
 	for _, w := range warns {
-		if _, ok := w.attrs["error"]; !ok {
-			t.Errorf("remove-failure WARN missing error attr: %+v", w.attrs)
+		if _, ok := w.Attrs["error"]; !ok {
+			t.Errorf("remove-failure WARN missing error attr: %+v", w.Attrs)
 		}
-		if _, ok := w.attrs["path"]; !ok {
-			t.Errorf("remove-failure WARN missing path attr: %+v", w.attrs)
+		if _, ok := w.Attrs["path"]; !ok {
+			t.Errorf("remove-failure WARN missing path attr: %+v", w.Attrs)
 		}
 	}
 
 	// Both failures counted as skipped; nothing reaped.
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if got := rec.intAttr(t, "reaped"); got != 0 {
+	if got := rec.IntAttr(t, "reaped"); got != 0 {
 		t.Errorf("reaped = %d, want 0", got)
 	}
-	if got := rec.intAttr(t, "skipped"); got != 2 {
+	if got := rec.IntAttr(t, "skipped"); got != 2 {
 		t.Errorf("skipped = %d, want 2 (both remove failures)", got)
 	}
 }
@@ -321,10 +243,10 @@ func TestSweepOrphanFIFOs_LiveMarkerProtectedCountsAsSkippedAndIsLeftInPlace(t *
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if got := rec.intAttr(t, "reaped"); got != 0 {
+	if got := rec.IntAttr(t, "reaped"); got != 0 {
 		t.Errorf("reaped = %d, want 0", got)
 	}
-	if got := rec.intAttr(t, "skipped"); got != 1 {
+	if got := rec.IntAttr(t, "skipped"); got != 1 {
 		t.Errorf("skipped = %d, want 1 (live-marker-protected)", got)
 	}
 }
@@ -343,8 +265,8 @@ func TestSweepOrphanFIFOs_DemotesPerRemovalInfoToDebugUnderClean(t *testing.T) {
 	}
 
 	// The old per-removal INFO message must be gone at any level/component.
-	for _, r := range sink.all() {
-		if r.msg == "removed orphan fifo" {
+	for _, r := range sink.Records() {
+		if r.Msg == "removed orphan fifo" {
 			t.Errorf("old per-removal INFO message must be gone: %+v", r)
 		}
 	}
@@ -352,10 +274,10 @@ func TestSweepOrphanFIFOs_DemotesPerRemovalInfoToDebugUnderClean(t *testing.T) {
 	// Exactly one per-item DEBUG "orphan fifo reaped" under clean, carrying path.
 	dbg := sink.matching(slog.LevelDebug, "clean", "orphan fifo reaped")
 	if len(dbg) != 1 {
-		t.Fatalf("expected 1 DEBUG 'orphan fifo reaped' under clean, got %d: %+v", len(dbg), sink.all())
+		t.Fatalf("expected 1 DEBUG 'orphan fifo reaped' under clean, got %d: %+v", len(dbg), sink.Records())
 	}
-	if p, ok := dbg[0].attrs["path"]; !ok || p.String() != orphan {
-		t.Errorf("DEBUG 'orphan fifo reaped' path = %v, want %s", dbg[0].attrs["path"], orphan)
+	if p, ok := dbg[0].Attrs["path"]; !ok || p.String() != orphan {
+		t.Errorf("DEBUG 'orphan fifo reaped' path = %v, want %s", dbg[0].Attrs["path"], orphan)
 	}
 }
 
@@ -409,7 +331,7 @@ func TestSweepOrphanFIFOs_BoundaryContract_CallerWarnSinkVsCleanSummary(t *testi
 	// (1) Per-item WARN is attributed to the CALLER component, not clean.
 	warns := sink.matching(slog.LevelWarn, callerComponent, "remove orphan fifo failed")
 	if len(warns) != 1 {
-		t.Fatalf("expected 1 remove-failure WARN under %q, got %d: %+v", callerComponent, len(warns), sink.all())
+		t.Fatalf("expected 1 remove-failure WARN under %q, got %d: %+v", callerComponent, len(warns), sink.Records())
 	}
 	if cleanWarns := sink.matching(slog.LevelWarn, "clean", "remove orphan fifo failed"); len(cleanWarns) != 0 {
 		t.Errorf("per-item WARN must NOT be attributed to clean, got %d: %+v", len(cleanWarns), cleanWarns)
@@ -417,8 +339,8 @@ func TestSweepOrphanFIFOs_BoundaryContract_CallerWarnSinkVsCleanSummary(t *testi
 
 	// (2) Cycle-summary INFO is attributed to clean, regardless of the caller.
 	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("summary level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.Level)
 	}
 	if sums := sink.summariesFor(callerComponent, "orphan-fifo sweep complete"); len(sums) != 0 {
 		t.Errorf("summary must NOT be attributed to caller component %q, got %d: %+v", callerComponent, len(sums), sums)

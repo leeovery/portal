@@ -11,96 +11,35 @@ package cmd
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// durationCaptureSink records the slog.Value of every emitted record's attrs
-// (including the component bound via WithAttrs) so a test can assert an attr's
-// Kind — substring rendering is too lossy to distinguish a slog.KindDuration
-// took attr from a stringified one. Mirrors captureSummarySink (Task 5-1) but
-// scoped to the timeout-log tests.
-type durationCaptureSink struct {
-	mu      sync.Mutex
-	records []durationCaptureRecord
-	shared  *durationCaptureSink
-	bound   []slog.Attr
-}
-
-type durationCaptureRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *durationCaptureSink) owner() *durationCaptureSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *durationCaptureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *durationCaptureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &durationCaptureSink{shared: s.owner(), bound: next}
-}
-
-func (s *durationCaptureSink) WithGroup(_ string) slog.Handler {
-	return &durationCaptureSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *durationCaptureSink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := durationCaptureRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *durationCaptureSink) all() []durationCaptureRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]durationCaptureRecord, len(s.records))
-	copy(out, s.records)
-	return out
-}
-
-// signalTimeoutRecord returns the single record whose component=hydrate and
-// msg="signal timeout". Fails if not exactly one was emitted.
-func (s *durationCaptureSink) signalTimeoutRecord(t *testing.T) durationCaptureRecord {
+// signalTimeoutRecord returns the single captured record whose component=hydrate
+// and msg="signal timeout", failing if not exactly one was emitted. It is a
+// thin filter over the shared logtest.Sink so the test can assert the took
+// attr's Kind (substring rendering cannot distinguish a slog.KindDuration took
+// attr from a stringified one).
+func signalTimeoutRecord(t *testing.T, sink *logtest.Sink) logtest.Record {
 	t.Helper()
-	var out []durationCaptureRecord
-	for _, r := range s.all() {
-		comp, ok := r.attrs["component"]
-		if !ok || comp.String() != "hydrate" || r.msg != "signal timeout" {
+	var out []logtest.Record
+	for _, r := range sink.Records() {
+		comp, ok := r.Attrs["component"]
+		if !ok || comp.String() != "hydrate" || r.Msg != "signal timeout" {
 			continue
 		}
 		out = append(out, r)
 	}
 	if len(out) != 1 {
-		t.Fatalf("expected exactly 1 hydrate: signal timeout record, got %d: %+v", len(out), s.all())
+		t.Fatalf("expected exactly 1 hydrate: signal timeout record, got %d: %+v", len(out), sink.Records())
 	}
 	return out[0]
 }
@@ -127,18 +66,17 @@ func TestHydrateTimeoutLog_TookAttrIsDurationNotString(t *testing.T) {
 	dir := t.TempDir()
 	fifo := makeFIFO(t, dir, "hydrate-dur__0.0.fifo")
 
-	sink := &durationCaptureSink{}
-	logger := slog.New(sink).With("component", "hydrate")
+	logger, sink := newCaptureLoggerForComponent(t, "hydrate")
 	cfg := timeoutCfg(t, fifo, filepath.Join(dir, "sb"), "dur:0.0", io.Discard, &recordingCommander{}, (&stubExecShell{}).fn(), logger)
 
 	if err := runHydrate(cfg); err != nil {
 		t.Fatalf("runHydrate: %v", err)
 	}
 
-	rec := sink.signalTimeoutRecord(t)
-	took, ok := rec.attrs["took"]
+	rec := signalTimeoutRecord(t, sink)
+	took, ok := rec.Attrs["took"]
 	if !ok {
-		t.Fatalf("signal timeout record missing took attr: %+v", rec.attrs)
+		t.Fatalf("signal timeout record missing took attr: %+v", rec.Attrs)
 	}
 	if took.Kind() != slog.KindDuration {
 		t.Errorf("took kind = %v, want Duration (must be passed as the hydrateTimeout time.Duration, not stringified)", took.Kind())

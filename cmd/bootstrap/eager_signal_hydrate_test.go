@@ -134,18 +134,18 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 	// failing FIFO path, the WRAPPED error, and error_class=unexpected.
 	warns := sink.matching(slog.LevelWarn, "signal", "eager-signal write fifo failed")
 	if len(warns) != 1 {
-		t.Fatalf("expected 1 WARN under component=signal for the failing FIFO, got %d: %+v", len(warns), sink.all())
+		t.Fatalf("expected 1 WARN under component=signal for the failing FIFO, got %d: %+v", len(warns), sink.Records())
 	}
 	rec := warns[0]
-	if p, ok := rec.attrs["path"]; !ok || p.String() != failPath {
-		t.Errorf("WARN path attr = %v; want %q", rec.attrs["path"], failPath)
+	if p, ok := rec.Attrs["path"]; !ok || p.String() != failPath {
+		t.Errorf("WARN path attr = %v; want %q", rec.Attrs["path"], failPath)
 	}
-	if ec, ok := rec.attrs["error_class"]; !ok || ec.String() != "unexpected" {
-		t.Errorf("WARN error_class attr = %v; want %q", rec.attrs["error_class"], "unexpected")
+	if ec, ok := rec.Attrs["error_class"]; !ok || ec.String() != "unexpected" {
+		t.Errorf("WARN error_class attr = %v; want %q", rec.Attrs["error_class"], "unexpected")
 	}
-	errAttr, ok := rec.attrs["error"]
+	errAttr, ok := rec.Attrs["error"]
 	if !ok {
-		t.Fatalf("WARN missing error attr: %+v", rec.attrs)
+		t.Fatalf("WARN missing error attr: %+v", rec.Attrs)
 	}
 	// The error attr must carry the wrapped err passed directly (not .Error()),
 	// so a slog.AnyValue holding the error value renders the sentinel message.
@@ -246,13 +246,13 @@ func TestEagerSignalHydrate_SuccessEmitsSignalledDebugBreadcrumb(t *testing.T) {
 	// One DEBUG "fifo signalled" under component=signal per successful FIFO.
 	dbg := sink.matching(slog.LevelDebug, "signal", "fifo signalled")
 	if len(dbg) != 2 {
-		t.Fatalf("expected 2 DEBUG 'fifo signalled' under component=signal, got %d: %+v", len(dbg), sink.all())
+		t.Fatalf("expected 2 DEBUG 'fifo signalled' under component=signal, got %d: %+v", len(dbg), sink.Records())
 	}
 	gotPaths := map[string]bool{}
 	for _, r := range dbg {
-		p, ok := r.attrs["path"]
+		p, ok := r.Attrs["path"]
 		if !ok {
-			t.Fatalf("DEBUG 'fifo signalled' missing path attr: %+v", r.attrs)
+			t.Fatalf("DEBUG 'fifo signalled' missing path attr: %+v", r.Attrs)
 		}
 		gotPaths[p.String()] = true
 	}
@@ -297,8 +297,8 @@ func TestEagerSignalHydrate_NoSignalingLineUnderHydrateOrBootstrap(t *testing.T)
 		t.Fatalf("EagerSignalHydrate returned error: %v", err)
 	}
 
-	for _, r := range sink.all() {
-		comp, ok := r.attrs["component"]
+	for _, r := range sink.Records() {
+		comp, ok := r.Attrs["component"]
 		if !ok {
 			continue
 		}
@@ -337,8 +337,8 @@ func TestEagerSignalHydrate_NoCycleSummaryNorNewAttrKeys(t *testing.T) {
 	}
 
 	// No INFO line at all from the signal step (no cycle summary).
-	for _, r := range sink.all() {
-		if r.level == slog.LevelInfo {
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelInfo {
 			t.Errorf("EagerSignalHydrate must not emit an INFO cycle summary; got %+v", r)
 		}
 	}
@@ -346,10 +346,10 @@ func TestEagerSignalHydrate_NoCycleSummaryNorNewAttrKeys(t *testing.T) {
 	// The only attr keys the signal lines may carry are component + the closed
 	// set path/error/error_class.
 	allowed := map[string]bool{"component": true, "path": true, "error": true, "error_class": true}
-	for _, r := range sink.all() {
-		for key := range r.attrs {
+	for _, r := range sink.Records() {
+		for key := range r.Attrs {
 			if !allowed[key] {
-				t.Errorf("unexpected attr key %q on signal line %q; closed set is path/error/error_class", key, r.msg)
+				t.Errorf("unexpected attr key %q on signal line %q; closed set is path/error/error_class", key, r.Msg)
 			}
 		}
 	}

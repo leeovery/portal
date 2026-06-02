@@ -1,114 +1,25 @@
 package alias_test
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/alias"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
-// captureSink is a slog.Handler that records every emitted record together with
-// the attrs bound via WithAttrs (notably the component attr that log.For binds
-// at the logger, not at each call site) so the alias store tests can assert on
-// component=aliases and the per-call attrs faithfully.
-type captureSink struct {
-	mu      sync.Mutex
-	records []captureRecord
-	// shared points at the records-owning sink so handlers derived via
-	// WithAttrs/WithGroup record into the same buffer; nil on the root sink.
-	shared *captureSink
-	// bound holds attrs accumulated via WithAttrs (e.g. component).
-	bound []slog.Attr
-}
-
-type captureRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *captureSink) owner() *captureSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *captureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *captureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &captureSink{shared: s.owner(), bound: next}
-}
-
-func (s *captureSink) WithGroup(_ string) slog.Handler {
-	return &captureSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *captureSink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := captureRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *captureSink) all() []captureRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]captureRecord, len(s.records))
-	copy(out, s.records)
-	return out
-}
-
-// installCapture swaps a capturing handler into the process-wide log
-// indirection for the duration of the test and returns the sink.
-func installCapture(t *testing.T) *captureSink {
+// installCapture swaps the shared logtest.Sink into the process-wide log
+// indirection for the duration of the test and returns it. The alias store
+// tests assert on component=aliases and the per-call attr values via the sink's
+// shared accessors.
+func installCapture(t *testing.T) *logtest.Sink {
 	t.Helper()
-	sink := &captureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 	return sink
-}
-
-// onlyRecord returns the single captured record, failing if there is not
-// exactly one.
-func (s *captureSink) onlyRecord(t *testing.T) captureRecord {
-	t.Helper()
-	recs := s.all()
-	if len(recs) != 1 {
-		t.Fatalf("expected exactly 1 log record, got %d: %+v", len(recs), recs)
-	}
-	return recs[0]
-}
-
-func (r captureRecord) attrString(t *testing.T, key string) string {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("record missing attr %q: %+v", key, r.attrs)
-	}
-	return v.String()
-}
-
-func (r captureRecord) hasAttr(key string) bool {
-	_, ok := r.attrs[key]
-	return ok
 }
 
 // readOnlyDirAliasPath returns a path inside a 0500 (read-only) directory whose
@@ -136,26 +47,26 @@ func TestSetAndSave(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelInfo {
-			t.Errorf("level = %v, want INFO", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.Level)
 		}
-		if rec.msg != "set" {
-			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		if rec.Msg != "set" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "set")
 		}
-		if got := rec.attrString(t, "op"); got != "set" {
+		if got := rec.AttrString(t, "op"); got != "set" {
 			t.Errorf("op = %q, want %q", got, "set")
 		}
-		if got := rec.attrString(t, "component"); got != "aliases" {
+		if got := rec.AttrString(t, "component"); got != "aliases" {
 			t.Errorf("component = %q, want %q", got, "aliases")
 		}
-		if got := rec.attrString(t, "alias"); got != "p" {
+		if got := rec.AttrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
-		if got := rec.attrString(t, "value"); got != "/code/portal" {
+		if got := rec.AttrString(t, "value"); got != "/code/portal" {
 			t.Errorf("value = %q, want %q", got, "/code/portal")
 		}
-		if got := rec.attrString(t, "via"); got != "cli" {
+		if got := rec.AttrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
 		}
 
@@ -182,23 +93,23 @@ func TestSetAndSave(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelInfo {
-			t.Errorf("level = %v, want INFO", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.Level)
 		}
-		if rec.msg != "modify" {
-			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		if rec.Msg != "modify" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "modify")
 		}
-		if got := rec.attrString(t, "op"); got != "modify" {
+		if got := rec.AttrString(t, "op"); got != "modify" {
 			t.Errorf("op = %q, want %q", got, "modify")
 		}
-		if got := rec.attrString(t, "alias"); got != "p" {
+		if got := rec.AttrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
-		if got := rec.attrString(t, "value"); got != "/code/new" {
+		if got := rec.AttrString(t, "value"); got != "/code/new" {
 			t.Errorf("value = %q, want %q", got, "/code/new")
 		}
-		if got := rec.attrString(t, "via"); got != "cli" {
+		if got := rec.AttrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
 		}
 	})
@@ -224,20 +135,20 @@ func TestSetAndSave(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelDebug {
-			t.Errorf("level = %v, want DEBUG", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelDebug {
+			t.Errorf("level = %v, want DEBUG", rec.Level)
 		}
-		if rec.msg != "set-noop" {
-			t.Errorf("msg = %q, want %q", rec.msg, "set-noop")
+		if rec.Msg != "set-noop" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "set-noop")
 		}
-		if got := rec.attrString(t, "op"); got != "set-noop" {
+		if got := rec.AttrString(t, "op"); got != "set-noop" {
 			t.Errorf("op = %q, want %q", got, "set-noop")
 		}
-		if got := rec.attrString(t, "alias"); got != "p" {
+		if got := rec.AttrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
-		if got := rec.attrString(t, "via"); got != "cli" {
+		if got := rec.AttrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
 		}
 
@@ -261,23 +172,23 @@ func TestSetAndSave(t *testing.T) {
 			t.Fatal("expected error from persist into read-only dir, got nil")
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelWarn {
-			t.Errorf("level = %v, want WARN", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.Level)
 		}
-		if rec.msg != "set" {
-			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		if rec.Msg != "set" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "set")
 		}
-		if got := rec.attrString(t, "op"); got != "set" {
+		if got := rec.AttrString(t, "op"); got != "set" {
 			t.Errorf("op = %q, want %q", got, "set")
 		}
-		if got := rec.attrString(t, "error_class"); got != "write-failed-write" {
+		if got := rec.AttrString(t, "error_class"); got != "write-failed-write" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-write")
 		}
-		if !rec.hasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.attrs)
+		if !rec.HasAttr("error") {
+			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
 		}
-		if got := rec.attrString(t, "via"); got != "cli" {
+		if got := rec.AttrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
 		}
 	})
@@ -301,27 +212,27 @@ func TestDeleteAndSave(t *testing.T) {
 			t.Fatal("expected existed=true for a present alias")
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelInfo {
-			t.Errorf("level = %v, want INFO", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.Level)
 		}
-		if rec.msg != "rm" {
-			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		if rec.Msg != "rm" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "rm")
 		}
-		if got := rec.attrString(t, "op"); got != "rm" {
+		if got := rec.AttrString(t, "op"); got != "rm" {
 			t.Errorf("op = %q, want %q", got, "rm")
 		}
-		if got := rec.attrString(t, "component"); got != "aliases" {
+		if got := rec.AttrString(t, "component"); got != "aliases" {
 			t.Errorf("component = %q, want %q", got, "aliases")
 		}
-		if got := rec.attrString(t, "alias"); got != "p" {
+		if got := rec.AttrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
-		if got := rec.attrString(t, "via"); got != "cli" {
+		if got := rec.AttrString(t, "via"); got != "cli" {
 			t.Errorf("via = %q, want %q", got, "cli")
 		}
-		if rec.hasAttr("value") {
-			t.Errorf("rm record must not carry a value attr: %+v", rec.attrs)
+		if rec.HasAttr("value") {
+			t.Errorf("rm record must not carry a value attr: %+v", rec.Attrs)
 		}
 	})
 
@@ -338,7 +249,7 @@ func TestDeleteAndSave(t *testing.T) {
 			t.Error("expected existed=false for an absent alias")
 		}
 
-		if recs := sink.all(); len(recs) != 0 {
+		if recs := sink.Records(); len(recs) != 0 {
 			t.Errorf("expected no log records for absent-delete, got %d: %+v", len(recs), recs)
 		}
 	})
@@ -358,21 +269,21 @@ func TestDeleteAndSave(t *testing.T) {
 			t.Error("expected existed=true (the entry was present in memory)")
 		}
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelWarn {
-			t.Errorf("level = %v, want WARN", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.Level)
 		}
-		if rec.msg != "rm" {
-			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		if rec.Msg != "rm" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "rm")
 		}
-		if got := rec.attrString(t, "op"); got != "rm" {
+		if got := rec.AttrString(t, "op"); got != "rm" {
 			t.Errorf("op = %q, want %q", got, "rm")
 		}
-		if got := rec.attrString(t, "error_class"); got != "write-failed-write" {
+		if got := rec.AttrString(t, "error_class"); got != "write-failed-write" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-write")
 		}
-		if !rec.hasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.attrs)
+		if !rec.HasAttr("error") {
+			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
 		}
 	})
 }

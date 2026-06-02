@@ -1,107 +1,22 @@
 package cmd
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 )
 
-// migrateCaptureSink is a slog.Handler that records every emitted record
-// together with the attrs bound via WithAttrs (notably the component attr that
-// log.For binds at the logger, not at each call site) so the migrateConfigFile
-// tests can assert on the owning component and the per-call attrs faithfully.
-type migrateCaptureSink struct {
-	mu      sync.Mutex
-	records []migrateCaptureRecord
-	// shared points at the records-owning sink so handlers derived via
-	// WithAttrs/WithGroup record into the same buffer; nil on the root sink.
-	shared *migrateCaptureSink
-	// bound holds attrs accumulated via WithAttrs (e.g. component).
-	bound []slog.Attr
-}
-
-type migrateCaptureRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *migrateCaptureSink) owner() *migrateCaptureSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *migrateCaptureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *migrateCaptureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &migrateCaptureSink{shared: s.owner(), bound: next}
-}
-
-func (s *migrateCaptureSink) WithGroup(_ string) slog.Handler {
-	return &migrateCaptureSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *migrateCaptureSink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := migrateCaptureRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *migrateCaptureSink) all() []migrateCaptureRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]migrateCaptureRecord, len(s.records))
-	copy(out, s.records)
-	return out
-}
-
-func (s *migrateCaptureSink) onlyRecord(t *testing.T) migrateCaptureRecord {
+// installMigrateCapture swaps the shared logtest.Sink into the process-wide log
+// indirection for the duration of the test and returns it. The migrateConfigFile
+// tests assert on the owning component and the per-call attr values via the
+// sink's shared accessors.
+func installMigrateCapture(t *testing.T) *logtest.Sink {
 	t.Helper()
-	recs := s.all()
-	if len(recs) != 1 {
-		t.Fatalf("expected exactly 1 log record, got %d: %+v", len(recs), recs)
-	}
-	return recs[0]
-}
-
-func (r migrateCaptureRecord) attrString(t *testing.T, key string) string {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("record missing attr %q: %+v", key, r.attrs)
-	}
-	return v.String()
-}
-
-func (r migrateCaptureRecord) hasAttr(key string) bool {
-	_, ok := r.attrs[key]
-	return ok
-}
-
-func installMigrateCapture(t *testing.T) *migrateCaptureSink {
-	t.Helper()
-	sink := &migrateCaptureSink{}
+	sink := &logtest.Sink{}
 	log.SetTestHandler(t, sink)
 	return sink
 }
@@ -130,28 +45,28 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "hooks")
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelInfo {
-			t.Errorf("level = %v, want INFO", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.Level)
 		}
-		if rec.msg != "migrate" {
-			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		if rec.Msg != "migrate" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "migrate")
 		}
-		if got := rec.attrString(t, "op"); got != "migrate" {
+		if got := rec.AttrString(t, "op"); got != "migrate" {
 			t.Errorf("op = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "component"); got != "hooks" {
+		if got := rec.AttrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
 		}
-		if got := rec.attrString(t, "via"); got != "migrate" {
+		if got := rec.AttrString(t, "via"); got != "migrate" {
 			t.Errorf("via = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "path"); got != newPath {
+		if got := rec.AttrString(t, "path"); got != newPath {
 			t.Errorf("path = %q, want %q", got, newPath)
 		}
 		// Whole-file move has no entry key (decision a): no hook_key attr.
-		if rec.hasAttr("hook_key") {
-			t.Errorf("migrate line must not carry a hook_key attr: %+v", rec.attrs)
+		if rec.HasAttr("hook_key") {
+			t.Errorf("migrate line must not carry a hook_key attr: %+v", rec.Attrs)
 		}
 	})
 
@@ -171,23 +86,23 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 				migrateConfigFile(oldPath, newPath, tc.component)
 
-				rec := sink.onlyRecord(t)
-				if rec.level != slog.LevelInfo {
-					t.Errorf("level = %v, want INFO", rec.level)
+				rec := sink.OnlyRecord(t)
+				if rec.Level != slog.LevelInfo {
+					t.Errorf("level = %v, want INFO", rec.Level)
 				}
-				if rec.msg != "migrate" {
-					t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+				if rec.Msg != "migrate" {
+					t.Errorf("msg = %q, want %q", rec.Msg, "migrate")
 				}
-				if got := rec.attrString(t, "op"); got != "migrate" {
+				if got := rec.AttrString(t, "op"); got != "migrate" {
 					t.Errorf("op = %q, want %q", got, "migrate")
 				}
-				if got := rec.attrString(t, "component"); got != tc.component {
+				if got := rec.AttrString(t, "component"); got != tc.component {
 					t.Errorf("component = %q, want %q", got, tc.component)
 				}
-				if got := rec.attrString(t, "via"); got != "migrate" {
+				if got := rec.AttrString(t, "via"); got != "migrate" {
 					t.Errorf("via = %q, want %q", got, "migrate")
 				}
-				if got := rec.attrString(t, "path"); got != newPath {
+				if got := rec.AttrString(t, "path"); got != newPath {
 					t.Errorf("path = %q, want %q", got, newPath)
 				}
 			})
@@ -202,7 +117,7 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "projects")
 
-		if recs := sink.all(); len(recs) != 0 {
+		if recs := sink.Records(); len(recs) != 0 {
 			t.Errorf("expected no log records for absent-old, got %d: %+v", len(recs), recs)
 		}
 	})
@@ -220,7 +135,7 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "projects")
 
-		if recs := sink.all(); len(recs) != 0 {
+		if recs := sink.Records(); len(recs) != 0 {
 			t.Errorf("expected no log records when new path occupied, got %d: %+v", len(recs), recs)
 		}
 	})
@@ -245,7 +160,7 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "projects")
 
-		if recs := sink.all(); len(recs) != 0 {
+		if recs := sink.Records(); len(recs) != 0 {
 			t.Errorf("expected no log records on stat-error branch, got %d: %+v", len(recs), recs)
 		}
 	})
@@ -270,30 +185,30 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "projects")
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelWarn {
-			t.Errorf("level = %v, want WARN", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.Level)
 		}
-		if rec.msg != "migrate" {
-			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		if rec.Msg != "migrate" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "migrate")
 		}
-		if got := rec.attrString(t, "op"); got != "migrate" {
+		if got := rec.AttrString(t, "op"); got != "migrate" {
 			t.Errorf("op = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "component"); got != "projects" {
+		if got := rec.AttrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
-		if got := rec.attrString(t, "via"); got != "migrate" {
+		if got := rec.AttrString(t, "via"); got != "migrate" {
 			t.Errorf("via = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "path"); got != newPath {
+		if got := rec.AttrString(t, "path"); got != newPath {
 			t.Errorf("path = %q, want %q", got, newPath)
 		}
-		if got := rec.attrString(t, "error_class"); got != "write-failed-rename" {
+		if got := rec.AttrString(t, "error_class"); got != "write-failed-rename" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-rename")
 		}
-		if !rec.hasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.attrs)
+		if !rec.HasAttr("error") {
+			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
 		}
 
 		// Old file should still exist after the failed rename.
@@ -319,27 +234,27 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "projects")
 
-		rec := sink.onlyRecord(t)
-		if rec.level != slog.LevelWarn {
-			t.Errorf("level = %v, want WARN", rec.level)
+		rec := sink.OnlyRecord(t)
+		if rec.Level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.Level)
 		}
-		if rec.msg != "migrate" {
-			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		if rec.Msg != "migrate" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "migrate")
 		}
-		if got := rec.attrString(t, "op"); got != "migrate" {
+		if got := rec.AttrString(t, "op"); got != "migrate" {
 			t.Errorf("op = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "via"); got != "migrate" {
+		if got := rec.AttrString(t, "via"); got != "migrate" {
 			t.Errorf("via = %q, want %q", got, "migrate")
 		}
-		if got := rec.attrString(t, "path"); got != filepath.Dir(newPath) {
+		if got := rec.AttrString(t, "path"); got != filepath.Dir(newPath) {
 			t.Errorf("path = %q, want %q", got, filepath.Dir(newPath))
 		}
-		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
+		if got := rec.AttrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
 		}
-		if !rec.hasAttr("error") {
-			t.Errorf("WARN record missing error attr: %+v", rec.attrs)
+		if !rec.HasAttr("error") {
+			t.Errorf("WARN record missing error attr: %+v", rec.Attrs)
 		}
 	})
 
@@ -350,7 +265,7 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 
 		migrateConfigFile(oldPath, newPath, "")
 
-		if recs := sink.all(); len(recs) != 0 {
+		if recs := sink.Records(); len(recs) != 0 {
 			t.Errorf("expected no log records for empty component, got %d: %+v", len(recs), recs)
 		}
 		// The move itself must still have happened (best-effort migration runs
@@ -383,14 +298,14 @@ func TestConfigFilePathThreadsComponent(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		rec := sink.onlyRecord(t)
-		if got := rec.attrString(t, "component"); got != "hooks" {
+		rec := sink.OnlyRecord(t)
+		if got := rec.AttrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
 		}
-		if rec.msg != "migrate" {
-			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		if rec.Msg != "migrate" {
+			t.Errorf("msg = %q, want %q", rec.Msg, "migrate")
 		}
-		if got := rec.attrString(t, "op"); got != "migrate" {
+		if got := rec.AttrString(t, "op"); got != "migrate" {
 			t.Errorf("op = %q, want %q", got, "migrate")
 		}
 	})

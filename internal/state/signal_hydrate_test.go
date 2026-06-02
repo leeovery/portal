@@ -151,14 +151,14 @@ func TestWriteFIFOSignal_EmitsRetryDebugUnderSignal(t *testing.T) {
 
 	dbg := sink.matching(slog.LevelDebug, "signal", "fifo signal retrying")
 	if len(dbg) != 1 {
-		t.Fatalf("expected 1 DEBUG 'fifo signal retrying' under component=signal (one retryable transition), got %d: %+v", len(dbg), sink.all())
+		t.Fatalf("expected 1 DEBUG 'fifo signal retrying' under component=signal (one retryable transition), got %d: %+v", len(dbg), sink.Records())
 	}
-	if p, ok := dbg[0].attrs["path"]; !ok || p.String() != path {
-		t.Errorf("retry DEBUG path attr = %v; want %q", dbg[0].attrs["path"], path)
+	if p, ok := dbg[0].Attrs["path"]; !ok || p.String() != path {
+		t.Errorf("retry DEBUG path attr = %v; want %q", dbg[0].Attrs["path"], path)
 	}
-	errAttr, ok := dbg[0].attrs["error"]
+	errAttr, ok := dbg[0].Attrs["error"]
 	if !ok {
-		t.Fatalf("retry DEBUG missing error attr: %+v", dbg[0].attrs)
+		t.Fatalf("retry DEBUG missing error attr: %+v", dbg[0].Attrs)
 	}
 	if errAttr.Kind() != slog.KindAny {
 		t.Errorf("retry DEBUG error attr kind = %v; want Any (wrapped err passed directly)", errAttr.Kind())

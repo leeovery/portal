@@ -20,89 +20,34 @@
 package tmux_test
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// saverEventSink is a slog.Handler that records every emitted record with its
-// level, message, and attrs (including those bound via WithAttrs — notably the
-// component attr log.For binds at the logger). The saver-lifecycle event tests
-// assert on the structured record (component=saver, msg, attr values), so a
-// substring sink would be too lossy.
+// saverEventSink is a thin wrapper over the shared logtest.Sink that adds the
+// saver-lifecycle event filtering (component=saver record selection by message
+// and emission-order lookup). The lifecycle event tests assert on the
+// structured record (component=saver, msg, attr values) via the sink's shared
+// accessors.
 type saverEventSink struct {
-	mu      sync.Mutex
-	records []saverEventRecord
-	shared  *saverEventSink
-	bound   []slog.Attr
-}
-
-type saverEventRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *saverEventSink) owner() *saverEventSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *saverEventSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *saverEventSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &saverEventSink{shared: s.owner(), bound: next}
-}
-
-func (s *saverEventSink) WithGroup(_ string) slog.Handler {
-	return &saverEventSink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *saverEventSink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := saverEventRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *saverEventSink) all() []saverEventRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]saverEventRecord, len(s.records))
-	copy(out, s.records)
-	return out
+	*logtest.Sink
 }
 
 // saverEvents returns every record whose component=saver and msg matches the
 // supplied message.
-func (s *saverEventSink) saverEvents(msg string) []saverEventRecord {
-	var out []saverEventRecord
-	for _, r := range s.all() {
-		comp, ok := r.attrs["component"]
-		if !ok || comp.String() != "saver" || r.msg != msg {
+func (s *saverEventSink) saverEvents(msg string) []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		comp, ok := r.Attrs["component"]
+		if !ok || comp.String() != "saver" || r.Msg != msg {
 			continue
 		}
 		out = append(out, r)
@@ -112,47 +57,21 @@ func (s *saverEventSink) saverEvents(msg string) []saverEventRecord {
 
 // onlySaverEvent asserts exactly one component=saver record with the supplied
 // message was emitted and returns it.
-func (s *saverEventSink) onlySaverEvent(t *testing.T, msg string) saverEventRecord {
+func (s *saverEventSink) onlySaverEvent(t *testing.T, msg string) logtest.Record {
 	t.Helper()
 	evs := s.saverEvents(msg)
 	if len(evs) != 1 {
-		t.Fatalf("expected exactly 1 saver %q event, got %d: %+v", msg, len(evs), s.all())
+		t.Fatalf("expected exactly 1 saver %q event, got %d: %+v", msg, len(evs), s.Records())
 	}
 	return evs[0]
 }
 
-func (r saverEventRecord) attrString(t *testing.T, key string) string {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("record missing attr %q: %+v", key, r.attrs)
-	}
-	return v.String()
-}
-
-func (r saverEventRecord) intAttr(t *testing.T, key string) int64 {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("record missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindInt64 {
-		t.Fatalf("attr %q kind = %v, want Int64: %+v", key, v.Kind(), v)
-	}
-	return v.Int64()
-}
-
-func (r saverEventRecord) hasAttr(key string) bool {
-	_, ok := r.attrs[key]
-	return ok
-}
-
-// installSaverEventSink swaps a capturing handler into the process-wide log
-// indirection for the duration of the test and returns the sink.
+// installSaverEventSink swaps the shared logtest.Sink into the process-wide log
+// indirection for the duration of the test and returns the wrapper.
 func installSaverEventSink(t *testing.T) *saverEventSink {
 	t.Helper()
-	sink := &saverEventSink{}
-	log.SetTestHandler(t, sink)
+	sink := &saverEventSink{Sink: &logtest.Sink{}}
+	log.SetTestHandler(t, sink.Sink)
 	return sink
 }
 
@@ -234,10 +153,10 @@ func TestBootstrapPortalSaver_EmitsPlaceholderCreatedWithTmuxPane(t *testing.T) 
 	}
 
 	rec := sink.onlySaverEvent(t, "placeholder created")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.attrString(t, "tmux_pane"); got != "%7" {
+	if got := rec.AttrString(t, "tmux_pane"); got != "%7" {
 		t.Errorf("tmux_pane = %q, want %q", got, "%7")
 	}
 	// pid is the auto-injected baseline — the call site must NOT pass it.
@@ -275,10 +194,10 @@ func TestBootstrapPortalSaver_EmitsDestroyUnattachedOffOnCreateBranch(t *testing
 	}
 
 	rec := sink.onlySaverEvent(t, "destroy-unattached off")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.attrString(t, "tmux_pane"); got != "%7" {
+	if got := rec.AttrString(t, "tmux_pane"); got != "%7" {
 		t.Errorf("tmux_pane = %q, want %q", got, "%7")
 	}
 }
@@ -306,10 +225,10 @@ func TestBootstrapPortalSaver_EmitsDestroyUnattachedOffOnAliveHappyPath_AndNotRe
 	}
 
 	rec := sink.onlySaverEvent(t, "destroy-unattached off")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.attrString(t, "tmux_pane"); got != "%9" {
+	if got := rec.AttrString(t, "tmux_pane"); got != "%9" {
 		t.Errorf("tmux_pane = %q, want %q", got, "%9")
 	}
 
@@ -366,16 +285,16 @@ func TestBootstrapPortalSaver_EmitsRespawnDaemonWithFromToPidAndTmuxPane(t *test
 	}
 
 	rec := sink.onlySaverEvent(t, "respawn-daemon")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "from_pid"); got != 1111 {
+	if got := rec.IntAttr(t, "from_pid"); got != 1111 {
 		t.Errorf("from_pid = %d, want 1111", got)
 	}
-	if got := rec.intAttr(t, "to_pid"); got != 2222 {
+	if got := rec.IntAttr(t, "to_pid"); got != 2222 {
 		t.Errorf("to_pid = %d, want 2222", got)
 	}
-	if got := rec.attrString(t, "tmux_pane"); got != "%7" {
+	if got := rec.AttrString(t, "tmux_pane"); got != "%7" {
 		t.Errorf("tmux_pane = %q, want %q", got, "%7")
 	}
 }
@@ -418,20 +337,20 @@ func TestBootstrapPortalSaver_StillEmitsRespawnDaemonBestEffortWhenPanePIDReadFa
 	}
 
 	rec := sink.onlySaverEvent(t, "respawn-daemon")
-	if got := rec.intAttr(t, "from_pid"); got != 0 {
+	if got := rec.IntAttr(t, "from_pid"); got != 0 {
 		t.Errorf("from_pid = %d, want 0 (read failed)", got)
 	}
-	if got := rec.intAttr(t, "to_pid"); got != 2222 {
+	if got := rec.IntAttr(t, "to_pid"); got != 2222 {
 		t.Errorf("to_pid = %d, want 2222", got)
 	}
 
 	// The read failure must be logged with the wrapped error attr, under saver.
 	failures := sink.saverEvents("saver respawn: pane-pid read failed")
 	if len(failures) == 0 {
-		t.Fatalf("expected a pane-pid read-failure log line, got none: %+v", sink.all())
+		t.Fatalf("expected a pane-pid read-failure log line, got none: %+v", sink.Records())
 	}
-	if !failures[0].hasAttr("error") {
-		t.Errorf("read-failure line missing error attr: %+v", failures[0].attrs)
+	if !failures[0].HasAttr("error") {
+		t.Errorf("read-failure line missing error attr: %+v", failures[0].Attrs)
 	}
 }
 
@@ -454,10 +373,10 @@ func TestWaitForSaverDaemonReady_EmitsDaemonReadyWithTargetPidOnSuccess(t *testi
 	}
 
 	rec := sink.onlySaverEvent(t, "daemon ready")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+	if got := rec.IntAttr(t, "target_pid"); got != 4321 {
 		t.Errorf("target_pid = %d, want 4321", got)
 	}
 	// version is the auto-baseline — the call site must NOT pass it.
@@ -511,9 +430,9 @@ func TestWaitForSaverDaemonReady_EmitsNoDaemonReadyAndKeepsWarnOnTimeout(t *test
 // assert relative ordering of lifecycle events on the same captured stream
 // (e.g. escalated INFO before the SIGKILL-escalation DEBUG breadcrumb).
 func (s *saverEventSink) firstSaverIndex(msg string) int {
-	for i, r := range s.all() {
-		comp, ok := r.attrs["component"]
-		if !ok || comp.String() != "saver" || r.msg != msg {
+	for i, r := range s.Records() {
+		comp, ok := r.Attrs["component"]
+		if !ok || comp.String() != "saver" || r.Msg != msg {
 			continue
 		}
 		return i
@@ -553,10 +472,10 @@ func TestKillSaverAndWaitForDaemon_EmitsKillBarrierStartedWhenPriorDaemonAlive(t
 	}
 
 	rec := sink.onlySaverEvent(t, "kill-barrier started")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+	if got := rec.IntAttr(t, "target_pid"); got != 4321 {
 		t.Errorf("target_pid = %d, want 4321", got)
 	}
 	if startedAtKillTime != 1 {
@@ -656,13 +575,13 @@ func TestKillSaverAndWaitForDaemon_EmitsKillBarrierEscalatedAboveDebugBreadcrumb
 	}
 
 	rec := sink.onlySaverEvent(t, "kill-barrier escalated")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+	if got := rec.IntAttr(t, "target_pid"); got != 4321 {
 		t.Errorf("target_pid = %d, want 4321", got)
 	}
-	if got := rec.attrString(t, "reason"); got != "kill-session-timeout" {
+	if got := rec.AttrString(t, "reason"); got != "kill-session-timeout" {
 		t.Errorf("reason = %q, want %q", got, "kill-session-timeout")
 	}
 
@@ -675,7 +594,7 @@ func TestKillSaverAndWaitForDaemon_EmitsKillBarrierEscalatedAboveDebugBreadcrumb
 	// and the escalated INFO must come BEFORE it.
 	breadcrumbIdx := sink.firstSaverIndex("kill-barrier escalating to SIGKILL")
 	if breadcrumbIdx < 0 {
-		t.Fatalf("expected the existing DEBUG breadcrumb %q to still be present: %+v", "kill-barrier escalating to SIGKILL", sink.all())
+		t.Fatalf("expected the existing DEBUG breadcrumb %q to still be present: %+v", "kill-barrier escalating to SIGKILL", sink.Records())
 	}
 	if breadcrumbs := sink.saverEvents("kill-barrier escalating to SIGKILL"); len(breadcrumbs) != 1 {
 		t.Errorf("expected exactly 1 DEBUG breadcrumb, got %d: %+v", len(breadcrumbs), breadcrumbs)
@@ -772,13 +691,13 @@ func TestKillSaverAndWaitForDaemon_EmitsPlaceholderDiedReasonSignalOnKillSession
 	}
 
 	rec := sink.onlySaverEvent(t, "placeholder died")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+	if got := rec.IntAttr(t, "target_pid"); got != 4321 {
 		t.Errorf("target_pid = %d, want 4321", got)
 	}
-	if got := rec.attrString(t, "reason"); got != "signal" {
+	if got := rec.AttrString(t, "reason"); got != "signal" {
 		t.Errorf("reason = %q, want %q", got, "signal")
 	}
 	if len(barrierLog.warns) != 0 {
@@ -820,13 +739,13 @@ func TestKillSaverAndWaitForDaemon_EmitsPlaceholderDiedReasonSignalOnPostSIGKILL
 	}
 
 	rec := sink.onlySaverEvent(t, "placeholder died")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "target_pid"); got != 4321 {
+	if got := rec.IntAttr(t, "target_pid"); got != 4321 {
 		t.Errorf("target_pid = %d, want 4321", got)
 	}
-	if got := rec.attrString(t, "reason"); got != "signal" {
+	if got := rec.AttrString(t, "reason"); got != "signal" {
 		t.Errorf("reason = %q, want %q", got, "signal")
 	}
 	if len(barrierLog.warns) != 0 {

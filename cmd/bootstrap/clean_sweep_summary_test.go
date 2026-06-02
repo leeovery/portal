@@ -16,86 +16,31 @@
 package bootstrap
 
 import (
-	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// cleanSummarySink is a slog.Handler that records every emitted record with its
-// level, message, and attrs (including the component attr bound via WithAttrs by
-// log.For). The clean-sweep summary tests assert on the structured record
-// (component=clean, msg, killed/unset int attrs, took rendered as a duration),
-// so a substring sink would be too lossy.
+// cleanSummarySink is a thin wrapper over the shared logtest.Sink that adds the
+// clean-sweep summary's component+message record filtering. The clean-sweep
+// summary tests assert on the structured record (component=clean, msg,
+// killed/unset int attrs, took rendered as a duration) via the sink's shared
+// accessors.
 type cleanSummarySink struct {
-	mu      sync.Mutex
-	records []cleanSummaryRecord
-	shared  *cleanSummarySink
-	bound   []slog.Attr
-}
-
-type cleanSummaryRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *cleanSummarySink) owner() *cleanSummarySink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *cleanSummarySink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *cleanSummarySink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &cleanSummarySink{shared: s.owner(), bound: next}
-}
-
-func (s *cleanSummarySink) WithGroup(_ string) slog.Handler {
-	return &cleanSummarySink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *cleanSummarySink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := cleanSummaryRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *cleanSummarySink) all() []cleanSummaryRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]cleanSummaryRecord, len(s.records))
-	copy(out, s.records)
-	return out
+	*logtest.Sink
 }
 
 // summariesFor returns every record whose component matches comp and msg matches.
-func (s *cleanSummarySink) summariesFor(comp, msg string) []cleanSummaryRecord {
-	var out []cleanSummaryRecord
-	for _, r := range s.all() {
-		c, ok := r.attrs["component"]
-		if !ok || c.String() != comp || r.msg != msg {
+func (s *cleanSummarySink) summariesFor(comp, msg string) []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		c, ok := r.Attrs["component"]
+		if !ok || c.String() != comp || r.Msg != msg {
 			continue
 		}
 		out = append(out, r)
@@ -105,54 +50,31 @@ func (s *cleanSummarySink) summariesFor(comp, msg string) []cleanSummaryRecord {
 
 // onlySummary asserts exactly one record with the given component+msg was
 // emitted and returns it.
-func (s *cleanSummarySink) onlySummary(t *testing.T, comp, msg string) cleanSummaryRecord {
+func (s *cleanSummarySink) onlySummary(t *testing.T, comp, msg string) logtest.Record {
 	t.Helper()
 	sums := s.summariesFor(comp, msg)
 	if len(sums) != 1 {
-		t.Fatalf("expected exactly 1 %q %q summary, got %d: %+v", comp, msg, len(sums), s.all())
+		t.Fatalf("expected exactly 1 %q %q summary, got %d: %+v", comp, msg, len(sums), s.Records())
 	}
 	return sums[0]
 }
 
-func (r cleanSummaryRecord) intAttr(t *testing.T, key string) int64 {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("summary missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindInt64 {
-		t.Fatalf("attr %q kind = %v, want Int64: %+v", key, v.Kind(), v)
-	}
-	return v.Int64()
-}
-
-func (r cleanSummaryRecord) requireDuration(t *testing.T, key string) {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("summary missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindDuration {
-		t.Errorf("attr %q kind = %v, want Duration", key, v.Kind())
-	}
-}
-
 func installCleanSummarySink(t *testing.T) *cleanSummarySink {
 	t.Helper()
-	sink := &cleanSummarySink{}
-	log.SetTestHandler(t, sink)
+	sink := &cleanSummarySink{Sink: &logtest.Sink{}}
+	log.SetTestHandler(t, sink.Sink)
 	return sink
 }
 
 // matching returns every record whose level+msg match and whose component
 // equals comp.
-func (s *cleanSummarySink) matching(level slog.Level, comp, msg string) []cleanSummaryRecord {
-	var out []cleanSummaryRecord
-	for _, r := range s.all() {
-		if r.level != level || r.msg != msg {
+func (s *cleanSummarySink) matching(level slog.Level, comp, msg string) []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		if r.Level != level || r.Msg != msg {
 			continue
 		}
-		c, ok := r.attrs["component"]
+		c, ok := r.Attrs["component"]
 		if !ok || c.String() != comp {
 			continue
 		}
@@ -180,13 +102,13 @@ func TestSweepOrphanDaemons_EmitsCleanSummaryCountingSuccessfulKills(t *testing.
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-daemon sweep complete")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("summary level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "killed"); got != 2 {
+	if got := rec.IntAttr(t, "killed"); got != 2 {
 		t.Errorf("killed = %d, want 2", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 func TestSweepOrphanDaemons_DemotesPerKillInfoToDebug(t *testing.T) {
@@ -206,21 +128,21 @@ func TestSweepOrphanDaemons_DemotesPerKillInfoToDebug(t *testing.T) {
 	}
 
 	// No INFO per-kill line under any component.
-	for _, r := range sink.all() {
-		if r.level == slog.LevelInfo && r.msg == "orphan killed" {
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelInfo && r.Msg == "orphan killed" {
 			t.Errorf("per-kill line must not be INFO: %+v", r)
 		}
-		if r.level == slog.LevelInfo && r.msg == "sweep: killed orphan daemon" {
+		if r.Level == slog.LevelInfo && r.Msg == "sweep: killed orphan daemon" {
 			t.Errorf("old per-kill INFO message must be gone: %+v", r)
 		}
 	}
 	// Exactly one per-item DEBUG "orphan killed" under clean, carrying target_pid.
 	dbg := sink.matching(slog.LevelDebug, "clean", "orphan killed")
 	if len(dbg) != 1 {
-		t.Fatalf("expected 1 DEBUG 'orphan killed' under clean, got %d: %+v", len(dbg), sink.all())
+		t.Fatalf("expected 1 DEBUG 'orphan killed' under clean, got %d: %+v", len(dbg), sink.Records())
 	}
-	if pid, ok := dbg[0].attrs["target_pid"]; !ok || pid.Int64() != 2001 {
-		t.Errorf("DEBUG 'orphan killed' target_pid = %v, want 2001", dbg[0].attrs["target_pid"])
+	if pid, ok := dbg[0].Attrs["target_pid"]; !ok || pid.Int64() != 2001 {
+		t.Errorf("DEBUG 'orphan killed' target_pid = %v, want 2001", dbg[0].Attrs["target_pid"])
 	}
 }
 
@@ -249,19 +171,19 @@ func TestSweepOrphanDaemons_ExcludesSkippedAndFailedFromKilled(t *testing.T) {
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-daemon sweep complete")
-	if got := rec.intAttr(t, "killed"); got != 1 {
+	if got := rec.IntAttr(t, "killed"); got != 1 {
 		t.Errorf("killed = %d, want 1 (excludes skip + failed kill)", got)
 	}
 
 	// Identity-skip stays DEBUG on the bootstrap logger.
 	skips := sink.matching(slog.LevelDebug, "bootstrap", "sweep: pid not identity-checked as portal daemon, skipping")
 	if len(skips) != 1 {
-		t.Errorf("expected 1 identity-skip DEBUG under bootstrap, got %d: %+v", len(skips), sink.all())
+		t.Errorf("expected 1 identity-skip DEBUG under bootstrap, got %d: %+v", len(skips), sink.Records())
 	}
 	// Kill-failure stays WARN on the bootstrap logger.
 	warns := sink.matching(slog.LevelWarn, "bootstrap", "sweep: kill failed")
 	if len(warns) != 1 {
-		t.Errorf("expected 1 kill-failure WARN under bootstrap, got %d: %+v", len(warns), sink.all())
+		t.Errorf("expected 1 kill-failure WARN under bootstrap, got %d: %+v", len(warns), sink.Records())
 	}
 }
 
@@ -302,10 +224,10 @@ func TestSweepOrphanDaemons_SummaryWithZeroKilledWhenSaverPanePIDErrors(t *testi
 	}
 
 	rec := sink.onlySummary(t, "clean", "orphan-daemon sweep complete")
-	if got := rec.intAttr(t, "killed"); got != 0 {
+	if got := rec.IntAttr(t, "killed"); got != 0 {
 		t.Errorf("killed = %d, want 0", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 // ---- Marker sweep summary ----
@@ -331,13 +253,13 @@ func TestCleanStaleMarkers_EmitsCleanSummaryCountingSuccessfulUnsets(t *testing.
 	}
 
 	rec := sink.onlySummary(t, "clean", "marker sweep complete")
-	if rec.level != slog.LevelInfo {
-		t.Errorf("summary level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "unset"); got != 2 {
+	if got := rec.IntAttr(t, "unset"); got != 2 {
 		t.Errorf("unset = %d, want 2", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 func TestCleanStaleMarkers_SummaryUnsetCountsOnlySuccessfulUnsets(t *testing.T) {
@@ -368,7 +290,7 @@ func TestCleanStaleMarkers_SummaryUnsetCountsOnlySuccessfulUnsets(t *testing.T) 
 	}
 
 	rec := sink.onlySummary(t, "clean", "marker sweep complete")
-	if got := rec.intAttr(t, "unset"); got != 2 {
+	if got := rec.IntAttr(t, "unset"); got != 2 {
 		t.Errorf("unset = %d, want 2 (counts successful unsets only)", got)
 	}
 }
@@ -397,13 +319,13 @@ func TestCleanStaleMarkers_SummaryUnsetZeroOnMassUnsetHazardDeferral(t *testing.
 	}
 
 	rec := sink.onlySummary(t, "clean", "marker sweep complete")
-	if got := rec.intAttr(t, "unset"); got != 0 {
+	if got := rec.IntAttr(t, "unset"); got != 0 {
 		t.Errorf("unset = %d, want 0 (never a false unset on deferral)", got)
 	}
 	// The deferral WARN still fires on the bootstrap logger.
 	warns := sink.matching(slog.LevelWarn, "bootstrap", "stale-marker cleanup: zero live panes parsed with markers present; skipping to avoid mass-unset hazard (next bootstrap retries)")
 	if len(warns) != 1 {
-		t.Errorf("expected 1 deferral WARN under bootstrap, got %d: %+v", len(warns), sink.all())
+		t.Errorf("expected 1 deferral WARN under bootstrap, got %d: %+v", len(warns), sink.Records())
 	}
 }
 
@@ -467,10 +389,10 @@ func TestCleanStaleMarkers_SummaryUnsetZeroOnEmptyMarkersNoOp(t *testing.T) {
 	}
 
 	rec := sink.onlySummary(t, "clean", "marker sweep complete")
-	if got := rec.intAttr(t, "unset"); got != 0 {
+	if got := rec.IntAttr(t, "unset"); got != 0 {
 		t.Errorf("unset = %d, want 0 on empty-markers no-op", got)
 	}
-	rec.requireDuration(t, "took")
+	rec.RequireDuration(t, "took")
 }
 
 // Compile-time guard: tmux import is exercised so goimports does not drop it if

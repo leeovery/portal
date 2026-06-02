@@ -13,8 +13,9 @@
 // This rendering is the contract every consumer's substring assertions key on
 // — cmd, internal/state, and internal/restore all share this one declaration
 // so the shape changes in exactly one place. Sink also retains a structured
-// view of each record (level, message, ordered attr keys) for callers that
-// assert on the exact attr-key set of a line rather than its rendered text.
+// view of each record (level, message, ordered attr keys, and the attr-value
+// map) for callers that assert on the exact attr-key set or the typed attr
+// values of a line rather than its rendered text.
 package logtest
 
 import (
@@ -26,15 +27,75 @@ import (
 	"testing"
 )
 
+// TestingT is the subset of *testing.T the failing-path accessors depend on.
+// Accepting an interface (rather than *testing.T) lets the accessors' own
+// failure paths be unit-tested without aborting the harness; production callers
+// pass their *testing.T.
+type TestingT interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
 // Record is a flattened, structured view of one captured slog.Record: its
-// level, message, and the ordered keys of its attrs (including any bound via
-// WithAttrs). Callers use it to assert on the exact attr-key set of a line —
-// e.g. that a geometry summary carries only panes/took/anomalous and no
-// scrollback key — without depending on rendered text.
+// level, message, the ordered keys of its attrs (including any bound via
+// WithAttrs), and the attr-value map keyed by attr name. Callers use Keys to
+// assert on the exact attr-key set of a line — e.g. that a geometry summary
+// carries only panes/took/anomalous and no scrollback key — and Attrs to assert
+// on the typed attr values (e.g. that took is a slog.KindDuration, or that a
+// component=capture line carries the expected int counts).
 type Record struct {
 	Level slog.Level
 	Msg   string
 	Keys  []string
+	// Attrs maps each attr key to its slog.Value (bound attrs first, then
+	// per-call attrs, last-write-wins on a duplicate key). It carries the same
+	// key set as Keys.
+	Attrs map[string]slog.Value
+}
+
+// AttrString returns the string rendering (slog.Value.String) of the attr named
+// key, failing the test if the record carries no such attr.
+func (r Record) AttrString(t TestingT, key string) string {
+	t.Helper()
+	v, ok := r.Attrs[key]
+	if !ok {
+		t.Fatalf("record missing attr %q: %+v", key, r.Attrs)
+	}
+	return v.String()
+}
+
+// IntAttr returns the int64 value of the attr named key, failing the test if it
+// is absent or is not a slog.KindInt64 value.
+func (r Record) IntAttr(t TestingT, key string) int64 {
+	t.Helper()
+	v, ok := r.Attrs[key]
+	if !ok {
+		t.Fatalf("record missing attr %q: %+v", key, r.Attrs)
+	}
+	if v.Kind() != slog.KindInt64 {
+		t.Fatalf("attr %q kind = %v, want Int64: %+v", key, v.Kind(), v)
+	}
+	return v.Int64()
+}
+
+// RequireDuration fails the test unless the attr named key is present and is a
+// slog.KindDuration value (the text-mode rendering of a time.Duration took
+// attr is indistinguishable from a stringified one, so kind must be asserted).
+func (r Record) RequireDuration(t TestingT, key string) {
+	t.Helper()
+	v, ok := r.Attrs[key]
+	if !ok {
+		t.Fatalf("record missing attr %q: %+v", key, r.Attrs)
+	}
+	if v.Kind() != slog.KindDuration {
+		t.Fatalf("attr %q kind = %v, want Duration", key, v.Kind())
+	}
+}
+
+// HasAttr reports whether the record carries an attr named key.
+func (r Record) HasAttr(key string) bool {
+	_, ok := r.Attrs[key]
+	return ok
 }
 
 // Sink is a slog.Handler that captures every record into an in-memory buffer
@@ -81,26 +142,32 @@ func (s *Sink) WithGroup(_ string) slog.Handler {
 
 // Handle renders the record into the canonical "<LEVEL> <msg> key=value..."
 // shape (bound attrs first, then per-call attrs) and appends both the rendered
-// line and a structured Record to the owning buffer.
+// line and a structured Record to the owning buffer. The same single traversal
+// that builds the rendered line and the ordered Keys also populates the
+// attr-value map (last-write-wins on a duplicate key, matching the
+// bound-then-call iteration order).
 func (s *Sink) Handle(_ context.Context, r slog.Record) error {
 	var b strings.Builder
 	b.WriteString(r.Level.String())
 	b.WriteString(" ")
 	b.WriteString(r.Message)
 	keys := make([]string, 0, len(s.bound)+r.NumAttrs())
+	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
 	for _, a := range s.bound {
 		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
 		keys = append(keys, a.Key)
+		attrs[a.Key] = a.Value
 	}
 	r.Attrs(func(a slog.Attr) bool {
 		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
 		keys = append(keys, a.Key)
+		attrs[a.Key] = a.Value
 		return true
 	})
 	owner := s.owner()
 	owner.mu.Lock()
 	owner.lines = append(owner.lines, b.String())
-	owner.records = append(owner.records, Record{Level: r.Level, Msg: r.Message, Keys: keys})
+	owner.records = append(owner.records, Record{Level: r.Level, Msg: r.Message, Keys: keys, Attrs: attrs})
 	owner.mu.Unlock()
 	return nil
 }
@@ -129,6 +196,18 @@ func (s *Sink) Records() []Record {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
 	return append([]Record(nil), owner.records...)
+}
+
+// OnlyRecord returns the single captured record, failing the test if there is
+// not exactly one. It is the shared form of the per-file onlyRecord helper the
+// store/migrate logging tests assert single-emission with.
+func (s *Sink) OnlyRecord(t TestingT) Record {
+	t.Helper()
+	recs := s.Records()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 log record, got %d: %+v", len(recs), recs)
+	}
+	return recs[0]
 }
 
 // NewCaptureLogger returns a *slog.Logger routed into a fresh Sink and the

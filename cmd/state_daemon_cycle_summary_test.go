@@ -18,84 +18,29 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// captureSummarySink is a slog.Handler that records every emitted record with
-// its level, message, and attrs (including those bound via WithAttrs — notably
-// the component attr log.For binds at the logger). The capture-cycle summary
-// tests assert on the structured record (component=capture, msg, attr values,
-// took rendered as a duration), so a substring sink would be too lossy.
+// captureSummarySink is a thin wrapper over the shared logtest.Sink that adds
+// the capture-cycle's "tick complete" record filtering. The capture-cycle
+// summary tests assert on the structured record (component=capture, msg, int
+// attr values, took rendered as a duration) via the sink's shared accessors.
 type captureSummarySink struct {
-	mu      sync.Mutex
-	records []captureSummaryRecord
-	shared  *captureSummarySink
-	bound   []slog.Attr
-}
-
-type captureSummaryRecord struct {
-	level slog.Level
-	msg   string
-	attrs map[string]slog.Value
-}
-
-func (s *captureSummarySink) owner() *captureSummarySink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *captureSummarySink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *captureSummarySink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &captureSummarySink{shared: s.owner(), bound: next}
-}
-
-func (s *captureSummarySink) WithGroup(_ string) slog.Handler {
-	return &captureSummarySink{shared: s.owner(), bound: s.bound}
-}
-
-func (s *captureSummarySink) Handle(_ context.Context, r slog.Record) error {
-	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
-	for _, a := range s.bound {
-		attrs[a.Key] = a.Value
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		attrs[a.Key] = a.Value
-		return true
-	})
-	rec := captureSummaryRecord{level: r.Level, msg: r.Message, attrs: attrs}
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.records = append(owner.records, rec)
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *captureSummarySink) all() []captureSummaryRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]captureSummaryRecord, len(s.records))
-	copy(out, s.records)
-	return out
+	*logtest.Sink
 }
 
 // summaries returns every record whose component=capture and msg="tick complete".
-func (s *captureSummarySink) summaries() []captureSummaryRecord {
-	var out []captureSummaryRecord
-	for _, r := range s.all() {
-		comp, ok := r.attrs["component"]
-		if !ok || comp.String() != "capture" || r.msg != "tick complete" {
+func (s *captureSummarySink) summaries() []logtest.Record {
+	var out []logtest.Record
+	for _, r := range s.Records() {
+		comp, ok := r.Attrs["component"]
+		if !ok || comp.String() != "capture" || r.Msg != "tick complete" {
 			continue
 		}
 		out = append(out, r)
@@ -105,31 +50,19 @@ func (s *captureSummarySink) summaries() []captureSummaryRecord {
 
 // onlySummary asserts exactly one capture: tick complete record was emitted and
 // returns it.
-func (s *captureSummarySink) onlySummary(t *testing.T) captureSummaryRecord {
+func (s *captureSummarySink) onlySummary(t *testing.T) logtest.Record {
 	t.Helper()
 	sums := s.summaries()
 	if len(sums) != 1 {
-		t.Fatalf("expected exactly 1 capture: tick complete summary, got %d: %+v", len(sums), s.all())
+		t.Fatalf("expected exactly 1 capture: tick complete summary, got %d: %+v", len(sums), s.Records())
 	}
 	return sums[0]
 }
 
-func (r captureSummaryRecord) intAttr(t *testing.T, key string) int64 {
-	t.Helper()
-	v, ok := r.attrs[key]
-	if !ok {
-		t.Fatalf("summary missing attr %q: %+v", key, r.attrs)
-	}
-	if v.Kind() != slog.KindInt64 {
-		t.Fatalf("attr %q kind = %v, want Int64: %+v", key, v.Kind(), v)
-	}
-	return v.Int64()
-}
-
 func installCaptureSummarySink(t *testing.T) *captureSummarySink {
 	t.Helper()
-	sink := &captureSummarySink{}
-	log.SetTestHandler(t, sink)
+	sink := &captureSummarySink{Sink: &logtest.Sink{}}
+	log.SetTestHandler(t, sink.Sink)
 	return sink
 }
 
@@ -203,24 +136,24 @@ func TestCaptureAndCommit_EmitsOneTickCompleteSummaryOnSuccess(t *testing.T) {
 	}
 
 	rec := sink.onlySummary(t)
-	if rec.level != slog.LevelInfo {
-		t.Errorf("summary level = %v, want INFO", rec.level)
+	if rec.Level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.Level)
 	}
-	if got := rec.intAttr(t, "sessions"); got != 1 {
+	if got := rec.IntAttr(t, "sessions"); got != 1 {
 		t.Errorf("sessions = %d, want 1", got)
 	}
-	if got := rec.intAttr(t, "panes"); got != 1 {
+	if got := rec.IntAttr(t, "panes"); got != 1 {
 		t.Errorf("panes = %d, want 1", got)
 	}
-	if got := rec.intAttr(t, "natural_churn"); got != 0 {
+	if got := rec.IntAttr(t, "natural_churn"); got != 0 {
 		t.Errorf("natural_churn = %d, want 0", got)
 	}
-	if got := rec.intAttr(t, "anomalous"); got != 0 {
+	if got := rec.IntAttr(t, "anomalous"); got != 0 {
 		t.Errorf("anomalous = %d, want 0", got)
 	}
-	tookVal, ok := rec.attrs["took"]
+	tookVal, ok := rec.Attrs["took"]
 	if !ok {
-		t.Fatalf("summary missing took attr: %+v", rec.attrs)
+		t.Fatalf("summary missing took attr: %+v", rec.Attrs)
 	}
 	if tookVal.Kind() != slog.KindDuration {
 		t.Errorf("took kind = %v, want Duration", tookVal.Kind())
@@ -334,29 +267,29 @@ func TestCaptureAndCommit_AnomalousCapturePaneFailureIncrementsAnomalousAndWarns
 	}
 
 	rec := sink.onlySummary(t)
-	if got := rec.intAttr(t, "anomalous"); got != 1 {
+	if got := rec.IntAttr(t, "anomalous"); got != 1 {
 		t.Errorf("anomalous = %d, want 1", got)
 	}
-	if got := rec.intAttr(t, "natural_churn"); got != 0 {
+	if got := rec.IntAttr(t, "natural_churn"); got != 0 {
 		t.Errorf("natural_churn = %d, want 0 on a genuine failure", got)
 	}
 	// Both panes are processed (the failing one and its healthy peer): the loop
 	// continues past the failure.
-	if got := rec.intAttr(t, "panes"); got != 2 {
+	if got := rec.IntAttr(t, "panes"); got != 2 {
 		t.Errorf("panes = %d, want 2 (loop continued past failure)", got)
 	}
 
 	// One per-pane WARN on component=daemon naming the failing pane + wrapped err.
-	var warns []captureSummaryRecord
-	for _, r := range sink.all() {
-		if r.level == slog.LevelWarn && r.msg == "capture pane failed" {
+	var warns []logtest.Record
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelWarn && r.Msg == "capture pane failed" {
 			warns = append(warns, r)
 		}
 	}
 	if len(warns) != 1 {
-		t.Fatalf("expected 1 'capture pane failed' WARN, got %d: %+v", len(warns), sink.all())
+		t.Fatalf("expected 1 'capture pane failed' WARN, got %d: %+v", len(warns), sink.Records())
 	}
-	if comp := warns[0].attrs["component"]; comp.String() != "daemon" {
+	if comp := warns[0].Attrs["component"]; comp.String() != "daemon" {
 		t.Errorf("WARN component = %q, want daemon (per-pane WARN stays on daemon)", comp.String())
 	}
 }
@@ -382,23 +315,23 @@ func TestCaptureAndCommit_AnomalousWriteScrollbackFailureIncrementsAnomalousAndW
 	}
 
 	rec := sink.onlySummary(t)
-	if got := rec.intAttr(t, "anomalous"); got != 1 {
+	if got := rec.IntAttr(t, "anomalous"); got != 1 {
 		t.Errorf("anomalous = %d, want 1", got)
 	}
-	if got := rec.intAttr(t, "natural_churn"); got != 0 {
+	if got := rec.IntAttr(t, "natural_churn"); got != 0 {
 		t.Errorf("natural_churn = %d, want 0", got)
 	}
 
-	var warns []captureSummaryRecord
-	for _, r := range sink.all() {
-		if r.level == slog.LevelWarn && r.msg == "write scrollback failed" {
+	var warns []logtest.Record
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelWarn && r.Msg == "write scrollback failed" {
 			warns = append(warns, r)
 		}
 	}
 	if len(warns) != 1 {
-		t.Fatalf("expected 1 'write scrollback failed' WARN, got %d: %+v", len(warns), sink.all())
+		t.Fatalf("expected 1 'write scrollback failed' WARN, got %d: %+v", len(warns), sink.Records())
 	}
-	if comp := warns[0].attrs["component"]; comp.String() != "daemon" {
+	if comp := warns[0].Attrs["component"]; comp.String() != "daemon" {
 		t.Errorf("WARN component = %q, want daemon", comp.String())
 	}
 }
@@ -447,33 +380,33 @@ func TestCaptureAndCommit_CountsUserClosedPaneAsNaturalChurnNotAnomalous(t *test
 	}
 
 	rec := sink.onlySummary(t)
-	if got := rec.intAttr(t, "natural_churn"); got != 1 {
+	if got := rec.IntAttr(t, "natural_churn"); got != 1 {
 		t.Errorf("natural_churn = %d, want 1 (option a: user-closed pane is natural churn)", got)
 	}
-	if got := rec.intAttr(t, "anomalous"); got != 0 {
+	if got := rec.IntAttr(t, "anomalous"); got != 0 {
 		t.Errorf("anomalous = %d, want 0 (a vanished pane is not anomalous)", got)
 	}
 
 	// A vanished pane emits a capture-bound DEBUG "pane vanished", NOT a WARN.
-	for _, r := range sink.all() {
-		if r.level == slog.LevelWarn && r.msg == "capture pane failed" {
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelWarn && r.Msg == "capture pane failed" {
 			t.Errorf("vanished pane must not emit a WARN: %+v", r)
 		}
 	}
-	var vanished []captureSummaryRecord
-	for _, r := range sink.all() {
-		if r.level == slog.LevelDebug && r.msg == "pane vanished" {
+	var vanished []logtest.Record
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelDebug && r.Msg == "pane vanished" {
 			vanished = append(vanished, r)
 		}
 	}
 	if len(vanished) != 1 {
-		t.Fatalf("expected 1 DEBUG 'pane vanished', got %d: %+v", len(vanished), sink.all())
+		t.Fatalf("expected 1 DEBUG 'pane vanished', got %d: %+v", len(vanished), sink.Records())
 	}
-	if comp := vanished[0].attrs["component"]; comp.String() != "capture" {
+	if comp := vanished[0].Attrs["component"]; comp.String() != "capture" {
 		t.Errorf("'pane vanished' component = %q, want capture", comp.String())
 	}
-	if ec, ok := vanished[0].attrs["error_class"]; !ok || ec.String() != "expected" {
-		t.Errorf("'pane vanished' error_class = %v, want expected", vanished[0].attrs["error_class"])
+	if ec, ok := vanished[0].Attrs["error_class"]; !ok || ec.String() != "expected" {
+		t.Errorf("'pane vanished' error_class = %v, want expected", vanished[0].Attrs["error_class"])
 	}
 }
 
@@ -490,24 +423,24 @@ func TestCaptureAndCommit_EmitsPerPaneDebugBreadcrumbUnderCapture(t *testing.T) 
 		t.Fatalf("captureAndCommit: %v", err)
 	}
 
-	var dbg []captureSummaryRecord
-	for _, r := range sink.all() {
-		if r.level == slog.LevelDebug && r.msg == "pane captured" {
+	var dbg []logtest.Record
+	for _, r := range sink.Records() {
+		if r.Level == slog.LevelDebug && r.Msg == "pane captured" {
 			dbg = append(dbg, r)
 		}
 	}
 	if len(dbg) != 1 {
-		t.Fatalf("expected 1 DEBUG 'pane captured' breadcrumb, got %d: %+v", len(dbg), sink.all())
+		t.Fatalf("expected 1 DEBUG 'pane captured' breadcrumb, got %d: %+v", len(dbg), sink.Records())
 	}
-	if comp := dbg[0].attrs["component"]; comp.String() != "capture" {
+	if comp := dbg[0].Attrs["component"]; comp.String() != "capture" {
 		t.Errorf("breadcrumb component = %q, want capture", comp.String())
 	}
 	// pane_key is the canonical persisted form (SanitizePaneKey), not the
 	// tmux -t target form: "work__0.0", not "work:0.0".
-	if pk, ok := dbg[0].attrs["pane_key"]; !ok || pk.String() != "work__0.0" {
-		t.Errorf("breadcrumb pane_key = %v, want work__0.0", dbg[0].attrs["pane_key"])
+	if pk, ok := dbg[0].Attrs["pane_key"]; !ok || pk.String() != "work__0.0" {
+		t.Errorf("breadcrumb pane_key = %v, want work__0.0", dbg[0].Attrs["pane_key"])
 	}
-	if s, ok := dbg[0].attrs["session"]; !ok || s.String() != "work" {
-		t.Errorf("breadcrumb session = %v, want work", dbg[0].attrs["session"])
+	if s, ok := dbg[0].Attrs["session"]; !ok || s.String() != "work" {
+		t.Errorf("breadcrumb session = %v, want work", dbg[0].Attrs["session"])
 	}
 }
