@@ -78,11 +78,15 @@ type ProjectEditor interface {
 }
 
 // AliasEditor defines the interface for managing aliases in edit mode.
+//
+// The mutation surface is the audited combined store-seam methods
+// (SetAndSave / DeleteAndSave) — not the raw Set / Delete / Save — so every TUI
+// alias edit is uniformly audited under the aliases component. Load stays for
+// the collision pre-check.
 type AliasEditor interface {
 	Load() (map[string]string, error)
-	Set(name, path string)
-	Delete(name string) bool
-	Save() error
+	SetAndSave(name, path, via string) error
+	DeleteAndSave(name, via string) (bool, error)
 }
 
 // editField tracks which field has focus in the edit modal.
@@ -1464,15 +1468,28 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Handle alias removals
+	// Alias mutations now flow through the audited combined store-seam methods
+	// (SetAndSave / DeleteAndSave), each of which persists immediately. This
+	// changes the TUI from ONE batched Save to per-op Saves. That is acceptable
+	// because (1) the set-noop skip-persist requirement is only expressible by a
+	// combined method (a separate Save cannot selectively skip), (2) a TUI alias
+	// edit is tiny (0-1 removals plus 0-1 additions), and (3) routing every
+	// mutation through the combined methods makes all alias edits — CLI and TUI
+	// alike — uniformly audited under the aliases component. via=cli: the TUI
+	// edit is a user-facing mutation.
+
+	// Handle alias removals.
 	for _, removed := range m.editRemoved {
-		m.aliasEditor.Delete(removed)
+		if _, err := m.aliasEditor.DeleteAndSave(removed, "cli"); err != nil {
+			m.editError = "Failed to save aliases"
+			return m, nil
+		}
 	}
 
-	// Handle new alias addition
+	// Handle new alias addition.
 	newAlias := strings.TrimSpace(m.editNewAlias)
 	if newAlias != "" {
-		// Check for collision
+		// Check for collision before mutating.
 		allAliases, err := m.aliasEditor.Load()
 		if err == nil {
 			if existingPath, ok := allAliases[newAlias]; ok && existingPath != m.editProject.Path {
@@ -1480,13 +1497,10 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		m.aliasEditor.Set(newAlias, m.editProject.Path)
-	}
-
-	// Save alias changes
-	if err := m.aliasEditor.Save(); err != nil {
-		m.editError = "Failed to save aliases"
-		return m, nil
+		if err := m.aliasEditor.SetAndSave(newAlias, m.editProject.Path, "cli"); err != nil {
+			m.editError = "Failed to save aliases"
+			return m, nil
+		}
 	}
 
 	m.modal = modalNone

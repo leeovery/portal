@@ -4740,7 +4740,10 @@ func (m *mockProjectEditor) Rename(path, newName, via string) error {
 	return m.err
 }
 
-// mockAliasEditor implements tui.AliasEditor for testing.
+// mockAliasEditor implements tui.AliasEditor for testing. The mutation surface
+// is the audited combined methods (SetAndSave / DeleteAndSave); setCalls /
+// deleted / saveCalled track invocations for assertions, and saveErr forces a
+// persist failure.
 type mockAliasEditor struct {
 	aliases    map[string]string
 	loadErr    error
@@ -4753,6 +4756,7 @@ type mockAliasEditor struct {
 type aliasSetCall struct {
 	name string
 	path string
+	via  string
 }
 
 func (m *mockAliasEditor) Load() (map[string]string, error) {
@@ -4766,26 +4770,32 @@ func (m *mockAliasEditor) Load() (map[string]string, error) {
 	return result, nil
 }
 
-func (m *mockAliasEditor) Set(name, path string) {
-	m.setCalls = append(m.setCalls, aliasSetCall{name: name, path: path})
+func (m *mockAliasEditor) SetAndSave(name, path, via string) error {
+	m.setCalls = append(m.setCalls, aliasSetCall{name: name, path: path, via: via})
+	m.saveCalled = true
+	if m.saveErr != nil {
+		return m.saveErr
+	}
 	if m.aliases == nil {
 		m.aliases = make(map[string]string)
 	}
 	m.aliases[name] = path
+	return nil
 }
 
-func (m *mockAliasEditor) Delete(name string) bool {
+func (m *mockAliasEditor) DeleteAndSave(name, via string) (bool, error) {
 	m.deleted = append(m.deleted, name)
 	_, ok := m.aliases[name]
-	if ok {
-		delete(m.aliases, name)
+	if !ok {
+		// Absent delete: no persist, no error (mirrors the store contract).
+		return false, nil
 	}
-	return ok
-}
-
-func (m *mockAliasEditor) Save() error {
+	delete(m.aliases, name)
 	m.saveCalled = true
-	return m.saveErr
+	if m.saveErr != nil {
+		return true, m.saveErr
+	}
+	return true, nil
 }
 
 // setupEditModel creates a model on the projects page with the given projects,
@@ -5146,6 +5156,11 @@ func TestEditProject(t *testing.T) {
 		}
 		if aliases.setCalls[0].path != "/code/portal" {
 			t.Errorf("expected alias path '/code/portal', got %q", aliases.setCalls[0].path)
+		}
+		// The TUI alias edit is a user-facing mutation, so the breadcrumb must
+		// record via=cli.
+		if aliases.setCalls[0].via != "cli" {
+			t.Errorf("expected SetAndSave via=cli, got %q", aliases.setCalls[0].via)
 		}
 		if !aliases.saveCalled {
 			t.Error("expected Save to be called")

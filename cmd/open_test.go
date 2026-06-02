@@ -724,18 +724,21 @@ func (s *stubAliasEditor) Load() (map[string]string, error) {
 	}
 	return result, nil
 }
-func (s *stubAliasEditor) Set(name, path string) {
+func (s *stubAliasEditor) SetAndSave(name, path, _ string) error {
 	if s.aliases == nil {
 		s.aliases = make(map[string]string)
 	}
 	s.aliases[name] = path
+	return nil
 }
-func (s *stubAliasEditor) Delete(name string) bool {
+func (s *stubAliasEditor) DeleteAndSave(name, _ string) (bool, error) {
 	_, ok := s.aliases[name]
+	if !ok {
+		return false, nil
+	}
 	delete(s.aliases, name)
-	return ok
+	return true, nil
 }
-func (s *stubAliasEditor) Save() error { return nil }
 
 // stubCommander implements tmux.Commander for cmd-level testing.
 // Returns a single session so list-sessions queries succeed during tests.

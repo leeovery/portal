@@ -25,11 +25,16 @@ var aliasRmCmd = &cobra.Command{
 			return err
 		}
 
-		if !store.Delete(name) {
+		// DeleteAndSave is the audited mutation path: it emits the rm breadcrumb
+		// under the aliases component (via=cli) on a successful persist. An
+		// absent alias returns existed=false WITHOUT persisting or emitting, so
+		// the pre-instrumentation "alias not found" error path is preserved
+		// exactly.
+		existed, err := store.DeleteAndSave(name, "cli")
+		if !existed {
 			return fmt.Errorf("alias not found: %s", name)
 		}
-
-		if err := store.Save(); err != nil {
+		if err != nil {
 			return fmt.Errorf("failed to save aliases: %w", err)
 		}
 
@@ -70,9 +75,10 @@ var aliasSetCmd = &cobra.Command{
 			return err
 		}
 
-		store.Set(name, normalised)
-
-		if err := store.Save(); err != nil {
+		// SetAndSave is the audited mutation path: it classifies set / modify /
+		// set-noop from the pre-mutation map, persists (skipping the write on a
+		// no-op), and emits the breadcrumb under the aliases component (via=cli).
+		if err := store.SetAndSave(name, normalised, "cli"); err != nil {
 			return fmt.Errorf("failed to save aliases: %w", err)
 		}
 
