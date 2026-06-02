@@ -3,7 +3,6 @@ package cmd
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -111,7 +110,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		oldPath := filepath.Join(tmpDir, "nonexistent", "portal", "projects.json")
 		newPath := filepath.Join(tmpDir, ".config", "portal", "projects.json")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		if _, err := os.Stat(newPath); !os.IsNotExist(err) {
 			t.Errorf("new file should not exist when old file does not exist")
@@ -139,7 +138,7 @@ func TestMigrateConfigFile(t *testing.T) {
 			t.Fatalf("failed to write new file: %v", err)
 		}
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		data, err := os.ReadFile(newPath)
 		if err != nil {
@@ -180,7 +179,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		newAliases := filepath.Join(newDir, "aliases")
 
 		// Migrate aliases — should succeed
-		migrateConfigFile(oldAliases, newAliases)
+		migrateConfigFile(oldAliases, newAliases, "aliases")
 
 		data, err := os.ReadFile(newAliases)
 		if err != nil {
@@ -192,7 +191,7 @@ func TestMigrateConfigFile(t *testing.T) {
 
 		// Migrate projects — should be no-op (new path occupied)
 		oldProjects := filepath.Join(oldDir, "projects.json")
-		migrateConfigFile(oldProjects, newProjects)
+		migrateConfigFile(oldProjects, newProjects, "projects")
 
 		projData, err := os.ReadFile(newProjects)
 		if err != nil {
@@ -221,7 +220,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		}
 		newPath := filepath.Join(newDir, "projects.json")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
 			t.Errorf("old directory should be removed when empty after migration")
@@ -251,7 +250,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		}
 		newPath := filepath.Join(newDir, "projects.json")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		if _, err := os.Stat(oldDir); err != nil {
 			t.Errorf("old directory should be preserved when non-empty: %v", err)
@@ -277,7 +276,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		// Do NOT create newDir — migration should create it
 		newPath := filepath.Join(tmpDir, ".config", "portal", "aliases")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "aliases")
 
 		data, err := os.ReadFile(newPath)
 		if err != nil {
@@ -288,62 +287,9 @@ func TestMigrateConfigFile(t *testing.T) {
 		}
 	})
 
-	t.Run("migration logs warning on rename failure", func(t *testing.T) {
-		tmpDir := t.TempDir()
-
-		oldDir := filepath.Join(tmpDir, "Library", "Application Support", "portal")
-		if err := os.MkdirAll(oldDir, 0o755); err != nil {
-			t.Fatalf("failed to create old dir: %v", err)
-		}
-		oldPath := filepath.Join(oldDir, "projects.json")
-		if err := os.WriteFile(oldPath, []byte("data"), 0o644); err != nil {
-			t.Fatalf("failed to write old file: %v", err)
-		}
-
-		// Create target directory as read+execute only (no write) to cause rename to fail.
-		// 0o555 allows stat to succeed (file not found) but blocks rename.
-		newDir := filepath.Join(tmpDir, ".config", "portal")
-		if err := os.MkdirAll(newDir, 0o755); err != nil {
-			t.Fatalf("failed to create new dir: %v", err)
-		}
-		if err := os.Chmod(newDir, 0o555); err != nil {
-			t.Fatalf("failed to chmod new dir: %v", err)
-		}
-		t.Cleanup(func() {
-			_ = os.Chmod(newDir, 0o755)
-		})
-
-		newPath := filepath.Join(newDir, "projects.json")
-
-		// Capture stderr
-		oldStderr := os.Stderr
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatalf("failed to create pipe: %v", err)
-		}
-		os.Stderr = w
-
-		migrateConfigFile(oldPath, newPath)
-
-		_ = w.Close()
-		os.Stderr = oldStderr
-
-		var buf [4096]byte
-		n, _ := r.Read(buf[:])
-		output := string(buf[:n])
-
-		if len(output) == 0 {
-			t.Errorf("expected warning on stderr, got nothing")
-		}
-		if !strings.Contains(output, "warning") || !strings.Contains(output, "migrate") {
-			t.Errorf("stderr output %q should contain 'warning' and 'migrate'", output)
-		}
-
-		// Old file should still exist
-		if _, err := os.Stat(oldPath); err != nil {
-			t.Errorf("old file should still exist after failed rename: %v", err)
-		}
-	})
+	// Note: the rename-failure WARN behaviour (previously asserted on stderr
+	// here) moved to a structured log line and is covered by
+	// TestMigrateConfigFileLogging's "write-failed-rename" case.
 
 	t.Run("migration is skipped when stat of new path returns non-not-found error", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -373,7 +319,7 @@ func TestMigrateConfigFile(t *testing.T) {
 
 		newPath := filepath.Join(newDir, "projects.json")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		// Old file must still exist — migration should have been skipped.
 		if _, err := os.Stat(oldPath); err != nil {
@@ -399,7 +345,7 @@ func TestMigrateConfigFile(t *testing.T) {
 		}
 		newPath := filepath.Join(newDir, "projects.json")
 
-		migrateConfigFile(oldPath, newPath)
+		migrateConfigFile(oldPath, newPath, "projects")
 
 		if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 			t.Errorf("old file should not exist after migration")

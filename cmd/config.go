@@ -5,14 +5,45 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/xdg"
 )
+
+// configFileComponents is the closed filename -> owning-component mapping for
+// the in-scope user-config files (the state-mutation audit-trail set). It is
+// the single source of truth that lets configFilePath thread the correct
+// owning component into migrateConfigFile's breadcrumb. A filename absent from
+// this map (none today, but defensive) resolves to "" and suppresses the
+// migrate emission entirely — see migrateConfigFile's empty-component guard.
+var configFileComponents = map[string]string{
+	"hooks.json":    "hooks",
+	"aliases":       "aliases",
+	"projects.json": "projects",
+}
 
 // migrateConfigFile moves a config file from oldPath to newPath if oldPath
 // exists and newPath does not. This handles one-shot migration from the old
 // macOS config location (~/Library/Application Support/portal/) to the
-// XDG-compliant path. Migration is best-effort: failures log to stderr.
-func migrateConfigFile(oldPath, newPath string) {
+// XDG-compliant path. Migration is best-effort.
+//
+// component is the owning component of the migrated file (one of the closed
+// "hooks"/"aliases"/"projects" values from configFileComponents). On a
+// successful move it emits one INFO breadcrumb (op rendered as the slog message
+// verb "migrate", per the established state-mutation pattern; via="migrate";
+// path=newPath) and on a MkdirAll/Rename failure one WARN — both under the
+// owning component's logger, bound dynamically here because migrateConfigFile
+// is generic across the three config files. There is deliberately NO per-entry
+// key attr (hook_key/alias/project): a whole-file move has no single entry key,
+// and the path attr plus the component already identify the file.
+//
+// An EMPTY component (an unmapped filename) suppresses every emission — we must
+// never log under an empty/invalid component — but the move itself still runs
+// best-effort.
+//
+// PR-timing caveat: migrateConfigFile lands with the state-mutation work; a
+// migration firing in an earlier window goes unlogged — accepted (rare
+// idempotent one-shot most users already ran).
+func migrateConfigFile(oldPath, newPath, component string) {
 	if _, err := os.Stat(oldPath); err != nil {
 		return
 	}
@@ -24,13 +55,21 @@ func migrateConfigFile(oldPath, newPath string) {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "portal: warning: failed to create config directory %s: %v\n", filepath.Dir(newPath), err)
+		if component != "" {
+			log.For(component).Warn("migrate", "via", "migrate", "path", filepath.Dir(newPath), "error", err, "error_class", "write-failed-temp-create")
+		}
 		return
 	}
 
 	if err := os.Rename(oldPath, newPath); err != nil {
-		fmt.Fprintf(os.Stderr, "portal: warning: failed to migrate config file from %s to %s: %v\n", oldPath, newPath, err)
+		if component != "" {
+			log.For(component).Warn("migrate", "via", "migrate", "path", newPath, "error", err, "error_class", "write-failed-rename")
+		}
 		return
+	}
+
+	if component != "" {
+		log.For(component).Info("migrate", "via", "migrate", "path", newPath)
 	}
 
 	// Clean up old directory if empty.
@@ -60,7 +99,9 @@ func configFilePath(envVar, filename string) (string, error) {
 	newPath := filepath.Join(configDir, "portal", filename)
 
 	oldPath := filepath.Join(homeDir, "Library", "Application Support", "portal", filename)
-	migrateConfigFile(oldPath, newPath)
+	// configFileComponents is the closed filename->component mapping; an
+	// unmapped filename yields "" and migrateConfigFile suppresses emission.
+	migrateConfigFile(oldPath, newPath, configFileComponents[filename])
 
 	return newPath, nil
 }
