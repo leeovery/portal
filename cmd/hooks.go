@@ -115,7 +115,7 @@ var hooksSetCmd = &cobra.Command{
 			return err
 		}
 
-		return store.Set(structuralKey, "on-resume", command)
+		return store.Set(structuralKey, "on-resume", command, "cli")
 	},
 }
 
@@ -161,7 +161,7 @@ var hooksRmCmd = &cobra.Command{
 			return err
 		}
 
-		return store.Remove(structuralKey, "on-resume")
+		return store.Remove(structuralKey, "on-resume", "cli")
 	},
 }
 

@@ -1,13 +1,127 @@
 package hooks_test
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 
+	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/hooks"
+	"github.com/leeovery/portal/internal/log"
 )
+
+// captureSink is a slog.Handler that records every emitted record together with
+// the attrs bound via WithAttrs (notably the component attr that log.For binds
+// at the logger, not at each call site) so the hooks store tests can assert on
+// component=hooks and the per-call attrs faithfully.
+type captureSink struct {
+	mu      sync.Mutex
+	records []captureRecord
+	// shared points at the records-owning sink so handlers derived via
+	// WithAttrs/WithGroup record into the same buffer; nil on the root sink.
+	shared *captureSink
+	// bound holds attrs accumulated via WithAttrs (e.g. component).
+	bound []slog.Attr
+}
+
+type captureRecord struct {
+	level slog.Level
+	msg   string
+	attrs map[string]slog.Value
+}
+
+func (s *captureSink) owner() *captureSink {
+	if s.shared != nil {
+		return s.shared
+	}
+	return s
+}
+
+func (s *captureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (s *captureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
+	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
+	next = append(next, s.bound...)
+	next = append(next, attrs...)
+	return &captureSink{shared: s.owner(), bound: next}
+}
+
+func (s *captureSink) WithGroup(_ string) slog.Handler {
+	return &captureSink{shared: s.owner(), bound: s.bound}
+}
+
+func (s *captureSink) Handle(_ context.Context, r slog.Record) error {
+	attrs := make(map[string]slog.Value, len(s.bound)+r.NumAttrs())
+	for _, a := range s.bound {
+		attrs[a.Key] = a.Value
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value
+		return true
+	})
+	rec := captureRecord{level: r.Level, msg: r.Message, attrs: attrs}
+	owner := s.owner()
+	owner.mu.Lock()
+	owner.records = append(owner.records, rec)
+	owner.mu.Unlock()
+	return nil
+}
+
+func (s *captureSink) all() []captureRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]captureRecord, len(s.records))
+	copy(out, s.records)
+	return out
+}
+
+// installCapture swaps a capturing handler into the process-wide log
+// indirection for the duration of the test and returns the sink.
+func installCapture(t *testing.T) *captureSink {
+	t.Helper()
+	sink := &captureSink{}
+	log.SetTestHandler(t, sink)
+	return sink
+}
+
+// onlyRecord returns the single captured record, failing if there is not
+// exactly one.
+func (s *captureSink) onlyRecord(t *testing.T) captureRecord {
+	t.Helper()
+	recs := s.all()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 log record, got %d: %+v", len(recs), recs)
+	}
+	return recs[0]
+}
+
+func (r captureRecord) attrString(t *testing.T, key string) string {
+	t.Helper()
+	v, ok := r.attrs[key]
+	if !ok {
+		t.Fatalf("record missing attr %q: %+v", key, r.attrs)
+	}
+	return v.String()
+}
+
+// readOnlyDirPath returns a path inside a 0500 (read-only) directory so that
+// AtomicWrite fails at the temp-create phase. The directory is created under a
+// t.TempDir so cleanup can remove it.
+func readOnlyDirPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	roDir := filepath.Join(dir, "ro")
+	if err := os.Mkdir(roDir, 0o500); err != nil {
+		t.Fatalf("failed to create read-only dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roDir, 0o700) })
+	return filepath.Join(roDir, "hooks.json")
+}
 
 func TestLoad(t *testing.T) {
 	t.Run("returns empty map when file does not exist", func(t *testing.T) {
@@ -167,7 +281,7 @@ func TestSet(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -189,10 +303,10 @@ func TestSet(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("my-session:0.0", "on-start", "echo hello"); err != nil {
+		if err := store.Set("my-session:0.0", "on-start", "echo hello", "cli"); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -220,10 +334,10 @@ func TestSet(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on first set: %v", err)
 		}
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume xyz789"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume xyz789", "cli"); err != nil {
 			t.Fatalf("unexpected error on second set: %v", err)
 		}
 
@@ -250,14 +364,14 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("my-session:0.0", "on-resume"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-resume", "cli"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -282,11 +396,11 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("my-session:0.0", "on-resume"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-resume", "cli"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -308,11 +422,11 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("nonexistent:9.9", "on-resume"); err != nil {
+		if err := store.Remove("nonexistent:9.9", "on-resume", "cli"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -331,11 +445,11 @@ func TestRemove(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
-		if err := store.Remove("my-session:0.0", "on-start"); err != nil {
+		if err := store.Remove("my-session:0.0", "on-start", "cli"); err != nil {
 			t.Fatalf("unexpected error on remove: %v", err)
 		}
 
@@ -413,7 +527,7 @@ func TestGet(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -452,10 +566,10 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -505,10 +619,10 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -527,10 +641,10 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "claude --resume def456", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -557,7 +671,7 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -643,16 +757,16 @@ func TestCleanStale(t *testing.T) {
 		filePath := filepath.Join(dir, "hooks.json")
 		store := hooks.NewStore(filePath)
 
-		if err := store.Set("my-session:0.0", "on-resume", "cmd0"); err != nil {
+		if err := store.Set("my-session:0.0", "on-resume", "cmd0", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("other-session:0.0", "on-resume", "cmd-other0"); err != nil {
+		if err := store.Set("other-session:0.0", "on-resume", "cmd-other0", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("my-session:0.1", "on-resume", "cmd1"); err != nil {
+		if err := store.Set("my-session:0.1", "on-resume", "cmd1", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
-		if err := store.Set("other-session:0.1", "on-resume", "cmd-other1"); err != nil {
+		if err := store.Set("other-session:0.1", "on-resume", "cmd-other1", "cli"); err != nil {
 			t.Fatalf("unexpected error on set: %v", err)
 		}
 
@@ -687,6 +801,284 @@ func TestCleanStale(t *testing.T) {
 		}
 		if _, ok := h["other-session:0.1"]; !ok {
 			t.Error("key other-session:0.1 should have been kept")
+		}
+	})
+}
+
+func TestSetLogging(t *testing.T) {
+	t.Run("emits INFO op=set with value and via=cli for a new hook key", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+		sink := installCapture(t)
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.level)
+		}
+		if rec.msg != "set" {
+			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "hook_key"); got != "my-session:0.0" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		}
+		if got := rec.attrString(t, "value"); got != "claude --resume abc123" {
+			t.Errorf("value = %q, want %q", got, "claude --resume abc123")
+		}
+		if got := rec.attrString(t, "via"); got != "cli" {
+			t.Errorf("via = %q, want %q", got, "cli")
+		}
+	})
+
+	t.Run("emits INFO op=modify when the key exists with a different value", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on first set: %v", err)
+		}
+
+		sink := installCapture(t)
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume xyz789", "cli"); err != nil {
+			t.Fatalf("unexpected error on second set: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.level)
+		}
+		if rec.msg != "modify" {
+			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "hook_key"); got != "my-session:0.0" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		}
+		if got := rec.attrString(t, "value"); got != "claude --resume xyz789" {
+			t.Errorf("value = %q, want %q", got, "claude --resume xyz789")
+		}
+		if got := rec.attrString(t, "via"); got != "cli" {
+			t.Errorf("via = %q, want %q", got, "cli")
+		}
+	})
+
+	t.Run("emits DEBUG op=set-noop and skips Save when key+value already match", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "hooks.json")
+		store := hooks.NewStore(filePath)
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on first set: %v", err)
+		}
+
+		infoBefore, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+
+		sink := installCapture(t)
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on noop set: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelDebug {
+			t.Errorf("level = %v, want DEBUG", rec.level)
+		}
+		if rec.msg != "set-noop" {
+			t.Errorf("msg = %q, want %q", rec.msg, "set-noop")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "hook_key"); got != "my-session:0.0" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		}
+		if got := rec.attrString(t, "via"); got != "cli" {
+			t.Errorf("via = %q, want %q", got, "cli")
+		}
+		if _, ok := rec.attrs["value"]; ok {
+			t.Errorf("set-noop record should not carry a value attr: %+v", rec.attrs)
+		}
+
+		infoAfter, err := os.Stat(filePath)
+		if err != nil {
+			t.Fatalf("failed to stat file: %v", err)
+		}
+		if !infoBefore.ModTime().Equal(infoAfter.ModTime()) {
+			t.Error("file was modified on a set-noop (Save should be skipped)")
+		}
+	})
+
+	t.Run("emits WARN with error_class=write-failed-temp-create when AtomicWrite fails on Set", func(t *testing.T) {
+		path := readOnlyDirPath(t)
+		store := hooks.NewStore(path)
+		sink := installCapture(t)
+
+		err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli")
+		if err == nil {
+			t.Fatal("expected error from Set on read-only dir, got nil")
+		}
+		if !errors.Is(err, fileutil.ErrWriteTempCreate) {
+			t.Errorf("returned error not classified as temp-create: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.level)
+		}
+		if rec.msg != "set" {
+			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
+			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
+		}
+		// The error attr must carry the wrapped error itself, so errors.Is on
+		// the sentinel succeeds.
+		errVal, ok := rec.attrs["error"]
+		if !ok {
+			t.Fatalf("WARN record missing error attr: %+v", rec.attrs)
+		}
+		loggedErr, ok := errVal.Any().(error)
+		if !ok {
+			t.Fatalf("error attr is not an error value: %T", errVal.Any())
+		}
+		if !errors.Is(loggedErr, fileutil.ErrWriteTempCreate) {
+			t.Errorf("logged error attr does not wrap the temp-create sentinel: %v", loggedErr)
+		}
+	})
+
+	t.Run("does not log inside Save (set-noop proves Save is not the emitter)", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on first set: %v", err)
+		}
+
+		// Direct Save call must emit nothing — only Set/Remove are emitters.
+		sink := installCapture(t)
+		h, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if err := store.Save(h); err != nil {
+			t.Fatalf("unexpected error on save: %v", err)
+		}
+
+		if recs := sink.all(); len(recs) != 0 {
+			t.Errorf("Save emitted %d log records, want 0: %+v", len(recs), recs)
+		}
+	})
+}
+
+func TestRemoveLogging(t *testing.T) {
+	t.Run("emits INFO op=rm without a value attr", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		sink := installCapture(t)
+		if err := store.Remove("my-session:0.0", "on-resume", "cli"); err != nil {
+			t.Fatalf("unexpected error on remove: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.level)
+		}
+		if rec.msg != "rm" {
+			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "hook_key"); got != "my-session:0.0" {
+			t.Errorf("hook_key = %q, want %q", got, "my-session:0.0")
+		}
+		if got := rec.attrString(t, "via"); got != "cli" {
+			t.Errorf("via = %q, want %q", got, "cli")
+		}
+		if _, ok := rec.attrs["value"]; ok {
+			t.Errorf("rm record should not carry a value attr: %+v", rec.attrs)
+		}
+	})
+
+	t.Run("still emits INFO op=rm when removing an absent key", func(t *testing.T) {
+		dir := t.TempDir()
+		store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+
+		if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+			t.Fatalf("unexpected error on set: %v", err)
+		}
+
+		sink := installCapture(t)
+		if err := store.Remove("nonexistent:9.9", "on-resume", "cli"); err != nil {
+			t.Fatalf("unexpected error on remove: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelInfo {
+			t.Errorf("level = %v, want INFO", rec.level)
+		}
+		if rec.msg != "rm" {
+			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "hook_key"); got != "nonexistent:9.9" {
+			t.Errorf("hook_key = %q, want %q", got, "nonexistent:9.9")
+		}
+	})
+
+	t.Run("emits WARN with error_class=write-failed-temp-create when AtomicWrite fails on Remove", func(t *testing.T) {
+		path := readOnlyDirPath(t)
+		store := hooks.NewStore(path)
+		sink := installCapture(t)
+
+		err := store.Remove("my-session:0.0", "on-resume", "cli")
+		if err == nil {
+			t.Fatal("expected error from Remove on read-only dir, got nil")
+		}
+		if !errors.Is(err, fileutil.ErrWriteTempCreate) {
+			t.Errorf("returned error not classified as temp-create: %v", err)
+		}
+
+		rec := sink.onlyRecord(t)
+		if rec.level != slog.LevelWarn {
+			t.Errorf("level = %v, want WARN", rec.level)
+		}
+		if rec.msg != "rm" {
+			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "component"); got != "hooks" {
+			t.Errorf("component = %q, want %q", got, "hooks")
+		}
+		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
+			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
+		}
+		errVal, ok := rec.attrs["error"]
+		if !ok {
+			t.Fatalf("WARN record missing error attr: %+v", rec.attrs)
+		}
+		loggedErr, ok := errVal.Any().(error)
+		if !ok {
+			t.Fatalf("error attr is not an error value: %T", errVal.Any())
+		}
+		if !errors.Is(loggedErr, fileutil.ErrWriteTempCreate) {
+			t.Errorf("logged error attr does not wrap the temp-create sentinel: %v", loggedErr)
 		}
 	})
 }

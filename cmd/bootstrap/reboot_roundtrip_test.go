@@ -227,7 +227,7 @@ func runRebootRoundTrip(t *testing.T, cfg roundTripCfg) {
 	// which is how we assert "exactly once" rather than "at least once".
 	hookCmd := fmt.Sprintf("echo HOOK_FIRED >> %s", hookFireFile)
 	store := hooks.NewStore(hooksPath)
-	if err := store.Set(savedHookKey, "on-resume", hookCmd); err != nil {
+	if err := store.Set(savedHookKey, "on-resume", hookCmd, "cli"); err != nil {
 		t.Fatalf("hooks.Set: %v", err)
 	}
 

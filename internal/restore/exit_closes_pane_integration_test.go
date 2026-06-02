@@ -345,7 +345,7 @@ func setupExitClosesPane(t *testing.T, hookCmd string) (string, *tmuxtest.Socket
 	if hookCmd != "" {
 		store := hooks.NewStore(hooksPath)
 		hookKey := tmux.PaneTarget(sessionName, 0, 0)
-		if err := store.Set(hookKey, "on-resume", hookCmd); err != nil {
+		if err := store.Set(hookKey, "on-resume", hookCmd, "cli"); err != nil {
 			t.Fatalf("hooks.Set: %v", err)
 		}
 	}
