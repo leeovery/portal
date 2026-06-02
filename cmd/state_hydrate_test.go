@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1797,3 +1798,197 @@ func TestHydrate_NilHookStoreDegradesToBareShellOnSignalArrived(t *testing.T) {
 // per-process file-backed logger — logging is owned by internal/log's
 // handler (configured once via main -> log.Init), so there is no per-helper
 // fd to defer-close. The behaviour it asserted no longer exists.
+
+// TestHydrate_FileMissing_ClassifiesCauseFromRawChain locks the Boundary
+// class 4 classification contract: handleHydrateFileMissing distinguishes
+// ENOENT vs permission vs generic purely by walking the raw Cause chain with
+// errors.Is. The cases use a wrapped *os.PathError (the shape runHydrate
+// actually passes through verbatim) for the fs.* arms, and a bare error for
+// the generic arm, so the test proves the switch keys off the unwrapped
+// sentinel — not off a pre-classified marker or the error's string form.
+func TestHydrate_FileMissing_ClassifiesCauseFromRawChain(t *testing.T) {
+	cases := []struct {
+		name   string
+		cause  error
+		phrase string
+	}{
+		{
+			name:   "ENOENT",
+			cause:  &os.PathError{Op: "open", Path: "/x/sb.bin", Err: syscall.ENOENT},
+			phrase: "not found",
+		},
+		{
+			name:   "permission",
+			cause:  &os.PathError{Op: "open", Path: "/x/sb.bin", Err: syscall.EACCES},
+			phrase: "permission denied",
+		},
+		{
+			name:   "generic",
+			cause:  errors.New("synthetic mid-stream failure"),
+			phrase: "I/O error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Sanity: the *os.PathError arms must traverse via %w-equivalent
+			// Unwrap to the fs sentinels — this is the property the handler
+			// relies on.
+			switch tc.name {
+			case "ENOENT":
+				if !errors.Is(tc.cause, fs.ErrNotExist) {
+					t.Fatalf("test setup: cause does not traverse to fs.ErrNotExist: %v", tc.cause)
+				}
+			case "permission":
+				if !errors.Is(tc.cause, fs.ErrPermission) {
+					t.Fatalf("test setup: cause does not traverse to fs.ErrPermission: %v", tc.cause)
+				}
+			}
+
+			logger, sink := newCaptureLoggerForComponent(t, "hydrate")
+			cfg := hydrateConfig{
+				FIFO: "/x/hydrate-c__0.0.fifo", File: "/x/sb.bin", HookKey: "c:0.0",
+				Stdout: io.Discard,
+				Client: tmux.NewClient(&recordingCommander{}),
+				Logger: logger,
+			}
+			if err := handleHydrateFileMissing(cfg, hydrateFileMissingContext{Cause: tc.cause}); err != nil {
+				t.Fatalf("handleHydrateFileMissing: %v", err)
+			}
+			body := sink.body()
+			if !strings.Contains(body, tc.phrase) {
+				t.Errorf("log missing classification phrase %q for %s cause; body = %q", tc.phrase, tc.name, body)
+			}
+		})
+	}
+}
+
+// TestHydrate_FileMissing_PassesRawCauseVerbatim locks the verbatim-Cause
+// contract for runHydrate's os.Open failure path: the *os.PathError returned
+// by os.Open must reach the handler's Cause WITHOUT pre-wrapping, so
+// errors.Is(ctx.Cause, fs.ErrNotExist) traverses. A pre-wrap with %s (or a
+// substituted errors.New) would break the handler's classification switch.
+func TestHydrate_FileMissing_PassesRawCauseVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-vc__0.0.fifo")
+	scrollback := filepath.Join(dir, "missing-sb") // never created → ENOENT on os.Open
+
+	signalFIFOAsync(t, fifo)
+
+	var captured error
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "vc:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		ExecShell: (&stubExecShell{}).fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+		HandleFileMissing: func(_ hydrateConfig, ctx hydrateFileMissingContext) error {
+			captured = ctx.Cause
+			return nil
+		},
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("HandleFileMissing was not invoked; Cause not captured")
+	}
+	if !errors.Is(captured, fs.ErrNotExist) {
+		t.Fatalf("Cause does not traverse to fs.ErrNotExist (pre-wrapped?): %v", captured)
+	}
+	var pathErr *os.PathError
+	if !errors.As(captured, &pathErr) {
+		t.Fatalf("Cause does not carry an *os.PathError verbatim: %v", captured)
+	}
+}
+
+// TestHydrate_FileMissing_PassesPermissionCauseVerbatim is the EACCES sibling
+// of the verbatim-Cause test — confirms a permission-denied os.Open reaches
+// the handler such that errors.Is(Cause, fs.ErrPermission) traverses.
+func TestHydrate_FileMissing_PassesPermissionCauseVerbatim(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0o000 mode bits")
+	}
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-vp__0.0.fifo")
+	scrollback := filepath.Join(dir, "sb")
+	if err := os.WriteFile(scrollback, []byte("HIDDEN"), 0o600); err != nil {
+		t.Fatalf("seed scrollback: %v", err)
+	}
+	if err := os.Chmod(scrollback, 0o000); err != nil {
+		t.Fatalf("chmod 0: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(scrollback, 0o600) })
+
+	signalFIFOAsync(t, fifo)
+
+	var captured error
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollback, HookKey: "vp:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		ExecShell: (&stubExecShell{}).fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+		HandleFileMissing: func(_ hydrateConfig, ctx hydrateFileMissingContext) error {
+			captured = ctx.Cause
+			return nil
+		},
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("HandleFileMissing was not invoked; Cause not captured")
+	}
+	if !errors.Is(captured, fs.ErrPermission) {
+		t.Fatalf("Cause does not traverse to fs.ErrPermission (pre-wrapped?): %v", captured)
+	}
+}
+
+// TestHydrate_MidStreamCopyError_CarriesUnderlyingCauseToHandler locks the
+// io.Copy mid-stream contract: when the scrollback file open succeeds but the
+// stream Read fails mid-dump, runHydrate routes to HandleFileMissing carrying
+// the underlying error verbatim in Cause. Forced by chmod-stripping a file's
+// directory after open is impractical for a mid-stream Read failure, so this
+// instead drives the reachable code path with an open-succeeds-then-Read-fails
+// scrollback: a FIFO standing in for the regular file. os.Open on a FIFO
+// succeeds, and io.Copy's Read then blocks/fails depending on writer state.
+// To keep the test deterministic we instead assert the contract on the
+// directly-reachable path: a scrollback file that is a directory (os.Open
+// succeeds on a dir, io.Copy's Read returns EISDIR mid-stream).
+func TestHydrate_MidStreamCopyError_CarriesUnderlyingCauseToHandler(t *testing.T) {
+	dir := t.TempDir()
+	fifo := makeFIFO(t, dir, "hydrate-ms__0.0.fifo")
+	// A directory: os.Open succeeds, but io.Copy's first Read fails (EISDIR on
+	// Linux, ENOTSUP/"is a directory" on darwin) — a genuine mid-stream Read
+	// error after a successful open.
+	scrollbackDir := filepath.Join(dir, "sb-as-dir")
+	if err := os.Mkdir(scrollbackDir, 0o700); err != nil {
+		t.Fatalf("mkdir scrollback dir: %v", err)
+	}
+
+	signalFIFOAsync(t, fifo)
+
+	var captured error
+	invoked := false
+	cfg := hydrateConfig{
+		FIFO: fifo, File: scrollbackDir, HookKey: "ms:0.0",
+		Stdout:    io.Discard,
+		Client:    tmux.NewClient(&recordingCommander{}),
+		ExecShell: (&stubExecShell{}).fn(),
+		OpenFIFO:  openFIFOWithTimeout,
+		HandleFileMissing: func(_ hydrateConfig, ctx hydrateFileMissingContext) error {
+			invoked = true
+			captured = ctx.Cause
+			return nil
+		},
+	}
+	if err := runHydrate(cfg); err != nil {
+		t.Fatalf("runHydrate: %v", err)
+	}
+	if !invoked {
+		t.Fatal("HandleFileMissing not invoked on mid-stream read failure")
+	}
+	if captured == nil {
+		t.Fatal("mid-stream failure carried a nil Cause to the handler")
+	}
+}

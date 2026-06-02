@@ -206,6 +206,41 @@ func TestCreateFIFO_WrapsMkfifoErrorWithPathWhenParentMissing(t *testing.T) {
 	}
 }
 
+func TestCreateFIFO_PreservesPathErrorSoErrorsIsPermissionTraverses(t *testing.T) {
+	// Boundary class 3 contract: a non-ENOENT os.Remove failure must wrap with
+	// %w so the underlying *os.PathError stays reachable. Stripping write
+	// permission from the parent dir makes the unlink fail with EACCES;
+	// errors.Is(err, fs.ErrPermission) must traverse the "remove existing: %w"
+	// wrap. (An errors.New or %s wrap would drop it.)
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based EACCES setup is unix-specific")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0500 directory write protection")
+	}
+
+	parent := t.TempDir()
+	path := filepath.Join(parent, "fifo")
+	if err := os.WriteFile(path, []byte("seed"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatalf("chmod parent: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+
+	err := state.CreateFIFO(path)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("expected non-ENOENT error, got %v", err)
+	}
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("errors.Is(err, fs.ErrPermission) = false; *os.PathError dropped? err = %v", err)
+	}
+}
+
 func TestCreateFIFO_WrapsRemoveErrorWithPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based EACCES setup is unix-specific")
