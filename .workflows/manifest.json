@@ -104,6 +104,9 @@
     },
     "portal-observability-layer": {
       "work_type": "feature"
+    },
+    "state-notify-cascade-on-binary-upgrade": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
