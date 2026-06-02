@@ -127,6 +127,17 @@ Only the **read** changes — from one global enumeration to a per-event enumera
 
 This is the second half of "delete `ShowGlobalHooks`": once both registration and teardown are on the per-event seam, the no-arg global read has no remaining caller and is removed.
 
+## Acceptance Criteria
+
+1. **No growth across bootstraps.** Running bootstrap step 2 (hook registration) N times (N ≥ 2) on a real tmux server leaves every Portal-managed event's hook array at **exactly one** Portal entry — specifically `pane-focus-out` and `window-layout-changed` stay at 1 and never grow.
+2. **Existing stacks self-collapse.** An event pre-seeded with K stacked identical Portal entries (e.g. 139) collapses to exactly one entry after a single registration — no dedicated cleanup invocation required.
+3. **Stale bodies migrate in place.** A legacy body (un-separated `signal-hydrate`; pre-fix `notifyCommand` on `session-closed`) is converged to the current desired body, leaving exactly one entry on that event.
+4. **User hooks survive.** A co-resident user-authored / other-plugin hook on a managed event — including on the two blind events — is untouched by both registration and teardown.
+5. **Teardown reaps at depth.** `UnregisterPortalHooks` (`portal hooks reset`) removes all Portal entries at any depth on every managed event, including `pane-focus-out` and `window-layout-changed` (Portal entry count → 0).
+6. **Global read removed.** The no-arg `ShowGlobalHooks` is deleted; no production caller remains. All hook reads go through `ShowGlobalHooksForEvent(event)`.
+7. **Idempotent and churn-free.** A registration against an already-converged table performs no unset and no append — no hook renumbering, no log churn.
+8. **Cascade eliminated.** After the fix, a single tmux event that triggers a managed hook (e.g. a session-switch firing `pane-focus-out`) spawns exactly one `portal state notify`, not N.
+
 ---
 
 ## Working Notes
