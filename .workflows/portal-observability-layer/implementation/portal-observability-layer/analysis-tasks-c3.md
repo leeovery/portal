@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Portal Observability Layer (Cycle 3)
 
 ## Task 1: Extract the shared test capture-handler ("captureSink") into one leaf test-helper package
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -37,7 +37,7 @@ sources: duplication
 - If a new helper package is added, include a minimal test exercising `newCaptureLogger` + `Handle` to lock the `<LEVEL> <msg> key=value` rendering contract in the helper's own package.
 
 ## Task 2: Resolve the signal-hydrate command's component attribution (decide-and-document)
-status: pending
+status: approved
 severity: low
 sources: standards
 
