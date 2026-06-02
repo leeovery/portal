@@ -8,8 +8,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
+
+// saverLogger is the component=saver sink for saver-lifecycle breadcrumbs that
+// must render under the saver component regardless of the bootstrap-component
+// WARN sink threaded through saver.Barrier.Logger. log.For never returns nil
+// (root is constructed at package init), so calls are safe at any level and
+// against a discard sink. Today its sole consumer is the SIGKILL-escalation
+// DEBUG breadcrumb in escalateKillToSIGKILL.
+var saverLogger = log.For("saver")
 
 // discardLogger is the canonical silent *slog.Logger used as the default sink
 // for the saver-side barrier and version-writer seams when production wiring
@@ -403,9 +412,17 @@ func waitForPriorPIDExit(pid int, budget time.Duration) bool {
 // structural safety net.
 //
 // The identity-check → SIGKILL pairing is the spec's load-bearing
-// residual-recycle-window invariant: no work (other than the syscall itself)
-// runs between the check and the signal. The two seam calls are deliberately
-// adjacent in source.
+// residual-recycle-window invariant: the ONLY statement permitted between the
+// identity check passing and the signal is the single DEBUG breadcrumb below.
+// That breadcrumb is non-mutating — it does not touch priorPID, the process
+// table, or any state that could let the PID recycle. It is a kernel-side write
+// to an unbuffered O_APPEND fd (microseconds), not a scheduling window that
+// materially widens the recycle race versus the pre-existing function-call
+// overhead. A future reviewer MUST NOT "fix" the invariant by deleting the
+// breadcrumb: it is the forensic record that the SIGKILL decision was committed
+// (the decision-point DEBUG beneath the saver: kill-barrier escalated INFO
+// lifecycle event), and it sits deliberately adjacent — immediately preceding —
+// the SendSIGKILL seam call.
 func escalateKillToSIGKILL(priorPID int) error {
 	result, err := saver.IdentifyDaemon(priorPID)
 	if err != nil || result != state.IdentifyIsPortalDaemon {
@@ -415,6 +432,7 @@ func escalateKillToSIGKILL(priorPID int) error {
 		)
 		return nil
 	}
+	saverLogger.Debug("kill-barrier escalating to SIGKILL", "target_pid", priorPID)
 	_ = saver.Barrier.SendSIGKILL(priorPID)
 
 	if waitForPriorPIDExit(priorPID, saver.Barrier.EscalationTimeout) {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 )
@@ -4128,5 +4129,207 @@ func TestKillSaverAndWaitForDaemon_Escalation_NoPIDFile_EscalationNeverRuns(t *t
 	}
 	if len(log.warns) != 0 {
 		t.Errorf("expected 0 WARN lines when PID file absent, got %d: %v", len(log.warns), log.warns)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Task 4-4: SIGKILL-escalation DEBUG breadcrumb in escalateKillToSIGKILL.
+//
+// The escalation branch (the one firing SIGKILL after the identity check
+// passes) emits ONE DEBUG breadcrumb "kill-barrier escalating to SIGKILL"
+// carrying target_pid under component=saver, as the IMMEDIATELY-preceding
+// statement to the SIGKILL syscall. It is a forensic decision-point detail
+// beneath the saver: kill-barrier escalated INFO lifecycle event (Phase 5).
+// The skip-WARN branch (identity check fails / transient error / dead) does
+// NOT emit it.
+//
+// Spec § Diagnostic context preservation at boundaries (escalateKillToSIGKILL)
+// and § Saver and daemon lifecycle event taxonomy (kill-barrier escalated).
+// ----------------------------------------------------------------------------
+
+const escalationBreadcrumbMessage = "kill-barrier escalating to SIGKILL"
+
+// escalationDebugRecords filters captured records for the escalation DEBUG
+// breadcrumb message.
+func escalationDebugRecords(recs []slog.Record) []slog.Record {
+	var out []slog.Record
+	for _, r := range recs {
+		if r.Message == escalationBreadcrumbMessage {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestEscalateKillToSIGKILL_EmitsDebugBreadcrumbWithTargetPIDOnEscalationBranch
+// pins the escalation branch (IdentifyIsPortalDaemon) emits exactly one DEBUG
+// "kill-barrier escalating to SIGKILL" breadcrumb carrying target_pid equal to
+// the PID being SIGKILL'd, under component=saver.
+func TestEscalateKillToSIGKILL_EmitsDebugBreadcrumbWithTargetPIDOnEscalationBranch(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	killCalls := 0
+	installBarrierSendSIGKILL(t, func(int) error {
+		killCalls++
+		return nil
+	})
+
+	// Alive during session-kill poll; dead immediately after SIGKILL.
+	installBarrierIsAlive(t, func(int) bool { return killCalls == 0 })
+
+	rec := &recordingSlogHandler{}
+	log.SetTestHandler(t, rec)
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	breadcrumbs := escalationDebugRecords(rec.records)
+	if len(breadcrumbs) != 1 {
+		t.Fatalf("expected exactly 1 %q breadcrumb, got %d: %v", escalationBreadcrumbMessage, len(breadcrumbs), rec.records)
+	}
+	b := breadcrumbs[0]
+	if b.Level != slog.LevelDebug {
+		t.Errorf("breadcrumb level = %v, want DEBUG", b.Level)
+	}
+
+	var gotComponent string
+	var gotTargetPID int64
+	var sawTargetPID bool
+	b.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case "component":
+			gotComponent = a.Value.String()
+		case "target_pid":
+			gotTargetPID = a.Value.Int64()
+			sawTargetPID = true
+		}
+		return true
+	})
+	if gotComponent != "saver" {
+		t.Errorf("breadcrumb component = %q, want %q", gotComponent, "saver")
+	}
+	if !sawTargetPID {
+		t.Fatalf("breadcrumb missing target_pid attr: %v", b)
+	}
+	if gotTargetPID != 4321 {
+		t.Errorf("breadcrumb target_pid = %d, want 4321 (the SIGKILL'd PID)", gotTargetPID)
+	}
+}
+
+// TestEscalateKillToSIGKILL_NoBreadcrumbOnSkipBranch pins that the escalation
+// DEBUG breadcrumb is NOT emitted on any skip-WARN branch (IdentifyDead,
+// IdentifyNotPortalDaemon, or a transient identity error) — only on the
+// IdentifyIsPortalDaemon escalation path that fires SIGKILL.
+func TestEscalateKillToSIGKILL_NoBreadcrumbOnSkipBranch(t *testing.T) {
+	cases := []struct {
+		name   string
+		result state.IdentifyResult
+		idErr  error
+	}{
+		{"IdentifyDead", state.IdentifyDead, nil},
+		{"IdentifyNotPortalDaemon", state.IdentifyNotPortalDaemon, nil},
+		{"TransientError", 0, errors.New("ps exec failed: transient")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			installBarrierPollInterval(t, 1*time.Millisecond)
+			installBarrierTimeout(t, 5*time.Millisecond)
+			installBarrierEscalationTimeout(t, 5*time.Millisecond)
+			installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+			installBarrierIsAlive(t, func(int) bool { return true })
+
+			installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+				return tc.result, tc.idErr
+			})
+
+			killCalls := 0
+			installBarrierSendSIGKILL(t, func(int) error {
+				killCalls++
+				return nil
+			})
+
+			rec := &recordingSlogHandler{}
+			log.SetTestHandler(t, rec)
+
+			script := &portalSaverScript{
+				killSession: func(int) (string, error) { return "", nil },
+			}
+			mock := &MockCommander{RunFunc: script.run(t)}
+			client := tmux.NewClient(mock)
+
+			if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+				t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+			}
+
+			if killCalls != 0 {
+				t.Errorf("expected 0 SIGKILL seam calls on skip branch, got %d", killCalls)
+			}
+			if got := escalationDebugRecords(rec.records); len(got) != 0 {
+				t.Errorf("expected 0 escalation breadcrumbs on skip branch, got %d: %v", len(got), got)
+			}
+		})
+	}
+}
+
+// TestEscalateKillToSIGKILL_BreadcrumbEmittedBeforeSIGKILL pins the adjacency
+// invariant from the breadcrumb's perspective: the DEBUG breadcrumb is emitted
+// BEFORE the SIGKILL syscall. The SendSIGKILL seam snapshots the captured
+// breadcrumb count at call time; the breadcrumb must already be recorded when
+// SIGKILL fires.
+func TestEscalateKillToSIGKILL_BreadcrumbEmittedBeforeSIGKILL(t *testing.T) {
+	installBarrierPollInterval(t, 1*time.Millisecond)
+	installBarrierTimeout(t, 5*time.Millisecond)
+	installBarrierEscalationTimeout(t, 5*time.Millisecond)
+	installBarrierReadPID(t, func(string) (int, error) { return 4321, nil })
+
+	installBarrierIdentifyDaemon(t, func(int) (state.IdentifyResult, error) {
+		return state.IdentifyIsPortalDaemon, nil
+	})
+
+	rec := &recordingSlogHandler{}
+	log.SetTestHandler(t, rec)
+
+	killCalls := 0
+	breadcrumbsAtKillTime := -1
+	installBarrierSendSIGKILL(t, func(int) error {
+		// Snapshot the breadcrumb count at the moment SIGKILL is invoked. If the
+		// breadcrumb is the immediately-preceding statement, exactly one
+		// escalation breadcrumb must already be recorded here.
+		breadcrumbsAtKillTime = len(escalationDebugRecords(rec.records))
+		killCalls++
+		return nil
+	})
+
+	installBarrierIsAlive(t, func(int) bool { return killCalls == 0 })
+
+	script := &portalSaverScript{
+		killSession: func(int) (string, error) { return "", nil },
+	}
+	mock := &MockCommander{RunFunc: script.run(t)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.KillSaverAndWaitForDaemon(client, t.TempDir()); err != nil {
+		t.Fatalf("KillSaverAndWaitForDaemon returned error: %v", err)
+	}
+
+	if killCalls != 1 {
+		t.Fatalf("expected exactly 1 SIGKILL seam call, got %d", killCalls)
+	}
+	if breadcrumbsAtKillTime != 1 {
+		t.Errorf("expected the escalation breadcrumb to be recorded BEFORE SIGKILL (count at kill time = %d, want 1)", breadcrumbsAtKillTime)
 	}
 }
