@@ -145,32 +145,69 @@ Probed on an isolated tmux 3.6b server — events that `set` successfully but ar
 
 _High-level only — implementation belongs to the spec._
 
-### The dedup must not depend on `show-hooks -g` global enumeration
+### Chosen Approach: per-event, declarative "ensure exactly one" registration
 
-Candidate directions (to decide in spec/discussion):
+Make Portal stop depending on tmux's global hook view entirely. Read hooks **per-event** (`show-hooks -g <event>`), uniformly for *every* Portal-managed event — and **delete the global `show-hooks -g` read** (`ShowGlobalHooks`). Registration becomes declarative: for each event, read that event's entries, find the Portal-authored ones for its category, and converge to exactly one of the current desired body (unset all matching in reverse index order, then append one). The 139-deep stacks collapse to 1 as an intrinsic side effect of normal registration — no dedicated run-once cleanup code.
 
-1. **Per-event enumeration:** dedup by querying `show-hooks -g <event>` for each event (proven to reliably list entries for *all* events incl. the two blind ones) instead of one global `show-hooks -g`. Smallest change to the existing append-if-absent shape.
-2. **Replace-not-append for Portal-owned hooks:** before registering, evict every existing Portal-authored entry on the event (`set-hook -gu <event>` / indexed unset of matching bodies) then append exactly one. Idempotent by construction, no reliance on enumeration completeness. Must preserve user-authored hooks on the same event.
+**Deciding factor:** doing the feature correctly (declarative, version-robust, single code path) fixes the bug AND the existing mess in one shape, with nothing that ever has to be removed. The cleanup is a *bonus*, not the goal.
 
-### Mandatory cleanup migration for existing installs
+Concrete shape (confirmed against the code):
+- **New seam:** `ShowGlobalHooksForEvent(event)` → `show-hooks -g <event>`. Output format is identical to the global form, so **`ParseShowHooks` needs zero changes** (verified live: `pane-focus-out[0] run-shell "…"`).
+- **Reuses existing, tested primitives:** `portalEntriesFor` + `containsAny` (`portalCommandSubstrings`) for Portal-only matching; reverse-index `UnsetGlobalHookAt`; `AppendGlobalHook`. The eviction half already exists in `UnregisterPortalHooks`.
+- **`UnregisterPortalHooks` moves to the same per-event seam** so `portal hooks reset` stops being blind too (it shares the identical defect today).
+- **Likely net code removal:** a general per-event ensure-exactly-one may subsume the bespoke `migrateHydrationHooks` and `migrateSessionClosedHook` — they exist only because append-if-absent couldn't self-heal. To confirm in spec.
 
-The fix must also **reap the already-stacked duplicates** (139 and counting) on the next bootstrap — collapse each event's Portal-notify entries to a single one. Without this, shipping the dedup fix alone leaves every existing user with a permanent 139-deep stack.
+### Options Explored
 
-### Testing recommendations
+- **(a) Dedup fix only + rely on tmux-server restart for cleanup.** Ship the per-event dedup, ship no cleanup; existing stacks clear when the server next restarts (cheap because Portal resurrects sessions). *Not chosen as the framing* — but its spirit is honoured: we don't ship dedicated cleanup code. The self-healing approach gives the cleanup for free, so we get (a)'s "no removable cruft" property AND immediate convergence.
+- **(b) Self-healing per-event registration.** **Chosen.** Cleanup is intrinsic, not bolted on.
+- **Per-event reads only for the two known-blind events (keep global for the rest).** *Rejected.* The blind set is tmux-version-specific (observed in 3.6b); a maintained "these events are blind" list re-introduces the exact hidden-coupling assumption that caused this bug, and would silently regress if a future tmux hides a different event. Uniform per-event removes the assumption entirely at negligible cost.
+- **Dedicated run-once cleanup migration.** *Rejected.* Classic accretion trap — code you add, can never safely remove (a user upgrading from a very old build still needs it), and that runs once then sits forever. Self-healing registration makes it unnecessary.
 
-- A regression test that models the real tmux behaviour: `show-hooks -g` (global) omitting pane/window-scoped events while `show-hooks -g <event>` includes them — and asserts registration stays at exactly 1 entry across N bootstraps.
-- An upper-bound invariant: after K bootstraps, every Portal hook array has length ≤ 1 (or ≤ expected).
-- Prefer a real-tmux integration test (the `tmuxtest` socket fixtures) for the dedup path, since the bug is a tmux-output-shape issue invisible to string-fixture commanders.
+### Discussion
+
+User priorities, in order: (1) implement the feature *correctly* at the code level; (2) avoid permanent run-once cruft; (3) cleanup is a welcome bonus, not a driver. Key journey points:
+- The inbox's framing (0.5.12 daemon loop; recycle fixes it) was overturned by the log: every cascade process is `version=0.6.0`, the cascade resumed after the recycle, and the inbox was written during a coincidental idle gap.
+- The diagnosis was confirmed **live with a pre-registered prediction**: one `portal open` took `pane-focus-out`/`window-layout-changed` from 139→140 while the `session-created` control stayed at 1. Clean negative control, no ambiguity.
+- User raised the run-once-code accretion concern and noted resurrection makes a server restart cheap (with the honest caveat that resurrection restores layout/scrollback/resume-hooks, not live in-pane process state). This steered us away from a dedicated migration and toward self-healing.
+- On "every event or just the blind ones": settled on uniform per-event because special-casing the blind set is the same brittle-assumption smell that caused the bug.
+
+### Testing Recommendations
+
+- Real-tmux integration test (`tmuxtest` socket fixtures): the bug is a tmux-output-*shape* issue invisible to string-fixture commanders. Assert that across N bootstraps every Portal hook array stays at exactly 1 — specifically on `pane-focus-out` / `window-layout-changed`, the events a global read can't see.
+- Regression guard modelling the tmux 3.6b reality: `show-hooks -g` (global) omits pane-scoped + geometry/rename window-scoped events while `show-hooks -g <event>` includes them.
+- Self-heal assertion: seed an event with K stacked Portal entries, run one registration, assert it collapses to 1 and leaves a co-resident user-authored hook on the same event untouched.
+- `portal hooks reset` (UnregisterPortalHooks) test: with stacked entries on the blind events, assert removal actually reaps them (today it no-ops).
 
 ### Risk Assessment
 
-- **Fix complexity:** Low–Medium (dedup change is small; the safe cleanup migration + a faithful tmux-shape test are the real work).
-- **Regression risk:** Medium — the eviction/cleanup must not clobber user-authored hooks or the signal-hydrate / commit-now entries on other events.
-- **Recommended approach:** Regular release with the cleanup migration bundled (existing installs are already carrying large stacks).
+- **Fix complexity:** Low. One new one-line seam; registration/unregistration reuse primitives that already exist; the parser is unchanged.
+- **Regression risk:** Low–Medium. The eviction predicate must match only Portal-authored bodies (existing `portalCommandSubstrings` discipline) so user hooks on `pane-focus-out` / `window-layout-changed` survive. If the migration helpers are folded in, verify the `--` signal-hydrate and `session-closed`→commit-now transitions still converge.
+- **Recommended approach:** Regular release. No dedicated data migration; existing stacks self-collapse on the next bootstrap after upgrade.
 
 ---
 
 ## Notes
 
-- The 0.6.0 daemon (post-recycle) looked "cascade-free" in the inbox only because the observation window happened to contain no session-switches; the stacked hooks were untouched by the recycle (now 139, *more* than during the incident).
-- Open question for spec: is the `show-hooks -g` blind spot specific to `pane-focus-out` / `window-layout-changed` (pane/window-scoped) or does it cover a whole class of events? The fix (per-event or replace) is robust either way, but the test should document the observed tmux 3.6b behaviour.
+- The 0.6.0 daemon (post-recycle) looked "cascade-free" in the inbox only because the observation window happened to contain no session-switches; the stacked hooks were untouched by the recycle.
+- The open question ("is the blind spot just these two events or a whole class?") is **resolved** — see "Resolved: the blind-spot event class" under Analysis.
+
+### Mechanical distinction: switching *fires*, `portal open` *adds*
+
+A load-bearing clarification surfaced during the live session:
+- **Switching tmux sessions** fires `pane-focus-out` → runs the N stacked hooks → **does not change N.** This is what generates the cascade (the notify count explodes).
+- **`portal open` / `x` / attach** runs bootstrap → step 2 registration → **adds +1 to each blind event** (N grows). Session-switching alone never grows the stack.
+
+This is why the live depth held at 139 while the notify count climbed from ~6,500 to ~11,000 during the discussion (lots of switching, no new `open`).
+
+### Live measurements (investigation session, 2026-06-02)
+
+Read from the live tmux server and `portal.log.2026-06-02` while diagnosing:
+- Live stacked depth: `pane-focus-out` = 139, `window-layout-changed` = 139, all four control events = 1.
+- **Pre-registered live confirmation:** one `portal open` → both blind events 139 → **140**, `session-created` control stayed **1**, `portal open` log count 2 → 3. Diagnosis proven with a clean negative control.
+- Cascade is **actively ongoing**: 11,190 `state notify` invocations logged on 2026-06-02 (latest 21:41:03, essentially live), log ~34,000 lines. ~11,190 ÷ 139 ≈ **~80 session-switches** today, each detonating 139 processes.
+- This supersedes the inbox's "2315 in ~7 min / ceased at 20:42:24" — the cascade never ceased; the inbox observed a coincidental idle gap.
+
+### Suspected real-world symptom (lead, not confirmed)
+
+User reports tmux occasionally pegging a core at ~98% CPU. Mechanically consistent: each focus/layout event funnels 139 `run-shell` fork+exec+reap jobs through the single-threaded tmux **server** process. Rapid switching could plausibly saturate it; deeper stacks make every switch worse. Not traced to proof — recorded as a strong lead.
