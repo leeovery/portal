@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -246,25 +247,51 @@ func (r *SessionRestorer) armPanes(sess state.Session, armInfos []savedPaneArmIn
 // continues; any other per-step failure is logged and the next step (or next
 // window) proceeds. The function returns nothing because the broader restore
 // flow degrades locally and continues per spec.
+//
+// Per the cycle-level summary cadence, it emits exactly ONE INFO
+// "geometry complete" summary per call (phase B covers GEOMETRY only — there
+// is no scrollback-replay step here; replay is FIFO/helper-driven). `panes` is
+// len(livePanes); `anomalous` counts degraded geometry operations — each apply*
+// helper that returns false (it emitted a per-step WARN / degraded) increments
+// it once, regardless of how many WARN lines that one operation emitted (a
+// double layout failure is still one anomalous operation). An empty saved-window
+// group is skipped and is NOT counted as anomalous. `anomalous` is always
+// present, even when zero, for grep-uniformity.
 func (r *SessionRestorer) ApplyWindowGeometry(sess state.Session, livePanes []tmux.PaneCoord) {
+	start := time.Now()
+	panes := len(livePanes)
+	anomalous := 0
+
 	groups := groupLivePanesBySavedWindow(sess, livePanes)
 
 	for wi, win := range sess.Windows {
 		group := groups[wi]
 		if len(group) == 0 {
 			// No live pane mapped to this saved window — skip; logging at the
-			// arm phase already surfaced the count mismatch.
+			// arm phase already surfaced the count mismatch. Not anomalous.
 			continue
 		}
 		liveWin := group[0].Window
 		liveActivePane := group[activePanePosition(win.Panes)%len(group)].Pane
 
-		r.applyLayoutWithFallback(sess.Name, liveWin, win.Layout)
-		r.applyActivePane(sess.Name, liveWin, liveActivePane)
+		if !r.applyLayoutWithFallback(sess.Name, liveWin, win.Layout) {
+			anomalous++
+		}
+		if !r.applyActivePane(sess.Name, liveWin, liveActivePane) {
+			anomalous++
+		}
 		if win.Zoomed {
-			r.applyZoom(sess.Name, liveWin, liveActivePane)
+			if !r.applyZoom(sess.Name, liveWin, liveActivePane) {
+				anomalous++
+			}
 		}
 	}
+
+	r.logger().Info("geometry complete",
+		"panes", panes,
+		"took", time.Since(start),
+		"anomalous", anomalous,
+	)
 }
 
 // groupLivePanesBySavedWindow buckets livePanes into one slice per saved
@@ -308,31 +335,43 @@ func activePanePosition(panes []state.Pane) int {
 // applyLayoutWithFallback attempts the saved layout first; on failure, logs
 // a warning and tries "tiled". If tiled also fails, logs and proceeds — the
 // caller continues with the remaining geometry steps regardless.
-func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, layout string) {
+//
+// Returns true only when the original select-layout succeeded with no WARN.
+// Returns false if the original select-layout failed (it WARNed) — whether or
+// not the tiled fallback then succeeded, because the saved layout was not
+// applied, so the operation is degraded. The double-failure (saved + tiled both
+// fail) still returns false once: one degraded operation, not two.
+func (r *SessionRestorer) applyLayoutWithFallback(session string, window int, layout string) bool {
 	err := r.Client.SelectLayout(session, window, layout)
 	if err == nil {
-		return
+		return true
 	}
 	r.logger().Warn("select-layout failed; falling back to tiled", "session", session, "error", err)
 	if err := r.Client.SelectLayout(session, window, "tiled"); err != nil {
 		r.logger().Warn("select-layout tiled fallback also failed", "session", session, "error", err)
 	}
+	return false
 }
 
-// applyActivePane sets the active pane within a live window. Failure is
-// logged and ignored.
-func (r *SessionRestorer) applyActivePane(session string, window, pane int) {
+// applyActivePane sets the active pane within a live window. Failure is logged
+// and ignored. Returns false iff it WARNed (select-pane failed); true otherwise.
+func (r *SessionRestorer) applyActivePane(session string, window, pane int) bool {
 	if err := r.Client.SelectPane(session, window, pane); err != nil {
 		r.logger().Warn("select-pane failed", "session", session, "error", err)
+		return false
 	}
+	return true
 }
 
 // applyZoom toggles zoom on the active pane after layout has been applied.
-// Failure is logged and ignored.
-func (r *SessionRestorer) applyZoom(session string, window, pane int) {
+// Failure is logged and ignored. Returns false iff it WARNed (resize-pane -Z
+// failed); true otherwise.
+func (r *SessionRestorer) applyZoom(session string, window, pane int) bool {
 	if err := r.Client.ResizePaneZoom(session, window, pane); err != nil {
 		r.logger().Warn("resize-pane -Z failed", "session", session, "error", err)
+		return false
 	}
+	return true
 }
 
 // ApplySkeletonMarkers sets the `@portal-skeleton-<paneKey>` server option on
