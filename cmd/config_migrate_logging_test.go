@@ -137,6 +137,9 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		if rec.msg != "migrate" {
 			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
 		}
+		if got := rec.attrString(t, "op"); got != "migrate" {
+			t.Errorf("op = %q, want %q", got, "migrate")
+		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
 		}
@@ -174,6 +177,9 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 				}
 				if rec.msg != "migrate" {
 					t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+				}
+				if got := rec.attrString(t, "op"); got != "migrate" {
+					t.Errorf("op = %q, want %q", got, "migrate")
 				}
 				if got := rec.attrString(t, "component"); got != tc.component {
 					t.Errorf("component = %q, want %q", got, tc.component)
@@ -271,6 +277,9 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		if rec.msg != "migrate" {
 			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
 		}
+		if got := rec.attrString(t, "op"); got != "migrate" {
+			t.Errorf("op = %q, want %q", got, "migrate")
+		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
@@ -316,6 +325,9 @@ func TestMigrateConfigFileLogging(t *testing.T) {
 		}
 		if rec.msg != "migrate" {
 			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		}
+		if got := rec.attrString(t, "op"); got != "migrate" {
+			t.Errorf("op = %q, want %q", got, "migrate")
 		}
 		if got := rec.attrString(t, "via"); got != "migrate" {
 			t.Errorf("via = %q, want %q", got, "migrate")
@@ -377,6 +389,9 @@ func TestConfigFilePathThreadsComponent(t *testing.T) {
 		}
 		if rec.msg != "migrate" {
 			t.Errorf("msg = %q, want %q", rec.msg, "migrate")
+		}
+		if got := rec.attrString(t, "op"); got != "migrate" {
+			t.Errorf("op = %q, want %q", got, "migrate")
 		}
 	})
 }

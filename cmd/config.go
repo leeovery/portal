@@ -28,13 +28,16 @@ var configFileComponents = map[string]string{
 //
 // component is the owning component of the migrated file (one of the closed
 // "hooks"/"aliases"/"projects" values from configFileComponents). On a
-// successful move it emits one INFO breadcrumb (op rendered as the slog message
-// verb "migrate", per the established state-mutation pattern; via="migrate";
-// path=newPath) and on a MkdirAll/Rename failure one WARN — both under the
-// owning component's logger, bound dynamically here because migrateConfigFile
-// is generic across the three config files. There is deliberately NO per-entry
-// key attr (hook_key/alias/project): a whole-file move has no single entry key,
-// and the path attr plus the component already identify the file.
+// successful move it emits one INFO breadcrumb and on a MkdirAll/Rename failure
+// one WARN — both under the owning component's logger, bound dynamically here
+// because migrateConfigFile is generic across the three config files. The op
+// verb "migrate" is carried BOTH as the slog message (preserving the
+// `<component>: migrate` catalog shape) AND as the required "op" attr drawn from
+// the closed value space, matching the store-mutation sites so JSON output and
+// `grep op=migrate` filtering both work; via="migrate"; path=newPath. There is
+// deliberately NO per-entry key attr (hook_key/alias/project): a whole-file move
+// has no single entry key, and the path attr plus the component already identify
+// the file.
 //
 // An EMPTY component (an unmapped filename) suppresses every emission — we must
 // never log under an empty/invalid component — but the move itself still runs
@@ -56,20 +59,20 @@ func migrateConfigFile(oldPath, newPath, component string) {
 
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 		if component != "" {
-			log.For(component).Warn("migrate", "via", "migrate", "path", filepath.Dir(newPath), "error", err, "error_class", "write-failed-temp-create")
+			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", filepath.Dir(newPath), "error", err, "error_class", "write-failed-temp-create")
 		}
 		return
 	}
 
 	if err := os.Rename(oldPath, newPath); err != nil {
 		if component != "" {
-			log.For(component).Warn("migrate", "via", "migrate", "path", newPath, "error", err, "error_class", "write-failed-rename")
+			log.For(component).Warn("migrate", "op", "migrate", "via", "migrate", "path", newPath, "error", err, "error_class", "write-failed-rename")
 		}
 		return
 	}
 
 	if component != "" {
-		log.For(component).Info("migrate", "via", "migrate", "path", newPath)
+		log.For(component).Info("migrate", "op", "migrate", "via", "migrate", "path", newPath)
 	}
 
 	// Clean up old directory if empty.

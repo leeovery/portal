@@ -1,7 +1,9 @@
 package hooks_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -839,6 +841,9 @@ func TestCleanStaleLogging(t *testing.T) {
 				t.Errorf("unexpected msg %q in %+v", r.msg, r)
 				continue
 			}
+			if got := r.attrString(t, "op"); got != "clean-stale" {
+				t.Errorf("op = %q, want %q", got, "clean-stale")
+			}
 			if got := r.attrString(t, "component"); got != "hooks" {
 				t.Errorf("component = %q, want %q", got, "hooks")
 			}
@@ -872,6 +877,9 @@ func TestCleanStaleLogging(t *testing.T) {
 			t.Fatalf("got %d INFO summary records, want 1: %+v", len(infos), infos)
 		}
 		summary := infos[0]
+		if got := summary.attrString(t, "op"); got != "clean-stale" {
+			t.Errorf("summary op = %q, want %q", got, "clean-stale")
+		}
 		if got := summary.attrString(t, "entries"); got != "2" {
 			t.Errorf("summary entries = %q, want %q", got, "2")
 		}
@@ -952,6 +960,9 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("no WARN clean-stale record captured: %+v", sink.all())
+		}
+		if got := warn.attrString(t, "op"); got != "clean-stale" {
+			t.Errorf("op = %q, want %q", got, "clean-stale")
 		}
 		if got := warn.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1043,6 +1054,9 @@ func TestSaveAuditedLogging(t *testing.T) {
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
 		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
+		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
 		}
@@ -1083,6 +1097,9 @@ func TestSaveAuditedLogging(t *testing.T) {
 		}
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1127,6 +1144,9 @@ func TestSetLogging(t *testing.T) {
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
 		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
+		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
 		}
@@ -1160,6 +1180,9 @@ func TestSetLogging(t *testing.T) {
 		}
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1200,6 +1223,9 @@ func TestSetLogging(t *testing.T) {
 		}
 		if rec.msg != "set-noop" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set-noop")
+		}
+		if got := rec.attrString(t, "op"); got != "set-noop" {
+			t.Errorf("op = %q, want %q", got, "set-noop")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1242,6 +1268,9 @@ func TestSetLogging(t *testing.T) {
 		}
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1288,6 +1317,33 @@ func TestSetLogging(t *testing.T) {
 	})
 }
 
+// TestSetEmitsOpAsJSONField proves the op verb is carried as a real structured
+// attr (not just the slog message), so the JSON-mode handler renders an "op"
+// field that programmatic tooling can index — the spec's stated rationale for
+// requiring op as an attr. A standard slog.NewJSONHandler stands in for the
+// future JSON rendering seam; component is rendered as an ordinary field too.
+func TestSetEmitsOpAsJSONField(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetTestHandler(t, slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	dir := t.TempDir()
+	store := hooks.NewStore(filepath.Join(dir, "hooks.json"))
+	if err := store.Set("my-session:0.0", "on-resume", "claude --resume abc123", "cli"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("failed to parse JSON log line %q: %v", buf.String(), err)
+	}
+	if got := rec["op"]; got != "set" {
+		t.Errorf(`JSON "op" field = %v, want "set" (line: %s)`, got, buf.String())
+	}
+	if got := rec["component"]; got != "hooks" {
+		t.Errorf(`JSON "component" field = %v, want "hooks"`, got)
+	}
+}
+
 func TestRemoveLogging(t *testing.T) {
 	t.Run("emits INFO op=rm without a value attr", func(t *testing.T) {
 		dir := t.TempDir()
@@ -1308,6 +1364,9 @@ func TestRemoveLogging(t *testing.T) {
 		}
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")
@@ -1343,6 +1402,9 @@ func TestRemoveLogging(t *testing.T) {
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
 		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
+		}
 		if got := rec.attrString(t, "hook_key"); got != "nonexistent:9.9" {
 			t.Errorf("hook_key = %q, want %q", got, "nonexistent:9.9")
 		}
@@ -1367,6 +1429,9 @@ func TestRemoveLogging(t *testing.T) {
 		}
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
 		}
 		if got := rec.attrString(t, "component"); got != "hooks" {
 			t.Errorf("component = %q, want %q", got, "hooks")

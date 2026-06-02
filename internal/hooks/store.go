@@ -18,6 +18,13 @@ import (
 // under this component so `grep "hooks:" portal.log` reconstructs the change
 // history. importing internal/log introduces no cycle — internal/log depends
 // only on the standard library.
+//
+// Message-shape: the op verb is BOTH the slog message (preserving the
+// `hooks: <verb>` catalog shape and grep idiom) AND a required "op" attr drawn
+// from the closed value space (set / modify / rm / clean-stale / set-noop). The
+// spec's "State-mutation audit trail" lists op under Required attrs and the
+// closed attr-key vocabulary, so JSON output and `grep op=set` filtering both
+// need op as a real structured attr — not only the message string.
 var logger = log.For("hooks")
 
 // Hook represents a single hook entry for list output.
@@ -87,12 +94,12 @@ func (s *Store) Save(h hooksFile) error {
 // value they loaded and rewrote without referencing the unexported alias.
 func (s *Store) SaveAudited(h hooksFile, op string, entries int, via string) error {
 	if err := s.Save(h); err != nil {
-		logger.Warn(op, "entries", entries, "via", via,
+		logger.Warn(op, "op", op, "entries", entries, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "entries", entries, "via", via)
+	logger.Info(op, "op", op, "entries", entries, "via", via)
 	return nil
 }
 
@@ -122,7 +129,7 @@ func (s *Store) Set(key, event, command, via string) error {
 	if op == "set-noop" {
 		// The value already matches: emit a DEBUG no-op breadcrumb and return
 		// without touching the file (no Save).
-		logger.Debug("set-noop", "hook_key", key, "via", via)
+		logger.Debug("set-noop", "op", "set-noop", "hook_key", key, "via", via)
 		return nil
 	}
 
@@ -132,12 +139,12 @@ func (s *Store) Set(key, event, command, via string) error {
 	h[key][event] = command
 
 	if err := s.Save(h); err != nil {
-		logger.Warn(op, "hook_key", key, "value", command, "via", via,
+		logger.Warn(op, "op", op, "hook_key", key, "value", command, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "hook_key", key, "value", command, "via", via)
+	logger.Info(op, "op", op, "hook_key", key, "value", command, "via", via)
 	return nil
 }
 
@@ -182,12 +189,12 @@ func (s *Store) Remove(key, event, via string) error {
 	}
 
 	if err := s.Save(h); err != nil {
-		logger.Warn("rm", "hook_key", key, "via", via,
+		logger.Warn("rm", "op", "rm", "hook_key", key, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info("rm", "hook_key", key, "via", via)
+	logger.Info("rm", "op", "rm", "hook_key", key, "via", via)
 	return nil
 }
 
@@ -271,20 +278,20 @@ func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 	}
 
 	for _, key := range removed {
-		logger.Debug("clean-stale", "hook_key", key, "via", "internal")
+		logger.Debug("clean-stale", "op", "clean-stale", "hook_key", key, "via", "internal")
 	}
 
 	if err := s.Save(kept); err != nil {
 		// Whole-batch persist failure: error_class is a write-failed-* value
 		// from the AtomicWrite phase space, NOT "unexpected".
-		logger.Warn("clean-stale", "entries", len(removed), "via", "internal",
+		logger.Warn("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal",
 			"error", err, "error_class", fileutil.ClassifyWriteError(err), "took", time.Since(start))
 		return nil, fmt.Errorf("failed to save after cleaning stale hooks: %w", err)
 	}
 
 	// entries_failed is omitted: there is no per-entry failure path (see the
 	// [needs-info] note above), so M is always 0 and the attr stays absent.
-	logger.Info("clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
+	logger.Info("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
 
 	return removed, nil
 }

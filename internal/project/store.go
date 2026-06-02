@@ -23,6 +23,12 @@ import (
 // addressable identifying key here is the PATH (the value Upsert/Rename/Remove
 // all match on). So the `project` attr carries the PATH, and the `value` attr
 // carries the NAME where relevant.
+//
+// Message-shape: the op verb is BOTH the slog message (preserving the
+// `projects: <verb>` catalog shape and grep idiom) AND a required "op" attr
+// drawn from the closed value space (set / modify / rm / clean-stale), so JSON
+// output and `grep op=set` filtering both work — see the hooks store for the
+// full rationale.
 var logger = log.For("projects")
 
 // Project represents a remembered project directory.
@@ -133,12 +139,12 @@ func (s *Store) Upsert(path, name, via string) error {
 	}
 
 	if err := s.Save(projects); err != nil {
-		logger.Warn(op, "project", path, "value", name, "via", via,
+		logger.Warn(op, "op", op, "project", path, "value", name, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "project", path, "value", name, "via", via)
+	logger.Info(op, "op", op, "project", path, "value", name, "via", via)
 	return nil
 }
 
@@ -210,20 +216,20 @@ func (s *Store) CleanStale() ([]Project, error) {
 	}
 
 	for _, p := range removed {
-		logger.Debug("clean-stale", "project", p.Path, "via", "internal")
+		logger.Debug("clean-stale", "op", "clean-stale", "project", p.Path, "via", "internal")
 	}
 
 	if err := s.Save(kept); err != nil {
 		// Whole-batch persist failure: error_class is a write-failed-* value
 		// from the AtomicWrite phase space, NOT "unexpected".
-		logger.Warn("clean-stale", "entries", len(removed), "via", "internal",
+		logger.Warn("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal",
 			"error", err, "error_class", fileutil.ClassifyWriteError(err), "took", time.Since(start))
 		return nil, fmt.Errorf("failed to save after cleaning stale projects: %w", err)
 	}
 
 	// entries_failed is omitted: there is no per-entry failure path (see the
 	// [needs-info] note above), so M is always 0 and the attr stays absent.
-	logger.Info("clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
+	logger.Info("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
 
 	return removed, nil
 }
@@ -248,11 +254,11 @@ func (s *Store) Rename(path, newName, via string) error {
 		if projects[i].Path == path {
 			projects[i].Name = newName
 			if err := s.Save(projects); err != nil {
-				logger.Warn("modify", "project", path, "value", newName, "via", via,
+				logger.Warn("modify", "op", "modify", "project", path, "value", newName, "via", via,
 					"error", err, "error_class", fileutil.ClassifyWriteError(err))
 				return err
 			}
-			logger.Info("modify", "project", path, "value", newName, "via", via)
+			logger.Info("modify", "op", "modify", "project", path, "value", newName, "via", via)
 			return nil
 		}
 	}
@@ -283,11 +289,11 @@ func (s *Store) Remove(path, via string) error {
 	})
 
 	if err := s.Save(filtered); err != nil {
-		logger.Warn("rm", "project", path, "via", via,
+		logger.Warn("rm", "op", "rm", "project", path, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info("rm", "project", path, "via", via)
+	logger.Info("rm", "op", "rm", "project", path, "via", via)
 	return nil
 }

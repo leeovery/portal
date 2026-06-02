@@ -139,6 +139,9 @@ func TestUpsertLogging(t *testing.T) {
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
 		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
+		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
@@ -175,6 +178,9 @@ func TestUpsertLogging(t *testing.T) {
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
 		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
+		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
@@ -208,6 +214,9 @@ func TestUpsertLogging(t *testing.T) {
 		}
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
 		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
@@ -249,6 +258,9 @@ func TestRenameLogging(t *testing.T) {
 		}
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
+		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
 		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
@@ -327,6 +339,9 @@ func TestRenameLogging(t *testing.T) {
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
 		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
+		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
 		}
@@ -365,6 +380,9 @@ func TestRemoveLogging(t *testing.T) {
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
 		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
+		}
 		if got := rec.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")
 		}
@@ -399,6 +417,9 @@ func TestRemoveLogging(t *testing.T) {
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
 		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
+		}
 		if got := rec.attrString(t, "project"); got != "/code/absent" {
 			t.Errorf("project = %q, want %q", got, "/code/absent")
 		}
@@ -426,6 +447,9 @@ func TestRemoveLogging(t *testing.T) {
 		}
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
 		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-temp-create" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-temp-create")
@@ -479,6 +503,9 @@ func TestCleanStaleLogging(t *testing.T) {
 				t.Errorf("unexpected msg %q in %+v", r.msg, r)
 				continue
 			}
+			if got := r.attrString(t, "op"); got != "clean-stale" {
+				t.Errorf("op = %q, want %q", got, "clean-stale")
+			}
 			if got := r.attrString(t, "component"); got != "projects" {
 				t.Errorf("component = %q, want %q", got, "projects")
 			}
@@ -512,6 +539,9 @@ func TestCleanStaleLogging(t *testing.T) {
 			t.Fatalf("got %d INFO summary records, want 1: %+v", len(infos), infos)
 		}
 		summary := infos[0]
+		if got := summary.attrString(t, "op"); got != "clean-stale" {
+			t.Errorf("summary op = %q, want %q", got, "clean-stale")
+		}
 		if got := summary.attrString(t, "entries"); got != "2" {
 			t.Errorf("summary entries = %q, want %q", got, "2")
 		}
@@ -597,6 +627,9 @@ func TestCleanStaleLogging(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("no WARN clean-stale record captured: %+v", sink.all())
+		}
+		if got := warn.attrString(t, "op"); got != "clean-stale" {
+			t.Errorf("op = %q, want %q", got, "clean-stale")
 		}
 		if got := warn.attrString(t, "component"); got != "projects" {
 			t.Errorf("component = %q, want %q", got, "projects")

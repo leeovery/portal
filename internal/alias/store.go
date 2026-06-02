@@ -20,6 +20,11 @@ import (
 // `grep "aliases:" portal.log` reconstructs the change history. importing
 // internal/log introduces no cycle — internal/log depends only on the standard
 // library.
+//
+// Message-shape: the op verb is BOTH the slog message (preserving the
+// `aliases: <verb>` catalog shape and grep idiom) AND a required "op" attr drawn
+// from the closed value space (set / modify / rm / set-noop), so JSON output and
+// `grep op=set` filtering both work — see the hooks store for the full rationale.
 var logger = log.For("aliases")
 
 // Alias represents a single name-to-path mapping.
@@ -167,7 +172,7 @@ func (s *Store) SetAndSave(name, path, via string) error {
 	if present && existing == path {
 		// The value already matches: emit a DEBUG no-op breadcrumb and return
 		// without touching the file (no Save).
-		logger.Debug("set-noop", "alias", name, "via", via)
+		logger.Debug("set-noop", "op", "set-noop", "alias", name, "via", via)
 		return nil
 	}
 
@@ -179,12 +184,12 @@ func (s *Store) SetAndSave(name, path, via string) error {
 	s.Set(name, path)
 
 	if err := s.Save(); err != nil {
-		logger.Warn(op, "alias", name, "value", path, "via", via,
+		logger.Warn(op, "op", op, "alias", name, "value", path, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return err
 	}
 
-	logger.Info(op, "alias", name, "value", path, "via", via)
+	logger.Info(op, "op", op, "alias", name, "value", path, "via", via)
 	return nil
 }
 
@@ -207,12 +212,12 @@ func (s *Store) DeleteAndSave(name, via string) (existed bool, err error) {
 	}
 
 	if err := s.Save(); err != nil {
-		logger.Warn("rm", "alias", name, "via", via,
+		logger.Warn("rm", "op", "rm", "alias", name, "via", via,
 			"error", err, "error_class", fileutil.ClassifyWriteError(err))
 		return true, err
 	}
 
-	logger.Info("rm", "alias", name, "via", via)
+	logger.Info("rm", "op", "rm", "alias", name, "via", via)
 	return true, nil
 }
 

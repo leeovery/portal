@@ -143,6 +143,9 @@ func TestSetAndSave(t *testing.T) {
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
 		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
+		}
 		if got := rec.attrString(t, "component"); got != "aliases" {
 			t.Errorf("component = %q, want %q", got, "aliases")
 		}
@@ -186,6 +189,9 @@ func TestSetAndSave(t *testing.T) {
 		if rec.msg != "modify" {
 			t.Errorf("msg = %q, want %q", rec.msg, "modify")
 		}
+		if got := rec.attrString(t, "op"); got != "modify" {
+			t.Errorf("op = %q, want %q", got, "modify")
+		}
 		if got := rec.attrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
@@ -225,6 +231,9 @@ func TestSetAndSave(t *testing.T) {
 		if rec.msg != "set-noop" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set-noop")
 		}
+		if got := rec.attrString(t, "op"); got != "set-noop" {
+			t.Errorf("op = %q, want %q", got, "set-noop")
+		}
 		if got := rec.attrString(t, "alias"); got != "p" {
 			t.Errorf("alias = %q, want %q", got, "p")
 		}
@@ -258,6 +267,9 @@ func TestSetAndSave(t *testing.T) {
 		}
 		if rec.msg != "set" {
 			t.Errorf("msg = %q, want %q", rec.msg, "set")
+		}
+		if got := rec.attrString(t, "op"); got != "set" {
+			t.Errorf("op = %q, want %q", got, "set")
 		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-write" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-write")
@@ -295,6 +307,9 @@ func TestDeleteAndSave(t *testing.T) {
 		}
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
 		}
 		if got := rec.attrString(t, "component"); got != "aliases" {
 			t.Errorf("component = %q, want %q", got, "aliases")
@@ -349,6 +364,9 @@ func TestDeleteAndSave(t *testing.T) {
 		}
 		if rec.msg != "rm" {
 			t.Errorf("msg = %q, want %q", rec.msg, "rm")
+		}
+		if got := rec.attrString(t, "op"); got != "rm" {
+			t.Errorf("op = %q, want %q", got, "rm")
 		}
 		if got := rec.attrString(t, "error_class"); got != "write-failed-write" {
 			t.Errorf("error_class = %q, want %q", got, "write-failed-write")
