@@ -57,39 +57,112 @@ Not yet reproduced. Two candidate mechanisms imply two different repro strategie
 
 ## Analysis
 
-### Initial Hypotheses
+### Initial Hypotheses (from inbox)
 
-Two structurally different root causes, both consistent with the post-recycle silence:
+1. **Daemon internal loop/feedback (version-specific):** the 0.5.12 daemon itself generated the notify invocations; the 0.6.0 daemon does not.
+2. **Stacked tmux global hooks:** tmux global hooks were stacked such that a single tmux event fired many `state notify` invocations; bootstrap's `RegisterPortalHooks` reset the stack.
 
-1. **Daemon internal loop/feedback (version-specific):** the 0.5.12 daemon itself generated the notify invocations via some internal loop or feedback; the 0.6.0 daemon does not. Repro: run 0.5.12 in isolation.
-2. **Stacked tmux global hooks:** tmux global hooks were stacked across prior binary lifetimes such that a single tmux event fired many `state notify` invocations. The new bootstrap's step-2 `RegisterPortalHooks` reset the stack to one entry per hook. Repro: `tmux show-options -g` before/after a forced saver recycle.
+**Verdict after analysis: Hypothesis 1 is WRONG. Hypothesis 2 is RIGHT in spirit, with a precise and ongoing mechanism (below).**
 
-Both are consistent with the evidence on hand; it cannot currently tell them apart.
+### What the evidence actually shows (corrects the inbox)
 
-### Code Trace
+Read directly from `~/.config/portal/state/portal.log.2026-06-02` (still on disk, 2.6 MB):
 
-_TBD — to be filled during Step 5 code analysis._
+- **All cascade `state notify` processes are `version=0.6.0`, not 0.5.12.** The brew symlink to 0.6.0 was created at 20:35 — the cascade began 20:35:29, immediately after the upgrade. So the *new* binary drove it; the old daemon is exonerated. → kills Hypothesis 1.
+- **The cascade did NOT stop at the 20:42:24 saver-recycle.** It went silent 20:42:24 → 20:48, then *resumed* and ran in bursts through 20:57. 6463 total notify invocations across 20:35→20:57. The inbox was written *during the 20:42–20:48 idle gap* and mistook a coincidental lull for a fix. → kills the inbox's central "recycle stops it" claim.
+- **Inter-arrival within a burst is a near-perfect ~16.5 ms (≈60 Hz), dead regular.** Not human input, not organic tmux events — this is tmux dispatching a queue of identical jobs back-to-back.
 
-**Key files to examine:**
-- `cmd/state_notify.go` (or wherever `state notify` subcommand is declared) — what it does, what it writes.
-- `cmd/bootstrap/bootstrap.go` step 2 `RegisterPortalHooks` — hook registration idempotency.
-- `internal/bootstrapadapter/hook_registrar.go` — production hook registrar, cross-binary-lifetime idempotency.
-- `internal/tmux/portal_saver.go` — Component A kill-barrier + Component F respawn (the path that stops the cascade).
-- `internal/state/capture.go` — daemon `save.requested` polling consumer.
+### Code trace
+
+`portal state notify` is **not** spawned by the daemon or any loop. It is the body of a **tmux global hook** registered on six "save-trigger" events (`internal/tmux/hooks_register.go`):
+
+```
+notifyCommand = run-shell "command -v portal >/dev/null 2>&1 && portal state notify"
+saveTriggerEvents = session-created, session-closed, session-renamed,
+                    window-linked, window-unlinked, window-layout-changed, pane-focus-out
+```
+
+(`session-closed` is migrated to `commit-now`, leaving 6 events carrying `notify`.)
+
+`state notify` itself only touches the `save.requested` marker file and does **zero** tmux calls (`cmd/state_notify.go`), and `state` is in `skipTmuxCheck` (`cmd/root.go`) so notify does **not** run bootstrap — the cascade is therefore **not self-amplifying** through notify.
+
+Registration is meant to be idempotent via `RegisterHookIfAbsent` (`internal/tmux/hooks_register.go:149`): it calls `ShowGlobalHooks()` → `tmux show-hooks -g` (`internal/tmux/tmux.go:769`), parses it with `ParseShowHooks`, and skips the append if any existing entry on that event already contains `portal state notify`.
+
+### Live hook state — the smoking gun
+
+`tmux show-hooks -g <event>` on the live server:
+
+| event | live entry count |
+|-------|------------------|
+| session-created | 1 |
+| session-renamed | 1 |
+| window-linked | 1 |
+| window-unlinked | 1 |
+| **pane-focus-out** | **139** |
+| **window-layout-changed** | **139** |
+
+Exactly the two highest-frequency events have **139 stacked identical `portal state notify` hooks** each. So a *single* `pane-focus-out` (the user switching tmux sessions — each session has one window/one pane, so session-switch = focus-out) makes tmux run all 139 stacked hooks back-to-back → a burst of 139 fork+exec `state notify` processes at ~16 ms spacing. That is the "60 Hz cascade." One human action → 139 processes.
 
 ### Root Cause
 
-_TBD._
+**tmux 3.6b's `show-hooks -g` (no event argument) does not enumerate `pane-focus-out` or `window-layout-changed` global hooks, even though they are set and fire normally. Portal's `RegisterHookIfAbsent` dedup relies *solely* on that global enumeration, so for these two events it never sees the existing entry, concludes "absent", and appends another copy on every bootstrap — unbounded.**
+
+Proven in an isolated throwaway tmux server (`tmux -L <sock>`):
+
+- `show-hooks -g pane-focus-out` → shows the entry; `show-hooks -g` (no arg) → omits it (`grep -c` = 0).
+- `show-hooks -g session-created` → shown by both forms.
+- Running Portal's exact append-if-absent logic 5×: `pane-focus-out` grew 1 → **6** (stacked every iteration); `session-created` stayed **1** (dedup worked).
+
+So the stacking is monotonic: every `portal open` / `x` / attach (each runs bootstrap → step 2 RegisterPortalHooks) adds **+1** to each of the two blind events. 139 entries ≈ 139 bootstrap-running invocations over the binary's life. It is still growing and will keep growing until fixed.
+
+### Why It Wasn't Caught
+
+- **Idempotency was verified only against the events `show-hooks -g` *does* enumerate.** Unit tests use a fake/parsed-string commander or a tmux fixture where `show-hooks -g` returns all events; the real tmux 3.6b global-enumeration blind spot for pane/window-scoped hooks was never modelled. (`feedback_inbox_not_facts` — the inbox's own hypotheses had to be validated, not trusted.)
+- **No upper-bound assertion on hook-array length** anywhere — stacking is silent.
+- **`state notify` cost is individually invisible** (~500 µs, exits 0); only the aggregate rate is pathological, and pre-0.6.0 builds had no per-process `process:` markers, so the cascade left no trace before observability landed.
+
+### Blast Radius
+
+**Directly affected:**
+- Every install on tmux ≥ (whatever version exhibits the `show-hooks -g` blind spot — at least 3.6b). Hook count on `pane-focus-out` / `window-layout-changed` grows by 2 per `portal open` forever.
+- Each session-switch / layout change → N× `state notify` fork+exec + N× `save.requested` touch + N× tmux job dispatch + ~3N log lines.
+
+**Potentially affected:**
+- `hooks-and-saver-vanish-after-recent-fixes` (open inbox bug) — a high-rate `save.requested` write storm puts the daemon capture loop under sustained pressure exactly when the wipes were observed. Plausible common cause; worth cross-checking.
+- Any other Portal hook registered on a pane/window-scoped event via the same `RegisterHookIfAbsent` path would stack the same way (currently only these two qualify).
 
 ---
 
 ## Fix Direction
 
-_TBD._
+_High-level only — implementation belongs to the spec._
+
+### The dedup must not depend on `show-hooks -g` global enumeration
+
+Candidate directions (to decide in spec/discussion):
+
+1. **Per-event enumeration:** dedup by querying `show-hooks -g <event>` for each event (proven to reliably list entries for *all* events incl. the two blind ones) instead of one global `show-hooks -g`. Smallest change to the existing append-if-absent shape.
+2. **Replace-not-append for Portal-owned hooks:** before registering, evict every existing Portal-authored entry on the event (`set-hook -gu <event>` / indexed unset of matching bodies) then append exactly one. Idempotent by construction, no reliance on enumeration completeness. Must preserve user-authored hooks on the same event.
+
+### Mandatory cleanup migration for existing installs
+
+The fix must also **reap the already-stacked duplicates** (139 and counting) on the next bootstrap — collapse each event's Portal-notify entries to a single one. Without this, shipping the dedup fix alone leaves every existing user with a permanent 139-deep stack.
+
+### Testing recommendations
+
+- A regression test that models the real tmux behaviour: `show-hooks -g` (global) omitting pane/window-scoped events while `show-hooks -g <event>` includes them — and asserts registration stays at exactly 1 entry across N bootstraps.
+- An upper-bound invariant: after K bootstraps, every Portal hook array has length ≤ 1 (or ≤ expected).
+- Prefer a real-tmux integration test (the `tmuxtest` socket fixtures) for the dedup path, since the bug is a tmux-output-shape issue invisible to string-fixture commanders.
+
+### Risk Assessment
+
+- **Fix complexity:** Low–Medium (dedup change is small; the safe cleanup migration + a faithful tmux-shape test are the real work).
+- **Regression risk:** Medium — the eviction/cleanup must not clobber user-authored hooks or the signal-hydrate / commit-now entries on other events.
+- **Recommended approach:** Regular release with the cleanup migration bundled (existing installs are already carrying large stacks).
 
 ---
 
 ## Notes
 
-- Discriminating the two hypotheses is the first analytical goal. Hook-stacking (hypothesis 2) is testable statically by reading `RegisterPortalHooks` for append-vs-replace semantics and checking whether any registered hook invokes `portal state notify`.
-- The `0.6.0` binary itself appears cascade-free post-recycle (~3 min idle → only ~32s capture-tick INFO lines).
+- The 0.6.0 daemon (post-recycle) looked "cascade-free" in the inbox only because the observation window happened to contain no session-switches; the stacked hooks were untouched by the recycle (now 139, *more* than during the incident).
+- Open question for spec: is the `show-hooks -g` blind spot specific to `pane-focus-out` / `window-layout-changed` (pane/window-scoped) or does it cover a whole class of events? The fix (per-event or replace) is robust either way, but the test should document the observed tmux 3.6b behaviour.
