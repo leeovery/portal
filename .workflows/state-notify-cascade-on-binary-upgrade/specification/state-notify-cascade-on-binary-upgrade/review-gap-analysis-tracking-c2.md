@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-02
 cycle: 2
 phase: Gap Analysis
@@ -34,7 +34,7 @@ Suggested resolution: either (a) implement `ShowGlobalHooksForEvent` with the tr
 **Proposed Addition**:
 {leave blank until discussed}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Corrected the 'Delete ShowGlobalHooks' bullet: the new seam preserves the same trimming `Run` path + `failed to show global hooks: %w` wrap (not 'verbatim, no-trim'); trim is immaterial since `ParseShowHooks` trims per line.
 
 ---
