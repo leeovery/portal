@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"syscall"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 )
@@ -122,10 +123,14 @@ var _ OrphanSweeper = (*OrphanSweepCore)(nil)
 //     skipping" with target_pid) and continue to the next PID.
 //     b. On result != IdentifyIsPortalDaemon: DEBUG ("sweep: pid not
 //     identity-checked as portal daemon, skipping") and continue.
-//     c. Invoke Kill. On error: WARN ("sweep: kill failed")
-//     and continue. On success: INFO ("sweep: killed orphan daemon"
-//     with target_pid) under the bootstrap component.
-//  6. Return nil unconditionally.
+//     c. Invoke Kill. On error: WARN ("sweep: kill failed") on the
+//     bootstrap logger and continue. On success: DEBUG ("orphan killed"
+//     with target_pid) on cleanLogger and increment the killed counter.
+//  6. Emit one INFO cycle summary ("orphan-daemon sweep complete" with
+//     killed + took) on cleanLogger (component clean), then return nil. The
+//     summary is reached only on the Pgrep-succeeded path; the Pgrep-fail
+//     early return at step 3 emits no summary. The SaverPanePID-error path
+//     proceeds (empty legitimate set) and reaches the summary normally.
 //
 // SweepOrphanDaemons never returns a non-nil error — Component B is a best-
 // effort step and the orchestrator's Warn-and-swallow site at step 4 would
@@ -144,6 +149,9 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 	if kill == nil {
 		kill = defaultKill
 	}
+
+	start := time.Now()
+	var killed int
 
 	candidates, err := c.Pgrep()
 	if err != nil {
@@ -188,7 +196,17 @@ func (c *OrphanSweepCore) SweepOrphanDaemons() error {
 			logger.Warn("sweep: kill failed", "target_pid", pid, "error", err)
 			continue
 		}
-		logger.Info("sweep: killed orphan daemon", "target_pid", pid)
+		// Per-kill detail demoted from INFO to DEBUG (per the Cycle-level
+		// summary cadence: per-item events at DEBUG, one INFO summary at
+		// completion). Emitted on cleanLogger so the clean: prefix groups the
+		// sweep's own detail with its clean-component summary below.
+		cleanLogger.Debug("orphan killed", "target_pid", pid)
+		killed++
 	}
+	// One INFO cycle summary at completion (component clean). Reached only on
+	// the Pgrep-succeeded path — the Pgrep-fail early return above emits no
+	// summary. killed counts successful SIGKILLs only (identity-skips and
+	// kill-failures are excluded).
+	cleanLogger.Info("orphan-daemon sweep complete", "killed", killed, "took", time.Since(start))
 	return nil
 }

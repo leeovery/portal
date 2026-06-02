@@ -38,12 +38,25 @@ import (
 	"io"
 	"log/slog"
 	"time"
+
+	"github.com/leeovery/portal/internal/log"
 )
 
 // discardLogger is the canonical silent *slog.Logger used as the default
 // sink when a step core or the Orchestrator is constructed without a real
 // logger injected. It writes to io.Discard so calls are safe no-ops.
 var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+// cleanLogger is the clean-component-bound logger used for the two
+// cmd/bootstrap clean-sweep cycle summaries (orphan-daemon sweep, marker
+// sweep) and the orphan-daemon sweep's own per-kill DEBUG detail. The
+// component flips to "clean" on these lines per the Subsystem prefix taxonomy
+// (clean owns sweep outcomes), while per-item identity-skip / kill-failure /
+// per-unset-failure breadcrumbs stay on the bootstrap-bound logger seam
+// injected into each step core. Bound once at package init via log.For so it
+// routes through the shared handler indirection (observing later Init /
+// SetTestHandler swaps).
+var cleanLogger = log.For("clean")
 
 // totalSteps is the fixed step count carried verbatim on the
 // orchestration-complete summary's steps attr. The eleven-step sequence is a

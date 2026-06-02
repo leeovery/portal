@@ -387,9 +387,15 @@ func TestSweepOrphanDaemons_pgrepEmptyListNoOp(t *testing.T) {
 	}
 }
 
-// TestSweepOrphanDaemons_emitsKilledOrphanInfo pins acceptance criterion that
-// each successful kill emits the canonical INFO message.
-func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
+// TestSweepOrphanDaemons_perKillNotEmittedAtInfoOnBootstrapLogger pins the
+// Phase 5 (task 5-5) demotion: the old per-kill INFO "sweep: killed orphan
+// daemon" is gone from the bootstrap-bound seam — the per-kill detail moved to
+// a DEBUG ("orphan killed") on cleanLogger (component clean), and the only INFO
+// at completion is the clean-component cycle summary. The positive DEBUG
+// assertion lives in clean_sweep_summary_test.go
+// (TestSweepOrphanDaemons_DemotesPerKillInfoToDebug); here we pin that nothing
+// lands on the injected bootstrap logger at INFO for a successful kill.
+func TestSweepOrphanDaemons_perKillNotEmittedAtInfoOnBootstrapLogger(t *testing.T) {
 	logger := &RecordingLogger{}
 	identify := &recordingIdentify{def: identifyOutcome{res: state.IdentifyIsPortalDaemon}}
 	kill := &recordingKill{}
@@ -404,18 +410,13 @@ func TestSweepOrphanDaemons_emitsKilledOrphanInfo(t *testing.T) {
 	if err := c.SweepOrphanDaemons(); err != nil {
 		t.Fatalf("SweepOrphanDaemons returned error: %v", err)
 	}
-	found := false
-	for i, msg := range logger.infos {
-		if strings.Contains(msg, "killed orphan daemon") && strings.Contains(msg, "11001") {
-			if logger.infoComponents[i] != "bootstrap" {
-				t.Errorf("killed-orphan Info component = %q, want %q", logger.infoComponents[i], "bootstrap")
-			}
-			found = true
-			break
-		}
+	if len(kill.calls) != 1 || kill.calls[0] != 11001 {
+		t.Fatalf("expected pid 11001 killed; got %v", kill.calls)
 	}
-	if !found {
-		t.Errorf("expected an Info entry for killed orphan; infos=%v", logger.infos)
+	for i, msg := range logger.infos {
+		if strings.Contains(msg, "killed orphan daemon") {
+			t.Errorf("per-kill INFO must be demoted off the bootstrap logger; got %q (component %q)", msg, logger.infoComponents[i])
+		}
 	}
 }
 

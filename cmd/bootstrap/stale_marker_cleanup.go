@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -93,7 +94,16 @@ var _ MarkerCleaner = (*MarkerCleanupCore)(nil)
 //  5. If the parsed live-pane set is empty AND no markers exist, return nil
 //     — there is nothing to do and no hazard to guard against.
 //  6. For each marker paneKey absent from the live set, invoke
-//     Unsetter.UnsetServerOption(state.SkeletonMarkerPrefix + paneKey).
+//     Unsetter.UnsetServerOption(state.SkeletonMarkerPrefix + paneKey),
+//     counting successful unsets.
+//
+// On each of the three non-error return paths (empty-markers no-op,
+// mass-unset-hazard deferral, post-loop) the method emits one INFO cycle
+// summary ("marker sweep complete" with unset + took) on cleanLogger
+// (component clean). unset counts successful unsets only — the deferral path
+// reports unset=0 (never a false unset) and the post-loop path emits the
+// summary regardless of per-unset failures. The two List-error returns (step 1
+// / step 2) emit no summary.
 //
 // CleanStaleMarkers never returns a *FatalError; every non-nil return is
 // soft per spec §Fix Component B (Soft-Warning Posture). Per-marker unset
@@ -111,6 +121,17 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	logger := c.Logger
 	if logger == nil {
 		logger = discardLogger
+	}
+
+	start := time.Now()
+	var unset int
+	// summarise emits the one INFO cycle summary on cleanLogger (component
+	// clean) before a non-error return. It is invoked at each of the three
+	// non-error return sites (empty-markers no-op, mass-unset-hazard deferral,
+	// post-loop) and NOT on the two List-error returns above, which emit
+	// nothing. unset counts successful unsets only.
+	summarise := func() {
+		cleanLogger.Info("marker sweep complete", "unset", unset, "took", time.Since(start))
 	}
 
 	markers, err := state.ListSkeletonMarkers(c.Markers)
@@ -134,12 +155,15 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 	if len(live) == 0 {
 		if len(markers) == 0 {
 			// Empty markers + empty live: nothing to do, no hazard.
+			summarise()
 			return nil
 		}
 		// The marker-present count has no closed attr key; the message must
 		// not interpolate values, so it is dropped — the hazard signal stands
 		// on its own.
 		logger.Warn("stale-marker cleanup: zero live panes parsed with markers present; skipping to avoid mass-unset hazard (next bootstrap retries)")
+		// Deferral: never a false unset — the summary reports unset=0.
+		summarise()
 		return nil
 	}
 
@@ -155,8 +179,13 @@ func (c *MarkerCleanupCore) CleanStaleMarkers() error {
 			// orchestrator (task 2-5) Warn-and-swallows the aggregate.
 			logger.Warn("stale-marker cleanup: unset marker failed", "pane_key", paneKey, "error", err)
 			unsetErrs = append(unsetErrs, fmt.Errorf("unset %s: %w", name, err))
+			continue
 		}
+		unset++
 	}
+	// Summary is emitted regardless of per-unset failures; the errors.Join
+	// aggregate return value is unchanged.
+	summarise()
 	if len(unsetErrs) > 0 {
 		return errors.Join(unsetErrs...)
 	}
