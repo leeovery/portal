@@ -1,0 +1,31 @@
+AGENT: duplication
+CYCLE: 1
+STATUS: findings
+
+FINDINGS:
+
+- FINDING: discardLogger declaration + nil-guard idiom re-authored in four packages
+  - SEVERITY: medium
+  - FILES: internal/state/logger_nil.go:14, internal/state/logger_nil.go:19-24, internal/restore/logger_nil.go:14-28, internal/tmux/portal_saver.go:27, internal/tmux/hooks_register.go:230-232, internal/tmux/hooks_register.go:308-310, internal/tmux/hooks_register.go:384-385, cmd/bootstrap/bootstrap.go:48, cmd/bootstrap/orphan_sweep.go:141-143, cmd/bootstrap/stale_marker_cleanup.go:122-124
+  - DESCRIPTION: The exact line `var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))` is independently declared in four separate packages (state, restore, tmux, bootstrap). Each carries its own copy plus the matching nil-tolerant guard, which itself recurs at ~9 call sites in three forms: a named helper (`state.loggerOrDiscard`), method accessors (`restore.Orchestrator.logger()` / `SessionRestorer.logger()`), and inline `if x == nil { x = discardLogger }` blocks (tmux hooks_register x3, bootstrap orphan_sweep, bootstrap stale_marker_cleanup). All implement the identical contract: "a nil `*slog.Logger` means discard" — a deliberate compatibility shim added by the observability migration when the legacy nil-safe bespoke logger was retyped to `*slog.Logger`. The discard sink and guard are pure boilerplate with one fixed correct implementation, so the per-package copies will drift with no compiler signal.
+  - RECOMMENDATION: Export a single canonical helper from `internal/log` (which every consumer already imports for `log.For`) — e.g. `log.OrDiscard(l *slog.Logger) *slog.Logger` backed by one package-level discard logger. Replace the four `var discardLogger = ...` declarations and route the nine guard sites through it. The restore accessor methods and `state.loggerOrDiscard` become one-line forwarders or are deleted. Pure consolidation of an existing identical contract; no behavior change.
+
+- FINDING: Identical "show-hooks failed" WARN + wrap block repeated three times in hooks_register.go
+  - SEVERITY: medium
+  - FILES: internal/tmux/hooks_register.go:131-132, internal/tmux/hooks_register.go:239-240, internal/tmux/hooks_register.go:318-319
+  - DESCRIPTION: Three functions (RegisterHookIfAbsent, migrateHydrationHooks, migrateSessionClosedHook) each handle a `c.ShowGlobalHooks()` error with the byte-identical pair `log.Warn("show-hooks failed", "error", err, "error_class", "unexpected")` immediately followed by `return ... fmt.Errorf("show-hooks failed: %w", err)`. The in-source comments at all three sites note the third is "normalized to the uniform shape shared with the two sibling show-hooks branches" — the authors already recognized this is one shape replicated across task boundaries. Any future change must be applied in three places or the lines silently diverge.
+  - RECOMMENDATION: Extract an unexported helper in hooks_register.go, e.g. `showGlobalHooksOrWarn(c *Client, log *slog.Logger) (string, error)` that performs the call, emits the canonical WARN on error, and returns the wrapped error. The three call sites collapse to `raw, err := showGlobalHooksOrWarn(c, log)`. Note one site uses the `bootstrapLogger` package var and two use the injected `log` param — reconcile to a single logger source as part of the extraction.
+
+- FINDING: Cycle-summary emission shape (`X complete`, counter, took) re-authored per sweep
+  - SEVERITY: low
+  - FILES: cmd/bootstrap/orphan_sweep.go:210, internal/state/fifo_sweep.go:71, cmd/bootstrap/stale_marker_cleanup.go:134, cmd/state_daemon.go:491-497
+  - DESCRIPTION: Four best-effort cycle/sweep cores independently implement the same summary skeleton: `start := time.Now()` at entry, a local counter (killed / reaped / unset / panes), and a terminal `cleanLogger.Info("<noun> sweep complete", "<counter>", n, "took", time.Since(start))`. The "clean owns sweep summaries" convention is intentional, but the timing-capture-and-emit scaffold is hand-rolled four times. Borderline under Rule-of-Three (the bodies differ substantially; only the bookend repeats), hence low.
+  - RECOMMENDATION: Optional / defer unless a fifth sweep appears. If consolidated, a helper like `log.Cycle(start time.Time)` returning the `"took", time.Since(start)` attr pair would pin the `took`-attr key in one place. Do not over-abstract the divergent loop bodies.
+
+- FINDING: Audited store-mutation logging shape duplicated across alias/hooks/project stores
+  - SEVERITY: low
+  - FILES: internal/alias/store.go:181-188, internal/alias/store.go:209-216, internal/hooks/store.go:134-140, internal/hooks/store.go:184-191, internal/hooks/store.go:280-287, internal/project/store.go:135-142, internal/project/store.go:219-226, internal/project/store.go:252, internal/project/store.go:287
+  - DESCRIPTION: All three persistence stores independently implement the same audited-mutation emission shape: on Save failure, `logger.Warn(op, "<entity>", id, ["value", val,] "via", via, "error", err, "error_class", fileutil.ClassifyWriteError(err))` then return; on success, `logger.Info(op, ...)`. The two batch CleanStale methods (hooks/project) share a near-identical block with comments cross-referencing each other. `ClassifyWriteError` is already a shared helper (good); the surrounding breadcrumb structure is copy-paste convention. Kept low because the attr keys differ per store and full extraction risks an over-abstract untyped helper.
+  - RECOMMENDATION: Leave the per-store single-mutation breadcrumb shape as convention. The worthwhile sub-case is the two CleanStale batch summaries: consider a shared `batchCleanSummary(logger, removed, start, saveErr)` helper parameterized by the per-entry attr key. Optional cleanup, not blocking.
+
+SUMMARY: Duplication is confined to the logging layer introduced by this work unit. The clearest extraction candidate is the `discardLogger` declaration + nil-guard idiom replicated across four packages (consolidate into one `internal/log` helper), followed by the thrice-repeated "show-hooks failed" block within hooks_register.go. The cycle-summary bookend and the audited-store-mutation breadcrumb shape are lower-priority convention-level repetition.
