@@ -4,15 +4,19 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/browser"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
@@ -1125,5 +1129,439 @@ func TestAttachConnectorConnectArgv(t *testing.T) {
 		if rec.argv[i] != want[i] {
 			t.Errorf("argv[%d] = %q, want %q", i, rec.argv[i], want[i])
 		}
+	}
+}
+
+// capturedRecord pairs a captured slog.Record with the WithAttrs chain that was
+// in force on the handler when it arrived. log.For("process") delivers the
+// "component" attr via root.With(...) — i.e. through WithAttrs, not on the record
+// itself — so a handler that wants to see the component must remember its
+// accumulated attrs and merge them at lookup time.
+type capturedRecord struct {
+	record slog.Record
+	attrs  []slog.Attr
+}
+
+// capturingHandler is an in-memory slog.Handler that records every Handle call
+// together with the WithAttrs-accumulated context, so the exec-marker tests can
+// assert on the For-delivered component via log.SetTestHandler.
+type capturingHandler struct {
+	mu       *sync.Mutex
+	captured *[]capturedRecord
+	attrs    []slog.Attr
+}
+
+func newCapturingHandler() *capturingHandler {
+	return &capturingHandler{
+		mu:       &sync.Mutex{},
+		captured: &[]capturedRecord{},
+	}
+}
+
+func (h *capturingHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	*h.captured = append(*h.captured, capturedRecord{record: r, attrs: h.attrs})
+	return nil
+}
+
+// WithAttrs returns a derived handler sharing the same capture sink but carrying
+// the extended attr chain, so For-delivered attrs (component) are remembered.
+func (h *capturingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	merged := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(merged, h.attrs)
+	copy(merged[len(h.attrs):], attrs)
+	return &capturingHandler{mu: h.mu, captured: h.captured, attrs: merged}
+}
+
+func (h *capturingHandler) WithGroup(string) slog.Handler { return h }
+
+// snapshot returns a copy of the records captured so far. Used by the
+// ordering-aware execer to prove the exec marker was already emitted at the
+// instant Exec was invoked.
+func (h *capturingHandler) snapshot() []capturedRecord {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]capturedRecord, len(*h.captured))
+	copy(out, *h.captured)
+	return out
+}
+
+// execRecords returns every captured record whose component is "process" and
+// whose message is "exec".
+func (h *capturingHandler) execRecords() []capturedRecord {
+	return filterExecRecords(h.snapshot())
+}
+
+func filterExecRecords(in []capturedRecord) []capturedRecord {
+	var out []capturedRecord
+	for _, cr := range in {
+		if cr.record.Message != "exec" {
+			continue
+		}
+		if recordComponent(cr) == "process" {
+			out = append(out, cr)
+		}
+	}
+	return out
+}
+
+// recordComponent extracts the "component" attr from a captured record, checking
+// the record's own attrs first then the WithAttrs-accumulated chain.
+func recordComponent(cr capturedRecord) string {
+	if v, ok := recordStringAttr(cr, "component"); ok {
+		return v
+	}
+	return ""
+}
+
+// recordStringAttr extracts a named string attr from a captured record, checking
+// the record's own attrs first then the WithAttrs-accumulated chain.
+func recordStringAttr(cr capturedRecord, key string) (string, bool) {
+	var (
+		found string
+		ok    bool
+	)
+	cr.record.Attrs(func(a slog.Attr) bool {
+		if a.Key == key {
+			found = a.Value.Resolve().String()
+			ok = true
+			return false
+		}
+		return true
+	})
+	if ok {
+		return found, true
+	}
+	for _, a := range cr.attrs {
+		if a.Key == key {
+			return a.Value.Resolve().String(), true
+		}
+	}
+	return "", false
+}
+
+// orderingExecer is a recording execer that, at Exec invocation time, snapshots
+// the records already captured by the handler. The exec-marker contract requires
+// the marker to be emitted BEFORE syscall.Exec — this seam proves it by checking
+// that a process: exec record exists in the snapshot taken at Exec time (i.e.
+// before the real syscall.Exec would have replaced the image).
+type orderingExecer struct {
+	handler        *capturingHandler
+	argv0          string
+	argv           []string
+	recordsAtCall  []capturedRecord
+	execMarkerSeen bool
+}
+
+func (e *orderingExecer) Exec(argv0 string, argv []string, _ []string) error {
+	e.argv0 = argv0
+	e.argv = argv
+	e.recordsAtCall = e.handler.snapshot()
+	if len(filterExecRecords(e.recordsAtCall)) > 0 {
+		e.execMarkerSeen = true
+	}
+	return nil
+}
+
+func TestAttachConnector_EmitsExecMarkerBeforeExec(t *testing.T) {
+	t.Run("emits process: exec target=tmux args before exec", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		ex := &orderingExecer{handler: h}
+		ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
+
+		if err := ac.Connect("foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		recs := h.execRecords()
+		if len(recs) != 1 {
+			t.Fatalf("expected exactly 1 process: exec record, got %d", len(recs))
+		}
+		r := recs[0]
+
+		if r.record.Level != slog.LevelInfo {
+			t.Errorf("exec marker level = %v, want INFO", r.record.Level)
+		}
+		if target, ok := recordStringAttr(r, "target"); !ok || target != "tmux" {
+			t.Errorf("target attr = %q (ok=%v), want %q", target, ok, "tmux")
+		}
+		gotArgs, ok := recordStringAttr(r, "args")
+		if !ok {
+			t.Fatal("exec marker missing args attr")
+		}
+		wantArgs := "attach-session -t =foo"
+		if gotArgs != wantArgs {
+			t.Errorf("args attr = %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("marker emitted before the exec call (ordering)", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		ex := &orderingExecer{handler: h}
+		ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
+
+		if err := ac.Connect("foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !ex.execMarkerSeen {
+			t.Fatal("process: exec marker was not present in the records captured at Exec invocation time — it must be emitted BEFORE syscall.Exec")
+		}
+	})
+}
+
+func TestPathOpener_EmitsExecMarkerBeforeExec_OutsideTmux(t *testing.T) {
+	t.Run("emits process: exec target=tmux args=joined ExecArgs before exec", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		ex := &orderingExecer{handler: h}
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs: &mockQuickStarter{
+				result: &session.QuickStartResult{
+					SessionName: "myproject-abc123",
+					Dir:         "/home/user/project",
+					ExecArgs:    []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
+				},
+			},
+			execer:   ex,
+			tmuxPath: "/usr/bin/tmux",
+		}
+
+		if err := opener.Open("/home/user/project", nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		recs := h.execRecords()
+		if len(recs) != 1 {
+			t.Fatalf("expected exactly 1 process: exec record, got %d", len(recs))
+		}
+		r := recs[0]
+
+		if r.record.Level != slog.LevelInfo {
+			t.Errorf("exec marker level = %v, want INFO", r.record.Level)
+		}
+		if target, ok := recordStringAttr(r, "target"); !ok || target != "tmux" {
+			t.Errorf("target attr = %q (ok=%v), want %q", target, ok, "tmux")
+		}
+		gotArgs, ok := recordStringAttr(r, "args")
+		if !ok {
+			t.Fatal("exec marker missing args attr")
+		}
+		wantArgs := "new-session -A -s myproject-abc123 -c /home/user/project"
+		if gotArgs != wantArgs {
+			t.Errorf("args attr = %q, want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("marker emitted before the exec call (ordering)", func(t *testing.T) {
+		h := newCapturingHandler()
+		log.SetTestHandler(t, h)
+
+		ex := &orderingExecer{handler: h}
+		opener := &PathOpener{
+			insideTmux: false,
+			creator:    &mockSessionCreator{},
+			switcher:   &mockSwitchClient{},
+			qs: &mockQuickStarter{
+				result: &session.QuickStartResult{
+					ExecArgs: []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project"},
+				},
+			},
+			execer:   ex,
+			tmuxPath: "/usr/bin/tmux",
+		}
+
+		if err := opener.Open("/home/user/project", nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !ex.execMarkerSeen {
+			t.Fatal("process: exec marker was not present in the records captured at Exec invocation time — it must be emitted BEFORE syscall.Exec")
+		}
+	})
+}
+
+func TestExecMarker_ArgsLoggedVerbatim(t *testing.T) {
+	// Privacy posture: full args land in portal.log verbatim (single-user threat
+	// model). A multi-word shell-command tail must survive unredacted.
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	ex := &orderingExecer{handler: h}
+	shellCmd := "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"
+	opener := &PathOpener{
+		insideTmux: false,
+		creator:    &mockSessionCreator{},
+		switcher:   &mockSwitchClient{},
+		qs: &mockQuickStarter{
+			result: &session.QuickStartResult{
+				ExecArgs: []string{"tmux", "new-session", "-A", "-s", "myproject-abc123", "-c", "/home/user/project", shellCmd},
+			},
+		},
+		execer:   ex,
+		tmuxPath: "/usr/bin/tmux",
+	}
+
+	if err := opener.Open("/home/user/project", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	recs := h.execRecords()
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 process: exec record, got %d", len(recs))
+	}
+	gotArgs, ok := recordStringAttr(recs[0], "args")
+	if !ok {
+		t.Fatal("exec marker missing args attr")
+	}
+	wantArgs := "new-session -A -s myproject-abc123 -c /home/user/project " + shellCmd
+	if gotArgs != wantArgs {
+		t.Errorf("args attr = %q, want %q (verbatim)", gotArgs, wantArgs)
+	}
+}
+
+func TestSwitchConnector_EmitsNoExecMarker(t *testing.T) {
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	mock := &mockSwitchClient{}
+	connector := &SwitchConnector{client: mock}
+
+	if err := connector.Connect("my-session"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.execRecords(); len(recs) != 0 {
+		t.Errorf("SwitchConnector must emit no process: exec marker, got %d", len(recs))
+	}
+}
+
+func TestPathOpener_InsideTmux_EmitsNoExecMarker(t *testing.T) {
+	h := newCapturingHandler()
+	log.SetTestHandler(t, h)
+
+	ex := &orderingExecer{handler: h}
+	opener := &PathOpener{
+		insideTmux: true,
+		creator:    &mockSessionCreator{sessionName: "myproject-abc123"},
+		switcher:   &mockSwitchClient{},
+		qs:         &mockQuickStarter{},
+		execer:     ex,
+	}
+
+	if err := opener.Open("/home/user/project", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if recs := h.execRecords(); len(recs) != 0 {
+		t.Errorf("PathOpener inside-tmux must emit no process: exec marker, got %d", len(recs))
+	}
+	if ex.argv0 != "" {
+		t.Errorf("execer must not be called inside tmux, got argv0 %q", ex.argv0)
+	}
+}
+
+// lifecycleBypassMessages mirrors the production handler's closed
+// process-lifecycle message set (spec § "Lifecycle markers bypass the level
+// filter"); "exec" is the message under test here.
+var lifecycleBypassMessages = map[string]bool{
+	"start":              true,
+	"exit":               true,
+	"exec":               true,
+	"panic":              true,
+	"log-level resolved": true,
+}
+
+// warnBypassHandler models the production textHandler's WARN-level gate plus the
+// process-lifecycle bypass: a record whose component is "process" and whose
+// message is in the lifecycle set ("exec" among them) writes through even though
+// it is INFO and the configured level is WARN. Any other INFO record is dropped.
+// It tracks the WithAttrs chain so the For-delivered component is visible (same
+// reasoning as capturingHandler). This lets the test prove the call-site emits
+// the marker in a shape the production bypass admits at PORTAL_LOG_LEVEL=warn —
+// without exporting the unexported production newTextHandler.
+type warnBypassHandler struct {
+	mu       *sync.Mutex
+	captured *[]capturedRecord
+	attrs    []slog.Attr
+}
+
+func newWARNBypassHandler() *warnBypassHandler {
+	return &warnBypassHandler{mu: &sync.Mutex{}, captured: &[]capturedRecord{}}
+}
+
+// Enabled mirrors the production coarse INFO-floor pre-gate so an INFO lifecycle
+// record is not skipped by slog before Handle can apply the bypass.
+func (h *warnBypassHandler) Enabled(_ context.Context, level slog.Level) bool {
+	floor := min(slog.LevelInfo, slog.LevelWarn)
+	return level >= floor
+}
+
+func (h *warnBypassHandler) Handle(_ context.Context, r slog.Record) error {
+	cr := capturedRecord{record: r, attrs: h.attrs}
+	bypass := recordComponent(cr) == "process" && lifecycleBypassMessages[r.Message]
+	if !bypass && r.Level < slog.LevelWarn {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	*h.captured = append(*h.captured, cr)
+	return nil
+}
+
+func (h *warnBypassHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	merged := make([]slog.Attr, len(h.attrs)+len(attrs))
+	copy(merged, h.attrs)
+	copy(merged[len(h.attrs):], attrs)
+	return &warnBypassHandler{mu: h.mu, captured: h.captured, attrs: merged}
+}
+
+func (h *warnBypassHandler) WithGroup(string) slog.Handler { return h }
+
+func (h *warnBypassHandler) execRecords() []capturedRecord {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]capturedRecord, len(*h.captured))
+	copy(out, *h.captured)
+	return filterExecRecords(out)
+}
+
+func TestExecMarker_VisibleAtWARN(t *testing.T) {
+	// The exec marker is a forensic tripwire: it must reach the sink even when
+	// PORTAL_LOG_LEVEL filters out ordinary INFO. The call site emits an ordinary
+	// INFO line under component=process with message=exec; the production handler
+	// special-cases that lifecycle set to bypass the level gate. This handler
+	// models the WARN gate + bypass and asserts the marker survives.
+	h := newWARNBypassHandler()
+	log.SetTestHandler(t, h)
+
+	ex := &recordingExecer{}
+	ac := &AttachConnector{execer: ex, tmuxPath: "/usr/bin/tmux"}
+
+	if err := ac.Connect("foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	recs := h.execRecords()
+	if len(recs) != 1 {
+		t.Fatalf("exec marker not visible at WARN: expected 1 process: exec record, got %d", len(recs))
+	}
+	r := recs[0]
+	if target, ok := recordStringAttr(r, "target"); !ok || target != "tmux" {
+		t.Errorf("target attr = %q (ok=%v), want %q", target, ok, "tmux")
+	}
+	if gotArgs, ok := recordStringAttr(r, "args"); !ok || gotArgs != "attach-session -t =foo" {
+		t.Errorf("args attr = %q (ok=%v), want %q", gotArgs, ok, "attach-session -t =foo")
 	}
 }

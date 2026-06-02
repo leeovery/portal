@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/browser"
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
@@ -94,7 +96,21 @@ func (ac *AttachConnector) Connect(name string) error {
 	if ex == nil {
 		ex = &realExecer{}
 	}
-	return ex.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", "=" + name}, os.Environ())
+
+	// argv[0] is the "tmux" program name; argv[1:] is the tmux subcommand+flags.
+	// We log argv[1:] so args renders "attach-session -t =<name>" (target already
+	// names tmux) and pass the full argv to Exec.
+	argv := []string{"tmux", "attach-session", "-t", "=" + name}
+
+	// Exec-handoff marker (spec § Defensive invariants — exec-handoff markers).
+	// syscall.Exec replaces the process image and never returns, so Close never
+	// fires and no process: exit line is emitted — this exec line is the terminal
+	// marker for the bare-shell attach handoff. marker emitted pre-exec; the log
+	// writer is unbuffered (Task 2-7) so the bytes are in the kernel before
+	// syscall.Exec replaces the image — no Sync needed.
+	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(argv[1:], " "))
+
+	return ex.Exec(tmuxPath, argv, os.Environ())
 }
 
 // buildSessionConnector returns the appropriate SessionConnector based on
@@ -248,6 +264,24 @@ func (po *PathOpener) Open(resolvedPath string, command []string) error {
 	if err != nil {
 		return err
 	}
+
+	// session.QuickStart builds ExecArgs as {"tmux", "new-session", "-A", …} —
+	// ExecArgs[0] is always the "tmux" program name, so ExecArgs[1:] is the tmux
+	// subcommand+flags (matching the spec example args="attach-session -A …").
+	// Drop the program name; never index [1:] on a <1-len slice (ExecArgs is
+	// always populated, but be defensive).
+	logArgs := result.ExecArgs
+	if len(logArgs) > 0 {
+		logArgs = logArgs[1:]
+	}
+
+	// Exec-handoff marker (spec § Defensive invariants — exec-handoff markers).
+	// syscall.Exec replaces the process image and never returns, so Close never
+	// fires — this exec line is the terminal marker for the bare-shell create-or-
+	// attach handoff. marker emitted pre-exec; the log writer is unbuffered
+	// (Task 2-7) so the bytes are in the kernel before syscall.Exec replaces the
+	// image — no Sync needed.
+	log.For("process").Info("exec", "target", "tmux", "args", strings.Join(logArgs, " "))
 
 	return po.execer.Exec(po.tmuxPath, result.ExecArgs, os.Environ())
 }
