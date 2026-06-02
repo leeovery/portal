@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/statetest"
 	"github.com/leeovery/portal/internal/tmux"
@@ -306,6 +308,117 @@ func TestSignalHydrate_IsIdempotentAcrossRepeatedInvocations(t *testing.T) {
 	}
 	if len(second.Calls) != 0 {
 		t.Errorf("second invocation SendSignal calls = %d, want 0 (idempotent)", len(second.Calls))
+	}
+}
+
+// TestSignalHydrate_WARNsRenderUnderSignalComponent pins the cycle-3 signal-vs-
+// hydrate attribution decision (task 9-2, option a): runSignalHydrate's three
+// enumeration/per-FIFO WARNs render under component=signal — matching the
+// structural sibling EagerSignalHydrate — so `grep "signal:"` reconstructs the
+// hook-driven FIFO-signaling path. They must NOT render under component=hydrate
+// (the command's process_role stays hydrate; the subsystem component is signal —
+// the two attrs are orthogonal).
+//
+// cfg.Logger is left nil deliberately so the test exercises the PRODUCTION
+// default (signalLoggerOrDefault → the package-level signalLogger bound via
+// log.For("signal")), not a test-injected component binding. log.SetTestHandler
+// re-points the shared handler indirection at a logtest.Sink so the cached
+// signalLogger's records are captured in-process — this is what would have
+// false-passed had we injected a pre-bound logger, so it is load-bearing.
+func TestSignalHydrate_WARNsRenderUnderSignalComponent(t *testing.T) {
+	cases := []struct {
+		name    string
+		runFunc func(args ...string) (string, error)
+		signal  state.FIFOSignaler
+		wantMsg string
+	}{
+		{
+			name: "list skeleton markers failed",
+			runFunc: func(args ...string) (string, error) {
+				if len(args) > 0 && args[0] == "show-options" {
+					return "", errors.New("show-options boom")
+				}
+				return "", fmt.Errorf("unexpected tmux call: %v", args)
+			},
+			signal:  &statetest.RecordingFIFOSignaler{},
+			wantMsg: "list skeleton markers failed",
+		},
+		{
+			name: "list panes for session failed",
+			runFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "show-options":
+					return markersOption(state.SanitizePaneKey("foo", 0, 0)), nil
+				case "list-panes":
+					return "", errors.New("can't find session: foo")
+				}
+				return "", fmt.Errorf("unexpected tmux call: %v", args)
+			},
+			signal:  &statetest.RecordingFIFOSignaler{},
+			wantMsg: "list panes for session failed",
+		},
+		{
+			name: "write fifo failed",
+			runFunc: func(args ...string) (string, error) {
+				switch args[0] {
+				case "show-options":
+					return markersOption(state.SanitizePaneKey("foo", 0, 0)), nil
+				case "list-panes":
+					return listPanesOutput([][2]int{{0, 0}}), nil
+				}
+				return "", fmt.Errorf("unexpected tmux call: %v", args)
+			},
+			signal:  &statetest.RecordingFIFOSignaler{Err: errors.New("retry exhausted (sentinel)")},
+			wantMsg: "write fifo failed",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &logtest.Sink{}
+			log.SetTestHandler(t, sink)
+
+			cfg := signalHydrateConfig{
+				Session:  "foo",
+				StateDir: t.TempDir(),
+				Client:   tmux.NewClient(&recordingCommander{RunFunc: tc.runFunc}),
+				// Logger intentionally nil — exercise the production default.
+				Signaler: tc.signal,
+			}
+			if err := runSignalHydrate(cfg); err != nil {
+				t.Fatalf("runSignalHydrate: %v", err)
+			}
+			assertSignalComponentWARN(t, sink, tc.wantMsg)
+		})
+	}
+}
+
+// assertSignalComponentWARN asserts the sink captured a WARN line carrying the
+// given message under component=signal and NOT under component=hydrate.
+func assertSignalComponentWARN(t *testing.T, sink *logtest.Sink, msg string) {
+	t.Helper()
+	body := sink.Body()
+	if !strings.Contains(body, msg) {
+		t.Fatalf("expected a WARN %q line; body=%q", msg, body)
+	}
+	matched := 0
+	for _, line := range sink.Lines() {
+		if !strings.Contains(line, msg) {
+			continue
+		}
+		matched++
+		if !strings.HasPrefix(line, "WARN ") {
+			t.Errorf("%q line is not WARN-level: %q", msg, line)
+		}
+		if !strings.Contains(line, "component=signal") {
+			t.Errorf("%q must render under component=signal; got %q", msg, line)
+		}
+		if strings.Contains(line, "component=hydrate") {
+			t.Errorf("%q must NOT render under component=hydrate; got %q", msg, line)
+		}
+	}
+	if matched == 0 {
+		t.Fatalf("no captured line contained %q; body=%q", msg, body)
 	}
 }
 

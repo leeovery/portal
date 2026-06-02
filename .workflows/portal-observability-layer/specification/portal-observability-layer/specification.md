@@ -163,7 +163,7 @@ This list is the **single source of truth** for the component count.
 | `preview` | TUI scrollback preview page |
 | `saver` | `_portal-saver` session lifecycle |
 | `capture` | The daemon's per-tick capture loop (promoted from inside `daemon`) |
-| `signal` | FIFO signaling **mechanism** — `EagerSignalHydrate` and the lower-level FIFO signal send/receive plumbing in `internal/state`. (The hydrate helper's own exit-path outcome lines — incl. `signal timeout` — render under `hydrate` per the Hook-firing catalog, which governs the helper's exec-chain.) |
+| `signal` | FIFO signaling **mechanism** — `EagerSignalHydrate`, the per-session hook-driven `portal state signal-hydrate` command (`runSignalHydrate`'s marker-enumeration / per-session / per-FIFO-write diagnostics), and the lower-level FIFO signal send/receive plumbing in `internal/state`. `signal-hydrate`'s `process_role` stays `hydrate` (the argv-resolved binary) — orthogonal to this subsystem `component` (cycle-3 decision: the FIFO-signaling subsystem is homed under `signal` regardless of which binary writes it, so `grep "signal:"` reconstructs the whole mechanism). (The hydrate helper's own exit-path outcome lines — incl. `signal timeout` — render under `hydrate` per the Hook-firing catalog, which governs the helper's exec-chain.) |
 | `log-rotate` | Rotation and retention events |
 | `clean` | `portal clean` command path |
 | `aliases` | `aliases` store mutations |

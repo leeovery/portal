@@ -14,8 +14,15 @@ import (
 // state.DefaultFIFOSignaler{} (whose SendSignal delegates to
 // state.SendHydrateSignal — the no-seam production entry point that bundles
 // state.OpenFIFOForSignal + time.Sleep + the bounded retry ladder). Tests
-// inject recording fakes that satisfy state.FIFOSignaler. Logger is the
-// hydrate component's *slog.Logger.
+// inject recording fakes that satisfy state.FIFOSignaler.
+//
+// Logger is the signal component's *slog.Logger — NOT hydrate. The
+// signal-hydrate command's diagnostics are FIFO-signaling-mechanism lines, so
+// they render under component=signal per the Subsystem prefix taxonomy (spec §
+// signal row), matching its structural sibling EagerSignalHydrate. This is the
+// subsystem (component), orthogonal to the command's process_role, which stays
+// `hydrate` (the binary, resolved from argv). When left nil it normalizes to
+// the package-level signalLogger via signalLoggerOrDefault.
 type signalHydrateConfig struct {
 	Session  string
 	StateDir string
@@ -37,8 +44,15 @@ type signalHydrateConfig struct {
 // retry coverage stays in one place rather than duplicated at the cmd
 // layer. The retry ladder is exhaustively tested in
 // internal/state/signal_hydrate_test.go.
+//
+// Its three failure-path WARNs render under component=signal (not hydrate):
+// signal-hydrate is the per-session, hook-driven peer of the bootstrap
+// EagerSignalHydrate step, doing the identical enumerate-markers-then-write-
+// FIFO work, so its diagnostics belong to the FIFO-signaling subsystem for
+// grep-completeness and sibling consistency. The component (subsystem) is
+// orthogonal to process_role (which stays `hydrate` — the binary).
 func runSignalHydrate(cfg signalHydrateConfig) error {
-	cfg.Logger = hydrateLoggerOrDefault(cfg.Logger)
+	cfg.Logger = signalLoggerOrDefault(cfg.Logger)
 	markers, err := state.ListSkeletonMarkers(cfg.Client)
 	if err != nil {
 		cfg.Logger.Warn("list skeleton markers failed", "error", err)
@@ -66,6 +80,19 @@ func runSignalHydrate(cfg signalHydrateConfig) error {
 	return nil
 }
 
+// signalLoggerOrDefault returns logger when non-nil, else the package's
+// signal-component-bound signalLogger. It mirrors hydrateLoggerOrDefault but
+// defaults to the signal component (not hydrate): signal-hydrate's diagnostics
+// are FIFO-signaling-mechanism lines per the Subsystem prefix taxonomy. The
+// nil-tolerant contract preserves the *slog.Logger nil-receiver safety a caller
+// (or test) that leaves Logger nil relies on.
+func signalLoggerOrDefault(logger *slog.Logger) *slog.Logger {
+	if logger == nil {
+		return signalLogger
+	}
+	return logger
+}
+
 // signalHydrateRunFunc is the package-level seam tests use to short-circuit
 // the body for argv-only assertions (see TestStateInternalSubcommandsAcceptValidArgv
 // in cmd/state_test.go). Production points it at runSignalHydrate.
@@ -91,11 +118,17 @@ var stateSignalHydrateCmd = &cobra.Command{
 		// Rotation and the append-only writer discipline are now
 		// handler-owned (Phase 2), so this hook-invoked command no longer
 		// opens or closes a per-process logger.
+		//
+		// signalLogger (component=signal), NOT hydrateLogger: signal-hydrate's
+		// FIFO-signaling diagnostics are homed under the signal subsystem
+		// (Subsystem prefix taxonomy), matching EagerSignalHydrate. The
+		// command's process_role stays `hydrate` (argv-resolved binary) —
+		// orthogonal to the subsystem component.
 		cfg := signalHydrateConfig{
 			Session:  sessionName,
 			StateDir: dir,
 			Client:   tmux.DefaultClient(),
-			Logger:   hydrateLogger,
+			Logger:   signalLogger,
 			Signaler: state.DefaultFIFOSignaler{},
 		}
 		return signalHydrateRunFunc(cfg)
