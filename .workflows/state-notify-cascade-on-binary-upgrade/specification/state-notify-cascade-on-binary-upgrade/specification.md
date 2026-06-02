@@ -138,6 +138,22 @@ This is the second half of "delete `ShowGlobalHooks`": once both registration an
 7. **Idempotent and churn-free.** A registration against an already-converged table performs no unset and no append — no hook renumbering, no log churn.
 8. **Cascade eliminated.** After the fix, a single tmux event that triggers a managed hook (e.g. a session-switch firing `pane-focus-out`) spawns exactly one `portal state notify`, not N.
 
+## Testing Requirements
+
+The defect is a tmux-output-**shape** issue — the global `show-hooks -g` omits a class of events. It is **invisible to string-fixture / mock commanders**, which return whatever output the test author wrote. The only faithful oracle is a **real tmux server**. Tests that would prove this fix MUST use the real-tmux socket fixtures (`internal/tmuxtest`), not the parsed-string commander.
+
+This is corroborated by existing project guidance: the `scrollback-not-restored-with-non-zero-base-index` spec already mandates a real-tmux socket fixture for the `RegisterPortalHooks` migration test, precisely because "the eviction logic depends on the precise format of `show-hooks` output and `set-hook -gu` index semantics, both of which a mock would have to re-implement to be faithful."
+
+Required tests:
+
+1. **No-growth integration test (real tmux).** Run hook registration N times against a real tmux server; assert every Portal hook array — and specifically `pane-focus-out` and `window-layout-changed`, the events a global read cannot see — stays at exactly 1. This is the direct regression guard for the bug; it fails today and passes after the fix.
+2. **Blind-spot regression guard (real tmux).** Lock the tmux 3.6b reality the fix is built on: assert that no-arg `show-hooks -g` omits the pane-scoped and geometry/rename window-scoped events while `show-hooks -g <event>` includes them. This documents *why* the per-event seam is mandatory and catches a future tmux behavior change.
+3. **Self-heal assertion (real tmux).** Seed an event with K stacked Portal entries; run one registration; assert it collapses to exactly 1, and that a co-resident user-authored hook on the same event is left untouched.
+4. **Teardown-at-depth test (real tmux).** With stacked Portal entries on the blind events, assert `UnregisterPortalHooks` reaps them all (it no-ops today), leaving any co-resident user hook intact.
+5. **Idempotency / no-churn assertion.** After convergence, a second registration produces no unset/append (e.g. hook indices unchanged, no eviction log line).
+
+Parser-level and pure-logic unit tests may still cover `ParseShowHooks` and the eviction-predicate matching, but they do **not** substitute for the real-tmux tests above — the blind spot lives below the parser.
+
 ---
 
 ## Working Notes
