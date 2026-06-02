@@ -306,6 +306,7 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"session":          {},
 		"state":            {},
 		"statetest":        {},
+		"storelog":         {},
 		"tmux":             {},
 		"tmuxerr":          {},
 		"tmuxout":          {},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/leeovery/portal/internal/fileutil"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/storelog"
 )
 
 // logger is the hooks-component logger, bound once at package init. Every
@@ -282,16 +283,16 @@ func (s *Store) CleanStale(liveKeys []string) ([]string, error) {
 	}
 
 	if err := s.Save(kept); err != nil {
-		// Whole-batch persist failure: error_class is a write-failed-* value
-		// from the AtomicWrite phase space, NOT "unexpected".
-		logger.Warn("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal",
-			"error", err, "error_class", fileutil.ClassifyWriteError(err), log.Took(start))
+		// Whole-batch persist failure: the shared helper emits the WARN with the
+		// write-failed-* error_class (from the AtomicWrite phase space, NOT
+		// "unexpected"); we wrap-and-return.
+		storelog.EmitCleanStaleSummary(logger, len(removed), start, err)
 		return nil, fmt.Errorf("failed to save after cleaning stale hooks: %w", err)
 	}
 
 	// entries_failed is omitted: there is no per-entry failure path (see the
 	// [needs-info] note above), so M is always 0 and the attr stays absent.
-	logger.Info("clean-stale", "op", "clean-stale", "entries", len(removed), "via", "internal", log.Took(start))
+	storelog.EmitCleanStaleSummary(logger, len(removed), start, nil)
 
 	return removed, nil
 }
