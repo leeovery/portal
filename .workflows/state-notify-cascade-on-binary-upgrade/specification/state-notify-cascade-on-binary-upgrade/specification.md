@@ -48,7 +48,7 @@ Special-casing the blind set was explicitly rejected. The blind set is tmux-vers
 ### Concrete mechanism
 
 - **New tmux client seam:** `ShowGlobalHooksForEvent(event)` → runs `show-hooks -g <event>`. Output format is byte-identical to the global form (`pane-focus-out[0] run-shell "…"`), so the existing `ParseShowHooks` parser needs **zero changes**.
-- **Delete `ShowGlobalHooks` (the no-arg global read).** It is the defect's single point of entry; with both registration and unregistration on the per-event seam, nothing should retain it. (Any remaining caller is migrated or the read is removed.)
+- **Delete `ShowGlobalHooks` (the no-arg global read).** It is the defect's single point of entry; with both registration and unregistration on the per-event seam, nothing should retain it. The `Client.ShowGlobalHooks` method itself is removed once no production caller remains; any test fixtures referencing it are migrated to the new seam. `ShowGlobalHooksForEvent` preserves the removed method's contract — **verbatim, no-trim** output and the `failed to show global hooks: %w` error-wrap shape — which is what lets `ParseShowHooks` stay unchanged.
 - **Reuse existing, tested primitives:** the per-event eviction half already exists in `UnregisterPortalHooks` — `portalEntriesFor` + `containsAny(portalCommandSubstrings)` for Portal-only matching, reverse-index `UnsetGlobalHookAt` for removal, `AppendGlobalHook` for the single append.
 
 ## Registration Redesign — "Ensure Exactly One"
@@ -61,7 +61,7 @@ For each managed event, given the event's *eviction fingerprint(s)* and its *des
 
 1. Read the event's entries via `ShowGlobalHooksForEvent(event)` → `ParseShowHooks`.
 2. Collect the Portal-authored entries — those whose command body contains any of the event's eviction fingerprint(s). (User/other-plugin entries are not matched and are never touched.)
-3. **Idempotent fast path:** if exactly one Portal-authored entry exists and its body already equals the desired body, do nothing — no unset, no append, no churn.
+3. **Idempotent fast path:** if exactly one Portal-authored entry exists and its body already equals the desired body, do nothing — no unset, no append, no churn. For events with multiple eviction fingerprints (i.e. `session-closed`), "Portal-authored entry" is counted across the **union** of those fingerprints, not per-fingerprint — an already-converged `session-closed` holds one `commitNowCommand` entry, which matches the `portal state commit-now` fingerprint, gives a union count of 1, and equals the desired body, so the fast path fires correctly.
 4. Otherwise converge: unset every Portal-authored entry via `UnsetGlobalHookAt` in **descending index order** (so a removal never shifts a not-yet-processed index), then `AppendGlobalHook(event, desiredBody)` exactly once.
 
 This collapses any depth-N stack (including the live 139-deep ones) to a single entry, and migrates a stale legacy body to the current one, as an ordinary side effect of bootstrap step 2 — no separate cleanup pass.
@@ -80,11 +80,25 @@ Notes on the table:
 - **Hydration events** match on `portal state signal-hydrate`, which catches both the legacy un-separated body and the current `--` form, converging to the current one. (This replaces the historical hydration special case — see "Migration-Helper Consolidation".)
 - Eviction is scoped to each event's **own category fingerprint(s)**. A legacy cross-category entry (e.g. a stale `portal state migrate-rename` on `session-renamed` from a very old binary) is *not* reaped by registration — it remains the responsibility of the teardown/clean path. Registration's job is solely "ensure exactly one of *this* event's desired body."
 
-**Hook body shapes.** Each desired body is a `run-shell`-wrapped, guard-prefixed command — not a bare subcommand. The notify body is `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"` (the `command -v portal` guard suppresses tmux "command not found" spam during a binary swap or after uninstall); `commit-now` and `signal-hydrate` follow the same wrapper shape. `ParseShowHooks` returns such an entry as e.g. `pane-focus-out[0] run-shell "…"`. The eviction fingerprints in the table above are therefore substrings *inside* that wrapper, and the idempotent fast-path equality check (step 3) compares the **full wrapped body**, not the bare subcommand.
+**Hook body shapes.** Each desired body is a `run-shell`-wrapped, guard-prefixed command — not a bare subcommand:
+
+- notify: `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
+- commit-now: `run-shell "command -v portal >/dev/null 2>&1 && portal state commit-now"`
+- signal-hydrate: `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"`
+
+The `command -v portal` guard suppresses tmux "command not found" spam during a binary swap or after uninstall. The hydration body's trailing `#{session_name}` is a tmux format token expanded at fire time (it tells `signal-hydrate` which session to act on); the ` -- ` end-of-flags separator before it protects session names that begin with `-`. `ParseShowHooks` returns such an entry as e.g. `pane-focus-out[0] run-shell "…"`. The eviction fingerprints in the table above are therefore substrings *inside* that wrapper, and the idempotent fast-path equality check (step 3) compares the **full wrapped body**, not the bare subcommand — a byte-for-byte string comparison against the desired-body constant. For hydration events that constant contains the literal, **unexpanded** `#{session_name}` token: tmux stores hook bodies verbatim and expands `#{...}` only at fire time, so the stored body equals the constant exactly (modulo `ParseShowHooks`' existing outer-quote stripping). No expansion or normalization is performed.
 
 ### User-hook coexistence guarantee
 
 The eviction predicate matches **only Portal-authored command bodies** (the `portalCommandSubstrings` substring discipline already used by the teardown path). A user-authored or other-plugin hook on the same event — including on `pane-focus-out` / `window-layout-changed` — is never matched and survives every registration untouched. This is a hard requirement: the original design deliberately chose `set-hook -ga` (append) over `-g` (replace) specifically to coexist with user `.tmux.conf` hooks, and the fix must preserve that coexistence.
+
+### Logging, ordering & failure semantics
+
+**Logging.** The unified convergence path replaces the per-helper log lines that were deleted with `migrateHydrationHooks` / `migrateSessionClosedHook`. When a registration evicts one or more stacked entries (the non-idempotent path), it emits a **single INFO** line under the `bootstrap` component recording the total count collapsed across all events via the existing `reaped` cycle-summary attr — no new attr key or component is introduced (both already exist in the closed taxonomy). A registration that evicts nothing — including the idempotent fast path — emits **no eviction line**; this absence is the signal Acceptance Criterion 7 and Testing Requirement 5 assert against. Per-event eviction detail may be emitted at DEBUG. A per-index `UnsetGlobalHookAt` failure is best-effort: it emits a WARN carrying the underlying `error` and the loop continues.
+
+**Ordering.** Because each event converges independently and self-contained, event- and category-processing order is **no longer significant for correctness** (unlike the prior append-if-absent code, whose doc comments emphasised order). A deterministic declaration order may be retained for stable log/test output, but nothing depends on it.
+
+**Per-event read failure.** Replacing one global read with N per-event reads changes the failure contract. A `ShowGlobalHooksForEvent(event)` failure is best-effort and **folded into the `errors.Join` aggregate**, matching the existing register contract: the loop never short-circuits, every event is still attempted, and only the failing event's convergence is skipped. Each failed read emits the canonical `show-hooks failed` WARN (`error_class=unexpected`) for that event. The teardown path follows the same fold-and-continue contract — a mid-loop failure leaves already-processed events torn down and folds the error rather than aborting. This is a deliberate change from today's single-read all-or-nothing abort: per-event isolation is strictly better than letting one unreadable event block every other event's convergence/teardown.
 
 ## Migration-Helper Consolidation
 
@@ -112,6 +126,8 @@ Consequence: a hypothetical user-authored hook whose body merely *contains* `por
 ### What is intentionally *not* consolidated
 
 The legacy `portal state migrate-rename` substring stays in the teardown path's `portalCommandSubstrings` (so `portal hooks reset` still reaps stale migrate-rename entries from very old binaries). Registration does not install or converge migrate-rename — it is not a current Portal hook category and is left exactly as-is.
+
+This means the **registration eviction-fingerprint set and the teardown `portalCommandSubstrings` set are intentionally different**: registration omits `portal state migrate-rename`, teardown includes it. The divergence is safe because no managed event's registration fingerprint is a substring of `portal state migrate-rename` (and vice versa), so registration never matches a migrate-rename entry and never collapses one into a notify entry. Do **not** "unify" the two predicate sets by adding migrate-rename to the registration table — that would make registration evict a legacy hook the teardown path is responsible for, blurring the two concerns.
 
 ## Teardown Rewrite — `UnregisterPortalHooks`
 

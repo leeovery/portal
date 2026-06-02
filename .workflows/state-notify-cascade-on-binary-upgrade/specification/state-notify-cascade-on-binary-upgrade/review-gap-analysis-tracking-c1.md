@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-02
 cycle: 1
 phase: Gap Analysis
@@ -30,8 +30,8 @@ CLAUDE.md states the log vocabulary is a closed taxonomy ("New components/attrs 
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added a 'Logging, ordering & failure semantics' subsection to Registration Redesign: single INFO under `bootstrap` with existing `reaped` attr on eviction, silent on no-eviction/fast-path (the AC7/Testing-5 signal), per-index unset failure -> WARN.
 
 ---
 
@@ -52,8 +52,8 @@ The trailing `#{session_name}` tmux format token (expanded by tmux at fire time)
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Hook body shapes paragraph now lists the full hydration body `... portal state signal-hydrate -- #{session_name}` and explains the token + `--` separator.
 
 ---
 
@@ -73,8 +73,8 @@ This works only if the assumption "tmux stores the hook body verbatim with the u
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Hook body shapes now states fast-path equality is byte-for-byte against the desired-body constant, which for hydration contains the literal unexpanded `#{session_name}`; tmux stores bodies verbatim, no normalization.
 
 ---
 
@@ -97,8 +97,8 @@ The existing register path folds per-event failures into `errors.Join` and never
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added 'Per-event read failure' to the new subsection: best-effort, folded into `errors.Join`, loop never short-circuits, canonical `show-hooks failed` WARN per failed event; teardown follows same fold-and-continue; deliberate change from single-read abort.
 
 ---
 
@@ -118,8 +118,8 @@ The algorithm collects entries matching *either* fingerprint and evicts *all* of
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Convergence step 3 now states the fast-path 'Portal-authored entry' count is across the union of an event's fingerprints (walked through the session-closed case).
 
 ---
 
@@ -137,8 +137,8 @@ The spec states a legacy `portal state migrate-rename` on `session-renamed` is "
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: 'What is intentionally not consolidated' now states the registration eviction-fingerprint set and teardown `portalCommandSubstrings` set are intentionally different, why it's safe, and not to unify them.
 
 ---
 
@@ -156,8 +156,8 @@ AC6 and the Concrete-mechanism section say `ShowGlobalHooks` (the no-arg seam) i
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: 'Delete ShowGlobalHooks' bullet now covers method removal, test-fixture migration, and that `ShowGlobalHooksForEvent` preserves the verbatim/no-trim + `failed to show global hooks: %w` contract.
 
 ---
 
@@ -175,7 +175,7 @@ The existing `RegisterPortalHooks` documents a load-bearing processing order (sa
 **Proposed Addition**:
 _Leave blank until discussed._
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added 'Ordering' to the new subsection: per-event convergence is independent so processing order is no longer significant for correctness; declaration order optional for stable output.
 
 ---
