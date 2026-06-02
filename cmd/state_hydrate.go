@@ -188,7 +188,16 @@ func runHydrate(cfg hydrateConfig) error {
 	// streams in 32K blocks; the 5MB-file test verifies this end-to-end. A
 	// mid-stream Read failure leaves the partial bytes on stdout — handler is
 	// invoked to log the cause, unset the marker, and exec the shell.
-	if _, err := io.Copy(cfg.Stdout, sb); err != nil {
+	//
+	// n is the io.Copy byte count carried down to the success-path
+	// `scrollback replayed` INFO (step 9b); took measures the replay window —
+	// deliberately scoped to the io.Copy only (the "scrollback dumped" window
+	// the spec intends), excluding the 100ms settle sleep below which is fixed
+	// PTY-parser overhead, not replay time.
+	start := time.Now()
+	n, err := io.Copy(cfg.Stdout, sb)
+	took := time.Since(start)
+	if err != nil {
 		if cfg.HandleFileMissing != nil {
 			if hErr := cfg.HandleFileMissing(cfg, hydrateFileMissingContext{Cause: err}); hErr != nil {
 				return hErr
@@ -214,7 +223,19 @@ func runHydrate(cfg hydrateConfig) error {
 	// bootstrap, which will re-skeleton the pane and clear it.
 	unsetSkeletonMarkerOrLog(cfg)
 
-	// 9. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
+	// 9. Success exit-path INFO (spec § Hook-firing observability limit,
+	// Mechanical rule 3 — success row). bytes is the exact io.Copy byte count
+	// (0 for an empty scrollback — an empty replay is still a successful
+	// rehydration); took is the replay duration measured across the copy
+	// (step 5), passed as a time.Duration so the text handler renders e.g.
+	// took=1.2s via Duration.String(). Emitted ONLY here on the signal-arrived
+	// success branch — the timeout / file-missing exit paths emit their own
+	// exit-path INFOs (Tasks 6-2 / 6-3). Placed after the postamble + settle
+	// sleep + marker-unset and immediately before the terminal exec INFO so
+	// this INFO precedes it per the spec's "then exec" framing.
+	cfg.Logger.Info("scrollback replayed", "bytes", n, "took", took)
+
+	// 9b. Lookup on-resume hook for cfg.HookKey (saved structural identifier,
 	// not live paneKey — preserves hooks across base-index drift) and exec
 	// either `sh -c '<HOOK>; exec $SHELL'` or bare $SHELL. Lookup happens
 	// AFTER the 100ms settle sleep and AFTER the marker-unset above.
