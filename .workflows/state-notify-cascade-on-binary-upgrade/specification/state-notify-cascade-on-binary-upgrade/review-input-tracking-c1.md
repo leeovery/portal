@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-02
 cycle: 1
 phase: Input Review
@@ -25,10 +25,10 @@ This matters because the substring-match eviction predicate (and the "idempotent
 > - **New tmux client seam:** `ShowGlobalHooksForEvent(event)` → runs `show-hooks -g <event>`. Output format is byte-identical to the global form (`pane-focus-out[0] run-shell "…"`), so the existing `ParseShowHooks` parser needs **zero changes**.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Added a "**Hook body shapes**" note after the per-event parameters table in "Registration Redesign", recording the `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"` wrapper shape, the guard rationale, the `ParseShowHooks` rendering, and that fingerprints/fast-path equality operate on the full wrapped body.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (user selected `a`).
 
 ---
 
@@ -45,9 +45,9 @@ The spec correctly records the load-bearing distinction "the stack only ever gro
 > - The stack only ever **grows** (every bootstrap +1 per blind event); switching fires but never grows it.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Extended the "stack only ever grows" bullet in "Problem Statement" with the not-self-amplifying mechanism: each `state notify` does zero tmux calls, `state` is in `skipTmuxCheck` so notify never runs bootstrap; growth is linear in open/attach count, never self-reinforcing; fix needs no anti-amplification safeguard inside `state notify`.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (user selected `a`).
 
 ---

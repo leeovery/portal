@@ -15,7 +15,7 @@ Because every stacked copy fires, a **single** human action that triggers one of
 - Log spam: ~3 lifecycle-marker lines per spawned process; tens of thousands of lines/day.
 - Write amplification on `portal.log` and on the `save.requested` marker that `state notify` touches, pressuring the daemon capture loop.
 - fork+exec + tmux job-dispatch load funnelled through the single-threaded tmux server process — a strong (unproven) lead for the reported intermittent ~98% CPU peg on a core.
-- The stack only ever **grows** (every bootstrap +1 per blind event); switching fires but never grows it.
+- The stack only ever **grows** (every bootstrap +1 per blind event); switching fires but never grows it. The cascade is **not self-amplifying**: each spawned `portal state notify` does zero tmux calls (it only touches the `save.requested` marker) and `state` is in `skipTmuxCheck`, so notify never runs bootstrap step 2. Growth is therefore linear in `portal open` / attach count, never self-reinforcing — and the fix needs no anti-amplification safeguard inside `state notify` itself.
 
 ## Root Cause
 
@@ -79,6 +79,8 @@ Notes on the table:
 - **`session-closed`** lists both `portal state notify` and `portal state commit-now` as eviction fingerprints: this evicts a stale pre-fix `notifyCommand` left by an older binary *and* collapses any duplicate `commit-now` entries, converging to one `commitNowCommand`. (This replaces the historical session-closed special case — see "Migration-Helper Consolidation".)
 - **Hydration events** match on `portal state signal-hydrate`, which catches both the legacy un-separated body and the current `--` form, converging to the current one. (This replaces the historical hydration special case — see "Migration-Helper Consolidation".)
 - Eviction is scoped to each event's **own category fingerprint(s)**. A legacy cross-category entry (e.g. a stale `portal state migrate-rename` on `session-renamed` from a very old binary) is *not* reaped by registration — it remains the responsibility of the teardown/clean path. Registration's job is solely "ensure exactly one of *this* event's desired body."
+
+**Hook body shapes.** Each desired body is a `run-shell`-wrapped, guard-prefixed command — not a bare subcommand. The notify body is `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"` (the `command -v portal` guard suppresses tmux "command not found" spam during a binary swap or after uninstall); `commit-now` and `signal-hydrate` follow the same wrapper shape. `ParseShowHooks` returns such an entry as e.g. `pane-focus-out[0] run-shell "…"`. The eviction fingerprints in the table above are therefore substrings *inside* that wrapper, and the idempotent fast-path equality check (step 3) compares the **full wrapped body**, not the bare subcommand.
 
 ### User-hook coexistence guarantee
 
