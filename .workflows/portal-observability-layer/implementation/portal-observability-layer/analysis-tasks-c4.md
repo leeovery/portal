@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: Portal Observability Layer (Cycle 4)
 
 ## Task 1: Extend internal/logtest.Sink to expose attr values and collapse the 11 structured-attr-map capture handlers onto it
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
