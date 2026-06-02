@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: Portal Observability Layer (Cycle 2)
 
 ## Task 1: Extract a `log.Took` helper to pin the cycle-summary `took` attr contract
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -34,7 +34,7 @@ sources: duplication
 - `go test ./...` passes; the existing cycle-summary assertions at the affected sites still pass unmodified.
 
 ## Task 2: Extract a shared `emitCleanStaleSummary` helper for the hooks and project stores
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -65,7 +65,7 @@ sources: duplication
 - `go test ./internal/hooks/... ./internal/project/...` passes.
 
 ## Task 3: Mark the hydrate exec-failure fallback before its bare `os.Exit(1)`
-status: pending
+status: approved
 severity: low
 sources: standards
 
@@ -93,7 +93,7 @@ sources: standards
 - `go test ./cmd -run Hydrate` (or the relevant hydrate test selector) passes.
 
 ## Task 4: Narrow the exported `SweepLogs` surface to drop its dead gated mode and ignored parameter
-status: pending
+status: approved
 severity: low
 sources: architecture
 
