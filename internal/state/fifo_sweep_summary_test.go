@@ -359,6 +359,72 @@ func TestSweepOrphanFIFOs_DemotesPerRemovalInfoToDebugUnderClean(t *testing.T) {
 	}
 }
 
+// TestSweepOrphanFIFOs_BoundaryContract_CallerWarnSinkVsCleanSummary locks the
+// deliberate two-logger boundary contract that Task 7-6 made explicit at the
+// signature: the injected logger is the CALLER-component WARN sink (so a
+// reboot-recovery operator can correlate a per-item failure with the bootstrap
+// step that drove the sweep), while the cycle-summary INFO and the per-reaped
+// DEBUG breadcrumb are pinned to the package-level clean component BY DESIGN.
+//
+// This test proves the WARN follows whatever component the caller supplies — it
+// passes an arbitrary non-bootstrap caller component ("restore") and asserts the
+// per-item WARN lands under THAT component, while the summary stays under clean
+// regardless. A future "consolidation" onto the injected logger (re-attributing
+// the summary away from clean) or a parameter-drop (re-attributing the WARN away
+// from the caller) would turn this red.
+func TestSweepOrphanFIFOs_BoundaryContract_CallerWarnSinkVsCleanSummary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based EACCES setup is unix-specific")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses 0500 directory write protection")
+	}
+
+	sink := installFIFOSummarySink(t)
+	dir := t.TempDir()
+
+	orphan := filepath.Join(dir, "hydrate-gone__0.0.fifo")
+	if err := state.CreateFIFO(orphan); err != nil {
+		t.Fatalf("create orphan: %v", err)
+	}
+
+	// Strip write permission so os.Remove fails, forcing the per-item WARN path.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	// Caller supplies an arbitrary non-clean, non-bootstrap component to prove
+	// the WARN tracks the caller's component, not a hard-coded one.
+	const callerComponent = "restore"
+	if err := state.SweepOrphanFIFOs(dir, map[string]struct{}{}, log.For(callerComponent)); err != nil {
+		t.Errorf("SweepOrphanFIFOs returned error: %v", err)
+	}
+
+	// Restore permissions so the temp-dir cleanup can remove files.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("restore chmod: %v", err)
+	}
+
+	// (1) Per-item WARN is attributed to the CALLER component, not clean.
+	warns := sink.matching(slog.LevelWarn, callerComponent, "remove orphan fifo failed")
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 remove-failure WARN under %q, got %d: %+v", callerComponent, len(warns), sink.all())
+	}
+	if cleanWarns := sink.matching(slog.LevelWarn, "clean", "remove orphan fifo failed"); len(cleanWarns) != 0 {
+		t.Errorf("per-item WARN must NOT be attributed to clean, got %d: %+v", len(cleanWarns), cleanWarns)
+	}
+
+	// (2) Cycle-summary INFO is attributed to clean, regardless of the caller.
+	rec := sink.onlySummary(t, "clean", "orphan-fifo sweep complete")
+	if rec.level != slog.LevelInfo {
+		t.Errorf("summary level = %v, want INFO", rec.level)
+	}
+	if sums := sink.summariesFor(callerComponent, "orphan-fifo sweep complete"); len(sums) != 0 {
+		t.Errorf("summary must NOT be attributed to caller component %q, got %d: %+v", callerComponent, len(sums), sums)
+	}
+}
+
 func TestSweepOrphanFIFOs_NoSummaryWhenGlobFails(t *testing.T) {
 	sink := installFIFOSummarySink(t)
 	// A malformed glob pattern is produced from a dir containing an unterminated
