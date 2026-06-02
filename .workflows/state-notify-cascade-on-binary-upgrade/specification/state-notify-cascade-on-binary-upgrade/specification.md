@@ -111,6 +111,22 @@ Consequence: a hypothetical user-authored hook whose body merely *contains* `por
 
 The legacy `portal state migrate-rename` substring stays in the teardown path's `portalCommandSubstrings` (so `portal hooks reset` still reaps stale migrate-rename entries from very old binaries). Registration does not install or converge migrate-rename — it is not a current Portal hook category and is left exactly as-is.
 
+## Teardown Rewrite — `UnregisterPortalHooks`
+
+`UnregisterPortalHooks` (consumed by `portal hooks reset` and any other teardown caller) shares the **identical** global-enumeration blind spot today: it reads once via the no-arg `show-hooks -g`, so on the two blind events it sees zero Portal entries on the 139-deep arrays and removes nothing. `portal hooks reset` therefore cannot currently undo this bug. This was independently reproduced (3 stacked entries → global enumeration shows 0 → per-index `set-hook -gu 'pane-focus-out[N]'` does clear them).
+
+**The teardown path moves to the same per-event seam.** For each event in `portalEvents`, read that event's entries via `ShowGlobalHooksForEvent(event)`, collect the Portal-authored entries (`portalEntriesFor` / `portalCommandSubstrings` — unchanged), and remove them via `UnsetGlobalHookAt` in descending index order.
+
+What stays unchanged:
+
+- The eviction predicate (`portalCommandSubstrings`, including the legacy `portal state migrate-rename` substring for old-binary cleanup).
+- The set of events scanned (`portalEvents` = save-trigger ∪ hydration events).
+- Reverse-index removal, per-removal best-effort with `errors.Join` aggregation, and the `show-hooks failed: %w` error wrap on a read failure.
+
+Only the **read** changes — from one global enumeration to a per-event enumeration loop. After this change, `portal hooks reset` reaps Portal entries at any depth on every managed event, including the two blind ones.
+
+This is the second half of "delete `ShowGlobalHooks`": once both registration and teardown are on the per-event seam, the no-arg global read has no remaining caller and is removed.
+
 ---
 
 ## Working Notes
