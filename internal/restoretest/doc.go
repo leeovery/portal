@@ -9,8 +9,10 @@
 //	  - WaitForFileExists — sentinel-file polling helper, defined in
 //	    waitfor_file_exists.go.
 //	  - OpenTestLogger — *slog.Logger factory that writes a text-format
-//	    audit trail to <stateDir>/portal.log for integration tests that
-//	    read portal.log content; defined in logger.go.
+//	    audit trail in the production rotating sink's on-disk shape
+//	    (a dated portal.log.<date> day file plus a portal.log symlink
+//	    pointing at it) for integration tests that read portal.log
+//	    content; defined in logger.go.
 //	  These run under default `go test ./...` and have no dependency on
 //	  tmux fixtures.
 //
