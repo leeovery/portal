@@ -681,7 +681,7 @@ func (s *stubProjectStore) List() ([]project.Project, error) { return s.projects
 func (s *stubProjectStore) CleanStale() ([]project.Project, error) {
 	return s.projects, nil
 }
-func (s *stubProjectStore) Remove(_ string) error { return nil }
+func (s *stubProjectStore) Remove(_, _ string) error { return nil }
 
 // stubSessionKiller implements tui.SessionKiller for cmd-level testing.
 type stubSessionKiller struct{}
@@ -710,7 +710,7 @@ func (s *stubDirLister) ListDirectories(_ string, _ bool) ([]browser.DirEntry, e
 // stubProjectEditor implements tui.ProjectEditor for cmd-level testing.
 type stubProjectEditor struct{}
 
-func (s *stubProjectEditor) Rename(_, _ string) error { return nil }
+func (s *stubProjectEditor) Rename(_, _, _ string) error { return nil }
 
 // stubAliasEditor implements tui.AliasEditor for cmd-level testing.
 type stubAliasEditor struct {

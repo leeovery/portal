@@ -10,7 +10,20 @@ import (
 	"time"
 
 	"github.com/leeovery/portal/internal/fileutil"
+	"github.com/leeovery/portal/internal/log"
 )
+
+// logger is the projects-component logger, bound once at package init. Every
+// projects.json mutation that flows through Upsert/Rename/Remove/CleanStale
+// emits a single breadcrumb under this component so `grep "projects:"
+// portal.log` reconstructs the change history. Importing internal/log
+// introduces no cycle — internal/log depends only on the standard library.
+//
+// project attr convention: the spec renders project=<name> loosely, but the
+// addressable identifying key here is the PATH (the value Upsert/Rename/Remove
+// all match on). So the `project` attr carries the PATH, and the `value` attr
+// carries the NAME where relevant.
+var logger = log.For("projects")
 
 // Project represents a remembered project directory.
 type Project struct {
@@ -68,7 +81,25 @@ func (s *Store) Save(projects []Project) error {
 // Upsert adds a new project or updates an existing one matched by path.
 // The LastUsed timestamp is set to the current time. If the project already
 // exists (matched by Path), its Name and LastUsed are updated.
-func (s *Store) Upsert(path, name string) error {
+//
+// via records the mutation origin for the audit breadcrumb and is drawn from
+// the closed value space cli / internal / migrate (internal for code-driven
+// mutations such as the session-creation pipeline).
+//
+// Upsert emits one audit breadcrumb under the projects component, classified
+// from the pre-write Load:
+//   - path NOT found -> INFO "set"
+//   - path FOUND     -> INFO "modify"
+//
+// A true set-noop (file unchanged) is effectively UNREACHABLE: Upsert always
+// bumps LastUsed=now even when the name matches, so the file always changes.
+// "path found" therefore maps to op="modify"; the set-noop op would only become
+// reachable if the LastUsed bump were skipped — which we deliberately do NOT do
+// (the timestamp behaviour is load-bearing for List ordering).
+//
+// On a persist failure the breadcrumb is WARN carrying the wrapped error and its
+// write-failed-* error_class.
+func (s *Store) Upsert(path, name, via string) error {
 	projects, err := s.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load projects: %w", err)
@@ -86,6 +117,13 @@ func (s *Store) Upsert(path, name string) error {
 		}
 	}
 
+	// op classified from the pre-write Load: an existing path is op="modify",
+	// a brand-new path is op="set". set-noop is unreachable (see doc comment).
+	op := "set"
+	if found {
+		op = "modify"
+	}
+
 	if !found {
 		projects = append(projects, Project{
 			Path:     path,
@@ -94,7 +132,14 @@ func (s *Store) Upsert(path, name string) error {
 		})
 	}
 
-	return s.Save(projects)
+	if err := s.Save(projects); err != nil {
+		logger.Warn(op, "project", path, "value", name, "via", via,
+			"error", err, "error_class", fileutil.ClassifyWriteError(err))
+		return err
+	}
+
+	logger.Info(op, "project", path, "value", name, "via", via)
+	return nil
 }
 
 // List returns all projects sorted by LastUsed in descending order (most recent first).
@@ -114,7 +159,30 @@ func (s *Store) List() ([]Project, error) {
 // CleanStale removes projects whose directories no longer exist on disk.
 // Projects with permission errors are retained. Returns the removed projects.
 // The file is only saved if at least one project was removed.
+//
+// CleanStale is a batch mutation and follows the batch-summary breadcrumb shape:
+// one DEBUG per removed project, then exactly one INFO summary (op clean-stale,
+// entries=N, via=internal, took=<elapsed>) on a successful whole-batch Save, or
+// one WARN carrying the wrapped error and its write-failed-* error_class on a
+// Save failure. via is always "internal" because CleanStale is only ever invoked
+// by code-driven cleanup, never a user-facing command.
+//
+// Zero-removal case (decision (a), documented): a clean that removes nothing is
+// an idempotent no-op. It emits NO summary and performs NO Save — the
+// batch-summary INFO is reserved for batches that did work and must not clutter
+// the INFO baseline.
+//
+// [needs-info, resolved-in-comment] The spec's batch contract mentions a
+// per-entry WARN with error_class=unexpected on a mid-loop failure. That has no
+// reachable site here: the kept/removed partition is computed entirely in memory
+// and persistence is a SINGLE batched Save of the kept slice. There is no point
+// at which one entry can fail while the batch continues — the only failure mode
+// is the whole-batch Save below, which is write-failed-* (not unexpected). We do
+// NOT fabricate a synthetic per-entry failure path. (Same reasoning as the hooks
+// store's CleanStale.)
 func (s *Store) CleanStale() ([]Project, error) {
+	start := time.Now()
+
 	projects, err := s.Load()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load projects: %w", err)
@@ -136,18 +204,41 @@ func (s *Store) CleanStale() ([]Project, error) {
 		}
 	}
 
-	if len(removed) > 0 {
-		if err := s.Save(kept); err != nil {
-			return nil, fmt.Errorf("failed to save after cleaning stale projects: %w", err)
-		}
+	// Zero-removal case: skip both the Save and the summary (decision (a)).
+	if len(removed) == 0 {
+		return removed, nil
 	}
+
+	for _, p := range removed {
+		logger.Debug("clean-stale", "project", p.Path, "via", "internal")
+	}
+
+	if err := s.Save(kept); err != nil {
+		// Whole-batch persist failure: error_class is a write-failed-* value
+		// from the AtomicWrite phase space, NOT "unexpected".
+		logger.Warn("clean-stale", "entries", len(removed), "via", "internal",
+			"error", err, "error_class", fileutil.ClassifyWriteError(err), "took", time.Since(start))
+		return nil, fmt.Errorf("failed to save after cleaning stale projects: %w", err)
+	}
+
+	// entries_failed is omitted: there is no per-entry failure path (see the
+	// [needs-info] note above), so M is always 0 and the attr stays absent.
+	logger.Info("clean-stale", "entries", len(removed), "via", "internal", "took", time.Since(start))
 
 	return removed, nil
 }
 
 // Rename updates the display name of the project matched by path.
 // It does not change the LastUsed timestamp. It is a no-op if the path is not found.
-func (s *Store) Rename(path, newName string) error {
+//
+// via records the mutation origin for the audit breadcrumb (cli for the
+// user-facing TUI rename).
+//
+// When the path is absent, Rename returns nil WITHOUT a Save and emits NOTHING
+// — there is no mutation to audit. When the path is found, after Save it emits
+// one breadcrumb under the projects component: INFO "modify" on success, or WARN
+// "modify" with the wrapped error and its error_class on a persist failure.
+func (s *Store) Rename(path, newName, via string) error {
 	projects, err := s.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load projects: %w", err)
@@ -156,16 +247,32 @@ func (s *Store) Rename(path, newName string) error {
 	for i := range projects {
 		if projects[i].Path == path {
 			projects[i].Name = newName
-			return s.Save(projects)
+			if err := s.Save(projects); err != nil {
+				logger.Warn("modify", "project", path, "value", newName, "via", via,
+					"error", err, "error_class", fileutil.ClassifyWriteError(err))
+				return err
+			}
+			logger.Info("modify", "project", path, "value", newName, "via", via)
+			return nil
 		}
 	}
 
+	// Path absent: no-op, no Save, no breadcrumb (nothing was mutated).
 	return nil
 }
 
 // Remove deletes the project with the given path. It is a no-op if the path
 // is not found.
-func (s *Store) Remove(path string) error {
+//
+// via records the mutation origin for the audit breadcrumb (cli for the
+// user-facing TUI delete).
+//
+// Remove always rewrites the file via Save — even removing an absent path
+// re-persists the (unchanged) filtered slice — so it always emits one breadcrumb
+// under the projects component: INFO "rm" (no value attr) on success, or WARN
+// "rm" with the wrapped error and its error_class on a persist failure. The
+// absent-path case still Saves, so it still emits the INFO.
+func (s *Store) Remove(path, via string) error {
 	projects, err := s.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load projects: %w", err)
@@ -175,5 +282,12 @@ func (s *Store) Remove(path string) error {
 		return p.Path == path
 	})
 
-	return s.Save(filtered)
+	if err := s.Save(filtered); err != nil {
+		logger.Warn("rm", "project", path, "via", via,
+			"error", err, "error_class", fileutil.ClassifyWriteError(err))
+		return err
+	}
+
+	logger.Info("rm", "project", path, "via", via)
+	return nil
 }

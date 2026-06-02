@@ -46,7 +46,9 @@ func PrepareSession(
 		return nil, fmt.Errorf("failed to generate session name: %w", err)
 	}
 
-	if err := store.Upsert(resolvedDir, projectName); err != nil {
+	// via=internal: the session-creation pipeline is a code-driven mutation,
+	// not a user-facing config command.
+	if err := store.Upsert(resolvedDir, projectName, "internal"); err != nil {
 		return nil, fmt.Errorf("failed to upsert project: %w", err)
 	}
 

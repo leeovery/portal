@@ -108,13 +108,15 @@ func (m *mockGitResolver) Resolve(dir string) (string, error) {
 type mockProjectStore struct {
 	upsertPath  string
 	upsertName  string
+	upsertVia   string
 	upsertCount int
 	upsertErr   error
 }
 
-func (m *mockProjectStore) Upsert(path, name string) error {
+func (m *mockProjectStore) Upsert(path, name, via string) error {
 	m.upsertPath = path
 	m.upsertName = name
+	m.upsertVia = via
 	m.upsertCount++
 	return m.upsertErr
 }
@@ -231,6 +233,12 @@ func TestCreateFromDir(t *testing.T) {
 		wantName := filepath.Base(gitRoot)
 		if store.upsertName != wantName {
 			t.Errorf("upsert name = %q, want %q", store.upsertName, wantName)
+		}
+
+		// The session-creation pipeline is a code-driven mutation, so the
+		// breadcrumb must record via=internal.
+		if store.upsertVia != "internal" {
+			t.Errorf("upsert via = %q, want %q", store.upsertVia, "internal")
 		}
 	})
 

@@ -735,6 +735,7 @@ type mockProjectStore struct {
 	listErr      error
 	removeCalled bool
 	removedPath  string
+	removedVia   string
 	removeErr    error
 }
 
@@ -746,9 +747,10 @@ func (m *mockProjectStore) CleanStale() ([]project.Project, error) {
 	return nil, nil
 }
 
-func (m *mockProjectStore) Remove(path string) error {
+func (m *mockProjectStore) Remove(path, via string) error {
 	m.removeCalled = true
 	m.removedPath = path
+	m.removedVia = via
 	return m.removeErr
 }
 
@@ -3962,6 +3964,11 @@ func TestDeleteProject(t *testing.T) {
 		if store.removedPath != "/code/portal" {
 			t.Errorf("expected Remove(%q), got Remove(%q)", "/code/portal", store.removedPath)
 		}
+		// The TUI delete is a user-facing mutation, so the breadcrumb must
+		// record via=cli.
+		if store.removedVia != "cli" {
+			t.Errorf("expected Remove via=cli, got %q", store.removedVia)
+		}
 	})
 
 	t.Run("n in delete modal dismisses without deleting", func(t *testing.T) {
@@ -4722,12 +4729,14 @@ func TestEscProgressiveBack(t *testing.T) {
 type mockProjectEditor struct {
 	renamedPath string
 	renamedName string
+	renamedVia  string
 	err         error
 }
 
-func (m *mockProjectEditor) Rename(path, newName string) error {
+func (m *mockProjectEditor) Rename(path, newName, via string) error {
 	m.renamedPath = path
 	m.renamedName = newName
+	m.renamedVia = via
 	return m.err
 }
 
@@ -4925,6 +4934,11 @@ func TestEditProject(t *testing.T) {
 		}
 		if editor.renamedName != "new" {
 			t.Errorf("expected Rename name 'new', got %q", editor.renamedName)
+		}
+		// The TUI rename is a user-facing mutation, so the breadcrumb must
+		// record via=cli.
+		if editor.renamedVia != "cli" {
+			t.Errorf("expected Rename via=cli, got %q", editor.renamedVia)
 		}
 
 		// Execute command — should refresh projects

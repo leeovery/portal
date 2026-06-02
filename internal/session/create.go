@@ -35,7 +35,7 @@ type GitResolver interface {
 
 // ProjectStore persists project data.
 type ProjectStore interface {
-	Upsert(path, name string) error
+	Upsert(path, name, via string) error
 }
 
 // TmuxClient provides tmux session operations.

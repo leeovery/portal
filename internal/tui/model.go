@@ -54,7 +54,7 @@ type PreviewAttacher interface {
 type ProjectStore interface {
 	List() ([]project.Project, error)
 	CleanStale() ([]project.Project, error)
-	Remove(path string) error
+	Remove(path, via string) error
 }
 
 // SessionKiller defines the interface for killing tmux sessions.
@@ -74,7 +74,7 @@ type SessionRenamer interface {
 
 // ProjectEditor defines the interface for renaming projects.
 type ProjectEditor interface {
-	Rename(path, newName string) error
+	Rename(path, newName, via string) error
 }
 
 // AliasEditor defines the interface for managing aliases in edit mode.
@@ -957,7 +957,8 @@ func (m *Model) transitionFromLoading() {
 // Errors from Remove are propagated via ProjectsLoadedMsg.
 func (m Model) deleteAndRefreshProjects(path string) tea.Cmd {
 	return func() tea.Msg {
-		if err := m.projectStore.Remove(path); err != nil {
+		// via=cli: the TUI delete is a user-facing mutation.
+		if err := m.projectStore.Remove(path, "cli"); err != nil {
 			return ProjectsLoadedMsg{Err: fmt.Errorf("failed to delete project '%s': %w", path, err)}
 		}
 		_, _ = m.projectStore.CleanStale()
@@ -1456,7 +1457,8 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 
 	// Save project name if changed
 	if name != m.editProject.Name {
-		if err := m.projectEditor.Rename(m.editProject.Path, name); err != nil {
+		// via=cli: the TUI rename is a user-facing mutation.
+		if err := m.projectEditor.Rename(m.editProject.Path, name, "cli"); err != nil {
 			m.editError = "Failed to save project name"
 			return m, nil
 		}

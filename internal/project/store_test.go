@@ -130,7 +130,7 @@ func TestUpsert(t *testing.T) {
 		filePath := filepath.Join(dir, "projects.json")
 		store := project.NewStore(filePath)
 
-		if err := store.Upsert("/Users/lee/Code/myapp", "myapp"); err != nil {
+		if err := store.Upsert("/Users/lee/Code/myapp", "myapp", "internal"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -160,7 +160,7 @@ func TestUpsert(t *testing.T) {
 		store := project.NewStore(filePath)
 
 		// Add initial project
-		if err := store.Upsert("/Users/lee/Code/myapp", "myapp"); err != nil {
+		if err := store.Upsert("/Users/lee/Code/myapp", "myapp", "internal"); err != nil {
 			t.Fatalf("unexpected error on first upsert: %v", err)
 		}
 
@@ -175,7 +175,7 @@ func TestUpsert(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 
 		// Upsert with same path but different name
-		if err := store.Upsert("/Users/lee/Code/myapp", "renamed-app"); err != nil {
+		if err := store.Upsert("/Users/lee/Code/myapp", "renamed-app", "internal"); err != nil {
 			t.Fatalf("unexpected error on second upsert: %v", err)
 		}
 
@@ -201,10 +201,10 @@ func TestUpsert(t *testing.T) {
 		filePath := filepath.Join(dir, "projects.json")
 		store := project.NewStore(filePath)
 
-		if err := store.Upsert("/Users/lee/Code/myapp", "myapp"); err != nil {
+		if err := store.Upsert("/Users/lee/Code/myapp", "myapp", "internal"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if err := store.Upsert("/Users/lee/Code/other", "other"); err != nil {
+		if err := store.Upsert("/Users/lee/Code/other", "other", "internal"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -282,7 +282,7 @@ func TestRemove(t *testing.T) {
 
 		store := project.NewStore(filePath)
 
-		if err := store.Remove("/a"); err != nil {
+		if err := store.Remove("/a", "cli"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -311,7 +311,7 @@ func TestRemove(t *testing.T) {
 
 		store := project.NewStore(filePath)
 
-		if err := store.Remove("/nonexistent"); err != nil {
+		if err := store.Remove("/nonexistent", "cli"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -339,7 +339,7 @@ func TestRename(t *testing.T) {
 
 		store := project.NewStore(filePath)
 
-		if err := store.Rename("/Users/lee/Code/myapp", "renamed-app"); err != nil {
+		if err := store.Rename("/Users/lee/Code/myapp", "renamed-app", "cli"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
@@ -371,7 +371,7 @@ func TestRename(t *testing.T) {
 
 		store := project.NewStore(filePath)
 
-		if err := store.Rename("/nonexistent", "new-name"); err != nil {
+		if err := store.Rename("/nonexistent", "new-name", "cli"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
