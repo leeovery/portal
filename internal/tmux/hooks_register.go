@@ -107,6 +107,31 @@ const signalHydrateSubstring = "portal state signal-hydrate --"
 // see the spec's "Resume Hook Firing → Session Rename: Hook Key Migration"
 // section for the v2 plan.
 
+// showGlobalHooksOrWarn calls c.ShowGlobalHooks and, on failure, emits the
+// canonical WARN before returning the wrapped error. It is the single
+// implementation of the show-hooks-failed WARN+wrap shape shared by
+// RegisterHookIfAbsent, migrateHydrationHooks, and migrateSessionClosedHook —
+// previously the byte-identical pair was replicated across all three, so any
+// change to the message, attrs, or wrap string had to be applied in three
+// places or the lines would silently diverge.
+//
+// A ShowGlobalHooks failure drops a unit of work (one event's registration,
+// a migration, etc.) → WARN error_class=unexpected per the level table. The
+// wrapped err (a *CommandError carrying tmux argv + stderr) is passed directly
+// so the rendered line carries the diagnostic context. On success the verbatim
+// output is returned with a nil error.
+//
+// A nil logger is tolerated and falls through to the shared internal/log
+// discard sink via log.OrDiscard.
+func showGlobalHooksOrWarn(c *Client, logger *slog.Logger) (string, error) {
+	raw, err := c.ShowGlobalHooks()
+	if err != nil {
+		log.OrDiscard(logger).Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+		return "", fmt.Errorf("show-hooks failed: %w", err)
+	}
+	return raw, nil
+}
+
 // RegisterHookIfAbsent appends fullCommand to the global hook array for event
 // only when no existing entry on that event already contains expectedSubstring.
 //
@@ -122,14 +147,12 @@ const signalHydrateSubstring = "portal state signal-hydrate --"
 // The fullCommand argument is opaque — it is passed verbatim to the
 // underlying tmux set-hook -ga invocation.
 func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand string) error {
-	raw, err := c.ShowGlobalHooks()
+	// RegisterHookIfAbsent takes no injected logger; pass the package-level
+	// bootstrapLogger explicitly so the WARN attribution stays component=bootstrap
+	// while sharing the single show-hooks-failed WARN+wrap implementation.
+	raw, err := showGlobalHooksOrWarn(c, bootstrapLogger)
 	if err != nil {
-		// Failure drops this event's hook registration (a unit of work) →
-		// WARN error_class=unexpected per the level table. The wrapped err
-		// (a *CommandError carrying tmux argv + stderr) is passed directly so
-		// the rendered line carries the diagnostic context.
-		bootstrapLogger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
-		return fmt.Errorf("show-hooks failed: %w", err)
+		return err
 	}
 
 	for _, entry := range ParseShowHooks(raw)[event] {
@@ -229,13 +252,9 @@ func isStaleSignalHydrateEntry(cmd string) bool {
 func migrateHydrationHooks(c *Client, logger *slog.Logger) (int, error) {
 	logger = log.OrDiscard(logger)
 
-	raw, err := c.ShowGlobalHooks()
+	raw, err := showGlobalHooksOrWarn(c, logger)
 	if err != nil {
-		// Failure aborts the hydration-hook migration (a unit of work) →
-		// WARN error_class=unexpected per the level table. Wrapped err passed
-		// directly so the *CommandError stderr surfaces.
-		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
-		return 0, fmt.Errorf("show-hooks failed: %w", err)
+		return 0, err
 	}
 
 	parsed := ParseShowHooks(raw)
@@ -305,14 +324,9 @@ func migrateHydrationHooks(c *Client, logger *slog.Logger) (int, error) {
 func migrateSessionClosedHook(c *Client, logger *slog.Logger) error {
 	logger = log.OrDiscard(logger)
 
-	raw, err := c.ShowGlobalHooks()
+	raw, err := showGlobalHooksOrWarn(c, logger)
 	if err != nil {
-		// Failure skips the session-closed migration (a unit of work) →
-		// WARN error_class=unexpected, normalized to the uniform shape shared
-		// with the two sibling show-hooks branches. Wrapped err passed
-		// directly so the *CommandError stderr surfaces.
-		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
-		return fmt.Errorf("show-hooks failed: %w", err)
+		return err
 	}
 
 	entries := ParseShowHooks(raw)[sessionClosedEvent]

@@ -20,6 +20,7 @@ package tmux_test
 import (
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/log"
@@ -264,6 +265,106 @@ func TestShowHooksWarn_ErrorAttrCarriesCommandErrorChain(t *testing.T) {
 	}
 	if asCmdErr.Stderr != cmdErr.Stderr {
 		t.Errorf("recovered CommandError.Stderr = %q, want %q", asCmdErr.Stderr, cmdErr.Stderr)
+	}
+}
+
+// TestShowGlobalHooksOrWarn_FailureWrapsAndEmitsSingleWarn drives the extracted
+// helper directly (task 7-2): the three sibling show-hooks-failed WARN+wrap
+// blocks now delegate to showGlobalHooksOrWarn. On a ShowGlobalHooks failure
+// the helper must (a) return ("", err) wrapping the underlying error with the
+// "show-hooks failed:" prefix and (b) emit exactly one WARN in the uniform
+// shape (message "show-hooks failed", error_class=unexpected, error attr =
+// wrapped error). The injected logger is the WARN sink.
+func TestShowGlobalHooksOrWarn_FailureWrapsAndEmitsSingleWarn(t *testing.T) {
+	sentinel := errors.New("tmux show-hooks failure (helper)")
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if args[0] == "show-hooks" {
+				return "", sentinel
+			}
+			t.Fatalf("only show-hooks should be called: %v", args)
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	rec := &recordingSlogHandler{}
+	logger := slog.New(rec).With("component", "bootstrap")
+
+	raw, err := tmux.ShowGlobalHooksOrWarn(client, logger)
+
+	if raw != "" {
+		t.Errorf("raw = %q, want empty string on failure", raw)
+	}
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "show-hooks failed:") {
+		t.Errorf("error %q does not start with %q", err.Error(), "show-hooks failed:")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
+	}
+
+	warns := showHooksWarnRecords(rec.records)
+	if len(warns) != 1 {
+		t.Fatalf("expected exactly 1 %q WARN, got %d: %v", showHooksWarnMessage, len(warns), rec.records)
+	}
+	assertShowHooksWarnShape(t, warns[0], sentinel)
+}
+
+// TestShowGlobalHooksOrWarn_SuccessReturnsRawNoWarn pins the happy path: on a
+// successful ShowGlobalHooks the helper returns the verbatim output with a nil
+// error and emits no WARN.
+func TestShowGlobalHooksOrWarn_SuccessReturnsRawNoWarn(t *testing.T) {
+	const want = "session-created -> run-shell 'portal state notify'\n"
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if args[0] == "show-hooks" {
+				return want, nil
+			}
+			t.Fatalf("only show-hooks should be called: %v", args)
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	rec := &recordingSlogHandler{}
+	logger := slog.New(rec).With("component", "bootstrap")
+
+	raw, err := tmux.ShowGlobalHooksOrWarn(client, logger)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if raw != want {
+		t.Errorf("raw = %q, want %q", raw, want)
+	}
+	if warns := showHooksWarnRecords(rec.records); len(warns) != 0 {
+		t.Fatalf("expected no WARN on success, got %d: %v", len(warns), rec.records)
+	}
+}
+
+// TestShowGlobalHooksOrWarn_NilLoggerTolerated pins that a nil logger is routed
+// through log.OrDiscard rather than panicking on the WARN emission.
+func TestShowGlobalHooksOrWarn_NilLoggerTolerated(t *testing.T) {
+	sentinel := errors.New("tmux show-hooks failure (nil-logger)")
+	mock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if args[0] == "show-hooks" {
+				return "", sentinel
+			}
+			t.Fatalf("only show-hooks should be called: %v", args)
+			return "", nil
+		},
+	}
+	client := tmux.NewClient(mock)
+
+	raw, err := tmux.ShowGlobalHooksOrWarn(client, nil)
+	if raw != "" {
+		t.Errorf("raw = %q, want empty string on failure", raw)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
 	}
 }
 
