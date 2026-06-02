@@ -196,8 +196,11 @@ processes like `claude --resume`. This is deliberate.
 Remove stale projects whose directories no longer exist on disk, and prune hooks for panes that no longer exist.
 
 ```bash
-xctl clean
+xctl clean              # prune stale projects + hooks (rotated logs preserved)
+xctl clean --logs       # also delete rotated portal.log.<date> files, keeping today's
 ```
+
+`xctl clean` preserves rotated logs by default; pass `--logs` to additionally sweep every rotated `portal.log.<date>` file (see [Logging](#logging)).
 
 ### `xctl state`
 
@@ -294,9 +297,23 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
-| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (diagnostics). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
+| `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics — see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
+
+## Logging
+
+Portal writes a structured diagnostic log to `state/portal.log` (under `PORTAL_STATE_DIR`). It is human-readable text with a `subsystem:` prefix on every line, so `grep "daemon:" portal.log` (or `restore:`, `saver:`, `hydrate:`, …) reconstructs what any subsystem did. `portal.log` is a symlink to a calendar-daily file (`portal.log.<date>`), so `tail -f portal.log` always follows today's log.
+
+- **Rotation** — a new file each local day; older files are kept read-only. A size-cap safety valve rolls over to `portal.log.<date>.N` if a single day ever grows huge.
+- **Retention** — rotated files older than 30 days are deleted automatically (one breadcrumb logged per deletion). `xctl clean --logs` sweeps them on demand.
+- **Level** — defaults to `info` (a few lines per meaningful event). Set `PORTAL_LOG_LEVEL=debug` to capture full reconstruction detail when investigating an issue.
+
+| Env var | Purpose | Default |
+|---|---|---|
+| `PORTAL_LOG_LEVEL` | Verbosity: `debug` / `info` / `warn` / `error` | `info` |
+| `PORTAL_LOG_ROTATE_SIZE` | Per-day size cap before overflow (`K`/`M`/`G` suffix, e.g. `500M`, `1G`) | `500M` |
+| `PORTAL_LOG_RETENTION_DAYS` | Days of rotated logs to keep | `30` |
 
 ## Privacy Considerations
 
@@ -308,6 +325,10 @@ mode `0600`, directories `0700`.
   your terminal can end up in the saved state.
 - **No encryption at rest.** If a pane displays secrets (tokens, credentials,
   diffs of sensitive files), they will be captured.
+- **`portal.log` records config changes verbatim.** It does not contain pane
+  scrollback, but config-mutation breadcrumbs and exec handoffs are logged as-is
+  — a `xctl hooks set --on-resume "<cmd>"` command string, alias values, and
+  project paths appear in the log. Redact manually if you share it in a bug report.
 - **Mitigations:** for sensitive panes, run `tmux set-option -w history-limit 0`
   to prevent scrollback from accumulating, or `tmux clear-history` on demand
   (run before the next save, which lands at most ~30s later).
