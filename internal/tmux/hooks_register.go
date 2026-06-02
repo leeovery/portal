@@ -6,7 +6,17 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+
+	"github.com/leeovery/portal/internal/log"
 )
+
+// bootstrapLogger is the component=bootstrap sink for the show-hooks failure
+// WARN emitted by RegisterHookIfAbsent, which (unlike its migrate siblings)
+// takes no injected logger. Named distinctly from saverLogger (portal_saver.go,
+// same package) to avoid a collision. log.For never returns nil, so the WARN is
+// always routable; production resolves it to log.For("bootstrap"), matching the
+// injected log the two migrate helpers receive at bootstrap step 2.
+var bootstrapLogger = log.For("bootstrap")
 
 // saveTriggerEvents lists every tmux event on which Portal registers a
 // `portal state notify` hook. Order is significant — RegisterPortalHooks
@@ -114,6 +124,11 @@ const signalHydrateSubstring = "portal state signal-hydrate --"
 func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand string) error {
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
+		// Failure drops this event's hook registration (a unit of work) →
+		// WARN error_class=unexpected per the level table. The wrapped err
+		// (a *CommandError carrying tmux argv + stderr) is passed directly so
+		// the rendered line carries the diagnostic context.
+		bootstrapLogger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return fmt.Errorf("show-hooks failed: %w", err)
 	}
 
@@ -218,6 +233,10 @@ func migrateHydrationHooks(c *Client, log *slog.Logger) (int, error) {
 
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
+		// Failure aborts the hydration-hook migration (a unit of work) →
+		// WARN error_class=unexpected per the level table. Wrapped err passed
+		// directly so the *CommandError stderr surfaces.
+		log.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return 0, fmt.Errorf("show-hooks failed: %w", err)
 	}
 
@@ -292,7 +311,11 @@ func migrateSessionClosedHook(c *Client, log *slog.Logger) error {
 
 	raw, err := c.ShowGlobalHooks()
 	if err != nil {
-		log.Warn("session-closed migration skipped: show-hooks failed", "error", err)
+		// Failure skips the session-closed migration (a unit of work) →
+		// WARN error_class=unexpected, normalized to the uniform shape shared
+		// with the two sibling show-hooks branches. Wrapped err passed
+		// directly so the *CommandError stderr surfaces.
+		log.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return fmt.Errorf("show-hooks failed: %w", err)
 	}
 
