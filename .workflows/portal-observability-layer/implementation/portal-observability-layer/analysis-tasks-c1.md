@@ -6,7 +6,7 @@ total_proposed: 7
 # Analysis Tasks: portal-observability-layer (Cycle 1)
 
 ## Task 1: Consolidate the discard-logger declaration + nil-guard into one internal/log helper
-status: pending
+status: approved
 severity: medium
 sources: duplication (discardLogger idiom in four packages), standards (direct slog.New discard fallbacks in production)
 
@@ -38,7 +38,7 @@ sources: duplication (discardLogger idiom in four packages), standards (direct s
 - Existing state/restore/tmux/bootstrap tests still pass, proving the forwarders preserve nil-tolerant behavior.
 
 ## Task 2: Extract the thrice-repeated "show-hooks failed" WARN + wrap block in hooks_register.go
-status: pending
+status: approved
 severity: medium
 sources: duplication (identical show-hooks-failed block repeated three times)
 
@@ -65,7 +65,7 @@ sources: duplication (identical show-hooks-failed block repeated three times)
 - Existing `RegisterHookIfAbsent` / `migrateHydrationHooks` / `migrateSessionClosedHook` tests still pass, confirming the error path is preserved at all three call sites.
 
 ## Task 3: Remove the redundant daemon "starting" INFO line dropped by the spec
-status: pending
+status: approved
 severity: medium
 sources: standards (redundant daemon startup INFO retained against explicit spec drop)
 
@@ -91,7 +91,7 @@ sources: standards (redundant daemon startup INFO retained against explicit spec
 - Any existing test asserting the presence of `daemon: starting` is updated to reflect its removal.
 
 ## Task 4: Emit the state-mutation `op` as the required `op=` attr rather than as the slog message
-status: pending
+status: approved
 severity: medium
 sources: standards (state-mutation op rendered as message, not as the required op= attr)
 
@@ -121,7 +121,7 @@ sources: standards (state-mutation op rendered as message, not as the required o
 - Optionally assert the JSON-mode handler renders an `"op"` field for one representative mutation.
 
 ## Task 5: Align the `project` attr with its closed-vocabulary definition (name, not path)
-status: pending
+status: approved
 severity: low
 sources: standards (project attr carries the filesystem path, not the project name)
 
@@ -148,7 +148,7 @@ sources: standards (project attr carries the filesystem path, not the project na
 - Existing project-store tests updated for the corrected attr semantics.
 
 ## Task 6: Make SweepOrphanFIFOs' caller-vs-self component attribution explicit at the boundary
-status: pending
+status: approved
 severity: medium
 sources: architecture (two-logger split inside a single cycle function obscures the seam contract)
 
@@ -179,7 +179,7 @@ Apply the same decision to any other cycle function that grows a caller-vs-self 
 - Regression: existing orphan-FIFO sweep tests still pass.
 
 ## Task 7: Add a drift-tripwire test tying ResolveProcessRole to the real command set
-status: pending
+status: approved
 severity: low
 sources: architecture (process_role taxonomy decoupled from the Cobra command tree it mirrors)
 

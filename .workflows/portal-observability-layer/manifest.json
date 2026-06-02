@@ -97,7 +97,15 @@
             "portal-observability-layer-6-2": "tick-81b237",
             "portal-observability-layer-6-3": "tick-3c06c4",
             "portal-observability-layer-6-4": "tick-1a48a1",
-            "portal-observability-layer-5-11": "tick-137c05"
+            "portal-observability-layer-5-11": "tick-137c05",
+            "portal-observability-layer-7": "tick-e6e7a5",
+            "portal-observability-layer-7-1": "tick-5bd95d",
+            "portal-observability-layer-7-2": "tick-7b5c88",
+            "portal-observability-layer-7-3": "tick-d24ddd",
+            "portal-observability-layer-7-4": "tick-511d84",
+            "portal-observability-layer-7-5": "tick-a73cc5",
+            "portal-observability-layer-7-6": "tick-38722d",
+            "portal-observability-layer-7-7": "tick-e37a85"
           },
           "external_id": "tick-7ac1a9"
         }
@@ -109,7 +117,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,
