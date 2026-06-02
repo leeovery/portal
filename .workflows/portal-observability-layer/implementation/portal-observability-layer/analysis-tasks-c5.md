@@ -6,7 +6,7 @@ total_proposed: 2
 # Analysis Tasks: Portal Observability Layer (Cycle 5)
 
 ## Task 1: Migrate tui previewCaptureSink onto the shared logtest.Sink helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -36,7 +36,7 @@ sources: duplication
 - `go build ./...` and `go vet ./internal/tui/...` are clean (no unused imports, no dangling references to `previewCaptureSink`).
 
 ## Task 2: Align restoretest.OpenTestLogger with the production sink's portal.log file contract
-status: pending
+status: approved
 severity: low
 sources: architecture
 
