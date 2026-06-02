@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -34,6 +35,43 @@ type daemonDeps struct {
 	LastSaveAt   time.Time
 	TickerPeriod time.Duration
 	MaxGap       time.Duration
+
+	// shutdownSignal holds the OS signal that triggered shutdown, recorded by
+	// the RunE signal goroutine BEFORE it cancels the run context and read by
+	// defaultShutdownFlush AFTER ctx.Done(). The store-then-cancel /
+	// cancel-then-read ordering makes the access race-free on its own; the
+	// atomic.Pointer is belt-and-braces so -race stays clean regardless. A nil
+	// pointer means no signal was recorded (a non-signal ctx cancel — tests, or
+	// an edge-path shutdown) and maps to reason="exit".
+	shutdownSignal atomic.Pointer[os.Signal]
+}
+
+// recordShutdownSignal stores the signal that triggered shutdown so
+// shutdownReason can later classify it. Called by the RunE signal goroutine
+// before it cancels the run context.
+func (d *daemonDeps) recordShutdownSignal(sig os.Signal) {
+	d.shutdownSignal.Store(&sig)
+}
+
+// shutdownReason maps the recorded shutdown signal to the closed
+// daemon-shutdown reason value space {sighup, signal, exit}:
+//
+//	SIGHUP  → "sighup"
+//	SIGTERM → "signal"
+//	none    → "exit"  (no signal recorded — a non-signal ctx cancel)
+func (d *daemonDeps) shutdownReason() string {
+	p := d.shutdownSignal.Load()
+	if p == nil {
+		return "exit"
+	}
+	switch *p {
+	case syscall.SIGHUP:
+		return "sighup"
+	case syscall.SIGTERM:
+		return "signal"
+	default:
+		return "exit"
+	}
 }
 
 // daemonRunFunc and daemonShutdownFunc are package-level seams. Tests replace
@@ -217,6 +255,13 @@ func defaultDaemonRun(ctx context.Context, deps *daemonDeps) error {
 		return fmt.Errorf("write version file: %w", err)
 	}
 	daemonLockFile = lockFile
+
+	// Additive subsystem milestone (spec § Saver and daemon lifecycle event
+	// taxonomy — daemon "lock acquired"). The OS-process-boundary marker is
+	// "process: start process_role=daemon" (Phase 2); this line carries the
+	// orphaned tmux_pane attr that the dropped redundant "daemon: spawn" event
+	// would have held. pid is the auto-injected baseline — not passed here.
+	deps.Logger.Info("lock acquired", "tmux_pane", os.Getenv("TMUX_PANE"))
 
 	return daemonTickLoopFunc(ctx, deps)
 }
@@ -466,22 +511,31 @@ func isPaneVanishedError(err error) bool {
 // Final-flush capture errors are logged but swallowed: the daemon is exiting
 // anyway and the prior on-disk save remains valid (per AtomicWrite atomicity).
 func defaultShutdownFlush(deps *daemonDeps) error {
+	// Each return path emits exactly one "shutdown" lifecycle INFO (spec
+	// § Saver and daemon lifecycle event taxonomy — daemon "shutdown") with the
+	// captured reason and whether the final commit completed. The pre-existing
+	// "skipping final flush" / "final flush" lines are demoted to DEBUG
+	// breadcrumbs — the INFO truth is the single shutdown line.
 	restoring, err := state.IsRestoringSet(deps.Client)
 	if err != nil {
 		deps.Logger.Warn("read @portal-restoring at shutdown failed; skipping final flush", "error", err)
+		deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", false)
 		return nil
 	}
 	if restoring {
-		deps.Logger.Info("skipping final flush: @portal-restoring set")
+		deps.Logger.Debug("skipping final flush: @portal-restoring set")
+		deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", false)
 		return nil
 	}
-	deps.Logger.Info("final flush")
+	deps.Logger.Debug("final flush")
 	// shutdown flush is non-cancellable — the cancelled context is what
 	// triggered the flush; passing it through would abort the very save we
 	// are exiting to perform.
-	if err := captureAndCommit(context.Background(), deps); err != nil {
-		deps.Logger.Warn("final flush failed", "error", err)
+	flushErr := captureAndCommit(context.Background(), deps)
+	if flushErr != nil {
+		deps.Logger.Warn("final flush failed", "error", flushErr)
 	}
+	deps.Logger.Info("shutdown", "reason", deps.shutdownReason(), "flush_completed", flushErr == nil)
 	return nil
 }
 
@@ -570,7 +624,13 @@ var stateDaemonCmd = &cobra.Command{
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM)
 		go func() {
-			<-sigCh
+			// Record the arriving signal BEFORE cancelling so
+			// defaultShutdownFlush (which reads only after ctx.Done()) can
+			// classify the shutdown reason. The store-then-cancel ordering is
+			// what makes the read race-free; the atomic.Pointer is the -race
+			// belt-and-braces.
+			sig := <-sigCh
+			deps.recordShutdownSignal(sig)
 			cancel()
 		}()
 

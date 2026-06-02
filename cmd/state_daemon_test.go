@@ -255,7 +255,9 @@ func (f *fakeCommander) RunRaw(args ...string) (string, error) {
 }
 
 func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
-	// "skipping final flush" is INFO; default WARN threshold filters it.
+	// The restoring-skip path emits a "shutdown" INFO with flush_completed=false
+	// (the breadcrumb "skipping final flush" is now DEBUG). At the INFO level
+	// the shutdown line survives the filter and is the observable truth.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -281,17 +283,18 @@ func TestStateDaemon_ShutdownFlushSkippedWhenRestoringSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if !strings.Contains(string(logData), "skipping final flush") {
-		t.Errorf("expected skip-flush log entry; got:\n%s", logData)
+	if !strings.Contains(string(logData), "flush_completed=false") {
+		t.Errorf("expected shutdown flush_completed=false when @portal-restoring set; got:\n%s", logData)
 	}
-	if strings.Contains(string(logData), "final flush") &&
-		!strings.Contains(string(logData), "skipping final flush") {
-		t.Errorf("flush should be skipped when @portal-restoring set; got:\n%s", logData)
+	if strings.Contains(string(logData), "flush_completed=true") {
+		t.Errorf("flush should be skipped (flush_completed=false) when @portal-restoring set; got:\n%s", logData)
 	}
 }
 
 func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
-	// "final flush" is INFO; default WARN threshold filters it.
+	// The flush-attempted path emits a "shutdown" INFO with flush_completed=true
+	// (the breadcrumb "final flush" is now DEBUG). At the INFO level the
+	// shutdown line survives the filter and is the observable truth.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
@@ -316,11 +319,11 @@ func TestStateDaemon_ShutdownFlushRunsWhenRestoringUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if strings.Contains(string(logData), "skipping final flush") {
-		t.Errorf("flush should run when @portal-restoring is unset; got:\n%s", logData)
+	if strings.Contains(string(logData), "flush_completed=false") {
+		t.Errorf("flush should run (flush_completed=true) when @portal-restoring is unset; got:\n%s", logData)
 	}
-	if !strings.Contains(string(logData), "final flush") {
-		t.Errorf("expected final-flush log entry; got:\n%s", logData)
+	if !strings.Contains(string(logData), "flush_completed=true") {
+		t.Errorf("expected shutdown flush_completed=true when @portal-restoring unset; got:\n%s", logData)
 	}
 }
 
@@ -344,7 +347,10 @@ func TestStateDaemon_DefaultRunReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	deps := &daemonDeps{Dir: dir, TickerPeriod: time.Hour}
+	// defaultDaemonRun now emits a "lock acquired" INFO post-acquire, so the
+	// deps need a non-nil Logger (production always sets daemonLogger here).
+	logger, _ := newCaptureLoggerForComponent(t, "daemon")
+	deps := &daemonDeps{Dir: dir, TickerPeriod: time.Hour, Logger: logger}
 	if err := defaultDaemonRun(ctx, deps); err != nil {
 		t.Errorf("defaultDaemonRun returned error after pre-cancelled context: %v", err)
 	}

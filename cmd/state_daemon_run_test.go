@@ -607,8 +607,8 @@ func TestDaemonShutdownFlush_FlushesOnContextCancelWhenNotRestoring(t *testing.T
 	if _, err := os.Stat(state.SessionsJSON(dir)); err != nil {
 		t.Errorf("final flush did not write sessions.json: %v", err)
 	}
-	if got := sink.body(); !strings.Contains(got, "final flush") {
-		t.Errorf("expected 'final flush' log entry; got:\n%s", got)
+	if got := sink.body(); !strings.Contains(got, "shutdown") || !strings.Contains(got, "flush_completed=true") {
+		t.Errorf("expected a 'shutdown' INFO with flush_completed=true; got:\n%s", got)
 	}
 }
 
