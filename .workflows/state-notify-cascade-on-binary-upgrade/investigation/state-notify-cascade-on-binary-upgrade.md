@@ -117,9 +117,12 @@ So the stacking is monotonic: every `portal open` / `x` / attach (each runs boot
 
 ### Why It Wasn't Caught
 
+- **The flaw was baked in at design time.** The `built-in-session-resurrection` spec's *"Content-Based Idempotency (per-event, per-command)"* section mandates the dedup oracle as: "1. Run `tmux show-hooks -g` and capture stdout … 5. If none match → `set-hook -ga` append." It assumed the global `show-hooks -g` returns *all* Portal entries — true for the session/window-linked events it was reasoned about, false for pane/window-scoped events. The same spec deliberately chose `-ga` (append) over `-g` (replace) "to coexist with user `.tmux.conf` hooks" — which is exactly why the self-healing fix must scope eviction to Portal-authored bodies, not blanket-replace.
 - **Idempotency was verified only against the events `show-hooks -g` *does* enumerate.** Unit tests use a fake/parsed-string commander or a tmux fixture where `show-hooks -g` returns all events; the real tmux 3.6b global-enumeration blind spot for pane/window-scoped hooks was never modelled. (`feedback_inbox_not_facts` — the inbox's own hypotheses had to be validated, not trusted.)
 - **No upper-bound assertion on hook-array length** anywhere — stacking is silent.
 - **`state notify` cost is individually invisible** (~500 µs, exits 0); only the aggregate rate is pathological, and pre-0.6.0 builds had no per-process `process:` markers, so the cascade left no trace before observability landed.
+
+**KB corroboration (contextual query):** the `scrollback-not-restored-with-non-zero-base-index` spec already prescribes a **real-tmux socket fixture** (`internal/tmuxtest`) for the `RegisterPortalHooks` migration test, precisely because "the eviction logic depends on the precise format of `show-hooks` output and `set-hook -gu` index semantics, both of which a mock would have to re-implement to be faithful." That guidance is exactly what this bug demands — it confirms the testing recommendation below.
 
 ### Blast Radius
 
