@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/leeovery/portal/internal/log"
 )
 
 // CommandRunner defines the interface for executing shell commands.
@@ -17,9 +19,14 @@ type CommandRunner interface {
 type RealCommandRunner struct{}
 
 // Run executes a command with the given name and arguments and returns its output.
+//
+// Boundary class 1: on a non-zero exit (or PATH-lookup failure) the returned
+// error embeds the binary path, argv, exit status/signal, and the child's
+// trimmed stderr via the shared helper. ResolveGitRoot still swallows that
+// error to (dir, nil) for the expected not-a-repo / git-missing classification;
+// the enrichment only matters for any caller that surfaces the error.
 func (r *RealCommandRunner) Run(name string, args ...string) (string, error) {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.Output()
+	out, err := log.CombinedOutputWithContext(exec.Command(name, args...))
 	if err != nil {
 		return "", err
 	}

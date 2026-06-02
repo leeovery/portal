@@ -20,7 +20,20 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/leeovery/portal/internal/log"
 )
+
+// pgrepCommand builds the `pgrep -fx <PortalDaemonArgvPattern>` *exec.Cmd. It is
+// a package-level seam so tests can substitute a deterministic command (e.g. a
+// `false` for the status-1 no-matches shape, or a stderr-emitting non-status-1
+// failure) without depending on the host's live process set. Production uses
+// defaultPgrepCommand unchanged.
+var pgrepCommand = defaultPgrepCommand
+
+func defaultPgrepCommand() *exec.Cmd {
+	return exec.Command("pgrep", "-fx", PortalDaemonArgvPattern)
+}
 
 // PgrepPortalDaemons enumerates candidate PIDs via
 // `pgrep -fx PortalDaemonArgvPattern`. The `-f` flag matches against the
@@ -47,10 +60,17 @@ import (
 // We use `pgrep -fx` (not `-fxc`) because BSD pgrep (darwin / FreeBSD)
 // does not implement `-c`; counting via len() is the portable equivalent.
 func PgrepPortalDaemons() ([]int, error) {
-	out, err := exec.Command("pgrep", "-fx", PortalDaemonArgvPattern).Output()
+	// Boundary class 1: capture stderr + embed argv/exit-status in the wrapped
+	// error via the shared helper. The helper wraps with %w, so the load-bearing
+	// status-1-no-matches branch below still traverses to *exec.ExitError via
+	// errors.As, and the helper preserves the captured stdout so the
+	// emptiness check is unaffected.
+	out, err := log.CombinedOutputWithContext(pgrepCommand())
 	if err != nil {
 		// pgrep status 1 + empty stdout = no matches (canonical pgrep
-		// "nothing found" signal). Treat as a normal empty result.
+		// "nothing found" signal). Treat as a normal empty result. This branch
+		// stays FIRST and unchanged — only the fallthrough below gains stderr
+		// context (carried by the helper's wrapped err).
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(strings.TrimSpace(string(out))) == 0 {
 			return nil, nil

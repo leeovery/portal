@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/leeovery/portal/internal/log"
 )
 
 // IdentifyResult is the three-way classification returned by IdentifyDaemon.
@@ -62,7 +64,14 @@ var daemonArgvPattern = regexp.MustCompile(PortalDaemonArgvPattern)
 var identifyPS = defaultIdentifyPS
 
 func defaultIdentifyPS(pid int) (string, error) {
-	out, err := exec.Command("ps", "-o", "comm=,args=", "-p", strconv.Itoa(pid)).Output()
+	// Boundary class 1: capture stderr + embed argv/exit-status in the wrapped
+	// error via the shared helper. The helper returns the captured stdout on
+	// the error path too, so IdentifyDaemon's pid-not-found (non-zero exit +
+	// empty stdout → IdentifyDead) vs transient (non-zero exit + non-empty
+	// stdout) discrimination is preserved unchanged — it keys on stdout
+	// emptiness, which the helper does not alter.
+	cmd := exec.Command("ps", "-o", "comm=,args=", "-p", strconv.Itoa(pid))
+	out, err := log.CombinedOutputWithContext(cmd)
 	return string(out), err
 }
 
