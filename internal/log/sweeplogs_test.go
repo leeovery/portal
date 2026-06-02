@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-// TestSweepLogs_DeletesEveryPriorDayKeepsTodayWithCutoffToday pins the
-// `portal clean --logs` contract: retentionDays==0 => cutoff == today, so every
-// rotated file with a date strictly before today is deleted while today's base
-// file and its .N segments survive (cutoff is computed from the injected clock,
-// so the test must pin today via fixedClock).
-func TestSweepLogs_DeletesEveryPriorDayKeepsTodayWithCutoffToday(t *testing.T) {
+// TestSweepLogsForClean_DeletesEveryPriorDayKeepsTodayWithCutoffToday pins the
+// `portal clean --logs` contract: the ungated cutoff==today sweep deletes every
+// rotated file with a date strictly before today while today's base file and its
+// .N segments survive (cutoff is computed from the injected clock, so the test
+// must pin today via fixedClock).
+func TestSweepLogsForClean_DeletesEveryPriorDayKeepsTodayWithCutoffToday(t *testing.T) {
 	dir := t.TempDir()
 	fixedClock(t, mustDate(2026, 5, 30))
 
@@ -22,8 +22,8 @@ func TestSweepLogs_DeletesEveryPriorDayKeepsTodayWithCutoffToday(t *testing.T) {
 	todayBase := touchFile(t, dir, "portal.log.2026-05-30")  // == today: keep
 	todaySeg := touchFile(t, dir, "portal.log.2026-05-30.1") // today's segment: keep
 
-	if err := SweepLogs(dir, 0, false); err != nil {
-		t.Fatalf("SweepLogs returned error: %v", err)
+	if err := SweepLogsForClean(dir); err != nil {
+		t.Fatalf("SweepLogsForClean returned error: %v", err)
 	}
 
 	for _, p := range []string{priorDay, priorSeg, older} {
@@ -38,10 +38,10 @@ func TestSweepLogs_DeletesEveryPriorDayKeepsTodayWithCutoffToday(t *testing.T) {
 	}
 }
 
-// TestSweepLogs_BypassesGateWhenSentinelPresent pins the gate-bypass contract:
-// SweepLogs is invoked with gated==false, so an existing portal.log.swept.<today>
-// sentinel must NOT short-circuit the sweep — it runs anyway.
-func TestSweepLogs_BypassesGateWhenSentinelPresent(t *testing.T) {
+// TestSweepLogsForClean_BypassesGateWhenSentinelPresent pins the gate-bypass
+// contract: the ungated `--logs` sweep runs even when an existing
+// portal.log.swept.<today> sentinel is present — it must NOT short-circuit.
+func TestSweepLogsForClean_BypassesGateWhenSentinelPresent(t *testing.T) {
 	dir := t.TempDir()
 	fixedClock(t, mustDate(2026, 5, 30))
 
@@ -49,8 +49,8 @@ func TestSweepLogs_BypassesGateWhenSentinelPresent(t *testing.T) {
 	touchFile(t, dir, sweptSentinelName("2026-05-30"))
 	old := touchFile(t, dir, "portal.log.2026-01-15")
 
-	if err := SweepLogs(dir, 0, false); err != nil {
-		t.Fatalf("SweepLogs returned error: %v", err)
+	if err := SweepLogsForClean(dir); err != nil {
+		t.Fatalf("SweepLogsForClean returned error: %v", err)
 	}
 
 	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
@@ -58,11 +58,11 @@ func TestSweepLogs_BypassesGateWhenSentinelPresent(t *testing.T) {
 	}
 }
 
-// TestSweepLogs_RemovesAllSweptSentinelsIncludingToday pins the --logs-only
-// prune behaviour: the gated==false path removes EVERY portal.log.swept.*
-// sentinel, today's included (an explicit user clean wants a clean slate; the
-// next per-process startup re-claims its own gate).
-func TestSweepLogs_RemovesAllSweptSentinelsIncludingToday(t *testing.T) {
+// TestSweepLogsForClean_RemovesAllSweptSentinelsIncludingToday pins the
+// --logs-only prune behaviour: the ungated path removes EVERY
+// portal.log.swept.* sentinel, today's included (an explicit user clean wants a
+// clean slate; the next per-process startup re-claims its own gate).
+func TestSweepLogsForClean_RemovesAllSweptSentinelsIncludingToday(t *testing.T) {
 	dir := t.TempDir()
 	fixedClock(t, mustDate(2026, 5, 30))
 
@@ -70,8 +70,8 @@ func TestSweepLogs_RemovesAllSweptSentinelsIncludingToday(t *testing.T) {
 	stale2 := touchFile(t, dir, sweptSentinelName("2026-05-29"))
 	today := touchFile(t, dir, sweptSentinelName("2026-05-30"))
 
-	if err := SweepLogs(dir, 0, false); err != nil {
-		t.Fatalf("SweepLogs returned error: %v", err)
+	if err := SweepLogsForClean(dir); err != nil {
+		t.Fatalf("SweepLogsForClean returned error: %v", err)
 	}
 
 	for _, p := range []string{stale1, stale2, today} {
@@ -81,47 +81,20 @@ func TestSweepLogs_RemovesAllSweptSentinelsIncludingToday(t *testing.T) {
 	}
 }
 
-// TestSweepLogs_GatedPathKeepsTodaySentinel pins that the gated==true variant
-// (the per-process startup path) still KEEPS today's sentinel — the all-sentinel
-// prune is tied to gated==false and must not leak into the gated path.
-func TestSweepLogs_GatedPathKeepsTodaySentinel(t *testing.T) {
+// TestSweepLogsForClean_ForcesCutoffTodayRegardlessOfEnv pins that the --logs
+// path forces cutoff==today even when the env requests a wider retention window —
+// the explicit clean cutoff overrides any PORTAL_LOG_RETENTION_DAYS value.
+func TestSweepLogsForClean_ForcesCutoffTodayRegardlessOfEnv(t *testing.T) {
 	dir := t.TempDir()
 	fixedClock(t, mustDate(2026, 5, 30))
-	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
-
-	stale := touchFile(t, dir, sweptSentinelName("2026-05-28"))
-	// today's sentinel is NOT pre-seeded — the gated winner creates it via the
-	// O_EXCL claim; pre-seeding would lose the gate and skip the sweep entirely.
-	todaySentinel := sweptSentinelFile(dir, "2026-05-30")
-
-	// retentionDays<0 sentinel value: gated path resolves from env, so pass any
-	// value (the gated path ignores the explicit days and reads the env).
-	if err := SweepLogs(dir, -1, true); err != nil {
-		t.Fatalf("SweepLogs returned error: %v", err)
-	}
-
-	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("stale sentinel %s still present; gated prune must remove date != today", filepath.Base(stale))
-	}
-	if _, err := os.Stat(todaySentinel); err != nil {
-		t.Errorf("today's sentinel %s pruned; gated path must KEEP today's live claim", filepath.Base(todaySentinel))
-	}
-}
-
-// TestSweepLogs_ForcesCutoffTodayRegardlessOfEnv pins that the --logs path's
-// retentionDays==0 forces cutoff==today even when the env requests a wider
-// retention window — the explicit days override the env value.
-func TestSweepLogs_ForcesCutoffTodayRegardlessOfEnv(t *testing.T) {
-	dir := t.TempDir()
-	fixedClock(t, mustDate(2026, 5, 30))
-	// Env asks for 365-day retention; --logs (retentionDays=0) must still delete
-	// a file only a day old because it forces cutoff=today.
+	// Env asks for 365-day retention; --logs must still delete a file only a day
+	// old because it forces cutoff=today.
 	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "365")
 
 	recent := touchFile(t, dir, "portal.log.2026-05-29")
 
-	if err := SweepLogs(dir, 0, false); err != nil {
-		t.Fatalf("SweepLogs returned error: %v", err)
+	if err := SweepLogsForClean(dir); err != nil {
+		t.Fatalf("SweepLogsForClean returned error: %v", err)
 	}
 
 	if _, err := os.Stat(recent); !errors.Is(err, os.ErrNotExist) {

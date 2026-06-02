@@ -163,19 +163,19 @@ func cleanStaleHooks(w io.Writer) error {
 	return nil
 }
 
-// cleanRotatedLogs runs the `portal clean --logs` retention sweep: cutoff=today
-// (retentionDays=0) with the single-winner gate bypassed (gated=false), reusing
-// the same log.SweepLogs entry point the per-process day-roll path uses (no
-// algorithm duplication). It is best-effort and must not hard-fail the clean: an
-// unresolvable state dir or a sweep failure is logged under the bootstrap
-// component and swallowed.
+// cleanRotatedLogs runs the `portal clean --logs` retention sweep via the
+// log.SweepLogsForClean entry point: ungated, cutoff=today (delete every rotated
+// file older than today), reusing the same shared walk/delete/prune algorithm the
+// per-process day-roll path uses (no algorithm duplication). It is best-effort and
+// must not hard-fail the clean: an unresolvable state dir or a sweep failure is
+// logged under the bootstrap component and swallowed.
 func cleanRotatedLogs() {
 	stateDir, err := state.EnsureDir()
 	if err != nil {
 		bootstrapLogger.Warn("clean --logs: state dir unresolvable, skipping log sweep", "error", err)
 		return
 	}
-	if err := log.SweepLogs(stateDir, 0, false); err != nil {
+	if err := log.SweepLogsForClean(stateDir); err != nil {
 		bootstrapLogger.Warn("clean --logs: log sweep failed", "error", err)
 	}
 }

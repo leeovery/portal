@@ -56,7 +56,7 @@ func runRetentionSweep(stateDir, today string, gated bool) {
 // (spec § Retention policy and audit, Mechanical rule steps 0-3). It is the
 // single source of the walk/delete/prune logic — both the per-process-startup
 // path (runRetentionSweep, forcedDays==nil) and the `portal clean --logs` path
-// (SweepLogs, forcedDays!=nil) delegate here so the algorithm is never
+// (SweepLogsForClean, forcedDays!=nil) delegate here so the algorithm is never
 // duplicated.
 //
 // forcedDays selects the retention window:
@@ -111,30 +111,26 @@ func resolveSweepRetentionDays(forcedDays *int) int {
 	return retentionDays
 }
 
-// SweepLogs is the exported entry point onto the shared retention sweep. It
-// computes today's calendar-day key from the injectable clock (nowFunc) and
-// delegates to runRetentionSweepWithDays — both the `portal clean --logs` path
-// (this function) and the per-process day-roll path (runRetentionSweep, wired
-// into the sink's dayRoll seam) run the SAME walk/delete/prune logic; the
-// algorithm is never duplicated.
+// SweepLogsForClean is the exported entry point for the explicit user-invoked
+// `portal clean --logs` retention sweep: ungated, cutoff == today (delete every
+// prior-day rotated file, leaving only today's), and removing every
+// portal.log.swept.* sentinel. It computes today's calendar-day key from the
+// injectable clock (nowFunc) and delegates to the shared runRetentionSweepWithDays
+// implementation with gated=false and an explicit retentionDays of 0 (cutoff ==
+// today) — so the walk/delete/prune algorithm is never duplicated.
 //
-// The retentionDays argument is honoured ONLY when gated==false (the explicit
-// `--logs` invocation): it forces the cutoff (0 => cutoff == today, deleting
-// every prior-day rotated file and leaving only today's). When gated==true (the
-// per-process path), retentionDays is ignored and the window is resolved from
-// PORTAL_LOG_RETENTION_DAYS, preserving the env-driven default. The signature is
-// uniform so callers share one entry point; the gated flag selects the policy.
+// The gated per-process startup sweep is NOT reachable from here: it lives behind
+// the unexported runRetentionSweep, wired into the sink's dayRoll seam, where it
+// resolves its window from PORTAL_LOG_RETENTION_DAYS and claims the single-winner
+// portal.log.swept.<today> gate.
 //
 // The error return is reserved for future failure surfacing; the sweep is
-// best-effort (per-file failures WARN and continue) so SweepLogs currently
-// always returns nil.
-func SweepLogs(stateDir string, retentionDays int, gated bool) error {
+// best-effort (per-file failures WARN and continue) so SweepLogsForClean
+// currently always returns nil.
+func SweepLogsForClean(stateDir string) error {
 	today := nowFunc().Format(dateLayout)
-	if gated {
-		runRetentionSweepWithDays(stateDir, today, true, nil)
-		return nil
-	}
-	runRetentionSweepWithDays(stateDir, today, false, &retentionDays)
+	cleanCutoffDays := 0
+	runRetentionSweepWithDays(stateDir, today, false, &cleanCutoffDays)
 	return nil
 }
 
