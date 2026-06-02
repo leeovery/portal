@@ -407,10 +407,12 @@ func TestEnsurePortalSaverVersion_AliveAndVersionAbsent_NoKill(t *testing.T) {
 //     (the lock-loser daemon) exits → tmux destroys the window →
 //     last-window-closed destroys the session.
 //  7. Assert SetSessionOption(_portal-saver, destroy-unattached, off)
-//     returns an error whose string contains BOTH "exit status 1"
-//     AND "no such session". Both substrings are required so an
-//     unrelated exit-1 (e.g. permission denied on a different
-//     surface) does not produce a false-positive pass.
+//     returns an error whose string contains BOTH the non-zero exit
+//     fragment "exit 1" AND "no such session". Both substrings are
+//     required so an unrelated exit-1 (e.g. permission denied on a
+//     different surface) does not produce a false-positive pass. (The
+//     boundary-class-2 commander wrap renders the exit code as
+//     "exit <N>"; the rendered format is not a public contract.)
 //
 // Regression-watch suites that exercise adjacent daemon/restore
 // surfaces and must remain green alongside this test (per spec
@@ -522,17 +524,20 @@ func TestBootstrapPortalSaver_LockContention_CascadeChainReachable(t *testing.T)
 	}
 
 	// Assertion 3: SetSessionOption(_portal-saver, destroy-unattached,
-	// off) returns an error containing BOTH "exit status 1" AND
-	// "no such session". Asserting both substrings independently
-	// rules out a false positive from any other exit-1 error
-	// (permission denied, malformed args, etc.).
+	// off) returns an error containing BOTH the non-zero exit fragment
+	// ("exit 1") AND "no such session". Asserting both substrings
+	// independently rules out a false positive from any other exit-1
+	// error (permission denied, malformed args, etc.). The boundary-class-2
+	// commander wrap renders the exit code as "exit <N>" (derived from
+	// *exec.ExitError.ExitCode()); the rendered format is not a public
+	// contract — callers discriminate via errors.As/Stderr/Args.
 	err := client.SetSessionOption(tmux.PortalSaverName, "destroy-unattached", "off")
 	if err == nil {
 		t.Fatalf("SetSessionOption returned nil; expected error after session destruction")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "exit status 1") {
-		t.Fatalf("SetSessionOption error %q does not contain %q", msg, "exit status 1")
+	if !strings.Contains(msg, "exit 1") {
+		t.Fatalf("SetSessionOption error %q does not contain %q", msg, "exit 1")
 	}
 	if !strings.Contains(msg, "no such session") {
 		t.Fatalf("SetSessionOption error %q does not contain %q", msg, "no such session")

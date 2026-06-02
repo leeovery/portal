@@ -81,7 +81,10 @@ func runCommand(binary string, trim bool, args ...string) (string, error) {
 	// cmd.Stderr left nil — see WrapCommandError precondition.
 	out, err := cmd.Output()
 	if err != nil {
-		return "", WrapCommandError(err)
+		// Thread the tmux argv into the wrap so a downstream log site can
+		// recover which invocation failed. cmd.Stderr stays nil — argv is
+		// additive context, NOT stderr capture.
+		return "", WrapCommandError(err, args...)
 	}
 	if trim {
 		return strings.TrimSpace(string(out)), nil

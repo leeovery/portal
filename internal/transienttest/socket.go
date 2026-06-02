@@ -28,22 +28,24 @@ func (s *SocketCommander) runArgs(args []string) []string {
 }
 
 // Run implements tmux.Commander with stdout trimmed of trailing
-// whitespace — matches tmux.RealCommander.Run.
+// whitespace — matches tmux.RealCommander.Run. Errors are wrapped via
+// tmux.WrapCommandError (with the tmux argv) for production parity.
 func (s *SocketCommander) Run(args ...string) (string, error) {
 	out, err := exec.Command("tmux", s.runArgs(args)...).Output()
 	if err != nil {
-		return "", tmux.WrapCommandError(err)
+		return "", tmux.WrapCommandError(err, args...)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
 // RunRaw implements tmux.Commander with verbatim stdout — matches
 // tmux.RealCommander.RunRaw. Scrollback-capturing paths depend on the
-// verbatim shape.
+// verbatim shape. Errors are wrapped via tmux.WrapCommandError (with the tmux
+// argv) for production parity.
 func (s *SocketCommander) RunRaw(args ...string) (string, error) {
 	out, err := exec.Command("tmux", s.runArgs(args)...).Output()
 	if err != nil {
-		return "", tmux.WrapCommandError(err)
+		return "", tmux.WrapCommandError(err, args...)
 	}
 	return string(out), nil
 }

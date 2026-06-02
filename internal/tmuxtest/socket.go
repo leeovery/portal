@@ -124,21 +124,23 @@ func (sc *socketCommander) runRaw(args []string) ([]byte, error) {
 }
 
 // Run executes tmux on the isolated socket and trims surrounding whitespace.
-// Errors are wrapped via tmux.WrapCommandError for production parity.
+// Errors are wrapped via tmux.WrapCommandError (with the tmux argv) for
+// production parity.
 func (sc *socketCommander) Run(args ...string) (string, error) {
 	out, err := sc.runRaw(args)
 	if err != nil {
-		return "", tmux.WrapCommandError(err)
+		return "", tmux.WrapCommandError(err, args...)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
 // RunRaw executes tmux on the isolated socket and returns its output verbatim.
-// Errors are wrapped via tmux.WrapCommandError for production parity.
+// Errors are wrapped via tmux.WrapCommandError (with the tmux argv) for
+// production parity.
 func (sc *socketCommander) RunRaw(args ...string) (string, error) {
 	out, err := sc.runRaw(args)
 	if err != nil {
-		return "", tmux.WrapCommandError(err)
+		return "", tmux.WrapCommandError(err, args...)
 	}
 	return string(out), nil
 }
