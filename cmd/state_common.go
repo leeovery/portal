@@ -22,4 +22,11 @@ var (
 	bootstrapLogger = log.For("bootstrap")
 	restoreLogger   = log.For("restore")
 	previewLogger   = log.For("preview")
+	// captureLogger is the component-bound logger for the daemon's per-tick
+	// capture loop. Per the taxonomy the capture loop is promoted out of the
+	// daemon component into its own "capture" component so the cycle summary
+	// (capture: tick complete) and the per-pane DEBUG breadcrumbs grep cleanly
+	// apart from the daemon's lifecycle lines. The per-pane WARNs stay on
+	// daemonLogger (lowest-churn; preserves their existing component).
+	captureLogger = log.For("capture")
 )

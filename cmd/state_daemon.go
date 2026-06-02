@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -317,6 +318,12 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 		return nil
 	default:
 	}
+
+	// start anchors the tick-complete cycle summary's took attr. Captured
+	// after obs-point-1's ctx check so a cancellation that arrives before any
+	// capture work returns nil without arming a summary.
+	start := time.Now()
+
 	skipSet, err := state.ListSkeletonMarkers(deps.Client)
 	if err != nil {
 		return fmt.Errorf("list markers: %w", err)
@@ -326,6 +333,16 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	if err != nil {
 		return fmt.Errorf("capture structure: %w", err)
 	}
+
+	// Cycle-summary counters (spec § Cycle-level summary cadence and shape).
+	// sessions is the structural session count; panes counts every PROCESSED
+	// pane (skipSet entries are excluded); naturalChurn counts panes that
+	// vanished mid-tick by normal action (a user closing a pane/session —
+	// distinguished from an anomalous failure via the tmux pane-vanished
+	// signal); anomalous counts genuine capture/write failures that did not
+	// terminate the cycle (each also emits a per-pane WARN).
+	sessions := len(idx.Sessions)
+	var panes, naturalChurn, anomalous int
 
 	// observation point 2 of 3: post-enumeration, pre-first-iteration; covers
 	// cancellation during the CaptureStructure subprocess call. Returns before
@@ -356,14 +373,34 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 				if _, skipped := skipSet[paneKey]; skipped {
 					continue
 				}
+				// Processed pane: count it and drop a capture-component DEBUG
+				// breadcrumb (silent at INFO, the summary is the INFO truth).
+				panes++
+				captureLogger.Debug("pane captured", "pane_key", paneKey, "session", sess.Name)
 				target := tmux.PaneTarget(sess.Name, win.Index, pane.Index)
 				data, hash, err := state.CaptureAndHashPane(deps.Client, target)
 				if err != nil {
+					// A pane/session the index still references can vanish
+					// mid-tick because the user closed it — the expected,
+					// normal action. CapturePane surfaces that as a
+					// tmux "can't find {session,window,pane}" *CommandError
+					// (it does not sentinel-wrap as ErrNoSuchSession). Classify
+					// it as natural_churn with a DEBUG (error_class=expected),
+					// NOT a WARN — the close is not an anomaly.
+					if isPaneVanishedError(err) {
+						naturalChurn++
+						captureLogger.Debug("pane vanished", "pane_key", paneKey, "error_class", "expected")
+						continue
+					}
+					anomalous++
 					deps.Logger.Warn("capture pane failed", "pane_key", target, "error", err)
 					continue
 				}
 				written, err := state.WriteScrollbackIfChanged(deps.Dir, paneKey, data, hash, deps.HashMap)
 				if err != nil {
+					// Write failures are disk-write faults (AtomicWrite0600),
+					// never a vanished pane, so they are always anomalous.
+					anomalous++
 					deps.Logger.Warn("write scrollback failed", "pane_key", paneKey, "error", err)
 					continue
 				}
@@ -379,7 +416,43 @@ func captureAndCommit(ctx context.Context, deps *daemonDeps) error {
 	}
 
 	deps.PrevIndex = &idx
+
+	// Tick-complete cycle summary (spec § Cycle-level summary cadence and
+	// shape, daemon-tick row). Emitted ONLY on the successful post-Commit
+	// return — never on a ctx-cancel obs point or a phase-boundary error
+	// return — so exactly one INFO summary fires per tick that did capture
+	// work.
+	captureLogger.Info("tick complete",
+		"sessions", sessions,
+		"panes", panes,
+		"natural_churn", naturalChurn,
+		"anomalous", anomalous,
+		"took", time.Since(start),
+	)
 	return nil
+}
+
+// isPaneVanishedError reports whether err signals an expected mid-tick
+// pane/session disappearance (the user closed a pane or session while the tick
+// was capturing) rather than a genuine capture failure. CapturePane does NOT
+// sentinel-wrap this case as ErrNoSuchSession, so the live signal is the
+// underlying *tmux.CommandError's stderr carrying tmux's "can't find
+// {session,window,pane}" phrasing (verified against tmux 3.6b). The
+// errors.Is(ErrNoSuchSession) check is a defensive belt-and-braces for any
+// chain that did wrap the sentinel; the *CommandError stderr inspection is the
+// load-bearing classifier.
+func isPaneVanishedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, tmux.ErrNoSuchSession) {
+		return true
+	}
+	var cmdErr *tmux.CommandError
+	if errors.As(err, &cmdErr) && strings.Contains(strings.ToLower(cmdErr.Stderr), "can't find ") {
+		return true
+	}
+	return false
 }
 
 // defaultShutdownFlush implements the SIGHUP/SIGTERM final-flush handler from
