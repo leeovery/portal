@@ -1,6 +1,7 @@
 package log
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -121,6 +122,10 @@ func TestRotatingSink_ReopensOnSameDayInodeMismatchWithoutSweeps(t *testing.T) {
 	if _, err := s.Write([]byte("before\n")); err != nil {
 		t.Fatalf("first Write: %v", err)
 	}
+	// The first-ever write is the first-of-day Handle and fires one sweep (PART 1).
+	// Record that baseline; the same-day inode mismatch below must add NO further
+	// sweep — only the FIRST-EVER branch is a sweep trigger, not a same-day reopen.
+	baselineSweeps := sweeps
 	origIno := s.ino
 
 	// Replace today's file out from under the open fd with a brand-new inode,
@@ -144,8 +149,8 @@ func TestRotatingSink_ReopensOnSameDayInodeMismatchWithoutSweeps(t *testing.T) {
 		t.Fatalf("second Write: %v", err)
 	}
 
-	if sweeps != 0 {
-		t.Errorf("day-roll sweeps ran %d times on a same-day inode mismatch; want 0", sweeps)
+	if sweeps != baselineSweeps {
+		t.Errorf("day-roll sweeps ran %d times across the same-day inode mismatch; want %d (mismatch reopen must not sweep)", sweeps, baselineSweeps)
 	}
 	// The post-reopen fd's inode must match the live file.
 	if s.ino != newIno {
@@ -175,6 +180,10 @@ func TestRotatingSink_RecreatesDayFileWhenSymlinkTargetENOENT(t *testing.T) {
 	if _, err := s.Write([]byte("before\n")); err != nil {
 		t.Fatalf("first Write: %v", err)
 	}
+	// The first-ever write is the first-of-day Handle and fires one sweep (PART 1).
+	// The ENOENT mid-day reopen below must add NO further sweep — it is a same-day
+	// recovery, not a date change.
+	baselineSweeps := sweeps
 
 	// Unlink today's file entirely: stat(symlink) now yields ENOENT.
 	dayPath := filepath.Join(dir, "portal.log.2026-05-29")
@@ -186,8 +195,8 @@ func TestRotatingSink_RecreatesDayFileWhenSymlinkTargetENOENT(t *testing.T) {
 		t.Fatalf("second Write: %v", err)
 	}
 
-	if sweeps != 0 {
-		t.Errorf("day-roll sweeps ran %d times on ENOENT mid-day; want 0", sweeps)
+	if sweeps != baselineSweeps {
+		t.Errorf("day-roll sweeps ran %d times across the ENOENT mid-day reopen; want %d (same-day reopen must not sweep)", sweeps, baselineSweeps)
 	}
 	// Day file recreated and "after" landed in it.
 	b, err := os.ReadFile(dayPath)
@@ -213,8 +222,11 @@ func TestRotatingSink_OpensNewDayFileAndFlagsSweepsOnDateChange(t *testing.T) {
 	if _, err := s.Write([]byte("day-one\n")); err != nil {
 		t.Fatalf("day-one Write: %v", err)
 	}
-	if sweeps != 0 {
-		t.Fatalf("sweeps ran %d times on first-ever write; want 0", sweeps)
+	// The first-ever write IS the first-of-day Handle for this fresh process, so
+	// the day-roll sweeps fire (the gated retention sweep dedupes via the
+	// swept.<today> sentinel; seal-of-past-day is idempotent). See PART 1 fix.
+	if sweeps != 1 {
+		t.Fatalf("sweeps ran %d times on first-ever write; want 1 (first-of-day)", sweeps)
 	}
 
 	// Advance past local midnight.
@@ -224,8 +236,8 @@ func TestRotatingSink_OpensNewDayFileAndFlagsSweepsOnDateChange(t *testing.T) {
 		t.Fatalf("day-two Write: %v", err)
 	}
 
-	if sweeps != 1 {
-		t.Errorf("day-roll sweeps ran %d times on a date change; want 1", sweeps)
+	if sweeps != 2 {
+		t.Errorf("day-roll sweeps ran %d times after a date change; want 2 (first-of-day + roll)", sweeps)
 	}
 
 	// New day's file created and written.
@@ -382,6 +394,136 @@ func TestRotatingSink_MigratesLegacyRegularFilePortalLogToSymlinkOnReopen(t *tes
 	}
 	if string(b) != "first line\n" {
 		t.Errorf("day file = %q, want %q", string(b), "first line\n")
+	}
+}
+
+// TestRotatingSink_FirstEverWriteRunsGatedRetentionSweep pins PART 1: the
+// first-ever write of a fresh (short-lived OR just-started) process IS its
+// first-of-day Handle, so it must fire the gated retention sweep. An aged-out
+// rotated file (date < cutoff) is deleted and the single-winner sentinel
+// portal.log.swept.<today> is created — the spec § Retention "first Handle of
+// each calendar date" trigger, which for a fresh process is its process: start
+// line, not a within-process date advance.
+func TestRotatingSink_FirstEverWriteRunsGatedRetentionSweep(t *testing.T) {
+	fixedClock(t, mustDate(2026, 5, 30))
+	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
+
+	dir := t.TempDir()
+
+	// cutoff on 2026-05-30 with 30-day retention is 2026-04-30; this predates it.
+	old := touchFile(t, dir, "portal.log.2026-01-01")
+
+	s := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s.close() })
+
+	if _, err := s.Write([]byte("first-ever\n")); err != nil {
+		t.Fatalf("first Write: %v", err)
+	}
+
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("aged file %s still present; the first-ever write must run the gated retention sweep", filepath.Base(old))
+	}
+	sentinel := sweptSentinelFile(dir, "2026-05-30")
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("single-winner sentinel %s missing; the first-ever write's sweep must claim the day's gate", filepath.Base(sentinel))
+	}
+}
+
+// TestRotatingSink_SecondFreshSinkSameDayDoesNotResweep pins PART 1's
+// single-winner dedupe: a SECOND fresh sink the same day (the swept.<today>
+// sentinel already exists from the first winner) loses the O_EXCL gate, so its
+// first-ever write's sweep no-ops — it does NOT re-delete an already-deleted
+// file nor re-create the sentinel. This is what makes firing the sweep on every
+// fresh startup safe under the reboot-morning crowd.
+func TestRotatingSink_SecondFreshSinkSameDayDoesNotResweep(t *testing.T) {
+	fixedClock(t, mustDate(2026, 5, 30))
+	t.Setenv("PORTAL_LOG_RETENTION_DAYS", "30")
+
+	dir := t.TempDir()
+	old := touchFile(t, dir, "portal.log.2026-01-01")
+
+	// First fresh sink wins the gate, sweeps, deletes old, creates the sentinel.
+	s1 := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s1.close() })
+	if _, err := s1.Write([]byte("winner\n")); err != nil {
+		t.Fatalf("winner Write: %v", err)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("first winner did not delete the aged file; test precondition unmet")
+	}
+
+	// Capture the sentinel's identity so we can prove the loser does not recreate it.
+	sentinel := sweptSentinelFile(dir, "2026-05-30")
+	sentinelIno := mustIno(t, sentinel)
+
+	// Re-seed a NEW aged-out file: if the loser re-ran the sweep it would delete this.
+	resed := touchFile(t, dir, "portal.log.2026-01-02")
+
+	// Second fresh sink the same day: sentinel present => gate lost => sweep no-ops.
+	s2 := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s2.close() })
+	if _, err := s2.Write([]byte("loser\n")); err != nil {
+		t.Fatalf("loser Write: %v", err)
+	}
+
+	if _, err := os.Stat(resed); err != nil {
+		t.Errorf("re-seeded aged file %s deleted; the gate-losing second sink must NOT re-run the sweep", filepath.Base(resed))
+	}
+	if got := mustIno(t, sentinel); got != sentinelIno {
+		t.Errorf("sentinel inode changed (%d -> %d); the loser must NOT recreate the sentinel", sentinelIno, got)
+	}
+}
+
+// TestRotatingSink_FirstWriteCreatesNonExistentStateDir pins the first-run
+// regression: log.Init runs in main BEFORE bootstrap's state.EnsureDir, so on a
+// first-ever run the state dir does not exist yet. The first Write must create
+// the state dir, the day file, and the portal.log symlink — the record (e.g.
+// process: start) lands in the FILE, not on stderr. Without openDayFile's
+// MkdirAll the O_CREATE|O_EXCL open fails ENOENT, the probe fails, and Init
+// falls back to the stderr handler — leaking lifecycle markers to the user's
+// terminal while portal.log is never created.
+func TestRotatingSink_FirstWriteCreatesNonExistentStateDir(t *testing.T) {
+	day := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	fixedClock(t, day)
+
+	// A non-existent subpath of t.TempDir() — the state dir as it is on a
+	// first-ever run, before bootstrap's EnsureDir has created it.
+	dir := filepath.Join(t.TempDir(), "state-not-created-yet")
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("test precondition: %s must not exist yet (stat err = %v)", dir, err)
+	}
+
+	s := newRotatingSink(dir, defaultRotateSize)
+	t.Cleanup(func() { _ = s.close() })
+
+	if _, err := s.Write([]byte("process: start\n")); err != nil {
+		t.Fatalf("Write to non-existent state dir: %v", err)
+	}
+
+	// The state dir must now exist.
+	if info, err := os.Stat(dir); err != nil {
+		t.Fatalf("state dir not created by first Write: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("state dir path is not a directory: mode %v", info.Mode())
+	}
+
+	// The day file must exist and contain the record (NOT stderr).
+	dayPath := filepath.Join(dir, "portal.log.2026-05-29")
+	b, err := os.ReadFile(dayPath)
+	if err != nil {
+		t.Fatalf("day file not created in fresh state dir: %v", err)
+	}
+	if string(b) != "process: start\n" {
+		t.Errorf("day file = %q, want %q (record must land in the file, not stderr)", string(b), "process: start\n")
+	}
+
+	// The portal.log symlink must point at today's day file.
+	target, err := os.Readlink(filepath.Join(dir, "portal.log"))
+	if err != nil {
+		t.Fatalf("readlink portal.log: %v", err)
+	}
+	if filepath.Base(target) != "portal.log.2026-05-29" {
+		t.Errorf("symlink target = %q, want portal.log.2026-05-29", target)
 	}
 }
 

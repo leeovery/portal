@@ -29,6 +29,12 @@ const componentKey = "component"
 // value AND its message is in lifecycleBypassMsgs.
 const processComponent = "process"
 
+// bootstrapComponent is the component name carried by the invalid-PORTAL_LOG_LEVEL
+// WARN emitted at Init. Unlike processComponent it does NOT bypass the level
+// filter, but a fallback always resolves to info so the configured handler is at
+// INFO and the WARN is visible.
+const bootstrapComponent = "bootstrap"
+
 // lifecycleBypassMsgs is the CLOSED process-lifecycle message set from the spec
 // (§ "Defensive invariants against log destruction" → "Lifecycle markers bypass
 // the level filter"). A record whose component is "process" and whose message is

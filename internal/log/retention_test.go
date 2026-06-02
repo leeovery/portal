@@ -271,16 +271,17 @@ func TestRotatingSink_RunsRetentionSweepOnRealDayRoll(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Seed an aged-out file that the day roll's retention sweep must delete.
-	// cutoff on 2026-05-30 with 30-day retention is 2026-04-30; this predates it.
-	old := touchFile(t, dir, "portal.log.2026-01-01")
-
 	s := newRotatingSink(dir, defaultRotateSize)
 	t.Cleanup(func() { _ = s.close() })
 
 	if _, err := s.Write([]byte("day-one\n")); err != nil {
 		t.Fatalf("day-one Write: %v", err)
 	}
+
+	// Seed an aged-out file AFTER the first-of-day write (which now fires its own
+	// gated sweep — PART 1). It must survive until the next day's roll deletes it.
+	// cutoff on 2026-05-30 with 30-day retention is 2026-04-30; this predates it.
+	old := touchFile(t, dir, "portal.log.2026-01-01")
 	if _, err := os.Stat(old); err != nil {
 		t.Fatalf("aged file removed before the roll; want untouched until the day roll")
 	}

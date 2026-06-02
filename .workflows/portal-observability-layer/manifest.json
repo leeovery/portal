@@ -108,9 +108,9 @@
         "portal-observability-layer": {
           "status": "in-progress",
           "task_gate_mode": "auto",
-          "fix_gate_mode": "gated",
+          "fix_gate_mode": "auto",
           "analysis_gate_mode": "gated",
-          "fix_attempts": 0,
+          "fix_attempts": 1,
           "analysis_cycle_total": 0,
           "analysis_cycle_session": 0,
           "linters": [
@@ -152,7 +152,8 @@
             "portal-observability-layer-2-7",
             "portal-observability-layer-2-8",
             "portal-observability-layer-2-9",
-            "portal-observability-layer-2-10"
+            "portal-observability-layer-2-10",
+            "portal-observability-layer-2-11"
           ],
           "completed_phases": [
             1

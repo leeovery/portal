@@ -259,9 +259,16 @@ func (s *rotatingSink) ensureCurrent() error {
 		return s.reopen(today, true)
 	}
 
-	// First Write ever: open today's file (no sweeps — there is no prior day to
-	// roll over).
-	return s.reopen(today, false)
+	// First Write ever: this IS the first-of-day Handle for this fresh
+	// (short-lived OR just-started) process, so it fires the day-roll sweeps too
+	// (spec § Retention "first Handle of each calendar date" — for a fresh process
+	// that is its process: start line, not a within-process date advance). Firing
+	// on every fresh startup is safe: the retention sweep's single-winner gate
+	// makes losers no-op (portal.log.swept.<today> EEXIST), and sealPastDayFiles
+	// is idempotent (skips date==today and already-0400 files, emits no INFO — only
+	// a WARN on chmod failure). The per-process seal-of-past-day overhead is
+	// acceptable.
+	return s.reopen(today, true)
 }
 
 // inodeMatchesSymlink reports whether the open fd's identity (fstat Dev+Ino)
@@ -341,6 +348,13 @@ func (s *rotatingSink) reopen(today string, dateChanged bool) error {
 // create race, or the file already exists from a same-day reopen) it retries with
 // O_APPEND|O_WRONLY. It returns the open file plus its fstat Dev+Ino identity.
 func openDayFile(stateDir, today string) (*os.File, uint64, uint64, error) {
+	// The state dir may not exist yet on first run (Init precedes bootstrap's
+	// EnsureDir); create it so process: start lands in portal.log, not stderr
+	// (mirrors the legacy logger's MkdirAll). Best-effort + swallowed like the
+	// swingSymlink / migrationGuard seams — the O_CREATE|O_EXCL open below still
+	// surfaces a genuine error (e.g. ENOTDIR when a path component is a file).
+	_ = os.MkdirAll(stateDir, 0o700)
+
 	path := dayFile(stateDir, today)
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY, logFileMode)

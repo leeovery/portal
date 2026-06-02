@@ -2,7 +2,10 @@ package log
 
 import (
 	"io"
+	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -43,7 +46,7 @@ var startTime time.Time
 // error so main can decide. By convention main calls Init first and does not
 // abort on a logging failure. By convention only main calls Init in production.
 func Init(stateDir, version, processRole string) error {
-	level, _, _ := resolveLevel(os.Getenv("PORTAL_LOG_LEVEL"))
+	level, source, raw := resolveLevel(os.Getenv("PORTAL_LOG_LEVEL"))
 
 	pid := os.Getpid()
 	startTime = time.Now()
@@ -51,13 +54,52 @@ func Init(stateDir, version, processRole string) error {
 	writer, openErr := openLogWriter(stateDir)
 	setHandler(newTextHandler(writer, level, pid, version, processRole))
 
-	// TODO(phase-2): emit the "process: start" INFO line here, as Init's final
-	// action before returning, via log.For("process").Info("start", "cmd",
-	// filepath.Base(os.Args[0]), "args", strings.Join(os.Args[1:], " ")). Also
-	// emit the "log-level resolved" line. Phase 1 delivers only the wiring; the
-	// lifecycle-marker emission bodies are Phase 2.
+	emitLifecycleMarkers(level, source, raw)
 
 	return openErr
+}
+
+// emitLifecycleMarkers writes the per-process lifecycle markers as Init's final
+// pre-return action, AFTER the configured handler is swapped in so they route to
+// the real day file (spec § Defensive invariants — process: start, and §
+// Log-level propagation verification). Emission order is fixed:
+//
+//  1. process: start — the FIRST record to the handler. Via the rotating sink's
+//     first-of-day open this is what triggers portal.log creation + the gated
+//     retention sweep; it must precede any other portal logging.
+//  2. process: log-level resolved — immediately after start, declaring the
+//     resolved level and how it was resolved.
+//
+// Both lines are component=process with messages in the closed lifecycle set, so
+// the handler bypasses the level filter and they appear even at WARN/ERROR. The
+// baseline attrs (pid/version/process_role) are auto-injected per-record by the
+// handler — the call sites here deliberately do NOT pass them.
+//
+// When the level resolved via fallback (an invalid PORTAL_LOG_LEVEL), an
+// additional bootstrap-component WARN is emitted (spec § Log-level discipline —
+// Default and invalid-value handling). It does NOT bypass the level filter, but a
+// fallback always resolves to info, so the configured handler is at INFO and the
+// WARN (slog WARN >= INFO) is visible.
+//
+// Init is idempotent: each call re-emits these markers — the most recent Init
+// defines the logical start. In production main calls Init exactly once.
+func emitLifecycleMarkers(level slog.Level, source, raw string) {
+	process := For(processComponent)
+	process.Info("start",
+		"cmd", filepath.Base(os.Args[0]),
+		"args", strings.Join(os.Args[1:], " "),
+	)
+	process.Info("log-level resolved",
+		"resolved", levelString(level),
+		"source", source,
+		"raw", raw,
+	)
+	if source == sourceFallback {
+		For(bootstrapComponent).Warn("invalid PORTAL_LOG_LEVEL",
+			"raw", raw,
+			"resolved", "info",
+		)
+	}
 }
 
 // openLogWriter constructs the date-aware rotating sink for stateDir and probes
