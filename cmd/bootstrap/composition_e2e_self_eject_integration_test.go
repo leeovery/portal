@@ -130,11 +130,14 @@ const selfEjectComposite_ConvergenceTimeout = 6 * time.Second
 const selfEjectComposite_PlaceholderCommand = `exec tail -f /dev/null`
 
 // selfEjectComposite_LogMarker is the load-bearing INFO log substring
-// emitted by cmd/state_daemon.go's defaultDaemonRun at the osExit(0)
-// call site. Spec § Component D bullet 4.i mandates the exact prefix.
-// Mirrors `selfEjectLogMarker` in
+// emitted by cmd/state_daemon.go's tick loop at the osExit(0) call site.
+// Task 5-10 replaced the ad-hoc "self-supervision: saver-membership lost,
+// exiting" line with the cataloged "self-eject" lifecycle event (spec
+// § Saver and daemon lifecycle event taxonomy — daemon "self-eject"),
+// rendered under the daemon component as "daemon: self-eject ticks=N
+// threshold=3". Mirrors `selfEjectLogMarker` in
 // cmd/state_daemon_self_supervision_integration_test.go.
-const selfEjectComposite_LogMarker = "self-supervision: saver-membership lost for"
+const selfEjectComposite_LogMarker = "daemon: self-eject"
 
 // TestCompositeBootstrap_ExternalSaverKillTriggersSelfEject pins spec
 // § Composite End-to-End Verification bullet 8 in the LIVE composite
@@ -422,4 +425,3 @@ func pollForPIDExit(pid int, startInstant time.Time, budget, tick time.Duration)
 		time.Sleep(tick)
 	}
 }
-

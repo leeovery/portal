@@ -45,10 +45,10 @@
 //  B. No panic / stack trace on stderr. A panic would manifest as
 //     "panic:" + "goroutine" lines from runtime/debug; either substring
 //     in cmd.Stderr surfaces a regression in the eject path.
-//  C. portal.log under <stateDir> contains the substring
-//     "self-supervision: saver-membership lost for". This is the
+//  C. portal.log under <stateDir> contains the cataloged self-eject
+//     marker "daemon: self-eject" (Task 5-10). This is the
 //     load-bearing audit-log invariant from cmd/state_daemon.go's
-//     defaultDaemonRun → osExit(0) call site.
+//     tick-loop → osExit(0) call site.
 //  D. daemon.pid stale-stays-stale: if it exists post-exit, contents
 //     equal the subprocess's PID (NOT deleted on osExit(0) per spec §
 //     Component D bullet 4.iii). If it never existed (race: the daemon
@@ -97,11 +97,14 @@ const selfEjectExitBudget = 6 * time.Second
 const selfEjectExitPollTick = 50 * time.Millisecond
 
 // selfEjectLogMarker is the load-bearing INFO log substring emitted by
-// cmd/state_daemon.go's defaultDaemonRun at the osExit(0) call site.
-// Spec § Component D bullet 4.i mandates the exact prefix; the test
-// asserts substring presence so a future tweak to the suffix (e.g.
-// trailing "ticks, exiting") does not flake the test.
-const selfEjectLogMarker = "self-supervision: saver-membership lost for"
+// cmd/state_daemon.go's tick loop at the osExit(0) call site. Task 5-10
+// replaced the ad-hoc "self-supervision: saver-membership lost, exiting"
+// line with the cataloged "self-eject" lifecycle event (spec § Saver and
+// daemon lifecycle event taxonomy — daemon "self-eject"), rendered under
+// the daemon component as "daemon: self-eject ticks=N threshold=3". The
+// test asserts substring presence of the component-prefixed msg so a future
+// attr tweak does not flake the test.
+const selfEjectLogMarker = "daemon: self-eject"
 
 // TestSelfEject_PortalSaverAbsent_ExitsCleanly pins spec § Component D
 // acceptance bullet 1. See the file-header comment for the full

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/spf13/cobra"
@@ -216,9 +217,10 @@ const selfSupervisionHysteresisTicks = 3
 // divergence. Keeping the check above tick guarantees it observes every
 // tick uniformly.
 //
-// On reaching selfSupervisionHysteresisTicks, the daemon logs INFO and calls
-// osExit(0) directly. The eject bypasses daemonShutdownFunc / defaultShutdownFlush
-// intentionally:
+// On reaching selfSupervisionHysteresisTicks, the daemon emits the cataloged
+// "self-eject" INFO, then log.Close(0) (the paired "process: exit code=0"
+// terminal marker), then calls osExit(0) directly. The eject bypasses
+// daemonShutdownFunc / defaultShutdownFlush intentionally:
 //
 //   - Same reasoning as Component A's straight-to-SIGKILL choice: a daemon
 //     whose view diverges from tmux's view must NOT execute one more
@@ -285,10 +287,29 @@ func defaultDaemonTickLoop(ctx context.Context, deps *daemonDeps) error {
 			} else {
 				consecutiveAbsenceTicks++
 				if consecutiveAbsenceTicks >= selfSupervisionHysteresisTicks {
-					deps.Logger.Info("self-supervision: saver-membership lost, exiting", "ticks", consecutiveAbsenceTicks)
+					// Hysteresis trip — cataloged daemon "self-eject"
+					// lifecycle event (spec § Saver and daemon lifecycle
+					// event taxonomy). ticks = consecutive-absence count at
+					// the trip; threshold = the configured ejection threshold.
+					deps.Logger.Info("self-eject", "ticks", consecutiveAbsenceTicks, "threshold", selfSupervisionHysteresisTicks)
+					// Load-bearing terminal-marker pairing (spec § Defensive
+					// invariants — sanctioned exception): emit the self-eject
+					// INFO, THEN log.Close(0) (which emits "process: exit
+					// code=0" and does NOT itself call os.Exit), THEN osExit(0).
+					// Without log.Close(0) the direct osExit would leave an
+					// unpaired "process: start". Order MUST NOT be reordered and
+					// log.Close(0) MUST NOT be skipped.
+					log.Close(0)
 					osExit(0)
+					// Unreachable in production (osExit terminates the process).
+					// Retained so the osExit-stubbed-to-no-op test seam falls
+					// through cleanly without running tick on the eject tick.
 					return nil
 				}
+				// Below the threshold: one DEBUG breadcrumb per failing probe
+				// (spec § Log-level discipline — hysteresis-internal failures
+				// are DEBUG). No INFO until the trip above.
+				deps.Logger.Debug("saver-membership probe failed", "ticks", consecutiveAbsenceTicks, "threshold", selfSupervisionHysteresisTicks)
 			}
 			tick(ctx, deps)
 		case <-ctx.Done():

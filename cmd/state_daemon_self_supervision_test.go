@@ -403,10 +403,12 @@ func TestDaemonLoop_SelfCheckResetOnEachTrue(t *testing.T) {
 	}
 }
 
-// TestDaemonLoop_SelfCheckLogsInfoOnEject asserts that the INFO log entry is
-// emitted under ComponentDaemon containing the literal
-// "self-supervision: saver-membership lost for" prefix and the consecutive
-// count.
+// TestDaemonLoop_SelfCheckLogsInfoOnEject asserts that the cataloged INFO log
+// entry is emitted under ComponentDaemon at the hysteresis trip: the
+// "self-eject" event with ticks (consecutive-absence count) and threshold
+// (the configured ejection threshold) attrs. (Task 5-10 replaced the ad-hoc
+// "self-supervision: saver-membership lost, exiting" line with this cataloged
+// event.)
 func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 	// INFO is below the default WARN threshold; bump explicitly.
 	t.Setenv("PORTAL_LOG_LEVEL", "info")
@@ -437,13 +439,22 @@ func TestDaemonLoop_SelfCheckLogsInfoOnEject(t *testing.T) {
 	if !strings.Contains(got, "daemon") {
 		t.Errorf("expected ComponentDaemon = %q in log; got:\n%s", "daemon", got)
 	}
-	if !strings.Contains(got, "self-supervision: saver-membership lost") {
-		t.Errorf("expected self-supervision log prefix; got:\n%s", got)
+	if !strings.Contains(got, "self-eject") {
+		t.Errorf("expected cataloged self-eject event; got:\n%s", got)
 	}
-	// The consecutive-tick count now rides the ticks attr.
+	// The legacy ad-hoc line must be gone.
+	if strings.Contains(got, "self-supervision: saver-membership lost") {
+		t.Errorf("legacy self-supervision INFO line still present; got:\n%s", got)
+	}
+	// The consecutive-tick count rides the ticks attr; the configured threshold
+	// rides the threshold attr.
 	want := fmt.Sprintf("ticks=%d", selfSupervisionHysteresisTicks)
 	if !strings.Contains(got, want) {
 		t.Errorf("expected consecutive-count %q in log; got:\n%s", want, got)
+	}
+	wantThreshold := fmt.Sprintf("threshold=%d", selfSupervisionHysteresisTicks)
+	if !strings.Contains(got, wantThreshold) {
+		t.Errorf("expected threshold %q in log; got:\n%s", wantThreshold, got)
 	}
 }
 
