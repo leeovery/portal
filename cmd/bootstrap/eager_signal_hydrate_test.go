@@ -2,8 +2,8 @@ package bootstrap
 
 import (
 	"errors"
+	"log/slog"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/leeovery/portal/internal/state"
@@ -97,9 +97,13 @@ func TestEagerSignalHydrate_ZeroMarkersIsNoOp(t *testing.T) {
 // TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues pins the
 // soft-warning posture: a single failing FIFO write must not abort the loop;
 // every other marker still receives its signal, the failure is logged via
-// Logger.Warn under ComponentHydrate with the spec's "eager-signal: write
-// fifo" prefix, and the method still returns nil.
+// the package-level signalLogger under component=signal with the
+// "eager-signal write fifo failed" message, path/error/error_class=unexpected
+// attrs (error is the WRAPPED err, passed directly), and the method still
+// returns nil. The re-attribution (Phase 5 Task 5-11) homes the FIFO-signaling
+// mechanism under the signal component, NOT hydrate.
 func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
+	sink := installCleanSummarySink(t)
 	stateDir := "/var/state"
 	failPath := state.FIFOPath(stateDir, "broken__0.0")
 	sentinel := errors.New("write fifo: i/o error")
@@ -112,13 +116,11 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 	signaler := &statetest.RecordingFIFOSignaler{
 		ErrOn: map[string]error{failPath: sentinel},
 	}
-	logger := &RecordingLogger{}
 
 	c := &EagerSignalCore{
 		Markers:  lister,
 		StateDir: stateDir,
 		Signaler: signaler,
-		Logger:   logger.Logger().With("component", "hydrate"),
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
@@ -128,21 +130,30 @@ func TestEagerSignalHydrate_PerFIFOWriteFailureLogsAndContinues(t *testing.T) {
 		t.Errorf("Signaler.SendSignal call count = %d; want 3 (loop must continue past the failing write); calls=%v", len(signaler.Calls), signaler.Calls)
 	}
 
-	// Locate the warning entry and pin its component routing (ComponentHydrate)
-	// + the spec-mandated "eager-signal: write fifo" prefix + the failing path
-	// in the formatted message body.
-	found := false
-	for i, msg := range logger.warnings {
-		if strings.Contains(msg, "eager-signal: write fifo") && strings.Contains(msg, failPath) {
-			if logger.warnComponents[i] != "hydrate" {
-				t.Errorf("warning component[%d] = %q; want %q", i, logger.warnComponents[i], "hydrate")
-			}
-			found = true
-			break
-		}
+	// Exactly one write-failure WARN under component=signal, carrying the
+	// failing FIFO path, the WRAPPED error, and error_class=unexpected.
+	warns := sink.matching(slog.LevelWarn, "signal", "eager-signal write fifo failed")
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 WARN under component=signal for the failing FIFO, got %d: %+v", len(warns), sink.all())
 	}
-	if !found {
-		t.Errorf("expected a Warn entry containing %q and the failing FIFO path %q; got warnings=%v", "eager-signal: write fifo", failPath, logger.warnings)
+	rec := warns[0]
+	if p, ok := rec.attrs["path"]; !ok || p.String() != failPath {
+		t.Errorf("WARN path attr = %v; want %q", rec.attrs["path"], failPath)
+	}
+	if ec, ok := rec.attrs["error_class"]; !ok || ec.String() != "unexpected" {
+		t.Errorf("WARN error_class attr = %v; want %q", rec.attrs["error_class"], "unexpected")
+	}
+	errAttr, ok := rec.attrs["error"]
+	if !ok {
+		t.Fatalf("WARN missing error attr: %+v", rec.attrs)
+	}
+	// The error attr must carry the wrapped err passed directly (not .Error()),
+	// so a slog.AnyValue holding the error value renders the sentinel message.
+	if errAttr.Kind() != slog.KindAny {
+		t.Errorf("error attr kind = %v; want Any (wrapped err passed directly, not .Error())", errAttr.Kind())
+	}
+	if gotErr, ok := errAttr.Any().(error); !ok || !errors.Is(gotErr, sentinel) {
+		t.Errorf("error attr = %v; want errors.Is(err, sentinel)=true", errAttr.Any())
 	}
 }
 
@@ -174,9 +185,11 @@ func TestEagerSignalHydrate_ReturnsErrorWhenListSkeletonMarkersFails(t *testing.
 	}
 }
 
-// TestEagerSignalHydrate_NilLoggerTolerated pins the local NoopLogger
-// substitution: a nil Logger field must not panic when the failure path
-// exercises Logger.Warn. Mirrors MarkerCleanupCore's nil-Logger contract.
+// TestEagerSignalHydrate_NilLoggerTolerated pins the nil-Logger contract: a
+// nil Logger field must not panic on the per-FIFO failure path. Since Phase 5
+// Task 5-11 re-homed the write-failure WARN onto the package-level signalLogger
+// (always non-nil), the field is no longer read by the WARN, but the
+// nil-tolerance contract for the DI-wired field is preserved.
 func TestEagerSignalHydrate_NilLoggerTolerated(t *testing.T) {
 	stateDir := "/var/state"
 	failPath := state.FIFOPath(stateDir, "broken__0.0")
@@ -193,7 +206,7 @@ func TestEagerSignalHydrate_NilLoggerTolerated(t *testing.T) {
 		Markers:  lister,
 		StateDir: stateDir,
 		Signaler: signaler,
-		Logger:   nil, // contract: must not panic when Logger.Warn fires.
+		Logger:   nil, // contract: must not panic on the failure path.
 	}
 
 	if err := c.EagerSignalHydrate(); err != nil {
@@ -201,6 +214,144 @@ func TestEagerSignalHydrate_NilLoggerTolerated(t *testing.T) {
 	}
 	if len(signaler.Calls) != 2 {
 		t.Errorf("Signaler.SendSignal call count = %d; want 2 (loop must continue past failing write under nil Logger); calls=%v", len(signaler.Calls), signaler.Calls)
+	}
+}
+
+// TestEagerSignalHydrate_SuccessEmitsSignalledDebugBreadcrumb pins the
+// per-FIFO success breadcrumb (Phase 5 Task 5-11): every successful
+// SendSignal emits a DEBUG "fifo signalled" under component=signal carrying
+// the FIFO path. The breadcrumb is silent at INFO and present at DEBUG —
+// the call-site transition breadcrumb that lets `grep signal:` reconstruct
+// the FIFO-signaling behaviour.
+func TestEagerSignalHydrate_SuccessEmitsSignalledDebugBreadcrumb(t *testing.T) {
+	sink := installCleanSummarySink(t)
+	stateDir := "/var/state"
+
+	lister := &fakeMarkerLister{markers: map[string]struct{}{
+		"alpha__0.0": {},
+		"beta__1.2":  {},
+	}}
+	signaler := &statetest.RecordingFIFOSignaler{}
+
+	c := &EagerSignalCore{
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
+	}
+
+	if err := c.EagerSignalHydrate(); err != nil {
+		t.Fatalf("EagerSignalHydrate returned error: %v", err)
+	}
+
+	// One DEBUG "fifo signalled" under component=signal per successful FIFO.
+	dbg := sink.matching(slog.LevelDebug, "signal", "fifo signalled")
+	if len(dbg) != 2 {
+		t.Fatalf("expected 2 DEBUG 'fifo signalled' under component=signal, got %d: %+v", len(dbg), sink.all())
+	}
+	gotPaths := map[string]bool{}
+	for _, r := range dbg {
+		p, ok := r.attrs["path"]
+		if !ok {
+			t.Fatalf("DEBUG 'fifo signalled' missing path attr: %+v", r.attrs)
+		}
+		gotPaths[p.String()] = true
+	}
+	for _, key := range []string{"alpha__0.0", "beta__1.2"} {
+		wantPath := state.FIFOPath(stateDir, key)
+		if !gotPaths[wantPath] {
+			t.Errorf("missing DEBUG 'fifo signalled' for path %q; got %v", wantPath, gotPaths)
+		}
+	}
+
+	// The breadcrumb is DEBUG-only: nothing rendered at INFO for it.
+	if got := sink.matching(slog.LevelInfo, "signal", "fifo signalled"); len(got) != 0 {
+		t.Errorf("'fifo signalled' must be DEBUG, not INFO; got %d INFO entries: %+v", len(got), got)
+	}
+}
+
+// TestEagerSignalHydrate_NoSignalingLineUnderHydrateOrBootstrap pins the
+// re-attribution (Phase 5 Task 5-11): after homing the FIFO-signaling
+// mechanism under signal, NO signaling-mechanism line renders under
+// component=hydrate or component=bootstrap. A mixed success+failure run
+// must produce only signal-component lines for the mechanism.
+func TestEagerSignalHydrate_NoSignalingLineUnderHydrateOrBootstrap(t *testing.T) {
+	sink := installCleanSummarySink(t)
+	stateDir := "/var/state"
+	failPath := state.FIFOPath(stateDir, "broken__0.0")
+
+	lister := &fakeMarkerLister{markers: map[string]struct{}{
+		"broken__0.0":  {},
+		"healthy__1.0": {},
+	}}
+	signaler := &statetest.RecordingFIFOSignaler{
+		ErrOn: map[string]error{failPath: errors.New("write fifo: i/o error")},
+	}
+
+	c := &EagerSignalCore{
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
+	}
+
+	if err := c.EagerSignalHydrate(); err != nil {
+		t.Fatalf("EagerSignalHydrate returned error: %v", err)
+	}
+
+	for _, r := range sink.all() {
+		comp, ok := r.attrs["component"]
+		if !ok {
+			continue
+		}
+		if comp.String() == "hydrate" || comp.String() == "bootstrap" {
+			t.Errorf("no signaling-mechanism line may render under %q; got %+v", comp.String(), r)
+		}
+	}
+}
+
+// TestEagerSignalHydrate_NoCycleSummaryNorNewAttrKeys pins the closed-attr +
+// no-summary contract (Phase 5 Task 5-11): the EagerSignalHydrate run emits
+// only the per-FIFO WARN/DEBUG under signal — no INFO cycle summary (owned by
+// Task 5-2's bootstrap step-complete line, not a signal-sweep summary), and no
+// attr keys beyond path/error/error_class.
+func TestEagerSignalHydrate_NoCycleSummaryNorNewAttrKeys(t *testing.T) {
+	sink := installCleanSummarySink(t)
+	stateDir := "/var/state"
+	failPath := state.FIFOPath(stateDir, "broken__0.0")
+
+	lister := &fakeMarkerLister{markers: map[string]struct{}{
+		"broken__0.0":  {},
+		"healthy__1.0": {},
+	}}
+	signaler := &statetest.RecordingFIFOSignaler{
+		ErrOn: map[string]error{failPath: errors.New("write fifo: i/o error")},
+	}
+
+	c := &EagerSignalCore{
+		Markers:  lister,
+		StateDir: stateDir,
+		Signaler: signaler,
+	}
+
+	if err := c.EagerSignalHydrate(); err != nil {
+		t.Fatalf("EagerSignalHydrate returned error: %v", err)
+	}
+
+	// No INFO line at all from the signal step (no cycle summary).
+	for _, r := range sink.all() {
+		if r.level == slog.LevelInfo {
+			t.Errorf("EagerSignalHydrate must not emit an INFO cycle summary; got %+v", r)
+		}
+	}
+
+	// The only attr keys the signal lines may carry are component + the closed
+	// set path/error/error_class.
+	allowed := map[string]bool{"component": true, "path": true, "error": true, "error_class": true}
+	for _, r := range sink.all() {
+		for key := range r.attrs {
+			if !allowed[key] {
+				t.Errorf("unexpected attr key %q on signal line %q; closed set is path/error/error_class", key, r.msg)
+			}
+		}
 	}
 }
 

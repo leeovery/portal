@@ -3,6 +3,7 @@ package state_test
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,6 +112,80 @@ func TestWriteFIFOSignal_RetriesOnENXIOPerLadder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(sleep.Durations, want) {
 		t.Errorf("Sleep durations = %v, want %v", sleep.Durations, want)
+	}
+}
+
+// TestWriteFIFOSignal_EmitsRetryDebugUnderSignal pins the lower-level
+// transition breadcrumb (Phase 5 Task 5-11, option a): on each retryable-error
+// transition (ENXIO/EAGAIN) the retry ladder emits a DEBUG "fifo signal
+// retrying" under component=signal carrying path + the wrapped error. The
+// whole-operation WARN stays at the EagerSignalHydrate caller; this is the
+// per-retry detail under signal. A retryable-then-success ladder fires the
+// DEBUG once (one retry) and the operation still returns nil.
+func TestWriteFIFOSignal_EmitsRetryDebugUnderSignal(t *testing.T) {
+	sink := installFIFOSummarySink(t)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	openCalls := 0
+	open := func(_ string) (*os.File, error) {
+		openCalls++
+		if openCalls == 1 {
+			return nil, syscall.ENXIO
+		}
+		return w, nil
+	}
+	sleep := &statetest.RecordingSleep{}
+
+	const path = "/tmp/example.fifo"
+	if err := state.WriteFIFOSignal(path, open, sleep.Fn()); err != nil {
+		t.Fatalf("WriteFIFOSignal: %v", err)
+	}
+
+	dbg := sink.matching(slog.LevelDebug, "signal", "fifo signal retrying")
+	if len(dbg) != 1 {
+		t.Fatalf("expected 1 DEBUG 'fifo signal retrying' under component=signal (one retryable transition), got %d: %+v", len(dbg), sink.all())
+	}
+	if p, ok := dbg[0].attrs["path"]; !ok || p.String() != path {
+		t.Errorf("retry DEBUG path attr = %v; want %q", dbg[0].attrs["path"], path)
+	}
+	errAttr, ok := dbg[0].attrs["error"]
+	if !ok {
+		t.Fatalf("retry DEBUG missing error attr: %+v", dbg[0].attrs)
+	}
+	if errAttr.Kind() != slog.KindAny {
+		t.Errorf("retry DEBUG error attr kind = %v; want Any (wrapped err passed directly)", errAttr.Kind())
+	}
+	if gotErr, ok := errAttr.Any().(error); !ok || !errors.Is(gotErr, syscall.ENXIO) {
+		t.Errorf("retry DEBUG error attr = %v; want errors.Is(err, ENXIO)=true", errAttr.Any())
+	}
+}
+
+// TestWriteFIFOSignal_RetryDebugOncePerRetryTransition pins the breadcrumb
+// cardinality: a retry-exhaustion ladder (always ENXIO) fires the DEBUG once
+// per actual sleep+retry transition — len(SignalHydrateRetryDelays) times,
+// not once per open attempt.
+func TestWriteFIFOSignal_RetryDebugOncePerRetryTransition(t *testing.T) {
+	sink := installFIFOSummarySink(t)
+
+	open := func(_ string) (*os.File, error) { return nil, syscall.ENXIO }
+	sleep := &statetest.RecordingSleep{}
+
+	const path = "/tmp/never-ready.fifo"
+	if err := state.WriteFIFOSignal(path, open, sleep.Fn()); err == nil {
+		t.Fatalf("expected retry-exhaustion error, got nil")
+	}
+
+	dbg := sink.matching(slog.LevelDebug, "signal", "fifo signal retrying")
+	if len(dbg) != len(state.SignalHydrateRetryDelays) {
+		t.Errorf("retry DEBUG count = %d; want %d (one per sleep+retry transition)", len(dbg), len(state.SignalHydrateRetryDelays))
 	}
 }
 

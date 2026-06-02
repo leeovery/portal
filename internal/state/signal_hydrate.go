@@ -6,7 +6,24 @@ import (
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/leeovery/portal/internal/log"
 )
+
+// signalLogger is the signal-component-bound package logger for the
+// FIFO-signaling mechanism's lower-level send plumbing (Subsystem prefix
+// taxonomy: signal owns the FIFO signal send/receive plumbing in
+// internal/state alongside the bootstrap EagerSignalHydrate caller). The
+// retry-ladder transition breadcrumb renders under component=signal so
+// `grep signal:` reconstructs the FIFO-signaling behaviour.
+//
+// It MUST NOT be named a bare `logger`: `logger` is the pervasive
+// function-parameter name across internal/state and would shadow a package
+// var. internal/state may import internal/log (internal/log never imports
+// internal/state — Task 1-8's import-cycle invariant), so this binding is
+// cycle-free. Bound once at package init via log.For so it routes through the
+// shared handler indirection (observing later Init / SetTestHandler swaps).
+var signalLogger = log.For("signal")
 
 // SignalHydrateRetryDelays is the back-off ladder used when the per-pane FIFO
 // is not yet readable. The cumulative budget is 500ms (10+20+40+80+160+190 =
@@ -42,6 +59,11 @@ func OpenFIFOForSignal(path string) (*os.File, error) {
 // (cmd/state_signal_hydrate, cmd/bootstrap) can wire their own production
 // or test implementations without sharing a config struct. Production
 // callers pass OpenFIFOForSignal and time.Sleep.
+//
+// Each retryable-error transition (immediately before the sleep+retry) emits a
+// DEBUG "fifo signal retrying" breadcrumb under component=signal carrying path
+// + the wrapped retryable error. The error RETURNS are unchanged — the
+// whole-operation WARN stays at the EagerSignalHydrate caller.
 func WriteFIFOSignal(path string, openFIFO func(string) (*os.File, error), sleep func(time.Duration)) error {
 	var lastErr error
 	for i := 0; i <= len(SignalHydrateRetryDelays); i++ {
@@ -61,6 +83,10 @@ func WriteFIFOSignal(path string, openFIFO func(string) (*os.File, error), sleep
 
 		lastErr = err
 		if i < len(SignalHydrateRetryDelays) {
+			// Per-retry transition breadcrumb under signal — the lower-level
+			// detail beneath the whole-operation WARN at the EagerSignalHydrate
+			// caller. The wrapped retryable err is passed directly.
+			signalLogger.Debug("fifo signal retrying", "path", path, "error", err)
 			sleep(SignalHydrateRetryDelays[i])
 		}
 	}

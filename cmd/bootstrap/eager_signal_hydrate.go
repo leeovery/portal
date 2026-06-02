@@ -3,8 +3,24 @@ package bootstrap
 import (
 	"log/slog"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
+
+// signalLogger is the signal-component-bound package logger for the
+// FIFO-signaling mechanism (Subsystem prefix taxonomy: signal owns
+// EagerSignalHydrate's per-FIFO write outcomes and the lower-level FIFO send
+// plumbing in internal/state). The per-FIFO write-failure WARN and the
+// per-FIFO success DEBUG breadcrumb both render under component=signal — NOT
+// hydrate — so `grep signal:` reconstructs the FIFO-signaling behaviour.
+//
+// It MUST NOT be named a bare `logger`: EagerSignalHydrate carries no
+// function-local `logger` anymore, but the package var stays explicitly named
+// signalLogger to match the Phase 5 naming convention (captureLogger,
+// cleanLogger, saverLogger) and to make the component routing legible at the
+// call site. Bound once at package init via log.For so it routes through the
+// shared handler indirection (observing later Init / SetTestHandler swaps).
+var signalLogger = log.For("signal")
 
 // EagerSignalCore is the orchestrator seam responsible for writing the
 // hydrate signal byte to every freshly-armed `@portal-skeleton-*` pane's
@@ -28,11 +44,15 @@ import (
 //     delegates to state.SendHydrateSignal — the no-seam production entry
 //     point that bundles state.OpenFIFOForSignal + time.Sleep + the bounded
 //     retry ladder. Tests inject statetest.RecordingFIFOSignaler.
-//   - Logger is optional. When non-nil, per-FIFO write failures are emitted
-//     via Logger.Warn under the hydrate component (production wiring injects
-//     log.For("hydrate")). A nil Logger is tolerated — EagerSignalHydrate
-//     substitutes the io.Discard-backed discardLogger at entry so call sites
-//     can dispatch unconditionally, mirroring MarkerCleanupCore's contract.
+//   - Logger is a DI-wired seam retained for uniformity with sibling step
+//     cores (MarkerCleanupCore, FIFOSweeper). As of the signal-component
+//     re-attribution (Phase 5 Task 5-11) the per-FIFO write-failure WARN and
+//     success DEBUG breadcrumb route through the package-level signalLogger
+//     (component=signal), NOT this field — the FIFO-signaling mechanism is
+//     homed under signal per the Subsystem prefix taxonomy. The field is
+//     therefore nil-tolerant and currently unread by EagerSignalHydrate; it
+//     is preserved (rather than removed) to avoid churning the DI wiring at
+//     cmd/bootstrap_production.go and cmd/bootstrap/defaults.go.
 //
 // Markers and Signaler are mandatory: behaviour with either nil is undefined
 // and will panic at first dereference inside EagerSignalHydrate. Only Logger
@@ -51,36 +71,26 @@ var _ EagerHydrateSignaler = (*EagerSignalCore)(nil)
 // EagerSignalHydrate writes the hydrate signal byte to every marker's FIFO.
 //
 // Algorithm:
-//  1. Substitute a local no-op Logger when none was injected so call sites
-//     can invoke logger.Warn unconditionally (mirrors MarkerCleanupCore).
-//  2. Enumerate marker paneKeys via state.ListSkeletonMarkers(c.Markers).
+//  1. Enumerate marker paneKeys via state.ListSkeletonMarkers(c.Markers).
 //     On error, return the wrapped error so the orchestrator's Warn-and-
 //     swallow site logs it uniformly with siblings (FIFOSweeper.Sweep,
 //     CleanStaleMarkers).
-//  3. If zero markers exist, return nil immediately — zero-marker no-op,
+//  2. If zero markers exist, return nil immediately — zero-marker no-op,
 //     no FIFO writes attempted.
-//  4. For each paneKey, derive fifoPath := state.FIFOPath(c.StateDir,
-//     paneKey) and call c.Signaler.SendSignal(fifoPath). On error, log via
-//     logger.Warn("eager-signal: write fifo failed", "path", fifoPath,
-//     "error", err) under the hydrate component and continue to the next pane
-//     — a single failing FIFO must NEVER abort the loop, otherwise the helpers
-//     in the remaining N-1 sessions stay stuck.
-//  5. Always return nil after the loop. Per-FIFO write failures are
+//  3. For each paneKey, derive fifoPath := state.FIFOPath(c.StateDir,
+//     paneKey) and call c.Signaler.SendSignal(fifoPath). On error, emit a WARN
+//     via signalLogger ("eager-signal write fifo failed", path/error/
+//     error_class=unexpected) under component=signal and continue to the next
+//     pane — a single failing FIFO must NEVER abort the loop, otherwise the
+//     helpers in the remaining N-1 sessions stay stuck. On success, emit a
+//     per-FIFO DEBUG breadcrumb ("fifo signalled", path) under signal.
+//  4. Always return nil after the loop. Per-FIFO write failures are
 //     soft warnings per spec §Failure Posture; only marker enumeration
 //     failures travel up via the return value.
 //
 // EagerSignalHydrate never returns a *FatalError; every non-nil return is
 // soft and the orchestrator (task 1-4) Warn-and-swallows it.
 func (c *EagerSignalCore) EagerSignalHydrate() error {
-	// Substitute a local no-op Logger when none was injected so call sites
-	// can invoke logger.Warn unconditionally. Use a local var rather than
-	// mutating c.Logger so the receiver's state is not silently rewritten
-	// across calls.
-	logger := c.Logger
-	if logger == nil {
-		logger = discardLogger
-	}
-
 	markers, err := state.ListSkeletonMarkers(c.Markers)
 	if err != nil {
 		return err
@@ -92,12 +102,17 @@ func (c *EagerSignalCore) EagerSignalHydrate() error {
 	for paneKey := range markers {
 		fifoPath := state.FIFOPath(c.StateDir, paneKey)
 		if err := c.Signaler.SendSignal(fifoPath); err != nil {
-			// Per-FIFO failures are soft — log and continue so the
-			// remaining markers still get their signal. The loop body's
-			// last statement is the warn call, so the implicit fallthrough
-			// to the next iteration is the continuation.
-			logger.Warn("eager-signal: write fifo failed", "path", fifoPath, "error", err)
+			// Per-FIFO failures are soft — an un-signalled pane drops a unit
+			// of work, so this is a WARN under component=signal with
+			// error_class=unexpected (level-discipline table). The wrapped
+			// err is passed directly. Log and continue so the remaining
+			// markers still get their signal.
+			signalLogger.Warn("eager-signal write fifo failed", "path", fifoPath, "error", err, "error_class", "unexpected")
+			continue
 		}
+		// Per-FIFO success breadcrumb under signal — the call-site transition
+		// breadcrumb that lets `grep signal:` reconstruct the signaling.
+		signalLogger.Debug("fifo signalled", "path", fifoPath)
 	}
 	return nil
 }
