@@ -468,6 +468,314 @@ func TestOrchestrator_ReturnsNilWhenEverySessionErrors(t *testing.T) {
 	}
 }
 
+// skeletonSummaryLine returns the single "skeleton complete" INFO line the
+// sink recorded, or "" if none was emitted. Fails the test if more than one
+// such line was recorded (the spec mandates exactly one per restore cycle).
+func skeletonSummaryLine(t *testing.T, sink *captureSink) string {
+	t.Helper()
+	var found []string
+	for _, line := range sink.lines {
+		if strings.Contains(line, "skeleton complete") {
+			found = append(found, line)
+		}
+	}
+	if len(found) > 1 {
+		t.Fatalf("expected at most one skeleton-complete summary; got %d: %v", len(found), found)
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
+}
+
+func TestOrchestrator_EmitsSkeletonCompleteSummaryAfterRestoringSessions(t *testing.T) {
+	dir := t.TempDir()
+	// Two restorable sessions: "work" (1 window / 1 pane) and "side"
+	// (2 windows: 2 panes + 1 pane = 3 panes). Restored totals must be
+	// sessions=2, windows=3, panes=4.
+	sessions := []state.Session{
+		{
+			Name: "work",
+			Windows: []state.Window{
+				{Index: 0, Name: "main", Panes: []state.Pane{
+					{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
+				}},
+			},
+		},
+		{
+			Name: "side",
+			Windows: []state.Window{
+				{Index: 0, Name: "a", Panes: []state.Pane{
+					{Index: 0, CWD: "/side", ScrollbackFile: "scrollback/side__0.0.bin", Active: true},
+					{Index: 1, CWD: "/side", ScrollbackFile: "scrollback/side__0.1.bin"},
+				}},
+				{Index: 1, Name: "b", Panes: []state.Pane{
+					{Index: 0, CWD: "/side", ScrollbackFile: "scrollback/side__1.0.bin"},
+				}},
+			},
+		},
+	}
+	writeValidIndex(t, dir, sessions)
+
+	rf := &orchestratorRunFunc{
+		listSessionsOut: "",
+		listPanesOut:    "0:0",
+	}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	line := skeletonSummaryLine(t, sink)
+	if line == "" {
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+	}
+	if !strings.HasPrefix(line, "INFO ") {
+		t.Errorf("summary level = %q, want INFO. line=%q", line, line)
+	}
+	for _, want := range []string{"sessions=2", "windows=3", "panes=4", "took="} {
+		if !strings.Contains(line, want) {
+			t.Errorf("summary %q missing %q", line, want)
+		}
+	}
+}
+
+func TestOrchestrator_SkeletonSummaryExcludesLiveSkippedSession(t *testing.T) {
+	dir := t.TempDir()
+	sessions := []state.Session{
+		{Name: "work", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
+			}},
+		}},
+		// "live" already exists in tmux — must be excluded from all counts.
+		{Name: "live", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/live", ScrollbackFile: "scrollback/live__0.0.bin"},
+				{Index: 1, CWD: "/live", ScrollbackFile: "scrollback/live__0.1.bin"},
+			}},
+		}},
+	}
+	writeValidIndex(t, dir, sessions)
+
+	rf := &orchestratorRunFunc{
+		listSessionsOut: "live|1|0",
+		listPanesOut:    "0:0",
+	}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	line := skeletonSummaryLine(t, sink)
+	if line == "" {
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+	}
+	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("summary %q missing %q (live session must be excluded)", line, want)
+		}
+	}
+}
+
+func TestOrchestrator_SkeletonSummaryExcludesUnderscorePrefixedSession(t *testing.T) {
+	dir := t.TempDir()
+	sessions := []state.Session{
+		{Name: "work", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
+			}},
+		}},
+		{Name: "_portal-saver", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/x", ScrollbackFile: "scrollback/x.bin"},
+			}},
+		}},
+	}
+	writeValidIndex(t, dir, sessions)
+
+	rf := &orchestratorRunFunc{listSessionsOut: "", listPanesOut: "0:0"}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	line := skeletonSummaryLine(t, sink)
+	if line == "" {
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+	}
+	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("summary %q missing %q (underscore session must be excluded)", line, want)
+		}
+	}
+}
+
+func TestOrchestrator_SkeletonSummaryExcludesInvalidTopologySessions(t *testing.T) {
+	dir := t.TempDir()
+	sessions := []state.Session{
+		{Name: "work", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{
+				{Index: 0, CWD: "/work", ScrollbackFile: "scrollback/work__0.0.bin", Active: true},
+			}},
+		}},
+		// zero windows — invalid topology, excluded.
+		{Name: "nowin", Windows: []state.Window{}},
+		// a window with zero panes — invalid topology, excluded.
+		{Name: "nopane", Windows: []state.Window{
+			{Index: 0, Name: "main", Panes: []state.Pane{}},
+		}},
+	}
+	writeValidIndex(t, dir, sessions)
+
+	rf := &orchestratorRunFunc{listSessionsOut: "", listPanesOut: "0:0"}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	line := skeletonSummaryLine(t, sink)
+	if line == "" {
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+	}
+	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("summary %q missing %q (invalid-topology sessions must be excluded)", line, want)
+		}
+	}
+}
+
+func TestOrchestrator_SkeletonSummaryExcludesRestoreErroredSessionButKeepsWarn(t *testing.T) {
+	dir := t.TempDir()
+	sessions := []state.Session{
+		{Name: "broken", Windows: []state.Window{
+			{Index: 0, Name: "m", Panes: []state.Pane{
+				{Index: 0, CWD: "/x", ScrollbackFile: "scrollback/x.bin"},
+			}},
+		}},
+		{Name: "ok", Windows: []state.Window{
+			{Index: 0, Name: "m", Panes: []state.Pane{
+				{Index: 0, CWD: "/y", ScrollbackFile: "scrollback/y.bin"},
+			}},
+		}},
+	}
+	writeValidIndex(t, dir, sessions)
+
+	rf := &orchestratorRunFunc{
+		listSessionsOut: "",
+		listPanesOut:    "0:0",
+		onCmd: map[string]func(args ...string) (string, error){
+			"new-session": func(args ...string) (string, error) {
+				for i, a := range args {
+					if a == "-s" && i+1 < len(args) && args[i+1] == "broken" {
+						return "", errors.New("new-session boom")
+					}
+				}
+				return "", nil
+			},
+		},
+	}
+	mock := &mockCommander{RunFunc: rf.run}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	if _, err := o.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	line := skeletonSummaryLine(t, sink)
+	if line == "" {
+		t.Fatalf("expected one skeleton-complete summary; sink body:\n%s", sink.body())
+	}
+	// Only "ok" was restored: sessions=1, windows=1, panes=1.
+	for _, want := range []string{"sessions=1", "windows=1", "panes=1"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("summary %q missing %q (errored session must be excluded)", line, want)
+		}
+	}
+	// The per-session WARN for "broken" must still fire.
+	body := sink.body()
+	if !strings.Contains(body, "WARN") || !strings.Contains(body, "broken") {
+		t.Errorf("expected per-session WARN for broken session; body:\n%s", body)
+	}
+}
+
+func TestOrchestrator_EmitsNoSkeletonSummaryOnPreLoopEarlyReturns(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, dir string) *orchestratorRunFunc
+	}{
+		{
+			name: "sessions.json absent",
+			setup: func(_ *testing.T, _ string) *orchestratorRunFunc {
+				return &orchestratorRunFunc{}
+			},
+		},
+		{
+			name: "zero saved sessions",
+			setup: func(t *testing.T, dir string) *orchestratorRunFunc {
+				writeValidIndex(t, dir, []state.Session{})
+				return &orchestratorRunFunc{listSessionsOut: ""}
+			},
+		},
+		{
+			name: "list-sessions fails",
+			setup: func(t *testing.T, dir string) *orchestratorRunFunc {
+				writeValidIndex(t, dir, []state.Session{
+					{Name: "work", Windows: []state.Window{
+						{Index: 0, Panes: []state.Pane{{Index: 0, CWD: "/w", ScrollbackFile: "scrollback/x.bin"}}},
+					}},
+				})
+				return &orchestratorRunFunc{listSessionsOut: "malformed-line"}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rf := tc.setup(t, dir)
+			mock := &mockCommander{RunFunc: rf.run}
+			logger, sink := openTestLogger(t, dir)
+			o := newOrchestrator(t, mock, dir, logger)
+			if _, err := o.Restore(); err != nil {
+				t.Fatalf("Restore: %v", err)
+			}
+			if line := skeletonSummaryLine(t, sink); line != "" {
+				t.Errorf("expected no skeleton-complete summary on early return; got %q", line)
+			}
+		})
+	}
+}
+
+func TestOrchestrator_EmitsNoSkeletonSummaryOnCorruptIndex(t *testing.T) {
+	dir := t.TempDir()
+	writeRawIndex(t, dir, []byte("{not json"))
+
+	mock := &mockCommander{RunFunc: defaultRunFunc}
+	logger, sink := openTestLogger(t, dir)
+	o := newOrchestrator(t, mock, dir, logger)
+	corrupt, err := o.Restore()
+	if err == nil {
+		t.Fatal("expected wrapped ErrCorruptIndex; got nil")
+	}
+	if !corrupt {
+		t.Error("expected corrupt=true; got false")
+	}
+	if !errors.Is(err, state.ErrCorruptIndex) {
+		t.Errorf("errors.Is(err, ErrCorruptIndex) = false; want true. err=%v", err)
+	}
+	if line := skeletonSummaryLine(t, sink); line != "" {
+		t.Errorf("expected no skeleton-complete summary on corrupt index; got %q", line)
+	}
+}
+
 func TestOrchestrator_AlwaysRunsApplySkeletonMarkersAfterApplyWindowGeometry(t *testing.T) {
 	// ApplyWindowGeometry never fails the orchestrator (it returns void).
 	// Markers must always run after geometry — drive a session with a layout

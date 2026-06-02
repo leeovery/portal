@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -60,9 +61,29 @@ func (o *Orchestrator) Restore() (bool, error) {
 		StateDir: o.StateDir,
 		Logger:   o.Logger,
 	}
+
+	// Phase A cycle summary: count sessions actually skeleton-restored and
+	// tally their SAVED-topology windows/panes (not a live re-query — that is
+	// phase B's concern). One INFO summary fires after the loop per the spec's
+	// cycle-level summary cadence.
+	start := time.Now()
+	var restoredSessions, restoredWindows, restoredPanes int
 	for _, sess := range idx.Sessions {
-		o.restoreOne(sr, sess, liveSet)
+		if !o.restoreOne(sr, sess, liveSet) {
+			continue
+		}
+		restoredSessions++
+		restoredWindows += len(sess.Windows)
+		for _, w := range sess.Windows {
+			restoredPanes += len(w.Panes)
+		}
 	}
+	o.logger().Info("skeleton complete",
+		"sessions", restoredSessions,
+		"windows", restoredWindows,
+		"panes", restoredPanes,
+		"took", time.Since(start),
+	)
 	return false, nil
 }
 
@@ -108,29 +129,36 @@ func (o *Orchestrator) snapshotLiveSessions() (map[string]struct{}, bool) {
 // the SessionRestorer's create / geometry / markers sequence with all three
 // operations sharing the same live []tmux.PaneCoord that the arm phase
 // gathered from list-panes.
-func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) {
+//
+// Returns true only when the session was actually skeleton-restored — i.e. it
+// passed the underscore-skip, the live-skip, validateTopology, AND sr.Restore
+// returned without error. Every skip and the Restore-error path return false
+// (the per-session WARN still fires on the Restore-error path). The caller uses
+// the bool to tally the phase A cycle summary from the session's saved topology.
+func (o *Orchestrator) restoreOne(sr *SessionRestorer, sess state.Session, liveSet map[string]struct{}) bool {
 	if strings.HasPrefix(sess.Name, "_") {
 		o.logger().Warn("skipping underscore-prefixed session", "session", sess.Name)
-		return
+		return false
 	}
 
 	if _, alive := liveSet[sess.Name]; alive {
 		// Silent skip per spec — the steady-state common case.
-		return
+		return false
 	}
 
 	if !o.validateTopology(sess) {
-		return
+		return false
 	}
 
 	livePanes, err := sr.Restore(sess)
 	if err != nil {
 		o.logger().Warn("restore session failed", "session", sess.Name, "error", err)
-		return
+		return false
 	}
 
 	sr.ApplyWindowGeometry(sess, livePanes)
 	sr.ApplySkeletonMarkers(sess, livePanes)
+	return true
 }
 
 // validateTopology rejects sessions that cannot be skeleton-restored: zero
