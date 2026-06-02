@@ -21,7 +21,7 @@
           "date": "2026-06-02",
           "sources": {
             "state-notify-cascade-on-binary-upgrade": {
-              "status": "pending"
+              "status": "incorporated"
             }
           }
         }

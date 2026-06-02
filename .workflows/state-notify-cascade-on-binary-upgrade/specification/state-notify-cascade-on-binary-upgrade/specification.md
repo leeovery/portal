@@ -154,6 +154,22 @@ Required tests:
 
 Parser-level and pure-logic unit tests may still cover `ParseShowHooks` and the eviction-predicate matching, but they do **not** substitute for the real-tmux tests above — the blind spot lives below the parser.
 
+## Out of Scope & Non-Goals
+
+- **No change to what the hooks *do*.** `portal state notify` still touches the `save.requested` marker; `commit-now` and `signal-hydrate` keep their current behavior. The set of Portal-managed events is unchanged (the six notify events, `session-closed`, the two hydration events). Only *how registration converges* changes.
+- **The `hooks-and-saver-vanish-after-recent-fixes` cross-link is a lead, not part of this fix.** The investigation flagged a *plausible* common cause (a high-rate `save.requested` write storm pressuring the daemon capture loop) but traced no code for it. This fix removes the write-storm driver; whether that resolves the vanish defect is left to that defect's own investigation. Not addressed here.
+- **The intermittent ~98% CPU peg is an unproven lead.** It is mechanically consistent with the cascade (139 fork+exec jobs funnelled through the single-threaded tmux server per event) and should be relieved as a consequence of the fix, but it is not a separately-verified symptom this spec commits to fixing.
+- **migrate-rename v2 is out of scope.** The deferred session-rename hook-key migration (`cmd/state_migrate_rename.go`) is untouched; only its legacy teardown substring is preserved (see "Teardown Rewrite").
+
+## Risks
+
+- **Fix complexity: Low.** One new one-line tmux seam (`ShowGlobalHooksForEvent`); registration and teardown reuse primitives that already exist (`portalEntriesFor`, `containsAny`, reverse-index `UnsetGlobalHookAt`, `AppendGlobalHook`); `ParseShowHooks` is unchanged.
+- **Regression risk: Low–Medium.** The eviction predicate must match **only** Portal-authored bodies so user hooks on `pane-focus-out` / `window-layout-changed` survive (covered by Acceptance Criteria 4 and the self-heal test). Because the two migration helpers are folded in, the `--` signal-hydrate convergence and the `session-closed → commit-now` convergence must be explicitly verified to still hold under the unified path.
+
+## Rollout
+
+Regular release. **No dedicated data migration** — existing 139-deep stacks self-collapse to one entry on the first bootstrap after the upgraded binary runs. No flag, no gate, no run-once cleanup code. The fix is fully effective from the next `portal open` / `x` / attach.
+
 ---
 
 ## Working Notes
