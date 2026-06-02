@@ -1,0 +1,15 @@
+AGENT: architecture
+CYCLE: 2
+STATUS: findings
+
+NOTE: Both cycle-1 architecture findings are resolved (the SweepOrphanFIFOs callerLogger rename + documented intentional split, and the process_role drift-tripwire test in internal/log/process_role_test.go), so they are not re-raised.
+
+FINDINGS:
+
+- FINDING: Exported SweepLogs carries a dead mode and a conditionally-ignored parameter
+  - SEVERITY: low
+  - FILES: internal/log/retention.go:131-139, cmd/clean.go:178
+  - DESCRIPTION: `SweepLogs(stateDir string, retentionDays int, gated bool) error` is the package's only exported retention entry point, but its parameter space does not match how it is consumed. The sole production caller is `cleanRotatedLogs` (cmd/clean.go:178), which always invokes `SweepLogs(stateDir, 0, false)`. The `gated==true` arm of SweepLogs is reachable from no production caller — the only gated (per-process startup) sweep runs through the unexported `runRetentionSweep` wired into the sink's dayRoll seam, never through SweepLogs. Worse, the two parameters interact: the doc comment states retentionDays is "honoured ONLY when gated==false" and "ignored" when gated==true, so a caller passing `SweepLogs(dir, 30, true)` would have its 30 silently discarded in favour of env resolution. This is the boolean-parameter + conditionally-meaningful-parameter anti-pattern (code-quality.md "Boolean parameters", "Untyped parameters when concrete types are known"): the exported signature advertises caller-chosen gating and a caller-chosen window that the single real caller never uses and that, in the dead combination, would behave surprisingly. It widens the public surface of internal/log beyond what the implementation supports as a coherent contract.
+  - RECOMMENDATION: Narrow the exported surface to the one mode that is actually a public entry point: the explicit user-invoked --logs sweep (ungated, cutoff=today). Drop SweepLogs to a parameterless-mode signature such as `SweepLogsForClean(stateDir string) error` (delete-everything-older-than-today, ungated) that delegates to `runRetentionSweepWithDays(stateDir, today, false, &zero)`. Keep the gated per-startup path entirely behind the unexported runRetentionSweep/dayRoll seam where it already lives. This removes the dead `gated==true` branch from the public API and eliminates the silently-ignored-retentionDays footgun while preserving the single-source-of-truth runRetentionSweepWithDays algorithm.
+
+SUMMARY: The observability layer composes cleanly as a whole — the single-owner internal/log package, the import-cycle guard (joins portal.log itself rather than depending on internal/state), the atomic swappable-handler indirection, the shared retention sweep with no duplicated walk logic, the earned 3-caller CombinedOutputWithContext boundary helper, and the consistent store-seam audit chokepoints are well-structured; both cycle-1 findings are resolved. One residual API-surface issue: the exported SweepLogs advertises a gated mode no caller uses and a retentionDays parameter that is silently ignored in that mode.
