@@ -132,6 +132,20 @@ func runHydrate(cfg hydrateConfig) error {
 			}
 			return err
 		}
+		// Non-timeout open error (notably a MISSING FIFO: os.OpenFile returns
+		// ENOENT immediately rather than blocking, so the goroutine surfaces a
+		// non-ErrHydrateTimeout error the select returns verbatim). This is the
+		// `fifo missing` exit path (spec § Hook-firing observability limit,
+		// Mechanical rule 3 — fifo-missing row); `path` is the reserved attr
+		// (Mechanical rule 2) carrying cfg.FIFO. DIVERGENCE NOTE: unlike the
+		// other three exit-path rows, this branch HARD-RETURNS the error rather
+		// than falling through to execShellOrHookAndExit — there is no exec to
+		// precede, so this is a non-exec exit-path INFO and does not match the
+		// spec table's "then exec" framing for this row. The framing assumed a
+		// silent-ENOENT fall-through-to-exec shape; the live handler instead
+		// surfaces the error to the caller (the pane closes), which is why the
+		// INFO stands alone here.
+		cfg.Logger.Info("fifo missing", "path", cfg.FIFO)
 		return fmt.Errorf("open fifo %s: %w", cfg.FIFO, err)
 	}
 
@@ -352,6 +366,19 @@ func handleHydrateFileMissing(cfg hydrateConfig, ctx hydrateFileMissingContext) 
 	default:
 		cfg.Logger.Warn("scrollback file I/O error", "hook_key", cfg.HookKey, "path", cfg.File, "error", ctx.Cause)
 	}
+
+	// 1b. Forensic-trail INFO for the scrollback-missing exit path (spec §
+	// Hook-firing observability limit, Mechanical rule 3 — scrollback-missing
+	// row). Emitted HERE, once, regardless of which call site (os.Open failure
+	// or mid-stream io.Copy failure) routed in and regardless of cause (ENOENT
+	// / permission / generic I/O) — this handler owns the file-missing recovery
+	// sequence and is the single funnel for all four failure shapes, so the
+	// single INFO fires exactly once per file-missing recovery. Additive to the
+	// retained per-cause WARNs above. `path` is the reserved attr for genuine
+	// filesystem paths (Mechanical rule 2) and carries cfg.File (the scrollback
+	// path), deliberately distinct from `target` (the exec'd binary on the
+	// exec INFO). Precedes runHydrate's execShellOrHookAndExit exec INFO.
+	cfg.Logger.Info("scrollback missing", "path", cfg.File)
 
 	// 2. Deliberately NO 100ms sleep — nothing was fully dumped, so there is
 	// no PTY parser settle to wait on.
