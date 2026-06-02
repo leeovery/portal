@@ -315,6 +315,14 @@ func handleHydrateTimeout(cfg hydrateConfig) error {
 	// the entry with the affected pane in the saved sessions.json.
 	cfg.Logger.Warn("timeout waiting for hydrate signal", "hook_key", cfg.HookKey, "path", cfg.FIFO)
 
+	// 4. Forensic-trail INFO for the FIFO-timeout exit path (spec § Hook-firing
+	// observability limit, Mechanical rule 3 — timeout row). hydrateTimeout is
+	// passed as a time.Duration so the text handler renders took=3s via
+	// Duration.String() (NOT a quoted string). Emitted here — before runHydrate
+	// falls through to execShellOrHookAndExit — so this signal-timeout INFO
+	// precedes the terminal hydrate: exec INFO on the timeout path.
+	cfg.Logger.Info("signal timeout", "took", hydrateTimeout)
+
 	unsetSkeletonMarkerOrLog(cfg)
 	// Recovery path matches handleHydrateFileMissing: marker unset above; runHydrate's exec fall-through still pays the 100ms settle sleep before exec (preserved per spec — same posture as the success path).
 	return nil
