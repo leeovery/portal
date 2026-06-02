@@ -174,32 +174,11 @@ func TestSweepOrphanFIFOs_LogsAndContinuesOnPerFileFailure(t *testing.T) {
 	}
 }
 
-func TestSweepOrphanFIFOs_LogsLinePerRemovedOrphan(t *testing.T) {
-	// Sweep emits INFO-level entries for removed orphans; default WARN
-	// threshold filters them out, so opt the test into INFO emission.
-	t.Setenv("PORTAL_LOG_LEVEL", "info")
-
-	dir := t.TempDir()
-
-	orphan := filepath.Join(dir, "hydrate-gone__0.0.fifo")
-	if err := state.CreateFIFO(orphan); err != nil {
-		t.Fatalf("create orphan: %v", err)
-	}
-
-	lg, sink := openTestLogger(t, dir)
-
-	if err := state.SweepOrphanFIFOs(dir, map[string]struct{}{}, lg); err != nil {
-		t.Fatalf("SweepOrphanFIFOs: %v", err)
-	}
-
-	body := sink.body()
-	if !strings.Contains(body, orphan) {
-		t.Errorf("log missing path %s; body = %q", orphan, body)
-	}
-	if !strings.Contains(body, "INFO") {
-		t.Errorf("log missing INFO level; body = %q", body)
-	}
-}
+// NOTE: the per-removal breadcrumb was demoted from INFO on the injected logger
+// to DEBUG "orphan fifo reaped" on the clean-component package logger in Phase 5
+// Task 5-6. That behaviour is now asserted in fifo_sweep_summary_test.go
+// (TestSweepOrphanFIFOs_DemotesPerRemovalInfoToDebugUnderClean), so the old
+// INFO-on-injected-logger assertion is removed.
 
 func TestSweepOrphanFIFOs_TreatsSymlinksAsNonFIFOs(t *testing.T) {
 	dir := t.TempDir()

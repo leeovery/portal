@@ -5,7 +5,19 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/leeovery/portal/internal/log"
 )
+
+// cleanLogger is the clean-component-bound package logger used for the
+// orphan-FIFO sweep's cycle summary and its demoted per-removal DEBUG
+// breadcrumb. Per-item lstat/remove WARNs stay on the injected bootstrap-bound
+// logger seam so an operator can correlate a failure with its bootstrap step;
+// the summary and per-item reaped breadcrumb group the sweep's own detail under
+// the clean component. It routes through the process-wide handler indirection,
+// so log.SetTestHandler captures it in tests.
+var cleanLogger = log.For("clean")
 
 // SweepOrphanFIFOs removes hydrate-*.fifo files in dir whose paneKey is not
 // present in liveMarkerKeys. Non-FIFO files matching the glob (regular files,
@@ -23,6 +35,8 @@ import (
 // FIFOs are created in the next bootstrap cycle.
 func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *slog.Logger) error {
 	logger = loggerOrDiscard(logger)
+	start := time.Now()
+	var reaped, skipped int
 	pattern := filepath.Join(dir, "hydrate-*.fifo")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
@@ -33,21 +47,27 @@ func SweepOrphanFIFOs(dir string, liveMarkerKeys map[string]struct{}, logger *sl
 		fi, err := os.Lstat(path)
 		if err != nil {
 			logger.Warn("orphan fifo lstat failed", "path", path, "error", err)
+			skipped++
 			continue
 		}
 		if fi.Mode()&os.ModeNamedPipe == 0 {
 			// Not a FIFO — could be a regular file or symlink. Preserve.
+			skipped++
 			continue
 		}
 		paneKey := PaneKeyFromFIFOPath(path)
 		if _, alive := liveMarkerKeys[paneKey]; alive {
+			skipped++
 			continue
 		}
 		if err := os.Remove(path); err != nil {
 			logger.Warn("remove orphan fifo failed", "path", path, "error", err)
+			skipped++
 			continue
 		}
-		logger.Info("removed orphan fifo", "path", path)
+		reaped++
+		cleanLogger.Debug("orphan fifo reaped", "path", path)
 	}
+	cleanLogger.Info("orphan-fifo sweep complete", "reaped", reaped, "skipped", skipped, "took", time.Since(start))
 	return nil
 }
