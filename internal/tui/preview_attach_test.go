@@ -1,17 +1,15 @@
 package tui
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
-	"sync"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/leeovery/portal/internal/logtest"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -75,78 +73,21 @@ func (f *fakePreviewConnector) Connect(name string) error {
 	return f.err
 }
 
-// previewCaptureSink is a slog.Handler that records every record into a text
-// body in the shape "<LEVEL> component=<c> <msg> key=value..." so the
-// preview-attach tests can assert on the level label, the bound component, and
-// per-call attrs after the observability migration retyped the pipeline's
-// logger to *slog.Logger.
-type previewCaptureSink struct {
-	mu    sync.Mutex
-	lines []string
-	// shared points at the lines-owning sink so handlers derived via
-	// WithAttrs/WithGroup (e.g. the .With("component", ...) binding) still
-	// record into the same buffer.
-	shared *previewCaptureSink
-	// bound holds attrs accumulated via WithAttrs (notably the component
-	// binding) so they are rendered on every record the derived handler emits.
-	bound []slog.Attr
-}
-
-func (s *previewCaptureSink) owner() *previewCaptureSink {
-	if s.shared != nil {
-		return s.shared
-	}
-	return s
-}
-
-func (s *previewCaptureSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (s *previewCaptureSink) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(s.bound)+len(attrs))
-	next = append(next, s.bound...)
-	next = append(next, attrs...)
-	return &previewCaptureSink{shared: s.owner(), bound: next}
-}
-
-func (s *previewCaptureSink) WithGroup(_ string) slog.Handler { return s }
-
-func (s *previewCaptureSink) Handle(_ context.Context, r slog.Record) error {
-	var b strings.Builder
-	b.WriteString(r.Level.String())
-	b.WriteString(" ")
-	b.WriteString(r.Message)
-	for _, a := range s.bound {
-		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
-		return true
-	})
-	owner := s.owner()
-	owner.mu.Lock()
-	owner.lines = append(owner.lines, b.String())
-	owner.mu.Unlock()
-	return nil
-}
-
-func (s *previewCaptureSink) body() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return strings.Join(s.lines, "\n")
-}
-
 // newTestLogger returns a capturing *slog.Logger bound to the preview
-// component plus the sink so tests can read back what was logged.
-func newTestLogger(t *testing.T) (*slog.Logger, *previewCaptureSink) {
+// component plus the sink so tests can read back what was logged. It routes
+// through the shared logtest.Sink so the rendered-body contract
+// ("<LEVEL> <msg> key=value...", component bound on every line) is
+// single-sourced with cmd, internal/state, and internal/restore.
+func newTestLogger(t *testing.T) (*slog.Logger, *logtest.Sink) {
 	t.Helper()
-	sink := &previewCaptureSink{}
-	return slog.New(sink).With("component", "preview"), sink
+	logger, sink := logtest.NewCaptureLogger(t)
+	return logger.With("component", "preview"), sink
 }
 
-// readLog renders the captured body of a previewCaptureSink.
-func readLog(t *testing.T, sink *previewCaptureSink) string {
+// readLog renders the captured body of a logtest.Sink.
+func readLog(t *testing.T, sink *logtest.Sink) string {
 	t.Helper()
-	return sink.body()
+	return sink.Body()
 }
 
 // runPipelineCmd invokes the tea.Cmd returned by Run and returns its message.
