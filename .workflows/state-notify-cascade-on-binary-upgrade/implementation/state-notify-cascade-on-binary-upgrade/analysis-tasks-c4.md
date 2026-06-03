@@ -6,7 +6,7 @@ total_proposed: 1
 # Analysis Tasks: state-notify-cascade-on-binary-upgrade (Cycle 4)
 
 ## Task 1: Route the three teardown tests' inline dispatch RunFuncs through perEventDispatchWithFaults
-status: pending
+status: approved
 severity: low
 sources: duplication
 
