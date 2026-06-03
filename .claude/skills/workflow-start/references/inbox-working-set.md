@@ -15,12 +15,13 @@ For each item in the set, read its file and synthesise a short summary of what i
 ```
   Working Set ({count} item{s}) — actions apply to all of them
 @if(set is mixed)
+
   ⚑ Work is unavailable while the set mixes types — drop to a single
     type to enable it.
 @endif
 
 @foreach(item in working_set)
-  {branch} • {item.title} ({item.type})
+  {branch}• {item.title} ({item.type})
 @foreach(line in wrap(item.summary, 65))
   {gutter}{line}
 @endforeach
@@ -29,15 +30,17 @@ For each item in the set, read its file and synthesise a short summary of what i
 
 **Render rules:**
 
-- **Item row**: `{branch} • {item.title} ({item.type})`. `{branch}` is `┌─` for the first item, `└─` for the last, `├─` for the rest; with a single item use `└─`. The `•` is a fixed marker, not a status icon.
-- **Summary sub-lines**: hard-wrap at 65 characters, capped at **3 lines** — if it would run longer, truncate the third line with `…` (`v`/`view` shows the full text). Each line aligns under the title.
-  - **`{gutter}`**: non-last item → `│` then 4 spaces; last item → 7 spaces (no `│`). The `│` runs continuously through every sub-line of non-last items so the tree never breaks.
+- **Item row**: `{branch}• {item.title} ({item.type})`. `{branch}` is `┌─ ` for the first item, `└─ ` for the last, `├─ ` for the rest (trailing space included). **With a single item, `{branch}` is empty** — render `• {item.title}` with no connector; a lone `└─` would join nothing. The `•` is a fixed marker, not a status icon.
+- **Flag spacing**: the `⚑` block carries one blank line above and one below. The blank inside `@if` supplies the upper gap; the blank after `@endif` supplies the lower. When no flag renders, only the lower blank remains — the title-to-items gap stays a single line, never doubled.
+- **Summary sub-lines**: hard-wrap at 65 characters, capped at **3 lines** — if it would run longer, truncate the third line with `…` (`v`/`view` shows the full text). Each line is indented **two columns past the title text** so the description reads as subordinate, not aligned directly under the title.
+  - **`{gutter}`** (the template's 2-space lead precedes it): non-last item → `│` then 6 spaces; last item → 7 spaces (no `│`); single item → 4 spaces. The `│` sits under the branch character and runs continuously through every sub-line of non-last items so the tree never breaks.
 
 > *Output the next fenced block as markdown (not a code block):*
 
 ```
 · · · · · · · · · · · ·
-What would you like to do?
+What would you like to do? Type a shortcut, or just tell me in
+your own words — e.g. "add 2 and 4", "drop the bug", "archive these".
 
 @if(set is type-uniform)
 - **`w`/`work`** — Proceed to discovery with this set
@@ -52,6 +55,8 @@ What would you like to do?
 ```
 
 **STOP.** Wait for user response.
+
+The user types a shorthand (`w`/`a`/`d`/`r`/`v`/`b`) **or** describes the action in their own words. Map the response to one branch below; a message that only asks about the set, naming no action, is `Ask`. When the phrasing also names items (*"add 2 and 4"*, *"drop the bug"*), carry that selection into the action so **B**/**C** apply it without re-prompting.
 
 #### If user chose `w`/`work`
 
@@ -103,6 +108,12 @@ Build a numbered list of inbox items **not already in the working set**, sorted 
 
 → Return to **A. Render the Working Set**.
 
+#### If the triggering message already named the item(s) to add
+
+Match each named item against the list — by title, or by the number if the user referenced one. If any reference is ambiguous or unmatched, → Proceed to **Otherwise**. Otherwise append the matched items to the working set.
+
+→ Return to **A. Render the Working Set**.
+
 #### Otherwise
 
 > *Output the next fenced block as a code block:*
@@ -135,6 +146,20 @@ Resolve each chosen item's inbox path and append it to the working set.
 
 ## C. Drop Items
 
+#### If the triggering message already named the item(s) to drop
+
+Resolve each named item against the working set by title or description. If any reference is ambiguous or unmatched, → Proceed to **Otherwise**. Otherwise remove the resolved items (they stay in the inbox):
+
+**If the set is now empty:**
+
+→ Return to caller.
+
+**If items remain:**
+
+→ Return to **A. Render the Working Set**.
+
+#### Otherwise
+
 > *Output the next fenced block as a code block:*
 
 ```
@@ -153,21 +178,13 @@ Drop which? (enter number(s), comma-separated, or **`b`/`back`**)
 
 **STOP.** Wait for user response.
 
-#### If user chose `b`/`back`
+**If user chose `b`/`back`:**
 
 → Return to **A. Render the Working Set**.
 
-#### If user chose one or more numbers
+**If user chose one or more numbers:**
 
-Remove the chosen items from the working set. They stay in the inbox.
-
-**If the set is now empty:**
-
-→ Return to caller.
-
-**If items remain:**
-
-→ Return to **A. Render the Working Set**.
+Remove the chosen items from the working set; they stay in the inbox. If the set is now empty, → Return to caller; otherwise → Return to **A. Render the Working Set**.
 
 ## D. Archive the Set
 

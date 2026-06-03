@@ -1,8 +1,8 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.4.15",
-    "commit": "88557d3390435eefb1b17ba8ea2ac698b90cfe00",
-    "installedAt": "2026-06-03T18:01:12.060Z",
+    "ref": "v0.4.17",
+    "commit": "797bd67991ae9f4c1ee1a6eb6cdb6fcf6eaf7a8c",
+    "installedAt": "2026-06-03T18:36:38.673Z",
     "agents": [
       "claude"
     ],
