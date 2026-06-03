@@ -92,7 +92,7 @@ confirms the per-event seam survives.
   - go build -o portal . passes and the full go test ./... suite is green with no regressions.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim to Task 1-5 (tick-54b1dc) — grep criterion now expects an empty result for the bare form, with a separate grep confirming the per-event seam survives.
 
 ---
