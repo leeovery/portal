@@ -24,7 +24,10 @@ import (
 // read fails loudly instead of passing silently. The register-side
 // `set-hook -ga` and read-fault channels are unused on the teardown path, so
 // setHookErrFor and readErrFor are nil; unsetErrFor carries the per-index
-// unset-fault injection.
+// unset-fault injection. Teardown tests that DO need read-fault injection call
+// perEventDispatchWithFaults directly (with readErrFor populated) rather than
+// widening this shim's signature — see the read-failure cases in this file and
+// hooks_unregister_warn_test.go.
 func dispatchUnregisterHooks(t *testing.T, showOutput string, unsetErrFor map[string]error) func(args ...string) (string, error) {
 	t.Helper()
 	return perEventDispatchWithFaults(t, showOutput, nil, nil, unsetErrFor)

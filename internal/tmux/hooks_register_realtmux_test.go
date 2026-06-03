@@ -447,6 +447,13 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 
 	// Assert per blind event: zero entries carry ANY teardown fingerprint, AND
 	// the co-resident user hook survives intact.
+	//
+	// This slice is hand-authored on purpose, NOT derived from
+	// tmux.PortalTeardownFingerprints(): it is a deliberate independent oracle.
+	// If the production derivation ever drops a fingerprint, this literal still
+	// asserts the reap, catching a bug that would also corrupt the production
+	// list. Do not "DRY" it back to the production helper — that would weaken
+	// the guard.
 	teardownFingerprints := []string{
 		"portal state notify",
 		"portal state commit-now",
