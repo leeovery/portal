@@ -79,11 +79,12 @@ func assertShowHooksWarnShape(t *testing.T, rec slog.Record, wantErr error) {
 	}
 }
 
-// TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn pins that the previously
-// silent migrateHydrationHooks branch now emits the same WARN before returning
-// (0, wrapped err). The migration is sealed inside RegisterPortalHooks; the
+// TestRegisterPortalHooks_HydrationReadFailureEmitsCanonicalWarn pins that the
+// previously silent migrateHydrationHooks branch (deleted; its coverage now
+// lives on the convergence path) emits the same WARN before returning the
+// wrapped err. The hydration convergence runs inside RegisterPortalHooks; the
 // injected logger is the WARN sink (production passes log.For("bootstrap")).
-func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
+func TestRegisterPortalHooks_HydrationReadFailureEmitsCanonicalWarn(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure (hydration)")
 	mock := &MockCommander{
 		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
@@ -105,7 +106,7 @@ func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 	// No set-hook may be dispatched when every per-event read fails.
 	assertNoSetHookCalls(t, mock.Calls)
 
-	// The migrateHydrationHooks branch is the FIRST show-hooks call. Assert at
+	// The hydration event's convergence is the FIRST show-hooks call. Assert at
 	// least one WARN carries the uniform shape with the sentinel reachable.
 	warns := showHooksWarnRecords(rec.records)
 	if len(warns) == 0 {
@@ -114,13 +115,13 @@ func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 	assertShowHooksWarnShape(t, warns[0], sentinel)
 }
 
-// TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized pins that the
+// TestRegisterPortalHooks_SessionClosedReadFailureEmitsCanonicalWarn pins that the
 // session-closed convergence emits the uniform WARN (message "show-hooks
 // failed", error_class=unexpected, error attr = the wrapped error) when its
 // per-event ShowGlobalHooksForEvent read fails, and skips appending
 // session-closed. The convergence engine now reads each event independently,
 // so the failure is scoped to the single failing event's read.
-func TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized(t *testing.T) {
+func TestRegisterPortalHooks_SessionClosedReadFailureEmitsCanonicalWarn(t *testing.T) {
 	// Fail only the per-event read for session-closed.
 	sentinel := errors.New("tmux show-hooks failure (session-closed)")
 	mock := &MockCommander{RunFunc: perEventDispatchWithFaults(t, "", nil,

@@ -59,11 +59,11 @@ func installStaleHooks(t *testing.T, client *tmux.Client) {
 	}
 }
 
-// TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed proves the
+// TestRegisterPortalHooks_HydrationConvergesUnSeparatedToDashForm proves the
 // happy-path upgrade: an installation with one stale un-separated entry on
 // every hydration event ends up with exactly one fixed entry per event
 // after bootstrap (eviction then install via RegisterPortalHooks).
-func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) {
+func TestRegisterPortalHooks_HydrationConvergesUnSeparatedToDashForm(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -105,11 +105,11 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	}
 }
 
-// TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap proves AC #3's
+// TestRegisterPortalHooks_HydrationSecondBootstrapIsSilentNoOp proves AC #3's
 // "unchanged across two consecutive bootstraps" invariant: a second
 // invocation evicts nothing, emits no INFO line, and leaves the entry count
 // per event at exactly 1.
-func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
+func TestRegisterPortalHooks_HydrationSecondBootstrapIsSilentNoOp(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -146,10 +146,10 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 	}
 }
 
-// TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp proves the
+// TestRegisterPortalHooks_HydrationFreshInstallIsSilentAndInstallsFixed proves the
 // fresh-install path: no stale entries to evict, no INFO emission. The
 // register loop still installs the fixed entry per event.
-func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) {
+func TestRegisterPortalHooks_HydrationFreshInstallIsSilentAndInstallsFixed(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -178,11 +178,11 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 	}
 }
 
-// TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder
+// TestRegisterPortalHooks_HydrationCollapsesMultipleStaleEntriesOnOneEvent
 // proves descending-index iteration prevents shift bugs: appending three
 // stale entries to a single event and then running the migration must
 // remove all three, leaving exactly one fixed entry post-bootstrap.
-func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t *testing.T) {
+func TestRegisterPortalHooks_HydrationCollapsesMultipleStaleEntriesOnOneEvent(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -224,7 +224,7 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	}
 }
 
-// TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint
+// TestRegisterPortalHooks_HydrationPreservesUserHookLackingFingerprint
 // proves the convergence engine's user-hook coexistence guarantee: a
 // hand-authored hook on a managed event that does NOT contain the event's
 // Portal fingerprint (`portal state signal-hydrate`) is never matched and
@@ -234,7 +234,7 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 // to record" — a user hook that *does* contain `portal state signal-hydrate`
 // would now be treated as Portal-owned and evicted; this test deliberately
 // uses a fingerprint-free user hook to assert the surviving case.)
-func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t *testing.T) {
+func TestRegisterPortalHooks_HydrationPreservesUserHookLackingFingerprint(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -271,18 +271,18 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 	}
 }
 
-// TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues uses a
+// TestRegisterPortalHooks_HydrationPerIndexEvictFailureWarnsAndContinues uses a
 // MockCommander to inject a per-index UnsetGlobalHookAt failure that the
-// real-tmux harness does not expose. The test drives the migration through
-// the canonical entry point RegisterPortalHooks (migrateHydrationHooks is
-// unexported, sealed inside it) and asserts:
+// real-tmux harness does not expose. The test drives the convergence through
+// the canonical entry point RegisterPortalHooks (the hydration migration is
+// now an ordinary side effect of the per-event convergence path) and asserts:
 //
 //   - RegisterPortalHooks returns nil — per-index migration failures
 //     surface only via WARN log lines, never as a returned error.
 //   - At least one WARN line names the failing event and a "failed to
 //     evict" message.
 //   - Successful evictions on other events trigger the INFO emission.
-func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) {
+func TestRegisterPortalHooks_HydrationPerIndexEvictFailureWarnsAndContinues(t *testing.T) {
 	// One stale entry per hydration event, served per-event via the shared
 	// perEventDispatchWithFaults helper (the single owner of the per-event
 	// read/dispatch skeleton). The unset-failure is injected through its
@@ -329,12 +329,12 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	}
 }
 
-// TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime
+// TestRegisterPortalHooks_HydrationScansEveryRuntimeTriggerEvent
 // proves the migration scans every event in HydrationTriggerEvents (read at
 // runtime, not hard-coded). Driving through RegisterPortalHooks, the
 // set-hook -gu calls observed must cover every event in the canonical list
 // — extending the slice later requires no code change in migration.
-func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t *testing.T) {
+func TestRegisterPortalHooks_HydrationScansEveryRuntimeTriggerEvent(t *testing.T) {
 	// Seed one stale entry per hydration event and serve it through the
 	// canonical perEventDispatch (single source of truth for per-event-filtered
 	// show-hooks output). The convergence engine must scan every event in the
@@ -376,7 +376,7 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	}
 }
 
-// TestMigrateHydrationHooks_ShowHooksFailureWrapsError proves the only path
+// TestRegisterPortalHooks_HydrationReadFailureWrapsErrorAndSkipsSetHook proves the only path
 // that surfaces an error from a per-event convergence: a
 // ShowGlobalHooksForEvent failure. Per-index UnsetGlobalHookAt failures are
 // best-effort (WARN + continue), but a failure to read an event at all skips
@@ -384,7 +384,7 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 // aggregate. With every per-event read failing, the aggregate names each
 // managed event's leg ("register hook on <event>: show-hooks failed: ...").
 // No set-hook call must ever be made when every read fails.
-func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
+func TestRegisterPortalHooks_HydrationReadFailureWrapsErrorAndSkipsSetHook(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure")
 	mock := &MockCommander{
 		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
