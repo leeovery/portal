@@ -1282,13 +1282,12 @@ func createLeadingDashSession(t *testing.T, ts *tmuxtest.Socket, name, cwd strin
 // production HookRegistrar adapter wiring.
 func verifyHydrationHookEntries(t *testing.T, client *tmux.Client) {
 	t.Helper()
-	raw, err := client.ShowGlobalHooks()
-	if err != nil {
-		t.Fatalf("ShowGlobalHooks: %v", err)
-	}
-	parsed := tmux.ParseShowHooks(raw)
 	for _, event := range tmux.HydrationTriggerEvents {
-		entries := parsed[event]
+		raw, err := client.ShowGlobalHooksForEvent(event)
+		if err != nil {
+			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", event, err)
+		}
+		entries := tmux.ParseShowHooks(raw)[event]
 		var matching []string
 		for _, e := range entries {
 			if strings.Contains(e.Command, "portal state signal-hydrate") {

@@ -763,17 +763,6 @@ func (c *Client) UnsetServerOption(name string) error {
 	return nil
 }
 
-// ShowGlobalHooks returns the raw output of "tmux show-hooks -g".
-// The output is returned verbatim (no trimming) so callers can parse the
-// array-indexed hook entries with line and whitespace fidelity intact.
-func (c *Client) ShowGlobalHooks() (string, error) {
-	output, err := c.cmd.Run("show-hooks", "-g")
-	if err != nil {
-		return "", fmt.Errorf("failed to show global hooks: %w", err)
-	}
-	return output, nil
-}
-
 // ShowGlobalHooksForEvent returns the raw output of "tmux show-hooks -g <event>",
 // a per-event read of the global hook scope. tmux 3.6b's no-arg show-hooks -g
 // does not enumerate an entire class of events (pane-* and the geometry/rename

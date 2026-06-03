@@ -38,13 +38,13 @@ const staleSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 
 // AC #3's "exactly 1 entry per event after bootstrap" invariant.
 func countSignalHydrateEntries(t *testing.T, client *tmux.Client) map[string]int {
 	t.Helper()
-	raw, err := client.ShowGlobalHooks()
-	if err != nil {
-		t.Fatalf("ShowGlobalHooks: %v", err)
-	}
-	parsed := tmux.ParseShowHooks(raw)
 	counts := make(map[string]int)
 	for _, ev := range tmux.HydrationTriggerEvents {
+		raw, err := client.ShowGlobalHooksForEvent(ev)
+		if err != nil {
+			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", ev, err)
+		}
+		parsed := tmux.ParseShowHooks(raw)
 		for _, e := range parsed[ev] {
 			if strings.Contains(e.Command, "portal state signal-hydrate") {
 				counts[ev]++
@@ -102,13 +102,13 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	}
 
 	// Verify the fixed entry actually contains the `--` separator on each
-	// hydration event.
-	raw, err := client.ShowGlobalHooks()
-	if err != nil {
-		t.Fatalf("ShowGlobalHooks: %v", err)
-	}
-	parsed := tmux.ParseShowHooks(raw)
+	// hydration event. Read each event's own table via the per-event seam.
 	for _, ev := range tmux.HydrationTriggerEvents {
+		raw, err := client.ShowGlobalHooksForEvent(ev)
+		if err != nil {
+			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", ev, err)
+		}
+		parsed := tmux.ParseShowHooks(raw)
 		var found bool
 		for _, e := range parsed[ev] {
 			if strings.Contains(e.Command, "portal state signal-hydrate -- ") {
@@ -274,10 +274,10 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 
 	// User entry must still be there. The convergence also appends the
 	// Portal-fixed entry, so client-attached holds the user hook + one Portal
-	// hook.
-	raw, err := client.ShowGlobalHooks()
+	// hook. Read client-attached's own table via the per-event seam.
+	raw, err := client.ShowGlobalHooksForEvent("client-attached")
 	if err != nil {
-		t.Fatalf("ShowGlobalHooks: %v", err)
+		t.Fatalf("ShowGlobalHooksForEvent(client-attached): %v", err)
 	}
 	parsed := tmux.ParseShowHooks(raw)
 
