@@ -40,4 +40,4 @@ The user confirmed quick-fix shape (small, mechanical, test-only edits, no behav
 
 ## Conclusion
 
-(none)
+Routed to scoping.
