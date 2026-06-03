@@ -37,4 +37,4 @@ Relevant code lives in the key-hint footer rendering for the sessions and projec
 
 ## Conclusion
 
-(none)
+Routed to scoping.
