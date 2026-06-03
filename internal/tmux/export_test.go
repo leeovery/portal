@@ -28,6 +28,19 @@ import (
 // KillSaverAndWaitForDaemon re-exports killSaverAndWaitForDaemon for tests.
 var KillSaverAndWaitForDaemon = killSaverAndWaitForDaemon
 
+// ManagedEventNames re-exports the projected `event` field of every
+// managedEvents entry, in declaration order, so the external tmux_test
+// package can assert the Portal-managed event-set parity against
+// PortalTeardownEvents without reaching into the unexported table. The slice
+// is rebuilt on each call from the live managedEvents so the parity guard
+// tracks any future edit to the table.
+func ManagedEventNames() []string { return managedEventNames() }
+
+// PortalTeardownEvents re-exports the portalEvents teardown enumeration so the
+// external tmux_test package can assert it equals ManagedEventNames — proving
+// registration and teardown operate over the identical event-set.
+func PortalTeardownEvents() []string { return portalEvents }
+
 // SaverPanePID re-exports the unexported saverPanePID for the external
 // tmux_test package's rich-sentinel-classification unit tests. Production
 // code routes through SaverPanePIDOrAbsent — the sole exported entry point

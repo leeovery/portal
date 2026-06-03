@@ -3,7 +3,6 @@ package tmux
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -40,16 +39,22 @@ var portalCommandSubstrings = []string{
 // hooks. UnregisterPortalHooks scopes its removals to these events; matching
 // command substrings on any other event (e.g. window-renamed) are ignored.
 //
-// Order: save-trigger events first, then hydration-trigger events — mirrors
-// the registration order in RegisterPortalHooks. The two source slices are
-// disjoint by construction (save events fire on the server/window side;
-// hydration events fire on the client side), so a plain concatenation is
-// sufficient — no deduping needed.
+// Derived — not independently authored — from managedEvents (the convergence
+// engine's per-event table in hooks_register.go) by projecting each entry's
+// event field. managedEvents is the single source of truth for the
+// Portal-managed event-set, so registration and teardown provably operate
+// over the identical events and adding a future event to managedEvents
+// automatically widens teardown coverage. TestPortalManagedEventSetParity
+// guards against accidental re-divergence.
+//
+// Order mirrors managedEvents declaration order (save-trigger events first,
+// then the two hydration-trigger events) — preserved because
+// hooks_unregister_test.go's cross-event removal-order assertion follows it.
 //
 // Legacy `migrate-rename` entries from older binaries land on
-// `session-renamed`, which is part of saveTriggerEvents, so they remain
+// `session-renamed`, which is one of the projected events, so they remain
 // reachable through portalCommandSubstrings without a dedicated event entry.
-var portalEvents = slices.Concat(saveTriggerEvents, HydrationTriggerEvents)
+var portalEvents = managedEventNames()
 
 // UnregisterPortalHooks removes every Portal-owned hook entry from the global
 // tmux hook table.

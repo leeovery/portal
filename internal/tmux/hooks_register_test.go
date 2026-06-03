@@ -12,8 +12,9 @@ import (
 )
 
 // expectedSaveTriggerEvents is the canonical save-trigger event list, in
-// registration order. Mirrors saveTriggerEvents in hooks_register.go; kept
-// here so tests can assert order without exporting the internal slice.
+// registration order. Mirrors the save-trigger (non-hydration) prefix of the
+// managedEvents table in hooks_register.go; kept here so tests can assert
+// order without exporting the internal table.
 var expectedSaveTriggerEvents = []string{
 	"session-created",
 	"session-closed",

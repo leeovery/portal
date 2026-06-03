@@ -54,17 +54,19 @@ var managedEvents = []managedEvent{
 	{event: "client-session-changed", fingerprints: []string{signalHydrateMarker}, desiredBody: signalHydrateCommand},
 }
 
-// saveTriggerEvents lists every tmux event on which Portal registers a
-// `portal state notify` hook. Order is significant — RegisterPortalHooks
-// processes save-trigger events before hydration-trigger events.
-var saveTriggerEvents = []string{
-	"session-created",
-	"session-closed",
-	"session-renamed",
-	"window-linked",
-	"window-unlinked",
-	"window-layout-changed",
-	"pane-focus-out",
+// managedEventNames projects the event field out of every managedEvents
+// entry, preserving declaration order, so managedEvents is the single
+// production source of truth for the Portal-managed event-set. portalEvents
+// (the teardown enumeration) is derived from this projection — registration
+// and teardown therefore provably operate over the identical event-set, and
+// adding a future event to managedEvents automatically widens teardown
+// coverage. A package-level guard test asserts the two stay in lockstep.
+func managedEventNames() []string {
+	names := make([]string, len(managedEvents))
+	for i, me := range managedEvents {
+		names[i] = me.event
+	}
+	return names
 }
 
 // HydrationTriggerEvents lists every tmux event on which Portal registers a
