@@ -357,6 +357,16 @@ func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing
 	}
 }
 
+// sessionClosedUserHookFingerprint is the unique marker embedded in the
+// session-closed co-resident user hook. It contains NONE of the teardown
+// fingerprints, so teardown must classify it non-Portal and leave it intact.
+const sessionClosedUserHookFingerprint = "echo user session-closed hook"
+
+// sessionClosedUserHookBody is the full run-shell-wrapped co-resident user hook
+// seeded on session-closed alongside the stacked commit-now entries. A user
+// `.tmux.conf` hook on a managed event must survive teardown (AC #4).
+const sessionClosedUserHookBody = `run-shell "echo user session-closed hook"`
+
 // TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact is
 // the real-tmux teardown-at-depth guard (Testing Requirement 4 / Acceptance
 // Criteria 4 and 5). On EACH blind event (pane-focus-out and
@@ -364,6 +374,17 @@ func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing
 // co-resident non-Portal user hook, runs UnregisterPortalHooks once, and
 // asserts every Portal entry is reaped (count → 0) while the user hook
 // survives on each event.
+//
+// It ALSO seeds a K-deep stack of the converged session-closed body
+// (commitNowCommand — whose only Portal fingerprint is `portal state
+// commit-now`) plus a co-resident user hook on session-closed, and asserts the
+// commit-now stack reaps to zero with the user hook intact. This closes the
+// fingerprint seam (AC #5): registration converges session-closed onto
+// commit-now, so teardown's eviction predicate must reap commit-now too. With
+// the pre-fix hand-authored portalCommandSubstrings (which omitted
+// `portal state commit-now`) this commit-now assertion fails RED — the prior
+// version of this test only ever seeded notify bodies on the two blind events,
+// so its commit-now assertion was vacuously green.
 //
 // This is the path that NO-OPS pre-fix: the pre-fix teardown read through the
 // no-arg `show-hooks -g`, which is blind to these two events, so it saw zero
@@ -399,13 +420,33 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 		}
 	}
 
-	// One teardown must reap every Portal entry on BOTH blind events.
+	// Seed session-closed with a K-deep stack of the converged commit-now body
+	// plus one co-resident user hook. This is the fingerprint-seam path: the
+	// commit-now body carries ONLY the `portal state commit-now` fingerprint,
+	// which the pre-fix teardown predicate omitted.
+	const sessionClosedEvent = "session-closed"
+	for i := 0; i < stackDepth; i++ {
+		if err := client.AppendGlobalHook(sessionClosedEvent, expectedCommitNowCommand); err != nil {
+			t.Fatalf("seed commit-now entry %d on %s: AppendGlobalHook: %v", i, sessionClosedEvent, err)
+		}
+	}
+	if err := client.AppendGlobalHook(sessionClosedEvent, sessionClosedUserHookBody); err != nil {
+		t.Fatalf("seed user hook on %s: AppendGlobalHook: %v", sessionClosedEvent, err)
+	}
+	// Pre-condition sanity (NON-VACUOUS): the commit-now stack really is K deep,
+	// so a green commit-now reap assertion cannot be a "nothing was there" pass.
+	if got := countPortalEntriesForEvent(t, client, sessionClosedEvent, commitNowFingerprint); got != stackDepth {
+		t.Fatalf("pre-seed %s: commit-now entry count = %d, want %d", sessionClosedEvent, got, stackDepth)
+	}
+
+	// One teardown must reap every Portal entry on the blind events AND on
+	// session-closed.
 	if err := tmux.UnregisterPortalHooks(client); err != nil {
 		t.Fatalf("UnregisterPortalHooks: %v", err)
 	}
 
-	// Assert per blind event: zero entries carry ANY portalCommandSubstrings
-	// fingerprint, AND the co-resident user hook survives intact.
+	// Assert per blind event: zero entries carry ANY teardown fingerprint, AND
+	// the co-resident user hook survives intact.
 	teardownFingerprints := []string{
 		"portal state notify",
 		"portal state commit-now",
@@ -421,6 +462,16 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 		if got := countPortalEntriesForEvent(t, client, event, userHookFingerprint); got != 1 {
 			t.Errorf("after teardown: event %q user hook count = %d, want 1 (must survive untouched)", event, got)
 		}
+	}
+
+	// Assert session-closed: the K-deep commit-now stack is reaped to zero (the
+	// fingerprint-seam fix), and the co-resident user hook survives at count 1.
+	if got := countPortalEntriesForEvent(t, client, sessionClosedEvent, commitNowFingerprint); got != 0 {
+		t.Errorf("after teardown: event %q still holds %d commit-now entries, want 0 — "+
+			"the converged session-closed commit-now hook survived teardown (AC #5 seam)", sessionClosedEvent, got)
+	}
+	if got := countPortalEntriesForEvent(t, client, sessionClosedEvent, sessionClosedUserHookFingerprint); got != 1 {
+		t.Errorf("after teardown: event %q user hook count = %d, want 1 (must survive untouched)", sessionClosedEvent, got)
 	}
 }
 

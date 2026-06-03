@@ -21,19 +21,26 @@ var bootstrapLogger = log.For("bootstrap")
 // command body contains one of these substrings; user and other-plugin
 // entries on the same events are left untouched.
 //
+// DERIVED, not hand-authored: it is the union of every managedEvents entry's
+// fingerprints (via teardownFingerprints in hooks_register.go) plus the legacy
+// migrate-rename substring. Because the registration-side fingerprints flow in
+// from managedEvents, adding a future hook category to managedEvents
+// automatically widens teardown coverage — a registered category can never
+// again become un-reapable. (The session-closed `portal state commit-now`
+// fingerprint was missing from the previous hand-authored literal, so the
+// converged commit-now hook survived `portal hooks reset`; deriving the set
+// closes that seam.) TestPortalTeardownFingerprintParity guards the derivation.
+//
 // `portal state migrate-rename` is intentionally retained even though the
-// register side no longer installs it: older Portal binaries (pre-Task 7-2)
-// shipped the inert migrate-rename hook on `session-renamed`, and any
-// installation upgrading from one of those builds will still have a stale
-// entry sitting in the global hook table. Keeping the substring here means
-// a single `portal hooks reset` (or any other path that calls
-// UnregisterPortalHooks) cleans those legacy entries up. Drop only once the
-// migration window for those binaries is considered closed.
-var portalCommandSubstrings = []string{
-	"portal state notify",
-	"portal state signal-hydrate",
-	"portal state migrate-rename",
-}
+// register side no longer installs it (it appears in NO managedEvents entry, so
+// teardownFingerprints explicitly adds it): older Portal binaries (pre-Task
+// 7-2) shipped the inert migrate-rename hook on `session-renamed`, and any
+// installation upgrading from one of those builds will still have a stale entry
+// sitting in the global hook table. Keeping the substring here means a single
+// `portal hooks reset` (or any other path that calls UnregisterPortalHooks)
+// cleans those legacy entries up. Drop only once the migration window for those
+// binaries is considered closed.
+var portalCommandSubstrings = teardownFingerprints()
 
 // portalEvents is the closed set of tmux events on which Portal registers
 // hooks. UnregisterPortalHooks scopes its removals to these events; matching

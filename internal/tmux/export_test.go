@@ -41,6 +41,24 @@ func ManagedEventNames() []string { return managedEventNames() }
 // registration and teardown operate over the identical event-set.
 func PortalTeardownEvents() []string { return portalEvents }
 
+// PortalTeardownFingerprints re-exports the portalCommandSubstrings teardown
+// eviction predicate so the external tmux_test package can assert it is the
+// derived union of managedEvents fingerprints plus the legacy migrate-rename
+// substring (TestPortalTeardownFingerprintParity).
+func PortalTeardownFingerprints() []string { return portalCommandSubstrings }
+
+// ManagedEventFingerprintUnion re-exports the de-duplicated union of every
+// managedEvents entry's fingerprints (WITHOUT the teardown-only migrate-rename
+// addend) so the fingerprint-parity guard can assert every registered
+// fingerprint is reapable by teardown and that registration carries no
+// migrate-rename fingerprint.
+func ManagedEventFingerprintUnion() []string { return managedEventFingerprintUnion() }
+
+// MigrateRenameSubstring re-exports the legacy migrate-rename content
+// fingerprint so the fingerprint-parity guard can assert teardown retains it
+// while registration omits it.
+const MigrateRenameSubstring = migrateRenameSubstring
+
 // UnregisterPortalHooksWithLogger re-exports the injected-logger teardown
 // variant (unregisterPortalHooks) so the external tmux_test package can assert
 // the teardown read-failure WARN through the same recording-logger seam the

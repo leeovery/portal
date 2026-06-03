@@ -69,6 +69,61 @@ func managedEventNames() []string {
 	return names
 }
 
+// migrateRenameSubstring is the legacy `portal state migrate-rename` content
+// fingerprint. It appears in NO managedEvents entry — registration never
+// installs or converges it (see managedEvents' doc comment and the spec's
+// "What is intentionally not consolidated"). It is named here (greppable,
+// self-documenting) solely so the teardown path can explicitly re-add it to the
+// derived eviction set: older Portal binaries shipped an inert migrate-rename
+// hook on `session-renamed`, and teardown must still reap those stale entries.
+const migrateRenameSubstring = "portal state migrate-rename"
+
+// managedEventFingerprintUnion projects the de-duplicated, order-stable UNION
+// of every managedEvents entry's fingerprints. It is the FINGERPRINT analogue
+// of managedEventNames (which projects the event-set): a single source of truth
+// derived from managedEvents, so adding a future hook category to managedEvents
+// automatically appears here. Order is managedEvents declaration order of first
+// appearance. This is the registration-side fingerprint set — it deliberately
+// does NOT include the teardown-only migrateRenameSubstring.
+func managedEventFingerprintUnion() []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, me := range managedEvents {
+		for _, fp := range me.fingerprints {
+			if seen[fp] {
+				continue
+			}
+			seen[fp] = true
+			out = append(out, fp)
+		}
+	}
+	return out
+}
+
+// teardownFingerprints derives the teardown eviction predicate as the
+// managedEventFingerprintUnion PLUS the legacy migrateRenameSubstring. Because
+// the union is computed from managedEvents, adding a future hook category to
+// managedEvents automatically widens teardown coverage, so a registered
+// category can never again become un-reapable (the session-closed commit-now
+// seam that motivated this helper).
+//
+// Order is deterministic: managedEvents declaration order of first appearance
+// (via managedEventFingerprintUnion), then migrateRenameSubstring last.
+// containsAny matching is order-independent, but the stable order keeps log and
+// test output reproducible and mirrors portalEvents' declaration-order contract.
+func teardownFingerprints() []string {
+	union := managedEventFingerprintUnion()
+	// The legacy migrate-rename substring is not in managedEvents, so the union
+	// must explicitly add it (appended last for a stable order). Guard against a
+	// future managedEvents entry already carrying it so it is never duplicated.
+	for _, fp := range union {
+		if fp == migrateRenameSubstring {
+			return union
+		}
+	}
+	return append(union, migrateRenameSubstring)
+}
+
 // HydrationTriggerEvents lists every tmux event on which Portal registers a
 // `portal state signal-hydrate #{session_name}` hook. The literal
 // `#{session_name}` is preserved verbatim — tmux expands it at hook-fire time.

@@ -37,3 +37,66 @@ func TestPortalManagedEventSetParity(t *testing.T) {
 		}
 	}
 }
+
+// TestPortalTeardownFingerprintParity is the fingerprint-drift guard, the
+// FINGERPRINT analogue of TestPortalManagedEventSetParity (which guards the
+// EVENT set). It proves the teardown eviction predicate
+// (portalCommandSubstrings) is DERIVED from — and never narrower than — the
+// union of every managedEvents entry's fingerprints PLUS the legacy
+// migrate-rename substring teardown explicitly retains.
+//
+// The defect this closes: registration converges `session-closed` onto
+// commitNowCommand, whose only fingerprint is `portal state commit-now`, but
+// the hand-authored teardown set omitted that substring — so
+// UnregisterPortalHooks classified the converged commit-now entry as non-Portal
+// and left it installed (AC #5 violation). Deriving the teardown set from the
+// managedEvents union closes the seam: any category added to managedEvents
+// auto-widens teardown coverage, and this test fails if a future edit
+// reintroduces an independent literal that drops a registered fingerprint.
+//
+// Both intentional asymmetries are asserted:
+//   - Every managedEvents fingerprint (including commitNowSubstring) MUST be a
+//     member of the teardown set.
+//   - The legacy migrate-rename substring MUST be a member of the teardown set
+//     even though it appears in NO managedEvents entry (registration never
+//     installs/converges it; teardown retains it for old-binary cleanup).
+func TestPortalTeardownFingerprintParity(t *testing.T) {
+	teardown := tmux.PortalTeardownFingerprints()
+	teardownSet := make(map[string]bool, len(teardown))
+	for _, fp := range teardown {
+		teardownSet[fp] = true
+	}
+
+	// Every managedEvents fingerprint must be reapable by teardown.
+	for _, fp := range tmux.ManagedEventFingerprintUnion() {
+		if !teardownSet[fp] {
+			t.Errorf("teardown fingerprint set %v is missing managedEvents fingerprint %q — "+
+				"a registered category is unreachable by UnregisterPortalHooks (AC #5 seam)",
+				teardown, fp)
+		}
+	}
+
+	// commit-now specifically — the fingerprint the original literal omitted.
+	if !teardownSet[commitNowFingerprint] {
+		t.Errorf("teardown fingerprint set %v is missing %q — the converged session-closed "+
+			"commit-now hook would survive UnregisterPortalHooks", teardown, commitNowFingerprint)
+	}
+
+	// The legacy migrate-rename substring is explicitly retained by teardown
+	// even though registration never installs it (asymmetry preserved).
+	if !teardownSet[tmux.MigrateRenameSubstring] {
+		t.Errorf("teardown fingerprint set %v is missing the explicitly-retained legacy substring %q — "+
+			"stale migrate-rename entries from old binaries would survive teardown",
+			teardown, tmux.MigrateRenameSubstring)
+	}
+
+	// Asymmetry guard: registration must NOT carry migrate-rename in any
+	// managedEvents fingerprint set (it is teardown-only).
+	for _, fp := range tmux.ManagedEventFingerprintUnion() {
+		if fp == tmux.MigrateRenameSubstring {
+			t.Errorf("managedEvents fingerprint union %v contains %q — registration must never "+
+				"install/converge migrate-rename (it is teardown-retained only)",
+				tmux.ManagedEventFingerprintUnion(), tmux.MigrateRenameSubstring)
+		}
+	}
+}
