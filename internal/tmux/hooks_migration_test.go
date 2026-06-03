@@ -95,10 +95,10 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	// One INFO line summarising the eviction count must be emitted. The
 	// unified convergence path emits a single "collapsed stacked portal hooks"
 	// summary carrying the reaped count across all events.
-	if len(log.infos) != 1 {
-		t.Errorf("INFO line count = %d, want 1; infos=%v", len(log.infos), log.infos)
-	} else if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || log.infoReaped[0] < 1 {
-		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", log.infos[0], log.infoReaped[0])
+	if infos := log.infos(); len(infos) != 1 {
+		t.Errorf("INFO line count = %d, want 1; infos=%v", len(infos), infos)
+	} else if !strings.Contains(infos[0], "collapsed stacked portal hooks") || log.infoReaped()[0] < 1 {
+		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", infos[0], log.infoReaped()[0])
 	}
 
 	// Verify the fixed entry actually contains the `--` separator on each
@@ -148,11 +148,11 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 		t.Fatalf("second RegisterPortalHooks: %v", err)
 	}
 
-	if len(second.infos) != 0 {
-		t.Errorf("second bootstrap INFO count = %d, want 0; infos=%v", len(second.infos), second.infos)
+	if len(second.infos()) != 0 {
+		t.Errorf("second bootstrap INFO count = %d, want 0; infos=%v", len(second.infos()), second.infos())
 	}
-	if len(second.warns) != 0 {
-		t.Errorf("second bootstrap WARN count = %d, want 0; warns=%v", len(second.warns), second.warns)
+	if len(second.warns()) != 0 {
+		t.Errorf("second bootstrap WARN count = %d, want 0; warns=%v", len(second.warns()), second.warns())
 	}
 
 	counts := countSignalHydrateEntries(t, client)
@@ -180,11 +180,11 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
-	if len(log.infos) != 0 {
-		t.Errorf("INFO count = %d, want 0 (zero-eviction bootstrap silent); infos=%v", len(log.infos), log.infos)
+	if len(log.infos()) != 0 {
+		t.Errorf("INFO count = %d, want 0 (zero-eviction bootstrap silent); infos=%v", len(log.infos()), log.infos())
 	}
-	if len(log.warns) != 0 {
-		t.Errorf("WARN count = %d, want 0; warns=%v", len(log.warns), log.warns)
+	if len(log.warns()) != 0 {
+		t.Errorf("WARN count = %d, want 0; warns=%v", len(log.warns()), log.warns())
 	}
 
 	counts := countSignalHydrateEntries(t, client)
@@ -233,11 +233,11 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	}
 
 	// INFO line should report 4 evictions (3 + 1).
-	if len(log.infos) != 1 {
-		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
+	if len(log.infos()) != 1 {
+		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos()), log.infos())
 	}
-	if log.infoReaped[0] != 4 {
-		t.Errorf("reaped attr = %d, want eviction count 4", log.infoReaped[0])
+	if log.infoReaped()[0] != 4 {
+		t.Errorf("reaped attr = %d, want eviction count 4", log.infoReaped()[0])
 	}
 }
 
@@ -294,8 +294,8 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 
 	// No eviction INFO: the user hook is not Portal-authored, so nothing was
 	// reaped on client-attached, and the only convergence action was an append.
-	if len(log.infos) != 0 {
-		t.Errorf("INFO count = %d, want 0 (user hook not Portal-fingerprinted, no eviction); infos=%v", len(log.infos), log.infos)
+	if len(log.infos()) != 0 {
+		t.Errorf("INFO count = %d, want 0 (user hook not Portal-fingerprinted, no eviction); infos=%v", len(log.infos()), log.infos())
 	}
 }
 
@@ -338,23 +338,22 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	// the event name has no closed attr key so the terse message no longer
 	// carries it — the WARN signature is asserted on its own.)
 	var sawFailureWarn bool
-	for _, w := range log.warns {
+	for _, w := range log.warns() {
 		if strings.Contains(w, "failed to evict") {
 			sawFailureWarn = true
 			break
 		}
 	}
 	if !sawFailureWarn {
-		t.Errorf("no WARN line with `failed to evict`; warns=%v", log.warns)
+		t.Errorf("no WARN line with `failed to evict`; warns=%v", log.warns())
 	}
 
 	// Successful evictions on other hydration events should trigger the
 	// single INFO summary line (count >= 1).
-	if len(log.infos) != 1 {
-		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
-	}
-	if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || log.infoReaped[0] < 1 {
-		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", log.infos[0], log.infoReaped[0])
+	if infos := log.infos(); len(infos) != 1 {
+		t.Fatalf("INFO count = %d, want 1; infos=%v", len(infos), infos)
+	} else if !strings.Contains(infos[0], "collapsed stacked portal hooks") || log.infoReaped()[0] < 1 {
+		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", infos[0], log.infoReaped()[0])
 	}
 }
 
@@ -403,11 +402,11 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	}
 
 	// Exactly one INFO line summarising eviction count = len(HydrationTriggerEvents).
-	if len(log.infos) != 1 {
-		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
+	if len(log.infos()) != 1 {
+		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos()), log.infos())
 	}
-	if want := int64(len(tmux.HydrationTriggerEvents)); log.infoReaped[0] != want {
-		t.Errorf("reaped attr = %d, want eviction count = %d", log.infoReaped[0], want)
+	if want := int64(len(tmux.HydrationTriggerEvents)); log.infoReaped()[0] != want {
+		t.Errorf("reaped attr = %d, want eviction count = %d", log.infoReaped()[0], want)
 	}
 }
 

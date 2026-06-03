@@ -465,16 +465,17 @@ func TestRegisterPortalHooks_SecondRegistrationIsChurnFree(t *testing.T) {
 	// (b) No eviction INFO line on the second run: no recorded INFO carries a
 	// reaped attr > 0. (RegisterPortalHooks emits the `reaped` cycle-summary
 	// INFO only when totalEvicted > 0.)
-	for i, reaped := range r2.infoReaped {
+	infos := r2.infos()
+	for i, reaped := range r2.infoReaped() {
 		if reaped > 0 {
 			t.Errorf("second run emitted an eviction INFO line %q with reaped=%d, want no eviction line",
-				r2.infos[i], reaped)
+				infos[i], reaped)
 		}
 	}
 
 	// (c) No WARN on the second run.
-	if len(r2.warns) != 0 {
-		t.Errorf("second run emitted %d WARN line(s): %v, want none", len(r2.warns), r2.warns)
+	if len(r2.warns()) != 0 {
+		t.Errorf("second run emitted %d WARN line(s): %v, want none", len(r2.warns()), r2.warns())
 	}
 }
 

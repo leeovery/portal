@@ -1,7 +1,6 @@
 package tmux_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -304,7 +303,7 @@ func TestRegisterPortalHooks_IdempotentFastPath(t *testing.T) {
 	if unsets := unsetHookCalls(mock.Calls); len(unsets) != 0 {
 		t.Errorf("expected 0 set-hook -gu on converged table, got %d: %v", len(unsets), unsets)
 	}
-	for _, line := range logger.infos {
+	for _, line := range logger.infos() {
 		if strings.Contains(line, "reaped") || strings.Contains(line, "collapsed") {
 			t.Errorf("unexpected eviction INFO on idempotent fast path: %q", line)
 		}
@@ -651,7 +650,7 @@ func TestRegisterPortalHooks_PerEventReadFailureFolds(t *testing.T) {
 	}
 
 	// The canonical WARN must have been emitted for the failure.
-	if len(logger.warns) == 0 {
+	if len(logger.warns()) == 0 {
 		t.Errorf("expected at least one WARN for the show-hooks failure, got none")
 	}
 
@@ -714,7 +713,7 @@ func TestRegisterPortalHooks_PerIndexUnsetFailureWarnsAndContinues(t *testing.T)
 	}
 
 	// WARN logged for the failure.
-	if len(logger.warns) == 0 {
+	if len(logger.warns()) == 0 {
 		t.Errorf("expected at least one WARN for the per-index unset failure, got none")
 	}
 
@@ -753,14 +752,15 @@ func TestRegisterPortalHooks_SingleReapedInfoOnEviction(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(logger.infos) != 1 {
-		t.Fatalf("INFO line count = %d, want 1; infos=%v", len(logger.infos), logger.infos)
+	infos := logger.infos()
+	if len(infos) != 1 {
+		t.Fatalf("INFO line count = %d, want 1; infos=%v", len(infos), infos)
 	}
-	if !strings.HasPrefix(logger.infos[0], "[bootstrap] ") {
-		t.Errorf("INFO line %q not bound to the bootstrap component", logger.infos[0])
+	if !strings.HasPrefix(infos[0], "[bootstrap] ") {
+		t.Errorf("INFO line %q not bound to the bootstrap component", infos[0])
 	}
-	if logger.infoReaped[0] != 3 {
-		t.Errorf("reaped attr = %d, want 3 (2 window-linked + 1 session-created)", logger.infoReaped[0])
+	if logger.infoReaped()[0] != 3 {
+		t.Errorf("reaped attr = %d, want 3 (2 window-linked + 1 session-created)", logger.infoReaped()[0])
 	}
 }
 
@@ -777,8 +777,8 @@ func TestRegisterPortalHooks_NoReapedInfoOnZeroEviction(t *testing.T) {
 		if err := tmux.RegisterPortalHooks(client, logger.Logger().With("component", "bootstrap")); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(logger.infos) != 0 {
-			t.Errorf("expected 0 INFO lines on zero-eviction fresh table, got %d: %v", len(logger.infos), logger.infos)
+		if len(logger.infos()) != 0 {
+			t.Errorf("expected 0 INFO lines on zero-eviction fresh table, got %d: %v", len(logger.infos()), logger.infos())
 		}
 	})
 
@@ -790,8 +790,8 @@ func TestRegisterPortalHooks_NoReapedInfoOnZeroEviction(t *testing.T) {
 		if err := tmux.RegisterPortalHooks(client, logger.Logger().With("component", "bootstrap")); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(logger.infos) != 0 {
-			t.Errorf("expected 0 INFO lines on all-fast-path converged table, got %d: %v", len(logger.infos), logger.infos)
+		if len(logger.infos()) != 0 {
+			t.Errorf("expected 0 INFO lines on all-fast-path converged table, got %d: %v", len(logger.infos()), logger.infos())
 		}
 	})
 }
@@ -855,70 +855,82 @@ func TestRegisterPortalHooks_NoMigrateRename(t *testing.T) {
 	}
 }
 
-// recordingMigrationLogger is a slog.Handler that captures Info / Warn records
-// for assertion in convergence-flow tests. Each captured Info record is
-// rendered as "[<component>] <message>" (so component-binding can be asserted)
-// and its `reaped` attr value is captured positionally in infoReaped (-1 when
-// absent). Use Logger() to obtain a *slog.Logger to pass into
-// RegisterPortalHooks.
+// recordingMigrationLogger is a thin typed projection over the shared
+// recordingSlogHandler (declared in portal_saver_test.go), which owns the
+// slog.Handler capture scaffolding (Enabled/Handle/WithAttrs/WithGroup/owner
+// and the shared records slice — including the WithAttrs-bound `component` it
+// merges onto each stored record). recordingMigrationLogger adds the
+// convergence-flow projections the migration tests assert on: each captured
+// Info record is rendered as "[<component>] <message>" (so component-binding
+// can be asserted) and its `reaped` attr value is projected positionally by
+// infoReaped (-1 when absent). Use Logger() to obtain a *slog.Logger to pass
+// into RegisterPortalHooks.
 type recordingMigrationLogger struct {
-	infos      []string
-	infoReaped []int64
-	warns      []string
-	// shared points at the slice-owning recorder so handlers derived via
-	// WithAttrs/WithGroup (notably .With("component", ...)) record into the
-	// same slices; nil on the root.
-	shared *recordingMigrationLogger
-	bound  []slog.Attr
+	recordingSlogHandler
 }
 
 // Logger returns a *slog.Logger whose records are captured by this recorder.
-func (r *recordingMigrationLogger) Logger() *slog.Logger { return slog.New(r) }
+func (r *recordingMigrationLogger) Logger() *slog.Logger { return slog.New(&r.recordingSlogHandler) }
 
-func (r *recordingMigrationLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (r *recordingMigrationLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
-	next = append(next, r.bound...)
-	next = append(next, attrs...)
-	return &recordingMigrationLogger{shared: r.owner(), bound: next}
-}
-
-func (r *recordingMigrationLogger) WithGroup(_ string) slog.Handler {
-	return &recordingMigrationLogger{shared: r.owner(), bound: r.bound}
-}
-
-func (r *recordingMigrationLogger) owner() *recordingMigrationLogger {
-	if r.shared != nil {
-		return r.shared
+// infos projects the captured Info records as "[<component>] <message>" lines,
+// in capture order.
+func (r *recordingMigrationLogger) infos() []string {
+	var out []string
+	for _, rec := range r.records {
+		if rec.Level == slog.LevelInfo {
+			out = append(out, migrationLine(rec))
+		}
 	}
-	return r
+	return out
 }
 
-func (r *recordingMigrationLogger) Handle(_ context.Context, rec slog.Record) error {
+// infoReaped projects the `reaped` attr of each captured Info record
+// positionally (aligned with infos), using -1 when the attr is absent.
+func (r *recordingMigrationLogger) infoReaped() []int64 {
+	var out []int64
+	for _, rec := range r.records {
+		if rec.Level == slog.LevelInfo {
+			out = append(out, migrationReaped(rec))
+		}
+	}
+	return out
+}
+
+// warns projects the captured Warn records as "[<component>] <message>" lines,
+// in capture order.
+func (r *recordingMigrationLogger) warns() []string {
+	var out []string
+	for _, rec := range r.records {
+		if rec.Level == slog.LevelWarn {
+			out = append(out, migrationLine(rec))
+		}
+	}
+	return out
+}
+
+// migrationLine renders a captured record as "[<component>] <message>", reading
+// the component attr that recordingSlogHandler.Handle merged from the .With
+// binding onto the stored record's attrs.
+func migrationLine(rec slog.Record) string {
 	component := ""
-	reaped := int64(-1)
-	read := func(a slog.Attr) bool {
-		switch a.Key {
-		case "component":
+	rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "component" {
 			component = a.Value.String()
-		case "reaped":
+		}
+		return true
+	})
+	return "[" + component + "] " + rec.Message
+}
+
+// migrationReaped extracts the `reaped` int64 attr from a captured record,
+// returning -1 when the attr is absent.
+func migrationReaped(rec slog.Record) int64 {
+	reaped := int64(-1)
+	rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "reaped" {
 			reaped = a.Value.Int64()
 		}
 		return true
-	}
-	for _, a := range r.bound {
-		read(a)
-	}
-	rec.Attrs(read)
-	line := "[" + component + "] " + rec.Message
-	owner := r.owner()
-	switch rec.Level {
-	case slog.LevelInfo:
-		owner.infos = append(owner.infos, line)
-		owner.infoReaped = append(owner.infoReaped, reaped)
-	case slog.LevelWarn:
-		owner.warns = append(owner.warns, line)
-	}
-	return nil
+	})
+	return reaped
 }
