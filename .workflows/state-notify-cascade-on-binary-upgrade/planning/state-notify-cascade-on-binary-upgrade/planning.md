@@ -37,3 +37,17 @@ approved_at: 2026-06-03
 | state-notify-cascade-on-binary-upgrade-1-5 | Delete the no-arg ShowGlobalHooks method and migrate its remaining fixtures | no production caller remains, showGlobalHooksOrWarn / ShowGlobalHooksOrWarn re-export removed, reboot_roundtrip_test.go reader re-pointed at per-event seam, full suite green |
 | state-notify-cascade-on-binary-upgrade-1-6 | Real-tmux no-growth + blind-spot regression guards | blind events (pane-focus-out, window-layout-changed) stay at 1 across N≥2, no-arg omits pane/geometry events while per-event includes them |
 | state-notify-cascade-on-binary-upgrade-1-7 | Real-tmux self-heal, teardown-at-depth, and idempotency/no-churn guards | K-deep stack collapses to 1 with co-resident user hook intact, teardown reaps at depth on blind events with user hook intact, second registration emits no unset/append and no reaped INFO |
+
+### Phase 2: Analysis (Cycle 1)
+
+**Goal**: Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| state-notify-cascade-on-binary-upgrade-2-1 | Make managedEvents the single source of truth for the Portal-managed event set | full-derivation vs parity-test fallback, preserve declaration order for stable output, retire saveTriggerEvents only if last production consumer, migrate-rename teardown-only fingerprint divergence preserved, stale doc comment corrected either way |
+| state-notify-cascade-on-binary-upgrade-2-2 | Collapse the eight hand-rolled per-event dispatch RunFuncs onto perEventDispatch with optional fault injection | readErrFor/unsetErrFor fault maps, preserve setHookErrFor + no-arg-global-read fatal guard, sibling builder if signature churn too large, each migrated test still exercises its original fault (read error / per-index unset / CommandError) |
+| state-notify-cascade-on-binary-upgrade-2-3 | De-duplicate hook command-body and fingerprint test literals within the tmux_test package | single test-package home for notify body + fingerprint substrings, production unexported-constant mirroring left untouched (exempt), real-tmux integration tests pass against shared literals |
+| state-notify-cascade-on-binary-upgrade-2-4 | Fold recordingMigrationLogger onto the pre-existing recordingSlogHandler base (additive to new code only) | embed/wrap shared base, thin component/reaped accessors via projection, portal_saver_test.go / recordingSlogHandler unchanged, consuming migration/warn tests observe identical captured output |
+| state-notify-cascade-on-binary-upgrade-2-5 | Fix the stale migrateHydrationHooks comment in reboot_roundtrip_test.go | comment-only edit (no test logic change), describe per-event ensure-exactly-one convergence, grep-confirm last stale reference, cmd/bootstrap package passes |

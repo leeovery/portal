@@ -6,7 +6,7 @@ total_proposed: 5
 # Analysis Tasks: State Notify Cascade on Binary Upgrade (Cycle 1)
 
 ## Task 1: Make managedEvents the single source of truth for the Portal-managed event set
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -33,7 +33,7 @@ sources: architecture
 - Existing teardown-at-depth and no-growth-across-bootstraps real-tmux guards continue to pass unchanged, confirming the derived/asserted event-set still covers every managed event.
 
 ## Task 2: Collapse the eight hand-rolled per-event dispatch RunFuncs onto perEventDispatch with optional fault injection
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -60,7 +60,7 @@ sources: duplication
 - No new test is required beyond confirming the helper's fault-injection branches are reached by the migrated call sites.
 
 ## Task 3: De-duplicate hook command-body and fingerprint test literals within the tmux_test package
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -82,7 +82,7 @@ sources: duplication
 - The existing real-tmux integration tests in `hooks_register_realtmux_test.go` must continue to pass against the now-shared literals, confirming the referenced constants carry the same values the local copies did.
 
 ## Task 4: Fold recordingMigrationLogger onto the pre-existing recordingSlogHandler base (additive to new code only)
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -104,7 +104,7 @@ sources: duplication
 - The existing tests consuming `recordingMigrationLogger` (the migration/warn-path tests) must continue to pass with identical assertions, confirming the wrapped base captures the same records the standalone recorder did.
 
 ## Task 5: Fix the stale migrateHydrationHooks comment in reboot_roundtrip_test.go
-status: pending
+status: approved
 severity: low
 sources: standards
 

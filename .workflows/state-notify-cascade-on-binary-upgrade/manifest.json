@@ -48,7 +48,13 @@
             "state-notify-cascade-on-binary-upgrade-1-4": "tick-2e83b9",
             "state-notify-cascade-on-binary-upgrade-1-5": "tick-54b1dc",
             "state-notify-cascade-on-binary-upgrade-1-6": "tick-9a1086",
-            "state-notify-cascade-on-binary-upgrade-1-7": "tick-6a7cec"
+            "state-notify-cascade-on-binary-upgrade-1-7": "tick-6a7cec",
+            "state-notify-cascade-on-binary-upgrade-2": "tick-50c1bf",
+            "state-notify-cascade-on-binary-upgrade-2-1": "tick-90e2aa",
+            "state-notify-cascade-on-binary-upgrade-2-2": "tick-9ba5f5",
+            "state-notify-cascade-on-binary-upgrade-2-3": "tick-7d3d71",
+            "state-notify-cascade-on-binary-upgrade-2-4": "tick-a121c0",
+            "state-notify-cascade-on-binary-upgrade-2-5": "tick-608d62"
           },
           "external_id": "tick-a00b4b"
         }
@@ -60,7 +66,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,
