@@ -253,3 +253,271 @@ func hasPortalEntry(entries []tmux.HookEntry, fingerprint string) bool {
 	}
 	return false
 }
+
+// stackDepth is the K used by the self-heal and teardown-at-depth guards. The
+// live incident stacked 139 identical Portal entries on each blind event
+// (pane-focus-out / window-layout-changed); 5 exercises the same depth-N
+// collapse / reap path (the convergence and teardown loops are linear in the
+// number of Portal-authored entries, so K=5 and K=139 traverse identical
+// code) while keeping the per-test wall-clock bounded — each seeded entry is
+// one real `set-hook -ga` round-trip against the live server.
+const stackDepth = 5
+
+// userHookFingerprint is the unique marker embedded in the co-resident user
+// hook bodies. It contains NONE of the portalCommandSubstrings fingerprints
+// (`portal state notify` / `portal state signal-hydrate` /
+// `portal state migrate-rename`) nor the registration commit-now fingerprint,
+// so both the registration convergence engine and the teardown reap classify
+// it as non-Portal and leave it untouched.
+const userHookFingerprint = "echo user pane-focus-out hook"
+
+// userHookBody is the full run-shell-wrapped co-resident user hook seeded
+// alongside the stacked Portal entries. A user `.tmux.conf` hook on a managed
+// event must survive both registration and teardown (Acceptance Criterion 4).
+const userHookBody = `run-shell "echo user pane-focus-out hook"`
+
+// TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact is the
+// real-tmux self-heal guard (Testing Requirement 3 / Acceptance Criteria 2
+// and 4). It seeds a blind event (pane-focus-out) with K stacked identical
+// Portal `notify` entries plus one co-resident non-Portal user hook, runs a
+// single RegisterPortalHooks, and asserts the K-deep Portal stack collapses to
+// exactly one entry carrying the desired notifyCommand while the user hook
+// survives untouched.
+//
+// pane-focus-out is chosen deliberately: it is one of the two events the
+// no-arg `show-hooks -g` enumeration is blind to, so this is the exact path
+// that grew unbounded pre-fix. A mock commander cannot reproduce the
+// stacked-array collapse — only a real tmux server faithfully models
+// `set-hook -gu <event>[N]` index semantics and the per-event read shape.
+func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts := tmuxtest.New(t, "ptl-hooks-")
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	const event = "pane-focus-out" // a blind event — the pre-fix growth path.
+
+	// Seed K stacked identical Portal entries plus ONE co-resident user hook.
+	// Live incident was 139-deep on this event; K=5 traverses the identical
+	// collapse path (see stackDepth).
+	for i := 0; i < stackDepth; i++ {
+		if err := client.AppendGlobalHook(event, notifyCommandBody); err != nil {
+			t.Fatalf("seed Portal entry %d: AppendGlobalHook(%s): %v", i, event, err)
+		}
+	}
+	if err := client.AppendGlobalHook(event, userHookBody); err != nil {
+		t.Fatalf("seed user hook: AppendGlobalHook(%s): %v", event, err)
+	}
+
+	// Pre-condition sanity: the stack really is K deep and the user hook is
+	// present, so a green result cannot be a vacuous "nothing was there" pass.
+	if got := countPortalEntriesForEvent(t, client, event, notifyFingerprint); got != stackDepth {
+		t.Fatalf("pre-seed: Portal entry count = %d, want %d", got, stackDepth)
+	}
+
+	// One registration must collapse the whole stack to exactly one.
+	if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+		t.Fatalf("RegisterPortalHooks: %v", err)
+	}
+
+	// Exactly one Portal entry survives, carrying the desired notifyCommand
+	// byte-for-byte (modulo ParseShowHooks' outer-quote stripping).
+	raw, err := client.ShowGlobalHooksForEvent(event)
+	if err != nil {
+		t.Fatalf("ShowGlobalHooksForEvent(%s): %v", event, err)
+	}
+	entries := tmux.ParseShowHooks(raw)[event]
+
+	var portal []tmux.HookEntry
+	for _, e := range entries {
+		if strings.Contains(e.Command, notifyFingerprint) {
+			portal = append(portal, e)
+		}
+	}
+	if len(portal) != 1 {
+		t.Fatalf("after self-heal: Portal entry count = %d, want 1; entries=%v", len(portal), entries)
+	}
+	if portal[0].Command != notifyCommandBody {
+		t.Errorf("after self-heal: surviving body = %q, want %q", portal[0].Command, notifyCommandBody)
+	}
+
+	// The co-resident user hook is untouched — exactly one entry carrying its
+	// fingerprint remains (Acceptance Criterion 4).
+	if got := countPortalEntriesForEvent(t, client, event, userHookFingerprint); got != 1 {
+		t.Errorf("after self-heal: user hook count = %d, want 1 (must survive untouched); entries=%v", got, entries)
+	}
+}
+
+// TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact is
+// the real-tmux teardown-at-depth guard (Testing Requirement 4 / Acceptance
+// Criteria 4 and 5). On EACH blind event (pane-focus-out and
+// window-layout-changed) it seeds K stacked Portal `notify` entries plus one
+// co-resident non-Portal user hook, runs UnregisterPortalHooks once, and
+// asserts every Portal entry is reaped (count → 0) while the user hook
+// survives on each event.
+//
+// This is the path that NO-OPS pre-fix: the pre-fix teardown read through the
+// no-arg `show-hooks -g`, which is blind to these two events, so it saw zero
+// Portal entries on the K-deep arrays and removed nothing. It passes only
+// after the teardown path moved to the per-event `show-hooks -g <event>` seam.
+// UnregisterPortalHooks takes no logger (its WARN sink is a package-level
+// bootstrapLogger), so correctness is asserted purely on the resulting tmux
+// state via per-event reads.
+func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts := tmuxtest.New(t, "ptl-hooks-")
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	blindEvents := []string{"pane-focus-out", "window-layout-changed"}
+
+	// Seed each blind event with a K-deep Portal stack plus one user hook.
+	for _, event := range blindEvents {
+		for i := 0; i < stackDepth; i++ {
+			if err := client.AppendGlobalHook(event, notifyCommandBody); err != nil {
+				t.Fatalf("seed Portal entry %d on %s: AppendGlobalHook: %v", i, event, err)
+			}
+		}
+		if err := client.AppendGlobalHook(event, userHookBody); err != nil {
+			t.Fatalf("seed user hook on %s: AppendGlobalHook: %v", event, err)
+		}
+		// Pre-condition sanity so a green pass cannot be vacuous.
+		if got := countPortalEntriesForEvent(t, client, event, notifyFingerprint); got != stackDepth {
+			t.Fatalf("pre-seed %s: Portal entry count = %d, want %d", event, got, stackDepth)
+		}
+	}
+
+	// One teardown must reap every Portal entry on BOTH blind events.
+	if err := tmux.UnregisterPortalHooks(client); err != nil {
+		t.Fatalf("UnregisterPortalHooks: %v", err)
+	}
+
+	// Assert per blind event: zero entries carry ANY portalCommandSubstrings
+	// fingerprint, AND the co-resident user hook survives intact.
+	teardownFingerprints := []string{
+		"portal state notify",
+		"portal state commit-now",
+		"portal state signal-hydrate",
+		"portal state migrate-rename",
+	}
+	for _, event := range blindEvents {
+		for _, fp := range teardownFingerprints {
+			if got := countPortalEntriesForEvent(t, client, event, fp); got != 0 {
+				t.Errorf("after teardown: event %q still holds %d entries matching %q, want 0", event, got, fp)
+			}
+		}
+		if got := countPortalEntriesForEvent(t, client, event, userHookFingerprint); got != 1 {
+			t.Errorf("after teardown: event %q user hook count = %d, want 1 (must survive untouched)", event, got)
+		}
+	}
+}
+
+// TestRegisterPortalHooks_SecondRegistrationIsChurnFree is the real-tmux
+// idempotency / no-churn guard (Testing Requirement 5 / Acceptance Criterion
+// 7). It converges the table with one RegisterPortalHooks, snapshots every
+// managed event's parsed entry indices, runs a SECOND RegisterPortalHooks, and
+// asserts:
+//
+//   - per-event entry indices are IDENTICAL across the two runs — the
+//     load-bearing structural proof that the converged fast path performed no
+//     unset+append (an unset+append would renumber the array). Real tmux is
+//     the oracle: index stability, not mock call counts, proves no churn.
+//   - the second run emits NO eviction INFO line (no `reaped` attr > 0 — the
+//     absence is the asserted churn-free signal per the spec), and
+//   - the second run emits NO WARN.
+func TestRegisterPortalHooks_SecondRegistrationIsChurnFree(t *testing.T) {
+	tmuxtest.SkipIfNoTmux(t)
+
+	ts := tmuxtest.New(t, "ptl-hooks-")
+	client := ts.Client()
+	if _, err := client.EnsureServer(); err != nil {
+		t.Fatalf("EnsureServer: %v", err)
+	}
+
+	// First registration converges the table (no pre-seeded stack — a clean
+	// server still has nothing to evict, so this is the all-fast-path-after-one
+	// append shape). Capture INFO/WARN to confirm the first run's behaviour is
+	// what we expect before testing the second.
+	r1 := &recordingMigrationLogger{}
+	if err := tmux.RegisterPortalHooks(client, r1.Logger().With("component", "bootstrap")); err != nil {
+		t.Fatalf("first RegisterPortalHooks: %v", err)
+	}
+
+	// Snapshot each managed event's parsed entry indices after convergence.
+	before := snapshotEventIndices(t, client)
+
+	// Second registration against the already-converged table.
+	r2 := &recordingMigrationLogger{}
+	if err := tmux.RegisterPortalHooks(client, r2.Logger().With("component", "bootstrap")); err != nil {
+		t.Fatalf("second RegisterPortalHooks: %v", err)
+	}
+
+	after := snapshotEventIndices(t, client)
+
+	// (a) Index stability: a converged fast path leaves every event's array
+	// untouched, so indices must be byte-for-byte identical. Any difference
+	// means the fast path regressed to unset+append (renumbering the array).
+	for _, me := range managedEventFingerprints {
+		b, a := before[me.event], after[me.event]
+		if !equalInts(b, a) {
+			t.Errorf("event %q: entry indices changed across churn-free run: before=%v after=%v "+
+				"(an unset+append would renumber — the fast path regressed)", me.event, b, a)
+		}
+	}
+
+	// (b) No eviction INFO line on the second run: no recorded INFO carries a
+	// reaped attr > 0. (RegisterPortalHooks emits the `reaped` cycle-summary
+	// INFO only when totalEvicted > 0.)
+	for i, reaped := range r2.infoReaped {
+		if reaped > 0 {
+			t.Errorf("second run emitted an eviction INFO line %q with reaped=%d, want no eviction line",
+				r2.infos[i], reaped)
+		}
+	}
+
+	// (c) No WARN on the second run.
+	if len(r2.warns) != 0 {
+		t.Errorf("second run emitted %d WARN line(s): %v, want none", len(r2.warns), r2.warns)
+	}
+}
+
+// snapshotEventIndices reads every managed event per-event and returns its
+// parsed HookEntry indices (ascending, as ParseShowHooks sorts them). Used by
+// the churn-free guard to prove the converged fast path leaves the arrays
+// unrenumbered across a second registration.
+func snapshotEventIndices(t *testing.T, client *tmux.Client) map[string][]int {
+	t.Helper()
+	out := make(map[string][]int, len(managedEventFingerprints))
+	for _, me := range managedEventFingerprints {
+		raw, err := client.ShowGlobalHooksForEvent(me.event)
+		if err != nil {
+			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", me.event, err)
+		}
+		var indices []int
+		for _, e := range tmux.ParseShowHooks(raw)[me.event] {
+			indices = append(indices, e.Index)
+		}
+		out[me.event] = indices
+	}
+	return out
+}
+
+// equalInts reports whether two int slices are element-wise equal (including
+// length). nil and empty are treated as equal.
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
