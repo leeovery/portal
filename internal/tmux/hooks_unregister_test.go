@@ -9,45 +9,37 @@ import (
 )
 
 // dispatchUnregisterHooks builds a RunFunc that answers the per-event
-// "show-hooks -g <event>" reads UnregisterPortalHooks now issues, and records
+// "show-hooks -g <event>" reads UnregisterPortalHooks issues, and records
 // "set-hook -gu" calls. showOutput is the whole hook table (across every
 // event); on each per-event read the helper returns ONLY the lines belonging
 // to the queried event (argv[2]), mirroring how real tmux scopes
 // `show-hooks -g <event>`. unsetErrFor, when non-nil, returns the configured
 // error for matching event[index] targets; nil otherwise.
+//
+// It is a thin shim over perEventDispatchWithFaults (declared in
+// hooks_register_test.go) — the single owner of the per-event read/unset
+// skeleton AND its no-arg-global-read t.Fatalf guard. Routing teardown through
+// the shared dispatcher means the teardown path now inherits that guard: a
+// teardown regression that reverts to the blind no-arg global `show-hooks -g`
+// read fails loudly instead of passing silently. The register-side
+// `set-hook -ga` and read-fault channels are unused on the teardown path, so
+// setHookErrFor and readErrFor are nil; unsetErrFor carries the per-index
+// unset-fault injection.
 func dispatchUnregisterHooks(t *testing.T, showOutput string, unsetErrFor map[string]error) func(args ...string) (string, error) {
 	t.Helper()
-	return func(args ...string) (string, error) {
-		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-			return linesForEvent(showOutput, args[2]), nil
-		}
-		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
-			if unsetErrFor != nil {
-				if err, ok := unsetErrFor[args[2]]; ok {
-					return "", err
-				}
-			}
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
+	return perEventDispatchWithFaults(t, showOutput, nil, nil, unsetErrFor)
 }
 
 // linesForEvent returns only the lines of showOutput whose entry belongs to
 // event (i.e. begin with "<event>["), preserving order. Reproduces the
 // per-event scoping of `tmux show-hooks -g <event>` so a whole-table fixture
-// can drive the per-event read loop.
+// can drive the per-event read loop. It is a thin lookup over
+// parseSeededTableByEvent (the single line-scoping primitive, declared in
+// hooks_register_test.go), which keys purely on the `<event>[` prefix so both
+// the register (`<event>[i] => '...'`) and unregister
+// (`<event>[i] run-shell '...'`) fixture shapes scope identically.
 func linesForEvent(showOutput, event string) string {
-	prefix := event + "["
-	var out strings.Builder
-	for _, line := range strings.Split(showOutput, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			out.WriteString(line)
-			out.WriteString("\n")
-		}
-	}
-	return out.String()
+	return parseSeededTableByEvent(showOutput)[event]
 }
 
 // unsetHookCalls extracts the set-hook -gu calls from a MockCommander's call
