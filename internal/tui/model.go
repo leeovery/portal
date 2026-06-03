@@ -526,7 +526,7 @@ func sessionHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rename")),
 		key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "kill")),
-		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "projects")),
+		key.NewBinding(key.WithKeys("p"), key.WithHelp("p/x", "projects")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 		key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "preview")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
@@ -573,7 +573,7 @@ func newSessionList(items []list.Item) list.Model {
 func projectHelpKeys() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "new session")),
-		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sessions")),
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s/x", "sessions")),
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
