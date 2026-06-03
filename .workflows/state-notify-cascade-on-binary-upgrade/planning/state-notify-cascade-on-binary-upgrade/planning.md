@@ -51,3 +51,16 @@ approved_at: 2026-06-03
 | state-notify-cascade-on-binary-upgrade-2-3 | De-duplicate hook command-body and fingerprint test literals within the tmux_test package | single test-package home for notify body + fingerprint substrings, production unexported-constant mirroring left untouched (exempt), real-tmux integration tests pass against shared literals |
 | state-notify-cascade-on-binary-upgrade-2-4 | Fold recordingMigrationLogger onto the pre-existing recordingSlogHandler base (additive to new code only) | embed/wrap shared base, thin component/reaped accessors via projection, portal_saver_test.go / recordingSlogHandler unchanged, consuming migration/warn tests observe identical captured output |
 | state-notify-cascade-on-binary-upgrade-2-5 | Fix the stale migrateHydrationHooks comment in reboot_roundtrip_test.go | comment-only edit (no test logic change), describe per-event ensure-exactly-one convergence, grep-confirm last stale reference, cmd/bootstrap package passes |
+
+### Phase 3: Analysis (Cycle 2)
+
+**Goal**: Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| state-notify-cascade-on-binary-upgrade-3-1 | Extract a shared per-event eviction helper used by both convergeEvent and UnregisterPortalHooks | parseEventEntries single-home collapse, descending-index best-effort unset loop shared, distinct error contracts preserved (convergeEvent best-effort vs UnregisterPortalHooks errors.Join), UnregisterPortalHooks keeps exported func(*Client) error signature for cmd/state_cleanup.go, migrate-rename teardown-only fingerprint divergence preserved, ParseShowHooks byte-identical, no new log component/attr, optional injected-logger teardown variant closes the recording-seam gap |
+| state-notify-cascade-on-binary-upgrade-3-2 | Consolidate the test-side read-per-event → ParseShowHooks → count-by-fingerprint helper | single tmux_test-package canonical helper, countSignalHydrateEntries collapses to map-builder, two migration inline loops routed through it, must read via ShowGlobalHooksForEvent (no-arg read is blind/vacuous), verifyHydrationHookEntries in different package left as-is |
+| state-notify-cascade-on-binary-upgrade-3-3 | Reuse the existing set-hook argv extractors instead of inline mock.Calls scanning | argv guards (set-hook/-ga/-gu index literals) live only in accessor co-located with setHookCalls/unsetHookCalls, cross-verb ordering + event-name-prefix split before "[", K-deep-collapse and append-follows-unset assertions unchanged in meaning |
+| state-notify-cascade-on-binary-upgrade-3-4 | Rename test functions that reference deleted migration helpers | rename 9 TestMigrateHydrationHooks_* + TestConvergeSessionClosed_* to behaviour-describing TestRegisterPortalHooks_* names, no name references migrateHydrationHooks/migrateSessionClosedHook/convergeSessionClosed, bodies/assertions/accurate doc comments unchanged, go test -run TestRegisterPortalHooks discovers renamed functions |

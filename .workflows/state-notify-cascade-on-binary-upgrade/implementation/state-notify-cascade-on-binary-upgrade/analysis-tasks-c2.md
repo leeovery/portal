@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: state-notify-cascade-on-binary-upgrade (Cycle 2)
 
 ## Task 1: Extract a shared per-event eviction helper used by both convergeEvent and UnregisterPortalHooks
-status: pending
+status: approved
 severity: medium
 sources: duplication, architecture
 
@@ -40,7 +40,7 @@ sources: duplication, architecture
 - The per-event read-failure fold-and-continue semantics remain verified for BOTH paths (register folds into `errors.Join` and continues; teardown folds `show-hooks failed on %s` and continues) with the no-double-log invariant preserved.
 
 ## Task 2: Consolidate the test-side "read-per-event → ParseShowHooks → count-by-fingerprint" helper
-status: pending
+status: approved
 severity: medium
 sources: duplication
 
@@ -68,7 +68,7 @@ sources: duplication
 - The blind-spot guard (per-event read is the only non-blind oracle) still holds: the migration count assertions remain non-vacuous on `pane-focus-out`/`window-layout-changed`.
 
 ## Task 3: Reuse the existing set-hook argv extractors instead of inline mock.Calls scanning
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -93,7 +93,7 @@ sources: duplication
 - All existing `internal/tmux` register/unregister/migration/warn tests pass unchanged; this is a test-helper refactor with no assertion-semantics change.
 
 ## Task 4: Rename test functions that reference deleted migration helpers
-status: pending
+status: approved
 severity: low
 sources: standards
 
