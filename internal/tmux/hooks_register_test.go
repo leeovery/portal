@@ -69,11 +69,41 @@ var nonSessionClosedSaveTriggerEvents = []string{
 // `set-hook -ga` is dispatched to setHookErrFor (per-event error map, nil =
 // success); `set-hook -gu` succeeds. The no-arg global `show-hooks -g` read is
 // no longer issued by the engine; if it ever appears the test fails loudly.
+//
+// It is the zero-fault convenience wrapper over perEventDispatchWithFaults — the
+// single owner of the per-event read/dispatch skeleton and its no-arg-global-read
+// fatal guard. Call sites that only vary set-hook -ga errors stay one-liners.
 func perEventDispatch(t *testing.T, seededTable string, setHookErrFor map[string]error) func(args ...string) (string, error) {
+	t.Helper()
+	return perEventDispatchWithFaults(t, seededTable, setHookErrFor, nil, nil)
+}
+
+// perEventDispatchWithFaults is the single owner of the per-event
+// read/dispatch skeleton, including the no-arg-global-read t.Fatalf guard that
+// pins the convergence engine's per-event-read invariant in exactly one place.
+// It generalises perEventDispatch with two optional fault-injection maps so the
+// previously-bespoke per-event RunFuncs collapse to one-line calls that vary
+// only the injected fault:
+//
+//   - readErrFor: keyed by event (args[2] of `show-hooks -g <event>`). When the
+//     key matches, the per-event read returns that error instead of the seeded
+//     table — the channel for both a plain read sentinel and a *CommandError.
+//   - unsetErrFor: keyed by indexed hook target (args[2] of
+//     `set-hook -gu <event[idx]>`). When the key matches, that single per-index
+//     unset returns the error; all other unsets succeed.
+//
+// setHookErrFor retains its existing semantics (per-event `set-hook -ga` error
+// map). A nil map disables that fault channel.
+func perEventDispatchWithFaults(t *testing.T, seededTable string, setHookErrFor, readErrFor, unsetErrFor map[string]error) func(args ...string) (string, error) {
 	t.Helper()
 	byEvent := parseSeededTableByEvent(seededTable)
 	return func(args ...string) (string, error) {
 		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
+			if readErrFor != nil {
+				if err, ok := readErrFor[args[2]]; ok {
+					return "", err
+				}
+			}
 			return byEvent[args[2]], nil
 		}
 		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
@@ -89,10 +119,44 @@ func perEventDispatch(t *testing.T, seededTable string, setHookErrFor map[string
 			return "", nil
 		}
 		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+			if unsetErrFor != nil {
+				if err, ok := unsetErrFor[args[2]]; ok {
+					return "", err
+				}
+			}
 			return "", nil
 		}
 		t.Fatalf("unexpected command: %v", args)
 		return "", nil
+	}
+}
+
+// readErrForAllManagedEvents builds a readErrFor map that returns err for the
+// per-event read of EVERY managed event, in lockstep with the production
+// managedEvents table (via tmux.ManagedEventNames). It is the fail-every-read
+// fault used by the "no set-hook when reads fail everywhere" tests; deriving the
+// key set from the production table keeps the fault total in step with any
+// future event added to managedEvents.
+func readErrForAllManagedEvents(err error) map[string]error {
+	m := map[string]error{}
+	for _, ev := range tmux.ManagedEventNames() {
+		m[ev] = err
+	}
+	return m
+}
+
+// assertNoSetHookCalls fails the test if any set-hook call (either -ga append or
+// -gu unset) was recorded. Pins the "set-hook must not be dispatched when the
+// per-event read fails" invariant as an observable post-condition on the mock's
+// call log — replacing the bespoke RunFuncs' inline t.Fatalf("set-hook must not
+// be called ...") tripwire with an equivalent assertion that survives collapse
+// onto the shared dispatch helper.
+func assertNoSetHookCalls(t *testing.T, calls [][]string) {
+	t.Helper()
+	for _, c := range calls {
+		if len(c) >= 2 && c[0] == "set-hook" {
+			t.Errorf("set-hook must not be called when show-hooks fails: %v", c)
+		}
 	}
 }
 
@@ -546,24 +610,8 @@ func TestRegisterPortalHooks_UserHookUntouched(t *testing.T) {
 // the other events from converging.
 func TestRegisterPortalHooks_PerEventReadFailureFolds(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure on session-renamed")
-	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-			if args[2] == "session-renamed" {
-				return "", sentinel
-			}
-			return "", nil
-		}
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			t.Fatalf("convergence engine must read per-event: %v", args)
-			return "", nil
-		}
-		if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-ga" || args[1] == "-gu") {
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
-	mock := &MockCommander{RunFunc: runFunc}
+	mock := &MockCommander{RunFunc: perEventDispatchWithFaults(t, "", nil,
+		map[string]error{"session-renamed": sentinel}, nil)}
 	client := tmux.NewClient(mock)
 
 	logger := &recordingMigrationLogger{}
@@ -624,24 +672,8 @@ func TestRegisterPortalHooks_PerIndexUnsetFailureWarnsAndContinues(t *testing.T)
 	raw := fmt.Sprintf("pane-focus-out[0] => '%s'\npane-focus-out[1] => '%s'\n",
 		expectedNotifyCommand, expectedNotifyCommand)
 	sentinel := errors.New("tmux unset failed at index 1")
-	byEvent := parseSeededTableByEvent(raw)
-	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-			return byEvent[args[2]], nil
-		}
-		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
-			if args[2] == "pane-focus-out[1]" {
-				return "", sentinel
-			}
-			return "", nil
-		}
-		if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
-	mock := &MockCommander{RunFunc: runFunc}
+	mock := &MockCommander{RunFunc: perEventDispatchWithFaults(t, raw, nil, nil,
+		map[string]error{"pane-focus-out[1]": sentinel})}
 	client := tmux.NewClient(mock)
 
 	logger := &recordingMigrationLogger{}

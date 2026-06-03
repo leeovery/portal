@@ -311,43 +311,21 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 //     evict" message.
 //   - Successful evictions on other events trigger the INFO emission.
 func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) {
-	// One stale entry per hydration event, served per-event via the canonical
-	// parseSeededTableByEvent splitter (the single source of truth for
-	// per-event-filtered show-hooks output). A bespoke runFunc layers
-	// set-hook -gu fault injection on top — perEventDispatch only models
-	// set-hook -ga errors, so the unset-failure case wraps the shared splitter
-	// directly, mirroring TestRegisterPortalHooks_PerIndexUnsetFailureWarnsAndContinues.
+	// One stale entry per hydration event, served per-event via the shared
+	// perEventDispatchWithFaults helper (the single owner of the per-event
+	// read/dispatch skeleton). The unset-failure is injected through its
+	// unsetErrFor fault map keyed by the indexed hook target, mirroring
+	// TestRegisterPortalHooks_PerIndexUnsetFailureWarnsAndContinues.
 	var raw strings.Builder
 	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
 	}
-	byEvent := parseSeededTableByEvent(raw.String())
 
 	failingTarget := "client-attached[0]" // matches set-hook -gu argv[2]
 	sentinel := errors.New("tmux unset failure")
 
-	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-			return byEvent[args[2]], nil
-		}
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
-			return "", nil
-		}
-		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
-			if args[2] == failingTarget {
-				return "", sentinel
-			}
-			return "", nil
-		}
-		// set-hook -ga (register-loop appends) — accept silently.
-		if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
-	mock := &MockCommander{RunFunc: runFunc}
+	mock := &MockCommander{RunFunc: perEventDispatchWithFaults(t, raw.String(), nil, nil,
+		map[string]error{failingTarget: sentinel})}
 	client := tmux.NewClient(mock)
 
 	log := &recordingMigrationLogger{}
@@ -444,17 +422,7 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure")
 	mock := &MockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-				return "", sentinel
-			}
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-				t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
-				return "", nil
-			}
-			t.Fatalf("set-hook must not be called when show-hooks fails: %v", args)
-			return "", nil
-		},
+		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
 	}
 	client := tmux.NewClient(mock)
 
@@ -467,6 +435,9 @@ func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
 	}
+
+	// No set-hook may be dispatched when every per-event read fails.
+	assertNoSetHookCalls(t, mock.Calls)
 	if !strings.Contains(err.Error(), "show-hooks failed") {
 		t.Errorf("error %q does not contain expected wrap %q", err.Error(), "show-hooks failed")
 	}

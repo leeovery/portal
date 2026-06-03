@@ -86,13 +86,7 @@ func assertShowHooksWarnShape(t *testing.T, rec slog.Record, wantErr error) {
 func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure (hydration)")
 	mock := &MockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-				return "", sentinel
-			}
-			t.Fatalf("set-hook must not be called when show-hooks fails: %v", args)
-			return "", nil
-		},
+		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
 	}
 	client := tmux.NewClient(mock)
 
@@ -107,6 +101,9 @@ func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
 	}
+
+	// No set-hook may be dispatched when every per-event read fails.
+	assertNoSetHookCalls(t, mock.Calls)
 
 	// The migrateHydrationHooks branch is the FIRST show-hooks call. Assert at
 	// least one WARN carries the uniform shape with the sentinel reachable.
@@ -126,24 +123,8 @@ func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 func TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized(t *testing.T) {
 	// Fail only the per-event read for session-closed.
 	sentinel := errors.New("tmux show-hooks failure (session-closed)")
-	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-			if args[2] == "session-closed" {
-				return "", sentinel
-			}
-			return "", nil
-		}
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
-			return "", nil
-		}
-		if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-ga" || args[1] == "-gu") {
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
-	mock := &MockCommander{RunFunc: runFunc}
+	mock := &MockCommander{RunFunc: perEventDispatchWithFaults(t, "", nil,
+		map[string]error{"session-closed": sentinel}, nil)}
 	client := tmux.NewClient(mock)
 
 	rec := &recordingSlogHandler{}
@@ -182,23 +163,8 @@ func TestShowHooksWarn_ErrorAttrCarriesCommandErrorChain(t *testing.T) {
 		Args:   []string{"show-hooks", "-g", "session-created"},
 	}
 	mock := &MockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-				if args[2] == "session-created" {
-					return "", cmdErr
-				}
-				return "", nil
-			}
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-				t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
-				return "", nil
-			}
-			if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-ga" || args[1] == "-gu") {
-				return "", nil
-			}
-			t.Fatalf("unexpected command: %v", args)
-			return "", nil
-		},
+		RunFunc: perEventDispatchWithFaults(t, "", nil,
+			map[string]error{"session-created": cmdErr}, nil),
 	}
 	client := tmux.NewClient(mock)
 
@@ -244,17 +210,7 @@ func TestShowHooksWarn_ErrorAttrCarriesCommandErrorChain(t *testing.T) {
 func TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks fails everywhere")
 	mock := &MockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-				return "", sentinel
-			}
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-				t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
-				return "", nil
-			}
-			t.Fatalf("set-hook must not be called when show-hooks fails: %v", args)
-			return "", nil
-		},
+		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
 	}
 	client := tmux.NewClient(mock)
 
@@ -268,6 +224,9 @@ func TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce(t *testing.T) {
 	if !errors.Is(err, sentinel) {
 		t.Errorf("aggregate error %v does not wrap sentinel %v", err, sentinel)
 	}
+
+	// No set-hook may be dispatched when every per-event read fails.
+	assertNoSetHookCalls(t, mock.Calls)
 
 	// One WARN per managed event whose per-event read failed: every event in
 	// managedEvents fails once. No aggregate WARN from RegisterPortalHooks.
