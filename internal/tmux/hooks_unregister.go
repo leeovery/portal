@@ -3,7 +3,7 @@ package tmux
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"log/slog"
 	"strings"
 
 	"github.com/leeovery/portal/internal/log"
@@ -82,29 +82,51 @@ var portalEvents = managedEventNames()
 // Per-event read failure is fold-and-continue (not all-or-nothing): a failing
 // ShowGlobalHooksForEvent emits the canonical show-hooks-failed WARN
 // (error_class=unexpected) under the bootstrap component, folds a
-// "show-hooks failed: %w" leaf naming the event into the aggregate, and the
-// loop proceeds so every other event is still torn down.
+// "show-hooks failed on <event>: %w" leaf into the aggregate, and the loop
+// proceeds so every other event is still torn down.
+//
+// The exported signature is func(*Client) error — it is consumed as a function
+// value by cmd/state_cleanup.go — so this stays a thin wrapper that binds the
+// package-level bootstrap WARN sink and delegates to unregisterPortalHooks.
 func UnregisterPortalHooks(c *Client) error {
+	return unregisterPortalHooks(c, bootstrapLogger)
+}
+
+// unregisterPortalHooks is the injected-logger teardown variant. The logger is
+// the sink for the per-event read-failure WARN (production passes the
+// package-level bootstrapLogger via the UnregisterPortalHooks wrapper; tests
+// pass a recording logger to assert the WARN shape through the same seam the
+// register side uses). It routes the per-event read+WARN and the descending-
+// index unset loop through the same shared helpers convergeEvent uses
+// (warnShowHooksFailure + evictPortalEntries), so the two paths cannot drift.
+//
+// A nil logger is tolerated and falls through to the shared internal/log
+// discard sink via log.OrDiscard.
+func unregisterPortalHooks(c *Client, logger *slog.Logger) error {
+	logger = log.OrDiscard(logger)
+
 	var errs []error
 	for _, event := range portalEvents {
 		raw, err := c.ShowGlobalHooksForEvent(event)
 		if err != nil {
-			// Canonical show-hooks-failed WARN+wrap: message "show-hooks failed",
-			// error_class=unexpected, underlying err wrapped verbatim. Fold and
-			// continue so the remaining events are still torn down.
-			bootstrapLogger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+			// Canonical show-hooks-failed WARN (one production definition in
+			// warnShowHooksFailure) followed by the teardown-specific
+			// event-named wrap. Fold and continue so the remaining events are
+			// still torn down.
+			warnShowHooksFailure(logger, err)
 			errs = append(errs, fmt.Errorf("show-hooks failed on %s: %w", event, err))
 			continue
 		}
 
-		portal := portalEntriesFor(ParseShowHooks(raw)[event])
-		sort.Slice(portal, func(i, j int) bool {
-			return portal[i].Index > portal[j].Index
-		})
-		for _, entry := range portal {
-			if err := c.UnsetGlobalHookAt(event, entry.Index); err != nil {
-				errs = append(errs, fmt.Errorf("unset hook on %s[%d]: %w", event, entry.Index, err))
-			}
+		// Filter with teardown's fingerprint set (portalCommandSubstrings,
+		// which retains the legacy migrate-rename substring registration never
+		// installs), then route through the shared descending-index unset loop.
+		portal := portalEntriesFor(parseEventEntries(raw, event))
+		_, failures := evictPortalEntries(c, event, portal)
+		for _, f := range failures {
+			// Teardown's contract folds each per-index failure into the
+			// errors.Join aggregate naming the failing event[index].
+			errs = append(errs, fmt.Errorf("unset hook on %s[%d]: %w", event, f.index, f.err))
 		}
 	}
 

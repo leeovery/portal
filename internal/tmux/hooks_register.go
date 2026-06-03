@@ -160,6 +160,80 @@ const signalHydrateMarker = "portal state signal-hydrate"
 // single source of truth for the session-closed literal.
 const sessionClosedEvent = "session-closed"
 
+// parseEventEntries is the single home for the per-event collapse of the
+// whole-table ParseShowHooks map down to one event's entry slice. Both the
+// registration convergence path (convergeEvent) and the teardown path
+// (unregisterPortalHooks) route through it so the `ParseShowHooks(raw)[event]`
+// idiom is written exactly once. ParseShowHooks itself is unchanged — this is a
+// thin projection over its result, returning a nil slice when the event is
+// absent (the zero value of a map lookup).
+func parseEventEntries(raw, event string) []HookEntry {
+	return ParseShowHooks(raw)[event]
+}
+
+// warnShowHooksFailure emits the canonical per-event show-hooks-failed WARN:
+// message "show-hooks failed", error_class=unexpected, and the underlying
+// error wrapped verbatim on the "error" attr (so errors.As can recover the
+// *CommandError chain). This is the single production definition of the WARN
+// shape shared by both the registration convergence path (convergeEvent) and
+// the teardown path (unregisterPortalHooks).
+//
+// Only the WARN is centralised here, not the returned wrapped error: the two
+// callers deliberately differ on the wrap prefix — registration folds a bare
+// "show-hooks failed: %w" leaf (then an outer "register hook on <event>: %w"),
+// while teardown folds an event-named "show-hooks failed on <event>: %w" leaf
+// directly into its aggregate. Centralising the error wrap too would force one
+// caller's event naming onto the other; each keeps its own fmt.Errorf at the
+// call site.
+//
+// A nil logger is tolerated via the caller's prior log.OrDiscard normalisation.
+func warnShowHooksFailure(logger *slog.Logger, err error) {
+	logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+}
+
+// evictFailure pairs a hook index whose UnsetGlobalHookAt call failed with the
+// raw underlying error, so each caller of evictPortalEntries can apply its own
+// error-aggregation policy (registration: best-effort WARN + continue, not
+// counted as evicted; teardown: fold an event-named leaf into errors.Join)
+// without the shared helper homogenising the two distinct contracts.
+type evictFailure struct {
+	index int
+	err   error
+}
+
+// evictPortalEntries is the single production definition of the descending-index
+// best-effort UnsetGlobalHookAt loop shared by convergeEvent and
+// unregisterPortalHooks.
+//
+// It takes the ALREADY-FILTERED Portal-authored entries for one event (each
+// caller filters with its own fingerprint set — registration's per-event
+// fingerprints vs teardown's portalCommandSubstrings — so the deliberate
+// registration-vs-teardown fingerprint divergence is preserved at the call
+// site, not hard-coded here), sorts their indices DESCENDING (so a removal
+// never shifts a not-yet-processed index), and attempts UnsetGlobalHookAt on
+// each. A per-index failure does NOT short-circuit the loop and is NOT counted
+// as evicted; it is collected into the returned failures slice with its raw
+// error for the caller to fold. The first return is the count of
+// successfully-unset entries.
+func evictPortalEntries(c *Client, event string, portalEntries []HookEntry) (int, []evictFailure) {
+	indices := make([]int, len(portalEntries))
+	for i, entry := range portalEntries {
+		indices[i] = entry.Index
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(indices)))
+
+	var evicted int
+	var failures []evictFailure
+	for _, idx := range indices {
+		if err := c.UnsetGlobalHookAt(event, idx); err != nil {
+			failures = append(failures, evictFailure{index: idx, err: err})
+			continue
+		}
+		evicted++
+	}
+	return evicted, failures
+}
+
 // convergeEvent ensures the global hook array for event holds exactly one
 // Portal entry carrying desiredBody, reading per-event via
 // ShowGlobalHooksForEvent so the tmux 3.6b blind-event omission (the no-arg
@@ -195,19 +269,20 @@ func convergeEvent(c *Client, logger *slog.Logger, event string, fingerprints []
 
 	raw, err := c.ShowGlobalHooksForEvent(event)
 	if err != nil {
-		// Canonical show-hooks-failed WARN+wrap: message "show-hooks failed",
-		// error_class=unexpected, and the underlying err wrapped verbatim.
-		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+		// Canonical show-hooks-failed WARN (one production definition in
+		// warnShowHooksFailure) followed by the registration-specific bare wrap
+		// the caller folds into "register hook on <event>: %w".
+		warnShowHooksFailure(logger, err)
 		return 0, fmt.Errorf("show-hooks failed: %w", err)
 	}
 
-	var portalIndices []int
+	var portalEntries []HookEntry
 	var alreadyConverged bool
-	for _, entry := range ParseShowHooks(raw)[event] {
+	for _, entry := range parseEventEntries(raw, event) {
 		if !containsAny(entry.Command, fingerprints) {
 			continue
 		}
-		portalIndices = append(portalIndices, entry.Index)
+		portalEntries = append(portalEntries, entry)
 		if entry.Command == desiredBody {
 			alreadyConverged = true
 		}
@@ -215,22 +290,18 @@ func convergeEvent(c *Client, logger *slog.Logger, event string, fingerprints []
 
 	// Idempotent fast path: exactly one Portal-authored entry and it already
 	// carries the desired body — nothing to do.
-	if len(portalIndices) == 1 && alreadyConverged {
+	if len(portalEntries) == 1 && alreadyConverged {
 		return 0, nil
 	}
 
-	// Descending so each unset targets the entry it identified during the
-	// pre-removal scan — ascending would shift later indices.
-	sort.Sort(sort.Reverse(sort.IntSlice(portalIndices)))
-	var evicted int
-	for _, idx := range portalIndices {
-		if err := c.UnsetGlobalHookAt(event, idx); err != nil {
-			// event name and hook index have no closed attr keys; "error"
-			// carries the signal.
-			logger.Warn("failed to evict portal hook", "error", err)
-			continue
-		}
-		evicted++
+	// Shared descending-index best-effort unset loop. Registration's contract
+	// for per-index failures is best-effort: WARN carrying only the raw error,
+	// continue, and do NOT count the failed index as evicted.
+	evicted, failures := evictPortalEntries(c, event, portalEntries)
+	for _, f := range failures {
+		// event name and hook index have no closed attr keys; "error" carries
+		// the signal.
+		logger.Warn("failed to evict portal hook", "error", f.err)
 	}
 
 	if err := c.AppendGlobalHook(event, desiredBody); err != nil {
