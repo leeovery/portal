@@ -774,6 +774,21 @@ func (c *Client) ShowGlobalHooks() (string, error) {
 	return output, nil
 }
 
+// ShowGlobalHooksForEvent returns the raw output of "tmux show-hooks -g <event>",
+// a per-event read of the global hook scope. tmux 3.6b's no-arg show-hooks -g
+// does not enumerate an entire class of events (pane-* and the geometry/rename
+// window-* events), so callers that need those hooks must query each event by
+// name. The output is byte-identical in shape to the no-arg global form, so
+// ParseShowHooks consumes it unchanged. An event with zero entries yields the
+// empty string and a nil error.
+func (c *Client) ShowGlobalHooksForEvent(event string) (string, error) {
+	output, err := c.cmd.Run("show-hooks", "-g", event)
+	if err != nil {
+		return "", fmt.Errorf("failed to show global hooks: %w", err)
+	}
+	return output, nil
+}
+
 // AppendGlobalHook appends a command to the global hook array for the given event
 // via "tmux set-hook -ga". The command is passed as a single argv element so that
 // single quotes and shell metacharacters within it are preserved verbatim.

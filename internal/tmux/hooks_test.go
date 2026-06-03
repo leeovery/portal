@@ -72,6 +72,72 @@ func TestShowGlobalHooks(t *testing.T) {
 	})
 }
 
+func TestShowGlobalHooksForEvent(t *testing.T) {
+	t.Run("calls show-hooks -g <event> and returns raw output", func(t *testing.T) {
+		// Raw output for a single per-event read; the wrapper must not normalize it.
+		raw := "pane-focus-out[0] run-shell 'command -v portal'\n"
+		mock := &MockCommander{Output: raw}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowGlobalHooksForEvent("pane-focus-out")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != raw {
+			t.Errorf("ShowGlobalHooksForEvent() = %q, want %q (verbatim)", got, raw)
+		}
+
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
+		}
+		wantArgs := []string{"show-hooks", "-g", "pane-focus-out"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got %d args %v, want %d args %v", len(mock.Calls[0]), mock.Calls[0], len(wantArgs), wantArgs)
+		}
+		for i, arg := range mock.Calls[0] {
+			if arg != wantArgs[i] {
+				t.Errorf("args[%d] = %q, want %q", i, arg, wantArgs[i])
+			}
+		}
+	})
+
+	t.Run("returns empty string without error when output is empty", func(t *testing.T) {
+		mock := &MockCommander{Output: ""}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowGlobalHooksForEvent("window-renamed")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("ShowGlobalHooksForEvent() = %q, want empty string", got)
+		}
+	})
+
+	t.Run("propagates commander error wrapped via %w", func(t *testing.T) {
+		sentinel := errors.New("tmux exec failed")
+		mock := &MockCommander{Err: sentinel}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ShowGlobalHooksForEvent("window-resized")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if got != "" {
+			t.Errorf("ShowGlobalHooksForEvent() output = %q, want empty string on error", got)
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
+		}
+		if !strings.Contains(err.Error(), "failed to show global hooks: ") {
+			t.Errorf("error %q does not contain expected prefix", err.Error())
+		}
+	})
+}
+
 func TestAppendGlobalHook(t *testing.T) {
 	t.Run("calls set-hook -ga with event and command as separate argv elements", func(t *testing.T) {
 		mock := &MockCommander{}
