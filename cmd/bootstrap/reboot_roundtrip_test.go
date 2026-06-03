@@ -1199,8 +1199,9 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 
 	// Wire PRODUCTION hook-registration adapters this time — this is the
 	// load-bearing difference vs the existing alpha/beta round-trips.
-	// HookRegistrar runs migrateHydrationHooks (Task 1-2) and registers
-	// the new `--`-separated signalHydrateCommand (Task 1-1) end-to-end.
+	// HookRegistrar runs RegisterPortalHooks' per-event ensure-exactly-one
+	// convergence, which evicts any stale un-separated signal-hydrate body and
+	// registers the `--`-separated signalHydrateCommand end-to-end.
 	o := buildIntegrationOrchestrator(t, client, orchestratorOpts{
 		Hooks:   &bootstrapadapter.HookRegistrar{Client: client, Logger: logger},
 		Restore: bootstrapadapter.NewRestoreAdapter(client, stateDir, logger),
@@ -1226,8 +1227,8 @@ func TestRebootRoundTrip_LeadingDashSessionName(t *testing.T) {
 	// Hook table assertion — for each hydration-trigger event there must
 	// be exactly one entry containing `portal state signal-hydrate` AND
 	// that entry must contain the `-- ` end-of-flags separator. Catches
-	// both Task 1-1 (separator) and Task 1-2 (migration evicted any
-	// stale un-separated entry; only one entry remains per event).
+	// both the separator registration and the per-event convergence having
+	// evicted any stale un-separated entry (only one entry remains per event).
 	verifyHydrationHookEntries(t, client)
 
 	// Drive signal-hydrate via the built portal binary — argv-identical
