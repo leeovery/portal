@@ -211,6 +211,48 @@ func setHookCalls(calls [][]string) [][2]string {
 	return out
 }
 
+// setHookEvent is one entry in the ordered, cross-verb set-hook projection
+// produced by setHookEvents. Verb is the tmux flag ("-ga" append or "-gu"
+// unset) and Target is argv[2] — the bare event for an append (e.g.
+// "pane-focus-out") or the indexed target for an unset (e.g.
+// "pane-focus-out[3]").
+type setHookEvent struct {
+	Verb   string
+	Target string
+}
+
+// setHookEvents projects a MockCommander's call log to the ordered cross-verb
+// list of set-hook calls (both -ga appends and -gu unsets), in invocation
+// order, dropping the interleaved show-hooks reads. It is the single accessor
+// for tests that assert append-vs-unset ORDERING relative to each other — the
+// relative position of each entry in the returned slice mirrors its relative
+// position in the raw call log, so "the append follows every unset" is
+// preserved without re-encoding the set-hook argv guards per test.
+func setHookEvents(calls [][]string) []setHookEvent {
+	var out []setHookEvent
+	for _, c := range calls {
+		switch {
+		case len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga":
+			out = append(out, setHookEvent{Verb: "-ga", Target: c[2]})
+		case len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu":
+			out = append(out, setHookEvent{Verb: "-gu", Target: c[2]})
+		}
+	}
+	return out
+}
+
+// eventOfUnsetTarget splits the event-name prefix out of an indexed unset
+// target (the argv[2] of a set-hook -gu call, e.g. "client-attached[3]"),
+// returning the text before the first '['. A target with no '[' is returned
+// unchanged. Co-located with the set-hook extractors so the indexed-target
+// shape is decoded in exactly one place.
+func eventOfUnsetTarget(target string) string {
+	if i := strings.IndexByte(target, '['); i > 0 {
+		return target[:i]
+	}
+	return target
+}
+
 // convergedTable builds a per-event seeded show-hooks table in the
 // post-convergence shape: notifyCommand on the six non-session-closed
 // save-trigger events, commitNowCommand on session-closed, and
@@ -348,14 +390,18 @@ func TestRegisterPortalHooks_KDeepStackCollapse(t *testing.T) {
 	appendIdx, lastUnsetIdx := -1, -1
 	var appendBody string
 	var paneFocusAppends int
-	for i, c := range mock.Calls {
-		if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "pane-focus-out" {
+	for i, e := range setHookEvents(mock.Calls) {
+		if e.Verb == "-ga" && e.Target == "pane-focus-out" {
 			paneFocusAppends++
 			appendIdx = i
-			appendBody = c[3]
 		}
-		if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" && strings.HasPrefix(c[2], "pane-focus-out[") {
+		if e.Verb == "-gu" && strings.HasPrefix(e.Target, "pane-focus-out[") {
 			lastUnsetIdx = i
+		}
+	}
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "pane-focus-out" {
+			appendBody = c[1]
 		}
 	}
 	if paneFocusAppends != 1 {
@@ -365,7 +411,7 @@ func TestRegisterPortalHooks_KDeepStackCollapse(t *testing.T) {
 		t.Errorf("pane-focus-out append body = %q, want %q", appendBody, expectedNotifyCommand)
 	}
 	if appendIdx <= lastUnsetIdx {
-		t.Errorf("append (call[%d]) must follow the unsets (last at call[%d])", appendIdx, lastUnsetIdx)
+		t.Errorf("append (event[%d]) must follow the unsets (last at event[%d])", appendIdx, lastUnsetIdx)
 	}
 }
 
@@ -437,14 +483,18 @@ func TestRegisterPortalHooks_StaleNotifyOnSessionClosedMigratesToCommitNow(t *te
 	unsetIdx, appendIdx := -1, -1
 	var appendBody string
 	var closedAppends int
-	for i, c := range mock.Calls {
-		if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" && c[2] == "session-closed[0]" {
+	for i, e := range setHookEvents(mock.Calls) {
+		if e.Verb == "-gu" && e.Target == "session-closed[0]" {
 			unsetIdx = i
 		}
-		if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" {
+		if e.Verb == "-ga" && e.Target == "session-closed" {
 			closedAppends++
 			appendIdx = i
-			appendBody = c[3]
+		}
+	}
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "session-closed" {
+			appendBody = c[1]
 		}
 	}
 	if closedAppends != 1 {
@@ -454,7 +504,7 @@ func TestRegisterPortalHooks_StaleNotifyOnSessionClosedMigratesToCommitNow(t *te
 		t.Errorf("session-closed append body = %q, want %q", appendBody, expectedCommitNowCommand)
 	}
 	if unsetIdx < 0 || appendIdx < 0 || unsetIdx >= appendIdx {
-		t.Errorf("unset (call[%d]) must precede append (call[%d])", unsetIdx, appendIdx)
+		t.Errorf("unset (event[%d]) must precede append (event[%d])", unsetIdx, appendIdx)
 	}
 }
 
@@ -471,15 +521,14 @@ func TestRegisterPortalHooks_SessionClosedUnionFastPath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, c := range mock.Calls {
-		if c[0] != "set-hook" {
-			continue
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "session-closed" {
+			t.Errorf("unexpected set-hook -ga on already-converged session-closed: %q", c[1])
 		}
-		if c[1] == "-ga" && len(c) >= 4 && c[2] == "session-closed" {
-			t.Errorf("unexpected set-hook -ga on already-converged session-closed: %q", c[3])
-		}
-		if c[1] == "-gu" && len(c) >= 3 && strings.HasPrefix(c[2], "session-closed[") {
-			t.Errorf("unexpected set-hook -gu on already-converged session-closed: %q", c[2])
+	}
+	for _, u := range unsetHookCalls(mock.Calls) {
+		if strings.HasPrefix(u, "session-closed[") {
+			t.Errorf("unexpected set-hook -gu on already-converged session-closed: %q", u)
 		}
 	}
 }

@@ -144,8 +144,8 @@ func TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized(t *testing.T) {
 	assertShowHooksWarnShape(t, warns[0], sentinel)
 
 	// session-closed must NOT have been appended (its convergence was skipped).
-	for _, c := range mock.Calls {
-		if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" {
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "session-closed" {
 			t.Errorf("session-closed must not be appended when its read fails: %v", c)
 		}
 	}

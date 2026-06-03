@@ -353,19 +353,13 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	}
 
 	// The unset calls should target every event in the canonical slice.
-	// Filter mock.Calls to set-hook -gu only — set-hook -ga calls from the
-	// register loop are unrelated to the migration's runtime-slice
-	// invariant.
+	// unsetHookCalls already filters to set-hook -gu only — set-hook -ga calls
+	// from the register loop are unrelated to the migration's runtime-slice
+	// invariant. eventOfUnsetTarget splits the bare event name out of the
+	// indexed target (e.g. "client-attached[0]" -> "client-attached").
 	gotEvents := map[string]bool{}
-	for _, c := range mock.Calls {
-		if len(c) >= 3 && c[0] == "set-hook" && c[1] == "-gu" {
-			// argv[2] is e.g. "client-attached[0]"
-			ev := c[2]
-			if i := strings.Index(ev, "["); i > 0 {
-				ev = ev[:i]
-			}
-			gotEvents[ev] = true
-		}
+	for _, u := range unsetHookCalls(mock.Calls) {
+		gotEvents[eventOfUnsetTarget(u)] = true
 	}
 	for _, want := range tmux.HydrationTriggerEvents {
 		if !gotEvents[want] {
