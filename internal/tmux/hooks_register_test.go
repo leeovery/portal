@@ -25,26 +25,46 @@ var expectedSaveTriggerEvents = []string{
 	"pane-focus-out",
 }
 
+// notifyFingerprint is the per-event content fingerprint for the six
+// `portal state notify` save-trigger events. Mirrors notifySubstring in
+// hooks_register.go and is the single source from which expectedNotifyCommand
+// is composed.
+const notifyFingerprint = "portal state notify"
+
+// commitNowFingerprint is the per-event content fingerprint for the
+// session-closed commit-now event. Mirrors commitNowSubstring in
+// hooks_register.go and is the single source from which expectedCommitNowCommand
+// is composed.
+const commitNowFingerprint = "portal state commit-now"
+
+// signalHydrateFingerprint is the per-event content fingerprint for the two
+// hydration-trigger events. Mirrors signalHydrateMarker in hooks_register.go
+// and is the single source from which expectedSignalHydrateCommand is composed.
+const signalHydrateFingerprint = "portal state signal-hydrate"
+
 // expectedNotifyCommand is the exact full command Portal registers on each of
 // the six non-session-closed save-trigger events. Mirrors notifyCommand in
-// hooks_register.go. The seventh save-trigger event (session-closed) carries
-// commitNowCommand; see expectedCommitNowCommand.
-const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
+// hooks_register.go, composed from notifyFingerprint so the fingerprint
+// substring is the single source. The seventh save-trigger event
+// (session-closed) carries commitNowCommand; see expectedCommitNowCommand.
+const expectedNotifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && ` + notifyFingerprint + `"`
 
 // expectedCommitNowCommand is the exact full command Portal registers on
-// session-closed. Mirrors commitNowCommand in hooks_register.go. session-closed
-// is the single tmux-side seam that fires uniformly across every kill path;
-// this command invokes a synchronous sessions.json commit to close the
-// resurrection window between kill and the daemon's next tick.
-const expectedCommitNowCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state commit-now"`
+// session-closed. Mirrors commitNowCommand in hooks_register.go, composed from
+// commitNowFingerprint. session-closed is the single tmux-side seam that fires
+// uniformly across every kill path; this command invokes a synchronous
+// sessions.json commit to close the resurrection window between kill and the
+// daemon's next tick.
+const expectedCommitNowCommand = `run-shell "command -v portal >/dev/null 2>&1 && ` + commitNowFingerprint + `"`
 
 // expectedSignalHydrateCommand is the exact full command Portal registers on
 // every hydration-trigger event. Mirrors signalHydrateCommand in
-// hooks_register.go. The literal #{session_name} is preserved verbatim — tmux
-// expands it at hook-fire time. The `--` end-of-flags separator before
-// #{session_name} prevents cobra/pflag from misparsing leading-dash session
-// names (e.g. `-dotfiles-HM9Zhw`) as short-flag clusters.
-const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate -- #{session_name}"`
+// hooks_register.go, composed from signalHydrateFingerprint. The literal
+// #{session_name} is preserved verbatim — tmux expands it at hook-fire time.
+// The `--` end-of-flags separator before #{session_name} prevents cobra/pflag
+// from misparsing leading-dash session names (e.g. `-dotfiles-HM9Zhw`) as
+// short-flag clusters.
+const expectedSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && ` + signalHydrateFingerprint + ` -- #{session_name}"`
 
 // expectedManagedEventCount is the total number of Portal-managed events the
 // convergence engine registers on a fresh table: seven save-trigger events +

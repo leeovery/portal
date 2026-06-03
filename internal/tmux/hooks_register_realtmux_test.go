@@ -36,22 +36,13 @@ type managedEventFingerprint struct {
 	fingerprint string
 }
 
-// notifyFingerprint is the per-event content fingerprint for the six
-// `portal state notify` save-trigger events (matches notifySubstring).
-const notifyFingerprint = "portal state notify"
-
-// commitNowFingerprint is the per-event content fingerprint for the
-// session-closed commit-now event (matches commitNowSubstring).
-const commitNowFingerprint = "portal state commit-now"
-
-// signalHydrateFingerprint is the per-event content fingerprint for the two
-// hydration-trigger events (matches signalHydrateMarker).
-const signalHydrateFingerprint = "portal state signal-hydrate"
-
-// notifyCommandBody is the full wrapped body the six notify save-trigger
-// events converge to (mirrors the unexported notifyCommand constant). Used to
-// cross-check the desired body on the two blind events.
-const notifyCommandBody = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
+// The per-event content fingerprints (notifyFingerprint, commitNowFingerprint,
+// signalHydrateFingerprint) and the full wrapped bodies they compose
+// (expectedNotifyCommand etc.) are declared once in hooks_register_test.go, the
+// single test-package home for the desired-body literals. They mirror the
+// unexported notifySubstring / commitNowSubstring / signalHydrateMarker and
+// notifyCommand constants and are referenced here to identify Portal-authored
+// entries and cross-check the desired body on the two blind events.
 
 // managedEventFingerprints enumerates every Portal-managed event with the
 // fingerprint that identifies a Portal-authored entry on it. This mirrors the
@@ -155,8 +146,8 @@ func TestRegisterPortalHooks_NoGrowthAcrossBootstraps(t *testing.T) {
 		if len(entries) != 1 {
 			t.Fatalf("event %q: entry count = %d, want exactly 1; entries=%v", ev, len(entries), entries)
 		}
-		if entries[0].Command != notifyCommandBody {
-			t.Errorf("event %q: desired body = %q, want %q", ev, entries[0].Command, notifyCommandBody)
+		if entries[0].Command != expectedNotifyCommand {
+			t.Errorf("event %q: desired body = %q, want %q", ev, entries[0].Command, expectedNotifyCommand)
 		}
 	}
 }
@@ -199,7 +190,7 @@ func TestShowHooksGlobalEnumeration_OmitsPaneAndGeometryEvents(t *testing.T) {
 	// convergence engine).
 	allEvents := append([]string{enumeratedEvent}, blindEvents...)
 	for _, ev := range allEvents {
-		if err := client.AppendGlobalHook(ev, notifyCommandBody); err != nil {
+		if err := client.AppendGlobalHook(ev, expectedNotifyCommand); err != nil {
 			t.Fatalf("AppendGlobalHook(%s): %v", ev, err)
 		}
 	}
@@ -304,7 +295,7 @@ func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing
 	// Live incident was 139-deep on this event; K=5 traverses the identical
 	// collapse path (see stackDepth).
 	for i := 0; i < stackDepth; i++ {
-		if err := client.AppendGlobalHook(event, notifyCommandBody); err != nil {
+		if err := client.AppendGlobalHook(event, expectedNotifyCommand); err != nil {
 			t.Fatalf("seed Portal entry %d: AppendGlobalHook(%s): %v", i, event, err)
 		}
 	}
@@ -340,8 +331,8 @@ func TestRegisterPortalHooks_SelfHealsKDeepStackLeavingUserHookIntact(t *testing
 	if len(portal) != 1 {
 		t.Fatalf("after self-heal: Portal entry count = %d, want 1; entries=%v", len(portal), entries)
 	}
-	if portal[0].Command != notifyCommandBody {
-		t.Errorf("after self-heal: surviving body = %q, want %q", portal[0].Command, notifyCommandBody)
+	if portal[0].Command != expectedNotifyCommand {
+		t.Errorf("after self-heal: surviving body = %q, want %q", portal[0].Command, expectedNotifyCommand)
 	}
 
 	// The co-resident user hook is untouched — exactly one entry carrying its
@@ -380,7 +371,7 @@ func TestUnregisterPortalHooks_ReapsAtDepthOnBlindEventsLeavingUserHookIntact(t 
 	// Seed each blind event with a K-deep Portal stack plus one user hook.
 	for _, event := range blindEvents {
 		for i := 0; i < stackDepth; i++ {
-			if err := client.AppendGlobalHook(event, notifyCommandBody); err != nil {
+			if err := client.AppendGlobalHook(event, expectedNotifyCommand); err != nil {
 				t.Fatalf("seed Portal entry %d on %s: AppendGlobalHook: %v", i, event, err)
 			}
 		}
