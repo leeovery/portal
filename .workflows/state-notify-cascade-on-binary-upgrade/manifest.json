@@ -1,7 +1,7 @@
 {
   "name": "state-notify-cascade-on-binary-upgrade",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-06-02",
   "description": "portal state notify fires continuously at multi-Hz rate while the old daemon is alive; stops only when saver-recycle kills it on binary upgrade",
   "phases": {
@@ -161,5 +161,6 @@
         }
       }
     }
-  }
+  },
+  "completed_at": "2026-06-03"
 }
