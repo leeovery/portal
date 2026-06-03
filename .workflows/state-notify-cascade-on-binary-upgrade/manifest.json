@@ -34,12 +34,23 @@
           "format": "tick",
           "spec_commit": "eb73e7f2157a8c2badf6bcb469579cce7401a8ff",
           "task_list_gate_mode": "gated",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
           "task": "state-notify-cascade-on-binary-upgrade-1-1",
-          "task_map": {}
+          "task_map": {
+            "state-notify-cascade-on-binary-upgrade": "tick-a00b4b",
+            "state-notify-cascade-on-binary-upgrade-1": "tick-0fb6d5",
+            "state-notify-cascade-on-binary-upgrade-1-1": "tick-98fc91",
+            "state-notify-cascade-on-binary-upgrade-1-2": "tick-bd6e6c",
+            "state-notify-cascade-on-binary-upgrade-1-3": "tick-4eb3c5",
+            "state-notify-cascade-on-binary-upgrade-1-4": "tick-2e83b9",
+            "state-notify-cascade-on-binary-upgrade-1-5": "tick-54b1dc",
+            "state-notify-cascade-on-binary-upgrade-1-6": "tick-9a1086",
+            "state-notify-cascade-on-binary-upgrade-1-7": "tick-6a7cec"
+          },
+          "external_id": "tick-a00b4b"
         }
       }
     }
