@@ -19,14 +19,14 @@ package tmux_test
 //
 // Why this gate exists alongside TestRegisterPortalHooks's table-style
 // coverage:
-// The existing TestRegisterPortalHooks_SessionClosedMigration's
-// nonSessionClosedSaveTriggerEvents loop already asserts each of the
-// six events resolves to notifyCommand on a fresh server. This file
-// adds explicit per-event named sub-tests so a future regression that
-// over-generalises the session-closed migration (e.g. accidentally
-// routing all save-trigger events through commitNowCommand) is
-// surfaced with a precise per-event failure message, rather than a
-// collective loop assertion that names only one event. The named
+// TestRegisterPortalHooks_FreshTable's fresh-table assertions already
+// check each of the six non-session-closed save-trigger events resolves
+// to notifyCommand on a fresh server. This file adds explicit per-event
+// named sub-tests so a future regression that over-generalises the
+// session-closed convergence (e.g. accidentally routing all save-trigger
+// events through commitNowCommand) is surfaced with a precise per-event
+// failure message, rather than a collective loop assertion that names
+// only one event. The named
 // sub-tests also document the contract event-by-event for code reviewers
 // who scan failing test names without reading the table-driven body.
 //
@@ -99,7 +99,7 @@ func TestRegisterPortalHooks_NonSessionClosedEventsRouteToNotifyCommand(t *testi
 				t.Errorf(
 					"event %q was REGRESSION-routed onto commitNowCommand %q; "+
 						"only session-closed may carry commitNowCommand per spec § "+
-						"Hook Registration Migration → Registration Strategy",
+						"Registration Redesign — Ensure Exactly One",
 					ev, expectedCommitNowCommand,
 				)
 			}
