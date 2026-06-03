@@ -1,0 +1,15 @@
+{
+  "name": "surface-x-toggle-in-keymap-hints",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-06-03",
+  "description": "Surface the existing X page-toggle binding in the sessions and projects keymap footers (P/X, S/X) — display-only, no behaviour change",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-05-19-surface-x-toggle-in-keymap-hints.md",
+      "source": "inbox:quickfix",
+      "seeded_at": "2026-06-03T18:42:21Z"
+    }
+  ]
+}
