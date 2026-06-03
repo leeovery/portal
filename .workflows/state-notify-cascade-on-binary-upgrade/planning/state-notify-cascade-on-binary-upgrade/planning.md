@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Per-Event Hook Convergence
-status: draft
+status: approved
+approved_at: 2026-06-03
 
 **Goal**: Eliminate the unbounded duplicate-hook cascade by moving every Portal hook read off the global no-arg `show-hooks -g` (blind to `pane-*` and geometry/rename `window-*` events in tmux 3.6b) and onto a per-event `show-hooks -g <event>` seam. Registration is rebuilt as declarative "ensure exactly one" per managed event (folding in and deleting `migrateHydrationHooks` and `migrateSessionClosedHook`); teardown is rewritten to read per-event so it reaps at any depth; and the defective `ShowGlobalHooks` seam is deleted once no caller remains. Existing 139-deep stacks self-collapse to one entry on the next bootstrap as an ordinary side effect — no dedicated cleanup migration.
 
