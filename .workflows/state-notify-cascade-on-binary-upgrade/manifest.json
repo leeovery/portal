@@ -30,7 +30,7 @@
     "planning": {
       "items": {
         "state-notify-cascade-on-binary-upgrade": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "eb73e7f2157a8c2badf6bcb469579cce7401a8ff",
           "task_list_gate_mode": "gated",
