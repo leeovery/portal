@@ -61,7 +61,7 @@ func TestRegisterPortalHooks_NonSessionClosedEventsRouteToNotifyCommand(t *testi
 	for _, ev := range nonSessionClosedSaveTriggerEvents {
 		ev := ev // pin for closure
 		t.Run(fmt.Sprintf("%s is registered with notifyCommand and not commitNowCommand", ev), func(t *testing.T) {
-			mock := &MockCommander{RunFunc: dispatchPortalHooks(t, "", nil)}
+			mock := &MockCommander{RunFunc: perEventDispatch(t, "", nil)}
 			client := tmux.NewClient(mock)
 
 			if err := tmux.RegisterPortalHooks(client, nil); err != nil {

@@ -160,23 +160,24 @@ func TestMigrateHydrationHooks_ShowHooksFailureEmitsWarn(t *testing.T) {
 	assertShowHooksWarnShape(t, warns[0], sentinel)
 }
 
-// TestMigrateSessionClosedHook_ShowHooksFailureWarnIsNormalized pins that the
-// session-closed migration's pre-existing WARN is normalized to the uniform
-// shape (message "show-hooks failed", error_class=unexpected, error attr = the
-// wrapped error) and still emitted before the return.
-func TestMigrateSessionClosedHook_ShowHooksFailureWarnIsNormalized(t *testing.T) {
-	// Fail only the session-closed migration's ShowGlobalHooks call (the third
-	// show-hooks call inside RegisterPortalHooks: migrateHydrationHooks #1,
-	// session-created RegisterHookIfAbsent #2, migrateSessionClosedHook #3) so
-	// the asserted WARN is unambiguously the session-closed one.
+// TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized pins that the
+// session-closed convergence emits the uniform WARN (message "show-hooks
+// failed", error_class=unexpected, error attr = the wrapped error) when its
+// per-event ShowGlobalHooksForEvent read fails, and skips appending
+// session-closed. The convergence engine now reads each event independently,
+// so the failure is scoped to the single failing event's read.
+func TestConvergeSessionClosed_ShowHooksFailureWarnIsNormalized(t *testing.T) {
+	// Fail only the per-event read for session-closed.
 	sentinel := errors.New("tmux show-hooks failure (session-closed)")
-	var showCallCount int
 	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			showCallCount++
-			if showCallCount == 3 {
+		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
+			if args[2] == "session-closed" {
 				return "", sentinel
 			}
+			return "", nil
+		}
+		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+			t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
 			return "", nil
 		}
 		if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-ga" || args[1] == "-gu") {
@@ -204,10 +205,10 @@ func TestMigrateSessionClosedHook_ShowHooksFailureWarnIsNormalized(t *testing.T)
 	}
 	assertShowHooksWarnShape(t, warns[0], sentinel)
 
-	// session-closed must NOT have been appended (migration skipped).
+	// session-closed must NOT have been appended (its convergence was skipped).
 	for _, c := range mock.Calls {
 		if len(c) >= 4 && c[0] == "set-hook" && c[1] == "-ga" && c[2] == "session-closed" {
-			t.Errorf("session-closed must not be appended when ShowGlobalHooks fails: %v", c)
+			t.Errorf("session-closed must not be appended when its read fails: %v", c)
 		}
 	}
 }
@@ -369,20 +370,23 @@ func TestShowGlobalHooksOrWarn_NilLoggerTolerated(t *testing.T) {
 }
 
 // TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce pins the no-double-log
-// invariant: when EVERY show-hooks call fails, each sibling failure is logged
-// exactly once (N WARNs for N failing siblings), and RegisterPortalHooks adds no
+// invariant: when EVERY per-event read fails, each event's failure is logged
+// exactly once (one WARN per managed event), and RegisterPortalHooks adds no
 // extra aggregate WARN for the errors.Join folding.
 //
-// Both the package-level bootstrapLogger (RegisterHookIfAbsent siblings) AND the
-// injected logger (the two migrate helpers) must route to the same recorder, so
-// the test installs the recorder via log.SetTestHandler AND passes a logger
-// built over the same recorder into RegisterPortalHooks.
+// The convergence engine reads each event via ShowGlobalHooksForEvent and emits
+// the WARN through the injected logger; the recorder is installed via the
+// injected logger built over the same handler.
 func TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks fails everywhere")
 	mock := &MockCommander{
 		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
 				return "", sentinel
+			}
+			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+				t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
+				return "", nil
 			}
 			t.Fatalf("set-hook must not be called when show-hooks fails: %v", args)
 			return "", nil
@@ -391,7 +395,6 @@ func TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce(t *testing.T) {
 	client := tmux.NewClient(mock)
 
 	rec := &recordingSlogHandler{}
-	log.SetTestHandler(t, rec)
 	injected := slog.New(rec).With("component", "bootstrap")
 
 	err := tmux.RegisterPortalHooks(client, injected)
@@ -402,16 +405,12 @@ func TestRegisterPortalHooks_ShowHooksFailureLoggedExactlyOnce(t *testing.T) {
 		t.Errorf("aggregate error %v does not wrap sentinel %v", err, sentinel)
 	}
 
-	// One WARN per sibling that called ShowGlobalHooks:
-	//   - migrateHydrationHooks (1)
-	//   - migrateSessionClosedHook (1)
-	//   - RegisterHookIfAbsent for the six non-session-closed save-trigger
-	//     events + the two hydration-trigger events (8)
-	// = 10 sibling show-hooks failures. No aggregate WARN from RegisterPortalHooks.
-	wantSiblingFailures := 1 + 1 + len(nonSessionClosedSaveTriggerEvents) + len(tmux.HydrationTriggerEvents)
+	// One WARN per managed event whose per-event read failed: every event in
+	// managedEvents fails once. No aggregate WARN from RegisterPortalHooks.
+	wantSiblingFailures := expectedManagedEventCount
 	warns := showHooksWarnRecords(rec.records)
 	if len(warns) != wantSiblingFailures {
-		t.Fatalf("expected exactly %d %q WARNs (one per sibling failure, no aggregate double-log), got %d: %v",
+		t.Fatalf("expected exactly %d %q WARNs (one per managed event, no aggregate double-log), got %d: %v",
 			wantSiblingFailures, showHooksWarnMessage, len(warns), rec.records)
 	}
 	for i, w := range warns {

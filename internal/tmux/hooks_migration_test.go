@@ -158,10 +158,12 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 		}
 	}
 
-	// One INFO line summarising the eviction count must be emitted.
+	// One INFO line summarising the eviction count must be emitted. The
+	// unified convergence path emits a single "collapsed stacked portal hooks"
+	// summary carrying the reaped count across all events.
 	if len(log.infos) != 1 {
 		t.Errorf("INFO line count = %d, want 1; infos=%v", len(log.infos), log.infos)
-	} else if !strings.Contains(log.infos[0], "evicted") || !strings.Contains(log.infos[0], "stale signal-hydrate") {
+	} else if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || !strings.Contains(log.infos[0], "reaped=") {
 		t.Errorf("INFO line = %q, missing eviction summary", log.infos[0])
 	}
 
@@ -305,11 +307,17 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	}
 }
 
-// TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPortalPrefix
-// proves the eviction predicate's specificity: a hand-authored hook that
-// references `portal state signal-hydrate` but lacks the `command -v portal`
-// guard prefix (i.e. is not Portal-authored shape) is preserved.
-func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPortalPrefix(t *testing.T) {
+// TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint
+// proves the convergence engine's user-hook coexistence guarantee: a
+// hand-authored hook on a managed event that does NOT contain the event's
+// Portal fingerprint (`portal state signal-hydrate`) is never matched and
+// survives untouched.
+//
+// (Per the spec's adopted substring predicate — see § "One behavioral change
+// to record" — a user hook that *does* contain `portal state signal-hydrate`
+// would now be treated as Portal-owned and evicted; this test deliberately
+// uses a fingerprint-free user hook to assert the surviving case.)
+func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t *testing.T) {
 	tmuxtest.SkipIfNoTmux(t)
 
 	ts := tmuxtest.New(t, "ptl-mig-")
@@ -318,9 +326,9 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	// User-authored entry: contains "portal state signal-hydrate" but lacks
-	// the Portal-authored "command -v portal >/dev/null 2>&1 &&" prefix.
-	userHook := `run-shell "echo running portal state signal-hydrate manually"`
+	// User-authored entry on client-attached that contains none of the event's
+	// Portal fingerprints (no `portal state signal-hydrate`).
+	userHook := `run-shell "tmux-resurrect restore"`
 	if err := client.AppendGlobalHook("client-attached", userHook); err != nil {
 		t.Fatalf("AppendGlobalHook(user): %v", err)
 	}
@@ -330,9 +338,9 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
 
-	// User entry must still be there. After migration the Portal-fixed
-	// entry is also installed, so client-attached should have count = 2
-	// (one user, one Portal-fixed).
+	// User entry must still be there. The convergence also appends the
+	// Portal-fixed entry, so client-attached holds the user hook + one Portal
+	// hook.
 	raw, err := client.ShowGlobalHooks()
 	if err != nil {
 		t.Fatalf("ShowGlobalHooks: %v", err)
@@ -341,7 +349,7 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 
 	var sawUser bool
 	for _, e := range parsed["client-attached"] {
-		if strings.Contains(e.Command, "echo running portal state signal-hydrate manually") {
+		if strings.Contains(e.Command, "tmux-resurrect restore") {
 			sawUser = true
 			break
 		}
@@ -350,9 +358,10 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingCommandVPorta
 		t.Errorf("user hook was evicted; entries=%v", parsed["client-attached"])
 	}
 
-	// No INFO emission since no Portal-authored stale entries existed.
+	// No eviction INFO: the user hook is not Portal-authored, so nothing was
+	// reaped on client-attached, and the only convergence action was an append.
 	if len(log.infos) != 0 {
-		t.Errorf("INFO count = %d, want 0 (user hook is not Portal-shape so no eviction); infos=%v", len(log.infos), log.infos)
+		t.Errorf("INFO count = %d, want 0 (user hook not Portal-fingerprinted, no eviction); infos=%v", len(log.infos), log.infos)
 	}
 }
 
@@ -425,7 +434,7 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	if !strings.Contains(log.infos[0], "evicted") || !strings.Contains(log.infos[0], "stale signal-hydrate") {
+	if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || !strings.Contains(log.infos[0], "reaped=") {
 		t.Errorf("INFO line = %q, missing eviction summary", log.infos[0])
 	}
 }
@@ -493,21 +502,23 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 }
 
 // TestMigrateHydrationHooks_ShowHooksFailureWrapsError proves the only path
-// that surfaces an error from the migration: a ShowGlobalHooks failure.
-// Per-index UnsetGlobalHookAt failures are best-effort (WARN + continue),
-// but a failure to enumerate at all aborts the migration with the wrapped
-// error. Driving through RegisterPortalHooks: the migration's wrapped
-// error is folded into the errors.Join aggregate alongside per-event
-// register failures (which also fail because show-hooks fails everywhere),
-// so we assert via errors.Is on the sentinel and substring containment of
-// "show-hooks failed". No set-hook call must ever be made when every
-// show-hooks call fails.
+// that surfaces an error from a per-event convergence: a
+// ShowGlobalHooksForEvent failure. Per-index UnsetGlobalHookAt failures are
+// best-effort (WARN + continue), but a failure to read an event at all skips
+// that event's convergence with the wrapped error folded into the errors.Join
+// aggregate. With every per-event read failing, the aggregate names each
+// managed event's leg ("register hook on <event>: show-hooks failed: ...").
+// No set-hook call must ever be made when every read fails.
 func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure")
 	mock := &MockCommander{
 		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
 				return "", sentinel
+			}
+			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+				t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
+				return "", nil
 			}
 			t.Fatalf("set-hook must not be called when show-hooks fails: %v", args)
 			return "", nil
@@ -527,9 +538,9 @@ func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "show-hooks failed") {
 		t.Errorf("error %q does not contain expected wrap %q", err.Error(), "show-hooks failed")
 	}
-	// The migration leg must contribute a "migrate hydration hooks:" leaf
-	// to the errors.Join aggregate.
-	if !strings.Contains(err.Error(), "migrate hydration hooks") {
-		t.Errorf("error %q missing migration-leg wrap %q", err.Error(), "migrate hydration hooks")
+	// The failing hydration event's convergence must contribute a
+	// "register hook on client-attached:" leaf to the errors.Join aggregate.
+	if !strings.Contains(err.Error(), "register hook on client-attached") {
+		t.Errorf("error %q missing per-event leg wrap %q", err.Error(), "register hook on client-attached")
 	}
 }
