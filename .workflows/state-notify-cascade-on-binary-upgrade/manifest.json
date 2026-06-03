@@ -135,7 +135,7 @@
     "review": {
       "items": {
         "state-notify-cascade-on-binary-upgrade": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "state-notify-cascade-on-binary-upgrade-1-1",
             "state-notify-cascade-on-binary-upgrade-1-2",
