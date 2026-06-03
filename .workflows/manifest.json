@@ -107,6 +107,9 @@
     },
     "state-notify-cascade-on-binary-upgrade": {
       "work_type": "bugfix"
+    },
+    "surface-x-toggle-in-keymap-hints": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
