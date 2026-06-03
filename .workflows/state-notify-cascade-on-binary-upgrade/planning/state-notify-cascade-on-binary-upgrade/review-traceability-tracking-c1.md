@@ -76,7 +76,7 @@ follows.
 - Cascade eliminated (Acceptance Criterion 8): because the no-growth test proves every managed event converges to exactly one Portal entry, a single tmux event that fires a managed hook (e.g. a session-switch firing pane-focus-out) now dispatches exactly one portal state notify rather than N. The no-growth assertion (per-event Portal entry count == 1 across N>=2 bootstraps) is the structural guard for this outcome — no separate process-count test is required, consistent with the spec's Testing Requirements which name the no-growth test as the direct regression guard for the cascade.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim to Task 1-6 (tick-9a1086) — AC 8 enumerated as an explicit acceptance bullet tied to the no-growth structural guard.
 
 ---
