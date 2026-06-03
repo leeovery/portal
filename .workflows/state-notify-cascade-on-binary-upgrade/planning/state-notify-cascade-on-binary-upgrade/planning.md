@@ -23,3 +23,16 @@ approved_at: 2026-06-03
 - [ ] A co-resident user-authored / other-plugin hook on any managed event — including `pane-focus-out` and `window-layout-changed` — is matched by neither registration nor teardown and survives untouched.
 - [ ] The no-arg `ShowGlobalHooks` method is deleted; no production caller remains and any test fixtures referencing it are migrated to the new seam.
 - [ ] Real-tmux (`internal/tmuxtest`) integration tests cover: no-growth across N bootstraps on the blind events; the tmux 3.6b blind-spot reality (no-arg omits pane/geometry events, per-event includes them); self-heal of a K-deep stack with a co-resident user hook left intact; teardown-at-depth on the blind events with user hook intact; and idempotency/no-churn. The full `go test ./...` suite is green with no regressions.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| state-notify-cascade-on-binary-upgrade-1-1 | Add ShowGlobalHooksForEvent per-event read seam | read failure wraps `failed to show global hooks: %w`, output byte-identical to global form, event with zero entries |
+| state-notify-cascade-on-binary-upgrade-1-2 | Rebuild RegisterPortalHooks as per-event "ensure exactly one" | idempotent fast-path no-op, K-deep stack collapse, stale-body in-place migration, session-closed union fingerprint count, user/other-plugin hook untouched, per-event read failure folded into errors.Join, per-index unset failure WARN-and-continue, single reaped INFO only when evictions occur |
+| state-notify-cascade-on-binary-upgrade-1-3 | Delete migrateHydrationHooks and migrateSessionClosedHook and their dedicated paths | hydration `--` convergence still holds, session-closed→commit-now convergence still holds, substring predicate is the documented behavioural change, mock-commander tests referencing deleted helpers migrated/removed |
+| state-notify-cascade-on-binary-upgrade-1-4 | Move UnregisterPortalHooks to the per-event read seam | migrate-rename substring retained in teardown predicate only, per-event read failure folded into errors.Join (no all-or-nothing abort), user hook on managed event survives |
+| state-notify-cascade-on-binary-upgrade-1-5 | Delete the no-arg ShowGlobalHooks method and migrate its remaining fixtures | no production caller remains, showGlobalHooksOrWarn / ShowGlobalHooksOrWarn re-export removed, reboot_roundtrip_test.go reader re-pointed at per-event seam, full suite green |
+| state-notify-cascade-on-binary-upgrade-1-6 | Real-tmux no-growth + blind-spot regression guards | blind events (pane-focus-out, window-layout-changed) stay at 1 across N≥2, no-arg omits pane/geometry events while per-event includes them |
+| state-notify-cascade-on-binary-upgrade-1-7 | Real-tmux self-heal, teardown-at-depth, and idempotency/no-churn guards | K-deep stack collapses to 1 with co-resident user hook intact, teardown reaps at depth on blind events with user hook intact, second registration emits no unset/append and no reaped INFO |
