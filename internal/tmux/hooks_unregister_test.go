@@ -8,15 +8,18 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// dispatchUnregisterHooks builds a RunFunc that returns showOutput for every
-// "show-hooks -g" call and records "set-hook -gu" calls. unsetErrFor, when
-// non-nil, returns the configured error for matching event[index] targets;
-// nil otherwise.
+// dispatchUnregisterHooks builds a RunFunc that answers the per-event
+// "show-hooks -g <event>" reads UnregisterPortalHooks now issues, and records
+// "set-hook -gu" calls. showOutput is the whole hook table (across every
+// event); on each per-event read the helper returns ONLY the lines belonging
+// to the queried event (argv[2]), mirroring how real tmux scopes
+// `show-hooks -g <event>`. unsetErrFor, when non-nil, returns the configured
+// error for matching event[index] targets; nil otherwise.
 func dispatchUnregisterHooks(t *testing.T, showOutput string, unsetErrFor map[string]error) func(args ...string) (string, error) {
 	t.Helper()
 	return func(args ...string) (string, error) {
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			return showOutput, nil
+		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
+			return linesForEvent(showOutput, args[2]), nil
 		}
 		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
 			if unsetErrFor != nil {
@@ -29,6 +32,22 @@ func dispatchUnregisterHooks(t *testing.T, showOutput string, unsetErrFor map[st
 		t.Fatalf("unexpected command: %v", args)
 		return "", nil
 	}
+}
+
+// linesForEvent returns only the lines of showOutput whose entry belongs to
+// event (i.e. begin with "<event>["), preserving order. Reproduces the
+// per-event scoping of `tmux show-hooks -g <event>` so a whole-table fixture
+// can drive the per-event read loop.
+func linesForEvent(showOutput, event string) string {
+	prefix := event + "["
+	var out strings.Builder
+	for _, line := range strings.Split(showOutput, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
 }
 
 // unsetHookCalls extracts the set-hook -gu calls from a MockCommander's call
@@ -184,14 +203,17 @@ func TestUnregisterPortalHooks(t *testing.T) {
 		}
 	})
 
-	t.Run("propagates show-hooks -g failure without issuing any removal", func(t *testing.T) {
+	t.Run("returns the aggregate error and removes nothing when every per-event read fails", func(t *testing.T) {
+		// Fold-and-continue replaces the old single-read all-or-nothing abort:
+		// if every per-event read fails the joined error returns and, because no
+		// event's entries are ever read, zero removals are issued.
 		sentinel := errors.New("tmux exec failed")
 		mock := &MockCommander{
 			RunFunc: func(args ...string) (string, error) {
-				if args[0] == "show-hooks" {
+				if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
 					return "", sentinel
 				}
-				t.Fatalf("set-hook -gu must not be called when show-hooks fails: %v", args)
+				t.Fatalf("set-hook -gu must not be called when every read fails: %v", args)
 				return "", nil
 			},
 		}
@@ -209,7 +231,56 @@ func TestUnregisterPortalHooks(t *testing.T) {
 			t.Errorf("error %q does not contain expected wrap message %q", err.Error(), "show-hooks failed")
 		}
 		if got := unsetHookCalls(mock.Calls); len(got) != 0 {
-			t.Errorf("expected 0 removals on show-hooks failure, got %d: %v", len(got), got)
+			t.Errorf("expected 0 removals when every read fails, got %d: %v", len(got), got)
+		}
+	})
+
+	t.Run("folds a single-event read failure into the aggregate and still reaps Portal entries on other events", func(t *testing.T) {
+		// One event's read fails; every other event reads cleanly. The failing
+		// event folds into the joined error while the Portal entries on the
+		// readable events are still reaped — all-or-nothing is gone.
+		sentinel := errors.New("transient show-hooks failure")
+		raw := "session-created[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n" +
+			"pane-focus-out[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n"
+		mock := &MockCommander{
+			RunFunc: func(args ...string) (string, error) {
+				if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
+					if args[2] == "pane-focus-out" {
+						return "", sentinel
+					}
+					return linesForEvent(raw, args[2]), nil
+				}
+				if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
+					return "", nil
+				}
+				t.Fatalf("unexpected command: %v", args)
+				return "", nil
+			},
+		}
+		client := tmux.NewClient(mock)
+
+		err := tmux.UnregisterPortalHooks(client)
+
+		if err == nil {
+			t.Fatal("expected aggregate error from the failing event, got nil")
+		}
+		if !errors.Is(err, sentinel) {
+			t.Errorf("error %v does not wrap sentinel %v", err, sentinel)
+		}
+		if !strings.Contains(err.Error(), "show-hooks failed") {
+			t.Errorf("error %q does not contain expected wrap message %q", err.Error(), "show-hooks failed")
+		}
+		// The readable event's Portal entry is still reaped despite the other
+		// event's read failure.
+		got := unsetHookCalls(mock.Calls)
+		want := []string{"session-created[0]"}
+		if len(got) != len(want) {
+			t.Fatalf("set-hook -gu calls = %v, want %v (readable event still torn down)", got, want)
+		}
+		for i, g := range got {
+			if g != want[i] {
+				t.Errorf("call[%d] = %q, want %q", i, g, want[i])
+			}
 		}
 	})
 
@@ -282,11 +353,14 @@ func TestUnregisterPortalHooks(t *testing.T) {
 		// show-hooks returns empty.
 		var removed bool
 		runFunc := func(args ...string) (string, error) {
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
+			if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
 				if removed {
 					return "", nil
 				}
-				return "session-created[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n", nil
+				return linesForEvent(
+					"session-created[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n",
+					args[2],
+				), nil
 			}
 			if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
 				removed = true

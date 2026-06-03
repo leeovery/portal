@@ -6,7 +6,16 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/leeovery/portal/internal/log"
 )
+
+// bootstrapLogger is the component-bound WARN sink for the per-event read
+// failure UnregisterPortalHooks now emits. Bound once at package init so the
+// exported UnregisterPortalHooks signature (consumed as a function value by
+// cmd/state_cleanup.go) stays unchanged. Mirrors the per-package
+// log.For(...) binding pattern used elsewhere in this package.
+var bootstrapLogger = log.For("bootstrap")
 
 // portalCommandSubstrings is the closed set of command-body fingerprints that
 // identify a Portal-owned hook entry. Removal targets only entries whose
@@ -46,32 +55,44 @@ var portalEvents = slices.Concat(saveTriggerEvents, HydrationTriggerEvents)
 // tmux hook table.
 //
 // Algorithm:
-//  1. Read the global hook table via show-hooks -g.
-//  2. For each event in portalEvents, collect entries whose command body
-//     contains any portalCommandSubstrings.
-//  3. Remove those entries via set-hook -gu in reverse index order — defensive
-//     against any edge case where index renumbering could shift surviving
-//     entries (tmux 3.0+ does not renumber, but reverse order is cheap insurance).
+//  1. For each event in portalEvents, read that event's entries via the
+//     per-event seam ShowGlobalHooksForEvent(event). The no-arg show-hooks -g
+//     enumeration is deliberately NOT used: tmux 3.6b omits an entire class of
+//     events (pane-* and the geometry/rename window-* events) from the global
+//     read, so a single global enumeration sees zero Portal entries on those
+//     blind events and would remove nothing. Reading per-event sidesteps the
+//     blind spot.
+//  2. Collect that event's entries whose command body contains any
+//     portalCommandSubstrings.
+//  3. Remove those entries via set-hook -gu in descending index order — so a
+//     removal never shifts a not-yet-processed index.
 //
 // Non-Portal entries on the same events are left untouched. Matching
-// substrings on events outside portalEvents are ignored. Per-removal failures
-// do not short-circuit the loop — every removal is attempted and errors are
-// aggregated via errors.Join, with each leaf error naming the failing
-// event[index] and wrapping the underlying tmux error.
+// substrings on events outside portalEvents are ignored (each event is read in
+// isolation). Per-removal failures do not short-circuit the loop — every
+// removal is attempted and errors are aggregated via errors.Join, with each
+// leaf error naming the failing event[index] and wrapping the underlying tmux
+// error.
 //
-// On show-hooks failure the error is wrapped with "show-hooks failed: %w" and
-// no removal is attempted.
+// Per-event read failure is fold-and-continue (not all-or-nothing): a failing
+// ShowGlobalHooksForEvent emits the canonical show-hooks-failed WARN
+// (error_class=unexpected) under the bootstrap component, folds a
+// "show-hooks failed: %w" leaf naming the event into the aggregate, and the
+// loop proceeds so every other event is still torn down.
 func UnregisterPortalHooks(c *Client) error {
-	raw, err := c.ShowGlobalHooks()
-	if err != nil {
-		return fmt.Errorf("show-hooks failed: %w", err)
-	}
-
-	entries := ParseShowHooks(raw)
-
 	var errs []error
 	for _, event := range portalEvents {
-		portal := portalEntriesFor(entries[event])
+		raw, err := c.ShowGlobalHooksForEvent(event)
+		if err != nil {
+			// Canonical show-hooks-failed WARN+wrap: message "show-hooks failed",
+			// error_class=unexpected, underlying err wrapped verbatim. Fold and
+			// continue so the remaining events are still torn down.
+			bootstrapLogger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
+			errs = append(errs, fmt.Errorf("show-hooks failed on %s: %w", event, err))
+			continue
+		}
+
+		portal := portalEntriesFor(ParseShowHooks(raw)[event])
 		sort.Slice(portal, func(i, j int) bool {
 			return portal[i].Index > portal[j].Index
 		})
