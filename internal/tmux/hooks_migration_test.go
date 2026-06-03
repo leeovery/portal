@@ -35,21 +35,14 @@ const staleSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 
 // countSignalHydrateEntries returns, for each event in
 // tmux.HydrationTriggerEvents, the number of hook entries on that event
 // whose command body contains "portal state signal-hydrate". Used to assert
-// AC #3's "exactly 1 entry per event after bootstrap" invariant.
+// AC #3's "exactly 1 entry per event after bootstrap" invariant. It is a thin
+// map-builder over the canonical countPortalEntriesForEvent helper, so the
+// per-event read/parse/match body lives in exactly one tmux_test-package place.
 func countSignalHydrateEntries(t *testing.T, client *tmux.Client) map[string]int {
 	t.Helper()
 	counts := make(map[string]int)
 	for _, ev := range tmux.HydrationTriggerEvents {
-		raw, err := client.ShowGlobalHooksForEvent(ev)
-		if err != nil {
-			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", ev, err)
-		}
-		parsed := tmux.ParseShowHooks(raw)
-		for _, e := range parsed[ev] {
-			if strings.Contains(e.Command, "portal state signal-hydrate") {
-				counts[ev]++
-			}
-		}
+		counts[ev] = countPortalEntriesForEvent(t, client, ev, "portal state signal-hydrate")
 	}
 	return counts
 }
@@ -102,22 +95,12 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	}
 
 	// Verify the fixed entry actually contains the `--` separator on each
-	// hydration event. Read each event's own table via the per-event seam.
+	// hydration event. Read each event's own table via the per-event seam
+	// (the canonical helper), matching on the fixed `-- ` body.
 	for _, ev := range tmux.HydrationTriggerEvents {
-		raw, err := client.ShowGlobalHooksForEvent(ev)
-		if err != nil {
-			t.Fatalf("ShowGlobalHooksForEvent(%s): %v", ev, err)
-		}
-		parsed := tmux.ParseShowHooks(raw)
-		var found bool
-		for _, e := range parsed[ev] {
-			if strings.Contains(e.Command, "portal state signal-hydrate -- ") {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("event %q: no entry containing `signal-hydrate -- `; entries=%v", ev, parsed[ev])
+		fixed := portalEntryCommandsForEvent(t, client, ev, "portal state signal-hydrate -- ")
+		if len(fixed) == 0 {
+			t.Errorf("event %q: no entry containing `signal-hydrate -- `; fixed entries=%v", ev, fixed)
 		}
 	}
 }
@@ -274,22 +257,11 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 
 	// User entry must still be there. The convergence also appends the
 	// Portal-fixed entry, so client-attached holds the user hook + one Portal
-	// hook. Read client-attached's own table via the per-event seam.
-	raw, err := client.ShowGlobalHooksForEvent("client-attached")
-	if err != nil {
-		t.Fatalf("ShowGlobalHooksForEvent(client-attached): %v", err)
-	}
-	parsed := tmux.ParseShowHooks(raw)
-
-	var sawUser bool
-	for _, e := range parsed["client-attached"] {
-		if strings.Contains(e.Command, "tmux-resurrect restore") {
-			sawUser = true
-			break
-		}
-	}
-	if !sawUser {
-		t.Errorf("user hook was evicted; entries=%v", parsed["client-attached"])
+	// hook. Read client-attached's own table via the per-event seam (the
+	// canonical helper), matching on the user hook's distinctive body.
+	survivingUser := portalEntryCommandsForEvent(t, client, "client-attached", "tmux-resurrect restore")
+	if len(survivingUser) == 0 {
+		t.Errorf("user hook was evicted; surviving user entries=%v", survivingUser)
 	}
 
 	// No eviction INFO: the user hook is not Portal-authored, so nothing was

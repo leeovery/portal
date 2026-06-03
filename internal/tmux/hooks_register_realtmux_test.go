@@ -60,27 +60,42 @@ var managedEventFingerprints = []managedEventFingerprint{
 	{event: "client-session-changed", fingerprint: signalHydrateFingerprint},
 }
 
-// countPortalEntriesForEvent reads event's hook array PER-EVENT (via the
+// portalEntryCommandsForEvent reads event's hook array PER-EVENT (via the
 // ShowGlobalHooksForEvent seam, never the no-arg global form) and returns the
-// number of entries whose command body contains fingerprint. Reading
-// per-event is load-bearing: a no-arg global read would itself be blind to
-// pane-focus-out / window-layout-changed, so the count assertion would be
-// vacuously satisfied. The per-event read is the only oracle that is not
-// itself blind.
-func countPortalEntriesForEvent(t *testing.T, client *tmux.Client, event, fingerprint string) int {
+// command bodies of every entry whose body contains fingerprint, in the order
+// ParseShowHooks yields them. It is the single tmux_test-package primitive for
+// "read one event, parse, select entries matching a fingerprint" — both the
+// count-based callers (via len) and the body-inspecting callers (which need
+// the surviving command text) route through it.
+//
+// Reading per-event is load-bearing: a no-arg global read would itself be
+// blind to pane-focus-out / window-layout-changed, so a count/select assertion
+// built on it would be vacuously satisfied. The per-event read is the only
+// oracle that is not itself blind, so this helper MUST stay on
+// ShowGlobalHooksForEvent and never revert to the no-arg global form.
+func portalEntryCommandsForEvent(t *testing.T, client *tmux.Client, event, fingerprint string) []string {
 	t.Helper()
 	raw, err := client.ShowGlobalHooksForEvent(event)
 	if err != nil {
 		t.Fatalf("ShowGlobalHooksForEvent(%s): %v", event, err)
 	}
 	parsed := tmux.ParseShowHooks(raw)
-	count := 0
+	var commands []string
 	for _, e := range parsed[event] {
 		if strings.Contains(e.Command, fingerprint) {
-			count++
+			commands = append(commands, e.Command)
 		}
 	}
-	return count
+	return commands
+}
+
+// countPortalEntriesForEvent returns the number of entries on event whose
+// command body contains fingerprint, derived from the canonical
+// portalEntryCommandsForEvent primitive so the read-per-event/parse/match body
+// lives in exactly one place.
+func countPortalEntriesForEvent(t *testing.T, client *tmux.Client, event, fingerprint string) int {
+	t.Helper()
+	return len(portalEntryCommandsForEvent(t, client, event, fingerprint))
 }
 
 // TestRegisterPortalHooks_NoGrowthAcrossBootstraps is the direct regression
