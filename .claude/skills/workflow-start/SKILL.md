@@ -1,7 +1,7 @@
 ---
 name: workflow-start
 disable-model-invocation: true
-allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs)
+allowed-tools: Bash(node .claude/skills/workflow-start/scripts/discovery.cjs), Bash(node .claude/skills/workflow-manifest/scripts/manifest.cjs), Bash(node .claude/skills/workflow-knowledge/scripts/knowledge.cjs), Bash(mkdir -p .workflows/), Bash(mv .workflows/.inbox/), Bash(git add), Bash(git commit), Bash(git rm)
 ---
 
 Unified workflow entry point. Discovers state, shows all active work, and routes to start or continue skills.
@@ -124,7 +124,8 @@ Parse the output to understand the current workflow state:
 **From `inbox` section (only present when inbox items exist):**
 - `ideas` — slug, date, title for each idea
 - `bugs` — slug, date, title for each bug
-- `idea_count`, `bug_count`, `total_count`
+- `quickfixes` — slug, date, title for each quick-fix
+- `idea_count`, `bug_count`, `quickfix_count`, `total_count`
 
 **From `state` section:**
 - Counts for each work type, `has_any_work` flag
