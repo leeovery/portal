@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 
 	"github.com/leeovery/portal/internal/log"
 )
@@ -55,14 +54,6 @@ var managedEvents = []managedEvent{
 	{event: "client-session-changed", fingerprints: []string{signalHydrateMarker}, desiredBody: signalHydrateCommand},
 }
 
-// bootstrapLogger is the component=bootstrap sink for the show-hooks failure
-// WARN emitted by RegisterHookIfAbsent, which (unlike its migrate siblings)
-// takes no injected logger. Named distinctly from saverLogger (portal_saver.go,
-// same package) to avoid a collision. log.For never returns nil, so the WARN is
-// always routable; production resolves it to log.For("bootstrap"), matching the
-// injected log the two migrate helpers receive at bootstrap step 2.
-var bootstrapLogger = log.For("bootstrap")
-
 // saveTriggerEvents lists every tmux event on which Portal registers a
 // `portal state notify` hook. Order is significant — RegisterPortalHooks
 // processes save-trigger events before hydration-trigger events.
@@ -96,10 +87,12 @@ var HydrationTriggerEvents = []string{
 // not log "command not found" spam during a binary swap or after uninstall.
 //
 // `session-closed` is excluded: following the
-// killed-session-resurrects-within-tick-window fix it migrates onto
+// killed-session-resurrects-within-tick-window fix it converges onto
 // commitNowCommand (synchronous sessions.json write) instead of the shared
-// dirty-flag touch. See migrateSessionClosedHook for the migration algorithm
-// and the spec's "Hook Registration Migration" section for the rationale.
+// dirty-flag touch. The session-closed convergence is intrinsic to the
+// per-event ensure-exactly-one engine (its two-element fingerprint set evicts
+// a stale pre-fix notifyCommand and converges to commitNowCommand) — see the
+// spec's "Migration-Helper Consolidation" section for the rationale.
 const notifyCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify"`
 
 // commitNowCommand is the exact command Portal appends to `session-closed`.
@@ -129,16 +122,8 @@ const signalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && po
 
 // notifySubstring is the per-event content fingerprint used to detect a
 // previously-registered Portal save-trigger hook. Distinct from
-// signalHydrateSubstring so the two categories cannot cross-contaminate.
+// signalHydrateMarker so the two categories cannot cross-contaminate.
 const notifySubstring = "portal state notify"
-
-// signalHydrateSubstring is the per-event content fingerprint used to detect
-// a previously-registered Portal hydration-trigger hook. The trailing `--`
-// is intentional: it distinguishes the new fixed entry from any pre-existing
-// un-separated entry registered by an older portal install, so the dedupe
-// check in RegisterHookIfAbsent does not mistake a stale entry for the
-// current one.
-const signalHydrateSubstring = "portal state signal-hydrate --"
 
 // commitNowSubstring is the per-event content fingerprint identifying a
 // Portal-authored `session-closed` commit-now hook. session-closed carries
@@ -148,13 +133,12 @@ const signalHydrateSubstring = "portal state signal-hydrate --"
 const commitNowSubstring = "portal state commit-now"
 
 // signalHydrateMarker is the per-event content fingerprint identifying a
-// Portal-authored hydration hook on the two hydration-trigger events. Unlike
-// signalHydrateSubstring (which requires the `--` separator), this matches the
-// bare `portal state signal-hydrate`, so it catches BOTH the legacy
-// un-separated body and the current `--` form — letting the convergence
-// engine migrate the legacy body to the current one as an ordinary
-// ensure-exactly-one side effect.
-const signalHydrateMarker = staleSignalHydrateMarker
+// Portal-authored hydration hook on the two hydration-trigger events. It
+// matches the bare `portal state signal-hydrate`, so it catches BOTH the
+// legacy un-separated body and the current `--` form — letting the
+// convergence engine migrate the legacy body to the current one as an
+// ordinary ensure-exactly-one side effect.
+const signalHydrateMarker = "portal state signal-hydrate"
 
 // Note on the v1 deferral of the rename-key migration hook:
 //
@@ -168,261 +152,11 @@ const signalHydrateMarker = staleSignalHydrateMarker
 // see the spec's "Resume Hook Firing → Session Rename: Hook Key Migration"
 // section for the v2 plan.
 
-// showGlobalHooksOrWarn calls c.ShowGlobalHooks and, on failure, emits the
-// canonical WARN before returning the wrapped error. It is the single
-// implementation of the show-hooks-failed WARN+wrap shape shared by
-// RegisterHookIfAbsent, migrateHydrationHooks, and migrateSessionClosedHook —
-// previously the byte-identical pair was replicated across all three, so any
-// change to the message, attrs, or wrap string had to be applied in three
-// places or the lines would silently diverge.
-//
-// A ShowGlobalHooks failure drops a unit of work (one event's registration,
-// a migration, etc.) → WARN error_class=unexpected per the level table. The
-// wrapped err (a *CommandError carrying tmux argv + stderr) is passed directly
-// so the rendered line carries the diagnostic context. On success the verbatim
-// output is returned with a nil error.
-//
-// A nil logger is tolerated and falls through to the shared internal/log
-// discard sink via log.OrDiscard.
-func showGlobalHooksOrWarn(c *Client, logger *slog.Logger) (string, error) {
-	raw, err := c.ShowGlobalHooks()
-	if err != nil {
-		log.OrDiscard(logger).Warn("show-hooks failed", "error", err, "error_class", "unexpected")
-		return "", fmt.Errorf("show-hooks failed: %w", err)
-	}
-	return raw, nil
-}
-
-// RegisterHookIfAbsent appends fullCommand to the global hook array for event
-// only when no existing entry on that event already contains expectedSubstring.
-//
-// It is the content-based idempotency primitive used by Portal's hook
-// registration: the (event, expectedSubstring) pair scopes the dedupe check so
-// the same command body cannot be registered twice on the same event, while
-// matching substrings on other events do not suppress registration.
-//
-// On a show-hooks failure the error is wrapped with "show-hooks failed: %w"
-// and no append is attempted. On an append failure the wrapping owned by
-// AppendGlobalHook is propagated to the caller verbatim.
-//
-// The fullCommand argument is opaque — it is passed verbatim to the
-// underlying tmux set-hook -ga invocation.
-func RegisterHookIfAbsent(c *Client, event, expectedSubstring, fullCommand string) error {
-	// RegisterHookIfAbsent takes no injected logger; pass the package-level
-	// bootstrapLogger explicitly so the WARN attribution stays component=bootstrap
-	// while sharing the single show-hooks-failed WARN+wrap implementation.
-	raw, err := showGlobalHooksOrWarn(c, bootstrapLogger)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range ParseShowHooks(raw)[event] {
-		if strings.Contains(entry.Command, expectedSubstring) {
-			return nil
-		}
-	}
-
-	return c.AppendGlobalHook(event, fullCommand)
-}
-
-// hookCategory bundles a set of tmux events with the (substring, command)
-// pair RegisterPortalHooks should append on each. Adding a new category is a
-// single table entry — no new loop, no new branch.
-//
-// `session-closed` is intentionally absent from every category here — it has
-// its own scan-and-remove + append-if-absent migration path (see
-// migrateSessionClosedHook). The six non-session-closed save-trigger events
-// retain the original substring-based append-if-absent discipline.
-type hookCategory struct {
-	events    []string
-	substring string
-	command   string
-}
-
-// portalHookCategories is the registration table consumed by
-// RegisterPortalHooks. Order is significant: categories are processed in
-// declaration order, and within each category events are processed in the
-// order declared on the category's events slice. The current ordering
-// (save-trigger first, then hydration-trigger) matches the spec.
-//
-// The save-trigger category's events slice is saveTriggerEvents with
-// `session-closed` filtered out by RegisterPortalHooks. The category table
-// itself stays uniform — the filter lives at the loop site so the table
-// continues to read as a single declarative truth.
-var portalHookCategories = []hookCategory{
-	{events: saveTriggerEvents, substring: notifySubstring, command: notifyCommand},
-	{events: HydrationTriggerEvents, substring: signalHydrateSubstring, command: signalHydrateCommand},
-}
-
-// sessionClosedEvent is the single save-trigger event whose registration has
-// been migrated off the shared notifyCommand and onto commitNowCommand. The
-// constant is named (not inlined) so the (a) skip predicate in
-// RegisterPortalHooks and (b) target string inside migrateSessionClosedHook
-// reference a single source of truth.
+// sessionClosedEvent is the single save-trigger event whose registration is
+// converged onto commitNowCommand rather than the shared notifyCommand. The
+// constant is named (not inlined) so the managedEvents table references a
+// single source of truth for the session-closed literal.
 const sessionClosedEvent = "session-closed"
-
-// staleSignalHydratePrefix is one of the two substrings the eviction
-// predicate requires: every Portal-authored signal-hydrate hook body
-// begins with `command -v portal >/dev/null 2>&1 &&` regardless of vintage.
-// Requiring this guard prefix prevents the migration from removing
-// hand-authored user hooks that reference `portal state signal-hydrate` in
-// a different shape.
-const staleSignalHydratePrefix = "command -v portal >/dev/null 2>&1 &&"
-
-// staleSignalHydrateMarker is the second substring the eviction predicate
-// requires: any Portal-authored signal-hydrate body contains the literal
-// `portal state signal-hydrate`. Combined with the absence of
-// signalHydrateSubstring (`portal state signal-hydrate --`), this isolates
-// the legacy un-separated body from the new fixed body.
-const staleSignalHydrateMarker = "portal state signal-hydrate"
-
-// isStaleSignalHydrateEntry reports whether a hook body is the legacy
-// Portal-authored signal-hydrate command lacking the `--` end-of-flags
-// separator. Eligible-for-eviction iff it contains both the
-// `command -v portal` guard prefix and `portal state signal-hydrate`, AND
-// does NOT contain `portal state signal-hydrate --`.
-func isStaleSignalHydrateEntry(cmd string) bool {
-	return strings.Contains(cmd, staleSignalHydratePrefix) &&
-		strings.Contains(cmd, staleSignalHydrateMarker) &&
-		!strings.Contains(cmd, signalHydrateSubstring)
-}
-
-// migrateHydrationHooks scans every event in HydrationTriggerEvents and
-// evicts any pre-existing hook entry whose body matches the legacy
-// un-separated `portal state signal-hydrate` shape. Indices are processed
-// in descending order so successful removals do not shift the indices of
-// later targets.
-//
-// Returns (evicted, nil) on the happy path and on partial-failure paths —
-// per-index UnsetGlobalHookAt failures are best-effort and surface only as
-// WARN log lines via the supplied MigrationLogger. The only path that
-// returns a non-nil err is a ShowGlobalHooks failure, which is wrapped with
-// "show-hooks failed: %w" and aborts the migration before any unset call.
-//
-// When at least one entry was evicted across all events, the function
-// emits a single INFO line "evicted stale signal-hydrate hooks" carrying the
-// eviction count under the "reaped" cycle-summary attr. Bootstraps with no
-// evictions are silent.
-//
-// Sealed inside RegisterPortalHooks: it is unexported to ensure exactly one
-// canonical entry point for "hook installation". A second invocation against
-// the same hook table is a no-op (idempotent).
-//
-// A nil logger is tolerated and falls through to the shared internal/log
-// discard sink via log.OrDiscard.
-func migrateHydrationHooks(c *Client, logger *slog.Logger) (int, error) {
-	logger = log.OrDiscard(logger)
-
-	raw, err := showGlobalHooksOrWarn(c, logger)
-	if err != nil {
-		return 0, err
-	}
-
-	parsed := ParseShowHooks(raw)
-
-	var evicted int
-	for _, event := range HydrationTriggerEvents {
-		// Collect indices of stale entries on this event in descending order.
-		var staleIndices []int
-		for _, entry := range parsed[event] {
-			if isStaleSignalHydrateEntry(entry.Command) {
-				staleIndices = append(staleIndices, entry.Index)
-			}
-		}
-		// Process highest-first so removing one does not shift earlier indices.
-		sort.Sort(sort.Reverse(sort.IntSlice(staleIndices)))
-
-		for _, idx := range staleIndices {
-			if err := c.UnsetGlobalHookAt(event, idx); err != nil {
-				// event name and hook index have no closed attr keys; "error"
-				// carries the signal.
-				logger.Warn("failed to evict stale signal-hydrate hook", "error", err)
-				continue
-			}
-			evicted++
-		}
-	}
-
-	if evicted > 0 {
-		logger.Info("evicted stale signal-hydrate hooks lacking '--' separator", "reaped", evicted)
-	}
-
-	return evicted, nil
-}
-
-// migrateSessionClosedHook is the dedicated registration path for the
-// `session-closed` event. Unlike the substring-based append-if-absent
-// discipline used for every other Portal hook, the session-closed migration
-// must both (a) evict any stale pre-fix notifyCommand entries left behind by
-// an older Portal install and (b) idempotently install commitNowCommand.
-//
-// Algorithm (per spec § Hook Registration Migration):
-//
-//  1. ShowGlobalHooks → filter to session-closed entries.
-//  2. Build the slice of indices whose body exact-string matches the
-//     historical notifyCommand literal. Sort descending so unset calls do
-//     not shift later indices.
-//  3. For each index: UnsetGlobalHookAt(sessionClosedEvent, idx). Per-index
-//     failure is best-effort — log WARN under ComponentBootstrap and
-//     continue to the next index.
-//  4. After eviction, if no remaining entry exact-matches commitNowCommand,
-//     AppendGlobalHook(sessionClosedEvent, commitNowCommand). The exact-
-//     match check is computed during step 2 so the post-removal scan does
-//     not require a second ShowGlobalHooks round-trip — none of the unset
-//     calls can have introduced a commitNowCommand entry, so the
-//     pre-eviction observation is authoritative.
-//
-// Exact-string match (not substring/regex) is load-bearing: an exact match
-// against the historical Portal-emitted literal cannot accidentally remove
-// user-customised hooks (e.g. `portal state notify --debug` or a script
-// wrapper invoking portal). Tolerating quoting drift would create false
-// positives.
-//
-// Returns a non-nil error only when ShowGlobalHooks fails (wrapped with
-// "show-hooks failed: %w") or when the AppendGlobalHook call fails — both
-// surface to RegisterPortalHooks as folded entries in the errors.Join
-// aggregate, consistent with other step-2 register failures.
-func migrateSessionClosedHook(c *Client, logger *slog.Logger) error {
-	logger = log.OrDiscard(logger)
-
-	raw, err := showGlobalHooksOrWarn(c, logger)
-	if err != nil {
-		return err
-	}
-
-	entries := ParseShowHooks(raw)[sessionClosedEvent]
-
-	var staleIndices []int
-	var commitNowPresent bool
-	for _, entry := range entries {
-		switch entry.Command {
-		case notifyCommand:
-			staleIndices = append(staleIndices, entry.Index)
-		case commitNowCommand:
-			commitNowPresent = true
-		}
-	}
-
-	// Descending so each unset targets the entry it identified during the
-	// pre-removal scan — ascending would shift later indices.
-	sort.Sort(sort.Reverse(sort.IntSlice(staleIndices)))
-	for _, idx := range staleIndices {
-		if err := c.UnsetGlobalHookAt(sessionClosedEvent, idx); err != nil {
-			// event name and hook index have no closed attr keys; "error"
-			// carries the signal.
-			logger.Warn("failed to evict stale notify hook", "error", err)
-			continue
-		}
-	}
-
-	if commitNowPresent {
-		return nil
-	}
-	if err := c.AppendGlobalHook(sessionClosedEvent, commitNowCommand); err != nil {
-		return fmt.Errorf("append commit-now hook: %w", err)
-	}
-	return nil
-}
 
 // convergeEvent ensures the global hook array for event holds exactly one
 // Portal entry carrying desiredBody, reading per-event via
@@ -459,8 +193,8 @@ func convergeEvent(c *Client, logger *slog.Logger, event string, fingerprints []
 
 	raw, err := c.ShowGlobalHooksForEvent(event)
 	if err != nil {
-		// Preserve the canonical show-hooks-failed WARN+wrap byte-identically
-		// to showGlobalHooksOrWarn: same message, attrs, error_class, and wrap.
+		// Canonical show-hooks-failed WARN+wrap: message "show-hooks failed",
+		// error_class=unexpected, and the underlying err wrapped verbatim.
 		logger.Warn("show-hooks failed", "error", err, "error_class", "unexpected")
 		return 0, fmt.Errorf("show-hooks failed: %w", err)
 	}

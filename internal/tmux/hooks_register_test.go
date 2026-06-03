@@ -400,6 +400,108 @@ func TestRegisterPortalHooks_SessionClosedUnionFastPath(t *testing.T) {
 	}
 }
 
+// TestRegisterPortalHooks_SessionClosedSubstringEvictsPortalStateNotifyBody
+// documents the spec's "One behavioral change to record": the unified
+// convergence path identifies Portal-owned entries by SUBSTRING match
+// (`portal state notify`), not the historical exact-string match. A body that
+// merely CONTAINS `portal state notify` on session-closed — e.g. the legacy
+// `portal state notify --debug` shape an exact-match would have preserved — is
+// now treated as Portal-owned and evicted, converging to one commitNowCommand.
+//
+// This is the deliberate consequence of deleting migrateSessionClosedHook
+// (whose exact-string match could never remove such a body) in favour of the
+// shared substring predicate that the teardown path already uses.
+func TestRegisterPortalHooks_SessionClosedSubstringEvictsPortalStateNotifyBody(t *testing.T) {
+	// A body containing `portal state notify` but NOT byte-equal to the
+	// historical notifyCommand literal — the exact case the old exact-match
+	// path deliberately preserved, now evicted under the substring predicate.
+	const notifyDebugBody = `run-shell "command -v portal >/dev/null 2>&1 && portal state notify --debug"`
+	if !strings.Contains(notifyDebugBody, "portal state notify") {
+		t.Fatalf("test fixture %q does not contain the substring fingerprint", notifyDebugBody)
+	}
+
+	raw := fmt.Sprintf("session-closed[0] => '%s'\n", notifyDebugBody)
+	mock := &MockCommander{RunFunc: perEventDispatch(t, raw, nil)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The substring-matching body must be evicted at session-closed[0].
+	var closedUnsets []string
+	for _, u := range unsetHookCalls(mock.Calls) {
+		if strings.HasPrefix(u, "session-closed[") {
+			closedUnsets = append(closedUnsets, u)
+		}
+	}
+	if len(closedUnsets) != 1 || closedUnsets[0] != "session-closed[0]" {
+		t.Fatalf("session-closed unsets = %v, want [session-closed[0]] (substring predicate must evict the notify body)", closedUnsets)
+	}
+
+	// Exactly one append on session-closed carrying commitNowCommand.
+	var appends int
+	var body string
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "session-closed" {
+			appends++
+			body = c[1]
+		}
+	}
+	if appends != 1 {
+		t.Fatalf("session-closed append count = %d, want 1", appends)
+	}
+	if body != expectedCommitNowCommand {
+		t.Errorf("session-closed append body = %q, want %q", body, expectedCommitNowCommand)
+	}
+}
+
+// TestRegisterPortalHooks_SessionClosedNonMatchingUserHookSurvives replaces the
+// old "--debug preserved" assertion (which no longer holds under the substring
+// predicate — see TestRegisterPortalHooks_SessionClosedSubstringEvictsPortalStateNotifyBody).
+// A genuinely non-matching user hook on session-closed — one whose body
+// contains NONE of the event's fingerprints (`portal state notify`,
+// `portal state commit-now`) — is never Portal-owned, so it survives untouched
+// while the Portal commitNowCommand is appended alongside it.
+func TestRegisterPortalHooks_SessionClosedNonMatchingUserHookSurvives(t *testing.T) {
+	const userHook = `run-shell "tmux-resurrect save"`
+	if strings.Contains(userHook, "portal state notify") || strings.Contains(userHook, "portal state commit-now") {
+		t.Fatalf("test fixture %q unexpectedly contains a Portal fingerprint", userHook)
+	}
+
+	raw := fmt.Sprintf("session-closed[0] => '%s'\n", userHook)
+	mock := &MockCommander{RunFunc: perEventDispatch(t, raw, nil)}
+	client := tmux.NewClient(mock)
+
+	if err := tmux.RegisterPortalHooks(client, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No unset on session-closed: the user hook is not Portal-fingerprinted.
+	for _, u := range unsetHookCalls(mock.Calls) {
+		if strings.HasPrefix(u, "session-closed[") {
+			t.Errorf("unexpected unset on non-matching user hook: %q", u)
+		}
+	}
+
+	// Exactly one append on session-closed carrying commitNowCommand, alongside
+	// the surviving user hook.
+	var appends int
+	var body string
+	for _, c := range setHookCalls(mock.Calls) {
+		if c[0] == "session-closed" {
+			appends++
+			body = c[1]
+		}
+	}
+	if appends != 1 {
+		t.Fatalf("session-closed append count = %d, want 1 (alongside the user hook)", appends)
+	}
+	if body != expectedCommitNowCommand {
+		t.Errorf("session-closed append body = %q, want %q", body, expectedCommitNowCommand)
+	}
+}
+
 // TestRegisterPortalHooks_UserHookUntouched proves a co-resident hook matching
 // none of the event's fingerprints survives convergence: the user entry is
 // never unset, and the Portal desired body is still appended alongside it.

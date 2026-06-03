@@ -82,10 +82,11 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "state-notify-cascade-on-binary-upgrade-1-3",
+          "current_task": "state-notify-cascade-on-binary-upgrade-1-4",
           "completed_tasks": [
             "state-notify-cascade-on-binary-upgrade-1-1",
-            "state-notify-cascade-on-binary-upgrade-1-2"
+            "state-notify-cascade-on-binary-upgrade-1-2",
+            "state-notify-cascade-on-binary-upgrade-1-3"
           ]
         }
       }

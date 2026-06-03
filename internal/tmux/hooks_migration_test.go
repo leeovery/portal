@@ -1,12 +1,15 @@
 package tmux_test
 
-// Migration tests for migrateHydrationHooks — Task 1-2 of the
-// scrollback-not-restored-with-non-zero-base-index spec.
+// Hydration-event convergence tests, driven through the unified
+// RegisterPortalHooks per-event ensure-exactly-one path.
 //
-// The migration scans every event in HydrationTriggerEvents, evicts any
-// pre-existing un-separated `portal state signal-hydrate` entry (so the
-// new fixed entry can be cleanly installed by RegisterHookIfAbsent), and
-// emits diagnostics via a small MigrationLogger seam.
+// These were originally the migrateHydrationHooks suite; that helper was
+// deleted once the convergence engine subsumed its job (matching on
+// `portal state signal-hydrate` evicts the legacy un-separated body AND any
+// duplicate, converging to the `--` form as an ordinary side effect). The
+// tests now pin that convergence behaviour against RegisterPortalHooks
+// directly. The capture helper is recordingMigrationLogger (the single
+// source of truth declared in hooks_register_test.go).
 //
 // Real-tmux fixtures (internal/tmuxtest) drive the tests where the eviction
 // touches `set-hook -gu` index semantics; mock-based tests cover the
@@ -14,10 +17,8 @@ package tmux_test
 // tmux that the test harness does not expose).
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -26,77 +27,10 @@ import (
 )
 
 // staleSignalHydrateCommand is the legacy un-separated hook body older
-// Portal installs registered before the `--` fix. The eviction predicate
-// matches this body; the new fixed body in expectedSignalHydrateCommand
-// does not.
+// Portal installs registered before the `--` fix. The convergence engine's
+// hydration fingerprint (`portal state signal-hydrate`) matches this body; the
+// new fixed body in expectedSignalHydrateCommand carries the `--` separator.
 const staleSignalHydrateCommand = `run-shell "command -v portal >/dev/null 2>&1 && portal state signal-hydrate #{session_name}"`
-
-// recordingLogger is a slog.Handler that captures Info and Warn records so
-// assertions can verify emission counts and message content. Each captured
-// record is rendered as "<component> | <message> <key>=<value>..." so the
-// migration's terse-message-plus-attrs shape (e.g. reaped=4) is inspectable.
-// Use Logger() to obtain a *slog.Logger to pass into RegisterPortalHooks.
-type recordingLogger struct {
-	infos []string
-	warns []string
-	// shared points at the slice-owning recorder so handlers derived via
-	// WithAttrs/WithGroup (notably .With("component", ...)) record into the
-	// same slices; nil on the root.
-	shared *recordingLogger
-	bound  []slog.Attr
-}
-
-// Logger returns a *slog.Logger whose records are captured by this recorder.
-func (r *recordingLogger) Logger() *slog.Logger { return slog.New(r) }
-
-func (r *recordingLogger) Enabled(_ context.Context, _ slog.Level) bool { return true }
-
-func (r *recordingLogger) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Attr, 0, len(r.bound)+len(attrs))
-	next = append(next, r.bound...)
-	next = append(next, attrs...)
-	return &recordingLogger{shared: r.owner(), bound: next}
-}
-
-func (r *recordingLogger) WithGroup(_ string) slog.Handler {
-	return &recordingLogger{shared: r.owner(), bound: r.bound}
-}
-
-func (r *recordingLogger) owner() *recordingLogger {
-	if r.shared != nil {
-		return r.shared
-	}
-	return r
-}
-
-func (r *recordingLogger) Handle(_ context.Context, rec slog.Record) error {
-	component := ""
-	var trailer strings.Builder
-	emit := func(a slog.Attr) bool {
-		if a.Key == "component" {
-			component = a.Value.String()
-			return true
-		}
-		trailer.WriteString(" ")
-		trailer.WriteString(a.Key)
-		trailer.WriteString("=")
-		trailer.WriteString(a.Value.String())
-		return true
-	}
-	for _, a := range r.bound {
-		emit(a)
-	}
-	rec.Attrs(func(a slog.Attr) bool { return emit(a) })
-	line := fmt.Sprintf("%s | %s%s", component, rec.Message, trailer.String())
-	owner := r.owner()
-	switch rec.Level {
-	case slog.LevelInfo:
-		owner.infos = append(owner.infos, line)
-	case slog.LevelWarn:
-		owner.warns = append(owner.warns, line)
-	}
-	return nil
-}
 
 // countSignalHydrateEntries returns, for each event in
 // tmux.HydrationTriggerEvents, the number of hook entries on that event
@@ -146,7 +80,7 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	}
 	installStaleHooks(t, client)
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
@@ -163,8 +97,8 @@ func TestMigrateHydrationHooks_EvictsUnSeparatedThenInstallsFixed(t *testing.T) 
 	// summary carrying the reaped count across all events.
 	if len(log.infos) != 1 {
 		t.Errorf("INFO line count = %d, want 1; infos=%v", len(log.infos), log.infos)
-	} else if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || !strings.Contains(log.infos[0], "reaped=") {
-		t.Errorf("INFO line = %q, missing eviction summary", log.infos[0])
+	} else if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || log.infoReaped[0] < 1 {
+		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", log.infos[0], log.infoReaped[0])
 	}
 
 	// Verify the fixed entry actually contains the `--` separator on each
@@ -203,13 +137,13 @@ func TestMigrateHydrationHooks_IdempotentNoOpOnSecondBootstrap(t *testing.T) {
 	installStaleHooks(t, client)
 
 	// First bootstrap: evicts and installs.
-	first := &recordingLogger{}
+	first := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, first.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("first RegisterPortalHooks: %v", err)
 	}
 
 	// Second bootstrap: must be a complete no-op.
-	second := &recordingLogger{}
+	second := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, second.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("second RegisterPortalHooks: %v", err)
 	}
@@ -241,7 +175,7 @@ func TestMigrateHydrationHooks_ZeroPreExistingEntriesIsSilentNoOp(t *testing.T) 
 		t.Fatalf("EnsureServer: %v", err)
 	}
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
@@ -285,7 +219,7 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 		t.Fatalf("AppendGlobalHook[client-session-changed]: %v", err)
 	}
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
@@ -302,8 +236,8 @@ func TestMigrateHydrationHooks_MultipleStaleEntriesOnSameEventEvictAllInOrder(t 
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	if !strings.Contains(log.infos[0], "reaped=4") {
-		t.Errorf("INFO line = %q, want eviction count reaped=4", log.infos[0])
+	if log.infoReaped[0] != 4 {
+		t.Errorf("reaped attr = %d, want eviction count 4", log.infoReaped[0])
 	}
 }
 
@@ -333,7 +267,7 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 		t.Fatalf("AppendGlobalHook(user): %v", err)
 	}
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
@@ -377,20 +311,28 @@ func TestMigrateHydrationHooks_DoesNotEvictHandAuthoredHooksLackingFingerprint(t
 //     evict" message.
 //   - Successful evictions on other events trigger the INFO emission.
 func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) {
-	// show-hooks output: one stale entry per hydration event. The same
-	// content is returned for every show-hooks call (migration scan plus
-	// the per-event register-loop dedupe checks).
+	// One stale entry per hydration event, served per-event via the canonical
+	// parseSeededTableByEvent splitter (the single source of truth for
+	// per-event-filtered show-hooks output). A bespoke runFunc layers
+	// set-hook -gu fault injection on top — perEventDispatch only models
+	// set-hook -ga errors, so the unset-failure case wraps the shared splitter
+	// directly, mirroring TestRegisterPortalHooks_PerIndexUnsetFailureWarnsAndContinues.
 	var raw strings.Builder
 	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
 	}
+	byEvent := parseSeededTableByEvent(raw.String())
 
 	failingTarget := "client-attached[0]" // matches set-hook -gu argv[2]
 	sentinel := errors.New("tmux unset failure")
 
 	runFunc := func(args ...string) (string, error) {
+		if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
+			return byEvent[args[2]], nil
+		}
 		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			return raw.String(), nil
+			t.Fatalf("convergence engine must read per-event, not the no-arg global show-hooks -g: %v", args)
+			return "", nil
 		}
 		if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
 			if args[2] == failingTarget {
@@ -398,9 +340,8 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 			}
 			return "", nil
 		}
-		// set-hook -ga (register-loop appends across save+hydrate
-		// categories) — accept silently.
-		if len(args) >= 2 && args[0] == "set-hook" && args[1] == "-ga" {
+		// set-hook -ga (register-loop appends) — accept silently.
+		if len(args) >= 4 && args[0] == "set-hook" && args[1] == "-ga" {
 			return "", nil
 		}
 		t.Fatalf("unexpected command: %v", args)
@@ -409,7 +350,7 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	mock := &MockCommander{RunFunc: runFunc}
 	client := tmux.NewClient(mock)
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks returned err: %v (per-index migration failures must not error)", err)
 	}
@@ -434,8 +375,8 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || !strings.Contains(log.infos[0], "reaped=") {
-		t.Errorf("INFO line = %q, missing eviction summary", log.infos[0])
+	if !strings.Contains(log.infos[0], "collapsed stacked portal hooks") || log.infoReaped[0] < 1 {
+		t.Errorf("INFO line = %q reaped=%d, missing eviction summary", log.infos[0], log.infoReaped[0])
 	}
 }
 
@@ -445,27 +386,19 @@ func TestMigrateHydrationHooks_PartialFailureLogsWarnAndContinues(t *testing.T) 
 // set-hook -gu calls observed must cover every event in the canonical list
 // — extending the slice later requires no code change in migration.
 func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t *testing.T) {
+	// Seed one stale entry per hydration event and serve it through the
+	// canonical perEventDispatch (single source of truth for per-event-filtered
+	// show-hooks output). The convergence engine must scan every event in the
+	// runtime slice; extending HydrationTriggerEvents later widens coverage with
+	// no code change.
 	var raw strings.Builder
 	for _, ev := range tmux.HydrationTriggerEvents {
 		fmt.Fprintf(&raw, "%s[0] => %q\n", ev, staleSignalHydrateCommand)
 	}
-
-	runFunc := func(args ...string) (string, error) {
-		if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-			return raw.String(), nil
-		}
-		// set-hook -gu (migration evictions) and set-hook -ga
-		// (register-loop appends) are both expected. Accept silently.
-		if len(args) >= 2 && args[0] == "set-hook" && (args[1] == "-gu" || args[1] == "-ga") {
-			return "", nil
-		}
-		t.Fatalf("unexpected command: %v", args)
-		return "", nil
-	}
-	mock := &MockCommander{RunFunc: runFunc}
+	mock := &MockCommander{RunFunc: perEventDispatch(t, raw.String(), nil)}
 	client := tmux.NewClient(mock)
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	if err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap")); err != nil {
 		t.Fatalf("RegisterPortalHooks: %v", err)
 	}
@@ -495,9 +428,8 @@ func TestMigrateHydrationHooks_HydrationTriggerEventsSliceIsRespectedAtRuntime(t
 	if len(log.infos) != 1 {
 		t.Fatalf("INFO count = %d, want 1; infos=%v", len(log.infos), log.infos)
 	}
-	wantSummary := fmt.Sprintf("reaped=%d", len(tmux.HydrationTriggerEvents))
-	if !strings.Contains(log.infos[0], wantSummary) {
-		t.Errorf("INFO line = %q, want eviction count = %d", log.infos[0], len(tmux.HydrationTriggerEvents))
+	if want := int64(len(tmux.HydrationTriggerEvents)); log.infoReaped[0] != want {
+		t.Errorf("reaped attr = %d, want eviction count = %d", log.infoReaped[0], want)
 	}
 }
 
@@ -526,7 +458,7 @@ func TestMigrateHydrationHooks_ShowHooksFailureWrapsError(t *testing.T) {
 	}
 	client := tmux.NewClient(mock)
 
-	log := &recordingLogger{}
+	log := &recordingMigrationLogger{}
 	err := tmux.RegisterPortalHooks(client, log.Logger().With("component", "bootstrap"))
 
 	if err == nil {

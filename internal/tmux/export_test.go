@@ -28,12 +28,6 @@ import (
 // KillSaverAndWaitForDaemon re-exports killSaverAndWaitForDaemon for tests.
 var KillSaverAndWaitForDaemon = killSaverAndWaitForDaemon
 
-// ShowGlobalHooksOrWarn re-exports showGlobalHooksOrWarn so the external
-// tmux_test package can drive the extracted show-hooks-failed WARN+wrap helper
-// directly. The three sibling call sites (RegisterHookIfAbsent,
-// migrateHydrationHooks, migrateSessionClosedHook) delegate to it.
-var ShowGlobalHooksOrWarn = showGlobalHooksOrWarn
-
 // SaverPanePID re-exports the unexported saverPanePID for the external
 // tmux_test package's rich-sentinel-classification unit tests. Production
 // code routes through SaverPanePIDOrAbsent — the sole exported entry point
