@@ -27,13 +27,7 @@ import (
 func TestUnregisterPortalHooks_ShowHooksFailureEmitsCanonicalWarn(t *testing.T) {
 	sentinel := errors.New("tmux show-hooks failure (teardown)")
 	mock := &MockCommander{
-		RunFunc: func(args ...string) (string, error) {
-			if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-				return "", sentinel
-			}
-			t.Fatalf("set-hook -gu must not be called when every read fails: %v", args)
-			return "", nil
-		},
+		RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
 	}
 	client := tmux.NewClient(mock)
 

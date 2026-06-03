@@ -201,13 +201,7 @@ func TestUnregisterPortalHooks(t *testing.T) {
 		// event's entries are ever read, zero removals are issued.
 		sentinel := errors.New("tmux exec failed")
 		mock := &MockCommander{
-			RunFunc: func(args ...string) (string, error) {
-				if len(args) >= 2 && args[0] == "show-hooks" && args[1] == "-g" {
-					return "", sentinel
-				}
-				t.Fatalf("set-hook -gu must not be called when every read fails: %v", args)
-				return "", nil
-			},
+			RunFunc: perEventDispatchWithFaults(t, "", nil, readErrForAllManagedEvents(sentinel), nil),
 		}
 		client := tmux.NewClient(mock)
 
@@ -235,19 +229,7 @@ func TestUnregisterPortalHooks(t *testing.T) {
 		raw := "session-created[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n" +
 			"pane-focus-out[0] run-shell 'command -v portal >/dev/null 2>&1 && portal state notify'\n"
 		mock := &MockCommander{
-			RunFunc: func(args ...string) (string, error) {
-				if len(args) >= 3 && args[0] == "show-hooks" && args[1] == "-g" {
-					if args[2] == "pane-focus-out" {
-						return "", sentinel
-					}
-					return linesForEvent(raw, args[2]), nil
-				}
-				if len(args) >= 3 && args[0] == "set-hook" && args[1] == "-gu" {
-					return "", nil
-				}
-				t.Fatalf("unexpected command: %v", args)
-				return "", nil
-			},
+			RunFunc: perEventDispatchWithFaults(t, raw, nil, map[string]error{"pane-focus-out": sentinel}, nil),
 		}
 		client := tmux.NewClient(mock)
 
