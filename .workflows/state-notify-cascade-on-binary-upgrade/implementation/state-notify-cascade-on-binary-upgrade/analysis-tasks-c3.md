@@ -6,7 +6,7 @@ total_proposed: 3
 # Analysis Tasks: State Notify Cascade on Binary Upgrade (Cycle 3)
 
 ## Task 1: Make teardown reap the converged session-closed commit-now hook (close the fingerprint seam, AC #5)
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -126,7 +126,7 @@ and documented.
   test(s) still pass unchanged, proving the intentional asymmetry is preserved.
 
 ## Task 2: Consolidate the forked register/teardown test-harness dispatch + line-scoping helpers and propagate the no-arg-global-read fatal guard to teardown
-status: pending
+status: approved
 severity: low
 sources: duplication
 
@@ -214,7 +214,7 @@ one definition of "an event line begins with `<event>[`".
   continue to pass unchanged after the line-scoping primitive is unified.
 
 ## Task 3: Fix the stale doc comment in the six-event routing test (deleted test name + prior-spec heading)
-status: pending
+status: approved
 severity: low
 sources: standards
 

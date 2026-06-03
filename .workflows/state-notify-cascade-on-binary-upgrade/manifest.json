@@ -59,7 +59,11 @@
             "state-notify-cascade-on-binary-upgrade-3-1": "tick-f1f862",
             "state-notify-cascade-on-binary-upgrade-3-2": "tick-50fffb",
             "state-notify-cascade-on-binary-upgrade-3-3": "tick-f87931",
-            "state-notify-cascade-on-binary-upgrade-3-4": "tick-72aeea"
+            "state-notify-cascade-on-binary-upgrade-3-4": "tick-72aeea",
+            "state-notify-cascade-on-binary-upgrade-4": "tick-066650",
+            "state-notify-cascade-on-binary-upgrade-4-1": "tick-607895",
+            "state-notify-cascade-on-binary-upgrade-4-2": "tick-938740",
+            "state-notify-cascade-on-binary-upgrade-4-3": "tick-2e1e48"
           },
           "external_id": "tick-a00b4b"
         }
