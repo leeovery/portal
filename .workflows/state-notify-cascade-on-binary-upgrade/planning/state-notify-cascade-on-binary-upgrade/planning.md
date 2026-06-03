@@ -25,7 +25,8 @@ approved_at: 2026-06-03
 - [ ] Real-tmux (`internal/tmuxtest`) integration tests cover: no-growth across N bootstraps on the blind events; the tmux 3.6b blind-spot reality (no-arg omits pane/geometry events, per-event includes them); self-heal of a K-deep stack with a co-resident user hook left intact; teardown-at-depth on the blind events with user hook intact; and idempotency/no-churn. The full `go test ./...` suite is green with no regressions.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-03
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
