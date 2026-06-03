@@ -11,6 +11,32 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "surface-x-toggle-in-keymap-hints": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "4cb7f142eb0d24b9c700c199614daec62a648705",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "surface-x-toggle-in-keymap-hints-1-1": "tick-036d4f"
+          },
+          "external_id": "tick-7ff6c0"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "surface-x-toggle-in-keymap-hints": {
+          "status": "completed"
+        }
+      }
     }
   },
   "seeds": [
