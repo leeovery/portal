@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-06-03",
   "description": "Harden cmd/state_daemon_integration_test.go against silent passes: export tmux.KillBarrierTimeoutCeiling and reuse it instead of a local mirror, and swap a t.Logf warning for t.Skip when a fast host cannot exercise the mid-tick SIGHUP cancellation path",
-  "phases": {},
+  "phases": {
+    "specification": {
+      "items": {
+        "harden-daemon-integration-test": {
+          "status": "completed"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-05-20-export-kill-barrier-timeout-ceiling.md",

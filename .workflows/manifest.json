@@ -110,6 +110,9 @@
     },
     "surface-x-toggle-in-keymap-hints": {
       "work_type": "quick-fix"
+    },
+    "harden-daemon-integration-test": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
