@@ -53,6 +53,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -356,6 +357,15 @@ func newSymptomFixture(t *testing.T, binary, binDir, sockPrefix string) symptomF
 	// own tmux server AFTER its own setenv, so the server's env
 	// reflects that sub-test's stateDir.
 	t.Setenv("PORTAL_STATE_DIR", stateDir)
+	// Isolate the per-file config env vars too — the bootstrap subprocess
+	// spawned below (portal list) runs the full eleven-step orchestrator,
+	// including step 11 CleanStale. Without these the subprocess inherits
+	// the developer's real ~/.config/portal/hooks.json / projects.json /
+	// aliases and CleanStale wipes them against the test's tmux server's
+	// pane set (which has nothing in common with the developer's hooks).
+	t.Setenv("PORTAL_HOOKS_FILE", filepath.Join(stateDir, "hooks.json"))
+	t.Setenv("PORTAL_PROJECTS_FILE", filepath.Join(stateDir, "projects.json"))
+	t.Setenv("PORTAL_ALIASES_FILE", filepath.Join(stateDir, "aliases"))
 
 	sock := tmuxtest.New(t, sockPrefix)
 

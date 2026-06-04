@@ -169,13 +169,13 @@ func TestStateInternalSubcommandsAcceptValidArgv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The daemon's RunE blocks on signal until the context is
-			// cancelled in production. For an argv-validation test we stub
-			// the run-func so the command returns immediately, and we point
-			// the daemon's state directory at a per-test TempDir so the PID
-			// and version writes are scoped to the test.
+			// Isolate every subtest against a fresh per-subtest temp state
+			// dir so notify / signal-hydrate / hydrate / migrate-rename never
+			// mutate (or fail to create) the developer's real
+			// ~/.config/portal/state. The daemon case additionally needs the
+			// run-func stub and lock-file reset.
+			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "daemon" {
-				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 				prev := daemonRunFunc
 				daemonRunFunc = func(_ context.Context, _ *daemonDeps) error { return nil }
 				t.Cleanup(func() { daemonRunFunc = prev })
