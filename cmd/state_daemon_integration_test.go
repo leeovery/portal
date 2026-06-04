@@ -241,9 +241,9 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	t.Logf("measurement: singlePaneWallTime=%s, aggregatePerTickEstimate=%s, anchoredThreshold=%s, "+
 		"scrollbackLinesPerPane=%d", singlePaneWallTime, aggregate, threshold, lines)
 	if aggregate < 2*time.Second {
-		t.Logf("WARNING: aggregate per-tick wall time estimate (%s) is below the 2s heuristic; "+
-			"the test still exercises the cancellation path but may pass trivially on a "+
-			"capture-pane-fast host. Anchored threshold (%s) remains the load-bearing assertion.",
+		t.Skipf("skipping: aggregate per-tick wall time (%s) is below the 2s heuristic; "+
+			"this host's capture-pane is too fast to exercise the tick-spans-kill-barrier "+
+			"cancellation path (anchoredThreshold=%s)",
 			aggregate, threshold)
 	}
 
