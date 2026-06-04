@@ -1,0 +1,3 @@
+AGENT: architecture
+FINDINGS: none
+SUMMARY: The change cleanly lifts the per-subtest t.Setenv("PORTAL_STATE_DIR", t.TempDir()) isolation out of the status-only conditional so it applies unconditionally to all three subtests in TestStateUserFacingSubcommandsExitZero. The seam (in-process rootCmd.Execute() + package-level t.Setenv env override) matches the existing status/daemon isolation pattern in the same file; no new abstraction, no boundary shift, and the deliberate non-adoption of subprocess-shaped portaltest.IsolateStateForTest is correct for this in-process test. The comment accurately documents the ErrStatusUnhealthy allowance and isolation rationale.
