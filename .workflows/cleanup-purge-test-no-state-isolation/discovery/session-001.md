@@ -52,8 +52,8 @@ natural fit; whether to do more is a scoping call.
 
 ## Topics Identified
 
-(n/a — single-topic work)
+(none)
 
 ## Conclusion
 
-(none)
+Routed to scoping.
