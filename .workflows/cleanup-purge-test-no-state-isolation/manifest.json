@@ -1,0 +1,15 @@
+{
+  "name": "cleanup-purge-test-no-state-isolation",
+  "work_type": "quick-fix",
+  "status": "in-progress",
+  "created": "2026-06-04",
+  "description": "Apply temp-dir PORTAL_STATE_DIR isolation to all subtests of TestStateUserFacingSubcommandsExitZero so the cleanup and --purge cases stop running against the developer's real state dir",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-06-02-cleanup-purge-test-no-state-isolation.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-06-04T14:26:38Z"
+    }
+  ]
+}
