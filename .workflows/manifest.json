@@ -113,6 +113,9 @@
     },
     "harden-daemon-integration-test": {
       "work_type": "quick-fix"
+    },
+    "cleanup-purge-test-no-state-isolation": {
+      "work_type": "quick-fix"
     }
   },
   "defaults": {
