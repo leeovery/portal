@@ -11,6 +11,32 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "cleanup-purge-test-no-state-isolation": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "cea666ee3eec5b6c7a5afd4e8bac5bac73bd7d9d",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "cleanup-purge-test-no-state-isolation-1-1": "tick-cb8a7e"
+          },
+          "external_id": "tick-dc0d91"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "cleanup-purge-test-no-state-isolation": {
+          "status": "completed"
+        }
+      }
     }
   },
   "seeds": [
