@@ -48,6 +48,7 @@ import (
 
 	"github.com/leeovery/portal/internal/portalbintest"
 	"github.com/leeovery/portal/internal/state"
+	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tmuxtest"
 )
 
@@ -77,16 +78,6 @@ const daemonAliveTimeout = 5 * time.Second
 // The 1.2s value keeps SIGHUP inside the [tick-fire, tick-fire +
 // per-pane-wall-time] window with margin on both sides.
 const tickStartDelay = 1200 * time.Millisecond
-
-// killBarrierTimeoutCeiling is the production killBarrierTimeout
-// asserted by the spec § Acceptance Criteria → Daemon responsiveness.
-// Mirrored here as a constant rather than imported from internal/tmux
-// because the spec calls the 5s ceiling out as a behavioural contract:
-// the daemon MUST exit within this window regardless of how the
-// anchored threshold derives from a fresh measurement. Mirroring the
-// literal keeps this test's failure surface readable without an
-// indirection through an unexported package var.
-const killBarrierTimeoutCeiling = 5 * time.Second
 
 // panePopulationTimeout is the ceiling on per-pane synthetic-
 // scrollback population. Each pane runs `sh -c 'seq 1 N; sleep
@@ -164,7 +155,7 @@ const historyLimit = 1000000
 //  11. Sleep tickStartDelay (1.2s) so the daemon's 1s ticker fires and
 //     captureAndCommit enters the per-pane loop.
 //  12. Capture tickStart, send SIGHUP, wait for Process.Wait via a
-//     polling goroutine bounded by killBarrierTimeoutCeiling.
+//     polling goroutine bounded by tmux.KillBarrierTimeoutCeiling.
 //  13. Assert exit happened within the anchored threshold AND within
 //     the 5s ceiling. Assert exit status zero (clean shutdown).
 //
@@ -201,7 +192,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 
 	// Step 5/6 (and re-measurement on slow hardware): populate the
 	// panes with synthetic scrollback and measure single-pane wall
-	// time. If the derived threshold exceeds killBarrierTimeoutCeiling
+	// time. If the derived threshold exceeds tmux.KillBarrierTimeoutCeiling
 	// we halve scrollbackLines and try again (max one retry).
 	//
 	// The measurement-anchored threshold contract from spec § Testing
@@ -225,7 +216,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 		populatePanes(t, sock, lines)
 		singlePaneWallTime = measureSinglePaneCapture(t, sock)
 		threshold = anchorThreshold(singlePaneWallTime)
-		if threshold <= killBarrierTimeoutCeiling {
+		if threshold <= tmux.KillBarrierTimeoutCeiling {
 			break
 		}
 		// Halve and re-measure. If still over after one retry the test
@@ -234,11 +225,11 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 		// a slow-machine condition silently.
 		lines /= 2
 	}
-	if threshold > killBarrierTimeoutCeiling {
+	if threshold > tmux.KillBarrierTimeoutCeiling {
 		t.Fatalf("derived threshold %s exceeds killBarrierTimeout ceiling %s after halving "+
 			"per-pane scrollback to %d lines (singlePaneWallTime=%s); "+
 			"test fixture cannot establish a meaningful responsiveness window on this hardware",
-			threshold, killBarrierTimeoutCeiling, lines, singlePaneWallTime)
+			threshold, tmux.KillBarrierTimeoutCeiling, lines, singlePaneWallTime)
 	}
 
 	// Sanity-check the aggregate per-tick wall time: the test only
@@ -380,7 +371,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 
 	// exec.Cmd.Wait does not accept a deadline; run it on a goroutine
 	// and bound the test's worst-case hang to
-	// killBarrierTimeoutCeiling. cmd.Wait (NOT cmd.Process.Wait) is the
+	// tmux.KillBarrierTimeoutCeiling. cmd.Wait (NOT cmd.Process.Wait) is the
 	// load-bearing call here: only cmd.Wait populates cmd.ProcessState,
 	// which the clean-exit assertion below reads. Calling
 	// cmd.Process.Wait directly reaps the zombie but leaves
@@ -397,7 +388,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	// measurement tight.
 	var exitErr error
 	var exitTime time.Time
-	deadline := time.NewTimer(killBarrierTimeoutCeiling + 500*time.Millisecond)
+	deadline := time.NewTimer(tmux.KillBarrierTimeoutCeiling + 500*time.Millisecond)
 	defer deadline.Stop()
 	select {
 	case exitErr = <-waitDone:
@@ -408,13 +399,13 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 		// SIGKILL it.
 		t.Fatalf("daemon did not exit within %s of SIGHUP (pid=%d); singlePaneWallTime=%s, "+
 			"anchoredThreshold=%s\n--- daemon stderr ---\n%s",
-			killBarrierTimeoutCeiling+500*time.Millisecond, daemon.Process.Pid,
+			tmux.KillBarrierTimeoutCeiling+500*time.Millisecond, daemon.Process.Pid,
 			singlePaneWallTime, threshold, stderr.String())
 	}
 
 	latency := exitTime.Sub(tickStart)
 	t.Logf("daemon exit latency: %s (anchoredThreshold=%s, ceiling=%s, singlePaneWallTime=%s)",
-		latency, threshold, killBarrierTimeoutCeiling, singlePaneWallTime)
+		latency, threshold, tmux.KillBarrierTimeoutCeiling, singlePaneWallTime)
 
 	// Post-exit diagnostics. The portal.log dump shows the daemon's
 	// observed shutdown chain; the scrollback file count proves whether
@@ -439,7 +430,7 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	if latency >= threshold {
 		t.Errorf("daemon exit latency %s >= anchored threshold %s "+
 			"(singlePaneWallTime=%s, ceiling=%s)\n--- daemon stderr ---\n%s",
-			latency, threshold, singlePaneWallTime, killBarrierTimeoutCeiling, stderr.String())
+			latency, threshold, singlePaneWallTime, tmux.KillBarrierTimeoutCeiling, stderr.String())
 	}
 
 	// Assertion 2: latency under the production killBarrierTimeout
@@ -447,10 +438,10 @@ func TestDaemon_MidTickSIGHUP_ExitsWithinBoundedWindow(t *testing.T) {
 	// assertion is the regression guard against "the ctx-aware loop
 	// was reverted" or "a future change reintroduced a synchronous
 	// tick".
-	if latency >= killBarrierTimeoutCeiling {
+	if latency >= tmux.KillBarrierTimeoutCeiling {
 		t.Errorf("daemon exit latency %s >= killBarrierTimeout ceiling %s "+
 			"(singlePaneWallTime=%s)\n--- daemon stderr ---\n%s",
-			latency, killBarrierTimeoutCeiling, singlePaneWallTime, stderr.String())
+			latency, tmux.KillBarrierTimeoutCeiling, singlePaneWallTime, stderr.String())
 	}
 
 	// Assertion 3: clean exit. SIGHUP must take the daemon through

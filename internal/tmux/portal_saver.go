@@ -89,6 +89,14 @@ var PortalSaverRetryDelay = 100 * time.Millisecond
 // BootstrapPortalSaver gives up and returns an error.
 const portalSaverMaxAttempts = 3
 
+// KillBarrierTimeoutCeiling is the upper bound on the kill barrier's wait for
+// the prior daemon to exit after kill-session is issued. It is the single
+// source of truth for the production SaverBarrierSeams.Timeout default below;
+// integration tests import it rather than mirroring the literal so a future
+// change to the production value cannot silently desync from the test's
+// asserted ceiling.
+const KillBarrierTimeoutCeiling = 5 * time.Second
+
 // SaverBarrierSeams groups the kill-barrier-specific seams driving
 // killSaverAndWaitForDaemon's poll loop and escalation path, plus the
 // shared WARN-emission Logger sink also consumed by the readiness barrier
@@ -237,7 +245,7 @@ var saver = SaverSeams{
 			return syscall.Kill(pid, syscall.SIGKILL)
 		},
 		PollInterval:      50 * time.Millisecond,
-		Timeout:           5 * time.Second,
+		Timeout:           KillBarrierTimeoutCeiling,
 		EscalationTimeout: 1 * time.Second,
 		Logger:            log.Discard(),
 	},
