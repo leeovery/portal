@@ -223,15 +223,15 @@ func TestStateUserFacingSubcommandsExitZero(t *testing.T) {
 			errBuf := new(bytes.Buffer)
 			resetRootCmd()
 			resetStateCmdFlags()
-			// `portal state status` exits non-zero on an unhealthy state
-			// surface (no daemon, stale save, recent warnings). Point the
-			// command at an empty TempDir and treat the unhealthy exit as
-			// expected for argv-validation purposes — the assertion this
+			// Isolate every subtest against a fresh per-subtest temp state
+			// dir so the cleanup / cleanup --purge cases never mutate the
+			// developer's real ~/.config/portal/state. The assertion this
 			// test cares about is that argv parsing succeeded and Cobra
-			// handed control to RunE without a usage/parse error.
-			if len(tt.args) >= 2 && tt.args[0] == "state" && tt.args[1] == "status" {
-				t.Setenv("PORTAL_STATE_DIR", t.TempDir())
-			}
+			// handed control to RunE without a usage/parse error. The
+			// status case is additionally allowed to exit non-zero with
+			// ErrStatusUnhealthy, since an empty TempDir is an unhealthy
+			// state surface (no daemon, stale save, recent warnings).
+			t.Setenv("PORTAL_STATE_DIR", t.TempDir())
 			rootCmd.SetOut(outBuf)
 			rootCmd.SetErr(errBuf)
 			rootCmd.SetArgs(tt.args)
