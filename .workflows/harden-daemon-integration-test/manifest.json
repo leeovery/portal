@@ -11,6 +11,33 @@
           "status": "completed"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "harden-daemon-integration-test": {
+          "status": "completed",
+          "format": "tick",
+          "spec_commit": "3c76e2cc9c8e779d9b992feb5726dd042537cf01",
+          "task_list_gate_mode": "auto",
+          "author_gate_mode": "auto",
+          "finding_gate_mode": "auto",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {
+            "harden-daemon-integration-test-1-1": "tick-957244",
+            "harden-daemon-integration-test-1-2": "tick-5da51b"
+          },
+          "external_id": "tick-fc0838"
+        }
+      }
+    },
+    "scoping": {
+      "items": {
+        "harden-daemon-integration-test": {
+          "status": "completed"
+        }
+      }
     }
   },
   "seeds": [
