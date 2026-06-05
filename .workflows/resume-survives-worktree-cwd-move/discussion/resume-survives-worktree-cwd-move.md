@@ -69,18 +69,64 @@ test-isolation fix, so this edge case is expected to bite more often now.
 
 ### Map
 
-  Discussion Map — Resume Survives Worktree CWD Move (6 subtopics — 2 exploring · 4 pending)
+  Discussion Map — Resume Survives Worktree CWD Move (6 subtopics — 3 decided · 1 converging · 1 exploring · 1 pending)
 
-  ┌─ → Resume target: land Claude in launch CWD vs drifted CWD [converging]
-  ├─ ◐ Fix locus: external bash hook vs Portal (Go) [exploring]
-  ├─ ◐ Capture point & cd-wrap mechanism (subshell vs cd -) [exploring]
-  ├─ ○ Hook entry on-disk shape: opaque string vs structured metadata [pending]
-  ├─ ○ Graceful fallback when a resume still misses [pending]
-  └─ ○ Adjacent: `portal hooks doctor` diagnostic [pending]
+  ┌─ ✓ Resume target: launch CWD for resume, drifted CWD for post-shell [decided]
+  ├─ ✓ Scope: failure-handling & Claude-specifics are not Portal's concern [decided]
+  ├─ ◐ Portal hook-creation API: CWD anchoring (flag / auto-capture / nothing) [exploring]
+  ├─ → cd-wrap mechanism: subshell vs Portal-native chdir [converging]
+  ├─ ✓ Graceful fallback on resume miss — out of scope [decided]
+  └─ ✓ `portal hooks doctor` diagnostic — out of scope [decided]
 
 ---
 
 *Subtopics documented below as they reach `decided`.*
+
+---
+
+## Resume target: launch CWD for resume, drifted CWD for post-shell
+
+### Decision
+The resume command must be **launched from the launch CWD** (where the Claude
+session was created) — that is the only CWD whose encoding matches the on-disk
+JSONL location, and it is stable across any later `cd`. After Claude exits, the
+pane's interactive shell should land back in the **drifted/restored CWD** (the
+path tmux captured and Portal restored the pane to), so the post-Claude shell
+matches where the pane "is". This is faithful-to-the-session for the resume and
+faithful-to-the-pane for the shell — no conflict, because they happen at
+different times.
+
+Rationale: Claude fixes its storage path at launch and never moves it on a
+mid-session `cd`. So the launch CWD is the stable key. There is no version of
+this where resuming from the drifted dir works without physically relocating the
+JSONL (rejected — mutates Claude's storage, risks divergent copies).
+
+---
+
+## Scope: failure-handling & Claude-specifics are not Portal's concern
+
+### Decision
+Portal's hook system runs an **opaque command** on resume — it could restart a
+dev process, reopen Vim, anything. Portal has no concept of Claude, sessions, or
+what "success" means for an arbitrary command. Therefore:
+
+- **Detecting/recovering a failed `claude --resume` is categorically out of
+  scope.** Portal cannot judge failure for a generic command, and shouldn't
+  special-case Claude. A missed resume already degrades acceptably: the command
+  exits and the helper falls through to `exec $SHELL` with scrollback intact
+  (the user can identify the session in the picker). Good enough.
+- **`portal hooks doctor` (checking whether a UUID's session file exists) is out
+  of scope** for the same reason — it's Claude-specific knowledge. The bash hook
+  already owns this via its validate-and-prune loop (globs
+  `~/.claude/projects/*/<uuid>.jsonl`, prunes via `portal hooks rm --pane-key`).
+  Duplicating that inside Portal would pull Claude-awareness into a generic tool.
+
+### Journey
+Started by asking whether Portal should own a graceful fallback on resume miss.
+The user cut it cleanly: the hooks are generic, so Claude-resume-failure simply
+isn't Portal's problem. This collapsed two seed subtopics (graceful fallback,
+hooks doctor) to "out of scope" and refocused the discussion on the *only* place
+Portal could legitimately help: the hook-**creation** API.
 
 ---
 
