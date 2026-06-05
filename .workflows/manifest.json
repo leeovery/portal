@@ -116,6 +116,9 @@
     },
     "cleanup-purge-test-no-state-isolation": {
       "work_type": "quick-fix"
+    },
+    "resume-survives-worktree-cwd-move": {
+      "work_type": "feature"
     }
   },
   "defaults": {
