@@ -31,6 +31,24 @@ failed to resume (session created in `~/Code/agentic-workflows`, pane CWD now
 pointed at a worktree underneath). Every other session in the same cycle
 resumed fine. This is an edge case, not a regression.
 
+**Validated (session 1, review F3):** confirmed empirically against live data —
+the kb-decay JSONL lives at `~/.claude/projects/-Users-leeovery-Code-agentic-workflows/`,
+exactly what raw `$PWD=/Users/leeovery/Code/agentic-workflows` encodes to, and
+`~/Code` is not a symlink. So for this environment `$PWD` at SessionStart ==
+Claude's encoded dir; the launch-CWD mechanism's foundation holds.
+**Known limitation:** `$PWD` is only a *proxy*. If a launch path ever sits under
+a symlink, Claude may encode the resolved path while `$PWD` is the symlink path,
+so anchoring to `$PWD` would still miss. The authoritative source is the JSONL's
+real parent dir (the prune loop already globs for it), but that file is written
+async and may not exist when SessionStart fires — so `$PWD` is the only signal
+available at registration time. Accepted as a documented edge, not solved now
+(user's paths are symlink-free).
+
+**Resolved (session 1, review F5):** the "post-Claude shell lands in drifted CWD"
+half needs no extra plumbing — the **subshell** form `(cd <launch> && claude
+--resume)` leaves the outer `sh -c` process in the drifted dir, so the helper's
+trailing `exec $SHELL` lands there automatically.
+
 **Proposed mechanism (session 1, user):** capture the launch CWD at hook-
 creation time (SessionStart, where `$PWD` == launch CWD) and have resume
 `cd` to it before running `claude --resume`, then restore the drifted CWD for
