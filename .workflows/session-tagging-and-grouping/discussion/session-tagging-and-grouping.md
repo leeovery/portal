@@ -334,9 +334,11 @@ zero-tag state.
 - Path-keying sharp edges for the dir→tags lookup: symlinks, trailing slash, `~`
   expansion, canonicalisation (review F8). Confirm the render-time lookup key
   matches stored `Project.Path` exactly.
-- Does tagging a **bare directory not yet a project** need to work, or is "tag
-  from the projects page" (lists known projects only) enough for v1? Leaning
-  enough, since every session already upserts a project.
+- **Decided (set-002 F2): no bare-directory tagging in v1.** The projects edit
+  modal is the *only* origin for tags, and it lists known projects only. Since
+  every session creation upserts a project, any directory opened in Portal at
+  least once is taggable; a directory **never opened in Portal** is not a project
+  and cannot be pre-tagged. Accepted boundary — open a dir, then tag it.
 
 ## Grouping-key problem (multi-tag → which group)
 
