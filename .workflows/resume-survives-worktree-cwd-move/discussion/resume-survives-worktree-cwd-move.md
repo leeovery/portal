@@ -44,16 +44,14 @@ async and may not exist when SessionStart fires — so `$PWD` is the only signal
 available at registration time. Accepted as a documented edge, not solved now
 (user's paths are symlink-free).
 
-**Resolved (session 1, review F5):** the "post-Claude shell lands in drifted CWD"
-half needs no extra plumbing — the **subshell** form `(cd <launch> && claude
---resume)` leaves the outer `sh -c` process in the drifted dir, so the helper's
-trailing `exec $SHELL` lands there automatically.
-
-**Proposed mechanism (session 1, user):** capture the launch CWD at hook-
-creation time (SessionStart, where `$PWD` == launch CWD) and have resume
-`cd` to it before running `claude --resume`, then restore the drifted CWD for
-the post-Claude shell. Open question: does the `cd`-wrap live in the external
-bash hook (opaque command string) or become a first-class Portal concept?
+**Final mechanism (session 1):** capture the launch CWD at hook-creation time
+(SessionStart, where `$PWD` == launch CWD) and have resume `cd` to it before
+running `claude --resume`. Mid-discussion a subshell form `(cd <launch> && claude
+--resume)` was explored to preserve the *drifted* dir for the post-Claude shell,
+but the user deprioritised post-exit shell CWD, so the subshell was **dropped** —
+the agreed form is the plain `cd <launch> && claude --resume <UUID>`. See the
+"cd-wrap mechanism" decision below. The locus question (bash hook vs first-class
+Portal concept) resolved to the **bash hook**; see "Fix locus / hook API" below.
 
 Discovery settled the work type as a **feature** (root cause understood, no
 investigation needed) and confirmed it should be fixed properly rather than
