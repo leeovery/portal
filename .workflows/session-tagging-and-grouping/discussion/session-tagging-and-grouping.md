@@ -169,6 +169,61 @@ A wrinkle to resolve if directory-anchored: a live session's "directory" is
 fuzzy (panes roam). Candidate: derive from the active pane's `current_path`, or
 stamp the creation dir once at session create.
 
+### Correction (session 001): "there is no BusinessA directory"
+
+The user clarified their custom groups are **not** encoded in the filesystem —
+there is no `~/businessA/` folder; BusinessA projects are scattered across
+arbitrary paths (`~/Code/portal`, `~/Code/fabric`, …). Consequences:
+
+- **Path-derived grouping (option C) is dead** — there is no shared path segment
+  to group on.
+- **Directory-anchored tags still work** — and this is the subtle point: a
+  directory anchor does **not** require dirs to share a path. You tag each
+  scattered directory `businessA` individually; they then group together
+  regardless of where they live on disk. Directory-anchor ≠ path-derived.
+
+### New option: tag at the tmux level (session user-option)
+
+User asked: "can't we tag the tmux session somehow, at the tmux level?" Yes —
+tmux **session user-options** (`@`-prefixed), which Portal already uses heavily
+(`@portal-restoring`, `@portal-skeleton-*`). Store tags as e.g.
+`@portal-tags "work,businessA"` on the session via the existing
+`SetSessionOption` helper. Read them cheaply in one pass — `ListSessions`
+already runs `list-sessions -F "#{session_name}|…"`; append `|#{@portal-tags}`
+to read names+tags together for the grouped render.
+
+Properties:
+
+- **Genuinely per-session** and **survives rename** — the option attaches to the
+  tmux session *object*, not its name. This sidesteps the mutable-name problem
+  *and* the fuzzy-directory wrinkle (F2) entirely — no directory derivation
+  needed.
+- **The catch — reboot.** tmux options are in-memory server state; they die when
+  the server dies. `sessions.json` currently saves `Session.Environment` but
+  **not** session options. So to survive a reboot we must **capture
+  `@portal-tags` into `sessions.json` and re-apply on restore** — a *modest,
+  bounded* schema addition (add tags to the `Session` record; daemon reads the
+  option on capture; restore re-sets it). Critically this is **far cheaper than
+  inventing a session UUID** — tags travel *with* the session record that
+  resurrection already keys by name, so no new identity scheme is needed.
+
+### The fork (anchor), restated
+
+1. **Directory-anchored** — store `{dir: [tags]}` in a json file. Tag once per
+   place; every session there inherits. Zero resurrection change. Cost: can't
+   distinguish two sessions in the same dir; assigning from one session row
+   affects siblings in that dir.
+2. **Session-option (`@portal-tags`)** — per-session granularity, survives
+   rename, no directory derivation. Cost: tag each session individually; needs
+   the modest capture/restore addition for reboot durability.
+3. **Hybrid (matches original discovery framing)** — directory tags as the
+   inherited base + per-session `@portal-tags` overrides for exceptions.
+   Effective tags = dir ∪ session. Most flexible; most surface.
+
+Leaning question to user: tag **once per place** (dir-anchored, ergonomic for
+stable classifications), or tag **each session** (session-option, maximal
+control)? YAGNI check on the hybrid before committing to both layers.
+
 ### Key Insights
 
 *(captured as the discussion progresses)*
