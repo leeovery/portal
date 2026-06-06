@@ -304,13 +304,30 @@ reads it in the same `list-sessions -F` pass and looks up the directory's tags.
 - Survives **rename** (option rides the session object, not the name).
 - Survives **pane `cd`** (stamped once at create, not derived from live cwd).
 - Avoids `git rev-parse` per session per render (perf).
-- **Reboot follow-on:** the option dies with the tmux server; restore must
-  re-stamp `@portal-dir` when it rebuilds the session. Small, bounded, but
-  required — else post-reboot sessions fall out of grouping. (Review F2/F4.)
+**Stamp-absence handling — decided: lazy stamp-on-render fallback (set-002
+F1 + F3).** The stamp is the *fast path*. When a session has **no
+`@portal-dir`**, the grouped render resolves its directory from the **active
+pane's current path → git-root** and **stamps it then** (lazy). After that first
+render the session is on the fast path. One mechanism covers **both** stamp-
+absence cases — no schema change, no restore-engine change, no first-boot
+backfill:
 
-Alternative (rejected as primary): derive the dir live from the active pane's
-`current_path` each render — drifts when a pane `cd`s out of the project, and
-costs a git-root resolution per session per render.
+- **Post-reboot** (F1): restored sessions return without the option (it's not in
+  `sessions.json`); first grouped render re-derives + re-stamps. No need to
+  persist the resolved dir into the session record.
+- **Pre-existing live sessions on first ship** (F3): sessions already running
+  when the feature ships have no stamp; same fallback stamps them on first
+  render — they appear in By Project immediately, **no "restart to appear" gap**.
+
+So "derive live from pane `current_path`" is **not rejected** — it's exactly the
+*fallback*, used only when the stamp is absent (the un-stamped minority,
+typically still at their project dir), then cached via the lazy stamp. The
+drift/perf objections applied only to using it as the *primary* path, which we
+don't.
+
+F3(b) — existing `projects.json` records predate the `tags` field — is a
+non-issue: a missing `tags` field decodes to nil/empty (no tags), exactly the
+zero-tag state.
 
 ### Open (parked)
 
@@ -514,9 +531,11 @@ GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
 - **Per-session tags + `portal open --tag=`** — deferred; the eventual hybrid's
   second layer. v1 ships directory/project tags only.
 - **Tag exclusion / hide-a-tag** — deferred power-feature.
-- Build-time details parked in subtopics: `@portal-dir` reboot re-stamp,
-  dir→tag path-keying canonicalisation (F8), orphan tag cleanup (F9), seeding
-  existing sessions/projects on first ship (F10).
+- Build-time detail still parked: dir→tag path-keying canonicalisation (review
+  set-001 F8) — confirm render-time lookup key matches stored `Project.Path`.
+- Resolved during final review: `@portal-dir` reboot re-stamp + first-ship
+  pre-existing sessions → lazy stamp-on-render fallback (set-002 F1+F3); orphan
+  tag cleanup → non-issue, tags ride the project record (set-001 F9).
 
 ### Current State
 
