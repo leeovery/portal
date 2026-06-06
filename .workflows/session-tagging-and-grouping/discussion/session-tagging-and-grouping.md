@@ -79,13 +79,13 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 2 decided · 1 converging · 1 exploring · 2 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 4 decided · 1 converging · 1 pending)
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
   ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
   ├─ ✓ Tag data model & persistence (projects.json + @portal-dir stamp) [decided]
-  ├─ → Grouping-key problem (A: dir once · B: tag under each) [converging]
-  ├─ ◐ Grouped TUI rendering + toggle behaviour [exploring]
+  ├─ ✓ Grouping-key problem (A: dir once · B: tag under each) [decided]
+  ├─ → Grouped TUI rendering + toggle behaviour (filter pending) [converging]
   └─ ○ Assigning & managing tags (projects-page editing) [pending]
 
 ---
@@ -340,8 +340,11 @@ each tag?
 
 Honest downside of B: a heavily-tagged list grows longer than flat. Mitigations
 deferred unless they bite: an "Untagged" catch-all, collapsible headers — not
-built up front (review F7). Not yet explicitly user-confirmed; recommendation
-stands pending objection.
+built up front (review F7).
+
+**Decided** — user confirmed via the mockups ("exactly what I had in mind"),
+including the By-Tag mockup showing a session under two tags + the Untagged
+bucket.
 
 ## Grouped TUI rendering + toggle behaviour
 
@@ -381,20 +384,48 @@ stands pending objection.
   grouping; revisit only if a concrete "tag I never want to see" pain appears.
   `/` filter covers basic narrowing meanwhile.
 
-### Open — the toggle key
+### Decided — toggle key & mode-string placement
 
-`g` was the natural mnemonic ("group") but **clashes**: `bubbles/list` binds
-`g`/`G` to GoToStart/GoToEnd and Portal keeps them active
-(`internal/tui/model.go:635-636`). Sessions-page taken keys: `enter r k p x n
-space q j`, plus list nav `g G` and `/`. Free mnemonic candidates:
+- **Toggle key: `s` ("switch view").** `g`/`G` were ruled out (bubbles/list
+  GoToStart/GoToEnd, kept active at `model.go:635-636`). Verified `s` is **free
+  on the sessions page** — the browse-mode handler (`model.go:1583-1607`) only
+  handles `? q k r n p x`, space, enter, esc; everything else falls through to
+  the list, which doesn't bind `s`.
+  - Minor noted wrinkle: `s` already means "go to sessions" on the *projects*
+    page (`s/x`). Same letter, page-dependent meaning. Judged fine — it chains
+    naturally (on projects `s` → sessions; press `s` again → cycle views) and
+    `x` remains the universal page-toggle.
+- **Mode string in the title** (top), not the footer. Portal already owns
+  `SessionListTitle()`. Flat → title is just `Sessions`; grouped →
+  `Sessions — by project` / `Sessions — by tag`. Keeps the state glanceable and
+  off the crowded footer.
+- **Key hint stays in the footer** (Portal convention: keys live at the bottom).
+  Only the `s switch view` entry is added there; the mode *state* lives in the
+  title.
 
-- **`v`** ("view") — clean, free, reads well in footer (`v  group`). Recommended.
-- **`Tab`** — universal "cycle view" feel; free in browse mode; less
-  self-describing in the footer.
-- **`t`** ("tag"/"toggle") — but the cycle isn't tag-only, so slightly
-  misleading.
+### Filter composition (converging)
 
-User to pick the key.
+User asked: does `/` filter still work with the view modes? **Yes** — the
+existing bubbles/list fuzzy filter is unchanged, matching **session names** as
+today.
+
+Recommended behaviour: **while a filter is active the list flattens** to the
+matching sessions (group headers step aside); when the filter clears, the grouped
+view returns. Rationale: search = a flat list of hits (you're hunting one
+session), browse = grouped. This is the familiar pattern and the simplest to
+build — filtering operates on the flat session set and grouping is a
+presentation layer re-applied only when not filtering, so empty groups never need
+special hiding.
+
+- **Filter scope stays name-based for v1.** The *tag* dimension is served by the
+  By-Tag view mode, not the filter — so no need to make the filter tag-aware.
+  Tag-aware filtering (type `businessA` → matching sessions) is a possible later
+  enhancement, not v1.
+- Alternative considered: keep headers during filtering and hide empty groups
+  (filter-within-groups). Rejected as primary — more mechanical complexity with
+  bubbles/list's flat filter, and flat results are better UX while searching.
+
+User to confirm flatten-on-filter.
 
 ## Summary
 
