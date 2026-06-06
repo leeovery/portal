@@ -435,6 +435,21 @@ the filter, but for the whole list). The grouped appearance is achievable purely
 as lipgloss styling layered into bubbles/list rendering — no new library, no
 rebuild. Build phase must not route the picker through `lipgloss/tree`.
 
+### Remembered mode & empty states (decided, set-002 F4)
+
+- **Persistence target:** a small **prefs file** under `~/.config/portal/` using
+  the existing `configFilePath` + `AtomicWrite` pattern (domain stores like
+  `projects.json` are not the home for UI state). Owns the last-used grouping
+  mode. (Idiomatic call — not a user-facing decision.)
+- **By Tag with zero tags:** does **not** silently flatten. Render the plain
+  (ungrouped) session list **with an explicit "No tags yet" message** so the
+  user sees they're in tag view and understands why there are no groups (and
+  where to add them — the projects page). Effectively a degrade-to-flat *with a
+  signpost*, not a silent one. Preserves the no-regression feel (the session list
+  itself is unchanged) while keeping the mode legible.
+- **Empty tags field** in the projects edit modal likewise shows a clear empty
+  state ("no tags") rather than a blank.
+
 ### Filter composition
 
 User asked: does `/` filter still work with the view modes? **Yes** — the
