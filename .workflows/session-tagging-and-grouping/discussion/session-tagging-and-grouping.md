@@ -79,11 +79,12 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (5 subtopics — 1 exploring · 4 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 1 converging · 1 exploring · 4 pending)
 
-  ┌─ ◐ Custom-grouping mechanism: tags vs single-category vs path-derived [exploring]
-  ├─ ○ Grouping axes (intrinsic dir/project + custom) [pending]
-  ├─ ○ Anchor: what grouping data attaches to (dir; names mutable) [pending]
+  ┌─ → Custom-grouping mechanism: tags (vs path-derived) [converging]
+  ├─ ◐ Anchor: directory vs session (durability cost) [exploring]
+  ├─ ○ Grouping axes (intrinsic dir/project + custom tags) [pending]
+  ├─ ○ Grouping-key problem (flat tags have no single grouping key) [pending]
   ├─ ○ Grouped TUI rendering + toggle behaviour [pending]
   └─ ○ Assigning & managing group membership (UX) [pending]
 
@@ -94,7 +95,79 @@ exploration to capture.*
 
 ---
 
-## Summary
+## Custom-grouping mechanism
+
+### Context
+
+What produces the custom groups (Personal / Work / BusinessA)? Intrinsic
+groupings (by directory/project) are free — derivable from where a session
+lives. Only the custom dimension needs a mechanism.
+
+### Journey
+
+User landed on **tags**: "group by a tag, sessions auto-sort." Path-based
+grouping (e.g. `~/Code/fabric/*` all together) was considered and kept as an
+idea but judged too inflexible as the *custom* mechanism ("which segment?",
+"doesn't work across the whole list"). Resolution: **path/directory grouping is
+the free *intrinsic* toggle mode; tags are the *custom* mechanism.** The user
+gets path-style grouping anyway (as the dir/project mode) without it having to
+carry the flexible custom case.
+
+### Decision (provisional)
+
+Tags are the custom-grouping mechanism. Grouping = pick a tag dimension, sessions
+cluster under it. Open sub-questions deferred to their own subtopics: the
+**anchor** (what a tag attaches to) and the **grouping key** problem (flat
+many-to-many tags have no single grouping key — see Open Threads).
+
+---
+
+## Anchor: what grouping data attaches to
+
+### Context
+
+User stated tags "need to be session based." But sessions have no durable
+identity in Portal, so "session-based + durable" is the expensive path. This
+subtopic decides what a tag actually hangs off.
+
+### Feasibility finding (verified in code, session 001)
+
+- `sessions.json` (`internal/state/schema.go`) keys each saved session **by
+  `Name`** — there is **no session id/UUID**. Resurrection recreates sessions
+  by name.
+- Therefore Portal has **no stable session identity** today. Within a server
+  lifetime tmux's `session_id` (`$3`) survives renames but is reassigned on
+  reboot; the name survives reboot (resurrection restores it) but the user
+  mutates names by habit. Neither is a durable key.
+- **Durable session-based tags** would require introducing a Portal-stamped
+  session id and threading it through create → daemon capture (schema bump) →
+  restore → tag store. Real infrastructure touching the resurrection engine.
+
+### The key distinction (assignment UX vs storage anchor)
+
+The examples the user named — Personal / Work / BusinessA — are
+**directory-stable classifications**: a directory's "Work-ness" is a property of
+the place/project, not of a transient session. You would essentially never tag
+two sessions in the *same directory* differently along these axes.
+
+So "session based" may mean **"I assign the tag from the session row"** (UX), not
+**"the tag is stored against the session"** (anchor). If the directory is the
+storage anchor:
+
+- Tags survive renames and reboots **for free** (directories are immortal; we
+  look up live by the session's directory).
+- Inheritance is automatic (every session in the dir gets the dir's tags).
+- No schema bump, no session-identity infra.
+- Cost: can't put two same-directory sessions in different custom groups — which
+  the named use cases never need.
+
+Open question to the user: is there a real case where two sessions in the **same
+directory** must land in **different** custom groups? If no → directory anchor
+(cheap, durable). If yes → pay for session identity (schema + resurrection work).
+
+A wrinkle to resolve if directory-anchored: a live session's "directory" is
+fuzzy (panes roam). Candidate: derive from the active pane's `current_path`, or
+stamp the creation dir once at session create.
 
 ### Key Insights
 
