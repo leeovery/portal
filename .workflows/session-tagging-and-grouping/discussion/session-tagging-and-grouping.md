@@ -83,9 +83,9 @@ assigning/managing tags only make sense delivered together.
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
   ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
-  ├─ ◐ Tag data model & persistence (projects.json + session→dir resolution) [exploring]
+  ├─ ✓ Tag data model & persistence (projects.json + @portal-dir stamp) [decided]
   ├─ → Grouping-key problem (A: dir once · B: tag under each) [converging]
-  ├─ ○ Grouped TUI rendering + toggle behaviour [pending]
+  ├─ ◐ Grouped TUI rendering + toggle behaviour [exploring]
   └─ ○ Assigning & managing tags (projects-page editing) [pending]
 
 ---
@@ -297,9 +297,9 @@ Grouping *by project* (let alone by tag) requires mapping each **live** session
 back to its directory. The name can't do it (`{project}-{nanoid}` at birth, but
 the user renames). A session knows its directory only via its panes.
 
-**Recommendation: stamp `@portal-dir = <resolvedDir>` on the session at
-creation** (value already in hand in `PrepareSession`). The grouped render reads
-it in the same `list-sessions -F` pass and looks up the directory's tags.
+**Decision (user-confirmed): stamp `@portal-dir = <resolvedDir>` on the session
+at creation** (value already in hand in `PrepareSession`). The grouped render
+reads it in the same `list-sessions -F` pass and looks up the directory's tags.
 
 - Survives **rename** (option rides the session object, not the name).
 - Survives **pane `cd`** (stamped once at create, not derived from live cwd).
