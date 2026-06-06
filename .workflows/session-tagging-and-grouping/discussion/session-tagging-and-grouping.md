@@ -356,29 +356,45 @@ stands pending objection.
   jumps session-to-session, never lands on a header), and carry a **count**
   (e.g. `Portal ··· 2`). User: "that's perfect."
 
-### Converging
+### Decided (cont.)
 
-- **Toggle interaction:** a **single key cycles** the modes (recommend **`g`**
-  for "group"; `Space` is taken by preview, `p`/`s`/`x` are page-jumps). Each
-  press advances Flat → Project → Tag → Flat. The **current mode shows in the
-  footer** (e.g. `grouped: project`). Recommend it **remembers the last mode**
-  across launches (persist in config) so it opens how you left it. A cycle beats
-  a "group by" menu for only three modes (fewer keystrokes, less chrome).
-- **Ordering (v1 = simplest, predictable):**
-  - *Within a group:* alphabetical by session name (user's suggestion).
-    Alternative offered: MRU/recency (most-recently-used on top) — often handier
-    in a picker; user to choose.
-  - *Group order:* alphabetical by heading name, with **Untagged always pinned
-    last** (catch-all shouldn't lead).
+- **Toggle = single cycle key.** Each press advances Flat → Project → Tag →
+  Flat. A cycle beats a "group by" menu for only three modes (fewer keystrokes,
+  less chrome). User happy with a cycle.
+- **Remember last mode.** Persist the last-used grouping mode (in config) so
+  Portal opens in the user's usual view — "if I always open in tag view I don't
+  want to keep switching to it." First-ever launch defaults to **Flat** (zero
+  surprise), remembers thereafter.
+- **Discoverability** ("how the options show"): the footer keymap shows the
+  toggle key + its action, and the footer shows the **current mode**
+  (`grouped: project`). No separate menu needed — standard Portal footer-hint
+  convention.
+- **Ordering = static alphabetical (no recency).** Portal has **no recency
+  tracking**; it leans on zoxide frecency for resolution but the user does not
+  want to hook that in here. So: within a group, alphabetical by session name;
+  group headings alphabetical; **Untagged pinned last**. Matches today's static
+  flat-list ordering, just aggregated. (MRU/recency alternative explicitly
+  declined.)
 - **Filtering:** the existing `/` fuzzy filter composes — narrows sessions and
   hides now-empty groups.
+- **Tag exclusion — deferred from v1** (user agreed). A filter layer on top of
+  grouping; revisit only if a concrete "tag I never want to see" pain appears.
+  `/` filter covers basic narrowing meanwhile.
 
-### Parked (likely deferred from v1)
+### Open — the toggle key
 
-- **Tag exclusion / "hide this tag"** (user asked "can we exclude tags?"). This
-  is a filter layer *on top of* grouping — more power, more surface. Lean: keep
-  v1 to the clean mode-cycle + existing `/` filter; add exclusion later only if a
-  concrete "a tag I never want to see" pain appears. (Open to user.)
+`g` was the natural mnemonic ("group") but **clashes**: `bubbles/list` binds
+`g`/`G` to GoToStart/GoToEnd and Portal keeps them active
+(`internal/tui/model.go:635-636`). Sessions-page taken keys: `enter r k p x n
+space q j`, plus list nav `g G` and `/`. Free mnemonic candidates:
+
+- **`v`** ("view") — clean, free, reads well in footer (`v  group`). Recommended.
+- **`Tab`** — universal "cycle view" feel; free in browse mode; less
+  self-describing in the footer.
+- **`t`** ("tag"/"toggle") — but the cycle isn't tag-only, so slightly
+  misleading.
+
+User to pick the key.
 
 ## Summary
 
