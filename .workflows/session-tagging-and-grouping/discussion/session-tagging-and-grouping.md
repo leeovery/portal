@@ -79,7 +79,7 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 6 decided)
+  Discussion Map — Session Tagging and Grouping (6 subtopics)
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
   ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
