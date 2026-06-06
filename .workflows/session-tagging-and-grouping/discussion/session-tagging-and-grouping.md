@@ -409,36 +409,42 @@ User asked: does `/` filter still work with the view modes? **Yes** — the
 existing bubbles/list fuzzy filter is unchanged, matching **session names** as
 today.
 
-**Decided behaviour (user preference): maintain the grouped view while
-filtering.** As the user types, non-matching sessions are hidden and now-empty
-groups (header + children) drop out; surviving sessions keep their alphabetical
-position within their group. Group structure is preserved throughout — no
-flatten.
+**Decided behaviour: flatten-on-filter (v1).** While a filter is active the list
+flattens to matching sessions using the existing built-in filter; group headers
+step aside; clearing the filter restores the grouped view. The built-in filter is
+**unchanged** — no behaviour change to filtering as it works today.
 
-**Library consequence (the cost of this choice).** Portal currently uses
-`bubbles/list`'s **built-in** `/` filter, which **re-ranks matches into a flat,
-relevance-sorted list** — it discards item order. That ranking is fundamentally
-incompatible with keeping groups (headers would rank as arbitrary rows, groups
-interleave). So maintaining grouping during filter means **Portal owns the
-filter** rather than using the built-in one:
+**Why not "keep groups while filtering" in v1.** It was the user's first
+preference, but explaining the impact showed the cost is concentrated entirely
+here and is disproportionate to the rest of the feature:
 
-- Capture filter keystrokes into our own filter-text state (reuse the existing
-  `internal/fuzzy` matcher for the match).
-- Re-run the grouping transform on surviving sessions each keystroke; hide empty
-  groups; preserve alphabetical within-group order (no rank re-sort).
-- For consistency, own the filter across **all** modes (Flat included) so the
-  filtering feel is identical everywhere — trading the built-in ranked behaviour
-  for in-order hide-non-matches. (Flat mode then shows a filtered flat list in
-  alphabetical order rather than rank order.)
+- `bubbles/list` is a **flat list widget** — no concept of sections/headers.
+  Grouping is entirely our own presentation layer on top. The widget's default
+  filter **re-ranks matches into a relevance-sorted flat list** (scored against
+  the typed query — contiguity, start-of-string, post-separator matches —
+  sorted best-first, not alphabetical), which scrambles any grouped layout. The
+  widget can't preserve a structure it doesn't know exists.
+- Keeping groups live during filtering therefore means **Portal owns the filter
+  wholesale** (custom input state, matching via `internal/fuzzy`, live re-group
+  per keystroke, cursor/pagination management, `InitialFilter` re-wiring) and
+  inherits a large interaction matrix (filter active + view-switch / preview /
+  external-kill refresh / inside-tmux exclusion). This is the single biggest
+  build-cost and bug-risk item in the feature — bigger than the tagging itself.
+- The payoff is small and transient: the difference shows *only while actively
+  typing a filter*; groups return the instant the filter clears, and filtering is
+  usually "find one session fast," where a flat ranked hit-list is fine.
 
-Cost: moderately more than leaning on the built-in filter (custom filter-input
-state + live re-group), but not architecturally risky — the fuzzy matcher and
-the grouping transform both already exist. Flagged as a genuine build-cost
-tradeoff the user accepted for the nicer behaviour.
+**Live-grouped-filtering is deferred as its own separate feature** — purely
+additive later, nothing about v1 locks it out. (Correction logged: Portal's
+custom `SessionDelegate` means matched chars do **not** highlight today — the
+built-in filter ranks but does not visually highlight matches.)
 
-- **Filter scope stays name-based for v1.** The *tag* dimension is served by the
-  By-Tag view mode, not the filter. Tag-aware filtering is a possible later
-  enhancement.
+Implementation note for build: grouping should be a **render-layer** concern (or
+headers injected only when not filtering), so the built-in filter only ever sees
+session items — keeps flatten-on-filter trivial.
+
+- **Filter scope stays name-based.** The *tag* dimension is served by the By-Tag
+  view mode, not the filter.
 
 ## Summary
 
@@ -448,7 +454,15 @@ tradeoff the user accepted for the nicer behaviour.
 
 ### Open Threads
 
-*(captured as the discussion progresses)*
+- **Live-grouped-filtering** (keep group headers while filtering) — deferred as
+  its own separate feature; would require Portal to own the filter wholesale.
+  Candidate future work unit.
+- **Per-session tags + `portal open --tag=`** — deferred; the eventual hybrid's
+  second layer. v1 ships directory/project tags only.
+- **Tag exclusion / hide-a-tag** — deferred power-feature.
+- Build-time details parked in subtopics: `@portal-dir` reboot re-stamp,
+  dir→tag path-keying canonicalisation (F8), orphan tag cleanup (F9), seeding
+  existing sessions/projects on first ship (F10).
 
 ### Current State
 
