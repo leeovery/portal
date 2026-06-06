@@ -87,12 +87,12 @@ test-isolation fix, so this edge case is expected to bite more often now.
 
 ### Map
 
-  Discussion Map — Resume Survives Worktree CWD Move (6 subtopics — 3 decided · 1 converging · 1 exploring · 1 pending)
+  Discussion Map — Resume Survives Worktree CWD Move (6 subtopics — 6 decided)
 
-  ┌─ ✓ Resume target: launch CWD for resume, drifted CWD for post-shell [decided]
+  ┌─ ✓ Resume target: launch CWD; Claude operates in root, re-navigates naturally [decided]
   ├─ ✓ Scope: failure-handling & Claude-specifics are not Portal's concern [decided]
-  ├─ ◐ Portal hook-creation API: CWD anchoring (flag / auto-capture / nothing) [exploring]
-  ├─ → cd-wrap mechanism: subshell vs Portal-native chdir [converging]
+  ├─ ✓ Fix locus / hook API: handled in the bash hook; Portal needs no change [decided]
+  ├─ ✓ cd-wrap mechanism: `cd <launch> && claude --resume <UUID>` (no subshell) [decided]
   ├─ ✓ Graceful fallback on resume miss — out of scope [decided]
   └─ ✓ `portal hooks doctor` diagnostic — out of scope [decided]
 
@@ -102,22 +102,43 @@ test-isolation fix, so this edge case is expected to bite more often now.
 
 ---
 
-## Resume target: launch CWD for resume, drifted CWD for post-shell
+## Resume target: launch CWD; Claude operates in root, re-navigates naturally
+
+### Context
+A subtle constraint surfaced mid-discussion: a Claude session's **launch CWD is
+simultaneously (a) where the session is looked up AND (b) where Claude operates
+for the entire session.** They are the same directory and cannot be split with a
+`cd` — a `cd` placed *after* `claude --resume` in the hook string only runs when
+Claude exits (potentially hours later), so it cannot move Claude's working dir
+mid-session. So the real question was: while a resumed session runs, where should
+Claude operate — the launch/root dir (resolvable) or the drifted dir (not
+resolvable without relocating the JSONL)?
 
 ### Decision
-The resume command must be **launched from the launch CWD** (where the Claude
-session was created) — that is the only CWD whose encoding matches the on-disk
-JSONL location, and it is stable across any later `cd`. After Claude exits, the
-pane's interactive shell should land back in the **drifted/restored CWD** (the
-path tmux captured and Portal restored the pane to), so the post-Claude shell
-matches where the pane "is". This is faithful-to-the-session for the resume and
-faithful-to-the-pane for the shell — no conflict, because they happen at
-different times.
+Resume **launches Claude from the launch CWD** (root). Claude operates in root
+for the session. This is not a compromise: it restores the session's *original
+starting point*.
 
-Rationale: Claude fixes its storage path at launch and never moves it on a
-mid-session `cd`. So the launch CWD is the stable key. There is no version of
-this where resuming from the drifted dir works without physically relocating the
-JSONL (rejected — mutates Claude's storage, risks divergent copies).
+The deciding insight (user): Claude can change its own working dir mid-session
+(via the `!cd` bash escape) and routinely does — that is exactly how the pane
+drifted in the first place. So resuming in root and letting Claude (or the user)
+re-navigate is just replaying the same self-navigation that created the drift.
+The "wrong" directory is **self-correcting** — no need to engineer "operate in
+the worktree", because the session re-derives its working location the same way
+it did originally.
+
+Rejected: "resume in root but operate in the worktree." Unachievable with a
+`cd`-wrap (lookup-dir and operate-dir are inseparable), and the alternatives —
+a Claude flag to decouple them (unverified, likely absent) or relocating/
+symlinking the JSONL into the worktree encoding (mutates Claude storage, risks
+divergent copies) — were both set aside.
+
+### Mechanism of the bug (clarified)
+Session starts at root → Claude/user `!cd`s into a subdir → the change persists
+at the shell level → tmux records the subdir as `pane_current_path` → on restore
+the pane is in the subdir → `claude --resume` from the subdir misses the
+root-anchored JSONL. Worktrees are just one instance; Claude wandering into a
+nested subdir is the more common trigger.
 
 ---
 
@@ -148,6 +169,122 @@ Portal could legitimately help: the hook-**creation** API.
 
 ---
 
+## Fix locus / hook API: handled in the bash hook; Portal needs no change
+
+### Options Considered
+**A — Portal does nothing; the bash hook bakes the `cd` into the command string.**
+- Pros: zero Portal change, no release, no schema migration; respects Portal's
+  design (it runs an *opaque* command — CWD-correctness is the command author's
+  job); keeps Portal the sole writer of `hooks.json` (the hook still writes via
+  `portal hooks set`); the existing prune loop's UUID-grep still works.
+- Cons: the caller owns shell-quoting the path; the CWD is invisible to Portal
+  (buried in the command string).
+
+**B — Portal adds an opt-in `--resume-cwd` flag (structured metadata).**
+- Pros: generic and reusable beyond Claude; Portal controls path quoting (could
+  `os.Chdir` natively); CWD becomes introspectable in `hooks list`.
+- Cons: real machinery (flag + storage change + helper logic + tests) for a
+  single consumer; raises schema back-compat, audit-visibility, and
+  auto-capture-opt-out questions (review F1/F6/F7); auto-capture variant would
+  silently change execution dir for existing non-Claude hooks.
+
+### Decision
+**Option A.** The fix is a one-line edit to `portal-resume-hook.sh` (outside this
+repo): change `portal hooks set --on-resume "claude --resume $SESSION_ID"` to
+`portal hooks set --on-resume "cd $PWD && claude --resume $SESSION_ID"`. **Portal
+itself needs no change.**
+
+Deciding factor: Portal's hook abstraction is "run this opaque string in the
+restored pane." CWD-anchoring a command is the command author's responsibility,
+and the author (the bash hook) already holds the only thing Portal can't recover
+on its own — the launch CWD (`$PWD` at SessionStart). Portal structurally cannot
+know the launch dir (it only ever sees the drifted `pane_current_path`), so even
+a Portal-owned design would still depend on the hook feeding it the value. Given
+that, B is machinery for one consumer with no real payoff. The user reached the
+same conclusion independently ("this is out of scope for Portal").
+
+Confidence: high. B remains a clean future option if a *second*, non-Claude
+consumer ever needs CWD-anchored resume — at which point genericity would start
+to earn its keep.
+
+---
+
+## cd-wrap mechanism: `cd <launch> && claude --resume <UUID>` (no subshell)
+
+### Journey
+Explored a subshell form `(cd <launch> && claude --resume)` whose only effect is
+to leave the post-Claude interactive shell in the *drifted* dir. Once the user
+deprioritised the post-exit shell CWD ("that could be hours from now"), the
+subshell solved a non-problem and was dropped.
+
+### Decision
+The hook contributes `cd <launch> && claude --resume <UUID>`; the hydrate helper
+appends its existing `; exec $SHELL`, giving the full executed line
+`cd <launch> && claude --resume <UUID>; exec $SHELL`.
+
+- **`&&` (not `;`) between `cd` and `claude`:** if the launch dir was deleted
+  (worktree removed — review F8), `cd` fails, the resume is skipped, and the
+  trailing `exec $SHELL` still lands the pane in a usable shell. Graceful
+  degradation for free, no special-casing.
+- **No subshell / no `cd -`:** post-Claude shell CWD doesn't matter to the user,
+  so the simplest form wins. (Subshell semantics confirmed harmless either way:
+  Claude runs as a normal foreground child; `exec $SHELL` *replaces* the `sh`,
+  so there is never a nested-shell stack.)
+
+---
+
+## Review findings — disposition
+
+The set-001 review raised 9 items. After choosing Option A:
+
+- **F3** (`$PWD` == encoded dir) — validated empirically; see Context (held as a
+  symlink-path known limitation).
+- **F5** (post-Claude drifted shell) — moot; user deprioritised post-exit CWD.
+- **F2** (prune-loop interaction) — verified fine: the UUID-grep still matches
+  inside `cd … && claude --resume <UUID>`.
+- **F4** (resume re-fires SessionStart) — verified benign: the helper resumes
+  *from* root, so the re-fired hook re-captures `$PWD` == root and re-writes the
+  same correct anchor; self-correcting, not drifting.
+- **F8** (cd to a deleted launch dir) — handled by `&&` (graceful skip → shell).
+- **F1 / F6 / F7 / F9** (schema back-compat, non-Claude opt-out, audit
+  visibility, hand-set-hook ownership) — all B-specific; retired by choosing A
+  (no Portal schema, no Portal-applied wrap, so non-Claude/hand-set hooks are
+  untouched).
+
+---
+
 ## Summary
 
-*(to be filled as subtopics resolve)*
+### Key Insights
+1. A Claude session's **launch CWD is the single, inseparable anchor** — it is
+   both where the session is found and where Claude operates. You cannot split
+   them with a `cd`.
+2. **Resuming in root is self-correcting, not a compromise.** Claude can `!cd`
+   itself (that's what causes the drift), so re-navigation on resume just replays
+   how the session drifted originally.
+3. **Portal's hook system is an opaque-command runner by design.** CWD-anchoring
+   is the command author's job; Portal can't even recover the launch dir on its
+   own. So the fix belongs in the caller, not Portal.
+4. The bug is **not worktree-specific** — any post-launch CWD drift triggers it;
+   worktrees are one instance, Claude wandering into a nested subdir is the
+   commoner one.
+
+### Outcome
+- **Fix:** one-line change in `~/.dotfiles/home/.claude/hooks/portal-resume-hook.sh`
+  — register `cd $PWD && claude --resume $SESSION_ID` instead of the bare resume.
+- **Portal code change: none.** This work unit resolves to a dotfiles fix; Portal's
+  current hook API is already sufficient.
+
+### Open Threads
+- **Symlinked launch paths** (known limitation): `$PWD` is a proxy for Claude's
+  encoded dir and would diverge if a launch path sits under a symlink. Not solved
+  (user's paths are symlink-free); the authoritative source (JSONL parent dir)
+  isn't available at SessionStart.
+- **Option B (`--resume-cwd`)** remains a clean future option if a second,
+  non-Claude consumer ever needs CWD-anchored resume.
+
+### Current State
+All six subtopics decided. Path forward is clear and small. Note for downstream
+phases: since the fix is entirely outside this repo, the in-repo deliverable may
+be limited to documentation (e.g. a note that Portal's opaque-command hooks are
+CWD-sensitive and the caller owns anchoring).
