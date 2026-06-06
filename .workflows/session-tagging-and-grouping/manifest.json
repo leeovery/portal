@@ -1,0 +1,8 @@
+{
+  "name": "session-tagging-and-grouping",
+  "work_type": "feature",
+  "status": "in-progress",
+  "created": "2026-06-06",
+  "description": "Tag-based organization for the session list: projects carry tags inherited by their sessions, with optional per-session tags, and the picker can group/aggregate sessions by tag via a toggle",
+  "phases": {}
+}
