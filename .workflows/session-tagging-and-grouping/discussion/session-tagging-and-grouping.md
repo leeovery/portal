@@ -79,14 +79,14 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 2 decided · 4 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 2 decided · 1 converging · 1 exploring · 2 pending)
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
-  ├─ ✓ Anchor: hybrid (dir/project inherited + per-session tmux-option) [decided]
-  ├─ ○ Tag data model & persistence (store shape; dir-tags ↔ projects.json) [pending]
-  ├─ ○ Grouping-key problem (multi-tag session → which group) [pending]
+  ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
+  ├─ ◐ Tag data model & persistence (projects.json + session→dir resolution) [exploring]
+  ├─ → Grouping-key problem (A: dir once · B: tag under each) [converging]
   ├─ ○ Grouped TUI rendering + toggle behaviour [pending]
-  └─ ○ Assigning & managing tags + `portal open --tag` (UX) [pending]
+  └─ ○ Assigning & managing tags (projects-page editing) [pending]
 
 ---
 
@@ -244,6 +244,15 @@ User chose **both**, explicitly. Two layers compose:
 Whether a session tag can *subtract* an inherited tag is deferred as YAGNI —
 union-only unless a real need surfaces.
 
+### v1 scope cut (session 001) — directory/project layer only
+
+User scoped a **first slice**: ship the **directory/project tag layer only**;
+**defer** the per-session `@portal-tags` layer and `portal open --tag=`. Rationale:
+"we're essentially tagging projects" — see how far pure directory tagging gets
+before adding per-session ceremony. The hybrid remains the eventual shape; v1 is
+just the inherited base of it. Effective tags in v1 = the directory's tags (no
+union, no overrides).
+
 ### Parked sub-questions (to the data-model subtopic)
 
 - **Where do directory tags live?** Natural fit: extend the `projects.json`
@@ -255,6 +264,86 @@ union-only unless a real need surfaces.
 - **Reboot capture/restore** details for `@portal-tags` (schema bump, daemon
   capture, restore re-set). Interaction with `@portal-restoring` window (F4).
 - **Grouping key** for multi-tag sessions (F1) — its own subtopic.
+
+## Tag data model & persistence
+
+### Context
+
+Where do directory tags live, and how does a live session resolve to its
+directory so it can be grouped / inherit tags?
+
+### Confirmed code facts (session 001)
+
+- `session.PrepareSession` (`internal/session/prepare.go`) resolves the input
+  path to a **git root** (`git.Resolve`), derives `projectName =
+  filepath.Base(resolvedDir)`, and **upserts a project on every session
+  creation** (`store.Upsert(resolvedDir, projectName, "internal")`). Every Portal
+  session creates/refreshes a project keyed by its git-root path.
+- Validates the user's model: **projects are just stored git-root directories**;
+  "start a session from a project" ≈ `cd <dir>` + start Portal.
+
+### Direction
+
+- **Store:** extend the `projects.json` `Project` record (`{path, name,
+  last_used}`) with **`tags []string`**. A directory carries **multiple tags**
+  (what lets one project appear under several tag groups). Reuses the existing
+  JSON store + `AtomicWrite` + `configFilePath` machinery.
+- **Editing UX:** surface tag editing on the **projects page** (already supports
+  per-project editing / aliases). Detail deferred to the UX subtopic.
+
+### The session→directory resolution problem (the one real piece of work)
+
+Grouping *by project* (let alone by tag) requires mapping each **live** session
+back to its directory. The name can't do it (`{project}-{nanoid}` at birth, but
+the user renames). A session knows its directory only via its panes.
+
+**Recommendation: stamp `@portal-dir = <resolvedDir>` on the session at
+creation** (value already in hand in `PrepareSession`). The grouped render reads
+it in the same `list-sessions -F` pass and looks up the directory's tags.
+
+- Survives **rename** (option rides the session object, not the name).
+- Survives **pane `cd`** (stamped once at create, not derived from live cwd).
+- Avoids `git rev-parse` per session per render (perf).
+- **Reboot follow-on:** the option dies with the tmux server; restore must
+  re-stamp `@portal-dir` when it rebuilds the session. Small, bounded, but
+  required — else post-reboot sessions fall out of grouping. (Review F2/F4.)
+
+Alternative (rejected as primary): derive the dir live from the active pane's
+`current_path` each render — drifts when a pane `cd`s out of the project, and
+costs a git-root resolution per session per render.
+
+### Open (parked)
+
+- Path-keying sharp edges for the dir→tags lookup: symlinks, trailing slash, `~`
+  expansion, canonicalisation (review F8). Confirm the render-time lookup key
+  matches stored `Project.Path` exactly.
+- Does tagging a **bare directory not yet a project** need to work, or is "tag
+  from the projects page" (lists known projects only) enough for v1? Leaning
+  enough, since every session already upserts a project.
+
+## Grouping-key problem (multi-tag → which group)
+
+### Context
+
+A directory can have multiple tags, so a session can belong to multiple tag
+groups. When grouping is active, does a multi-tag session appear once or under
+each tag?
+
+### Direction (converging — standard-practice split)
+
+- **Group by project/directory** is single-valued → **Pattern A**: each session
+  appears **once**. Matches the user's mockup; expected dominant mode.
+- **Group by tag** is multi-valued → **Pattern B** (Linear/Jira/Trello/Notion
+  group-by-label convention): a session appears **under each tag it has**. Avoids
+  inventing a "primary tag" concept (the only alternative, judged not worth the
+  extra model + UX).
+
+Honest downside of B: a heavily-tagged list grows longer than flat. Mitigations
+deferred unless they bite: an "Untagged" catch-all, collapsible headers — not
+built up front (review F7). Not yet explicitly user-confirmed; recommendation
+stands pending objection.
+
+## Summary
 
 ### Key Insights
 
