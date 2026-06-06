@@ -19,6 +19,27 @@ several independently-shippable pieces — the tag model/persistence, the
 project→session inheritance rule, the aggregated/grouped TUI view, and
 assigning/managing tags only make sense delivered together.
 
+### Code grounding (current state)
+
+- A **project** is `{path, name, last_used}` in `~/.config/portal/projects.json`
+  (persistent). A **session** is live tmux state `{name, windows, attached}`.
+- A session name is `{project}-{nanoid}` at creation, but there is **no stored
+  session→project link** — the only association is the name prefix convention.
+- The `open` session list is live tmux sessions, flat alphabetical.
+
+### Hard constraints surfaced early (session 001)
+
+1. **Session names are NOT identity.** The user renames sessions freely to match
+   what the session is doing. So we cannot use the session name — neither for
+   identity nor for parsing the `{project}-` prefix to recover its origin. The
+   name-prefix inheritance path is dead on arrival.
+2. **Projects are rarely used; the real entry point is the directory.** The user
+   normally starts via an alias (e.g. `xc portal`) which resolves through
+   zoxide to a *directory*. Many sessions never touch a "project" record at all.
+   This pushes the natural tag anchor toward the **directory**, not the project:
+   a "project" is really just a named, tagged directory, and the directory is
+   the one stable thing that survives renames and reboots.
+
 ### References
 
 - Discovery session log: `.workflows/session-tagging-and-grouping/discovery/session-001.md`
@@ -34,12 +55,12 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics, 6 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 1 exploring · 5 pending)
 
-  ┌─ ○ Tag data model & persistence [pending]
-  ├─ ○ Project→session tag inheritance [pending]
-  ├─ ○ Per-session tags & overrides [pending]
-  ├─ ○ Built-in vs derived facets (directory/project) [pending]
+  ┌─ ◐ Identity anchor: what do tags attach to? [exploring]
+  ├─ ○ Tag data model & persistence [pending]
+  ├─ ○ Per-session tags durability & identity [pending]
+  ├─ ○ Inheritance & resolution (dir → session) [pending]
   ├─ ○ Grouped/aggregated TUI view & toggle [pending]
   └─ ○ Assigning & managing tags (UX) [pending]
 
