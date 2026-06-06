@@ -79,14 +79,14 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 4 decided · 1 converging · 1 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 5 decided · 1 exploring)
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
   ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
   ├─ ✓ Tag data model & persistence (projects.json + @portal-dir stamp) [decided]
   ├─ ✓ Grouping-key problem (A: dir once · B: tag under each) [decided]
-  ├─ → Grouped TUI rendering + toggle behaviour (filter pending) [converging]
-  └─ ○ Assigning & managing tags (projects-page editing) [pending]
+  ├─ ✓ Grouped TUI rendering + toggle behaviour [decided]
+  └─ ◐ Assigning & managing tags (projects-page editing) [exploring]
 
 ---
 
@@ -409,23 +409,36 @@ User asked: does `/` filter still work with the view modes? **Yes** — the
 existing bubbles/list fuzzy filter is unchanged, matching **session names** as
 today.
 
-Recommended behaviour: **while a filter is active the list flattens** to the
-matching sessions (group headers step aside); when the filter clears, the grouped
-view returns. Rationale: search = a flat list of hits (you're hunting one
-session), browse = grouped. This is the familiar pattern and the simplest to
-build — filtering operates on the flat session set and grouping is a
-presentation layer re-applied only when not filtering, so empty groups never need
-special hiding.
+**Decided behaviour (user preference): maintain the grouped view while
+filtering.** As the user types, non-matching sessions are hidden and now-empty
+groups (header + children) drop out; surviving sessions keep their alphabetical
+position within their group. Group structure is preserved throughout — no
+flatten.
+
+**Library consequence (the cost of this choice).** Portal currently uses
+`bubbles/list`'s **built-in** `/` filter, which **re-ranks matches into a flat,
+relevance-sorted list** — it discards item order. That ranking is fundamentally
+incompatible with keeping groups (headers would rank as arbitrary rows, groups
+interleave). So maintaining grouping during filter means **Portal owns the
+filter** rather than using the built-in one:
+
+- Capture filter keystrokes into our own filter-text state (reuse the existing
+  `internal/fuzzy` matcher for the match).
+- Re-run the grouping transform on surviving sessions each keystroke; hide empty
+  groups; preserve alphabetical within-group order (no rank re-sort).
+- For consistency, own the filter across **all** modes (Flat included) so the
+  filtering feel is identical everywhere — trading the built-in ranked behaviour
+  for in-order hide-non-matches. (Flat mode then shows a filtered flat list in
+  alphabetical order rather than rank order.)
+
+Cost: moderately more than leaning on the built-in filter (custom filter-input
+state + live re-group), but not architecturally risky — the fuzzy matcher and
+the grouping transform both already exist. Flagged as a genuine build-cost
+tradeoff the user accepted for the nicer behaviour.
 
 - **Filter scope stays name-based for v1.** The *tag* dimension is served by the
-  By-Tag view mode, not the filter — so no need to make the filter tag-aware.
-  Tag-aware filtering (type `businessA` → matching sessions) is a possible later
-  enhancement, not v1.
-- Alternative considered: keep headers during filtering and hide empty groups
-  (filter-within-groups). Rejected as primary — more mechanical complexity with
-  bubbles/list's flat filter, and flat results are better UX while searching.
-
-User to confirm flatten-on-filter.
+  By-Tag view mode, not the filter. Tag-aware filtering is a possible later
+  enhancement.
 
 ## Summary
 
