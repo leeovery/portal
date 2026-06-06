@@ -397,8 +397,9 @@ bucket.
   group headings alphabetical; **Untagged pinned last**. Matches today's static
   flat-list ordering, just aggregated. (MRU/recency alternative explicitly
   declined.)
-- **Filtering:** the existing `/` fuzzy filter composes — narrows sessions and
-  hides now-empty groups.
+- **Filtering:** see *Filter composition* below — **v1 flattens on filter** (the
+  built-in `/` filter is unchanged; grouping steps aside while filtering, returns
+  on clear). (Earlier wording implying grouped filtering was superseded.)
 - **Tag exclusion — deferred from v1** (user agreed). A filter layer on top of
   grouping; revisit only if a concrete "tag I never want to see" pain appears.
   `/` filter covers basic narrowing meanwhile.
@@ -530,8 +531,9 @@ GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
    git-root directories," and directories survive renames and reboots. So tags
    attach to directories; sessions inherit live.
 3. **`@portal-dir` is the lynchpin.** Because names can't be identity, each
-   session is stamped with its resolved git-root at creation; the grouped render
-   reads it to map session → directory → tags.
+   session is stamped with its resolved git-root at creation (with a lazy
+   stamp-on-render fallback for un-stamped sessions — post-reboot or
+   pre-existing); the grouped render reads it to map session → directory → tags.
 4. **Purely additive — no regression.** Flat mode and the zero-tag / all-tags-
    deleted state are exactly today's session list. Grouping appears only on
    opt-in (`s`). **By Project** delivers value with zero setup; **By Tag** fills
@@ -565,5 +567,6 @@ GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
   projects edit modal (implicit tags, TUI-only, projects-page only); additive /
   no-regression invariant.
 - **Deferred (see Open Threads):** per-session tags + `--tag`, live-grouped
-  filtering, tag exclusion. Build-time details parked: `@portal-dir` reboot
-  re-stamp, dir→tag path canonicalisation.
+  filtering, tag exclusion. Only build-time detail still parked: dir→tag path
+  canonicalisation. (`@portal-dir` reboot re-stamp + first-ship sessions were
+  resolved via the lazy stamp-on-render fallback.)
