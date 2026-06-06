@@ -1,8 +1,8 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.4.17",
-    "commit": "797bd67991ae9f4c1ee1a6eb6cdb6fcf6eaf7a8c",
-    "installedAt": "2026-06-03T18:36:38.673Z",
+    "ref": "v0.5.0",
+    "commit": "f1e9c56b3aaf0ca84f2bca928ba8b457dca68e34",
+    "installedAt": "2026-06-06T09:01:47.674Z",
     "agents": [
       "claude"
     ],
@@ -233,6 +233,8 @@
       ".claude/skills/workflow-migrate/scripts/migrations/039-move-gap-analysis-cache.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/040-rename-inception-to-discovery.sh",
       ".claude/skills/workflow-migrate/scripts/migrations/041-split-analysis-cycle-counter.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/042-allow-workflows-writes.sh",
+      ".claude/skills/workflow-migrate/scripts/migrations/043-handled-umbrellas-and-restamp-caches.sh",
       ".claude/skills/workflow-planning-entry/",
       ".claude/skills/workflow-planning-entry/SKILL.md",
       ".claude/skills/workflow-planning-entry/references/",
@@ -351,6 +353,7 @@
       ".claude/skills/workflow-scoping-process/references/write-tasks.md",
       ".claude/skills/workflow-shared/",
       ".claude/skills/workflow-shared/references/",
+      ".claude/skills/workflow-shared/references/analysis-approval-gate.md",
       ".claude/skills/workflow-shared/references/background-agent-surfacing.md",
       ".claude/skills/workflow-shared/references/casing-conventions.md",
       ".claude/skills/workflow-shared/references/compliance-check.md",
@@ -362,6 +365,7 @@
       ".claude/skills/workflow-shared/references/research-analysis.md",
       ".claude/skills/workflow-shared/references/routing-decision.md",
       ".claude/skills/workflow-shared/references/seed-context.md",
+      ".claude/skills/workflow-shared/references/sequence-discovery-map.md",
       ".claude/skills/workflow-shared/references/topic-discovery-dispatch.md",
       ".claude/skills/workflow-shared/references/topic-discovery.md",
       ".claude/skills/workflow-shared/references/topic-granularity.md",
@@ -455,6 +459,6 @@
       ".claude/agents/workflow-specification-review-input.md"
     ],
     "cloneUrl": "https://github.com/leeovery/agentic-workflows.git",
-    "constraint": "^0.4.6"
+    "constraint": "^0.5.0"
   }
 }
