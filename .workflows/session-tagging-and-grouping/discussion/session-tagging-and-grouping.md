@@ -343,6 +343,43 @@ deferred unless they bite: an "Untagged" catch-all, collapsible headers — not
 built up front (review F7). Not yet explicitly user-confirmed; recommendation
 stands pending objection.
 
+## Grouped TUI rendering + toggle behaviour
+
+### Decided (user-confirmed via mockups)
+
+- **Modes:** the list cycles through **Flat → By Project → By Tag**. User
+  confirmed all three; the mockups matched their mental picture exactly.
+  - *By project*: heading per directory, each session appears **once**.
+  - *By tag*: heading per tag, a session appears **under each of its tags**
+    (Pattern B); untagged sessions fall to a pinned **Untagged** bucket.
+- **Header style:** group headers are **dimmed**, **non-selectable** (cursor
+  jumps session-to-session, never lands on a header), and carry a **count**
+  (e.g. `Portal ··· 2`). User: "that's perfect."
+
+### Converging
+
+- **Toggle interaction:** a **single key cycles** the modes (recommend **`g`**
+  for "group"; `Space` is taken by preview, `p`/`s`/`x` are page-jumps). Each
+  press advances Flat → Project → Tag → Flat. The **current mode shows in the
+  footer** (e.g. `grouped: project`). Recommend it **remembers the last mode**
+  across launches (persist in config) so it opens how you left it. A cycle beats
+  a "group by" menu for only three modes (fewer keystrokes, less chrome).
+- **Ordering (v1 = simplest, predictable):**
+  - *Within a group:* alphabetical by session name (user's suggestion).
+    Alternative offered: MRU/recency (most-recently-used on top) — often handier
+    in a picker; user to choose.
+  - *Group order:* alphabetical by heading name, with **Untagged always pinned
+    last** (catch-all shouldn't lead).
+- **Filtering:** the existing `/` fuzzy filter composes — narrows sessions and
+  hides now-empty groups.
+
+### Parked (likely deferred from v1)
+
+- **Tag exclusion / "hide this tag"** (user asked "can we exclude tags?"). This
+  is a filter layer *on top of* grouping — more power, more surface. Lean: keep
+  v1 to the clean mode-cycle + existing `/` filter; add exclusion later only if a
+  concrete "a tag I never want to see" pain appears. (Open to user.)
+
 ## Summary
 
 ### Key Insights
