@@ -8,6 +8,30 @@ certain count, a flat list stops being legible. The desire is to slice the list
 different ways on demand and aggregate sessions into logical groups, flipping
 between views with a toggle.
 
+### Restated goal (session 001)
+
+The user clarified that **tags were a candidate mechanism, not the goal**. The
+actual want is: **a grouped session list with a toggle to switch between
+grouping modes.** Mockup the user gave:
+
+    Portal
+      session-1
+      session-2
+
+    Agentic Workflows
+      session-3
+      session-4
+
+    Tick
+      ...
+
+That example groups by project/directory. But the user also wants *other*
+groupings — e.g. Personal, Work, BusinessA, BusinessB — which is what led to the
+tags idea. Tags are still on the table but explicitly "open to ideas." So the
+decision splits into two axes: **intrinsic groupings** (directory/project —
+derivable for free from where a session lives) and **custom groupings**
+(user-defined buckets that need some data behind them).
+
 Discovery reframed an initial "three fixed grouping modes" idea (by directory,
 by project, by custom buckets) toward a more general primitive: **tags**. Tag a
 project and its sessions inherit that tag; optionally tag individual sessions
@@ -55,14 +79,13 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 1 exploring · 5 pending)
+  Discussion Map — Session Tagging and Grouping (5 subtopics — 1 exploring · 4 pending)
 
-  ┌─ ◐ Identity anchor: what do tags attach to? [exploring]
-  ├─ ○ Tag data model & persistence [pending]
-  ├─ ○ Per-session tags durability & identity [pending]
-  ├─ ○ Inheritance & resolution (dir → session) [pending]
-  ├─ ○ Grouped/aggregated TUI view & toggle [pending]
-  └─ ○ Assigning & managing tags (UX) [pending]
+  ┌─ ◐ Custom-grouping mechanism: tags vs single-category vs path-derived [exploring]
+  ├─ ○ Grouping axes (intrinsic dir/project + custom) [pending]
+  ├─ ○ Anchor: what grouping data attaches to (dir; names mutable) [pending]
+  ├─ ○ Grouped TUI rendering + toggle behaviour [pending]
+  └─ ○ Assigning & managing group membership (UX) [pending]
 
 ---
 
