@@ -79,14 +79,14 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 1 converging · 1 exploring · 4 pending)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 2 decided · 4 pending)
 
-  ┌─ → Custom-grouping mechanism: tags (vs path-derived) [converging]
-  ├─ ◐ Anchor: directory vs session (durability cost) [exploring]
-  ├─ ○ Grouping axes (intrinsic dir/project + custom tags) [pending]
-  ├─ ○ Grouping-key problem (flat tags have no single grouping key) [pending]
+  ┌─ ✓ Custom-grouping mechanism: tags [decided]
+  ├─ ✓ Anchor: hybrid (dir/project inherited + per-session tmux-option) [decided]
+  ├─ ○ Tag data model & persistence (store shape; dir-tags ↔ projects.json) [pending]
+  ├─ ○ Grouping-key problem (multi-tag session → which group) [pending]
   ├─ ○ Grouped TUI rendering + toggle behaviour [pending]
-  └─ ○ Assigning & managing group membership (UX) [pending]
+  └─ ○ Assigning & managing tags + `portal open --tag` (UX) [pending]
 
 ---
 
@@ -113,12 +113,12 @@ the free *intrinsic* toggle mode; tags are the *custom* mechanism.** The user
 gets path-style grouping anyway (as the dir/project mode) without it having to
 carry the flexible custom case.
 
-### Decision (provisional)
+### Decision
 
 Tags are the custom-grouping mechanism. Grouping = pick a tag dimension, sessions
-cluster under it. Open sub-questions deferred to their own subtopics: the
-**anchor** (what a tag attaches to) and the **grouping key** problem (flat
-many-to-many tags have no single grouping key — see Open Threads).
+cluster under it. Open sub-questions in their own subtopics: the **grouping key**
+problem (multi-tag session → which group does it render under), and the data
+model/persistence shape.
 
 ---
 
@@ -223,6 +223,38 @@ Properties:
 Leaning question to user: tag **once per place** (dir-anchored, ergonomic for
 stable classifications), or tag **each session** (session-option, maximal
 control)? YAGNI check on the hybrid before committing to both layers.
+
+### Decision — hybrid, both layers
+
+User chose **both**, explicitly. Two layers compose:
+
+1. **Directory / project tags (inherited base).** Tag a directory once; every
+   session started there inherits its tags. Key unification from the user:
+   **"projects are just stored directories"** — so a *project tag* and a
+   *directory tag* are the same concept. A project is a directory that also has a
+   friendly name. Inheritance is a live lookup, durable for free (directories are
+   immortal), no resurrection changes.
+2. **Per-session tags (tmux `@portal-tags` option).** Set on the session object,
+   survives rename, captured into `sessions.json` for reboot durability (the
+   modest schema/capture/restore addition described above). Settable **at launch**
+   via a new flag: **`portal open --tag=tag1,tag2`** (and presumably `x --tag=`),
+   which stamps `@portal-tags` on the new session.
+
+**Effective tags of a session = directory/project tags ∪ session tags** (union).
+Whether a session tag can *subtract* an inherited tag is deferred as YAGNI —
+union-only unless a real need surfaces.
+
+### Parked sub-questions (to the data-model subtopic)
+
+- **Where do directory tags live?** Natural fit: extend the `projects.json`
+  `Project` record (`{path, name, last_used}`) with `tags []string`. But the
+  user rarely creates projects — so does **tagging a bare (non-project) directory
+  lazily create a project record**, or do directory tags need a store decoupled
+  from projects? (Review F8 also flags path-keying sharp edges: symlinks,
+  trailing slash, `~` expansion, canonicalisation.)
+- **Reboot capture/restore** details for `@portal-tags` (schema bump, daemon
+  capture, restore re-set). Interaction with `@portal-restoring` window (F4).
+- **Grouping key** for multi-tag sessions (F1) — its own subtopic.
 
 ### Key Insights
 
