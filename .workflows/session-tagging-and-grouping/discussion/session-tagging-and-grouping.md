@@ -79,14 +79,14 @@ assigning/managing tags only make sense delivered together.
 
 ### Map
 
-  Discussion Map — Session Tagging and Grouping (6 subtopics — 5 decided · 1 exploring)
+  Discussion Map — Session Tagging and Grouping (6 subtopics — 6 decided)
 
   ┌─ ✓ Custom-grouping mechanism: tags [decided]
   ├─ ✓ Anchor: hybrid — v1 ships directory/project layer ONLY [decided]
   ├─ ✓ Tag data model & persistence (projects.json + @portal-dir stamp) [decided]
   ├─ ✓ Grouping-key problem (A: dir once · B: tag under each) [decided]
   ├─ ✓ Grouped TUI rendering + toggle behaviour [decided]
-  └─ ◐ Assigning & managing tags (projects-page editing) [exploring]
+  └─ ✓ Assigning & managing tags (projects-page editing) [decided]
 
 ---
 
@@ -458,6 +458,32 @@ session items — keeps flatten-on-filter trivial.
 
 - **Filter scope stays name-based.** The *tag* dimension is served by the By-Tag
   view mode, not the filter.
+
+## Assigning & managing tags (projects-page editing)
+
+### Decision (user-confirmed)
+
+- **Edit in the existing projects edit modal.** Add a **Tags** field alongside
+  Name and Aliases, behaving exactly like the alias field (`model.go:1427-1438`):
+  type a tag + enter to add, highlight an entry + `x` to remove. Zero new
+  interaction to learn.
+- **Tags are implicit** — no separate "create tag" step or registry. The set of
+  tags that exists = the union of tags applied across all projects. Applying
+  `work` to a second directory auto-joins the existing `work` group.
+- **TUI-only for v1** — no `portal tags …` CLI. Projects page is the management
+  surface. CLI/scripting is a possible later add.
+- **Edit from the projects page only** — not the sessions row. Since v1 tags the
+  *directory*, a sessions-row action would really mean "edit this session's
+  project" (indirect); deferred to keep v1 clean. (Ties back to the deferred
+  per-session tag layer.)
+
+### Lifecycle (review F9 — resolved as non-issue)
+
+No orphan-tag problem in the directory model: tags live **on the project
+record** in `projects.json`, not in a separate store. They persist with the
+project and are removed when the project is deleted (projects-page `d`). The
+`@portal-dir` session stamp is ephemeral and dies with the session — nothing to
+GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
 
 ## Summary
 
