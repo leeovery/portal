@@ -489,7 +489,22 @@ GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
 
 ### Key Insights
 
-*(captured as the discussion progresses)*
+1. **Tags were a means, not the goal.** The goal is a grouped session list with a
+   toggle. Tags are how the *custom* grouping dimension is expressed.
+2. **The directory is the durable anchor.** Session names are mutable (user
+   renames freely) and projects are rarely used — but "projects are just stored
+   git-root directories," and directories survive renames and reboots. So tags
+   attach to directories; sessions inherit live.
+3. **`@portal-dir` is the lynchpin.** Because names can't be identity, each
+   session is stamped with its resolved git-root at creation; the grouped render
+   reads it to map session → directory → tags.
+4. **Purely additive — no regression.** Flat mode and the zero-tag / all-tags-
+   deleted state are exactly today's session list. Grouping appears only on
+   opt-in (`s`). **By Project** delivers value with zero setup; **By Tag** fills
+   in as the user tags.
+5. **The biggest cost is filtering, not tagging.** "Keep groups while filtering"
+   would mean Portal owning the whole filter (bubbles/list is a flat widget that
+   re-ranks matches). Deferred — v1 flattens on filter.
 
 ### Open Threads
 
@@ -505,4 +520,14 @@ GC. So no dedicated tag-cleanup sweep is needed (unlike hooks/markers).
 
 ### Current State
 
-- Nothing decided yet — discussion just opened.
+- **All 6 subtopics decided.** v1 scope = directory/project tag layer only.
+- **Resolved:** tags as the custom-grouping mechanism; directory anchor (hybrid,
+  v1 = dir layer); `projects.json` `tags []string` + `@portal-dir` stamp;
+  grouping-key split (project once / tag under each); TUI (modes Flat→Project→Tag,
+  `s` to switch, mode in title, dimmed counted unselectable headers, static
+  alphabetical order, remember-last-mode); flatten-on-filter; assignment via the
+  projects edit modal (implicit tags, TUI-only, projects-page only); additive /
+  no-regression invariant.
+- **Deferred (see Open Threads):** per-session tags + `--tag`, live-grouped
+  filtering, tag exclusion. Build-time details parked: `@portal-dir` reboot
+  re-stamp, dir→tag path canonicalisation.
