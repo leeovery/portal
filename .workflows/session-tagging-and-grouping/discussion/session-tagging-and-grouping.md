@@ -403,7 +403,20 @@ bucket.
   Only the `s switch view` entry is added there; the mode *state* lives in the
   title.
 
-### Filter composition (converging)
+### Rendering stack (clarified)
+
+Use **`bubbles/list`** for the interactive picker (cursor, selection, filter,
+scroll, pagination) and **`lipgloss`** for styling the grouped look (dimmed
+headers + counts, via the existing `SessionDelegate` styles). Both already in
+use. **`lipgloss/list` and `lipgloss/tree` were considered** (they render nice
+nested/grouped output) **and rejected**: they are *static* renderers with no
+cursor/selection/filter/scroll — adopting them means hand-rolling all the
+interactivity bubbles/list provides for free (the same big-lift trap as owning
+the filter, but for the whole list). The grouped appearance is achievable purely
+as lipgloss styling layered into bubbles/list rendering — no new library, no
+rebuild. Build phase must not route the picker through `lipgloss/tree`.
+
+### Filter composition
 
 User asked: does `/` filter still work with the view modes? **Yes** — the
 existing bubbles/list fuzzy filter is unchanged, matching **session names** as
