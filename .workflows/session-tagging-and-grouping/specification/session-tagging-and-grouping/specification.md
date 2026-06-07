@@ -162,6 +162,8 @@ The toggle key is **`s`** ("switch view"), on the sessions page:
 - `g`/`G` were ruled out — they are bound by `bubbles/list` to GoToStart/GoToEnd (`model.go:635-636`).
 - Minor accepted wrinkle: `s` already means "go to sessions" on the *projects* page (`s`/`x`). Same letter, page-dependent meaning — judged fine; it chains naturally (on projects, `s` → sessions; press `s` again → cycle views), and `x` remains the universal page-toggle.
 
+**`s` while the `/` filter input is active.** When the filter input is focused and capturing keystrokes, `s` is a **literal filter character** (typed into the search text) — exactly as in browse-mode today, where rune keys are consumed by the filter while it has focus. `s` does **not** cycle the mode mid-typing. To switch modes the user exits/clears the filter first (at which point the grouped view restores per *Flatten-on-filter*) and then presses `s`. This matches the established precedence: the filter owns keystrokes while focused; `s` cycles only in browse mode.
+
 ### Group headers
 
 Group headers are:
@@ -254,6 +256,12 @@ Tags are assigned and managed in the **existing projects edit modal**. A **Tags*
 - Highlight an entry + **`x`** to remove it.
 
 This reuses an interaction the user already knows — zero new interaction to learn.
+
+**Field navigation (three fields now: Name, Aliases, Tags).** The modal's current binary Tab toggle (`model.go:1391-1397`, Name ↔ Aliases) becomes a **three-way cycle**:
+
+- **Focus order:** Name → Aliases → **Tags** → (wrap to Name). Tab advances; the Tags field is placed **visually after Aliases** (last in the modal).
+- **Tab still cycles** — no new navigation key is introduced; the existing Tab handler is extended from a binary toggle to an N-way cycle over the three fields.
+- **Enter is field-scoped (add), not confirm.** While the Tags (or Aliases) field is focused with non-empty input, Enter **adds the entry** — identical to the existing alias-field behaviour. Modal confirm/save continues to use its existing mechanism, unchanged. Adding the Tags field does not alter the add-vs-confirm disambiguation for the existing fields.
 
 ### Projects page only — not the sessions row
 
