@@ -175,6 +175,34 @@ The last-used grouping mode is **persisted** so Portal opens in the user's usual
 - **By Tag with zero tags** — does **not** silently flatten. Render the plain (ungrouped) session list **with an explicit "No tags yet" message**, so the user sees they are in tag view, understands why there are no groups, and knows where to add them (the projects page). This is a degrade-to-flat **with a signpost**, not a silent one — it preserves the no-regression feel (the session list itself is unchanged) while keeping the mode legible.
 - **Empty tags field in the projects edit modal** — shows a clear empty state ("no tags") rather than a blank.
 
+## Filter Composition
+
+The existing `/` fuzzy filter (`bubbles/list`) continues to work **unchanged**, matching **session names** as it does today.
+
+### Flatten-on-filter (v1)
+
+While a filter is active, the list **flattens** to the matching sessions using the existing built-in filter; **group headers step aside**. Clearing the filter **restores** the grouped view. There is **no behaviour change** to filtering as it works today.
+
+### Why not keep groups live while filtering
+
+Keeping group headers visible during filtering was the user's first preference but is deferred — the cost is concentrated here and disproportionate to the rest of the feature:
+
+- `bubbles/list` is a **flat list widget** with no concept of sections/headers. Its default filter **re-ranks matches into a relevance-sorted flat list** (scored by contiguity, start-of-string, post-separator matches — best-first, not alphabetical), which scrambles any grouped layout. The widget cannot preserve a structure it does not know exists.
+- Keeping groups live during filtering would therefore require **Portal to own the filter wholesale** (custom input state, matching via `internal/fuzzy`, live re-group per keystroke, cursor/pagination management, `InitialFilter` re-wiring) and inherit a large interaction matrix (filter active + view-switch / preview / external-kill refresh / inside-tmux exclusion). This is the single biggest build-cost and bug-risk item in the area — bigger than the tagging itself.
+- The payoff is small and transient: the difference shows only while actively typing; groups return the instant the filter clears, and filtering is usually "find one session fast," where a flat ranked hit-list is fine.
+
+Live-grouped filtering is **deferred as its own separate, purely-additive feature** (see Non-Goals); nothing in v1 locks it out.
+
+### Filter scope
+
+- Filter scope stays **name-based**. The *tag* dimension is served by the **By Tag** view mode, not by the filter.
+
+### Build note
+
+Grouping must be a **render-layer** concern (or headers injected only when not filtering) so that the built-in filter only ever sees session items — this keeps flatten-on-filter trivial.
+
+> Note: Portal's custom `SessionDelegate` means matched characters do **not** visually highlight today — the built-in filter ranks but does not highlight matches. v1 introduces no change here.
+
 ---
 
 ## Working Notes
