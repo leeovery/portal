@@ -19,6 +19,20 @@ approved_at: 2026-06-07
 - [ ] A pane with no enclosing git repository (no derivable git-root) yields no stamp and is re-attempted each render
 - [ ] The render-time lookup key (stamped value and fallback-derived git-root) matches stored `Project.Path` exactly, normalised for symlinks, trailing slash, and `~` expansion
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-1-1 | Add `tags []string` field to Project record | missing tags field decodes to nil/empty (no migration), existing records round-trip unchanged, null vs [] in JSON |
+| session-tagging-and-grouping-1-2 | Tag value normalisation helper (trim + lower-case + reject empty) | leading/trailing whitespace trimmed, whitespace-only rejected, mixed/upper case collapses, empty string rejected, internal whitespace preserved |
+| session-tagging-and-grouping-1-3 | Per-project tag set add/remove (normalised, deduped, persisted) | duplicate-after-normalisation no-op, removing absent tag no-op, blank/whitespace add rejected, project path not found |
+| session-tagging-and-grouping-1-4 | Canonical directory path key for dir→project lookup | symlinked path, trailing slash, ~ home expansion, path not a known project, relative path |
+| session-tagging-and-grouping-1-5 | Stamp `@portal-dir` at session creation | stamp survives rename (rides session object, not name), QuickStart exec-handoff path, SetSessionOption failure non-fatal |
+| session-tagging-and-grouping-1-6 | Expose `@portal-dir` via ListSessions (Session.Dir) | empty/absent @portal-dir parses to empty Dir, format-field count change, pipe character in value |
+| session-tagging-and-grouping-1-7 | Lazy active-pane → git-root directory resolution | pane with no enclosing git repo (no git-root), session killed mid-resolve, active pane only (not all panes) |
+| session-tagging-and-grouping-1-8 | Best-effort lazy re-stamp of derived `@portal-dir` | SetSessionOption failure swallowed and re-attempted next render, git-root derivation failure yields no stamp, derived value used for current render regardless of write outcome |
+
 ### Phase 2: Grouped render — By Project & By Tag
 status: approved
 approved_at: 2026-06-07
