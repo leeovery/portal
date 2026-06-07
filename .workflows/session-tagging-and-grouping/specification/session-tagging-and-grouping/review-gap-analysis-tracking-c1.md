@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 1
 phase: Gap Analysis
@@ -29,10 +29,10 @@ The spec says the Tags field behaves "exactly like the existing alias field" (ty
 An implementer cannot build the add-tag path or the group-key derivation without these rules, and getting them wrong silently fractures groups. The "implicit tags = union across projects" model makes the canonical comparison form load-bearing (the union dedup depends on it).
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Added 'Tag value normalisation & validation' subsection: trim, reject empty, lower-case canonical form (case-insensitive grouping/union), per-project dedup, no char/length limit.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -52,10 +52,10 @@ The fallback "resolves that session's directory from the active pane's current p
 - **Is the derived-and-stamped value also used for *this* render**, or only cached for the next one? (Spec implies this render — "They appear in By Project immediately" — but doesn't state it explicitly.)
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Added failure & ordering semantics to lazy fallback: derived value used this render; stamp write best-effort; git-root failure → Unknown/Untagged; first-ship N-derivation cost accepted as bounded one-time amortisation.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -78,10 +78,10 @@ The spec introduces "a small prefs file under `~/.config/portal/`, using the exi
 Without these an implementer must invent the file layout and failure semantics.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Defined prefs.json: configFilePath-resolved, migrateConfigFile-participating, JSON {session_list_mode: enum}, written each toggle, decode-failure → Flat.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -101,10 +101,10 @@ By Project renders "a heading per directory," and the header example is `Portal 
 An implementer needs the heading source field and any collision handling defined.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Defined heading labels: By Project = project name (key = canonical path, same-name distinct dirs = separate groups, visual repeat accepted); By Tag = canonical tag value.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -123,10 +123,10 @@ Two interacting rules:
 If the user's persisted mode is By Tag and they have (or later delete to) zero tags, Portal opens showing the signposted flat list. Pressing `s` from there — the spec says the cycle is Flat → By Project → By Tag → Flat. From the signposted By Tag state, one `s` press advances to Flat. That is probably fine, but the spec never confirms which logical mode the signposted state *is* for cycling purposes, nor whether the user can land back on a meaningless By Tag while still having zero tags (the cycle will keep returning them to a signpost). Confirm the cycle still includes By Tag when zero tags exist, or whether By Tag is skipped — this is a concrete branch an implementer must code.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Clarified cycle is unconditional — By Tag never skipped; signposted zero-tags state IS by-tag for cycling; one s press → Flat.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -141,10 +141,10 @@ If the user's persisted mode is By Tag and they have (or later delete to) zero t
 Headers are "Counted" (`Portal ··· 2`). In By Tag mode a session appears under each tag it has (Pattern B). It is reasonable to infer each tag header counts the sessions rendered under *that* heading (so one session contributes to multiple counts), but this is never stated. Confirm: per-group count = number of rows under that heading (so totals across headings exceed the live session count in By Tag mode). Cheap to state, removes an implementer guess.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Clarified count = rows under that heading; By-Tag header-count sum exceeds live session count (expected).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -163,10 +163,10 @@ Headers are non-selectable; "the cursor jumps session-to-session and never lands
 - **Filtering interaction:** the spec says grouping must be a render-layer concern so the built-in filter "only ever sees session items." If headers are injected at render only (not list items), the non-selectable skip is automatic — but if headers are list items, skip logic and the filter-only-sees-sessions requirement may conflict. Clarify which implementation the build-note mandates, since it determines whether skip logic is even needed.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Resolved render-layer ambiguity: headers are render-layer separators, not list items → non-selectable/filter/g-G fall out free; tightened build note, removed the 'or' alternative.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -186,10 +186,10 @@ The lifecycle section says tags "are removed when the project is deleted (projec
 The Unknown bucket is currently scoped to "no `@portal-dir` AND no derivable git-root." A stamped session whose project record was deleted is a *different* case (stamp present, lookup misses) that the spec does not route. An implementer needs the missing-project-record-but-stamped path defined.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Routed stamped-but-deleted-project case: By Project → Unknown (bucket now covers 'resolved dir but not a known project'), By Tag → Untagged.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -204,9 +204,9 @@ The Unknown bucket is currently scoped to "no `@portal-dir` AND no derivable git
 The spec is decision-rich and rationale-heavy but states no explicit acceptance criteria / verifiable behaviours per section (e.g. "Given a project with tags [work, personal] and one live session in it, By Tag renders that session under both `work` and `personal` headings and under no Untagged group"). Most behaviours are inferable, but a planner breaking this into tasks would benefit from a short Given/When/Then list to anchor test cases — especially for the three modes, the Untagged/Unknown buckets, flatten-on-filter restore, and the empty-state signpost. This is a planning-readiness nicety, not a blocker.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Applied. Added Acceptance Criteria section (15 Given/When/Then items) as a checklist digest.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---

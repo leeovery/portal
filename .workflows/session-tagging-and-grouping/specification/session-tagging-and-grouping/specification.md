@@ -211,6 +211,10 @@ The last-used grouping mode is **persisted** so Portal opens in the user's usual
 - **By Project with nothing to group** — follows the same no-regression principle as By Tag:
   - **No live sessions:** renders exactly as flat mode would (an empty list). There is nothing to group; By Project never renders worse than flat, so no dedicated signpost is required. Unlike By Tag (which can be globally empty whenever zero tags exist anywhere), By Project is effectively always populated once any session is live, because every session resolves to a directory (via the `@portal-dir` stamp or the lazy fallback).
   - **Unresolvable directory:** a session whose `@portal-dir` is absent *and* whose lazy fallback cannot derive a git-root (e.g. a pane with no enclosing git repository) collects under a single pinned **Unknown** group at the end — mirroring the By-Tag **Untagged** bucket — so no session is ever silently dropped from the grouped view.
+  - **Stamped, but no matching project record** (e.g. the project was deleted from the projects page while a session stamped with its `@portal-dir` is still live): the path lookup misses. This routes the same way as an unresolvable directory:
+    - **By Project:** the session falls to the **Unknown** bucket (the Unknown bucket covers *both* "no derivable directory" and "directory resolved but not a known project").
+    - **By Tag:** no project record → no tags → the session falls to **Untagged**.
+    - No attempt is made to synthesise a heading from the bare path; the deleted project's tags are gone (lifecycle), so the session simply behaves as an untagged/unknown session until it ends or its directory is re-opened (re-creating the project record).
 
 ## Filter Composition
 
@@ -262,6 +266,43 @@ There is **no `portal tags …` CLI** in v1. The projects page is the sole manag
 ### Implicit tags (recap)
 
 Consistent with the data model: there is no "create tag" step or registry. The set of tags is the union of tags applied across all projects (see *Tag Data Model & Persistence*). Applying `work` to a second directory auto-joins the existing `work` group.
+
+## Acceptance Criteria
+
+Verifiable behaviours to anchor planning and test cases. (Decisions and rationale live in the sections above; this is a checklist digest, not new scope.)
+
+**Grouping & modes**
+
+1. **Given** any live sessions, **when** the user presses `s` on the sessions page, **then** the mode advances Flat → By Project → By Tag → Flat, the title reflects the mode (`Sessions` / `Sessions — by project` / `Sessions — by tag`), and the footer shows the `s switch view` hint.
+2. **Given** a project with tags `[work, personal]` and one live session in it, **when** in By Tag mode, **then** that session renders **under both** `work` and `personal` headings and under **no** Untagged group.
+3. **Given** a session whose directory has no tags, **when** in By Tag mode, **then** it renders under the **Untagged** group, pinned last.
+4. **Given** any sessions, **when** in By Project mode, **then** each session renders **exactly once** under its project `name` heading.
+5. **Given** grouping is active, **then** group headers are dimmed, carry a count of the rows beneath them, and the cursor never lands on a header (`g`/`G` and initial cursor land on sessions).
+
+**Tag values**
+
+6. **Given** the projects edit modal, **when** the user adds `  Work `, **then** it is stored/displayed as `work`; adding `WORK` again is a no-op; pressing Enter on a blank input adds nothing.
+7. **Given** two projects tagged `work` and `Work` respectively, **when** in By Tag mode, **then** their sessions appear under a **single** `work` heading.
+
+**Resolution & buckets**
+
+8. **Given** a newly created session, **then** `@portal-dir` is stamped at creation and By Project groups it without a `git rev-parse` at render.
+9. **Given** a live session with no `@portal-dir` (post-reboot or pre-existing on first ship), **when** the grouped list first renders, **then** the session is resolved from its active pane → git-root, grouped **this render**, and stamped for subsequent renders.
+10. **Given** a session whose directory cannot be resolved to a git-root, **or** a stamped session whose project record no longer exists, **then** it renders under **Unknown** (By Project) / **Untagged** (By Tag) and is never dropped.
+
+**Persistence & empty states**
+
+11. **Given** a first-ever launch (no `prefs.json`), **then** the list opens in Flat; **and** after toggling to By Tag and reopening, it opens in By Tag.
+12. **Given** a corrupt/unparseable `prefs.json`, **then** the list opens in Flat (treated as first-launch), no hard error.
+13. **Given** By Tag mode with zero tags anywhere, **then** the plain session list renders with a "No tags yet" signpost (not a silent flatten), and the cycle still includes By Tag.
+
+**Filter**
+
+14. **Given** grouping is active, **when** the user types in the `/` filter, **then** the list flattens to matching sessions (headers step aside); **when** the filter clears, **then** the grouped view restores. Filtering behaviour is otherwise unchanged from today.
+
+**No-regression**
+
+15. **Given** zero tags and Flat mode, **then** the session list is identical to today's (ordering, content, behaviour).
 
 ---
 
