@@ -154,6 +154,8 @@ This matches today's static flat-list ordering, just aggregated. An MRU/recency 
 
 A single key **cycles** the mode: each press advances **Flat → By Project → By Tag → Flat**. A cycle is chosen over a "group by" menu because there are only three modes (fewer keystrokes, less chrome).
 
+**The cycle is unconditional — By Tag is never skipped.** Even when zero tags exist anywhere, the cycle still includes By Tag; landing on it shows the "No tags yet" signposted state (see *Empty States*) rather than being skipped. Rationale: a predictable fixed cycle beats a count-dependent one that silently changes which mode a press lands on. For cycling purposes the signposted state **is** the By-Tag mode (the persisted mode is `by-tag`); one `s` press from there advances to Flat as normal. The same holds if Portal reopens in a persisted By-Tag mode with zero tags — it shows the signpost, and the cycle behaves identically.
+
 The toggle key is **`s`** ("switch view"), on the sessions page:
 
 - Verified free on the sessions page — the browse-mode handler (`model.go:1583-1607`) handles only `? q k r n p x`, space, enter, esc; everything else falls through to the `bubbles/list`, which does not bind `s`.
@@ -165,8 +167,11 @@ The toggle key is **`s`** ("switch view"), on the sessions page:
 Group headers are:
 
 - **Dimmed** (styled distinct from session rows).
-- **Non-selectable** — the cursor jumps session-to-session and **never lands on a header**.
-- **Counted** — each header carries a count of its sessions, e.g. `Portal ··· 2`.
+- **Non-selectable** — the cursor jumps session-to-session and **never lands on a header**. This is achieved by the **render-layer approach** (see *Filter Composition → Build note*): the list's items remain *session items only*; headings are injected at render time as visual separators, not as list rows. Because headers are never list items, the cursor cannot land on one and no custom skip logic is required. Consequences:
+  - **Initial cursor:** the first **session** row (the leading header is purely visual).
+  - **GoToStart / GoToEnd (`g`/`G`, bound by `bubbles/list`):** land on the first / last **session** — they navigate list items, which are all sessions.
+  - **No conflict with flatten-on-filter:** since the built-in filter only ever sees session items, filtering and the non-selectable guarantee fall out of the same render-layer design (this is the approach the build note mandates — headers as render-layer separators, not list items).
+- **Counted** — each header carries a count of the rows rendered **under that heading**, e.g. `Portal ··· 2`. In By Tag mode (Pattern B) a multi-tag session is counted under each of its tag headings, so the **sum of By-Tag header counts exceeds the live session count** — this is expected, each count reflects what is shown beneath it.
 
 ### Mode indication
 
@@ -231,7 +236,7 @@ Live-grouped filtering is **deferred as its own separate, purely-additive featur
 
 ### Build note
 
-Grouping must be a **render-layer** concern (or headers injected only when not filtering) so that the built-in filter only ever sees session items — this keeps flatten-on-filter trivial.
+Grouping must be a **render-layer** concern: the `bubbles/list` items are **session items only**, and group headings are injected at render time as visual separators — never as list items. This single decision delivers three properties for free: the built-in filter only ever sees session items (flatten-on-filter is trivial), the cursor can never land on a header (non-selectable, no skip logic), and `g`/`G` navigate session-to-session. The alternative (headers as list items, suppressed while filtering) is **rejected** — it would require custom cursor-skip logic and filter-aware header injection.
 
 > Note: Portal's custom `SessionDelegate` means matched characters do **not** visually highlight today — the built-in filter ranks but does not highlight matches. v1 introduces no change here.
 
