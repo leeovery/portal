@@ -27,8 +27,34 @@ func windowLabel(count int) string {
 
 // SessionItem wraps a tmux.Session and implements the list.Item interface
 // for use with bubbles/list.
+//
+// Group metadata (GroupKey, GroupHeading, Tag, CatchAll) is render-layer
+// information that lets the delegate inject a dimmed heading at a group
+// boundary and lets By-Tag materialise a multi-tag session as several
+// instances. All four are zero-valued for Flat items, so a flat item is
+// byte-for-byte identical to a metadata-free item.
+//
+// Two SessionItems that share the same Session but differ in Tag/GroupKey are
+// independently selectable views of one session — not distinct attach targets.
+// Selection and attach key on Session.Name (task 2-6), so every view of a
+// session resolves to the same underlying target.
 type SessionItem struct {
 	Session tmux.Session
+
+	// GroupKey is the canonical sort/boundary key: the canonical directory
+	// path for By Project, the canonical tag for By Tag, empty for Flat.
+	GroupKey string
+
+	// GroupHeading is the dimmed label shown at a group boundary: the project
+	// name, tag value, or Unknown / Untagged; empty for Flat.
+	GroupHeading string
+
+	// Tag is the canonical tag for a By-Tag instance; empty otherwise.
+	Tag string
+
+	// CatchAll marks an Unknown (By Project) or Untagged (By Tag) bucket
+	// instance, pinning it last without string-matching the heading.
+	CatchAll bool
 }
 
 // FilterValue returns the session name for filtering.

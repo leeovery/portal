@@ -77,6 +77,72 @@ func TestSessionItem(t *testing.T) {
 	})
 }
 
+func TestSessionItemGroupMetadata(t *testing.T) {
+	t.Run("leaves Flat items with empty group metadata", func(t *testing.T) {
+		item := tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 3, Attached: true}}
+
+		if item.GroupKey != "" {
+			t.Errorf("GroupKey = %q, want empty", item.GroupKey)
+		}
+		if item.GroupHeading != "" {
+			t.Errorf("GroupHeading = %q, want empty", item.GroupHeading)
+		}
+		if item.Tag != "" {
+			t.Errorf("Tag = %q, want empty", item.Tag)
+		}
+		if item.CatchAll {
+			t.Errorf("CatchAll = %v, want false", item.CatchAll)
+		}
+	})
+
+	t.Run("returns the session name from FilterValue regardless of group fields", func(t *testing.T) {
+		item := tui.SessionItem{
+			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true},
+			GroupKey:     "work",
+			GroupHeading: "work",
+			Tag:          "work",
+			CatchAll:     false,
+		}
+
+		if got := item.FilterValue(); got != "dev" {
+			t.Errorf("FilterValue() = %q, want %q", got, "dev")
+		}
+	})
+
+	t.Run("returns the session name from Title regardless of group fields", func(t *testing.T) {
+		item := tui.SessionItem{
+			Session:      tmux.Session{Name: "dev", Windows: 3, Attached: true},
+			GroupKey:     "/home/me/project",
+			GroupHeading: "project",
+			Tag:          "",
+			CatchAll:     true,
+		}
+
+		if got := item.Title(); got != "dev" {
+			t.Errorf("Title() = %q, want %q", got, "dev")
+		}
+	})
+
+	t.Run("builds two instances of one session sharing the same underlying Session.Name", func(t *testing.T) {
+		session := tmux.Session{Name: "dev", Windows: 3, Attached: true}
+		work := tui.SessionItem{Session: session, GroupKey: "work", GroupHeading: "work", Tag: "work"}
+		personal := tui.SessionItem{Session: session, GroupKey: "personal", GroupHeading: "personal", Tag: "personal"}
+
+		if work.Tag == personal.Tag {
+			t.Fatalf("expected distinct tags, got %q and %q", work.Tag, personal.Tag)
+		}
+		if work.GroupKey == personal.GroupKey {
+			t.Fatalf("expected distinct group keys, got %q and %q", work.GroupKey, personal.GroupKey)
+		}
+		if work.Session.Name != personal.Session.Name {
+			t.Errorf("instances do not share Session.Name: %q vs %q", work.Session.Name, personal.Session.Name)
+		}
+		if work.Session.Name != "dev" {
+			t.Errorf("Session.Name = %q, want %q", work.Session.Name, "dev")
+		}
+	})
+}
+
 func TestSessionDelegate(t *testing.T) {
 	t.Run("implements list.ItemDelegate interface", func(t *testing.T) {
 		var _ list.ItemDelegate = tui.SessionDelegate{}
@@ -266,6 +332,34 @@ func TestToListItems(t *testing.T) {
 			}
 			if si.Session.Attached != s.Attached {
 				t.Errorf("items[%d].Session.Attached = %v, want %v", i, si.Session.Attached, s.Attached)
+			}
+		}
+	})
+
+	t.Run("keeps producing flat items with no group metadata", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "dev", Windows: 3, Attached: true},
+			{Name: "work", Windows: 5, Attached: false},
+		}
+
+		items := tui.ToListItems(sessions)
+
+		for i := range items {
+			si, ok := items[i].(tui.SessionItem)
+			if !ok {
+				t.Fatalf("items[%d] is not a SessionItem", i)
+			}
+			if si.GroupKey != "" {
+				t.Errorf("items[%d].GroupKey = %q, want empty", i, si.GroupKey)
+			}
+			if si.GroupHeading != "" {
+				t.Errorf("items[%d].GroupHeading = %q, want empty", i, si.GroupHeading)
+			}
+			if si.Tag != "" {
+				t.Errorf("items[%d].Tag = %q, want empty", i, si.Tag)
+			}
+			if si.CatchAll {
+				t.Errorf("items[%d].CatchAll = %v, want false", i, si.CatchAll)
 			}
 		}
 	})
