@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "session-tagging-and-grouping": {
-          "status": "in-progress",
+          "status": "completed",
           "review_cycle": 4,
           "finding_gate_mode": "auto",
           "date": "2026-06-07",
