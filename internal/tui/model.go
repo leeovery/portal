@@ -425,7 +425,7 @@ func (m Model) WithInsideTmux(currentSession string) Model {
 	if cmd := m.sessionList.SetItems(ToListItems(filtered)); cmd != nil {
 		panic("unreachable: WithInsideTmux runs before any filter can be applied")
 	}
-	m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", currentSession)
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, true, currentSession)
 	return m
 }
 
@@ -566,6 +566,35 @@ func brightenHelpStyles(l *list.Model) {
 	l.Help.Styles.FullDesc = lipgloss.NewStyle().Foreground(descColor)
 	l.Help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(sepColor)
 	l.Help.Styles.Ellipsis = lipgloss.NewStyle().Foreground(sepColor)
+}
+
+// sessionListTitleForMode computes the session list title for the active
+// grouping mode, reconciling it with the inside-tmux current-session
+// decoration. The three base strings come from the spec (§ TUI Rendering &
+// Toggle Behaviour → Mode indication): ModeFlat → "Sessions",
+// ModeByProject → "Sessions — by project", ModeByTag → "Sessions — by tag".
+// The separator is " — " (an em-dash U+2014 with surrounding spaces).
+//
+// DIVERGENCE FROM SPEC: the spec's title scheme specifies only those three
+// base strings and does not mention the pre-existing "(current: %s)"
+// decoration that the inside-tmux path already showed. Rather than dropping
+// that decoration, this function preserves it as a suffix composed onto the
+// mode base (e.g. "Sessions — by tag (current: foo)") — the minimal
+// reconciliation. This is the single place to change that composition later.
+func sessionListTitleForMode(mode prefs.SessionListMode, insideTmux bool, currentSession string) string {
+	var base string
+	switch mode {
+	case prefs.ModeByProject:
+		base = "Sessions — by project"
+	case prefs.ModeByTag:
+		base = "Sessions — by tag"
+	default:
+		base = "Sessions"
+	}
+	if insideTmux && currentSession != "" {
+		return fmt.Sprintf("%s (current: %s)", base, currentSession)
+	}
+	return base
 }
 
 // newSessionList creates and configures a new bubbles/list.Model for sessions.
@@ -744,6 +773,11 @@ func New(lister SessionLister, opts ...Option) Model {
 	for _, opt := range opts {
 		opt(&m)
 	}
+	// Recompute the title for the initial mode once options have been applied
+	// (newSessionList sets the Flat default before mode / inside-tmux are known).
+	// 3-9 injects the persisted mode via an Option, so opening in By Tag must
+	// paint "Sessions — by tag" on the first frame.
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
 	return m
 }
 
@@ -812,8 +846,9 @@ func (m Model) filteredSessions() []tmux.Session {
 // view, pushes the resulting items into sessionList, and re-applies the
 // terminal size so pagination accounts for full help height. This is the
 // single canonical sequence shared by the SessionsMsg and
-// previewSessionsRefreshedMsg handlers; handler-specific tail logic
-// (e.g. inside-tmux title rewrite) stays at the call site.
+// previewSessionsRefreshedMsg handlers. The mode-aware (and inside-tmux
+// current-session) title is now recomputed inside rebuildSessionList, so
+// both handlers inherit the correct title without a call-site rewrite.
 func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
 	return m.rebuildSessionList()
@@ -861,6 +896,14 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	}
 
 	cmd := m.sessionList.SetItems(items)
+
+	// Canonical mode-aware title set. Living here means both the s-toggle
+	// (handleSwitchViewKey → rebuildSessionList) and the SessionsMsg refresh
+	// (applySessions → rebuildSessionList) get the correct mode title for free.
+	// WithInsideTmux sets the title separately because it does not route through
+	// this core (it runs before sessions are populated).
+	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
+
 	// Re-apply terminal size so pagination accounts for the manual keymap
 	// footer height (see applyListSize). Without this re-apply the list
 	// would size itself against pre-load defaults and overflow under the
@@ -1099,11 +1142,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			return m, tea.Quit
 		}
+		// applySessions → rebuildSessionList sets the mode-aware title (and the
+		// inside-tmux current-session decoration), so no title rewrite is needed
+		// here.
 		cmd := m.applySessions(msg.Sessions)
-
-		if m.insideTmux && m.currentSession != "" {
-			m.sessionList.Title = fmt.Sprintf("Sessions (current: %s)", m.currentSession)
-		}
 
 		// SessionsMsg no longer drives loading-page dismissal. The orchestrator
 		// signals completion via BootstrapCompleteMsg, paired with the
