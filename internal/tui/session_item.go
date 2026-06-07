@@ -154,6 +154,22 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 // GroupKey, while the heading label is taken from si.GroupHeading (the display
 // label, e.g. the project name or tag value).
 func groupHeading(m list.Model, index int, si SessionItem) (string, bool) {
+	// Flatten-on-filter is realised at this single point: while the built-in
+	// filter is active (typing → list.Filtering, committed → list.FilterApplied)
+	// we suppress all heading injection, so the filter's relevance-sorted result
+	// renders as a plain flat hit-list. This relies on the render-layer invariant
+	// that headers are never list items (they are drawn inside this delegate, not
+	// stored in m.Items()), so the filter only ever sees session instances and no
+	// item rebuild is needed. On list.Unfiltered the headings resume and the
+	// grouped view restores against the still-grouped underlying slice — which was
+	// never un-grouped; only heading drawing was suppressed. In By Tag mode the
+	// slice carries one item per (session, tag) pair, so a filtered result may show
+	// the same session more than once (one row per matching tag instance) — this is
+	// expected in v1, not a defect.
+	if m.FilterState() != list.Unfiltered {
+		return "", false
+	}
+
 	if si.GroupKey == "" {
 		return "", false
 	}

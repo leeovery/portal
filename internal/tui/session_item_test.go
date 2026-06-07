@@ -446,6 +446,151 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 	})
 }
 
+func TestSessionDelegateFlattenOnFilter(t *testing.T) {
+	projectItems := func() []list.Item {
+		return []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+		}
+	}
+
+	tagItems := func() []list.Item {
+		return []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "personal", GroupHeading: "personal", Tag: "personal"},
+			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "work", GroupHeading: "work", Tag: "work"},
+		}
+	}
+
+	renderAll := func(d tui.SessionDelegate, m list.Model, items []list.Item) string {
+		var buf bytes.Buffer
+		for index := range items {
+			d.Render(&buf, m, index, items[index])
+		}
+		return buf.String()
+	}
+
+	t.Run("suppresses group headers while a filter is active in By Project mode", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := projectItems()
+		m := list.New(items, d, 80, 10)
+		m.SetFilterState(list.FilterApplied)
+
+		out := renderAll(d, m, items)
+		if strings.Contains(out, groupSeparator) {
+			t.Errorf("expected no group headings while filtering By Project, got: %q", out)
+		}
+	})
+
+	t.Run("suppresses group headers while a filter is active in By Tag mode", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := tagItems()
+		m := list.New(items, d, 80, 10)
+		m.SetFilterState(list.FilterApplied)
+
+		out := renderAll(d, m, items)
+		if strings.Contains(out, groupSeparator) {
+			t.Errorf("expected no group headings while filtering By Tag, got: %q", out)
+		}
+	})
+
+	t.Run("restores group headers when the filter is cleared", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := projectItems()
+		m := list.New(items, d, 80, 10)
+
+		m.SetFilterState(list.FilterApplied)
+		filtered := renderAll(d, m, items)
+		if strings.Contains(filtered, groupSeparator) {
+			t.Fatalf("precondition failed: headings present while filtering: %q", filtered)
+		}
+
+		m.SetFilterState(list.Unfiltered)
+		restored := renderAll(d, m, items)
+		if !strings.Contains(restored, groupSeparator) {
+			t.Errorf("expected group headings to return on Unfiltered, got: %q", restored)
+		}
+		if !strings.Contains(restored, "Portal") || !strings.Contains(restored, "Work") {
+			t.Errorf("expected By Project headings to return on clear, got: %q", restored)
+		}
+	})
+
+	t.Run("leaves Flat-mode filtering unchanged", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 2, Attached: true}},
+			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 1, Attached: false}},
+		}
+		m := list.New(items, d, 80, 10)
+
+		var unfiltered bytes.Buffer
+		for index := range items {
+			d.Render(&unfiltered, m, index, items[index])
+		}
+
+		m.SetFilterState(list.FilterApplied)
+		var filtered bytes.Buffer
+		for index := range items {
+			d.Render(&filtered, m, index, items[index])
+		}
+
+		if unfiltered.String() != filtered.String() {
+			t.Errorf("flat-mode filtering changed output: unfiltered=%q filtered=%q", unfiltered.String(), filtered.String())
+		}
+		if strings.Contains(filtered.String(), groupSeparator) {
+			t.Errorf("flat-mode filtering should never emit headings: %q", filtered.String())
+		}
+	})
+
+	t.Run("restores the current mode's headings on clear (By Tag tags, not By Project)", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := tagItems()
+		m := list.New(items, d, 80, 10)
+
+		m.SetFilterState(list.FilterApplied)
+		_ = renderAll(d, m, items)
+
+		m.SetFilterState(list.Unfiltered)
+		restored := renderAll(d, m, items)
+		if !strings.Contains(restored, "personal "+groupSeparator) {
+			t.Errorf("expected By Tag heading 'personal' to return on clear, got: %q", restored)
+		}
+		if !strings.Contains(restored, "work "+groupSeparator) {
+			t.Errorf("expected By Tag heading 'work' to return on clear, got: %q", restored)
+		}
+	})
+
+	t.Run("suppresses headings during both Filtering and FilterApplied states", func(t *testing.T) {
+		states := []list.FilterState{list.Filtering, list.FilterApplied}
+		for _, state := range states {
+			d := tui.SessionDelegate{}
+			items := projectItems()
+			m := list.New(items, d, 80, 10)
+			m.SetFilterState(state)
+
+			out := renderAll(d, m, items)
+			if strings.Contains(out, groupSeparator) {
+				t.Errorf("state %v: expected no headings, got: %q", state, out)
+			}
+		}
+	})
+
+	t.Run("may surface duplicate session rows when filtering in By Tag mode", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := tagItems()
+		m := list.New(items, d, 80, 10)
+		m.SetFilterState(list.FilterApplied)
+
+		out := renderAll(d, m, items)
+		if strings.Count(out, "dev") < 2 {
+			t.Errorf("expected duplicate 'dev' rows (one per matching tag instance), got: %q", out)
+		}
+		if strings.Contains(out, groupSeparator) {
+			t.Errorf("expected no headings around the duplicate rows, got: %q", out)
+		}
+	})
+}
+
 func TestToListItems(t *testing.T) {
 	t.Run("converts tmux sessions to list items", func(t *testing.T) {
 		sessions := []tmux.Session{
