@@ -73,6 +73,14 @@ type SessionRenamer interface {
 	RenameSession(oldName, newName string) error
 }
 
+// ModePersister persists the session-list grouping mode. The production
+// implementation is *prefs.Store (its Save(prefs.SessionListMode) error method
+// satisfies this seam); the model imports prefs only for the SessionListMode
+// value type and never constructs the store itself.
+type ModePersister interface {
+	Save(prefs.SessionListMode) error
+}
+
 // ProjectEditor defines the interface for renaming projects.
 type ProjectEditor interface {
 	Rename(path, newName, via string) error
@@ -153,6 +161,7 @@ type Model struct {
 	sessions          []tmux.Session
 	projects          []project.Project
 	sessionListMode   prefs.SessionListMode
+	modePersister     ModePersister
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -434,6 +443,15 @@ func WithKiller(k SessionKiller) Option {
 func WithRenamer(r SessionRenamer) Option {
 	return func(m *Model) {
 		m.sessionRenamer = r
+	}
+}
+
+// WithModePersister sets the session-list mode persister dependency. Production
+// wiring passes a *prefs.Store; tests that do not exercise the s toggle can omit
+// this option, leaving modePersister nil (the handler tolerates a nil persister).
+func WithModePersister(p ModePersister) Option {
+	return func(m *Model) {
+		m.modePersister = p
 	}
 }
 
@@ -812,6 +830,23 @@ func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 // render path. ModeFlat routes through ToListItems so its output is identical
 // to the pre-grouping behaviour; ModeByProject / ModeByTag route through the
 // grouping builders. Zero live sessions yields an empty list in every mode.
+// nextSessionListMode advances the grouping mode one step in the fixed cycle
+// Flat → By Project → By Tag → Flat. The wrap is unconditional (By Tag always
+// advances to Flat). An out-of-range value collapses defensively to Flat so the
+// cycle can never get stuck on an unrecognised mode.
+func nextSessionListMode(mode prefs.SessionListMode) prefs.SessionListMode {
+	switch mode {
+	case prefs.ModeFlat:
+		return prefs.ModeByProject
+	case prefs.ModeByProject:
+		return prefs.ModeByTag
+	case prefs.ModeByTag:
+		return prefs.ModeFlat
+	default:
+		return prefs.ModeFlat
+	}
+}
+
 func (m *Model) rebuildSessionList() tea.Cmd {
 	filtered := m.filteredSessions()
 
@@ -1629,6 +1664,13 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleRenameKey()
 		case isRuneKey(msg, "n"):
 			return m.handleNewInCWD()
+		// s cycles the session-list grouping mode (Flat → By Project → By Tag
+		// → Flat). This case MUST stay inside this rune switch, which sits below
+		// the `if m.sessionList.SettingFilter() { break }` guard above — that
+		// guard makes s a literal filter character while the / filter input is
+		// focused. Do NOT hoist this case above that guard.
+		case isRuneKey(msg, "s"):
+			return m.handleSwitchViewKey()
 		case isRuneKey(msg, "p"):
 			m.activePage = PageProjects
 			return m, nil
@@ -1643,6 +1685,28 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate remaining key handling to the list (cursor navigation, filtering, etc.)
 	var cmd tea.Cmd
 	m.sessionList, cmd = m.sessionList.Update(msg)
+	return m, cmd
+}
+
+// handleSwitchViewKey advances the session-list grouping mode one step
+// (Flat → By Project → By Tag → Flat), re-renders the list via the mode-aware
+// core, and persists the new mode through the injected seam. The cycle is
+// unconditional — it fires regardless of session count or tag count.
+//
+// Persistence is best-effort: a nil persister is skipped, and a non-nil Save
+// error is swallowed so a persist failure never aborts the in-memory toggle or
+// the re-render.
+func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
+	m.sessionListMode = nextSessionListMode(m.sessionListMode)
+	// rebuildSessionList is a pointer-receiver method; call it on the local
+	// value copy's address so the re-render mutates this copy before return.
+	cmd := (&m).rebuildSessionList()
+	if m.modePersister != nil {
+		// Persist exactly once per press. The error is intentionally swallowed:
+		// remembering the last mode is a convenience, not a correctness
+		// invariant, so a write failure must not abort the toggle.
+		_ = m.modePersister.Save(m.sessionListMode)
+	}
 	return m, cmd
 }
 
