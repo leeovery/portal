@@ -43,6 +43,13 @@ func NewQuickStart(git GitResolver, store ProjectStore, checker SessionChecker, 
 // It resolves the git root, registers the project, generates a session name,
 // and returns the result with exec args for atomic tmux create-or-attach handoff.
 // When command is non-nil and non-empty, a shell-command is appended to exec args.
+//
+// Unlike SessionCreator.CreateFromDir, this path deliberately does NOT stamp the
+// @portal-dir session user-option. syscall.Exec replaces the portal process with
+// tmux, so there is no in-process point after session creation at which to call
+// SetSessionOption, and set-option must not be injected into the exec handoff.
+// QuickStart-created sessions are covered by the lazy stamp-on-render fallback,
+// which re-derives the directory and stamps @portal-dir on the first grouped render.
 func (qs *QuickStart) Run(path string, command []string) (*QuickStartResult, error) {
 	prepared, err := PrepareSession(path, command, qs.git, qs.store, qs.checker, qs.gen, qs.shell)
 	if err != nil {

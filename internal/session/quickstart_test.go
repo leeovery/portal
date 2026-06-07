@@ -54,6 +54,33 @@ func TestQuickStart(t *testing.T) {
 		}
 	})
 
+	t.Run("does not stamp at creation in the exec-handoff path", func(t *testing.T) {
+		// syscall.Exec replaces the process, so QuickStart cannot stamp
+		// @portal-dir after creation. No set-option must be injected into the
+		// exec args; the lazy stamp-on-render fallback covers these sessions.
+		gitRoot := t.TempDir()
+		gitResolver := &mockGitResolver{resolvedDir: gitRoot}
+		store := &mockProjectStore{}
+		checker := &mockSessionChecker{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		qs := session.NewQuickStart(gitResolver, store, checker, gen)
+
+		result, err := qs.Run(gitRoot, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for i, arg := range result.ExecArgs {
+			if arg == session.PortalDirOption {
+				t.Errorf("ExecArgs[%d] = %q: @portal-dir must not be injected into the exec handoff", i, arg)
+			}
+			if arg == "set-option" {
+				t.Errorf("ExecArgs[%d] = %q: set-option must not be injected into the exec handoff", i, arg)
+			}
+		}
+	})
+
 	t.Run("registers new project in store", func(t *testing.T) {
 		gitRoot := t.TempDir()
 		gitResolver := &mockGitResolver{resolvedDir: gitRoot}

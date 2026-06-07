@@ -128,6 +128,12 @@ type mockTmuxClient struct {
 	newSessionDir      string
 	newSessionShellCmd string
 	newSessionErr      error
+
+	setOptionCalled  bool
+	setOptionSession string
+	setOptionName    string
+	setOptionValue   string
+	setOptionErr     error
 }
 
 func (m *mockTmuxClient) HasSession(name string) bool {
@@ -139,6 +145,14 @@ func (m *mockTmuxClient) NewSession(name, dir, shellCommand string) error {
 	m.newSessionDir = dir
 	m.newSessionShellCmd = shellCommand
 	return m.newSessionErr
+}
+
+func (m *mockTmuxClient) SetSessionOption(session, name, value string) error {
+	m.setOptionCalled = true
+	m.setOptionSession = session
+	m.setOptionName = name
+	m.setOptionValue = value
+	return m.setOptionErr
 }
 
 func TestCreateFromDir(t *testing.T) {
@@ -411,6 +425,106 @@ func TestCreateFromDir(t *testing.T) {
 		want := "/bin/sh -ic 'vim; exec /bin/sh'"
 		if tmuxClient.newSessionShellCmd != want {
 			t.Errorf("shell command = %q, want %q", tmuxClient.newSessionShellCmd, want)
+		}
+	})
+
+	t.Run("stamps @portal-dir with the resolved git root after creating a session", func(t *testing.T) {
+		gitRoot := t.TempDir()
+		subDir := filepath.Join(gitRoot, "subdir")
+
+		gitResolver := &mockGitResolver{resolvedDir: gitRoot}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		sessionName, err := creator.CreateFromDir(subDir, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if !tmuxClient.setOptionCalled {
+			t.Fatal("expected SetSessionOption to be called")
+		}
+		if tmuxClient.setOptionSession != sessionName {
+			t.Errorf("stamp session = %q, want %q", tmuxClient.setOptionSession, sessionName)
+		}
+		if tmuxClient.setOptionName != session.PortalDirOption {
+			t.Errorf("stamp option name = %q, want %q", tmuxClient.setOptionName, session.PortalDirOption)
+		}
+		if tmuxClient.setOptionValue != gitRoot {
+			t.Errorf("stamp value = %q, want %q", tmuxClient.setOptionValue, gitRoot)
+		}
+	})
+
+	t.Run("returns the session name even when SetSessionOption fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{
+			existingSessions: map[string]bool{},
+			setOptionErr:     fmt.Errorf("set-option failed"),
+		}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		sessionName, err := creator.CreateFromDir(dir, nil)
+		if err != nil {
+			t.Fatalf("SetSessionOption failure must not fail creation, got error: %v", err)
+		}
+
+		wantName := filepath.Base(dir) + "-abc123"
+		if sessionName != wantName {
+			t.Errorf("session name = %q, want %q", sessionName, wantName)
+		}
+	})
+
+	t.Run("stamps using the prepared resolved dir, not a re-derived path", func(t *testing.T) {
+		gitRoot := t.TempDir()
+		subDir := filepath.Join(gitRoot, "a", "b", "c")
+
+		// The resolver maps the deep subdir to the git root. The stamp value
+		// must be that resolved root, never the input subdir.
+		gitResolver := &mockGitResolver{resolvedDir: gitRoot}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{existingSessions: map[string]bool{}}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		_, err := creator.CreateFromDir(subDir, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if tmuxClient.setOptionValue != gitRoot {
+			t.Errorf("stamp value = %q, want resolved git root %q", tmuxClient.setOptionValue, gitRoot)
+		}
+		if tmuxClient.setOptionValue == subDir {
+			t.Errorf("stamp value must not be the input subdir %q", subDir)
+		}
+	})
+
+	t.Run("does not stamp at creation when NewSession fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gitResolver := &mockGitResolver{}
+		store := &mockProjectStore{}
+		tmuxClient := &mockTmuxClient{
+			existingSessions: map[string]bool{},
+			newSessionErr:    fmt.Errorf("tmux error"),
+		}
+		gen := func() (string, error) { return "abc123", nil }
+
+		creator := session.NewSessionCreator(gitResolver, store, tmuxClient, gen)
+
+		_, err := creator.CreateFromDir(dir, nil)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if tmuxClient.setOptionCalled {
+			t.Error("SetSessionOption must not be called when NewSession fails")
 		}
 	})
 

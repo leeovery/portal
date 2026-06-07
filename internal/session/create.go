@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// PortalDirOption is the tmux session user-option that stamps a session with
+// its resolved directory (the git-root computed in PrepareSession). It is the
+// fast path for mapping a live session back to its directory at grouped render
+// time — a freely-renamed session name cannot do this. It rides the session
+// object, not its name, so it survives rename without a re-stamp.
+const PortalDirOption = "@portal-dir"
+
 // ShellFromEnv returns the user's shell from $SHELL, falling back to /bin/sh.
 func ShellFromEnv() string {
 	shell := os.Getenv("SHELL")
@@ -18,7 +25,7 @@ func ShellFromEnv() string {
 // BuildShellCommand constructs a tmux shell-command string from a command slice.
 // Returns empty string when command is nil or empty.
 // The format is: $SHELL -ic '<joined_cmd>; exec $SHELL'
-// Single quotes in the command are escaped using the '\'' pattern.
+// Single quotes in the command are escaped using the '\” pattern.
 func BuildShellCommand(command []string, shell string) string {
 	if len(command) == 0 {
 		return ""
@@ -42,6 +49,7 @@ type ProjectStore interface {
 type TmuxClient interface {
 	HasSession(name string) bool
 	NewSession(name, dir, shellCommand string) error
+	SetSessionOption(session, name, value string) error
 }
 
 // SessionCreator orchestrates the creation of a new tmux session from a directory.
@@ -78,6 +86,14 @@ func (sc *SessionCreator) CreateFromDir(dir string, command []string) (string, e
 	if err := sc.tmux.NewSession(prepared.SessionName, prepared.ResolvedDir, prepared.ShellCmd); err != nil {
 		return "", fmt.Errorf("failed to create tmux session: %w", err)
 	}
+
+	// Stamp the resolved git-root onto the session as the @portal-dir fast-path
+	// for directory resolution at grouped render time. Best-effort: a stamp
+	// failure must not fail session creation — the lazy stamp-on-render fallback
+	// re-derives and re-stamps any un-stamped session on its first grouped
+	// render. Swallowed silently: the session package has no log component and
+	// the closed component vocabulary does not include one.
+	_ = sc.tmux.SetSessionOption(prepared.SessionName, PortalDirOption, prepared.ResolvedDir)
 
 	return prepared.SessionName, nil
 }
