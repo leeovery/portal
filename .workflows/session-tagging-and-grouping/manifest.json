@@ -27,6 +27,22 @@
           "construction_gate_mode": "auto"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "session-tagging-and-grouping": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "20f05106ebce0c452761f2482146a3cc85cfbb81",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   }
 }
