@@ -1,8 +1,8 @@
 {
   "leeovery/agentic-workflows": {
-    "ref": "v0.5.2",
-    "commit": "1e96db2d58a0e4e8404f33c3631d8f0dd6a3797f",
-    "installedAt": "2026-06-07T08:38:23.521Z",
+    "ref": "v0.5.3",
+    "commit": "32c3ad0726950261ca750773eaf55aa4b242ce96",
+    "installedAt": "2026-06-07T09:59:07.451Z",
     "agents": [
       "claude"
     ],
@@ -363,6 +363,7 @@
       ".claude/skills/workflow-shared/references/final-review-menu.md",
       ".claude/skills/workflow-shared/references/natural-breaks.md",
       ".claude/skills/workflow-shared/references/research-analysis.md",
+      ".claude/skills/workflow-shared/references/resume-detection.md",
       ".claude/skills/workflow-shared/references/routing-decision.md",
       ".claude/skills/workflow-shared/references/seed-context.md",
       ".claude/skills/workflow-shared/references/sequence-discovery-map.md",
