@@ -124,6 +124,43 @@ Portal has no recency tracking and does not hook zoxide frecency into this view.
 
 This matches today's static flat-list ordering, just aggregated. An MRU/recency ordering was explicitly declined.
 
+## TUI Rendering & Toggle Behaviour
+
+### Toggle key — `s`, single cycle
+
+A single key **cycles** the mode: each press advances **Flat → By Project → By Tag → Flat**. A cycle is chosen over a "group by" menu because there are only three modes (fewer keystrokes, less chrome).
+
+The toggle key is **`s`** ("switch view"), on the sessions page:
+
+- Verified free on the sessions page — the browse-mode handler (`model.go:1583-1607`) handles only `? q k r n p x`, space, enter, esc; everything else falls through to the `bubbles/list`, which does not bind `s`.
+- `g`/`G` were ruled out — they are bound by `bubbles/list` to GoToStart/GoToEnd (`model.go:635-636`).
+- Minor accepted wrinkle: `s` already means "go to sessions" on the *projects* page (`s`/`x`). Same letter, page-dependent meaning — judged fine; it chains naturally (on projects, `s` → sessions; press `s` again → cycle views), and `x` remains the universal page-toggle.
+
+### Group headers
+
+Group headers are:
+
+- **Dimmed** (styled distinct from session rows).
+- **Non-selectable** — the cursor jumps session-to-session and **never lands on a header**.
+- **Counted** — each header carries a count of its sessions, e.g. `Portal ··· 2`.
+
+### Mode indication
+
+- **Mode string lives in the title** (top), via the existing `SessionListTitle()`:
+  - Flat → `Sessions`
+  - By Project → `Sessions — by project`
+  - By Tag → `Sessions — by tag`
+- **Key hint lives in the footer** (Portal convention — keys at the bottom). Only the `s switch view` entry is added to the footer. The mode *state* lives in the title, off the crowded footer.
+
+### Rendering stack
+
+- **`bubbles/list`** drives the interactive picker (cursor, selection, filter, scroll, pagination) — unchanged.
+- **`lipgloss`** styles the grouped look (dimmed headers + counts), layered into the existing `SessionDelegate` styles.
+
+Both are already in use. The grouped appearance is achieved purely as lipgloss styling layered into `bubbles/list` rendering — **no new library, no rebuild.**
+
+**`lipgloss/list` and `lipgloss/tree` were considered and rejected:** they are *static* renderers with no cursor/selection/filter/scroll; adopting them would mean hand-rolling all the interactivity `bubbles/list` provides for free. **Build constraint: the picker must not be routed through `lipgloss/tree`.**
+
 ---
 
 ## Working Notes
