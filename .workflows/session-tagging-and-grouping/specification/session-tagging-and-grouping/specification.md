@@ -131,6 +131,8 @@ A directory can carry multiple tags, so a session can belong to multiple tag gro
 
 **Untagged bucket.** In By Tag mode, sessions whose directory has no tags collect under a single **Untagged** group, pinned last.
 
+**Catch-all bucket rendering.** The pinned **Untagged** (By Tag) and **Unknown** (By Project) buckets are ordinary group headers: they **carry a count** like any other heading (e.g. `Untagged ··· 3`), and they are **rendered only when their membership is ≥ 1**. An empty catch-all is **suppressed** — when tags exist but every live session is tagged, no `Untagged` header appears; likewise no `Unknown` header when every session resolves to a known project. (This is distinct from the globally-empty By-Tag *zero-tags-anywhere* case, which shows the "No tags yet" signpost.)
+
 **Heading label text.**
 
 - **By Project headings show the project `name`** (the friendly name on the `Project` record), e.g. `Portal`. The **grouping key is the canonical directory path**, not the name — so two distinct directories that happen to share a `name` (e.g. `~/code/portal` and `~/archive/portal`) form **two separate groups** that may display the same heading text. This visual repeat is accepted in v1 (no path-disambiguation suffix); it is rare and harmless. (A session whose directory is not a known project — stamped path with no matching `Project` record — does not appear here; see *Empty States → Unknown bucket*.)
@@ -144,7 +146,7 @@ Portal has no recency tracking and does not hook zoxide frecency into this view.
 
 - **Within a group:** alphabetical by session name.
 - **Group headings:** alphabetical.
-- **Untagged:** pinned **last** (overrides alphabetical).
+- **Catch-all buckets pinned last** (overrides alphabetical): **Untagged** in By Tag mode, **Unknown** in By Project mode.
 
 This matches today's static flat-list ordering, just aggregated. An MRU/recency ordering was explicitly declined.
 
@@ -155,6 +157,8 @@ This matches today's static flat-list ordering, just aggregated. An MRU/recency 
 A single key **cycles** the mode: each press advances **Flat → By Project → By Tag → Flat**. A cycle is chosen over a "group by" menu because there are only three modes (fewer keystrokes, less chrome).
 
 **The cycle is unconditional — By Tag is never skipped.** Even when zero tags exist anywhere, the cycle still includes By Tag; landing on it shows the "No tags yet" signposted state (see *Empty States*) rather than being skipped. Rationale: a predictable fixed cycle beats a count-dependent one that silently changes which mode a press lands on. For cycling purposes the signposted state **is** the By-Tag mode (the persisted mode is `by-tag`); one `s` press from there advances to Flat as normal. The same holds if Portal reopens in a persisted By-Tag mode with zero tags — it shows the signpost, and the cycle behaves identically.
+
+**The cycle is also unconditional on session count.** `s` cycles modes and writes the new mode to `prefs.json` regardless of how many sessions are live — including **zero** live sessions. The toggle is never gated on a non-empty list; an empty list simply renders the empty/degenerate state for whichever mode is active. (Same principle as unconditional-on-tag-count.)
 
 The toggle key is **`s`** ("switch view"), on the sessions page:
 
@@ -263,6 +267,13 @@ This reuses an interaction the user already knows — zero new interaction to le
 - **Tab still cycles** — no new navigation key is introduced; the existing Tab handler is extended from a binary toggle to an N-way cycle over the three fields.
 - **Enter is field-scoped (add), not confirm.** While the Tags (or Aliases) field is focused with non-empty input, Enter **adds the entry** — identical to the existing alias-field behaviour. Modal confirm/save continues to use its existing mechanism, unchanged. Adding the Tags field does not alter the add-vs-confirm disambiguation for the existing fields.
 
+### Refresh contract — edits are visible on return to the sessions page
+
+Tags are read **live** from `projects.json` at grouped-render time (no per-session tag cache). For just-edited tags to appear, the grouped view must re-read project records when the user returns. v1 contract:
+
+- On the **projects-edit → sessions-page transition**, dispatch a **sessions-list refresh that re-resolves project records and re-groups** — mirroring the existing refresh dispatched on the preview-dismiss → sessions transition. After adding/removing a tag and returning to the sessions list, the change is reflected on the next render.
+- No live cross-page reactivity beyond this is required — re-grouping on page re-entry (not a background watch on `projects.json`) is sufficient for v1.
+
 ### Projects page only — not the sessions row
 
 Tags are edited **from the projects page only**, never from a session row. Since v1 tags the *directory*, a sessions-row action would really mean "edit this session's project" (indirect) — deferred to keep v1 clean. (This ties back to the deferred per-session tag layer.)
@@ -281,7 +292,7 @@ Verifiable behaviours to anchor planning and test cases. (Decisions and rational
 
 **Grouping & modes**
 
-1. **Given** any live sessions, **when** the user presses `s` on the sessions page, **then** the mode advances Flat → By Project → By Tag → Flat, the title reflects the mode (`Sessions` / `Sessions — by project` / `Sessions — by tag`), and the footer shows the `s switch view` hint.
+1. **Given** the sessions page (any session count, including zero), **when** the user presses `s` in browse mode, **then** the mode advances Flat → By Project → By Tag → Flat, the new mode is written to `prefs.json`, the title reflects the mode (`Sessions` / `Sessions — by project` / `Sessions — by tag`), and the footer shows the `s switch view` hint.
 2. **Given** a project with tags `[work, personal]` and one live session in it, **when** in By Tag mode, **then** that session renders **under both** `work` and `personal` headings and under **no** Untagged group.
 3. **Given** a session whose directory has no tags, **when** in By Tag mode, **then** it renders under the **Untagged** group, pinned last.
 4. **Given** any sessions, **when** in By Project mode, **then** each session renders **exactly once** under its project `name` heading.

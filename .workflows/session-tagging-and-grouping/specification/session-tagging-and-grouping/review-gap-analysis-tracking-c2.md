@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 2
 phase: Gap Analysis
@@ -27,9 +27,10 @@ The existing modal cycles focus between exactly two fields with a binary Tab tog
 An implementer must invent the navigation order and Tab semantics. Because the modal's confirm key is also Enter and is currently disambiguated by focus + cursor position, the new field's placement in the focus chain is load-bearing for both navigation and the add-vs-confirm disambiguation. This is a concrete decision an implementer would otherwise guess.
 
 **Proposed Addition**:
+Applied. Added three-way field navigation (Name→Aliases→Tags→wrap, Tab cycles, Tags last; Enter=field-scoped add, confirm unchanged).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -47,9 +48,10 @@ In the current handler structure, browse-mode rune keys (`q`, `k`, `n`, etc.) on
 This leaves an implementer to decide whether `s` is swallowed by the filter, ignored, or still cycles the (currently hidden) mode. Worth pinning since the spec is otherwise exhaustive about `s`'s precedence and the filter interaction.
 
 **Proposed Addition**:
+Applied. Defined s during active filter input: s is a literal filter char while filter focused; cycle only in browse mode after clearing filter.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -68,9 +70,10 @@ The spec defines that every group header is "Counted" (e.g. `Portal ··· 2`) a
 These are minor but would force an implementer to make a visible UX decision (show empty `Untagged ··· 0` header vs omit it) with no guidance.
 
 **Proposed Addition**:
+Applied. Stated catch-all buckets carry counts and are suppressed at zero membership; updated Ordering to pin Unknown (By Project) alongside Untagged (By Tag).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -86,9 +89,10 @@ Acceptance criterion 1 is phrased "**Given** any live sessions, **when** the use
 The By-Tag zero-tags signpost and the By-Project empty-list behaviour are each defined as *render* outcomes, but the *cycling/persistence* behaviour with zero sessions is implied rather than stated. Since the cycle is declared "unconditional," the natural reading is that `s` still cycles and persists with zero sessions — but the AC's "Given any live sessions" qualifier introduces just enough doubt that an implementer might gate the toggle on a non-empty list. Worth one sentence confirming the cycle and prefs write are unconditional on session count, matching the unconditional-on-tag-count rule already established.
 
 **Proposed Addition**:
+Applied. Stated cycle + prefs write are unconditional on session count (incl. zero); tightened AC1 wording from 'Given any live sessions'.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
 
@@ -104,8 +108,9 @@ The spec defines that grouping reads tags live (no per-session tag storage) and 
 The TUI already has a sessions-list refresh dispatched on certain page transitions (e.g. the preview-dismiss → sessions transition described in CLAUDE.md), but the spec does not state that a projects-edit → sessions transition must re-read tags / re-group. Because tags are read live from `projects.json` at render time, whether the just-edited tags are visible depends on whether the grouped render re-resolves project records after the edit. This is a concrete behaviour an implementer must decide (re-group on page re-entry vs only on full list reload) and the spec is silent on it.
 
 **Proposed Addition**:
+Applied. Added refresh contract: projects-edit → sessions transition dispatches a re-resolve + re-group, mirroring preview-dismiss refresh; no background watch in v1.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto).
 
 ---
