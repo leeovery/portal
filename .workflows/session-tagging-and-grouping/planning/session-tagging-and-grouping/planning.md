@@ -80,6 +80,21 @@ approved_at: 2026-06-07
 - [ ] By Tag with zero tags anywhere renders the plain session list with an explicit "No tags yet" signpost (not a silent flatten), and the cycle still lands on By Tag
 - [ ] An active filter flattens the grouped view to matching sessions (headers step aside, filtering behaviour otherwise unchanged); clearing the filter restores the grouped view
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-3-1 | prefs.json store: read/write session_list_mode with tolerant decode | missing file → Flat, empty file → Flat, corrupt/unparseable JSON → Flat, unrecognised mode value → Flat, valid by-tag/by-project round-trip, AtomicWrite temp+rename |
+| session-tagging-and-grouping-3-2 | Resolve prefs.json via configFilePath + migrateConfigFile | per-file env-var override wins, XDG_CONFIG_HOME path, ~/.config fallback, migrate from old macOS path only when new absent, never overwrite existing |
+| session-tagging-and-grouping-3-3 | Mode-aware session re-render core on the model (dispatches to Phase 2 builders) | zero live sessions per mode, mode-unchanged idempotent, correct builder per mode, SessionsMsg refresh preserves active mode |
+| session-tagging-and-grouping-3-4 | `s` cycle key handler (Flat → By Project → By Tag → Flat) | cycle wraps By Tag → Flat, unconditional on zero sessions, unconditional on zero tags, `s` literal while filter focused, persist once per press, persist failure non-fatal |
+| session-tagging-and-grouping-3-5 | Mode-aware title via SessionListTitle() | inside-tmux current-session title interaction, updates on mode change, updates on SessionsMsg refresh, Flat title unchanged from baseline |
+| session-tagging-and-grouping-3-6 | Footer `s switch view` hint on sessions page | absent on projects page, footer column layout unbroken, present at all session counts |
+| session-tagging-and-grouping-3-7 | By-Tag zero-tags "No tags yet" signpost | zero tags anywhere → signpost, degrade-with-message not silent flatten, reopen persisted by-tag with zero tags shows signpost, one `s` advances to Flat, tags-exist-all-sessions-tagged does not trigger signpost |
+| session-tagging-and-grouping-3-8 | Flatten-on-filter and restore-grouping-on-clear | filter active flattens, headers absent while filtering, clear restores grouping, Flat-mode filter unchanged, re-group respects current mode on clear, FilterApplied vs Filtering transitions |
+| session-tagging-and-grouping-3-9 | Wire prefs-backed initial mode + persister into TUI construction (open.go Option) | first-ever launch opens Flat, persisted by-tag opens By Tag, corrupt prefs opens Flat, persister writes on toggle end-to-end, nil persister tolerated in tests |
+
 ### Phase 4: Tag management in the projects edit modal
 status: approved
 approved_at: 2026-06-07
