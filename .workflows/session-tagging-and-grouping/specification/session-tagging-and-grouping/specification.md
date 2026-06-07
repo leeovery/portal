@@ -161,6 +161,20 @@ Both are already in use. The grouped appearance is achieved purely as lipgloss s
 
 **`lipgloss/list` and `lipgloss/tree` were considered and rejected:** they are *static* renderers with no cursor/selection/filter/scroll; adopting them would mean hand-rolling all the interactivity `bubbles/list` provides for free. **Build constraint: the picker must not be routed through `lipgloss/tree`.**
 
+## Mode Persistence & Empty States
+
+### Remember last mode
+
+The last-used grouping mode is **persisted** so Portal opens in the user's usual view ("if I always open in tag view I don't want to keep switching to it").
+
+- **First-ever launch defaults to Flat** (zero surprise), and remembers thereafter.
+- **Persistence target:** a small **prefs file** under `~/.config/portal/`, using the existing `configFilePath` + `AtomicWrite` pattern. UI state does not belong in domain stores like `projects.json`; the prefs file owns the last-used grouping mode. (This is an idiomatic implementation call, not a user-facing decision.)
+
+### Empty states
+
+- **By Tag with zero tags** — does **not** silently flatten. Render the plain (ungrouped) session list **with an explicit "No tags yet" message**, so the user sees they are in tag view, understands why there are no groups, and knows where to add them (the projects page). This is a degrade-to-flat **with a signpost**, not a silent one — it preserves the no-regression feel (the session list itself is unchanged) while keeping the mode legible.
+- **Empty tags field in the projects edit modal** — shows a clear empty state ("no tags") rather than a blank.
+
 ---
 
 ## Working Notes
