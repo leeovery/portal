@@ -210,3 +210,278 @@ func TestBuildByProject(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildByTag(t *testing.T) {
+	t.Run("emits one item per tag for a multi-tag session", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		got := map[string]SessionItem{}
+		for _, it := range items {
+			si := asSessionItem(t, it)
+			if si.CatchAll {
+				t.Errorf("item for tag %q is CatchAll, want false", si.Tag)
+			}
+			if si.GroupKey != si.Tag {
+				t.Errorf("GroupKey = %q, want = Tag %q", si.GroupKey, si.Tag)
+			}
+			if si.GroupHeading != si.Tag {
+				t.Errorf("GroupHeading = %q, want = Tag %q", si.GroupHeading, si.Tag)
+			}
+			got[si.Tag] = si
+		}
+		for _, tag := range []string{"personal", "work"} {
+			si, ok := got[tag]
+			if !ok {
+				t.Fatalf("missing item for tag %q, got %v", tag, got)
+			}
+			if si.Session.Name != "portal-abc" {
+				t.Errorf("tag %q: Session.Name = %q, want %q", tag, si.Session.Name, "portal-abc")
+			}
+		}
+	})
+
+	t.Run("collapses work, Work and WORK into a single tag heading", func(t *testing.T) {
+		base := t.TempDir()
+		dir1 := filepath.Join(base, "one")
+		dir2 := filepath.Join(base, "two")
+		dir3 := filepath.Join(base, "three")
+		mustMkdir(t, dir1)
+		mustMkdir(t, dir2)
+		mustMkdir(t, dir3)
+		// Non-canonical stored values prove the defensive NormaliseTag collapse.
+		projects := []project.Project{
+			{Path: dir1, Name: "P1", Tags: []string{"work"}},
+			{Path: dir2, Name: "P2", Tags: []string{"Work"}},
+			{Path: dir3, Name: "P3", Tags: []string{"WORK"}},
+		}
+		sessions := []tmux.Session{
+			{Name: "s1", Dir: dir1},
+			{Name: "s2", Dir: dir2},
+			{Name: "s3", Dir: dir3},
+		}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 3 {
+			t.Fatalf("len(items) = %d, want 3", len(items))
+		}
+		for _, it := range items {
+			si := asSessionItem(t, it)
+			if si.GroupKey != "work" {
+				t.Errorf("GroupKey = %q, want %q", si.GroupKey, "work")
+			}
+			if si.GroupHeading != "work" {
+				t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "work")
+			}
+		}
+	})
+
+	t.Run("emits exactly one Untagged item for a zero-tag session", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{{Name: "no-tags", Dir: dir}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if !si.CatchAll {
+			t.Errorf("CatchAll = false, want true")
+		}
+		if si.GroupHeading != "Untagged" {
+			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Untagged")
+		}
+		if si.Tag != "" {
+			t.Errorf("Tag = %q, want empty", si.Tag)
+		}
+		if si.Session.Name != "no-tags" {
+			t.Errorf("Session.Name = %q, want %q", si.Session.Name, "no-tags")
+		}
+	})
+
+	t.Run("emits one Untagged item for a session whose dir has no project record", func(t *testing.T) {
+		dir := t.TempDir()
+		// No project record for dir → no tags → Untagged.
+		sessions := []tmux.Session{{Name: "orphan", Dir: dir}}
+
+		items := buildByTag(sessions, nil)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if !si.CatchAll {
+			t.Errorf("CatchAll = false, want true")
+		}
+		if si.GroupHeading != "Untagged" {
+			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Untagged")
+		}
+	})
+
+	t.Run("emits one Untagged item for a session with empty Dir", func(t *testing.T) {
+		sessions := []tmux.Session{{Name: "no-dir"}}
+
+		items := buildByTag(sessions, nil)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if !si.CatchAll {
+			t.Errorf("CatchAll = false, want true")
+		}
+		if si.GroupHeading != "Untagged" {
+			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Untagged")
+		}
+	})
+
+	t.Run("skips a junk non-canonical stored tag without emitting an item", func(t *testing.T) {
+		dir := t.TempDir()
+		// "  " normalises to ok==false → skipped; "work" remains.
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   ", "work"}}}
+		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if si.GroupKey != "work" || si.Tag != "work" {
+			t.Errorf("item = (GroupKey %q, Tag %q), want both %q", si.GroupKey, si.Tag, "work")
+		}
+		if si.CatchAll {
+			t.Errorf("CatchAll = true, want false")
+		}
+	})
+
+	t.Run("routes a project whose only tag is junk to Untagged", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"   "}}}
+		sessions := []tmux.Session{{Name: "s1", Dir: dir}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if !si.CatchAll {
+			t.Errorf("CatchAll = false, want true")
+		}
+		if si.GroupHeading != "Untagged" {
+			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Untagged")
+		}
+	})
+
+	t.Run("orders tagged items by canonical tag then session name", func(t *testing.T) {
+		base := t.TempDir()
+		dir1 := filepath.Join(base, "one")
+		dir2 := filepath.Join(base, "two")
+		mustMkdir(t, dir1)
+		mustMkdir(t, dir2)
+		projects := []project.Project{
+			{Path: dir1, Name: "P1", Tags: []string{"work", "alpha"}},
+			{Path: dir2, Name: "P2", Tags: []string{"alpha"}},
+		}
+		// Unsorted input: ensure ordering is by (tag, name), not input order.
+		sessions := []tmux.Session{
+			{Name: "z-sess", Dir: dir1},
+			{Name: "a-sess", Dir: dir2},
+		}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 3 {
+			t.Fatalf("len(items) = %d, want 3", len(items))
+		}
+		wantOrder := []struct {
+			tag  string
+			name string
+		}{
+			{"alpha", "a-sess"},
+			{"alpha", "z-sess"},
+			{"work", "z-sess"},
+		}
+		for i, want := range wantOrder {
+			si := asSessionItem(t, items[i])
+			if si.GroupKey != want.tag || si.Session.Name != want.name {
+				t.Errorf("item[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, want.tag, want.name)
+			}
+		}
+	})
+
+	t.Run("appends Untagged items after tagged items", func(t *testing.T) {
+		base := t.TempDir()
+		tagged := filepath.Join(base, "tagged")
+		mustMkdir(t, tagged)
+		projects := []project.Project{{Path: tagged, Name: "Tagged", Tags: []string{"work"}}}
+		sessions := []tmux.Session{
+			{Name: "untagged-1"},
+			{Name: "tagged-1", Dir: tagged},
+		}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		first := asSessionItem(t, items[0])
+		if first.CatchAll {
+			t.Errorf("first item is CatchAll, want tagged item first")
+		}
+		last := asSessionItem(t, items[1])
+		if !last.CatchAll {
+			t.Errorf("last item is not CatchAll, want Untagged item last")
+		}
+	})
+
+	t.Run("shares the underlying session across a multi-tag session's instances", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir, Windows: 3, Attached: true}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		a := asSessionItem(t, items[0])
+		b := asSessionItem(t, items[1])
+		if a.Session != b.Session {
+			t.Errorf("instances reference different sessions: %+v vs %+v", a.Session, b.Session)
+		}
+		if a.Session != sessions[0] {
+			t.Errorf("instance session = %+v, want %+v", a.Session, sessions[0])
+		}
+	})
+
+	t.Run("sum of items exceeds live session count when a session is multi-tagged", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal", "urgent"}}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) <= len(sessions) {
+			t.Errorf("len(items) = %d, want > live session count %d", len(items), len(sessions))
+		}
+	})
+
+	t.Run("returns an empty slice for zero live sessions", func(t *testing.T) {
+		items := buildByTag(nil, nil)
+
+		if len(items) != 0 {
+			t.Fatalf("len(items) = %d, want 0", len(items))
+		}
+	})
+}

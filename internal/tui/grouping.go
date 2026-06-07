@@ -14,6 +14,11 @@ import (
 // resolved to a known project. See spec § Empty States → Unknown bucket.
 const unknownHeading = "Unknown"
 
+// untaggedHeading is the dimmed label for the pinned catch-all bucket in By Tag
+// mode — the group collecting sessions whose directory has no usable tags. See
+// spec § Empty States → Untagged bucket.
+const untaggedHeading = "Untagged"
+
 // buildByProject assembles the live sessions into By-Project grouped order: a
 // pre-sorted []list.Item of SessionItems where every session appears exactly
 // once (Pattern A) under its project name heading, ready for the delegate to
@@ -71,6 +76,104 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 	}
 	items = append(items, unknown...)
 	return items
+}
+
+// buildByTag assembles the live sessions into By-Tag grouped order: a pre-sorted
+// []list.Item of SessionItems materialising the multi-membership Pattern B — one
+// item per (session, tag) pair — ready for the delegate to inject a heading at
+// each GroupKey boundary.
+//
+// For each session, its directory resolves to a project via
+// project.MatchProjectByDir (Session.Dir re-run through the same canonical
+// keying as buildByProject). The project's Tags — stored canonical (lower-cased)
+// by Phase 1 — are each re-normalised through project.NormaliseTag defensively,
+// so a stray non-canonical stored value (e.g. "Work") cannot split a heading and
+// junk values (empty/whitespace) are skipped entirely. Every usable tag emits a
+// SessionItem with GroupKey = Tag = GroupHeading = the canonical tag.
+//
+// A session whose project has no usable tags — empty Tags, all-junk Tags, a
+// project miss, or an empty Dir — emits exactly one item flagged for the pinned
+// Untagged bucket (never zero items, so no session is dropped). Because a
+// multi-tag session contributes N items, the total can exceed the live session
+// count (the header-count rule for Pattern B).
+//
+// Tagged items are sorted by (GroupKey, Session.Name) — the canonical tag, then
+// the session name. Untagged items are appended after the sorted tagged items.
+//
+// Every emitted instance of a session shares the same underlying tmux.Session,
+// so selecting any instance attaches the same target (task 2-6).
+//
+// Pure function — no tmux call, no I/O. Zero live sessions yields an empty slice.
+func buildByTag(sessions []tmux.Session, projects []project.Project) []list.Item {
+	var tagged []SessionItem
+	var untagged []list.Item
+
+	for _, s := range sessions {
+		tags := resolveSessionTags(s, projects)
+		if len(tags) == 0 {
+			untagged = append(untagged, untaggedItem(s))
+			continue
+		}
+		for _, tag := range tags {
+			tagged = append(tagged, SessionItem{
+				Session:      s,
+				GroupKey:     tag,
+				GroupHeading: tag,
+				Tag:          tag,
+			})
+		}
+	}
+
+	slices.SortFunc(tagged, func(a, b SessionItem) int {
+		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Session.Name, b.Session.Name)
+	})
+
+	items := make([]list.Item, 0, len(tagged)+len(untagged))
+	for _, ti := range tagged {
+		items = append(items, ti)
+	}
+	items = append(items, untagged...)
+	return items
+}
+
+// resolveSessionTags returns the canonical, usable tags for a session's
+// directory. It resolves the session's project (project miss or empty Dir yields
+// no tags) and defensively re-normalises each stored tag through
+// project.NormaliseTag, dropping any that fail (empty/whitespace junk). The
+// result is the set of tags under which the session should appear; an empty
+// result routes the session to the Untagged catch-all.
+func resolveSessionTags(s tmux.Session, projects []project.Project) []string {
+	if s.Dir == "" {
+		return nil
+	}
+
+	matched, ok := project.MatchProjectByDir(projects, s.Dir)
+	if !ok {
+		return nil
+	}
+
+	var tags []string
+	for _, raw := range matched.Tags {
+		if tag, ok := project.NormaliseTag(raw); ok {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
+// untaggedItem builds the catch-all SessionItem for a session that has no usable
+// tags. It is kept cohesive (CatchAll flag + Untagged heading set in one place)
+// so it can later be extracted/unified with unknownItem into the shared pinned +
+// empty-suppression catch-all helper (task 2-4).
+func untaggedItem(s tmux.Session) SessionItem {
+	return SessionItem{
+		Session:      s,
+		GroupHeading: untaggedHeading,
+		CatchAll:     true,
+	}
 }
 
 // unknownItem builds the catch-all SessionItem for a session that cannot be
