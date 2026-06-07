@@ -38,8 +38,8 @@
           "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
-          "phase": 1,
-          "task": "session-tagging-and-grouping-1-1",
+          "phase": 2,
+          "task": "~",
           "task_map": {
             "session-tagging-and-grouping-1": "tick-6a2ca8",
             "session-tagging-and-grouping-1-1": "tick-9738f6",
