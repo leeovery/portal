@@ -19,6 +19,14 @@ var configFileComponents = map[string]string{
 	"hooks.json":    "hooks",
 	"aliases":       "aliases",
 	"projects.json": "projects",
+	// prefs.json is intentionally mapped to the empty component. It is NOT part
+	// of the state-mutation audit-trail set and "prefs" is not one of the 15
+	// closed log components, so it must never log under a non-catalogued
+	// component. The "" value routes through migrateConfigFile's empty-component
+	// guard: the one-shot move still runs best-effort while all emission is
+	// suppressed. The entry is explicit (rather than relying on the unmapped ->
+	// "" default) so the intent is visible in the map itself.
+	"prefs.json": "",
 }
 
 // migrateConfigFile moves a config file from oldPath to newPath if oldPath

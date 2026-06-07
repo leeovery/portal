@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/state"
 	"github.com/leeovery/portal/internal/tmux"
@@ -196,6 +197,24 @@ func loadProjectStore() (*project.Store, error) {
 // defaults to ~/.config/portal/projects.json.
 func projectsFilePath() (string, error) {
 	return configFilePath("PORTAL_PROJECTS_FILE", "projects.json")
+}
+
+// loadPrefsStore creates a prefs store from the configured file path.
+// Uses PORTAL_PREFS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/prefs.json.
+func loadPrefsStore() (*prefs.Store, error) {
+	path, err := prefsFilePath()
+	if err != nil {
+		return nil, err
+	}
+	return prefs.NewStore(path), nil
+}
+
+// prefsFilePath returns the path to the prefs.json file.
+// Uses PORTAL_PREFS_FILE env var if set (for testing), otherwise
+// defaults to ~/.config/portal/prefs.json.
+func prefsFilePath() (string, error) {
+	return configFilePath("PORTAL_PREFS_FILE", "prefs.json")
 }
 
 func init() {
