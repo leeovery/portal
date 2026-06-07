@@ -51,7 +51,8 @@ approved_at: 2026-06-07
 - [ ] Selecting any instance of a session attaches the same underlying session (duplicate By-Tag instances are views of one session); the picker is not routed through `lipgloss/tree`
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
