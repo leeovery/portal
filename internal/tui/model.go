@@ -457,6 +457,20 @@ func WithRenamer(r SessionRenamer) Option {
 	}
 }
 
+// WithInitialMode sets the persisted session-list grouping mode that the model
+// opens in. Production wiring reads it from prefs.json (via cmd/open.go's
+// loadPrefsStore + Store.Load, tolerant to ModeFlat) and injects it here; the
+// New constructor recomputes the list title after options apply so the first
+// frame paints the correct mode heading. Flat is a valid explicit value, so the
+// caller always passes the option. The mode is re-applied on every session
+// ingestion (applySessions → rebuildSessionList), so it does not depend on
+// sessions already being loaded at construction time.
+func WithInitialMode(mode prefs.SessionListMode) Option {
+	return func(m *Model) {
+		m.sessionListMode = mode
+	}
+}
+
 // WithModePersister sets the session-list mode persister dependency. Production
 // wiring passes a *prefs.Store; tests that do not exercise the s toggle can omit
 // this option, leaving modePersister nil (the handler tolerates a nil persister).

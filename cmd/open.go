@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/leeovery/portal/internal/browser"
 	"github.com/leeovery/portal/internal/log"
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
@@ -349,6 +350,8 @@ type tuiConfig struct {
 	enumerator      tui.TmuxEnumerator
 	reader          tui.ScrollbackReader
 	previewAttacher tui.PreviewAttacher
+	initialMode     prefs.SessionListMode
+	modePersister   tui.ModePersister
 	cwd             string
 	insideTmux      bool
 	currentSession  string
@@ -382,6 +385,13 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 	}
 	if cfg.previewAttacher != nil {
 		opts = append(opts, tui.WithPreviewAttachPipeline(cfg.previewAttacher))
+	}
+	// Initial mode is always injected — Flat is a valid explicit value, and the
+	// New constructor recomputes the list title after options apply so the first
+	// frame paints the correct mode heading.
+	opts = append(opts, tui.WithInitialMode(cfg.initialMode))
+	if cfg.modePersister != nil {
+		opts = append(opts, tui.WithModePersister(cfg.modePersister))
 	}
 	m := tui.New(cfg.lister, opts...)
 	if len(command) > 0 {
@@ -439,6 +449,26 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 	}
 	previewReader := tui.NewProductionScrollbackReader(stateDir)
 
+	// Load the prefs store once at TUI construction; the same *prefs.Store
+	// instance serves the initial-mode read here and per-toggle writes via the
+	// tui.ModePersister seam. A prefs path-resolution failure must NOT block
+	// opening the TUI: swallow it and proceed with a nil persister + the Flat
+	// default. prefs.json is deliberately outside the closed state-mutation
+	// audit-trail (see internal/prefs), so there is no breadcrumb component to
+	// log under here.
+	prefsStore, err := loadPrefsStore()
+	if err != nil {
+		prefsStore = nil
+	}
+	// Read the persisted initial mode tolerantly. Store.Load collapses every
+	// degenerate case (missing / empty / corrupt / unrecognised value) to
+	// ModeFlat, so the discarded error is acceptable: a read failure can only
+	// yield Flat, which is the first-launch default anyway.
+	initialMode := prefs.ModeFlat
+	if prefsStore != nil {
+		initialMode, _ = prefsStore.Load()
+	}
+
 	// Resolve the connector once. It is used post-TUI by processTUIResult
 	// for both Sessions-page Enter and Preview-page Enter. Both
 	// *AttachConnector and *SwitchConnector are safe to reuse across
@@ -471,8 +501,15 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		enumerator:      client,
 		reader:          previewReader,
 		previewAttacher: previewAttacher,
+		initialMode:     initialMode,
 		cwd:             cwd,
 		serverStarted:   serverStarted,
+	}
+	// Guard the persister assignment: a typed-nil *prefs.Store boxed into the
+	// tui.ModePersister interface would be non-nil, defeating buildTUIModel's nil
+	// check. Only wire the persister when the store actually loaded.
+	if prefsStore != nil {
+		cfg.modePersister = prefsStore
 	}
 
 	if tmux.InsideTmux() {
