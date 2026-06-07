@@ -3190,3 +3190,75 @@ func TestCommandError_StructLiteralConstruction(t *testing.T) {
 	// factory, fields Stderr and Err remain exported).
 	var _ error = &tmux.CommandError{Stderr: "x", Err: errors.New("y")}
 }
+
+func TestActivePaneCurrentPath(t *testing.T) {
+	t.Run("reads only the active pane via display-message, not list-panes", func(t *testing.T) {
+		mock := &MockCommander{Output: "/home/user/project"}
+		client := tmux.NewClient(mock)
+
+		got, err := client.ActivePaneCurrentPath("my-session")
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "/home/user/project" {
+			t.Errorf("got %q, want %q", got, "/home/user/project")
+		}
+		if len(mock.Calls) != 1 {
+			t.Fatalf("expected exactly 1 call, got %d: %v", len(mock.Calls), mock.Calls)
+		}
+		wantArgs := []string{"display-message", "-p", "-t", "my-session", "-F", "#{pane_current_path}"}
+		if len(mock.Calls[0]) != len(wantArgs) {
+			t.Fatalf("got args %v, want %v", mock.Calls[0], wantArgs)
+		}
+		for i, want := range wantArgs {
+			if mock.Calls[0][i] != want {
+				t.Errorf("arg[%d] = %q, want %q (full %v)", i, mock.Calls[0][i], want, mock.Calls[0])
+			}
+		}
+		// The active-pane-only contract: must not use list-panes or the -a flag.
+		joined := strings.Join(mock.Calls[0], " ")
+		if strings.Contains(joined, "list-panes") {
+			t.Errorf("must not enumerate panes via list-panes, got %q", joined)
+		}
+		if strings.Contains(joined, "-a") {
+			t.Errorf("must not use the -a (all-panes) flag, got %q", joined)
+		}
+	})
+
+	t.Run("wraps a no-such-session command error so errors.Is(ErrNoSuchSession) holds", func(t *testing.T) {
+		cmdErr := &tmux.CommandError{Stderr: "no such session: gone", Err: errors.New("exit status 1")}
+		mock := &MockCommander{Err: cmdErr}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ActivePaneCurrentPath("gone")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !errors.Is(err, tmux.ErrNoSuchSession) {
+			t.Errorf("error %v is not classified as ErrNoSuchSession", err)
+		}
+		var recovered *tmux.CommandError
+		if !errors.As(err, &recovered) {
+			t.Errorf("underlying *CommandError not recoverable from %v", err)
+		}
+	})
+
+	t.Run("propagates a non-session command error without the sentinel", func(t *testing.T) {
+		mock := &MockCommander{Err: fmt.Errorf("some transport failure")}
+		client := tmux.NewClient(mock)
+
+		_, err := client.ActivePaneCurrentPath("my-session")
+
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if errors.Is(err, tmux.ErrNoSuchSession) {
+			t.Errorf("unrelated error %v wrongly classified as ErrNoSuchSession", err)
+		}
+		if !strings.Contains(err.Error(), "my-session") {
+			t.Errorf("error %q does not contain session name", err.Error())
+		}
+	})
+}

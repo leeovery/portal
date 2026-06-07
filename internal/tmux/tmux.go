@@ -328,6 +328,26 @@ func (c *Client) ResolveStructuralKey(paneID string) (string, error) {
 	return output, nil
 }
 
+// ActivePaneCurrentPath returns the active pane's current_path for the named
+// session in a single tmux read. It runs "display-message -p -t <session> -F
+// '#{pane_current_path}'" which, with no pane target, resolves against the
+// session's active pane — so exactly one value is returned without enumerating
+// panes (no list-panes, no -a).
+//
+// This is the lazy-fallback primitive consumed by the grouped render's
+// directory resolver for sessions that carry no @portal-dir stamp. A
+// "no such session" failure (session killed mid-resolve) is classified at this
+// boundary so callers can discriminate it via errors.Is(err, ErrNoSuchSession)
+// and treat it as a non-fatal unresolvable result rather than aborting the
+// render. The original *CommandError remains recoverable via errors.As.
+func (c *Client) ActivePaneCurrentPath(session string) (string, error) {
+	output, err := c.cmd.Run("display-message", "-p", "-t", session, "-F", "#{pane_current_path}")
+	if err != nil {
+		return "", fmt.Errorf("failed to read active pane current path for session %q: %w", session, wrapNoSuchSession(err))
+	}
+	return output, nil
+}
+
 // KillSession kills the tmux session with the given name.
 func (c *Client) KillSession(name string) error {
 	_, err := c.cmd.Run("kill-session", "-t", name)
