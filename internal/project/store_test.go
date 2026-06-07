@@ -76,6 +76,162 @@ func TestLoad(t *testing.T) {
 	})
 }
 
+func TestTagsField(t *testing.T) {
+	t.Run("decodes a legacy record with no tags field to an empty Tags slice", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		content := `{"projects":[{"path":"/a","name":"legacy","last_used":"2026-01-22T10:30:00Z"}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+		if projects[0].Tags != nil {
+			t.Errorf("Tags = %#v, want nil", projects[0].Tags)
+		}
+		if len(projects[0].Tags) != 0 {
+			t.Errorf("len(Tags) = %d, want 0", len(projects[0].Tags))
+		}
+	})
+
+	t.Run("decodes an explicit null tags value to an empty Tags slice", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		content := `{"projects":[{"path":"/a","name":"n","last_used":"2026-01-22T10:30:00Z","tags":null}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+		if len(projects[0].Tags) != 0 {
+			t.Errorf("len(Tags) = %d, want 0", len(projects[0].Tags))
+		}
+	})
+
+	t.Run("decodes an explicit [] tags value to an empty Tags slice", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+
+		content := `{"projects":[{"path":"/a","name":"n","last_used":"2026-01-22T10:30:00Z","tags":[]}]}`
+		if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		store := project.NewStore(filePath)
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+		if len(projects[0].Tags) != 0 {
+			t.Errorf("len(Tags) = %d, want 0", len(projects[0].Tags))
+		}
+	})
+
+	t.Run("round-trips a record with multiple tags unchanged", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+		store := project.NewStore(filePath)
+
+		projects := []project.Project{
+			{
+				Path:     "/Users/lee/Code/myapp",
+				Name:     "myapp",
+				LastUsed: time.Date(2026, 1, 22, 10, 30, 0, 0, time.UTC),
+				Tags:     []string{"work", "personal"},
+			},
+		}
+
+		if err := store.Save(projects); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(loaded) != 1 {
+			t.Fatalf("got %d projects, want 1", len(loaded))
+		}
+
+		want := []string{"work", "personal"}
+		if len(loaded[0].Tags) != len(want) {
+			t.Fatalf("Tags = %#v, want %#v", loaded[0].Tags, want)
+		}
+		for i, tag := range want {
+			if loaded[0].Tags[i] != tag {
+				t.Errorf("Tags[%d] = %q, want %q", i, loaded[0].Tags[i], tag)
+			}
+		}
+	})
+
+	t.Run("preserves Tags when Upsert updates an existing project's name and last_used", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+		store := project.NewStore(filePath)
+
+		// Seed an existing record that already carries tags.
+		seeded := []project.Project{
+			{
+				Path:     "/Users/lee/Code/myapp",
+				Name:     "myapp",
+				LastUsed: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				Tags:     []string{"work", "personal"},
+			},
+		}
+		if err := store.Save(seeded); err != nil {
+			t.Fatalf("failed to seed: %v", err)
+		}
+
+		// Upsert the same path with a new name; must not clobber Tags.
+		if err := store.Upsert("/Users/lee/Code/myapp", "renamed-app", "internal"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(projects) != 1 {
+			t.Fatalf("got %d projects, want 1", len(projects))
+		}
+		if projects[0].Name != "renamed-app" {
+			t.Errorf("Name = %q, want %q", projects[0].Name, "renamed-app")
+		}
+		if projects[0].LastUsed.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+			t.Errorf("LastUsed should have been bumped, got %v", projects[0].LastUsed)
+		}
+
+		want := []string{"work", "personal"}
+		if len(projects[0].Tags) != len(want) {
+			t.Fatalf("Tags = %#v, want %#v", projects[0].Tags, want)
+		}
+		for i, tag := range want {
+			if projects[0].Tags[i] != tag {
+				t.Errorf("Tags[%d] = %q, want %q", i, projects[0].Tags[i], tag)
+			}
+		}
+	})
+}
+
 func TestSave(t *testing.T) {
 	t.Run("creates config directory on save", func(t *testing.T) {
 		dir := t.TempDir()

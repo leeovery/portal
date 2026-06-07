@@ -37,6 +37,7 @@ type Project struct {
 	Path     string    `json:"path"`
 	Name     string    `json:"name"`
 	LastUsed time.Time `json:"last_used"`
+	Tags     []string  `json:"tags,omitempty"`
 }
 
 // projectsFile is the on-disk JSON structure for projects.json.

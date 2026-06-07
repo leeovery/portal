@@ -112,7 +112,9 @@ func TestMatchProjectByDir(t *testing.T) {
 		if ok {
 			t.Errorf("MatchProjectByDir(unknown) ok = true, want false")
 		}
-		if got != (Project{}) {
+		// Project now contains a slice field (Tags) so it is not comparable
+		// with ==; assert the zero value field-by-field.
+		if got.Path != "" || got.Name != "" || !got.LastUsed.IsZero() || got.Tags != nil {
 			t.Errorf("MatchProjectByDir(unknown) project = %+v, want zero value", got)
 		}
 	})
