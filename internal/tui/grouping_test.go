@@ -209,6 +209,131 @@ func TestBuildByProject(t *testing.T) {
 			t.Fatalf("len(items) = %d, want 0", len(items))
 		}
 	})
+
+	t.Run("suppresses the Unknown heading when no session is unresolvable", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{
+			{Name: "s1", Dir: dir},
+			{Name: "s2", Dir: dir},
+		}
+
+		items := buildByProject(sessions, projects)
+
+		for _, it := range items {
+			si := asSessionItem(t, it)
+			if si.CatchAll {
+				t.Errorf("unexpected catch-all item %+v; Unknown heading should be suppressed", si)
+			}
+			if si.GroupHeading == unknownHeading {
+				t.Errorf("unexpected Unknown heading; should be suppressed when no session is unresolvable")
+			}
+		}
+	})
+
+	t.Run("orders Unknown catch-all items by session name", func(t *testing.T) {
+		// Unsorted, all unresolvable (empty Dir).
+		sessions := []tmux.Session{
+			{Name: "charlie"},
+			{Name: "alpha"},
+			{Name: "bravo"},
+		}
+
+		items := buildByProject(sessions, nil)
+
+		if len(items) != 3 {
+			t.Fatalf("len(items) = %d, want 3", len(items))
+		}
+		wantNames := []string{"alpha", "bravo", "charlie"}
+		for i, want := range wantNames {
+			si := asSessionItem(t, items[i])
+			if si.Session.Name != want {
+				t.Errorf("item[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
+			}
+		}
+	})
+
+	t.Run("stamps each Unknown catch-all item GroupKey with the heading constant", func(t *testing.T) {
+		sessions := []tmux.Session{{Name: "no-dir"}}
+
+		items := buildByProject(sessions, nil)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if si.GroupKey != unknownHeading {
+			t.Errorf("GroupKey = %q, want %q", si.GroupKey, unknownHeading)
+		}
+	})
+
+	t.Run("pins the Unknown catch-all group last after alphabetical project headings", func(t *testing.T) {
+		// A project named "Zulu" sorts after Unknown alphabetically; the catch-all
+		// must still be pinned last (append-position, not alphabetical).
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Zulu"}}
+		sessions := []tmux.Session{
+			{Name: "orphan"}, // empty Dir → Unknown
+			{Name: "zulu-1", Dir: dir},
+		}
+
+		items := buildByProject(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		first := asSessionItem(t, items[0])
+		if first.GroupHeading != "Zulu" {
+			t.Errorf("first item heading = %q, want %q", first.GroupHeading, "Zulu")
+		}
+		last := asSessionItem(t, items[1])
+		if !last.CatchAll || last.GroupHeading != unknownHeading {
+			t.Errorf("last item = %+v, want Unknown catch-all pinned last", last)
+		}
+	})
+
+	t.Run("never drops a session: every input session appears exactly once", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{
+			{Name: "resolved", Dir: dir},
+			{Name: "unresolvable-dir"},                  // empty Dir → Unknown
+			{Name: "deleted-project", Dir: t.TempDir()}, // stamped, no record → Unknown
+		}
+
+		items := buildByProject(sessions, projects)
+
+		counts := map[string]int{}
+		for _, it := range items {
+			counts[asSessionItem(t, it).Session.Name]++
+		}
+		for _, s := range sessions {
+			if counts[s.Name] != 1 {
+				t.Errorf("session %q appears %d times, want exactly 1", s.Name, counts[s.Name])
+			}
+		}
+	})
+
+	t.Run("routes both an unresolvable-dir and a deleted-project session to Unknown", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{
+			{Name: "unresolvable-dir"},                  // empty Dir
+			{Name: "deleted-project", Dir: t.TempDir()}, // stamped dir, no matching record
+		}
+
+		items := buildByProject(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		for _, it := range items {
+			si := asSessionItem(t, it)
+			if !si.CatchAll || si.GroupHeading != unknownHeading {
+				t.Errorf("session %q not routed to Unknown: %+v", si.Session.Name, si)
+			}
+		}
+	})
 }
 
 func TestBuildByTag(t *testing.T) {
@@ -482,6 +607,125 @@ func TestBuildByTag(t *testing.T) {
 
 		if len(items) != 0 {
 			t.Fatalf("len(items) = %d, want 0", len(items))
+		}
+	})
+
+	t.Run("suppresses the Untagged heading when every session is tagged", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work"}}}
+		sessions := []tmux.Session{
+			{Name: "s1", Dir: dir},
+			{Name: "s2", Dir: dir},
+		}
+
+		items := buildByTag(sessions, projects)
+
+		for _, it := range items {
+			si := asSessionItem(t, it)
+			if si.CatchAll {
+				t.Errorf("unexpected catch-all item %+v; Untagged heading should be suppressed", si)
+			}
+			if si.GroupHeading == untaggedHeading {
+				t.Errorf("unexpected Untagged heading; should be suppressed when every session is tagged")
+			}
+		}
+	})
+
+	t.Run("orders Untagged catch-all items by session name", func(t *testing.T) {
+		// Unsorted, all untagged (empty Dir).
+		sessions := []tmux.Session{
+			{Name: "charlie"},
+			{Name: "alpha"},
+			{Name: "bravo"},
+		}
+
+		items := buildByTag(sessions, nil)
+
+		if len(items) != 3 {
+			t.Fatalf("len(items) = %d, want 3", len(items))
+		}
+		wantNames := []string{"alpha", "bravo", "charlie"}
+		for i, want := range wantNames {
+			si := asSessionItem(t, items[i])
+			if si.Session.Name != want {
+				t.Errorf("item[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
+			}
+		}
+	})
+
+	t.Run("stamps each Untagged catch-all item GroupKey with the heading constant", func(t *testing.T) {
+		sessions := []tmux.Session{{Name: "no-dir"}}
+
+		items := buildByTag(sessions, nil)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if si.GroupKey != untaggedHeading {
+			t.Errorf("GroupKey = %q, want %q", si.GroupKey, untaggedHeading)
+		}
+	})
+
+	t.Run("pins the Untagged catch-all group last after alphabetical tag headings", func(t *testing.T) {
+		// Tag "zeta" sorts after Untagged alphabetically; the catch-all must still
+		// be pinned last (append-position, not alphabetical).
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"zeta"}}}
+		sessions := []tmux.Session{
+			{Name: "orphan"}, // empty Dir → Untagged
+			{Name: "zeta-1", Dir: dir},
+		}
+
+		items := buildByTag(sessions, projects)
+
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2", len(items))
+		}
+		first := asSessionItem(t, items[0])
+		if first.GroupHeading != "zeta" {
+			t.Errorf("first item heading = %q, want %q", first.GroupHeading, "zeta")
+		}
+		last := asSessionItem(t, items[1])
+		if !last.CatchAll || last.GroupHeading != untaggedHeading {
+			t.Errorf("last item = %+v, want Untagged catch-all pinned last", last)
+		}
+	})
+
+	t.Run("routes a deleted-project session to Untagged", func(t *testing.T) {
+		// Stamped dir, no matching project record → no tags → Untagged.
+		sessions := []tmux.Session{{Name: "deleted-project", Dir: t.TempDir()}}
+
+		items := buildByTag(sessions, nil)
+
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if !si.CatchAll || si.GroupHeading != untaggedHeading {
+			t.Errorf("deleted-project session not routed to Untagged: %+v", si)
+		}
+	})
+
+	t.Run("never drops a session: every input session appears at least once", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal", Tags: []string{"work", "personal"}}}
+		sessions := []tmux.Session{
+			{Name: "tagged", Dir: dir},
+			{Name: "untagged-dir"},                      // empty Dir → Untagged
+			{Name: "deleted-project", Dir: t.TempDir()}, // stamped, no record → Untagged
+		}
+
+		items := buildByTag(sessions, projects)
+
+		seen := map[string]bool{}
+		for _, it := range items {
+			seen[asSessionItem(t, it).Session.Name] = true
+		}
+		for _, s := range sessions {
+			if !seen[s.Name] {
+				t.Errorf("session %q dropped from rendered set", s.Name)
+			}
 		}
 	})
 }

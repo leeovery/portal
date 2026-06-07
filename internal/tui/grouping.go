@@ -70,12 +70,11 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 		return cmp.Compare(a.Session.Name, b.Session.Name)
 	})
 
-	items := make([]list.Item, 0, len(known)+len(unknown))
+	resolved := make([]list.Item, 0, len(known))
 	for _, ki := range known {
-		items = append(items, ki)
+		resolved = append(resolved, ki)
 	}
-	items = append(items, unknown...)
-	return items
+	return appendCatchAll(resolved, unknown, unknownHeading)
 }
 
 // buildByTag assembles the live sessions into By-Tag grouped order: a pre-sorted
@@ -131,12 +130,11 @@ func buildByTag(sessions []tmux.Session, projects []project.Project) []list.Item
 		return cmp.Compare(a.Session.Name, b.Session.Name)
 	})
 
-	items := make([]list.Item, 0, len(tagged)+len(untagged))
+	resolved := make([]list.Item, 0, len(tagged))
 	for _, ti := range tagged {
-		items = append(items, ti)
+		resolved = append(resolved, ti)
 	}
-	items = append(items, untagged...)
-	return items
+	return appendCatchAll(resolved, untagged, untaggedHeading)
 }
 
 // resolveSessionTags returns the canonical, usable tags for a session's
@@ -186,4 +184,48 @@ func unknownItem(s tmux.Session) SessionItem {
 		GroupHeading: unknownHeading,
 		CatchAll:     true,
 	}
+}
+
+// appendCatchAll pins the catch-all bucket (Unknown / Untagged) last and applies
+// the empty-suppression rule. resolved holds the already-alphabetically-ordered
+// resolvable groups (keyed on their real GroupKey — canonical path or tag);
+// catchAll holds the flagged catch-all SessionItems (CatchAll = true,
+// GroupHeading = heading) in arbitrary input order.
+//
+// The catch-all items are sorted by Session.Name and each is stamped with
+// GroupKey = heading so that 2-5's boundary logic treats them as one contiguous
+// group under a single heading. They are appended after every resolvable group,
+// pinning them last regardless of where the heading would fall alphabetically.
+//
+// Empty-suppression: when there are no catch-all items, resolved is returned
+// unchanged — no heading materialises, because 2-5 only emits a header where
+// items exist. The catch-all heading's count is derived by 2-5 from the rows
+// beneath it, like any other heading.
+//
+// Pure function — no I/O.
+func appendCatchAll(resolved []list.Item, catchAll []list.Item, heading string) []list.Item {
+	if len(catchAll) == 0 {
+		return resolved
+	}
+
+	stamped := make([]SessionItem, 0, len(catchAll))
+	for _, it := range catchAll {
+		si, ok := it.(SessionItem)
+		if !ok {
+			// Defensive: only SessionItems are ever routed to a catch-all bucket.
+			continue
+		}
+		si.GroupKey = heading
+		stamped = append(stamped, si)
+	}
+	slices.SortFunc(stamped, func(a, b SessionItem) int {
+		return cmp.Compare(a.Session.Name, b.Session.Name)
+	})
+
+	items := make([]list.Item, 0, len(resolved)+len(stamped))
+	items = append(items, resolved...)
+	for _, si := range stamped {
+		items = append(items, si)
+	}
+	return items
 }
