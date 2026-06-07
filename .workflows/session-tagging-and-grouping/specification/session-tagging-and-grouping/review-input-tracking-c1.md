@@ -43,10 +43,10 @@ The spec's Non-Goals bullet says per-session tags would be "captured/restored ac
 > - **Per-session tags + `portal open --tag=`** — the eventual hybrid model's second layer (per-session `@portal-tags` tmux option, captured/restored across reboot). Deferred.
 
 **Proposed Addition**:
+Rewrote the Per-session non-goal bullet to record the cost the directory-anchored v1 avoids: capturing `@portal-tags` into `sessions.json` (Session-record schema addition), daemon capture, restore re-set, and `@portal-restoring` interaction — the cut-line rationale.
 
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Applied together with finding 3 (same bullet).
 
 ---
 
@@ -63,10 +63,10 @@ The discussion notes the deferred launch flag is expected on both `portal open -
 > - **Per-session tags + `portal open --tag=`** — the eventual hybrid model's second layer (per-session `@portal-tags` tmux option, captured/restored across reboot). Deferred.
 
 **Proposed Addition**:
+Added "(and `x --tag=`)" to the Per-session non-goal bullet so the deferred launch flag's scope covers the user's habitual `x` entry point.
 
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Folded into finding 2's bullet rewrite.
 
 ---
 

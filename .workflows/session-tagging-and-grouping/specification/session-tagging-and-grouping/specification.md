@@ -27,7 +27,7 @@ v1 ships the **directory/project tag layer only**:
 
 These are explicitly out of v1 scope. v1 is purely additive and locks none of them out:
 
-- **Per-session tags + `portal open --tag=`** — the eventual hybrid model's second layer (per-session `@portal-tags` tmux option, captured/restored across reboot). Deferred.
+- **Per-session tags + `portal open --tag=`** (and `x --tag=`) — the eventual hybrid model's second layer: a per-session `@portal-tags` tmux option, settable at launch. Deferred. This layer is precisely what the directory-anchored v1 avoids: because `@portal-tags` is in-memory tmux server state, surviving a reboot would require capturing it into `sessions.json` (a modest, bounded addition to the `Session` record), reading it on daemon capture, and re-applying it on restore (interacting with the `@portal-restoring` window). The directory anchor needs none of this — directory tags ride the `projects.json` project record. That cost contrast is why v1 stops at the directory layer.
 - **Live-grouped filtering** — keeping group headers visible while the `/` filter is active. Deferred as its own separate feature (would require Portal to own the filter wholesale). v1 flattens on filter.
 - **Tag exclusion / hide-a-tag** — a filter layer on top of grouping. Deferred power-feature. The deferral is acceptable because the existing `/` filter covers basic narrowing in the meantime; revisit only if a concrete "tag I never want to see" pain appears.
 
