@@ -550,6 +550,14 @@ func sessionHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("p"), key.WithHelp("p/x", "projects")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 		key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "preview")),
+		// "s switch view" sits adjacent to the other view-related action
+		// ("space/preview") so it reads naturally in the manual footer. The
+		// footer column split is positional (keymapFooterColumnSize = 5, three
+		// columns in source order): with nav/filter bindings ahead of these,
+		// this entry lands in the trailing columns next to preview rather than
+		// being orphaned in a column of its own. (spec § TUI Rendering &
+		// Toggle Behaviour → Mode indication, Toggle key.)
+		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "switch view")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
