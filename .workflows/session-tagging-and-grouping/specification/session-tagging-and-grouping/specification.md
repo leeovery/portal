@@ -93,6 +93,37 @@ So deriving the directory live from the pane's `current_path` is **not rejected*
 
 The dir→tags lookup keys on a directory path, so the **render-time lookup key must match the stored `Project.Path` exactly**. Both the stamped `@portal-dir` value and the fallback-derived git-root must be normalised to the same canonical form the project store uses, accounting for: symlinks, trailing slash, `~` expansion. Implementation must confirm the lookup key matches stored `Project.Path` for the same directory; a mismatch would silently drop a session out of its group.
 
+## Grouping Semantics
+
+### Modes
+
+The session list cycles through three modes:
+
+1. **Flat** — today's list, unchanged: all live sessions, flat, alphabetical.
+2. **By Project** — a heading per directory; each session appears **once** under its directory.
+3. **By Tag** — a heading per tag; a session appears **under each tag it has**; untagged sessions fall to a pinned **Untagged** bucket.
+
+### The grouping-key problem (multi-membership)
+
+A directory can carry multiple tags, so a session can belong to multiple tag groups. How a session renders depends on whether the grouping dimension is single- or multi-valued:
+
+- **By Project — single-valued → Pattern A.** A session has exactly one directory, so it appears **once**. Matches the user's mental model and is the expected dominant mode.
+- **By Tag — multi-valued → Pattern B.** A session appears **once under each tag it has** (the Linear/Jira/Trello/Notion group-by-label convention). This deliberately avoids inventing a "primary tag" concept — the only alternative, judged not worth the extra model and UX.
+
+**Untagged bucket.** In By Tag mode, sessions whose directory has no tags collect under a single **Untagged** group, pinned last.
+
+Accepted downside of Pattern B: a heavily-tagged list is longer than the flat list (sessions repeat). Mitigations beyond the Untagged catch-all (e.g. collapsible headers) are **deferred** — not built up front, revisited only if it bites.
+
+### Ordering — static alphabetical, no recency
+
+Portal has no recency tracking and does not hook zoxide frecency into this view. Ordering is static:
+
+- **Within a group:** alphabetical by session name.
+- **Group headings:** alphabetical.
+- **Untagged:** pinned **last** (overrides alphabetical).
+
+This matches today's static flat-list ordering, just aggregated. An MRU/recency ordering was explicitly declined.
+
 ---
 
 ## Working Notes
