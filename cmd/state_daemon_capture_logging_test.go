@@ -129,7 +129,7 @@ func TestDaemonTick_LogsAnomalousShowEnvironmentFailureUnderComponentDaemon(t *t
 
 	// Two sessions in list-sessions; pane rows for both.
 	fc := &daemonFakeCommander{
-		sessionsOut: "A|1|0\nB|1|0",
+		sessionsOut: "A|1|0|\nB|1|0|",
 		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
 		envBySession: map[string]string{
@@ -207,7 +207,7 @@ func TestDaemonTick_LogsPerSessionWarnAndCommitsEmptyOnAllNaturalChurn(t *testin
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	fc := &daemonFakeCommander{
-		sessionsOut: "A|1|0\nB|1|0",
+		sessionsOut: "A|1|0|\nB|1|0|",
 		panesOut: "A|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"B|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
 	}

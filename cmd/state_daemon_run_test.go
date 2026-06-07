@@ -254,7 +254,7 @@ func touchSaveRequested(t *testing.T, dir string) {
 // one window and one pane. Useful as a fixture for the captureAndCommit happy
 // path.
 func oneSession() (sessionsOut, panesOut string) {
-	sessionsOut = "work|1|0"
+	sessionsOut = "work|1|0|"
 	// Format matches captureFormat in internal/state/capture.go.
 	panesOut = "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh"
 	return
@@ -347,7 +347,7 @@ func TestDaemonTick_SkipsEntireTickWhenRestoring(t *testing.T) {
 	fc := &daemonFakeCommander{
 		optionByName: map[string]string{state.RestoringMarkerName: "1"},
 		// Seed sessions output so any leak through would trip the check.
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 	touchSaveRequested(t, dir)
@@ -401,7 +401,7 @@ func TestDaemonTick_PreservesSaveRequestedOnError(t *testing.T) {
 	// force the failure path through CaptureStructure we instead force
 	// list-panes to fail; ListSessionNames swallows list-sessions errors.
 	fc.sessionsErr = nil
-	fc.sessionsOut = "work|1|0"
+	fc.sessionsOut = "work|1|0|"
 	fc.panesErr = errors.New("list-panes failed")
 
 	deps := makeDeps(t, dir, fc)
@@ -456,7 +456,7 @@ func TestDaemonTick_SkipsSkeletonMarkedPanesInScrollback(t *testing.T) {
 
 	fc := &daemonFakeCommander{
 		markersOut:  markersOut,
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
 		captureByTarget: map[string]string{
@@ -490,7 +490,7 @@ func TestDaemonTick_ContinuesOnPerPaneCaptureError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash",
 		captureErrByTarget: map[string]error{
@@ -545,7 +545,7 @@ func TestDaemonTick_LogsAndSkipsOnCaptureStructureError(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesErr:    errors.New("list-panes blew up"),
 	}
 	deps := makeDeps(t, dir, fc)
@@ -618,7 +618,7 @@ func TestDaemonShutdownFlush_SkipsWhenRestoring(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
 		optionByName: map[string]string{state.RestoringMarkerName: "1"},
-		sessionsOut:  "work|1|0",
+		sessionsOut:  "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 	deps.TickerPeriod = time.Hour
@@ -651,7 +651,7 @@ func TestDefaultShutdownFlush_SkipsOnTransportError(t *testing.T) {
 		optionErr: transportErrCommandError(),
 		// Seed sessions output so any leak through to captureAndCommit would
 		// surface as a list-sessions call we can assert against.
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 
@@ -684,7 +684,7 @@ func TestTick_SkipsOnTransportError(t *testing.T) {
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
 		optionErr:   transportErrCommandError(),
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 	deps.LastSaveAt = time.Now()
@@ -882,7 +882,7 @@ func TestCaptureAndCommit_UncancelledCtxMatchesPreThreadingBehaviour(t *testing.
 	// Two sessions, two windows total, three panes — exercises the inner
 	// loop's pane-iteration across the (sess, win, pane) nesting.
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0\nside|1|0",
+		sessionsOut: "work|1|0|\nside|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
 			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
@@ -966,7 +966,7 @@ func TestCaptureAndCommit_PreCancelledCtxReturnsImmediately(t *testing.T) {
 	// missing, the function would do observable work (enumerate sessions,
 	// capture panes, commit) — the assertions below would catch the leak.
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
 		captureByTarget: map[string]string{
 			"work:0.0": "work-pane-0-bytes",
@@ -1036,7 +1036,7 @@ func TestCaptureAndCommit_CancelDuringCaptureStructureReturnsBeforePerPaneWork(t
 	// catch the leak (capture-pane calls / scrollback files / committed
 	// sessions.json).
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0\nside|1|0",
+		sessionsOut: "work|1|0|\nside|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
 			"side|||0|||main|||layout|||0|||1|||0|||/var|||1|||zsh",
@@ -1130,7 +1130,7 @@ func TestCaptureAndCommit_CancelMidLoopAfterKofNPanesProcessed(t *testing.T) {
 	// Single session, single window, three panes — exercises the innermost
 	// pane-iteration loop.
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
 			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",
@@ -1195,7 +1195,7 @@ func TestCaptureAndCommit_UncancelledMultiPaneFixtureProcessesAllPanesAndCommits
 	t.Setenv("PORTAL_STATE_DIR", dir)
 
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||0|||bash\n" +
 			"work|||0|||main|||layout|||0|||1|||2|||/tmp|||0|||fish",

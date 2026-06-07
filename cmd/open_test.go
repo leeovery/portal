@@ -746,7 +746,7 @@ type stubCommander struct{}
 
 func (s *stubCommander) Run(args ...string) (string, error) {
 	if len(args) > 0 && args[0] == "list-sessions" {
-		return "stub|1|0", nil
+		return "stub|1|0|", nil
 	}
 	return "", nil
 }

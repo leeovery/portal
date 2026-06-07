@@ -31,6 +31,12 @@ type Session struct {
 	Name     string
 	Windows  int
 	Attached bool
+	// Dir is the session's stamped @portal-dir user-option (the resolved
+	// git-root captured at session creation). Empty when the session carries
+	// no @portal-dir stamp (e.g. restored post-reboot, where the in-memory
+	// option is not persisted, or a pre-existing session from before stamping
+	// shipped). See spec § The stamp / § The lazy stamp-on-render fallback.
+	Dir string
 }
 
 // Commander defines the interface for executing tmux commands.
@@ -185,7 +191,11 @@ func (c *Client) NewSession(name, dir, shellCommand string) error {
 // ListSessions queries tmux for running sessions and returns them as structured data.
 // Returns an empty slice and nil error when no tmux server is running.
 func (c *Client) ListSessions() ([]Session, error) {
-	output, err := c.cmd.Run("list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}")
+	// @portal-dir is intentionally the LAST format field: a directory path may
+	// contain a literal '|', so it must occupy the unbounded trailing slot. The
+	// parser below splits with SplitN(line, "|", 4) so parts[3] is everything
+	// after the third pipe, preserving any embedded pipes in the path.
+	output, err := c.cmd.Run("list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}|#{@portal-dir}")
 	if err != nil {
 		// A list-sessions error is the canonical "no server running" signal
 		// (tmux exits non-zero when there are no sessions). Collapse it to the
@@ -206,8 +216,8 @@ func (c *Client) ListSessions() ([]Session, error) {
 			continue
 		}
 
-		parts := strings.SplitN(line, "|", 3)
-		if len(parts) != 3 {
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) != 4 {
 			return nil, fmt.Errorf("unexpected session format: %q", line)
 		}
 
@@ -225,6 +235,8 @@ func (c *Client) ListSessions() ([]Session, error) {
 			Name:     parts[0],
 			Windows:  windows,
 			Attached: attachedCount > 0,
+			// An absent/empty @portal-dir yields an empty trailing field.
+			Dir: parts[3],
 		})
 	}
 

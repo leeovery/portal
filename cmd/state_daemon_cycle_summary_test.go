@@ -227,7 +227,7 @@ func TestCaptureAndCommit_NoSummaryWhenCtxCancelledAtObsPoint3(t *testing.T) {
 	// returns nil before reaching Commit — no summary is emitted.
 	ctx, cancel := context.WithCancel(context.Background())
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh",
 		dispatchHook: func(args []string) {
@@ -255,7 +255,7 @@ func TestCaptureAndCommit_AnomalousCapturePaneFailureIncrementsAnomalousAndWarns
 	// neither ErrNoSuchSession nor a "can't find" *tmux.CommandError.
 	sentinel := errors.New("capture-pane transport boom")
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh",
 		captureErrByTarget: map[string]error{"work:0.0": sentinel},
@@ -365,7 +365,7 @@ func TestCaptureAndCommit_CountsUserClosedPaneAsNaturalChurnNotAnomalous(t *test
 
 	// Two panes: one vanished mid-tick (tmux "can't find pane"), one healthy.
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut: "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh\n" +
 			"work|||0|||main|||layout|||0|||1|||1|||/tmp|||1|||zsh",
 		captureErrByTarget: map[string]error{

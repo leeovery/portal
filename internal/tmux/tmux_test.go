@@ -52,7 +52,7 @@ func TestListSessions(t *testing.T) {
 	}{
 		{
 			name:   "parses multiple sessions correctly",
-			output: "dev|3|1\nwork|5|0\nmisc|1|0",
+			output: "dev|3|1|\nwork|5|0|\nmisc|1|0|",
 			want: []tmux.Session{
 				{Name: "dev", Windows: 3, Attached: true},
 				{Name: "work", Windows: 5, Attached: false},
@@ -61,7 +61,7 @@ func TestListSessions(t *testing.T) {
 		},
 		{
 			name:   "parses single session",
-			output: "main|2|0",
+			output: "main|2|0|",
 			want: []tmux.Session{
 				{Name: "main", Windows: 2, Attached: false},
 			},
@@ -79,21 +79,21 @@ func TestListSessions(t *testing.T) {
 		},
 		{
 			name:   "attached is true when session_attached > 0",
-			output: "session1|2|3",
+			output: "session1|2|3|",
 			want: []tmux.Session{
 				{Name: "session1", Windows: 2, Attached: true},
 			},
 		},
 		{
 			name:   "attached is false when session_attached is 0",
-			output: "session1|2|0",
+			output: "session1|2|0|",
 			want: []tmux.Session{
 				{Name: "session1", Windows: 2, Attached: false},
 			},
 		},
 		{
 			name:   "handles session name with special characters",
-			output: "my-project.v2|4|1",
+			output: "my-project.v2|4|1|",
 			want: []tmux.Session{
 				{Name: "my-project.v2", Windows: 4, Attached: true},
 			},
@@ -137,6 +137,65 @@ func TestListSessions(t *testing.T) {
 	}
 }
 
+func TestListSessionsParsesPortalDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		wantDir string
+	}{
+		{
+			name:    "parses the stamped @portal-dir into Session.Dir",
+			output:  "dev|3|1|/Users/me/code/portal",
+			wantDir: "/Users/me/code/portal",
+		},
+		{
+			name:    "parses an absent @portal-dir to an empty Dir",
+			output:  "dev|3|1|",
+			wantDir: "",
+		},
+		{
+			name:    "preserves a pipe character in the directory value",
+			output:  "dev|3|1|/Users/me/weird|path/portal",
+			wantDir: "/Users/me/weird|path/portal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockCommander{Output: tt.output}
+			client := tmux.NewClient(mock)
+
+			got, err := client.ListSessions()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d sessions, want 1", len(got))
+			}
+			if got[0].Dir != tt.wantDir {
+				t.Errorf("session.Dir = %q, want %q", got[0].Dir, tt.wantDir)
+			}
+		})
+	}
+}
+
+func TestListSessionsFormatStringIncludesPortalDir(t *testing.T) {
+	mock := &MockCommander{Output: "dev|1|0|"}
+	client := tmux.NewClient(mock)
+
+	if _, err := client.ListSessions(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mock.Calls) == 0 {
+		t.Fatal("expected at least one tmux call")
+	}
+	args := strings.Join(mock.Calls[0], " ")
+	if !strings.Contains(args, "#{@portal-dir}") {
+		t.Errorf("list-sessions format string %q does not include #{@portal-dir}", args)
+	}
+}
+
 func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -145,7 +204,7 @@ func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 	}{
 		{
 			name:   "filters _* names from mixed output",
-			output: fmt.Sprintf("dev|2|0\n%s|1|0\nwork|3|1\n%s|1|0", tmux.PortalSaverName, tmux.PortalBootstrapName),
+			output: fmt.Sprintf("dev|2|0|\n%s|1|0|\nwork|3|1|\n%s|1|0|", tmux.PortalSaverName, tmux.PortalBootstrapName),
 			want: []tmux.Session{
 				{Name: "dev", Windows: 2, Attached: false},
 				{Name: "work", Windows: 3, Attached: true},
@@ -153,12 +212,12 @@ func TestListSessionsFiltersUnderscorePrefixed(t *testing.T) {
 		},
 		{
 			name:   "all underscore sessions yields non-nil empty slice",
-			output: fmt.Sprintf("%s|1|0\n%s|1|0", tmux.PortalSaverName, tmux.PortalBootstrapName),
+			output: fmt.Sprintf("%s|1|0|\n%s|1|0|", tmux.PortalSaverName, tmux.PortalBootstrapName),
 			want:   []tmux.Session{},
 		},
 		{
 			name:   "underscore mid-name is not filtered (HasPrefix not Contains)",
-			output: "foo_bar|1|0",
+			output: "foo_bar|1|0|",
 			want: []tmux.Session{
 				{Name: "foo_bar", Windows: 1, Attached: false},
 			},
@@ -207,7 +266,7 @@ func TestListSessions_PortalSaverExcludedAtSource(t *testing.T) {
 	// Raw tmux output deliberately includes _portal-saver alongside two
 	// real user sessions to verify the filter strips only the internal
 	// session.
-	rawOutput := fmt.Sprintf("dev|2|0\n%s|1|0\nwork|3|1", tmux.PortalSaverName)
+	rawOutput := fmt.Sprintf("dev|2|0|\n%s|1|0|\nwork|3|1|", tmux.PortalSaverName)
 	mock := &MockCommander{Output: rawOutput}
 	client := tmux.NewClient(mock)
 
@@ -247,7 +306,7 @@ func TestListSessions_PortalSaverExclusionRefactorPin(t *testing.T) {
 	// pigeon-saver (no underscore prefix, mid-name 'saver' substring)
 	// must NOT be filtered.
 	rawOutput := fmt.Sprintf(
-		"pigeon|1|0\n%s|1|0\npigeon-saver|1|0\n%s|1|0\n_foo|1|0",
+		"pigeon|1|0|\n%s|1|0|\npigeon-saver|1|0|\n%s|1|0|\n_foo|1|0|",
 		tmux.PortalSaverName,
 		tmux.PortalBootstrapName,
 	)
@@ -1601,7 +1660,7 @@ func TestEnsureServerThenListSessions(t *testing.T) {
 				case "new-session":
 					return "", nil
 				case "list-sessions":
-					return fmt.Sprintf("%s|1|0", tmux.PortalBootstrapName), nil
+					return fmt.Sprintf("%s|1|0|", tmux.PortalBootstrapName), nil
 				default:
 					t.Fatalf("unexpected command: %v", args)
 					return "", nil
@@ -1642,7 +1701,7 @@ func TestEnsureServerThenListSessions(t *testing.T) {
 		wantCalls := [][]string{
 			{"info"},
 			{"new-session", "-d", "-s", tmux.PortalBootstrapName},
-			{"list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}"},
+			{"list-sessions", "-F", "#{session_name}|#{session_windows}|#{session_attached}|#{@portal-dir}"},
 			{"info"},
 		}
 		for i, wantArgs := range wantCalls {
@@ -1700,7 +1759,7 @@ func TestSendKeys(t *testing.T) {
 
 func TestListSessionNames(t *testing.T) {
 	t.Run("returns just the names from list-sessions output", func(t *testing.T) {
-		mock := &MockCommander{Output: "dev|3|1\nwork|5|0"}
+		mock := &MockCommander{Output: "dev|3|1|\nwork|5|0|"}
 		client := tmux.NewClient(mock)
 
 		got, err := client.ListSessionNames()

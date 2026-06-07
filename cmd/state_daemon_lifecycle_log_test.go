@@ -168,7 +168,7 @@ func TestDefaultShutdownFlush_EmitsShutdownFlushCompletedFalseOnRestoringSkip(t 
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
 		optionByName: map[string]string{state.RestoringMarkerName: "1"},
-		sessionsOut:  "work|1|0",
+		sessionsOut:  "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 	logger, sink := newCaptureLoggerForComponent(t, "daemon")
@@ -303,7 +303,7 @@ func TestDefaultShutdownFlush_EmitsShutdownFlushCompletedFalseOnRestoringReadErr
 	t.Setenv("PORTAL_STATE_DIR", dir)
 	fc := &daemonFakeCommander{
 		optionErr:   transportErrCommandError(),
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 	}
 	deps := makeDeps(t, dir, fc)
 	logger, sink := newCaptureLoggerForComponent(t, "daemon")

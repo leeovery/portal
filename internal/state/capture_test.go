@@ -71,11 +71,13 @@ func (m *captureMock) RunRaw(args ...string) (string, error) {
 }
 
 // listSessionsFor returns a list-sessions output line for the given names. The
-// numeric fields are placeholders; CaptureStructure only consumes the names.
+// numeric fields and the trailing @portal-dir field are placeholders;
+// CaptureStructure only consumes the names. The trailing empty field matches
+// the 4-field "name|windows|attached|@portal-dir" format ListSessions emits.
 func listSessionsFor(names ...string) string {
 	lines := make([]string, 0, len(names))
 	for _, n := range names {
-		lines = append(lines, n+"|1|0")
+		lines = append(lines, n+"|1|0|")
 	}
 	return strings.Join(lines, "\n")
 }

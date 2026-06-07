@@ -238,7 +238,7 @@ func TestOrchestrator_SilentlySkipsLiveSession(t *testing.T) {
 
 	rf := &orchestratorRunFunc{
 		// Live session named "work" already exists.
-		listSessionsOut: "work|1|0",
+		listSessionsOut: "work|1|0|",
 	}
 	mock := &mockCommander{RunFunc: rf.run}
 	logger, sink := openTestLogger(t, dir)
@@ -590,7 +590,7 @@ func TestOrchestrator_SkeletonSummaryExcludesLiveSkippedSession(t *testing.T) {
 	writeValidIndex(t, dir, sessions)
 
 	rf := &orchestratorRunFunc{
-		listSessionsOut: "live|1|0",
+		listSessionsOut: "live|1|0|",
 		listPanesOut:    "0:0",
 	}
 	mock := &mockCommander{RunFunc: rf.run}

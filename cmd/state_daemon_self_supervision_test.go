@@ -143,7 +143,7 @@ func TestDaemonLoop_SelfCheckSkipsCaptureOnEjectTick(t *testing.T) {
 	withOsExitFake(t, func(_ int) { panic("osExit invoked") })
 
 	fc := &daemonFakeCommander{
-		sessionsOut: "work|1|0",
+		sessionsOut: "work|1|0|",
 		panesOut:    "work|||0|||main|||layout|||0|||1|||0|||/tmp|||1|||zsh",
 	}
 	deps := makeDeps(t, dir, fc)
