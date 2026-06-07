@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 1
 phase: Input Review
@@ -80,9 +80,9 @@ Added "(and `x --tag=`)" to the Per-session non-goal bullet so the deferred laun
 The spec carefully specifies the By-Tag-with-zero-tags empty state (degrade-to-flat with a "No tags yet" signpost) but is silent on By Project mode when there are no projects/sessions to group, or when every session is on the lazy-stamp path and has not yet resolved a directory. Because By Project is sold as "delivers value with zero setup," its empty/degenerate rendering is worth pinning down (does it just show the flat list? a signpost? Untagged-equivalent bucket for un-resolvable sessions?). This is a minor blind spot the sources did not cover; flagging for completeness rather than as missed source content.
 
 **Proposed Addition**:
+Added a "By Project with nothing to group" empty-state subsection mirroring the By-Tag handling: no-sessions degrades to flat with no signpost (By Project is always populated once any session is live); a session with an unresolvable directory (no stamp + fallback can't derive a git-root) collects under a pinned **Unknown** bucket so it is never dropped.
 
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Gap-fill grounded in the existing By-Tag empty-state + Untagged-bucket pattern; introduces the parallel **Unknown** bucket for By Project.
 
 ---

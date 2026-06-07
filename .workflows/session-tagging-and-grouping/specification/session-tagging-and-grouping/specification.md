@@ -174,6 +174,9 @@ The last-used grouping mode is **persisted** so Portal opens in the user's usual
 
 - **By Tag with zero tags** — does **not** silently flatten. Render the plain (ungrouped) session list **with an explicit "No tags yet" message**, so the user sees they are in tag view, understands why there are no groups, and knows where to add them (the projects page). This is a degrade-to-flat **with a signpost**, not a silent one — it preserves the no-regression feel (the session list itself is unchanged) while keeping the mode legible.
 - **Empty tags field in the projects edit modal** — shows a clear empty state ("no tags") rather than a blank.
+- **By Project with nothing to group** — follows the same no-regression principle as By Tag:
+  - **No live sessions:** renders exactly as flat mode would (an empty list). There is nothing to group; By Project never renders worse than flat, so no dedicated signpost is required. Unlike By Tag (which can be globally empty whenever zero tags exist anywhere), By Project is effectively always populated once any session is live, because every session resolves to a directory (via the `@portal-dir` stamp or the lazy fallback).
+  - **Unresolvable directory:** a session whose `@portal-dir` is absent *and* whose lazy fallback cannot derive a git-root (e.g. a pane with no enclosing git repository) collects under a single pinned **Unknown** group at the end — mirroring the By-Tag **Untagged** bucket — so no session is ever silently dropped from the grouped view.
 
 ## Filter Composition
 
