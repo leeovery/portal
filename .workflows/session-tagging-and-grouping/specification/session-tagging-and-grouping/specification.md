@@ -62,6 +62,37 @@ A directory **never opened in Portal** is not a project and cannot be pre-tagged
 
 Tags live on the project record in `projects.json`, not in a separate store. They persist with the project and are removed when the project is deleted (projects-page `d`). There is no separate tag store to garbage-collect and no orphan-tag sweep (unlike hooks/markers). The `@portal-dir` session stamp (see *Session → Directory Resolution*) is ephemeral and dies with the session — nothing to GC there either.
 
+## Session → Directory Resolution
+
+Grouping a session — by project or (via inheritance) by tag — requires mapping each **live** session back to its directory. This is the one genuine piece of new mechanism the feature needs.
+
+The session **name cannot** do this: a name is `{project}-{nanoid}` at birth, but the user renames sessions freely. A session knows its directory only via its panes, which roam.
+
+### The stamp (fast path)
+
+At session creation, Portal stamps the tmux session user-option **`@portal-dir = <resolvedDir>`**, where `<resolvedDir>` is the git-root already computed in `session.PrepareSession`.
+
+- **Survives rename** — the option rides the session *object*, not its name.
+- **Survives pane `cd`** — stamped once at create, never re-derived from live pane cwd.
+- **Cheap to read** — the grouped render reads it in the same `list-sessions -F` pass that already fetches session names (append `#{@portal-dir}` to the format string). No `git rev-parse` per session per render.
+
+The grouped render uses `@portal-dir` to look up the directory's `Project` record and its `tags`.
+
+### The lazy stamp-on-render fallback (stamp absent)
+
+`@portal-dir` is the fast path, not a guarantee. When the grouped render encounters a session with **no `@portal-dir`**, it resolves that session's directory from the **active pane's current path → git-root** and **stamps `@portal-dir` then and there** (lazy). After that first grouped render the session is on the fast path.
+
+One mechanism covers **both** stamp-absence cases — no schema change, no restore-engine change, no first-boot backfill:
+
+- **Post-reboot:** restored sessions return without the option (`@portal-dir` is in-memory tmux state, not persisted in `sessions.json`). The first grouped render re-derives and re-stamps. There is no need to persist the resolved directory into the session record.
+- **Pre-existing live sessions on first ship:** sessions already running when the feature ships have no stamp; the same fallback stamps them on first render. They appear in **By Project** immediately — **no "restart to appear" gap**.
+
+So deriving the directory live from the pane's `current_path` is **not rejected** — it is precisely this fallback, used only for the un-stamped minority (typically still sitting at their project directory), then cached via the lazy stamp. The drift/perf objections applied only to using live derivation as the *primary* path, which v1 does not.
+
+### Path-keying canonicalisation (build-time requirement)
+
+The dir→tags lookup keys on a directory path, so the **render-time lookup key must match the stored `Project.Path` exactly**. Both the stamped `@portal-dir` value and the fallback-derived git-root must be normalised to the same canonical form the project store uses, accounting for: symlinks, trailing slash, `~` expansion. Implementation must confirm the lookup key matches stored `Project.Path` for the same directory; a mismatch would silently drop a session out of its group.
+
 ---
 
 ## Working Notes
