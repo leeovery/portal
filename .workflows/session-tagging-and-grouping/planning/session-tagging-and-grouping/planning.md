@@ -111,3 +111,16 @@ approved_at: 2026-06-07
 - [ ] An empty tags field shows a clear "no tags" empty state rather than a blank
 - [ ] The projects-edit → sessions-page transition dispatches a sessions-list refresh that re-reads project records and re-groups, so an added/removed tag is reflected on the next render
 - [ ] Tags are editable from the projects page only (never a session row) and there is no `portal tags …` CLI
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-4-1 | Add Tags field modal state + load editProject.Tags on modal open | project with nil/empty tags, existing tags preserved on open, modal re-open resets prior tag buffer |
+| session-tagging-and-grouping-4-2 | Three-way Tab field cycle (Name → Aliases → Tags → wrap to Name) | wrap Tags → Name, focus order Name→Aliases→Tags, tag cursor initialised on entering Tags field |
+| session-tagging-and-grouping-4-3 | Add-tag-on-Enter (field-scoped add, blank/dup no-op) | blank/whitespace-only Enter no-op, "  Work " stored as "work", duplicate-after-normalisation no-op, Enter while Name/Aliases focused still confirms, Tags-focused empty-input Enter is no-op not confirm |
+| session-tagging-and-grouping-4-4 | Remove-highlighted-tag via `x` + Tags field text/Backspace/Up/Down keys | `x` on Add input is not a removal, cursor clamp after removing last entry, Backspace only affects new-tag input, Up/Down bounded to entries+Add row |
+| session-tagging-and-grouping-4-5 | Persist tag additions/removals on confirm via ProjectEditor AddTag/RemoveTag seam | persist failure sets editError and aborts close, no-op when tags unchanged, additions and removals in one confirm, normalisation/dedup owned by Phase 1 store |
+| session-tagging-and-grouping-4-6 | Render Tags block after Aliases with "no tags" empty state | empty tags shows clear empty state not blank, focus indicator only on focused field, highlighted-entry marker, Add-input row always rendered |
+| session-tagging-and-grouping-4-7 | Dispatch re-group sessions refresh on projects-edit → sessions-page transition | refresh respects active grouping mode, nil SessionLister tolerated, no refresh when not transitioning, command-pending guard preserved |
