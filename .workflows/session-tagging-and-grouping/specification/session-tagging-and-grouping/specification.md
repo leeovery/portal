@@ -127,7 +127,7 @@ The session list cycles through three modes:
 A directory can carry multiple tags, so a session can belong to multiple tag groups. How a session renders depends on whether the grouping dimension is single- or multi-valued:
 
 - **By Project — single-valued → Pattern A.** A session has exactly one directory, so it appears **once**. Matches the user's mental model and is the expected dominant mode.
-- **By Tag — multi-valued → Pattern B.** A session appears **once under each tag it has** (the Linear/Jira/Trello/Notion group-by-label convention). This deliberately avoids inventing a "primary tag" concept — the only alternative, judged not worth the extra model and UX.
+- **By Tag — multi-valued → Pattern B.** A session appears **once under each tag it has** (the Linear/Jira/Trello/Notion group-by-label convention). This deliberately avoids inventing a "primary tag" concept — the only alternative, judged not worth the extra model and UX. Rendering: a multi-tag session is materialised as one list item per tag (see *Filter Composition → Item model*); every instance attaches the same underlying session.
 
 **Untagged bucket.** In By Tag mode, sessions whose directory has no tags collect under a single **Untagged** group, pinned last.
 
@@ -246,7 +246,15 @@ Live-grouped filtering is **deferred as its own separate, purely-additive featur
 
 ### Build note
 
-Grouping must be a **render-layer** concern: the `bubbles/list` items are **session items only**, and group headings are injected at render time as visual separators — never as list items. This single decision delivers three properties for free: the built-in filter only ever sees session items (flatten-on-filter is trivial), the cursor can never land on a header (non-selectable, no skip logic), and `g`/`G` navigate session-to-session. The alternative (headers as list items, suppressed while filtering) is **rejected** — it would require custom cursor-skip logic and filter-aware header injection.
+Grouping must be a **render-layer** concern: every `bubbles/list` item is a **session instance** (an item that selects/attaches a real session), and group headings are injected at render time as visual separators — **never as list items**. "Session instance" — not "exactly one item per session": see *Item model* below, where By Tag mode legitimately materialises a multi-tag session as several instances. The key invariant is that *no list item is a header*. This single decision delivers three properties for free: the built-in filter only ever sees session instances (flatten-on-filter is trivial), the cursor can never land on a header (non-selectable, no skip logic), and `g`/`G` navigate session-instance to session-instance. The alternative (headers as list items, suppressed while filtering) is **rejected** — it would require custom cursor-skip logic and filter-aware header injection.
+
+#### Item model (the central rendering mechanism)
+
+The flat item slice fed to `bubbles/list` is **pre-sorted into grouped order**, and headers are injected at each **group-key boundary** (when the current item's group key differs from the previous item's). The slice is deliberately *not* in default `bubbles/list` order — grouping order is a precondition the render layer establishes before handing the slice to the widget.
+
+- **Flat & By Project:** **one item per session.** Each session has exactly one directory, so it occupies one position. (By Project items are pre-sorted by project heading, then session name.)
+- **By Tag:** **one item per `(session, tag)` pair.** A session with tags `[work, personal]` materialises as **two** list items — one under each tag heading. This is exactly what makes Pattern B and the header-count rule (sum of By-Tag counts exceeds live session count) work. A zero-tag session contributes **one** item, pinned into the **Untagged** group; an unresolved session contributes one item in **Unknown** (By Project).
+- **Selection/cursor contract:** every instance of a session is independently selectable, and **selecting any instance attaches the same underlying session** (the duplicate instances are views of one session, not distinct targets). `g`/`G` and the initial cursor land on a session instance; it is acceptable and expected that the same session is reachable from more than one cursor position in By Tag mode.
 
 > Note: Portal's custom `SessionDelegate` means matched characters do **not** visually highlight today — the built-in filter ranks but does not highlight matches. v1 introduces no change here.
 

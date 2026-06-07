@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 3
 phase: Gap Analysis
@@ -36,7 +36,7 @@ This is the central rendering mechanism of the feature; leaving the item-model u
 **Proposed Addition**:
 {leave blank until discussed — likely a clarification in the Build note / Group headers section stating that the render-layer item slice is pre-sorted into grouped order, and that in By Tag mode the slice contains one item per (session, tag) pair (a session legitimately materialises as multiple list items, each selecting/attaching the same underlying session), while By Project / Flat keep one item per session; headers are injected at each group-key boundary in the pre-sorted slice.}
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved (finding_gate_mode=auto). Added an 'Item model' subsection under Filter Composition: render-layer slice is pre-sorted into grouped order with headers injected at group-key boundaries; Flat/By-Project = one item per session, By-Tag = one item per (session,tag) pair; every instance attaches the same underlying session. Clarified the build-note wording ('session instance', invariant = no list item is a header) and cross-linked from Pattern B.
 
 ---
