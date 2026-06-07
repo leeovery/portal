@@ -15,7 +15,16 @@ var (
 	nameStyle     = lipgloss.NewStyle().Bold(true)
 	detailStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#777777"))
 	attachedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76"))
+	// headingStyle dims the injected group heading so it reads as a separator
+	// rather than a selectable row. Layered alongside the existing delegate
+	// styles per spec § Group headers (dimmed).
+	headingStyle = lipgloss.NewStyle().Faint(true)
 )
+
+// groupSeparator is the heading glyph between the group label and its count,
+// rendered as "Heading ··· N" (U+00B7 MIDDLE DOT ×3) per the spec examples
+// (Portal ··· 2, Untagged ··· 3).
+const groupSeparator = "···"
 
 // windowLabel returns a formatted window count with correct pluralization.
 func windowLabel(count int) string {
@@ -93,10 +102,28 @@ func (d SessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 // Render renders a session item with cursor indicator, styled name,
 // dimmed window count, and green attached badge.
+//
+// When the item begins a new group, Render prepends a dimmed group heading
+// line ("Heading ··· N") as a pure render-layer separator — never a list item,
+// so the cursor and selection (which index into m.Items()) are unaffected. A
+// new group is detected by comparing this item's GroupKey against the previous
+// list item's; the leading item always starts a group. Flat items (empty
+// GroupKey) inject no heading, leaving the output byte-identical to the
+// pre-grouping delegate.
+//
+// Height/Spacing tradeoff: the heading is drawn as an extra prefixed line
+// within this single Render write, but Height() stays 1 (bubbles/list measures
+// pagination by Height()). The extra heading lines are therefore drawn but not
+// counted, accepting minor pagination imprecision in v1 rather than routing the
+// picker through lipgloss/tree (build constraint) or per-item variable height.
 func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	si, ok := item.(SessionItem)
 	if !ok {
 		return
+	}
+
+	if heading, ok := groupHeading(m, index, si); ok {
+		_, _ = fmt.Fprintln(w, heading)
 	}
 
 	isSelected := index == m.Index()
@@ -116,6 +143,47 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 
 	line := fmt.Sprintf("%s%s  %s", cursor, name, detail)
 	_, _ = fmt.Fprint(w, line)
+}
+
+// groupHeading returns the dimmed "Heading ··· N" separator to render above the
+// item at index, plus true, when that item begins a new group. It returns
+// ("", false) for Flat items (empty GroupKey) and for interior items of a group.
+//
+// A new group is detected by comparing si.GroupKey against the previous list
+// item's GroupKey; index 0 always begins a group. Boundary detection keys on
+// GroupKey, while the heading label is taken from si.GroupHeading (the display
+// label, e.g. the project name or tag value).
+func groupHeading(m list.Model, index int, si SessionItem) (string, bool) {
+	if si.GroupKey == "" {
+		return "", false
+	}
+
+	if index > 0 {
+		if prev, ok := m.Items()[index-1].(SessionItem); ok && prev.GroupKey == si.GroupKey {
+			return "", false
+		}
+	}
+
+	count := groupCount(m.Items(), index, si.GroupKey)
+	label := fmt.Sprintf("%s %s %d", si.GroupHeading, groupSeparator, count)
+	return headingStyle.Render(label), true
+}
+
+// groupCount returns the size of the contiguous run of items sharing groupKey,
+// starting at start (the group's first item). The pre-sorted grouped order
+// guarantees same-key items are contiguous, so a forward scan is exact. The scan
+// is bounded by the run length (~15-20 sessions in practice), so the linear walk
+// per group boundary is acceptable.
+func groupCount(items []list.Item, start int, groupKey string) int {
+	count := 0
+	for i := start; i < len(items); i++ {
+		si, ok := items[i].(SessionItem)
+		if !ok || si.GroupKey != groupKey {
+			break
+		}
+		count++
+	}
+	return count
 }
 
 // ToListItems converts a slice of tmux sessions to a slice of list.Item.

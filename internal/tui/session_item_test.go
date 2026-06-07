@@ -305,6 +305,147 @@ func TestSessionDelegate(t *testing.T) {
 	})
 }
 
+// groupSeparator is the heading separator glyph (U+00B7 MIDDLE DOT ×3) used by
+// the delegate in the "Heading ··· N" form. Duplicated here so the test pins the
+// exact rendered glyph independently of the implementation constant.
+const groupSeparator = "···"
+
+func TestSessionDelegateGroupHeadings(t *testing.T) {
+	t.Run("injects a dimmed heading before the first item of each group", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+		}
+		m := list.New(items, d, 80, 10)
+
+		// The second group's first item (index 2) starts a new group → heading.
+		var buf bytes.Buffer
+		d.Render(&buf, m, 2, items[2])
+		out := buf.String()
+		if !strings.Contains(out, "Work") {
+			t.Errorf("expected heading 'Work' before group boundary item: %q", out)
+		}
+		if !strings.Contains(out, groupSeparator) {
+			t.Errorf("expected separator glyph in heading: %q", out)
+		}
+
+		// An interior item of the first group (index 1) does NOT start a new group.
+		var interior bytes.Buffer
+		d.Render(&interior, m, 1, items[1])
+		if strings.Contains(interior.String(), groupSeparator) {
+			t.Errorf("interior item should emit no heading: %q", interior.String())
+		}
+	})
+
+	t.Run("injects a leading heading before the very first item", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+		}
+		m := list.New(items, d, 80, 10)
+
+		var buf bytes.Buffer
+		d.Render(&buf, m, 0, items[0])
+		out := buf.String()
+		if !strings.Contains(out, "Portal") {
+			t.Errorf("expected leading heading 'Portal' before first item: %q", out)
+		}
+		if !strings.Contains(out, groupSeparator) {
+			t.Errorf("expected separator glyph in leading heading: %q", out)
+		}
+	})
+
+	t.Run("renders a per-group count of the rows beneath the heading", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+			tui.SessionItem{Session: tmux.Session{Name: "d", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+			tui.SessionItem{Session: tmux.Session{Name: "e", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
+		}
+		m := list.New(items, d, 80, 10)
+
+		var portal bytes.Buffer
+		d.Render(&portal, m, 0, items[0])
+		if !strings.Contains(portal.String(), "Portal "+groupSeparator+" 2") {
+			t.Errorf("expected 'Portal %s 2', got: %q", groupSeparator, portal.String())
+		}
+
+		var work bytes.Buffer
+		d.Render(&work, m, 2, items[2])
+		if !strings.Contains(work.String(), "Work "+groupSeparator+" 3") {
+			t.Errorf("expected 'Work %s 3', got: %q", groupSeparator, work.String())
+		}
+	})
+
+	t.Run("counts a multi-tag session under each of its tag headings", func(t *testing.T) {
+		// One live session 'dev' materialised under two tags (Pattern B). The
+		// By-Tag header counts sum to 2 while there is only 1 live session.
+		dev := tmux.Session{Name: "dev", Windows: 1}
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: dev, GroupKey: "personal", GroupHeading: "personal", Tag: "personal"},
+			tui.SessionItem{Session: dev, GroupKey: "work", GroupHeading: "work", Tag: "work"},
+		}
+		m := list.New(items, d, 80, 10)
+
+		var personal bytes.Buffer
+		d.Render(&personal, m, 0, items[0])
+		if !strings.Contains(personal.String(), "personal "+groupSeparator+" 1") {
+			t.Errorf("expected 'personal %s 1', got: %q", groupSeparator, personal.String())
+		}
+
+		var work bytes.Buffer
+		d.Render(&work, m, 1, items[1])
+		if !strings.Contains(work.String(), "work "+groupSeparator+" 1") {
+			t.Errorf("expected 'work %s 1', got: %q", groupSeparator, work.String())
+		}
+	})
+
+	t.Run("injects no heading for flat items (byte-identical to today)", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 2, Attached: true}},
+			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 1, Attached: false}},
+		}
+		m := list.New(items, d, 80, 10)
+
+		// Expected output is the legacy session line: cursor + name + "  " + detail.
+		for index := range items {
+			var buf bytes.Buffer
+			d.Render(&buf, m, index, items[index])
+			out := buf.String()
+			if strings.Contains(out, groupSeparator) {
+				t.Errorf("flat item %d emitted a heading: %q", index, out)
+			}
+			if strings.Contains(out, "\n") {
+				t.Errorf("flat item %d emitted a multi-line render: %q", index, out)
+			}
+		}
+	})
+
+	t.Run("carries the correct count for the last group", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		items := []list.Item{
+			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
+			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
+			tui.SessionItem{Session: tmux.Session{Name: "d", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
+		}
+		m := list.New(items, d, 80, 10)
+
+		var last bytes.Buffer
+		d.Render(&last, m, 1, items[1])
+		if !strings.Contains(last.String(), "Untagged "+groupSeparator+" 3") {
+			t.Errorf("expected last group 'Untagged %s 3', got: %q", groupSeparator, last.String())
+		}
+	})
+}
+
 func TestToListItems(t *testing.T) {
 	t.Run("converts tmux sessions to list items", func(t *testing.T) {
 		sessions := []tmux.Session{
