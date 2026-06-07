@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Tag data model & session→directory resolution
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 **Goal**: Establish the feature's foundation — add a normalised `tags []string` field to the `Project` record, and build the `@portal-dir` session→directory resolution mechanism (creation-time stamp plus lazy stamp-on-render fallback) that maps each live session back to its directory and thus its tags.
 
@@ -19,7 +20,8 @@ status: draft
 - [ ] The render-time lookup key (stamped value and fallback-derived git-root) matches stored `Project.Path` exactly, normalised for symlinks, trailing slash, and `~` expansion
 
 ### Phase 2: Grouped render — By Project & By Tag
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 **Goal**: Render the live session list in grouped form using the render-layer item model: every `bubbles/list` item remains a session instance, group headings are injected at group-key boundaries as visual separators, the By-Tag mode materialises a multi-tag session as one `(session, tag)` item per tag, and unresolved/untagged sessions collect in the pinned **Unknown** (By Project) / **Untagged** (By Tag) buckets.
 
@@ -34,7 +36,8 @@ status: draft
 - [ ] Selecting any instance of a session attaches the same underlying session (duplicate By-Tag instances are views of one session); the picker is not routed through `lipgloss/tree`
 
 ### Phase 3: Mode toggle, persistence & empty/filter states
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 **Goal**: Wire the `s` key as a single unconditional cycle (Flat → By Project → By Tag → Flat), persist the last-used mode in a new `prefs.json`, surface the mode in the title and the `s switch view` footer hint, and handle the degenerate states: the By-Tag "No tags yet" signpost and flatten-on-filter.
 
@@ -50,7 +53,8 @@ status: draft
 - [ ] An active filter flattens the grouped view to matching sessions (headers step aside, filtering behaviour otherwise unchanged); clearing the filter restores the grouped view
 
 ### Phase 4: Tag management in the projects edit modal
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 **Goal**: Add a **Tags** field to the existing projects edit modal that behaves exactly like the alias field (type + Enter to add, highlight + `x` to remove), extend the modal's Tab handler from a binary toggle to a three-way Name → Aliases → Tags cycle, and dispatch a sessions-list re-group refresh on the projects-edit → sessions-page transition so edits are visible on return.
 
