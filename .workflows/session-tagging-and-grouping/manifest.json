@@ -33,7 +33,7 @@
         "session-tagging-and-grouping": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "20f05106ebce0c452761f2482146a3cc85cfbb81",
+          "spec_commit": "47b8df4579891795fae8df5efdc710f7f14e33ef",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
