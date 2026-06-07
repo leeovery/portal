@@ -21,7 +21,7 @@ func IsPathArgument(arg string) bool {
 // user's home directory, resolves relative paths to absolute, and validates
 // that the result exists and is a directory. Returns the resolved absolute path.
 func ResolvePath(arg string) (string, error) {
-	expanded := expandTilde(arg)
+	expanded := ExpandTilde(arg)
 
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
@@ -43,7 +43,7 @@ func ResolvePath(arg string) (string, error) {
 // NormalisePath expands tilde and resolves relative paths to absolute.
 // Unlike ResolvePath, it does not validate that the path exists on disk.
 func NormalisePath(path string) string {
-	expanded := expandTilde(path)
+	expanded := ExpandTilde(path)
 
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
@@ -53,8 +53,11 @@ func NormalisePath(path string) string {
 	return abs
 }
 
-// expandTilde replaces a leading ~ with the user's home directory.
-func expandTilde(path string) string {
+// ExpandTilde replaces a leading ~ with the user's home directory. It is the
+// single source of truth for tilde expansion across Portal — other packages
+// (e.g. internal/project's canonical path keying) reuse it rather than
+// re-implementing the logic.
+func ExpandTilde(path string) string {
 	if path == "~" {
 		home, err := os.UserHomeDir()
 		if err != nil {
