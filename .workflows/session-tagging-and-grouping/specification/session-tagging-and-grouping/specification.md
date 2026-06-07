@@ -29,7 +29,7 @@ These are explicitly out of v1 scope. v1 is purely additive and locks none of th
 
 - **Per-session tags + `portal open --tag=`** — the eventual hybrid model's second layer (per-session `@portal-tags` tmux option, captured/restored across reboot). Deferred.
 - **Live-grouped filtering** — keeping group headers visible while the `/` filter is active. Deferred as its own separate feature (would require Portal to own the filter wholesale). v1 flattens on filter.
-- **Tag exclusion / hide-a-tag** — a filter layer on top of grouping. Deferred power-feature.
+- **Tag exclusion / hide-a-tag** — a filter layer on top of grouping. Deferred power-feature. The deferral is acceptable because the existing `/` filter covers basic narrowing in the meantime; revisit only if a concrete "tag I never want to see" pain appears.
 
 ## Guiding Invariant — Additive, No Regression
 

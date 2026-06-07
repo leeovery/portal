@@ -23,10 +23,10 @@ The discussion explicitly records the rationale that tag exclusion is acceptable
 > - **Tag exclusion / hide-a-tag** — a filter layer on top of grouping. Deferred power-feature.
 
 **Proposed Addition**:
+Appended to the Tag exclusion non-goal bullet: "The deferral is acceptable because the existing `/` filter covers basic narrowing in the meantime; revisit only if a concrete 'tag I never want to see' pain appears."
 
-
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved.
 
 ---
 
