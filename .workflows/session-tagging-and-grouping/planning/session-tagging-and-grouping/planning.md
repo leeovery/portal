@@ -20,7 +20,8 @@ approved_at: 2026-06-07
 - [ ] The render-time lookup key (stamped value and fallback-derived git-root) matches stored `Project.Path` exactly, normalised for symlinks, trailing slash, and `~` expansion
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
