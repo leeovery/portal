@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
@@ -150,6 +151,8 @@ type ProjectsLoadedMsg struct {
 type Model struct {
 	sessionList       list.Model
 	sessions          []tmux.Session
+	projects          []project.Project
+	sessionListMode   prefs.SessionListMode
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -795,8 +798,34 @@ func (m Model) filteredSessions() []tmux.Session {
 // (e.g. inside-tmux title rewrite) stays at the call site.
 func (m *Model) applySessions(sessions []tmux.Session) tea.Cmd {
 	m.sessions = sessions
+	return m.rebuildSessionList()
+}
+
+// rebuildSessionList is the single mode-aware re-render core for the session
+// list. It recomputes the filtered (inside-tmux excluded) view, dispatches to
+// the builder for the active sessionListMode, pushes the resulting items into
+// sessionList, and re-applies the terminal size so pagination accounts for the
+// full footer height.
+//
+// Builders are pure functions fed the cached project records (m.projects,
+// populated from ProjectsLoadedMsg) — no synchronous store read happens in the
+// render path. ModeFlat routes through ToListItems so its output is identical
+// to the pre-grouping behaviour; ModeByProject / ModeByTag route through the
+// grouping builders. Zero live sessions yields an empty list in every mode.
+func (m *Model) rebuildSessionList() tea.Cmd {
 	filtered := m.filteredSessions()
-	cmd := m.sessionList.SetItems(ToListItems(filtered))
+
+	var items []list.Item
+	switch m.sessionListMode {
+	case prefs.ModeByProject:
+		items = buildByProject(filtered, m.projects)
+	case prefs.ModeByTag:
+		items = buildByTag(filtered, m.projects)
+	default:
+		items = ToListItems(filtered)
+	}
+
+	cmd := m.sessionList.SetItems(items)
 	// Re-apply terminal size so pagination accounts for the manual keymap
 	// footer height (see applyListSize). Without this re-apply the list
 	// would size itself against pre-load defaults and overflow under the
@@ -1077,6 +1106,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ProjectsLoadedMsg:
 		var setItemsCmd tea.Cmd
 		if msg.Err == nil {
+			// Cache the project records so the mode-aware session re-render core
+			// (rebuildSessionList) can feed them to the grouping builders
+			// without a synchronous store read in the render path.
+			m.projects = msg.Projects
 			items := ProjectsToListItems(msg.Projects)
 			setItemsCmd = m.projectList.SetItems(items)
 			// Re-apply terminal size so pagination accounts for the manual
