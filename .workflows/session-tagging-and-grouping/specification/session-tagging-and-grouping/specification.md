@@ -52,6 +52,18 @@ Existing `projects.json` records predate the `tags` field. A missing `tags` fiel
 
 There is **no separate "create tag" step and no tag registry**. The set of tags that exists is the **union of `tags` across all project records**. Applying `work` to a second directory auto-joins the existing `work` group; removing the last `work` tag makes the group cease to exist. Tags come into and out of existence purely as a side effect of being applied to projects.
 
+### Tag value normalisation & validation
+
+Because a tag value is also the **grouping key** (it becomes a By-Tag heading and drives the implicit-union dedup), value handling is load-bearing and must be defined — the alias field has no equivalent consequences. v1 rules:
+
+- **Whitespace:** leading/trailing whitespace is **trimmed** on add. `"  work "` is stored as `work`.
+- **Empty / whitespace-only:** rejected. Pressing Enter on a blank (or whitespace-only) input is a **no-op** — no tag is added.
+- **Case:** the **canonical form is lower-cased**. `Work`, `WORK`, and `work` are the **same tag** — they collapse into one By-Tag heading and dedup in the union. Tags are stored and displayed in this canonical lower-cased form (no separate display casing in v1).
+- **Duplicate within a project:** adding a tag a project already carries (after normalisation) is a **no-op** — `tags` is a deduped set per project, so a project never appears twice under one heading.
+- **Allowed characters / length:** no character whitelist and no hard max length in v1 (freeform, like aliases). The trim + lower-case + non-empty + per-project dedup rules above are the complete validation set.
+
+The same canonical form (trim + lower-case) is used everywhere a tag is compared: per-project dedup, the cross-project union that defines "which tags exist," and By-Tag grouping.
+
 ### Taggable surface — projects only
 
 The projects edit modal is the **only** origin for tags, and it lists **known projects only**. Because every session creation upserts a project (`session.PrepareSession` → `store.Upsert(resolvedDir, projectName, "internal")` keyed by git-root), any directory opened in Portal at least once is a project and therefore taggable.
@@ -88,6 +100,13 @@ One mechanism covers **both** stamp-absence cases — no schema change, no resto
 - **Pre-existing live sessions on first ship:** sessions already running when the feature ships have no stamp; the same fallback stamps them on first render. They appear in **By Project** immediately — **no "restart to appear" gap**.
 
 So deriving the directory live from the pane's `current_path` is **not rejected** — it is precisely this fallback, used only for the un-stamped minority (typically still sitting at their project directory), then cached via the lazy stamp. The drift/perf objections applied only to using live derivation as the *primary* path, which v1 does not.
+
+**Failure & ordering semantics (the fallback writes during a render):**
+
+- **The derived value is used for *this* render**, not just cached for the next one — that is what makes "they appear in By Project immediately" true. The stamp write is a side-effect that accelerates *subsequent* renders.
+- **The stamp write is best-effort.** If `set-session-option` fails (tmux error, session killed mid-render), the session still renders this pass using the in-memory derived directory; the stamp is simply re-attempted on the next grouped render. A write failure never drops the session from the view.
+- **If git-root derivation itself fails** (pane has no enclosing git repository), the session is not stamped and falls to the **Unknown** bucket (By Project) / **Untagged** (By Tag) — see *Empty States*. It is re-attempted each render (cheap; this is the rare case).
+- **First-ship cost is a bounded one-time amortisation.** On first ship every live session is un-stamped, so the *first* grouped render performs N git-root derivations + N stamp writes (N = live session count, ~15–20). This one-time cost is accepted; from the second render on, all sessions are on the fast path. The steady-state "un-stamped minority" framing applies after this first pass.
 
 ### Path-keying canonicalisation (build-time requirement)
 
