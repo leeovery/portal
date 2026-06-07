@@ -230,6 +230,17 @@ type Model struct {
 	flashText string
 	flashGen  uint64
 
+	// byTagSignpost is the persistent "No tags yet" signpost flag (spec §
+	// Mode Persistence & Empty States → Empty states → By Tag with zero
+	// tags). It is set true by rebuildSessionList whenever ModeByTag is
+	// active AND no project carries any tag — the zero-tags-anywhere gate.
+	// In that state the list is built with the plain flat builder (degrade
+	// to flat) while viewSessionList renders a dimmed signpost row. Unlike
+	// flashText (transient, cleared on the next actionable key), this is a
+	// derived persistent flag recomputed on every rebuild — it clears the
+	// moment the mode leaves ByTag or any tag appears.
+	byTagSignpost bool
+
 	// Data loading tracking
 	sessionsLoaded       bool
 	projectsLoaded       bool
@@ -890,14 +901,42 @@ func nextSessionListMode(mode prefs.SessionListMode) prefs.SessionListMode {
 	}
 }
 
+// anyTagsExist reports whether any project record carries at least one tag —
+// the zero-tags-anywhere gate (spec § Tag Data Model → Tags are implicit: the
+// set of tags that exists is the union of tags across all project records).
+// Presence is all that matters: tags are already canonical from Phase 1, so a
+// non-empty Tags slice on any project means "a tag exists somewhere." This is
+// strictly directory-tag presence, independent of which sessions are live — so
+// the tags-exist-but-all-sessions-tagged case (empty-Untagged-suppression) does
+// NOT degrade to the signpost.
+func anyTagsExist(projects []project.Project) bool {
+	for _, p := range projects {
+		if len(p.Tags) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) rebuildSessionList() tea.Cmd {
 	filtered := m.filteredSessions()
 
+	// Zero-tags-anywhere gate (spec § Empty states → By Tag with zero tags):
+	// when By Tag mode is active but no project carries any tag, degrade to the
+	// plain flat list WITH a signpost rather than silently flattening. Build
+	// with ToListItems so the rendered list is byte-for-byte the flat list (no
+	// Untagged heading — there is nothing to group). The flag is recomputed on
+	// every rebuild, so it clears automatically when the mode leaves ByTag or
+	// when a tag appears.
+	m.byTagSignpost = m.sessionListMode == prefs.ModeByTag && !anyTagsExist(m.projects)
+
 	var items []list.Item
-	switch m.sessionListMode {
-	case prefs.ModeByProject:
+	switch {
+	case m.byTagSignpost:
+		items = ToListItems(filtered)
+	case m.sessionListMode == prefs.ModeByProject:
 		items = buildByProject(filtered, m.projects)
-	case prefs.ModeByTag:
+	case m.sessionListMode == prefs.ModeByTag:
 		items = buildByTag(filtered, m.projects)
 	default:
 		items = ToListItems(filtered)
@@ -2019,21 +2058,57 @@ func (m Model) viewSessionList() string {
 		modalContent = m.renameInput.View()
 	}
 	listView := renderListWithModal(m.sessionList, modalContent)
+	if m.byTagSignpost {
+		// Persistent "No tags yet" signpost (spec § Empty states → By Tag
+		// with zero tags). Inserted additively beneath the title/filter row
+		// — mirroring the flash-row insertion below — so the title, list,
+		// and footer chrome are unchanged aside from the one inserted row.
+		// Gated on byTagSignpost (persistent), NOT flashText (transient).
+		listView = insertRowBelowTitle(listView, renderByTagSignpostRow())
+	}
 	if m.flashText != "" {
 		// Split off the first line (title / filter input row) and insert
 		// the flash row between it and the remainder. Using a manual split
 		// keeps the existing list view byte-identical aside from the
 		// inserted row, satisfying "no existing chrome replaced or
 		// overlaid".
-		if idx := strings.IndexByte(listView, '\n'); idx < 0 {
-			// Single-line list view (degenerate); append the flash below.
-			listView = listView + "\n" + m.renderFlashRow()
-		} else {
-			listView = listView[:idx+1] + m.renderFlashRow() + "\n" + listView[idx+1:]
-		}
+		listView = insertRowBelowTitle(listView, m.renderFlashRow())
 	}
 	footer := renderKeymapFooter(&m.sessionList, sessionFooterBindings(&m.sessionList))
 	return lipgloss.JoinVertical(lipgloss.Left, listView, footer)
+}
+
+// insertRowBelowTitle inserts row between the first line (the list's
+// title / filter input row) and the remainder of listView, preserving the
+// rest byte-for-byte. A single-line (degenerate) listView appends the row
+// below instead. Shared by the persistent By-Tag signpost and the transient
+// flash so both use the identical additive-insertion mechanic.
+func insertRowBelowTitle(listView, row string) string {
+	idx := strings.IndexByte(listView, '\n')
+	if idx < 0 {
+		return listView + "\n" + row
+	}
+	return listView[:idx+1] + row + "\n" + listView[idx+1:]
+}
+
+// byTagSignpostStyle is the dimmed style for the persistent By-Tag "No tags
+// yet" signpost row. Kept SEPARATE from flashRowStyle (the transient flash):
+// the two rows have distinct lifecycles and the signpost must remain visually
+// distinct from a transient flash. Package-level + immutable (lipgloss value
+// semantics prevent mutation bleed across renders).
+var byTagSignpostStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Italic(true)
+
+// byTagSignpostText is the exact, persistent signpost wording rendered in By
+// Tag mode when no project carries any tag (spec § Empty states → By Tag with
+// zero tags). It states the empty condition ("No tags yet") and points the
+// user at where to add tags (the projects page). Placement: a dimmed row
+// inserted directly beneath the title/filter row, above the (plain flat)
+// session list.
+const byTagSignpostText = "No tags yet — add tags on the projects page"
+
+// renderByTagSignpostRow returns the styled persistent signpost row.
+func renderByTagSignpostRow() string {
+	return byTagSignpostStyle.Render(byTagSignpostText)
 }
 
 // flashRowStyle is a package-level immutable lipgloss style; lipgloss
