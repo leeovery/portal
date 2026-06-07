@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 1
 phase: Plan Integrity Review
@@ -36,8 +36,8 @@ The surgical fix is to add an explicit `blocked_by` edge from 2-2 and 2-3 to 2-1
 >
 > Rationale: `buildByProject` returns `[]list.Item` of enriched `SessionItem`s and assigns `GroupKey`/`GroupHeading`; those fields are introduced by task 2-1, so 2-1 must complete first. The added edge overrides the priority-1 sort that would otherwise offer this builder before 2-1.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Added `tick dep add tick-4358f8 tick-0ccac8` (2-2 ← 2-1). Verified 2-2 now blocked_by [2-1, 1-6, 1-4].
 
 ---
 
@@ -63,7 +63,7 @@ This is a genuine cross-phase dependency gap (criteria: "a cross-phase dependenc
 >
 > Rationale: `buildByTag` calls `project.MatchProjectByDir` (delivered by 1-4) to resolve each session's project, and constructs enriched `SessionItem`s whose `GroupKey`/`GroupHeading`/`Tag`/`CatchAll` fields are introduced by 2-1. Both are hard predecessors. The added 2-1 edge also overrides the priority-1 sort that would otherwise offer this builder before 2-1 (see Finding 1).
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Added `tick dep add tick-dc8a90 tick-0ccac8` (2-3 ← 2-1) and `tick dep add tick-dc8a90 tick-5a49ee` (2-3 ← 1-4). Verified 2-3 now blocked_by [2-1, 1-4, 1-2].
 
 ---
