@@ -4896,12 +4896,15 @@ func TestEditProject(t *testing.T) {
 			t.Errorf("name should still be 'portalZ' (not modified by alias typing), got:\n%s", view)
 		}
 
-		// Tab again returns to name
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+		// Tab is now a three-way cycle: Name → Aliases → Tags → Name.
+		// From Aliases, two more Tabs (Tags, then wrap) return focus to Name,
+		// where typing again appends to the name field.
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Aliases → Tags
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Tags → Name
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Y'}})
 		view = model.View()
 		if !strings.Contains(view, "portalZY") {
-			t.Errorf("after second Tab, typing should append to name, got:\n%s", view)
+			t.Errorf("after wrapping back to name, typing should append to name, got:\n%s", view)
 		}
 	})
 

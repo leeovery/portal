@@ -105,6 +105,7 @@ type editField int
 const (
 	editFieldName editField = iota
 	editFieldAliases
+	editFieldTags
 )
 
 // DirLister abstracts directory listing for testability.
@@ -1575,9 +1576,17 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyTab:
-		if m.editFocus == editFieldName {
+		// Three-way forward cycle: Name → Aliases → Tags → wrap to Name.
+		switch m.editFocus {
+		case editFieldName:
 			m.editFocus = editFieldAliases
-		} else {
+		case editFieldAliases:
+			m.editFocus = editFieldTags
+			// Reset the tag cursor to the Add-input row on entry so the
+			// highlight starts in a defined, in-bounds position (index 0 is
+			// always valid, even with zero tags).
+			m.editTagCursor = 0
+		default:
 			m.editFocus = editFieldName
 		}
 		return m, nil
