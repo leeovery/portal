@@ -81,7 +81,8 @@ approved_at: 2026-06-07
 - [ ] An active filter flattens the grouped view to matching sessions (headers step aside, filtering behaviour otherwise unchanged); clearing the filter restores the grouped view
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
