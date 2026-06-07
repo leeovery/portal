@@ -203,6 +203,29 @@ Grouping must be a **render-layer** concern (or headers injected only when not f
 
 > Note: Portal's custom `SessionDelegate` means matched characters do **not** visually highlight today — the built-in filter ranks but does not highlight matches. v1 introduces no change here.
 
+## Assigning & Managing Tags
+
+### Surface — the projects edit modal
+
+Tags are assigned and managed in the **existing projects edit modal**. A **Tags** field is added alongside Name and Aliases, behaving **exactly like the existing alias field** (`model.go:1427-1438`):
+
+- Type a tag + **Enter** to add it.
+- Highlight an entry + **`x`** to remove it.
+
+This reuses an interaction the user already knows — zero new interaction to learn.
+
+### Projects page only — not the sessions row
+
+Tags are edited **from the projects page only**, never from a session row. Since v1 tags the *directory*, a sessions-row action would really mean "edit this session's project" (indirect) — deferred to keep v1 clean. (This ties back to the deferred per-session tag layer.)
+
+### TUI only — no CLI in v1
+
+There is **no `portal tags …` CLI** in v1. The projects page is the sole management surface. A CLI/scripting interface is a possible later addition.
+
+### Implicit tags (recap)
+
+Consistent with the data model: there is no "create tag" step or registry. The set of tags is the union of tags applied across all projects (see *Tag Data Model & Persistence*). Applying `work` to a second directory auto-joins the existing `work` group.
+
 ---
 
 ## Working Notes
