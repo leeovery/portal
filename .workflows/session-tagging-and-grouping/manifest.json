@@ -23,7 +23,8 @@
             "session-tagging-and-grouping": {
               "status": "pending"
             }
-          }
+          },
+          "construction_gate_mode": "auto"
         }
       }
     }
