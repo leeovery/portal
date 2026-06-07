@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-07
 cycle: 2
 phase: Plan Integrity Review
@@ -56,7 +56,7 @@ Raising 2-1 to priority 1 makes the critical-path banding internally consistent 
 >
 > Rationale: 2-1 is a convergence-point predecessor of two priority-1 critical-path tasks (2-2 and 2-3 both `blocked_by` 2-1). Elevating it to priority 1 aligns its graph position with the critical-path banding (1-2 / 1-4 / 1-6 / 2-2 / 2-3 / 3-1 / 3-3) so the gate to the grouped-render builders is scheduled no later than the builders themselves. Correctness is unchanged — the existing `blocked_by` edges already enforce 2-1 before 2-2/2-3; this only corrects the priority-versus-graph-position mismatch.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Ran `tick update tick-0ccac8 --priority 1`. Verified 2-1 now priority 1, aligning it with the critical-path band (1-2/1-4/1-6/2-2/2-3/3-1/3-3). Correctness unchanged — blocked_by edges already enforced order.
 
 ---
