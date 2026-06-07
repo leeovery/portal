@@ -131,6 +131,11 @@ A directory can carry multiple tags, so a session can belong to multiple tag gro
 
 **Untagged bucket.** In By Tag mode, sessions whose directory has no tags collect under a single **Untagged** group, pinned last.
 
+**Heading label text.**
+
+- **By Project headings show the project `name`** (the friendly name on the `Project` record), e.g. `Portal`. The **grouping key is the canonical directory path**, not the name — so two distinct directories that happen to share a `name` (e.g. `~/code/portal` and `~/archive/portal`) form **two separate groups** that may display the same heading text. This visual repeat is accepted in v1 (no path-disambiguation suffix); it is rare and harmless. (A session whose directory is not a known project — stamped path with no matching `Project` record — does not appear here; see *Empty States → Unknown bucket*.)
+- **By Tag headings show the canonical (trimmed, lower-cased) tag value.**
+
 Accepted downside of Pattern B: a heavily-tagged list is longer than the flat list (sessions repeat). Mitigations beyond the Untagged catch-all (e.g. collapsible headers) are **deferred** — not built up front, revisited only if it bites.
 
 ### Ordering — static alphabetical, no recency
@@ -188,6 +193,11 @@ The last-used grouping mode is **persisted** so Portal opens in the user's usual
 
 - **First-ever launch defaults to Flat** (zero surprise), and remembers thereafter.
 - **Persistence target:** a small **prefs file** under `~/.config/portal/`, using the existing `configFilePath` + `AtomicWrite` pattern. UI state does not belong in domain stores like `projects.json`; the prefs file owns the last-used grouping mode. (This is an idiomatic implementation call, not a user-facing decision.)
+- **Concrete shape (idiomatic, owned):**
+  - **Filename:** `prefs.json`, resolved through `configFilePath` exactly like the other config files (per-file env-var override → `XDG_CONFIG_HOME/portal/` → `~/.config/portal/`). It participates in the same `migrateConfigFile` one-shot move convention as `projects.json` / `aliases` / `hooks.json`.
+  - **Format & schema:** a JSON object with a single string-enum key, e.g. `{"session_list_mode": "flat" | "by-project" | "by-tag"}`. String enum (not int) so the file stays human-readable and stable.
+  - **Write timing:** persisted on **each toggle press** via `AtomicWrite` (cheap; matches the "remember last mode" intent without a flush-on-quit code path). 
+  - **Decode-failure behaviour:** a missing, empty, corrupt, or unparseable prefs file (or an unrecognised mode value) **falls back to Flat** and is treated as first-launch — consistent with the other stores' tolerant decode behaviour. No hard error; a missing file is the normal first-run state.
 
 ### Empty states
 
