@@ -1592,6 +1592,26 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// Tags field: Enter is field-scoped — it adds the typed tag to the
+		// working buffer rather than confirming. A blank/whitespace-only or
+		// duplicate-after-normalisation input is a no-op (and never confirms).
+		// Name/Aliases fall through to the existing confirm path unchanged.
+		if m.editFocus == editFieldTags {
+			tag, ok := project.NormaliseTag(m.editNewTag)
+			if !ok {
+				// Blank/whitespace-only: no append, no confirm.
+				return m, nil
+			}
+			if slices.Contains(m.editTags, tag) {
+				// Duplicate after normalisation: no append, no confirm.
+				m.editNewTag = ""
+				return m, nil
+			}
+			m.editTags = append(m.editTags, tag)
+			m.editNewTag = ""
+			m.editError = ""
+			return m, nil
+		}
 		return m.handleEditProjectConfirm()
 
 	case tea.KeyBackspace:
