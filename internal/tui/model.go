@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -255,6 +256,12 @@ type Model struct {
 	editFocus       editField
 	editAliasCursor int
 	editError       string
+
+	// Tag-buffer modal state, parallel to the alias-buffer fields above.
+	editTags        []string // working copy of the project's tags
+	editRemovedTags []string // tags marked for removal (parallel to editRemoved)
+	editNewTag      string   // in-progress Add-input text (parallel to editNewAlias)
+	editTagCursor   int      // highlighted row within the Tags block
 }
 
 // Selected returns the name of the session chosen by the user, or empty if
@@ -1529,6 +1536,14 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 	m.editError = ""
 	m.editRemoved = nil
 	m.editAliasCursor = 0
+
+	// Seed the tag buffer from a copy of the project's tags so mutating the
+	// buffer never aliases the stored project slice. slices.Clone(nil)
+	// returns nil, so a back-compat record with no tags seeds an empty buffer.
+	m.editTags = slices.Clone(pi.Project.Tags)
+	m.editRemovedTags = nil
+	m.editNewTag = ""
+	m.editTagCursor = 0
 
 	// Load aliases matching this project's directory
 	allAliases, err := m.aliasEditor.Load()
