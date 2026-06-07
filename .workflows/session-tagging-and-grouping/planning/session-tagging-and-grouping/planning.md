@@ -50,6 +50,18 @@ approved_at: 2026-06-07
 - [ ] Catch-all buckets (**Unknown** / **Untagged**) are pinned last, carry a count, and are suppressed when their membership is zero; an unresolvable or deleted-project session falls to Unknown (By Project) / Untagged (By Tag) and is never dropped
 - [ ] Selecting any instance of a session attaches the same underlying session (duplicate By-Tag instances are views of one session); the picker is not routed through `lipgloss/tree`
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-2-1 | Extend SessionItem with group metadata (group key, heading label, optional tag) | zero-value flat item carries no group metadata, FilterValue still returns session name, multiple instances share one underlying Session |
+| session-tagging-and-grouping-2-2 | By Project grouping builder (session → dir key → project name heading, pre-sorted) | two distinct dirs sharing a project name form two groups (key is canonical path not name), Session.Dir empty, stamped dir with no matching project record, zero live sessions |
+| session-tagging-and-grouping-2-3 | By Tag grouping builder (one item per (session, tag), pre-sorted) | multi-tag session yields N items, work/Work/WORK collapse to one heading, zero-tag session yields exactly one item, session whose dir has no project record |
+| session-tagging-and-grouping-2-4 | Pinned catch-all buckets (Unknown / Untagged) with empty-suppression | empty bucket suppressed, unresolvable dir (no git-root) → Unknown, deleted-project session → Unknown (By Project) / Untagged (By Tag), bucket pinned last after alphabetical headings, session never dropped |
+| session-tagging-and-grouping-2-5 | Header-injecting counted delegate render (dimmed heading + row count at group boundary) | count reflects rows beneath heading (By-Tag sum exceeds live session count), leading header before first item, flat items inject no header, last group's count |
+| session-tagging-and-grouping-2-6 | Cursor, initial position and g/G land only on session instances; any instance attaches same session | initial cursor on first session instance, g/G land on session not header, duplicate By-Tag instances resolve to one session, selectedSessionItem returns underlying session |
+
 ### Phase 3: Mode toggle, persistence & empty/filter states
 status: approved
 approved_at: 2026-06-07
