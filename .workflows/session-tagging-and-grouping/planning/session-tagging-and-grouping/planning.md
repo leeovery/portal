@@ -113,7 +113,8 @@ approved_at: 2026-06-07
 - [ ] Tags are editable from the projects page only (never a session row) and there is no `portal tags …` CLI
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-07
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
