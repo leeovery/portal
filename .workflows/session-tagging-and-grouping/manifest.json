@@ -16,7 +16,7 @@
       "items": {
         "session-tagging-and-grouping": {
           "status": "in-progress",
-          "review_cycle": 3,
+          "review_cycle": 4,
           "finding_gate_mode": "auto",
           "date": "2026-06-07",
           "sources": {
