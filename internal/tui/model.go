@@ -2248,56 +2248,10 @@ func (m Model) renderEditProjectContent() string {
 	fmt.Fprintf(&b, "%sName: %s\n", nameIndicator, m.editName)
 
 	b.WriteString("\n")
-
-	aliasIndicator := "  "
-	if m.editFocus == editFieldAliases {
-		aliasIndicator = "> "
-	}
-	b.WriteString(aliasIndicator + "Aliases:\n")
-
-	if len(m.editAliases) == 0 {
-		b.WriteString("    (none)\n")
-	} else {
-		for i, a := range m.editAliases {
-			marker := "    "
-			if m.editFocus == editFieldAliases && m.editAliasCursor == i {
-				marker = "  > "
-			}
-			fmt.Fprintf(&b, "%s[x] %s\n", marker, a)
-		}
-	}
-
-	addMarker := "    "
-	if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
-		addMarker = "  > "
-	}
-	fmt.Fprintf(&b, "%sAdd: %s\n", addMarker, m.editNewAlias)
+	renderEditListField(&b, "Aliases", m.editFocus == editFieldAliases, m.editAliases, m.editAliasCursor, m.editNewAlias)
 
 	b.WriteString("\n")
-
-	tagsIndicator := "  "
-	if m.editFocus == editFieldTags {
-		tagsIndicator = "> "
-	}
-	b.WriteString(tagsIndicator + "Tags:\n")
-
-	if len(m.editTags) == 0 {
-		b.WriteString("    (none)\n")
-	} else {
-		for i, tag := range m.editTags {
-			marker := "    "
-			if m.editFocus == editFieldTags && m.editTagCursor == i {
-				marker = "  > "
-			}
-			fmt.Fprintf(&b, "%s[x] %s\n", marker, tag)
-		}
-	}
-
-	tagAddMarker := "    "
-	if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
-		tagAddMarker = "  > "
-	}
-	fmt.Fprintf(&b, "%sAdd: %s\n", tagAddMarker, m.editNewTag)
+	renderEditListField(&b, "Tags", m.editFocus == editFieldTags, m.editTags, m.editTagCursor, m.editNewTag)
 
 	if m.editError != "" {
 		fmt.Fprintf(&b, "\n  Error: %s\n", m.editError)
@@ -2306,6 +2260,38 @@ func (m Model) renderEditProjectContent() string {
 	b.WriteString("\n  [Enter] Save  [Esc] Cancel  [Tab] Switch field")
 
 	return b.String()
+}
+
+// renderEditListField renders one editable list field (Aliases or Tags) of the
+// edit-project modal into b: a focus-indicated "<label>:" heading, the entries
+// (each a removable "[x] <entry>" row, or a "(none)" empty state), and a trailing
+// "Add: <addInput>" row. The focus indicator and per-row cursor markers are driven
+// by focused (whether the field currently has focus) combined with cursor (which
+// selects an entry, or the Add row when it equals len(entries)).
+func renderEditListField(b *strings.Builder, label string, focused bool, entries []string, cursor int, addInput string) {
+	indicator := "  "
+	if focused {
+		indicator = "> "
+	}
+	b.WriteString(indicator + label + ":\n")
+
+	if len(entries) == 0 {
+		b.WriteString("    (none)\n")
+	} else {
+		for i, entry := range entries {
+			marker := "    "
+			if focused && cursor == i {
+				marker = "  > "
+			}
+			fmt.Fprintf(b, "%s[x] %s\n", marker, entry)
+		}
+	}
+
+	addMarker := "    "
+	if focused && cursor == len(entries) {
+		addMarker = "  > "
+	}
+	fmt.Fprintf(b, "%sAdd: %s\n", addMarker, addInput)
 }
 
 // viewSessionList renders the session list using bubbles/list, composes the
