@@ -5,8 +5,8 @@ package project
 // grouped TUI render cheap: the stored Project.Path values are canonicalised
 // ONCE at construction (NewIndex), rather than re-running CanonicalDirKey — a
 // filepath.EvalSymlinks syscall — over every stored project on every session,
-// every render (the O(sessions × projects) syscall cost that
-// MatchProjectByDir incurs).
+// every render (the O(sessions × projects) syscall cost a per-call linear scan
+// over the stored project set would incur).
 //
 // An Index is a derived cache of a []Project: it must be rebuilt (via NewIndex)
 // whenever the underlying project set changes, or lookups will return stale
@@ -32,9 +32,9 @@ func NewIndex(projects []Project) Index {
 
 // Match finds the Project whose directory matches dirPath, canonicalising
 // dirPath via CanonicalDirKey exactly once and performing a single map lookup.
-// It returns (Project{}, key, false) when no project matches — semantically
-// identical to MatchProjectByDir, but at O(1) amortised cost with no per-call
-// EvalSymlinks over the stored project set.
+// It returns (Project{}, key, false) when no project matches — the same
+// canonical-key match semantics a linear scan over the stored project set would
+// yield, but at O(1) amortised cost with no per-call EvalSymlinks over that set.
 //
 // The returned key is always CanonicalDirKey(dirPath) — the canonical
 // (EvalSymlinks-resolved) form of the input — whether or not a project matched.
@@ -44,8 +44,8 @@ func NewIndex(projects []Project) Index {
 //
 // An empty dirPath is canonicalised like any other path; since a real project's
 // canonical key never collides with CanonicalDirKey("") (the process working
-// directory), an empty dir reports not-found, preserving MatchProjectByDir's
-// semantics. Grouping callers additionally guard s.Dir == "" before calling.
+// directory), an empty dir reports not-found. Grouping callers additionally
+// guard s.Dir == "" before calling.
 func (idx Index) Match(dirPath string) (Project, string, bool) {
 	key := CanonicalDirKey(dirPath)
 	p, ok := idx.byKey[key]

@@ -22,26 +22,40 @@ func TestIndexMatch(t *testing.T) {
 		{Path: otherDir, Name: "Other"},
 	}
 
-	t.Run("it resolves a session dir to the same project as MatchProjectByDir", func(t *testing.T) {
+	t.Run("it resolves a session dir to the same project as a canonical-key scan", func(t *testing.T) {
 		idx := NewIndex(projects)
 
 		// Pass a trailing-slash variant to confirm canonicalisation on both sides.
 		dir := projDir + string(os.PathSeparator)
 
 		gotIdx, gotKey, okIdx := idx.Match(dir)
-		gotMatch, okMatch := MatchProjectByDir(projects, dir)
+
+		// Inline oracle: scan the project set for one whose canonical key equals
+		// the canonical key of the lookup dir — the same logic the index
+		// performs, computed independently here as a differential cross-check.
+		wantKey := CanonicalDirKey(dir)
+		var wantProj Project
+		wantOk := false
+		for _, p := range projects {
+			if CanonicalDirKey(p.Path) == wantKey {
+				wantProj = p
+				wantOk = true
+				break
+			}
+		}
+
 		if !okIdx {
 			t.Fatalf("Index.Match(%q) ok = false, want true", dir)
 		}
-		if okIdx != okMatch || gotIdx.Name != gotMatch.Name || gotIdx.Path != gotMatch.Path {
-			t.Errorf("Index.Match(%q) = (%+v,%v), MatchProjectByDir = (%+v,%v)", dir, gotIdx, okIdx, gotMatch, okMatch)
+		if okIdx != wantOk || gotIdx.Name != wantProj.Name || gotIdx.Path != wantProj.Path {
+			t.Errorf("Index.Match(%q) = (%+v,%v), scan oracle = (%+v,%v)", dir, gotIdx, okIdx, wantProj, wantOk)
 		}
 		if gotIdx.Name != "Proj" {
 			t.Errorf("Index.Match(%q) name = %q, want %q", dir, gotIdx.Name, "Proj")
 		}
 		// The returned key is always the canonical form of the input dir.
-		if want := CanonicalDirKey(dir); gotKey != want {
-			t.Errorf("Index.Match(%q) key = %q, want %q", dir, gotKey, want)
+		if gotKey != wantKey {
+			t.Errorf("Index.Match(%q) key = %q, want %q", dir, gotKey, wantKey)
 		}
 	})
 

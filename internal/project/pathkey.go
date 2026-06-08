@@ -40,21 +40,3 @@ func CanonicalDirKey(path string) string {
 
 	return filepath.Clean(resolved)
 }
-
-// MatchProjectByDir finds the Project whose directory matches dirPath by
-// canonical key. The stored Project.Path is canonicalised on each comparison so
-// the match is robust to symlink/trailing-slash/tilde differences between the
-// stored path and the lookup path. It returns (Project{}, false) when no
-// project matches — the caller routes such a path to the Unknown/Untagged
-// bucket.
-func MatchProjectByDir(projects []Project, dirPath string) (Project, bool) {
-	want := CanonicalDirKey(dirPath)
-
-	for _, p := range projects {
-		if CanonicalDirKey(p.Path) == want {
-			return p, true
-		}
-	}
-
-	return Project{}, false
-}

@@ -163,7 +163,14 @@ func TestResolveSessionDir(t *testing.T) {
 		// store would derive for the stored Project.Path, so a By-Project
 		// lookup matches. Simulate a stored project rooted at gitRoot.
 		stored := []project.Project{{Path: gitRoot, Name: "proj"}}
-		_, matched := project.MatchProjectByDir(stored, dir)
+		matched := false
+		want := project.CanonicalDirKey(dir)
+		for _, p := range stored {
+			if project.CanonicalDirKey(p.Path) == want {
+				matched = true
+				break
+			}
+		}
 		if !matched {
 			t.Errorf("derived dir %q did not match stored Project.Path %q via canonical key", dir, gitRoot)
 		}

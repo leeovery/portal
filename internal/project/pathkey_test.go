@@ -84,42 +84,6 @@ func TestCanonicalDirKey(t *testing.T) {
 	})
 }
 
-func TestMatchProjectByDir(t *testing.T) {
-	base := t.TempDir()
-	projDir := filepath.Join(base, "proj")
-	if err := os.Mkdir(projDir, 0o755); err != nil {
-		t.Fatalf("Mkdir(%q) error = %v", projDir, err)
-	}
-
-	projects := []Project{
-		{Path: projDir, Name: "Proj"},
-		{Path: filepath.Join(base, "other"), Name: "Other"},
-	}
-
-	t.Run("it matches a project by canonical directory key", func(t *testing.T) {
-		// Pass a trailing-slash variant to confirm canonicalisation on both sides.
-		got, ok := MatchProjectByDir(projects, projDir+string(os.PathSeparator))
-		if !ok {
-			t.Fatalf("MatchProjectByDir(%q) ok = false, want true", projDir)
-		}
-		if got.Name != "Proj" {
-			t.Errorf("MatchProjectByDir(%q) name = %q, want %q", projDir, got.Name, "Proj")
-		}
-	})
-
-	t.Run("it returns not-found when the path matches no project", func(t *testing.T) {
-		got, ok := MatchProjectByDir(projects, filepath.Join(base, "nope"))
-		if ok {
-			t.Errorf("MatchProjectByDir(unknown) ok = true, want false")
-		}
-		// Project now contains a slice field (Tags) so it is not comparable
-		// with ==; assert the zero value field-by-field.
-		if got.Path != "" || got.Name != "" || !got.LastUsed.IsZero() || got.Tags != nil {
-			t.Errorf("MatchProjectByDir(unknown) project = %+v, want zero value", got)
-		}
-	})
-}
-
 // TestCanonicalDirKey_MatchesResolveGitRoot is the spec's build-time
 // lookup-key-matches-stored-path invariant: a directory resolved through
 // ResolveGitRoot (the source of Project.Path at upsert time) must produce a
