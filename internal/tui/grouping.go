@@ -64,18 +64,7 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 		})
 	}
 
-	slices.SortFunc(known, func(a, b SessionItem) int {
-		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Session.Name, b.Session.Name)
-	})
-
-	resolved := make([]list.Item, 0, len(known))
-	for _, ki := range known {
-		resolved = append(resolved, ki)
-	}
-	return appendCatchAll(resolved, unknown, unknownHeading)
+	return assembleGroups(known, unknown, unknownHeading)
 }
 
 // buildByTag assembles the live sessions into By-Tag grouped order: a pre-sorted
@@ -124,18 +113,7 @@ func buildByTag(sessions []tmux.Session, projects []project.Project) []list.Item
 		}
 	}
 
-	slices.SortFunc(tagged, func(a, b SessionItem) int {
-		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Session.Name, b.Session.Name)
-	})
-
-	resolved := make([]list.Item, 0, len(tagged))
-	for _, ti := range tagged {
-		resolved = append(resolved, ti)
-	}
-	return appendCatchAll(resolved, untagged, untaggedHeading)
+	return assembleGroups(tagged, untagged, untaggedHeading)
 }
 
 // resolveSessionTags returns the canonical, usable tags for a session's
@@ -225,8 +203,41 @@ func appendCatchAll(resolved []list.Item, catchAll []list.Item, heading string) 
 
 	items := make([]list.Item, 0, len(resolved)+len(stamped))
 	items = append(items, resolved...)
-	for _, si := range stamped {
-		items = append(items, si)
-	}
+	items = append(items, sessionItemsToList(stamped)...)
 	return items
+}
+
+// sessionItemsToList boxes a typed []SessionItem into a []list.Item, preserving
+// order and element identity. It is the single source of truth for the
+// SessionItem → list.Item conversion shared by assembleGroups and appendCatchAll.
+// A nil or empty input yields a non-nil, len-0 slice (no panic).
+func sessionItemsToList(items []SessionItem) []list.Item {
+	out := make([]list.Item, 0, len(items))
+	for _, si := range items {
+		out = append(out, si)
+	}
+	return out
+}
+
+// assembleGroups is the shared grouping-assembly tail for buildByProject and
+// buildByTag. It sorts the resolvable groups by (GroupKey, Session.Name) — the
+// single definition of grouped-list ordering — boxes them into []list.Item via
+// sessionItemsToList, and hands off to appendCatchAll, which pins the catch-all
+// bucket last (under heading) and applies empty-suppression.
+//
+// resolved holds the typed resolvable-group items (real GroupKey: canonical path
+// or tag); catchAll holds the flagged catch-all SessionItems in arbitrary order;
+// heading is the catch-all bucket label (Unknown / Untagged). Empty resolved +
+// empty catch-all yields an empty slice.
+//
+// Pure function — no I/O.
+func assembleGroups(resolved []SessionItem, catchAll []list.Item, heading string) []list.Item {
+	slices.SortFunc(resolved, func(a, b SessionItem) int {
+		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.Session.Name, b.Session.Name)
+	})
+
+	return appendCatchAll(sessionItemsToList(resolved), catchAll, heading)
 }
