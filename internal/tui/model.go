@@ -2151,6 +2151,32 @@ func (m Model) renderEditProjectContent() string {
 	}
 	fmt.Fprintf(&b, "%sAdd: %s\n", addMarker, m.editNewAlias)
 
+	b.WriteString("\n")
+
+	tagsIndicator := "  "
+	if m.editFocus == editFieldTags {
+		tagsIndicator = "> "
+	}
+	b.WriteString(tagsIndicator + "Tags:\n")
+
+	if len(m.editTags) == 0 {
+		b.WriteString("    (none)\n")
+	} else {
+		for i, tag := range m.editTags {
+			marker := "    "
+			if m.editFocus == editFieldTags && m.editTagCursor == i {
+				marker = "  > "
+			}
+			fmt.Fprintf(&b, "%s[x] %s\n", marker, tag)
+		}
+	}
+
+	tagAddMarker := "    "
+	if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
+		tagAddMarker = "  > "
+	}
+	fmt.Fprintf(&b, "%sAdd: %s\n", tagAddMarker, m.editNewTag)
+
 	if m.editError != "" {
 		fmt.Fprintf(&b, "\n  Error: %s\n", m.editError)
 	}
