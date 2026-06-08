@@ -5511,6 +5511,40 @@ func TestEditProjectTagPersistence(t *testing.T) {
 			t.Errorf("expected raw tag 'work' passed verbatim, got %q", editor.addedTags[0].rawTag)
 		}
 	})
+
+	t.Run("keeps a tag that was removed then re-added within one modal session", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		// Remove the existing "work" tag (cursor at Add row index 1 → up to 0, x).
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		// Re-add the same tag via the Add input before saving. editRemovedTags
+		// still holds "work" AND editTags now holds it again.
+		model = typeTagAndAdd(model, "work")
+
+		_, cmd := confirmFromTagsField(model)
+
+		// Reconciliation: "work" is still in the final editTags, so it is NOT a
+		// genuine removal — RemoveTag must not fire. It was also in the original
+		// set, so AddTag does not fire either. Net: no-op, tag survives.
+		if len(editor.removedTags) != 0 {
+			t.Errorf("expected no RemoveTag calls for re-added tag, got %+v", editor.removedTags)
+		}
+		if len(editor.addedTags) != 0 {
+			t.Errorf("expected no AddTag calls for re-added tag, got %+v", editor.addedTags)
+		}
+		if cmd == nil {
+			t.Error("expected refresh command on successful confirm, got nil")
+		}
+	})
 }
 
 func TestFileBrowserFromProjectsPage(t *testing.T) {

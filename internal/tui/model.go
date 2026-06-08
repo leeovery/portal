@@ -1845,6 +1845,16 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 	// dedup, so the modal passes raw buffer values verbatim and never
 	// re-normalises here.
 	for _, removed := range m.editRemovedTags {
+		// Reconcile against the final buffer: genuine removals are
+		// editRemovedTags MINUS the final editTags. A tag pressed `x` (queued for
+		// removal) but then re-added via the Add input before saving is still
+		// present in editTags, so it is NOT a genuine removal — skip it. Without
+		// this guard a remove-then-re-add of an originally-present tag would call
+		// RemoveTag (queued) while the addition loop skips it (it was in the
+		// original set), silently dropping the tag from projects.json.
+		if slices.Contains(m.editTags, removed) {
+			continue
+		}
 		if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
 			m.editError = "Failed to save tags"
 			return m, nil
