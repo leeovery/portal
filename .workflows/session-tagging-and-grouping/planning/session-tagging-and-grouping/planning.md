@@ -151,3 +151,13 @@ Address findings from Analysis (Cycle 2).
 | session-tagging-and-grouping-6-2 | Pre-canonicalise stored project paths once per project-load instead of per grouped render | symlinked project path, index rebuilt after project add/remove/edit, grouped-render output byte-identical, collision policy (last-write-wins), CanonicalDirKey stays sole key form |
 | session-tagging-and-grouping-6-3 | Remove the dead SessionItem.Tag field, derive a tag accessor if needed | catch-all identified via CatchAll not empty Tag, no remaining Tag-field references, By-Tag heading/counts/boundary unchanged, optional derived accessor |
 | session-tagging-and-grouping-6-4 | Add an end-to-end @portal-dir stamp → ListSessions(Dir) round-trip integration test | tmux quoting/format-string drift, path with a space, integration build-tag excluded from default run, isolated state env if subprocess spawned |
+
+### Phase 7: Analysis (Cycle 3)
+
+Address findings from Analysis (Cycle 3).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-7-1 | Gate lazy stamp-on-render resolution to grouped modes only | Flat (default) + byTagSignpost arms perform zero pane reads / git rev-parse / stamp writes, ModeByProject/ModeByTag still resolve (counter == N), byTagSignpost precedes ModeByTag so zero-tags By-Tag skips resolution, grouped output byte-identical, m.sessions never mutated |
