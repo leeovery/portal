@@ -16,15 +16,21 @@ func TestNormaliseTag(t *testing.T) {
 			wantOk:  true,
 		},
 		{
-			name:    "it lower-cases mixed case",
+			name:    "it preserves mixed case",
 			raw:     "Work",
-			wantTag: "work",
+			wantTag: "Work",
 			wantOk:  true,
 		},
 		{
-			name:    "it lower-cases upper case",
+			name:    "it preserves upper case",
 			raw:     "WORK",
-			wantTag: "work",
+			wantTag: "WORK",
+			wantOk:  true,
+		},
+		{
+			name:    "it preserves case while trimming edges",
+			raw:     "  Personal ",
+			wantTag: "Personal",
 			wantOk:  true,
 		},
 		{

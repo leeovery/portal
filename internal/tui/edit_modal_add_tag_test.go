@@ -39,11 +39,12 @@ func TestEditModalAddTag_AppendsNormalisedTag(t *testing.T) {
 	}
 }
 
-func TestEditModalAddTag_NormalisesWhitespaceAndCase(t *testing.T) {
+func TestEditModalAddTag_TrimsEdgesPreservingCase(t *testing.T) {
 	got := pressEnter(t, addTagModel("  Work ", nil))
 
-	if len(got.editTags) != 1 || got.editTags[0] != "work" {
-		t.Fatalf("editTags = %v, want [work]", got.editTags)
+	// Edges trimmed, case preserved: the tag is stored/displayed as typed.
+	if len(got.editTags) != 1 || got.editTags[0] != "Work" {
+		t.Fatalf("editTags = %v, want [Work]", got.editTags)
 	}
 	if got.editNewTag != "" {
 		t.Errorf("editNewTag = %q, want empty", got.editNewTag)
@@ -61,8 +62,10 @@ func TestEditModalAddTag_BlankIsNoOp(t *testing.T) {
 	}
 }
 
-func TestEditModalAddTag_DuplicateAfterNormalisationIsNoOp(t *testing.T) {
-	got := pressEnter(t, addTagModel("WORK", []string{"work"}))
+func TestEditModalAddTag_TrimmedDuplicateIsNoOp(t *testing.T) {
+	// "  work " trims to the already-present "work" (exact, case-sensitive
+	// match) — no duplicate appended.
+	got := pressEnter(t, addTagModel("  work ", []string{"work"}))
 
 	if len(got.editTags) != 1 || got.editTags[0] != "work" {
 		t.Errorf("editTags = %v, want [work] (no duplicate appended)", got.editTags)
@@ -72,6 +75,16 @@ func TestEditModalAddTag_DuplicateAfterNormalisationIsNoOp(t *testing.T) {
 	}
 	if got.modal != modalEditProject {
 		t.Errorf("modal = %v, want modalEditProject (dup Enter must not confirm)", got.modal)
+	}
+}
+
+func TestEditModalAddTag_CaseVariantIsNotADuplicate(t *testing.T) {
+	// Case is preserved and matching is case-sensitive, so "WORK" is distinct
+	// from a present "work" and is appended.
+	got := pressEnter(t, addTagModel("WORK", []string{"work"}))
+
+	if len(got.editTags) != 2 || got.editTags[0] != "work" || got.editTags[1] != "WORK" {
+		t.Errorf("editTags = %v, want [work WORK] (case-variant appended)", got.editTags)
 	}
 }
 

@@ -26,6 +26,18 @@ var (
 // (Portal ··· 2, Untagged ··· 3).
 const groupSeparator = "···"
 
+const (
+	// groupHeaderIndent aligns a group header's text with the list title box.
+	// bubbles/list's default TitleBar has PaddingLeft = 2, so the purple
+	// "Sessions" title starts at column 2; headers indent to match rather than
+	// sitting flush against the left edge.
+	groupHeaderIndent = "  "
+	// groupRowIndent nests a grouped session row one level under its header, so
+	// the rows read as indented children of the group heading (cursor aligned
+	// with the header text, name two columns further in).
+	groupRowIndent = "  "
+)
+
 // windowLabel returns a formatted window count with correct pluralization.
 func windowLabel(count int) string {
 	if count == 1 {
@@ -141,7 +153,7 @@ func (d SessionDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	switch it := item.(type) {
 	case HeaderItem:
-		_, _ = fmt.Fprint(w, headingStyle.Render(it.label()))
+		_, _ = fmt.Fprint(w, groupHeaderIndent+headingStyle.Render(it.label()))
 	case SessionItem:
 		cursor := "  "
 		if index == m.Index() {
@@ -155,7 +167,14 @@ func (d SessionDelegate) Render(w io.Writer, m list.Model, index int, item list.
 			detail += "  " + attachedStyle.Render("● attached")
 		}
 
-		_, _ = fmt.Fprintf(w, "%s%s  %s", cursor, name, detail)
+		// Grouped rows (GroupKey set in By Project / By Tag) nest under their
+		// header; Flat rows (empty GroupKey) render flush as before.
+		indent := ""
+		if it.GroupKey != "" {
+			indent = groupRowIndent
+		}
+
+		_, _ = fmt.Fprintf(w, "%s%s%s  %s", indent, cursor, name, detail)
 	}
 }
 

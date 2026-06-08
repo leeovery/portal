@@ -75,11 +75,11 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 //
 // For each session, its directory resolves to a project via idx.Match (the
 // pre-canonicalised project.Index; Session.Dir re-run through the same canonical
-// keying as buildByProject). The project's Tags — stored canonical (lower-cased)
-// by Phase 1 — are each re-normalised through project.NormaliseTag defensively,
-// so a stray non-canonical stored value (e.g. "Work") cannot split a heading and
+// keying as buildByProject). The project's Tags are each re-normalised through
+// project.NormaliseTag defensively (trim + reject-empty, case preserved), so
 // junk values (empty/whitespace) are skipped entirely. Every usable tag emits a
-// SessionItem with GroupKey = GroupHeading = the canonical tag.
+// SessionItem with GroupKey = GroupHeading = the tag exactly as stored — tags
+// are case-sensitive, so "Work" and "work" form distinct headings.
 //
 // A session whose project has no usable tags — empty Tags, all-junk Tags, a
 // project miss, or an empty Dir — emits exactly one item flagged for the pinned

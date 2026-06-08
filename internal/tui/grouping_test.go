@@ -513,7 +513,7 @@ func TestBuildByTag(t *testing.T) {
 		}
 	})
 
-	t.Run("collapses work, Work and WORK into a single tag heading", func(t *testing.T) {
+	t.Run("treats work, Work and WORK as three distinct, case-preserved tag headings", func(t *testing.T) {
 		base := t.TempDir()
 		dir1 := filepath.Join(base, "one")
 		dir2 := filepath.Join(base, "two")
@@ -521,7 +521,8 @@ func TestBuildByTag(t *testing.T) {
 		mustMkdir(t, dir1)
 		mustMkdir(t, dir2)
 		mustMkdir(t, dir3)
-		// Non-canonical stored values prove the defensive NormaliseTag collapse.
+		// Tags are case-sensitive: each case variant is its own group, displayed
+		// exactly as stored.
 		projects := []project.Project{
 			{Path: dir1, Name: "P1", Tags: []string{"work"}},
 			{Path: dir2, Name: "P2", Tags: []string{"Work"}},
@@ -540,21 +541,21 @@ func TestBuildByTag(t *testing.T) {
 			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
 		for _, si := range rows {
-			if si.GroupKey != "work" {
-				t.Errorf("GroupKey = %q, want %q", si.GroupKey, "work")
-			}
-			if si.GroupHeading != "work" {
-				t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "work")
+			if si.GroupKey != si.GroupHeading {
+				t.Errorf("GroupKey %q != GroupHeading %q (tag is its own display)", si.GroupKey, si.GroupHeading)
 			}
 		}
-		// The three non-canonical stored values collapse into one "work" group,
-		// hence a single header counting all three rows.
+		// Sorted by (GroupKey, name): "WORK" < "Work" < "work" (ASCII order), so
+		// three single-row headers in that order.
 		headers := headerRows(items)
-		if len(headers) != 1 {
-			t.Fatalf("len(headers) = %d, want 1 (single collapsed work group)", len(headers))
+		if len(headers) != 3 {
+			t.Fatalf("len(headers) = %d, want 3 (case-distinct groups)", len(headers))
 		}
-		if headers[0].Heading != "work" || headers[0].Count != 3 {
-			t.Errorf("header = (%q, %d), want (%q, 3)", headers[0].Heading, headers[0].Count, "work")
+		want := []string{"WORK", "Work", "work"}
+		for i, h := range headers {
+			if h.Heading != want[i] || h.Count != 1 {
+				t.Errorf("header[%d] = (%q, %d), want (%q, 1)", i, h.Heading, h.Count, want[i])
+			}
 		}
 	})
 

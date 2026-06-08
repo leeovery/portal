@@ -15,20 +15,24 @@ import (
 var ErrProjectNotFound = errors.New("project not found")
 
 // NormaliseTag converts a raw tag value into its canonical form: leading and
-// trailing whitespace trimmed, then lower-cased. Internal whitespace is
-// preserved. It returns ok==false (with an empty string) for input that is
-// empty or whitespace-only, which callers treat as a rejected/no-op tag.
+// trailing whitespace trimmed. Case and internal whitespace are preserved, so a
+// tag is stored and displayed exactly as the user typed it (e.g. "Personal"
+// stays "Personal" rather than being folded to "personal"). It returns
+// ok==false (with an empty string) for input that is empty or whitespace-only,
+// which callers treat as a rejected/no-op tag.
 //
-// This is the sole canonical-form function for tags. Every later tag
-// comparison — per-project dedup, the cross-project union that defines which
-// tags exist, and By-Tag grouping — MUST call it rather than re-implementing
-// trim/lower-case, so the grouping key stays consistent everywhere.
+// This is the sole canonical-form function for tags. Every tag comparison —
+// per-project dedup, the cross-project union that defines which tags exist, and
+// By-Tag grouping — MUST call it rather than re-implementing the trim, so the
+// stored value, the grouping key, and the displayed heading stay identical
+// everywhere. Because case is preserved, matching is case-sensitive: "Work" and
+// "work" are distinct tags (and distinct By-Tag groups).
 func NormaliseTag(raw string) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", false
 	}
-	return strings.ToLower(trimmed), true
+	return trimmed, true
 }
 
 // findByPath locates the index of the project whose Path exactly matches path.
