@@ -1,0 +1,8 @@
+# Analysis — Standards — Cycle 3
+
+STATUS: clean
+FINDINGS_COUNT: 0
+
+SUMMARY: The session-tagging-and-grouping implementation conforms to the specification and project conventions across all four phases and the 15 acceptance criteria. Tag normalisation (trim+lower+dedup+empty-reject), the three-mode cycle with unconditional By-Tag inclusion, prefs.json persistence with tolerant-decode-to-Flat, the @portal-dir stamp-at-creation plus render-layer lazy fallback, canonical path keying (symlink/trailing-slash/tilde), Pattern-A/Pattern-B grouping, pinned-and-suppressed catch-all buckets, flatten-on-filter, the projects-edit→sessions re-group refresh, and the no-regression Flat path all match the spec. Conventions honoured: prefs is a leaf that logs nothing and is excluded from the closed audit-trail; prefs.json resolves through configFilePath with PORTAL_PREFS_FILE override + migration; tag mutations emit the audited projects: breadcrumb; no tests use t.Parallel().
+
+Two deliberate, planning-documented spec reconciliations (not drift): (1) sessionListTitleForMode preserves the pre-existing inside-tmux "(current: %s)" suffix on top of the spec's three base strings (in-source flagged as minimal reconciliation). (2) dirresolve.go treats a pane with no enclosing git repo as resolving to its own cwd (groupable, Unknown only when no project record matches) rather than the spec's literal "no git-root → Unknown"; acknowledged spec ambiguity resolved during planning, still satisfies AC 10's "never dropped". The accepted pagination-imprecision (Height()==1 vs heading lines) excluded per instructions.
