@@ -108,8 +108,8 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected SessionItem, got %T", items[0])
 	}
-	if si.GroupHeading != "work" || si.Tag != "work" {
-		t.Errorf("expected session re-grouped under tag heading %q, got heading=%q tag=%q", "work", si.GroupHeading, si.Tag)
+	if si.GroupHeading != "work" || si.GroupKey != "work" {
+		t.Errorf("expected session re-grouped under tag heading %q, got heading=%q key=%q", "work", si.GroupHeading, si.GroupKey)
 	}
 }
 

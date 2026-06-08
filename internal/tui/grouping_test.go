@@ -52,9 +52,6 @@ func TestBuildByProject(t *testing.T) {
 		if si.GroupHeading != "Portal" {
 			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Portal")
 		}
-		if si.Tag != "" {
-			t.Errorf("Tag = %q, want empty", si.Tag)
-		}
 		if si.CatchAll {
 			t.Errorf("CatchAll = true, want false")
 		}
@@ -351,15 +348,14 @@ func TestBuildByTag(t *testing.T) {
 		for _, it := range items {
 			si := asSessionItem(t, it)
 			if si.CatchAll {
-				t.Errorf("item for tag %q is CatchAll, want false", si.Tag)
+				t.Errorf("item for tag %q is CatchAll, want false", si.GroupKey)
 			}
-			if si.GroupKey != si.Tag {
-				t.Errorf("GroupKey = %q, want = Tag %q", si.GroupKey, si.Tag)
+			// For a By-Tag instance the canonical tag IS the GroupKey, and the
+			// dimmed heading mirrors it.
+			if si.GroupHeading != si.GroupKey {
+				t.Errorf("GroupHeading = %q, want = GroupKey %q", si.GroupHeading, si.GroupKey)
 			}
-			if si.GroupHeading != si.Tag {
-				t.Errorf("GroupHeading = %q, want = Tag %q", si.GroupHeading, si.Tag)
-			}
-			got[si.Tag] = si
+			got[si.GroupKey] = si
 		}
 		for _, tag := range []string{"personal", "work"} {
 			si, ok := got[tag]
@@ -425,9 +421,6 @@ func TestBuildByTag(t *testing.T) {
 		if si.GroupHeading != "Untagged" {
 			t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Untagged")
 		}
-		if si.Tag != "" {
-			t.Errorf("Tag = %q, want empty", si.Tag)
-		}
 		if si.Session.Name != "no-tags" {
 			t.Errorf("Session.Name = %q, want %q", si.Session.Name, "no-tags")
 		}
@@ -481,8 +474,8 @@ func TestBuildByTag(t *testing.T) {
 			t.Fatalf("len(items) = %d, want 1", len(items))
 		}
 		si := asSessionItem(t, items[0])
-		if si.GroupKey != "work" || si.Tag != "work" {
-			t.Errorf("item = (GroupKey %q, Tag %q), want both %q", si.GroupKey, si.Tag, "work")
+		if si.GroupKey != "work" || si.GroupHeading != "work" {
+			t.Errorf("item = (GroupKey %q, GroupHeading %q), want both %q", si.GroupKey, si.GroupHeading, "work")
 		}
 		if si.CatchAll {
 			t.Errorf("CatchAll = true, want false")

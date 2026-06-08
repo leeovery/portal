@@ -78,7 +78,7 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 // by Phase 1 — are each re-normalised through project.NormaliseTag defensively,
 // so a stray non-canonical stored value (e.g. "Work") cannot split a heading and
 // junk values (empty/whitespace) are skipped entirely. Every usable tag emits a
-// SessionItem with GroupKey = Tag = GroupHeading = the canonical tag.
+// SessionItem with GroupKey = GroupHeading = the canonical tag.
 //
 // A session whose project has no usable tags — empty Tags, all-junk Tags, a
 // project miss, or an empty Dir — emits exactly one item flagged for the pinned
@@ -108,7 +108,6 @@ func buildByTag(sessions []tmux.Session, idx project.Index) []list.Item {
 				Session:      s,
 				GroupKey:     tag,
 				GroupHeading: tag,
-				Tag:          tag,
 			})
 		}
 	}

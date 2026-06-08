@@ -69,9 +69,9 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 				t.Errorf("item %d = %+v, want flat %+v", i, gi, want[i])
 			}
 			// Flat items carry no group metadata — no Untagged heading.
-			if gi.GroupKey != "" || gi.GroupHeading != "" || gi.Tag != "" || gi.CatchAll {
-				t.Errorf("item %d is grouped (key=%q heading=%q tag=%q catchAll=%v), want flat",
-					i, gi.GroupKey, gi.GroupHeading, gi.Tag, gi.CatchAll)
+			if gi.GroupKey != "" || gi.GroupHeading != "" || gi.CatchAll {
+				t.Errorf("item %d is grouped (key=%q heading=%q catchAll=%v), want flat",
+					i, gi.GroupKey, gi.GroupHeading, gi.CatchAll)
 			}
 		}
 		if strings.Contains(m.View(), untaggedHeading) {

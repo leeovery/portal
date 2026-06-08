@@ -100,8 +100,8 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 			if si.CatchAll {
 				t.Fatalf("session routed to Untagged catch-all, want resolved under its tags")
 			}
-			if si.Tag == "" {
-				t.Errorf("By Tag item has empty Tag: %+v", si)
+			if si.GroupKey == "" {
+				t.Errorf("By Tag item has empty GroupKey (canonical tag): %+v", si)
 			}
 		}
 	})

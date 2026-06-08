@@ -43,9 +43,9 @@ func TestRebuildSessionList(t *testing.T) {
 		}
 		for i, it := range items {
 			si := asSessionItem(t, it)
-			if si.GroupKey != "" || si.GroupHeading != "" || si.Tag != "" || si.CatchAll {
-				t.Errorf("item %d is grouped (key=%q heading=%q tag=%q catchAll=%v), want flat",
-					i, si.GroupKey, si.GroupHeading, si.Tag, si.CatchAll)
+			if si.GroupKey != "" || si.GroupHeading != "" || si.CatchAll {
+				t.Errorf("item %d is grouped (key=%q heading=%q catchAll=%v), want flat",
+					i, si.GroupKey, si.GroupHeading, si.CatchAll)
 			}
 		}
 	})
@@ -113,8 +113,8 @@ func TestRebuildSessionList(t *testing.T) {
 		}
 		for _, it := range items {
 			si := asSessionItem(t, it)
-			if si.Tag == "" {
-				t.Errorf("By Tag item has empty Tag: %+v", si)
+			if si.GroupKey == "" {
+				t.Errorf("By Tag item has empty GroupKey (canonical tag): %+v", si)
 			}
 		}
 	})

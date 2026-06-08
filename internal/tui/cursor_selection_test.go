@@ -132,12 +132,13 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			t.Fatalf("expected 2 instances (one per tag), got %d", len(items))
 		}
 
-		// The two instances must be distinct list views (different Tag/GroupKey)
-		// of the same underlying session — proving multi-instance reachability.
+		// The two instances must be distinct list views (different GroupKey,
+		// i.e. distinct canonical tags) of the same underlying session —
+		// proving multi-instance reachability.
 		i0 := asSessionItem(t, items[0])
 		i1 := asSessionItem(t, items[1])
-		if i0.Tag == i1.Tag {
-			t.Fatalf("expected distinct tags on the two instances, got %q and %q", i0.Tag, i1.Tag)
+		if i0.GroupKey == i1.GroupKey {
+			t.Fatalf("expected distinct tags on the two instances, got %q and %q", i0.GroupKey, i1.GroupKey)
 		}
 
 		m := newCursorTestModel(t, items)

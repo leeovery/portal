@@ -71,8 +71,8 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 			t.Fatalf("len(items) = %d, want 1", len(items))
 		}
 		si := asSessionItem(t, items[0])
-		if si.GroupHeading != "work" || si.Tag != "work" {
-			t.Errorf("expected session under tag heading %q, got heading=%q tag=%q", "work", si.GroupHeading, si.Tag)
+		if si.GroupHeading != "work" || si.GroupKey != "work" {
+			t.Errorf("expected session under tag heading %q, got heading=%q key=%q", "work", si.GroupHeading, si.GroupKey)
 		}
 	})
 
@@ -117,9 +117,9 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 			t.Fatalf("len(items) = %d, want 1", len(items))
 		}
 		si := asSessionItem(t, items[0])
-		if si.GroupKey != "" || si.GroupHeading != "" || si.Tag != "" || si.CatchAll {
-			t.Errorf("item is grouped (key=%q heading=%q tag=%q catchAll=%v), want flat",
-				si.GroupKey, si.GroupHeading, si.Tag, si.CatchAll)
+		if si.GroupKey != "" || si.GroupHeading != "" || si.CatchAll {
+			t.Errorf("item is grouped (key=%q heading=%q catchAll=%v), want flat",
+				si.GroupKey, si.GroupHeading, si.CatchAll)
 		}
 	})
 

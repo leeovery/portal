@@ -53,8 +53,8 @@ func TestWithInitialMode(t *testing.T) {
 		if len(items) != 1 {
 			t.Fatalf("len(items) = %d, want 1", len(items))
 		}
-		if got := asSessionItem(t, items[0]).Tag; got != "work" {
-			t.Errorf("Tag = %q, want %q (first ingestion did not group By Tag)", got, "work")
+		if got := asSessionItem(t, items[0]).GroupKey; got != "work" {
+			t.Errorf("GroupKey = %q, want %q (first ingestion did not group By Tag)", got, "work")
 		}
 	})
 }
