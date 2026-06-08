@@ -1437,13 +1437,25 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.activePage = PageSessions
-			return m, nil
+			// Dispatch a mode-aware re-group refresh so tag edits made in the
+			// projects modal are visible on return to the sessions page (spec
+			// § Assigning & Managing Tags → Refresh contract). Routes through
+			// applySessions, so the active grouping mode is respected. Empty
+			// preserveName: no preview-anchored cursor on a page switch. The
+			// cmd is nil when no SessionLister is wired (test harnesses).
+			return m, m.refreshSessionsAfterPreviewCmd("")
 		case isRuneKey(msg, "x"):
 			if m.commandPending {
 				return m, nil
 			}
 			m.activePage = PageSessions
-			return m, nil
+			// Dispatch a mode-aware re-group refresh so tag edits made in the
+			// projects modal are visible on return to the sessions page (spec
+			// § Assigning & Managing Tags → Refresh contract). Routes through
+			// applySessions, so the active grouping mode is respected. Empty
+			// preserveName: no preview-anchored cursor on a page switch. The
+			// cmd is nil when no SessionLister is wired (test harnesses).
+			return m, m.refreshSessionsAfterPreviewCmd("")
 		case isRuneKey(msg, "n"):
 			return m.handleNewInCWD()
 		case isRuneKey(msg, "d"):
