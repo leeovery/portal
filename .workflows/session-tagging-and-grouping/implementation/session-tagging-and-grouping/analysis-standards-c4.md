@@ -1,0 +1,12 @@
+# Analysis — Standards — Cycle 4
+
+STATUS: findings
+FINDINGS_COUNT: 1 (1 low — NO CODE CHANGE / framing)
+
+## FINDING: Bare-shell (outside-tmux) session creation never eager-stamps @portal-dir
+- SEVERITY: low
+- FILES: internal/session/quickstart.go:42-69, cmd/open.go:255-287, internal/session/create.go:80-98
+- DESCRIPTION: AC 8 states "Given a newly created session, then @portal-dir is stamped at creation and By Project groups it without a git rev-parse at render." Only the inside-tmux path (CreateFromDir → SwitchClient) stamps at creation. The dominant outside-tmux entry point (PathOpener.Open → QuickStart.Run → syscall.Exec handoff) cannot stamp because the process is replaced, so it deliberately does not. The spec's stamp-absent fallback enumerates only two unstamped classes — post-reboot restored sessions and pre-existing-on-first-ship — and frames unstamped sessions as one-time bounded amortisation plus a steady-state minority. Bare-shell-created sessions are neither: they are a permanent, steady-state population always unstamped at birth, always paying the first-grouped-render git-root derivation + stamp cost. Functionally fully covered by the lazy fallback (no session dropped; divergence documented in quickstart.go with sound rationale), so CORRECTNESS HOLDS — the divergence is the spec's cost/perf framing vs reality, and AC 8's literal "stamped at creation" is unmet for the primary CLI entry point.
+- RECOMMENDATION: NO CODE CHANGE required for correctness — the lazy fallback handles it as designed (and gated to grouped modes only after the c3 fix). This is a spec-framing observation for the spec owner to confirm/record (AC 8 should read "stamped at creation OR on first grouped render via the fallback"). Eager-stamp via exec-injected set-option was already considered and rejected in quickstart.go for sound reasons. DISCARD as a code task — it is a documentation/spec-owner-confirmation item, not an implementable defect.
+
+SUMMARY: Implementation conforms across all 4 phases and 15 acceptance criteria — prefs logs nothing and resolves via configFilePath/AtomicWrite with migrate; @portal-dir read in the single list-sessions pass; tag normalisation/dedup/empty-rejection, three-way Tab cycle, field-scoped Enter, (none) empty state, signpost text, footer hint, title, catch-all pinning/suppression, multi-instance same-target selection all match. resolveSessionDirs correctly gated to grouped non-signpost arms (c3 fix confirmed). The only divergence is the low-severity AC-8 framing gap above (no code change).

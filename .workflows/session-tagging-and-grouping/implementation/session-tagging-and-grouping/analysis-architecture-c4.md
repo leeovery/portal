@@ -1,0 +1,18 @@
+# Analysis — Architecture — Cycle 4
+
+STATUS: findings
+FINDINGS_COUNT: 2 (1 medium, 1 low)
+
+## FINDING: buildByProject pays a redundant EvalSymlinks syscall per known session per render
+- SEVERITY: medium
+- FILES: internal/tui/grouping.go:54-64 (buildByProject), internal/project/index.go (Index.Match)
+- DESCRIPTION: The cycle-2 fix introduced project.Index so each stored Project.Path is canonicalised once at NewIndex time. But buildByProject re-introduces a per-session canonicalisation on the SESSION side: `idx.Match(s.Dir)` internally computes `CanonicalDirKey(s.Dir)` (one filepath.EvalSymlinks syscall) and discards it, then `GroupKey: project.CanonicalDirKey(s.Dir)` computes it AGAIN — a second identical syscall on the same input. Every known-project session pays 2 EvalSymlinks per By-Project render instead of 1 (~30-40 syscalls/render at 15-20 sessions), including fast-path sessions already stamped. The two computations are a pure function of the same input, always agree, second is pure waste. buildByTag does not hit this (its GroupKey is the tag, not a path), so it is localised to By Project.
+- RECOMMENDATION: Have Index.Match return the canonical key it already computes (e.g. `Match(dirPath) (Project, string, bool)`), and let buildByProject use the returned key as GroupKey instead of recomputing CanonicalDirKey(s.Dir). Composes the two currently-independent computations of the same value; keeps the Index the single place a session-side path is canonicalised per render.
+
+## FINDING: Catch-all assembly passes []list.Item where only SessionItem ever flows, forcing a runtime type-assertion and a dead defensive branch
+- SEVERITY: low
+- FILES: internal/tui/grouping.go (appendCatchAll ~184-198, assembleGroups ~233-241, buildByProject ~47-67, buildByTag ~96-115)
+- DESCRIPTION: unknownItem/untaggedItem return concrete SessionItem values, and the only things ever appended to the unknown/untagged slices are those SessionItems. Yet those slices are typed []list.Item and threaded as `catchAll []list.Item` through assembleGroups → appendCatchAll, which immediately asserts each element back to SessionItem (`si, ok := it.(SessionItem)`) with a defensive `continue` on the `!ok` branch that can never execute. This is the "untyped parameter when the concrete type is known at design time" anti-pattern (code-quality.md Concrete Over Abstract): the abstract list.Item element type is widened only to be narrowed back one call later, and the GroupKey stamp + sort are SessionItem-specific operations list.Item cannot express. The defensive branch is untestable dead code.
+- RECOMMENDATION: Type the catch-all inputs as []SessionItem end to end (the builders already produce SessionItem; collect into []SessionItem, pass `catchAll []SessionItem`). The type assertion and its unreachable defensive branch disappear; GroupKey-stamp and sort operate on the concrete type directly; the only []list.Item boxing remaining is the single sessionItemsToList call at the return boundary where the widening is actually required by bubbles/list.
+
+SUMMARY: Architecture is largely sound after the prior cycles — single rebuildSessionList chokepoint, single m.projects writer via setProjects, clean seams, prefs leaf, grouped-mode-only lazy-resolver gating. Two residual issues: a redundant per-session EvalSymlinks syscall in By Project render (partially undoing the c2 Index optimisation, medium) and an untyped []list.Item catch-all path forcing a runtime type-assertion the concrete type would avoid (low). Note: the alias-field/tag-field modal handling parallel duplication is a duplication concern (not flagged here per one-concern rule) and is an already-accepted intentional mirror.
