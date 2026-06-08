@@ -161,3 +161,15 @@ Address findings from Analysis (Cycle 3).
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
 | session-tagging-and-grouping-7-1 | Gate lazy stamp-on-render resolution to grouped modes only | Flat (default) + byTagSignpost arms perform zero pane reads / git rev-parse / stamp writes, ModeByProject/ModeByTag still resolve (counter == N), byTagSignpost precedes ModeByTag so zero-tags By-Tag skips resolution, grouped output byte-identical, m.sessions never mutated |
+
+### Phase 8: Analysis (Cycle 4)
+
+Address findings from Analysis (Cycle 4).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-8-1 | Return the canonical key from Index.Match so buildByProject stops double-canonicalising | symlinked path where EvalSymlinks changes the value, all other Index.Match callers updated to new signature, one EvalSymlinks syscall per known-project session per render, By-Project output unchanged |
+| session-tagging-and-grouping-8-2 | Type the grouping catch-all path as []SessionItem to remove the runtime type-assertion and dead branch | it.(SessionItem) assertion + unreachable !ok branch removed, single []list.Item widening at sessionItemsToList boundary, catch-all pinning/suppression/ordering unchanged for By-Project and By-Tag |
+| session-tagging-and-grouping-8-3 | Extract a findByPath helper for the new AddTag/RemoveTag lookup duplication | not-found → ErrProjectNotFound preserved for both AddTag and RemoveTag, store.go Upsert/Rename/Remove left untouched, inline slices.IndexFunc + idx < 0 guard removed from both new sites |
