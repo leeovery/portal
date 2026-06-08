@@ -26,13 +26,14 @@ const untaggedHeading = "Untagged"
 //
 // Each session resolves to a canonical directory key from Session.Dir (already
 // resolved by the render-layer resolution pass in rebuildSessionList — the lazy
-// stamp-on-render fallback — but re-run through project.CanonicalDirKey here so
-// the lookup key matches the stored Project.Path form). A hit on idx.Match (the
-// pre-canonicalised project.Index, built once per project-load) yields a
-// known-project item keyed on the canonical path with the matched project name
-// as heading; a miss — empty Dir, or a stamped path with no matching Project
-// record (e.g. a deleted project) — routes the session to the pinned Unknown
-// bucket, which is always rendered last. No session is ever dropped.
+// stamp-on-render fallback). idx.Match (the pre-canonicalised project.Index,
+// built once per project-load) canonicalises Session.Dir once and returns that
+// canonical key alongside the match result; a hit yields a known-project item
+// keyed on that returned canonical path (reused as GroupKey — no second
+// CanonicalDirKey/EvalSymlinks call) with the matched project name as heading. A
+// miss — empty Dir, or a stamped path with no matching Project record (e.g. a
+// deleted project) — routes the session to the pinned Unknown bucket, which is
+// always rendered last. No session is ever dropped.
 //
 // Known-project items are sorted by (GroupKey, Session.Name): the key is the
 // canonical path, not the heading name, so two distinct directories that share
@@ -51,7 +52,7 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 			continue
 		}
 
-		matched, ok := idx.Match(s.Dir)
+		matched, key, ok := idx.Match(s.Dir)
 		if !ok {
 			unknown = append(unknown, unknownItem(s))
 			continue
@@ -59,7 +60,7 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 
 		known = append(known, SessionItem{
 			Session:      s,
-			GroupKey:     project.CanonicalDirKey(s.Dir),
+			GroupKey:     key,
 			GroupHeading: matched.Name,
 		})
 	}
@@ -126,7 +127,7 @@ func resolveSessionTags(s tmux.Session, idx project.Index) []string {
 		return nil
 	}
 
-	matched, ok := idx.Match(s.Dir)
+	matched, _, ok := idx.Match(s.Dir)
 	if !ok {
 		return nil
 	}

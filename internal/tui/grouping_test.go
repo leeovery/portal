@@ -57,6 +57,30 @@ func TestBuildByProject(t *testing.T) {
 		}
 	})
 
+	t.Run("known-project GroupKey reuses the key returned by idx.Match", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		idx := project.NewIndex(projects)
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+
+		// The GroupKey buildByProject stamps must be exactly the canonical key
+		// idx.Match computes and returns for the same Dir — proving the key is
+		// reused, not recomputed via a second CanonicalDirKey call.
+		_, matchKey, ok := idx.Match(dir)
+		if !ok {
+			t.Fatalf("idx.Match(%q) ok = false, want true", dir)
+		}
+
+		items := buildByProject(sessions, idx)
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if si.GroupKey != matchKey {
+			t.Errorf("GroupKey = %q, want %q (key returned by idx.Match)", si.GroupKey, matchKey)
+		}
+	})
+
 	t.Run("orders items by group key then session name", func(t *testing.T) {
 		base := t.TempDir()
 		dirA := filepath.Join(base, "a")
