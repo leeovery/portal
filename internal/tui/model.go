@@ -1619,7 +1619,12 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.editName) > 0 {
 				m.editName = m.editName[:len(m.editName)-1]
 			}
-		} else if m.editAliasCursor == len(m.editAliases) {
+		} else if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
+			// Tags Add input: trim only the in-progress new-tag text.
+			if len(m.editNewTag) > 0 {
+				m.editNewTag = m.editNewTag[:len(m.editNewTag)-1]
+			}
+		} else if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
 			// On Add input
 			if len(m.editNewAlias) > 0 {
 				m.editNewAlias = m.editNewAlias[:len(m.editNewAlias)-1]
@@ -1631,11 +1636,17 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.editFocus == editFieldAliases && m.editAliasCursor < len(m.editAliases) {
 			m.editAliasCursor++
 		}
+		if m.editFocus == editFieldTags && m.editTagCursor < len(m.editTags) {
+			m.editTagCursor++
+		}
 		return m, nil
 
 	case tea.KeyUp:
 		if m.editFocus == editFieldAliases && m.editAliasCursor > 0 {
 			m.editAliasCursor--
+		}
+		if m.editFocus == editFieldTags && m.editTagCursor > 0 {
+			m.editTagCursor--
 		}
 		return m, nil
 
@@ -1654,6 +1665,22 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// In alias area, on Add input: type into new alias
 		if m.editFocus == editFieldAliases && m.editAliasCursor == len(m.editAliases) {
 			m.editNewAlias += text
+			m.editError = ""
+			return m, nil
+		}
+		// In tags area, on an existing tag entry: x removes it
+		if m.editFocus == editFieldTags && text == "x" && m.editTagCursor < len(m.editTags) {
+			removed := m.editTags[m.editTagCursor]
+			m.editRemovedTags = append(m.editRemovedTags, removed)
+			m.editTags = append(m.editTags[:m.editTagCursor], m.editTags[m.editTagCursor+1:]...)
+			if m.editTagCursor > len(m.editTags) {
+				m.editTagCursor = len(m.editTags)
+			}
+			return m, nil
+		}
+		// In tags area, on Add input: type into new tag
+		if m.editFocus == editFieldTags && m.editTagCursor == len(m.editTags) {
+			m.editNewTag += text
 			m.editError = ""
 			return m, nil
 		}
