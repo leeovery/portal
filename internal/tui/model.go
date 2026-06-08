@@ -14,6 +14,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
+	"github.com/leeovery/portal/internal/resolver"
+	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/ui"
 )
@@ -225,6 +227,20 @@ type Model struct {
 	reader          ScrollbackReader
 	previewAttacher PreviewAttacher
 	preview         previewModel
+
+	// dirStamper and dirRunner are the render-layer directory-resolution
+	// seam consumed by rebuildSessionList's lazy stamp-on-render fallback
+	// (spec § The lazy stamp-on-render fallback). When both are non-nil,
+	// each session whose @portal-dir is absent is resolved live from its
+	// active pane → git-root via session.ResolveAndStampDir (which also
+	// best-effort stamps @portal-dir so subsequent renders take the fast
+	// path) before the grouping builders consume Session.Dir. Production
+	// wiring is *tmux.Client + &resolver.RealCommandRunner{} via
+	// WithDirResolver; tests that omit the option leave both nil, in which
+	// case the resolution pass is skipped and un-stamped sessions route to
+	// Unknown/Untagged as before.
+	dirStamper session.PaneStamper
+	dirRunner  resolver.CommandRunner
 
 	// Sessions-page inline-flash state (spec § Inline flash —
 	// feature-local infrastructure). flashText empty string means no
@@ -577,6 +593,20 @@ func WithScrollbackReader(r ScrollbackReader) Option {
 func WithPreviewAttachPipeline(p PreviewAttacher) Option {
 	return func(m *Model) {
 		m.previewAttacher = p
+	}
+}
+
+// WithDirResolver wires the render-layer directory-resolution seam used by
+// rebuildSessionList's lazy stamp-on-render fallback. Production callers pass
+// the concrete *tmux.Client (which satisfies session.PaneStamper:
+// ActivePaneCurrentPath + SetSessionOption) and a &resolver.RealCommandRunner{}.
+// When wired, each session with an absent @portal-dir is resolved live and
+// best-effort stamped before grouping; tests that omit this option leave both
+// seams nil and the resolution pass is skipped.
+func WithDirResolver(stamper session.PaneStamper, runner resolver.CommandRunner) Option {
+	return func(m *Model) {
+		m.dirStamper = stamper
+		m.dirRunner = runner
 	}
 }
 
@@ -946,8 +976,40 @@ func anyTagsExist(projects []project.Project) bool {
 	return false
 }
 
+// resolveSessionDirs is the render-layer chokepoint over the lazy
+// stamp-on-render fallback (spec § The lazy stamp-on-render fallback). It maps
+// every session through session.ResolveAndStampDir BEFORE the grouping builders
+// consume Session.Dir, so a session whose @portal-dir is absent is resolved live
+// from its active pane → git-root (and best-effort stamped so subsequent renders
+// take the fast path). ResolveAndStampDir's fast path returns an already-stamped
+// Dir verbatim with no pane read, so mapping all sessions is safe and cheap.
+//
+// Resolution is best-effort and overwrite-on-success only: when it yields
+// ok==false (unresolvable this pass — killed mid-resolve, blank pane, or no
+// enclosing path) the session's Dir is left as-is, so an empty Dir still falls
+// through to the Unknown (By Project) / Untagged (By Tag) catch-all.
+//
+// tmux.Session is a value type, so each session is copied and .Dir set on the
+// copy — m.sessions is never mutated. When the seam is unwired (either half
+// nil, e.g. tests without WithDirResolver), the input slice is returned
+// unchanged and no resolution happens.
+func (m *Model) resolveSessionDirs(sessions []tmux.Session) []tmux.Session {
+	if m.dirStamper == nil || m.dirRunner == nil {
+		return sessions
+	}
+
+	resolved := make([]tmux.Session, len(sessions))
+	for i, s := range sessions {
+		if dir, ok := session.ResolveAndStampDir(s.Name, s.Dir, m.dirStamper, m.dirRunner); ok {
+			s.Dir = dir
+		}
+		resolved[i] = s
+	}
+	return resolved
+}
+
 func (m *Model) rebuildSessionList() tea.Cmd {
-	filtered := m.filteredSessions()
+	filtered := m.resolveSessionDirs(m.filteredSessions())
 
 	// Zero-tags-anywhere gate (spec § Empty states → By Tag with zero tags):
 	// when By Tag mode is active but no project carries any tag, degrade to the

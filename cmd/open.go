@@ -350,6 +350,8 @@ type tuiConfig struct {
 	enumerator      tui.TmuxEnumerator
 	reader          tui.ScrollbackReader
 	previewAttacher tui.PreviewAttacher
+	dirStamper      session.PaneStamper
+	dirRunner       resolver.CommandRunner
 	initialMode     prefs.SessionListMode
 	modePersister   tui.ModePersister
 	cwd             string
@@ -385,6 +387,9 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 	}
 	if cfg.previewAttacher != nil {
 		opts = append(opts, tui.WithPreviewAttachPipeline(cfg.previewAttacher))
+	}
+	if cfg.dirStamper != nil && cfg.dirRunner != nil {
+		opts = append(opts, tui.WithDirResolver(cfg.dirStamper, cfg.dirRunner))
 	}
 	// Initial mode is always injected — Flat is a valid explicit value, and the
 	// New constructor recomputes the list title after options apply so the first
@@ -501,9 +506,15 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		enumerator:      client,
 		reader:          previewReader,
 		previewAttacher: previewAttacher,
-		initialMode:     initialMode,
-		cwd:             cwd,
-		serverStarted:   serverStarted,
+		// Render-layer lazy stamp-on-render fallback (spec § The lazy
+		// stamp-on-render fallback): client (*tmux.Client) satisfies
+		// session.PaneStamper (ActivePaneCurrentPath + SetSessionOption);
+		// RealCommandRunner resolves the active pane's cwd to a git-root.
+		dirStamper:    client,
+		dirRunner:     &resolver.RealCommandRunner{},
+		initialMode:   initialMode,
+		cwd:           cwd,
+		serverStarted: serverStarted,
 	}
 	// Guard the persister assignment: a typed-nil *prefs.Store boxed into the
 	// tui.ModePersister interface would be non-nil, defeating buildTUIModel's nil

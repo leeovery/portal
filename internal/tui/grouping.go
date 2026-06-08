@@ -25,9 +25,10 @@ const untaggedHeading = "Untagged"
 // inject a heading at each GroupKey boundary.
 //
 // Each session resolves to a canonical directory key from Session.Dir (already
-// canonicalised upstream by Phase 1's lazy fallback/restamp, but re-run through
-// project.CanonicalDirKey here so the lookup key matches the stored
-// Project.Path form). A hit on project.MatchProjectByDir yields a known-project
+// resolved by the render-layer resolution pass in rebuildSessionList — the lazy
+// stamp-on-render fallback — but re-run through project.CanonicalDirKey here so
+// the lookup key matches the stored Project.Path form). A hit on
+// project.MatchProjectByDir yields a known-project
 // item keyed on the canonical path with the matched project name as heading; a
 // miss — empty Dir, or a stamped path with no matching Project record (e.g. a
 // deleted project) — routes the session to the pinned Unknown bucket, which is
