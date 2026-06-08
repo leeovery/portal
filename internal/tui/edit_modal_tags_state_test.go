@@ -20,6 +20,8 @@ func (stubTagsAliasEditor) DeleteAndSave(_, _ string) (bool, error) { return fal
 type stubTagsProjectEditor struct{}
 
 func (stubTagsProjectEditor) Rename(_, _, _ string) error { return nil }
+func (stubTagsProjectEditor) AddTag(_, _ string) error    { return nil }
+func (stubTagsProjectEditor) RemoveTag(_, _ string) error { return nil }
 
 // newTagModalTestModel builds a Model on the projects page with the given
 // projects loaded into the project list and the supplied project selected, plus

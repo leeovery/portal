@@ -106,6 +106,8 @@ func (confirmStubAliasEditor) DeleteAndSave(_, _ string) (bool, error) { return 
 type confirmStubProjectEditor struct{}
 
 func (confirmStubProjectEditor) Rename(_, _, _ string) error { return nil }
+func (confirmStubProjectEditor) AddTag(_, _ string) error    { return nil }
+func (confirmStubProjectEditor) RemoveTag(_, _ string) error { return nil }
 
 func confirmModel(focus editField) Model {
 	return Model{

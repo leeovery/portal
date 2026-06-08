@@ -82,9 +82,15 @@ type ModePersister interface {
 	Save(prefs.SessionListMode) error
 }
 
-// ProjectEditor defines the interface for renaming projects.
+// ProjectEditor defines the interface for renaming projects and mutating their
+// tag set. AddTag/RemoveTag take the raw tag value and delegate canonicalisation
+// and dedup to the store (Phase 1's project.Store.AddTag/RemoveTag); the modal
+// never re-normalises. There is no via parameter — the store hardcodes via=cli
+// for tag mutations (the projects-edit modal is the sole origin).
 type ProjectEditor interface {
 	Rename(path, newName, via string) error
+	AddTag(path, rawTag string) error
+	RemoveTag(path, rawTag string) error
 }
 
 // AliasEditor defines the interface for managing aliases in edit mode.
@@ -1742,6 +1748,33 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 		if err := m.aliasEditor.SetAndSave(newAlias, m.editProject.Path, "cli"); err != nil {
 			m.editError = "Failed to save aliases"
 			return m, nil
+		}
+	}
+
+	// Persist tag mutations. Order is removals THEN additions: removing first
+	// avoids a transient state where a re-added tag could momentarily collide
+	// with one still pending removal. The store (Phase 1) owns normalisation and
+	// dedup, so the modal passes raw buffer values verbatim and never
+	// re-normalises here.
+	for _, removed := range m.editRemovedTags {
+		if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
+			m.editError = "Failed to save tags"
+			return m, nil
+		}
+	}
+
+	// Additions are diffed against the originally-loaded tag set
+	// (m.editProject.Tags) to minimise store writes: only tags present in the
+	// working buffer but absent from the original set are added. Phase 1's store
+	// dedups, so passing the full buffer would also be correct — the diff is just
+	// cleaner. Buffer entries are already canonical (NormaliseTag ran at add
+	// time), so equality against the canonical original set is exact.
+	for _, tag := range m.editTags {
+		if !slices.Contains(m.editProject.Tags, tag) {
+			if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
+				m.editError = "Failed to save tags"
+				return m, nil
+			}
 		}
 	}
 

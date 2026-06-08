@@ -712,6 +712,10 @@ type stubProjectEditor struct{}
 
 func (s *stubProjectEditor) Rename(_, _, _ string) error { return nil }
 
+func (s *stubProjectEditor) AddTag(_, _ string) error { return nil }
+
+func (s *stubProjectEditor) RemoveTag(_, _ string) error { return nil }
+
 // stubAliasEditor implements tui.AliasEditor for cmd-level testing.
 type stubAliasEditor struct {
 	aliases map[string]string

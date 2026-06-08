@@ -1,6 +1,7 @@
 package tui_test
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -4726,11 +4727,24 @@ func TestEscProgressiveBack(t *testing.T) {
 }
 
 // mockProjectEditor implements tui.ProjectEditor for testing.
+//
+// tagErr is kept distinct from err (the Rename error) so a tag-persist failure
+// can be exercised independently of a name-rename failure.
 type mockProjectEditor struct {
 	renamedPath string
 	renamedName string
 	renamedVia  string
 	err         error
+
+	addedTags   []tagCall
+	removedTags []tagCall
+	tagErr      error
+}
+
+// tagCall records a single AddTag/RemoveTag invocation.
+type tagCall struct {
+	path   string
+	rawTag string
 }
 
 func (m *mockProjectEditor) Rename(path, newName, via string) error {
@@ -4738,6 +4752,16 @@ func (m *mockProjectEditor) Rename(path, newName, via string) error {
 	m.renamedName = newName
 	m.renamedVia = via
 	return m.err
+}
+
+func (m *mockProjectEditor) AddTag(path, rawTag string) error {
+	m.addedTags = append(m.addedTags, tagCall{path: path, rawTag: rawTag})
+	return m.tagErr
+}
+
+func (m *mockProjectEditor) RemoveTag(path, rawTag string) error {
+	m.removedTags = append(m.removedTags, tagCall{path: path, rawTag: rawTag})
+	return m.tagErr
 }
 
 // mockAliasEditor implements tui.AliasEditor for testing. The mutation surface
@@ -5252,6 +5276,239 @@ func TestEditProject(t *testing.T) {
 		view := model.View()
 		if strings.Contains(view, "Name:") {
 			t.Errorf("edit modal should not open on empty list, got:\n%s", view)
+		}
+	})
+}
+
+// openTagsModal opens the edit modal for the (single) project and moves focus to
+// the Tags field, leaving the cursor on the Add-input row.
+func openTagsModal(model tea.Model) tea.Model {
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	// Tab cycle: Name → Aliases → Tags.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	return model
+}
+
+// typeTagAndAdd types the given tag runes into the Tags Add input and presses
+// Enter to commit it to the working buffer.
+func typeTagAndAdd(model tea.Model, tag string) tea.Model {
+	for _, r := range tag {
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return model
+}
+
+// confirmFromTagsField moves focus off the Tags field back to Name (a single Tab
+// wraps Tags → Name) and presses Enter to confirm. Enter while the Tags field is
+// focused is field-scoped (add), so confirm must originate from the Name field.
+func confirmFromTagsField(model tea.Model) (tea.Model, tea.Cmd) {
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab}) // Tags → Name
+	return model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestEditProjectTagPersistence(t *testing.T) {
+	t.Run("persists an added tag via AddTag on confirm", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		model = typeTagAndAdd(model, "work")
+
+		_, cmd := confirmFromTagsField(model)
+
+		if len(editor.addedTags) != 1 {
+			t.Fatalf("expected 1 AddTag call, got %d: %+v", len(editor.addedTags), editor.addedTags)
+		}
+		if editor.addedTags[0].path != "/code/portal" {
+			t.Errorf("expected AddTag path /code/portal, got %q", editor.addedTags[0].path)
+		}
+		if editor.addedTags[0].rawTag != "work" {
+			t.Errorf("expected AddTag tag 'work', got %q", editor.addedTags[0].rawTag)
+		}
+		if len(editor.removedTags) != 0 {
+			t.Errorf("expected no RemoveTag calls, got %+v", editor.removedTags)
+		}
+		if cmd == nil {
+			t.Error("expected refresh command on successful confirm, got nil")
+		}
+	})
+
+	t.Run("persists a removed tag via RemoveTag on confirm", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		// Move cursor up from the Add-input row onto the existing tag, then x.
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		_, cmd := confirmFromTagsField(model)
+
+		if len(editor.removedTags) != 1 {
+			t.Fatalf("expected 1 RemoveTag call, got %d: %+v", len(editor.removedTags), editor.removedTags)
+		}
+		if editor.removedTags[0].path != "/code/portal" {
+			t.Errorf("expected RemoveTag path /code/portal, got %q", editor.removedTags[0].path)
+		}
+		if editor.removedTags[0].rawTag != "work" {
+			t.Errorf("expected RemoveTag tag 'work', got %q", editor.removedTags[0].rawTag)
+		}
+		if len(editor.addedTags) != 0 {
+			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
+		}
+		if cmd == nil {
+			t.Error("expected refresh command on successful confirm, got nil")
+		}
+	})
+
+	t.Run("persists both an addition and a removal in one confirm", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal", Tags: []string{"old"}},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		// Remove the existing "old" tag (cursor at Add row index 1 → up to 0).
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+		// After removal the buffer is empty; cursor lands on the Add row. Add "new".
+		model = typeTagAndAdd(model, "new")
+
+		_, cmd := confirmFromTagsField(model)
+
+		if len(editor.removedTags) != 1 || editor.removedTags[0].rawTag != "old" {
+			t.Fatalf("expected 1 RemoveTag(old), got %+v", editor.removedTags)
+		}
+		if len(editor.addedTags) != 1 || editor.addedTags[0].rawTag != "new" {
+			t.Fatalf("expected 1 AddTag(new), got %+v", editor.addedTags)
+		}
+		if cmd == nil {
+			t.Error("expected refresh command on successful confirm, got nil")
+		}
+	})
+
+	t.Run("makes no tag persistence calls when the tag set is unchanged", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		// Open and confirm without touching tags.
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+		_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+		if len(editor.addedTags) != 0 {
+			t.Errorf("expected no AddTag calls, got %+v", editor.addedTags)
+		}
+		if len(editor.removedTags) != 0 {
+			t.Errorf("expected no RemoveTag calls, got %+v", editor.removedTags)
+		}
+		if cmd == nil {
+			t.Error("expected refresh command on confirm, got nil")
+		}
+	})
+
+	t.Run("sets editError and keeps the modal open when AddTag fails", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{tagErr: errors.New("boom")}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		model = typeTagAndAdd(model, "work")
+
+		model, cmd := confirmFromTagsField(model)
+
+		if cmd != nil {
+			t.Error("expected nil command (no refresh) on AddTag failure, got non-nil")
+		}
+		view := model.View()
+		if !strings.Contains(view, "Error:") {
+			t.Errorf("expected an error message, got:\n%s", view)
+		}
+		// Modal stays open — the Tags field section is still rendered.
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should stay open after AddTag failure, got:\n%s", view)
+		}
+	})
+
+	t.Run("sets editError and keeps the modal open when RemoveTag fails", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
+			},
+		}
+		editor := &mockProjectEditor{tagErr: errors.New("boom")}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+		model, cmd := confirmFromTagsField(model)
+
+		if cmd != nil {
+			t.Error("expected nil command (no refresh) on RemoveTag failure, got non-nil")
+		}
+		view := model.View()
+		if !strings.Contains(view, "Error:") {
+			t.Errorf("expected an error message, got:\n%s", view)
+		}
+		if !strings.Contains(view, "Name:") {
+			t.Errorf("modal should stay open after RemoveTag failure, got:\n%s", view)
+		}
+	})
+
+	t.Run("passes the raw tag to the store without re-normalising in the modal", func(t *testing.T) {
+		store := &mockProjectStore{
+			projects: []project.Project{
+				{Path: "/code/portal", Name: "portal"},
+			},
+		}
+		editor := &mockProjectEditor{}
+		aliases := &mockAliasEditor{aliases: map[string]string{}}
+		model := setupEditModel(store, editor, aliases)
+
+		model = openTagsModal(model)
+		// The buffer value is already canonical (NormaliseTag ran at add time in
+		// 4-3). The modal must pass exactly that value to AddTag — no second
+		// normalisation pass.
+		model = typeTagAndAdd(model, "work")
+
+		_, _ = confirmFromTagsField(model)
+
+		if len(editor.addedTags) != 1 {
+			t.Fatalf("expected 1 AddTag call, got %+v", editor.addedTags)
+		}
+		if editor.addedTags[0].rawTag != "work" {
+			t.Errorf("expected raw tag 'work' passed verbatim, got %q", editor.addedTags[0].rawTag)
 		}
 	})
 }
