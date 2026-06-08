@@ -187,6 +187,59 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "session-tagging-and-grouping": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "session-tagging-and-grouping-1-1",
+            "session-tagging-and-grouping-1-2",
+            "session-tagging-and-grouping-1-3",
+            "session-tagging-and-grouping-1-4",
+            "session-tagging-and-grouping-1-5",
+            "session-tagging-and-grouping-1-6",
+            "session-tagging-and-grouping-1-7",
+            "session-tagging-and-grouping-1-8",
+            "session-tagging-and-grouping-2-1",
+            "session-tagging-and-grouping-2-2",
+            "session-tagging-and-grouping-2-3",
+            "session-tagging-and-grouping-2-4",
+            "session-tagging-and-grouping-2-5",
+            "session-tagging-and-grouping-2-6",
+            "session-tagging-and-grouping-3-1",
+            "session-tagging-and-grouping-3-2",
+            "session-tagging-and-grouping-3-3",
+            "session-tagging-and-grouping-3-4",
+            "session-tagging-and-grouping-3-5",
+            "session-tagging-and-grouping-3-6",
+            "session-tagging-and-grouping-3-7",
+            "session-tagging-and-grouping-3-8",
+            "session-tagging-and-grouping-3-9",
+            "session-tagging-and-grouping-4-1",
+            "session-tagging-and-grouping-4-2",
+            "session-tagging-and-grouping-4-3",
+            "session-tagging-and-grouping-4-4",
+            "session-tagging-and-grouping-4-5",
+            "session-tagging-and-grouping-4-6",
+            "session-tagging-and-grouping-4-7",
+            "session-tagging-and-grouping-5-1",
+            "session-tagging-and-grouping-5-2",
+            "session-tagging-and-grouping-5-3",
+            "session-tagging-and-grouping-5-4",
+            "session-tagging-and-grouping-6-1",
+            "session-tagging-and-grouping-6-2",
+            "session-tagging-and-grouping-6-3",
+            "session-tagging-and-grouping-6-4",
+            "session-tagging-and-grouping-7-1",
+            "session-tagging-and-grouping-8-1",
+            "session-tagging-and-grouping-8-2",
+            "session-tagging-and-grouping-8-3",
+            "session-tagging-and-grouping-9-1",
+            "session-tagging-and-grouping-9-2"
+          ]
+        }
+      }
     }
   }
 }
