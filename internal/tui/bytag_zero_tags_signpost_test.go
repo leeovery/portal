@@ -147,7 +147,7 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 			t.Errorf("signpost rendered when a tag exists:\n%s", m.View())
 		}
 		// Normal By Tag grouping renders the tag heading.
-		want := buildByTag(sessions, projects)
+		want := buildByTag(sessions, project.NewIndex(projects))
 		if len(m.sessionList.Items()) != len(want) {
 			t.Errorf("len(items) = %d, want %d (normal By Tag build)", len(m.sessionList.Items()), len(want))
 		}

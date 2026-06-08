@@ -17,6 +17,7 @@ import (
 func newProjectsTransitionModel(lister SessionLister, projects []project.Project, mode prefs.SessionListMode) Model {
 	m := Model{
 		projects:        projects,
+		projectIndex:    project.NewIndex(projects),
 		projectList:     newProjectList(),
 		sessionList:     newSessionList(nil),
 		activePage:      PageProjects,

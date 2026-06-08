@@ -167,9 +167,15 @@ type ProjectsLoadedMsg struct {
 
 // Model is the Bubble Tea model for the session list TUI.
 type Model struct {
-	sessionList       list.Model
-	sessions          []tmux.Session
-	projects          []project.Project
+	sessionList list.Model
+	sessions    []tmux.Session
+	projects    []project.Project
+	// projectIndex is a DERIVED CACHE of projects: a pre-canonicalised
+	// dir→project lookup table (project.NewIndex) consumed by the grouping
+	// builders so a grouped render is map lookups, not an
+	// O(sessions × projects) CanonicalDirKey/EvalSymlinks scan. It MUST be
+	// rebuilt whenever projects changes — always mutate both via setProjects.
+	projectIndex      project.Index
 	sessionListMode   prefs.SessionListMode
 	modePersister     ModePersister
 	selected          string
@@ -979,6 +985,15 @@ func anyTagsExist(projects []project.Project) bool {
 	return false
 }
 
+// setProjects updates the cached project records AND their derived lookup cache
+// (projectIndex) together. It is the single production seam where m.projects
+// changes, so the index can never go stale relative to the records the grouping
+// builders consult. Always mutate projects through this helper.
+func (m *Model) setProjects(projects []project.Project) {
+	m.projects = projects
+	m.projectIndex = project.NewIndex(projects)
+}
+
 // resolveSessionDirs is the render-layer chokepoint over the lazy
 // stamp-on-render fallback (spec § The lazy stamp-on-render fallback). It maps
 // every session through session.ResolveAndStampDir BEFORE the grouping builders
@@ -1028,9 +1043,9 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	case m.byTagSignpost:
 		items = ToListItems(filtered)
 	case m.sessionListMode == prefs.ModeByProject:
-		items = buildByProject(filtered, m.projects)
+		items = buildByProject(filtered, m.projectIndex)
 	case m.sessionListMode == prefs.ModeByTag:
-		items = buildByTag(filtered, m.projects)
+		items = buildByTag(filtered, m.projectIndex)
 	default:
 		items = ToListItems(filtered)
 	}
@@ -1326,7 +1341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Cache the project records so the mode-aware session re-render core
 			// (rebuildSessionList) can feed them to the grouping builders
 			// without a synchronous store read in the render path.
-			m.projects = msg.Projects
+			m.setProjects(msg.Projects)
 			items := ProjectsToListItems(msg.Projects)
 			setItemsCmd = m.projectList.SetItems(items)
 			// Re-apply terminal size so pagination accounts for the manual

@@ -27,12 +27,12 @@ const untaggedHeading = "Untagged"
 // Each session resolves to a canonical directory key from Session.Dir (already
 // resolved by the render-layer resolution pass in rebuildSessionList — the lazy
 // stamp-on-render fallback — but re-run through project.CanonicalDirKey here so
-// the lookup key matches the stored Project.Path form). A hit on
-// project.MatchProjectByDir yields a known-project
-// item keyed on the canonical path with the matched project name as heading; a
-// miss — empty Dir, or a stamped path with no matching Project record (e.g. a
-// deleted project) — routes the session to the pinned Unknown bucket, which is
-// always rendered last. No session is ever dropped.
+// the lookup key matches the stored Project.Path form). A hit on idx.Match (the
+// pre-canonicalised project.Index, built once per project-load) yields a
+// known-project item keyed on the canonical path with the matched project name
+// as heading; a miss — empty Dir, or a stamped path with no matching Project
+// record (e.g. a deleted project) — routes the session to the pinned Unknown
+// bucket, which is always rendered last. No session is ever dropped.
 //
 // Known-project items are sorted by (GroupKey, Session.Name): the key is the
 // canonical path, not the heading name, so two distinct directories that share
@@ -41,7 +41,7 @@ const untaggedHeading = "Untagged"
 //
 // Pure function — no tmux call, no I/O. Zero live sessions yields an empty
 // slice.
-func buildByProject(sessions []tmux.Session, projects []project.Project) []list.Item {
+func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 	var known []SessionItem
 	var unknown []list.Item
 
@@ -51,7 +51,7 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 			continue
 		}
 
-		matched, ok := project.MatchProjectByDir(projects, s.Dir)
+		matched, ok := idx.Match(s.Dir)
 		if !ok {
 			unknown = append(unknown, unknownItem(s))
 			continue
@@ -72,8 +72,8 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 // item per (session, tag) pair — ready for the delegate to inject a heading at
 // each GroupKey boundary.
 //
-// For each session, its directory resolves to a project via
-// project.MatchProjectByDir (Session.Dir re-run through the same canonical
+// For each session, its directory resolves to a project via idx.Match (the
+// pre-canonicalised project.Index; Session.Dir re-run through the same canonical
 // keying as buildByProject). The project's Tags — stored canonical (lower-cased)
 // by Phase 1 — are each re-normalised through project.NormaliseTag defensively,
 // so a stray non-canonical stored value (e.g. "Work") cannot split a heading and
@@ -93,12 +93,12 @@ func buildByProject(sessions []tmux.Session, projects []project.Project) []list.
 // so selecting any instance attaches the same target (task 2-6).
 //
 // Pure function — no tmux call, no I/O. Zero live sessions yields an empty slice.
-func buildByTag(sessions []tmux.Session, projects []project.Project) []list.Item {
+func buildByTag(sessions []tmux.Session, idx project.Index) []list.Item {
 	var tagged []SessionItem
 	var untagged []list.Item
 
 	for _, s := range sessions {
-		tags := resolveSessionTags(s, projects)
+		tags := resolveSessionTags(s, idx)
 		if len(tags) == 0 {
 			untagged = append(untagged, untaggedItem(s))
 			continue
@@ -122,12 +122,12 @@ func buildByTag(sessions []tmux.Session, projects []project.Project) []list.Item
 // project.NormaliseTag, dropping any that fail (empty/whitespace junk). The
 // result is the set of tags under which the session should appear; an empty
 // result routes the session to the Untagged catch-all.
-func resolveSessionTags(s tmux.Session, projects []project.Project) []string {
+func resolveSessionTags(s tmux.Session, idx project.Index) []string {
 	if s.Dir == "" {
 		return nil
 	}
 
-	matched, ok := project.MatchProjectByDir(projects, s.Dir)
+	matched, ok := idx.Match(s.Dir)
 	if !ok {
 		return nil
 	}

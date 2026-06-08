@@ -17,6 +17,7 @@ func newRebuildTestModel(mode prefs.SessionListMode, sessions []tmux.Session, pr
 	m := Model{
 		sessions:        sessions,
 		projects:        projects,
+		projectIndex:    project.NewIndex(projects),
 		sessionList:     newSessionList(nil),
 		projectList:     newProjectList(),
 		activePage:      PageSessions,
@@ -80,7 +81,7 @@ func TestRebuildSessionList(t *testing.T) {
 		m.rebuildSessionList()
 
 		items := m.sessionList.Items()
-		want := buildByProject(sessions, projects)
+		want := buildByProject(sessions, project.NewIndex(projects))
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}
@@ -102,7 +103,7 @@ func TestRebuildSessionList(t *testing.T) {
 		m.rebuildSessionList()
 
 		items := m.sessionList.Items()
-		want := buildByTag(sessions, projects)
+		want := buildByTag(sessions, project.NewIndex(projects))
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}

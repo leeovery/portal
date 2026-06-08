@@ -44,7 +44,7 @@ func TestWithInitialMode(t *testing.T) {
 
 		// Construct in By Tag, then seed projects and feed the first SessionsMsg.
 		m := New(fakeLister{}, WithInitialMode(prefs.ModeByTag))
-		m.projects = projects
+		m.setProjects(projects)
 		m.applySessionListSize(80, 24)
 
 		updated, _ := m.Update(SessionsMsg{Sessions: sessions})

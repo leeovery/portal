@@ -34,6 +34,7 @@ func newSwitchViewTestModel(mode prefs.SessionListMode, persister ModePersister,
 	m := Model{
 		sessions:        sessions,
 		projects:        projects,
+		projectIndex:    project.NewIndex(projects),
 		sessionList:     newSessionList(nil),
 		projectList:     newProjectList(),
 		activePage:      PageSessions,

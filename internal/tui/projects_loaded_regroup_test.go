@@ -123,6 +123,50 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		}
 	})
 
+	t.Run("rebuilds the lookup index on each ProjectsLoadedMsg so a later add is reflected and a removed project no longer matches", func(t *testing.T) {
+		dirA := t.TempDir()
+		dirB := t.TempDir()
+		keyB := project.CanonicalDirKey(dirB)
+		sessions := []tmux.Session{
+			{Name: "alpha", Dir: dirA},
+			{Name: "bravo", Dir: dirB},
+		}
+
+		m := newProjectsLoadedRegroupModel(prefs.ModeByProject, sessions)
+
+		// First load: only project A is known. B must land in Unknown.
+		updated, _ := m.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: dirA, Name: "Alpha"}}})
+		m = updated.(Model)
+
+		// Second load: A is REMOVED and B is ADDED. A stale index would still
+		// match alpha to "Alpha" and miss bravo. A correctly-rebuilt index
+		// reflects exactly the new set.
+		updated, _ = m.Update(ProjectsLoadedMsg{Projects: []project.Project{{Path: dirB, Name: "Bravo"}}})
+		got := updated.(Model)
+
+		var alphaItem, bravoItem SessionItem
+		for _, it := range got.sessionList.Items() {
+			si := asSessionItem(t, it)
+			switch si.Session.Name {
+			case "alpha":
+				alphaItem = si
+			case "bravo":
+				bravoItem = si
+			}
+		}
+
+		// alpha's project was removed → it must now fall to Unknown.
+		if !alphaItem.CatchAll || alphaItem.GroupHeading != unknownHeading {
+			t.Errorf("alpha: catchAll=%v heading=%q, want Unknown catch-all (removed project must not match a stale index)",
+				alphaItem.CatchAll, alphaItem.GroupHeading)
+		}
+		// bravo's project was added → it must now group under Bravo.
+		if bravoItem.CatchAll || bravoItem.GroupHeading != "Bravo" || bravoItem.GroupKey != keyB {
+			t.Errorf("bravo: catchAll=%v heading=%q key=%q, want grouped under Bravo (added project must be reflected)",
+				bravoItem.CatchAll, bravoItem.GroupHeading, bravoItem.GroupKey)
+		}
+	})
+
 	t.Run("does NOT re-group when no sessions are ingested", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}

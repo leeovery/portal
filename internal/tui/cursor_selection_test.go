@@ -51,7 +51,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-1", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, projects)
+		items := buildByProject(sessions, project.NewIndex(projects))
 
 		m := newCursorTestModel(t, items)
 
@@ -80,7 +80,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "alpha-2", Dir: dirA},
 			{Name: "bravo-1", Dir: dirB},
 		}
-		items := buildByProject(sessions, projects)
+		items := buildByProject(sessions, project.NewIndex(projects))
 		if len(items) < 2 {
 			t.Fatalf("need at least 2 items to exercise g/G, got %d", len(items))
 		}
@@ -127,7 +127,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dir, Name: "Portal", Tags: []string{"work", "infra"}},
 		}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
-		items := buildByTag(sessions, projects)
+		items := buildByTag(sessions, project.NewIndex(projects))
 		if len(items) != 2 {
 			t.Fatalf("expected 2 instances (one per tag), got %d", len(items))
 		}
@@ -169,7 +169,7 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Path: dir, Name: "Portal", Tags: []string{"alpha", "beta", "gamma"}},
 		}
 		sessions := []tmux.Session{{Name: "portal-xyz", Dir: dir}}
-		items := buildByTag(sessions, projects)
+		items := buildByTag(sessions, project.NewIndex(projects))
 		if len(items) != 3 {
 			t.Fatalf("expected 3 instances (one per tag), got %d", len(items))
 		}
