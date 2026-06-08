@@ -58,4 +58,4 @@ cause is not easily identifiable, stop the work; if it is, proceed to the fix.
 
 ## Conclusion
 
-(none)
+Routed to investigation.
