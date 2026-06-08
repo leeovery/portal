@@ -31,6 +31,17 @@ func NormaliseTag(raw string) (string, bool) {
 	return strings.ToLower(trimmed), true
 }
 
+// findByPath locates the index of the project whose Path exactly matches path.
+// It returns the index and true when found, or (-1, false) when no project
+// matches. It is the shared exact-path lookup for the AddTag/RemoveTag tag
+// mutations, so both routes treat a missing project identically.
+func findByPath(projects []Project, path string) (int, bool) {
+	idx := slices.IndexFunc(projects, func(p Project) bool {
+		return p.Path == path
+	})
+	return idx, idx >= 0
+}
+
 // AddTag adds rawTag to the tag set of the project matched by exact path, in
 // canonical (trimmed + lower-cased) form, deduped. It is a no-op (returns nil,
 // no Save) when rawTag is blank/whitespace-only or the project already carries
@@ -45,10 +56,8 @@ func (s *Store) AddTag(path, rawTag string) error {
 		return err
 	}
 
-	idx := slices.IndexFunc(projects, func(p Project) bool {
-		return p.Path == path
-	})
-	if idx < 0 {
+	idx, ok := findByPath(projects, path)
+	if !ok {
 		return ErrProjectNotFound
 	}
 
@@ -81,10 +90,8 @@ func (s *Store) RemoveTag(path, rawTag string) error {
 		return err
 	}
 
-	idx := slices.IndexFunc(projects, func(p Project) bool {
-		return p.Path == path
-	})
-	if idx < 0 {
+	idx, ok := findByPath(projects, path)
+	if !ok {
 		return ErrProjectNotFound
 	}
 
