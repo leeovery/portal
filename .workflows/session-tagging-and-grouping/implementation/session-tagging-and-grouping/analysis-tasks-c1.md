@@ -6,7 +6,7 @@ total_proposed: 4
 # Analysis Tasks: Session Tagging and Grouping (Cycle 1)
 
 ## Task 1: Wire lazy stamp-on-render fallback into the render path
-status: pending
+status: approved
 severity: high
 sources: standards, architecture
 
@@ -37,7 +37,7 @@ sources: standards, architecture
 - Nil-seam test: Model constructed without the new Option does not panic; unresolved sessions route to Unknown/Untagged.
 
 ## Task 2: Re-group on ProjectsLoadedMsg so grouped first paint is independent of startup message order
-status: pending
+status: approved
 severity: medium
 sources: architecture
 
@@ -62,7 +62,7 @@ sources: architecture
 - A test asserting no re-group is triggered when in flat mode or when sessions have not yet loaded.
 
 ## Task 3: Reconcile remove-then-re-add of the same tag within one edit-modal session
-status: pending
+status: approved
 severity: medium
 sources: standards
 
@@ -87,7 +87,7 @@ sources: standards
 - Regression test: remove-only (no re-add) still removes the tag.
 
 ## Task 4: Extract shared grouping-assembly skeleton from buildByProject/buildByTag
-status: pending
+status: approved
 severity: medium
 sources: duplication
 

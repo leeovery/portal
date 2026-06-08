@@ -125,3 +125,16 @@ approved_at: 2026-06-07
 | session-tagging-and-grouping-4-5 | Persist tag additions/removals on confirm via ProjectEditor AddTag/RemoveTag seam | persist failure sets editError and aborts close, no-op when tags unchanged, additions and removals in one confirm, normalisation/dedup owned by Phase 1 store |
 | session-tagging-and-grouping-4-6 | Render Tags block after Aliases with "no tags" empty state | empty tags shows clear empty state not blank, focus indicator only on focused field, highlighted-entry marker, Add-input row always rendered |
 | session-tagging-and-grouping-4-7 | Dispatch re-group sessions refresh on projects-edit → sessions-page transition | refresh respects active grouping mode, nil SessionLister tolerated, no refresh when not transitioning, command-pending guard preserved |
+
+### Phase 5: Analysis (Cycle 1)
+
+Address findings from Analysis (Cycle 1).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-5-1 | Wire lazy stamp-on-render fallback into the render path | post-reboot restored session (no @portal-dir), pre-existing live session on first ship, QuickStart-created session, empty current_path / unresolvable git root falls through to Unknown/Untagged, nil-seam Model does not panic, derived dir stamped after first render |
+| session-tagging-and-grouping-5-2 | Re-group on ProjectsLoadedMsg so grouped first paint is independent of startup message order | SessionsMsg before ProjectsLoadedMsg, setItemsCmd batched not substituted, no spurious re-group in flat mode or before sessions load |
+| session-tagging-and-grouping-5-3 | Reconcile remove-then-re-add of the same tag within one edit-modal session | remove-then-re-add survives save, remove-only still removes, brand-new tag still persists |
+| session-tagging-and-grouping-5-4 | Extract shared grouping-assembly skeleton from buildByProject/buildByTag | pure refactor (byte-identical output), all three boxing sites route through sessionItemsToList, sort + appendCatchAll defined in one place |

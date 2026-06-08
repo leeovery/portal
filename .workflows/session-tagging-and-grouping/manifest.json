@@ -74,7 +74,12 @@
             "session-tagging-and-grouping-4-4": "tick-a40c85",
             "session-tagging-and-grouping-4-5": "tick-08eb39",
             "session-tagging-and-grouping-4-6": "tick-732c41",
-            "session-tagging-and-grouping-4-7": "tick-293de5"
+            "session-tagging-and-grouping-4-7": "tick-293de5",
+            "session-tagging-and-grouping-5": "tick-052353",
+            "session-tagging-and-grouping-5-1": "tick-81a6fc",
+            "session-tagging-and-grouping-5-2": "tick-587c1c",
+            "session-tagging-and-grouping-5-3": "tick-e71d73",
+            "session-tagging-and-grouping-5-4": "tick-863b2d"
           },
           "external_id": "tick-7d0ed3"
         }
@@ -86,7 +91,7 @@
           "status": "in-progress",
           "task_gate_mode": "auto",
           "fix_gate_mode": "auto",
-          "analysis_gate_mode": "gated",
+          "analysis_gate_mode": "auto",
           "fix_attempts": 0,
           "analysis_cycle_total": 1,
           "analysis_cycle_session": 1,
