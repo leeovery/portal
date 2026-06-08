@@ -138,3 +138,16 @@ Address findings from Analysis (Cycle 1).
 | session-tagging-and-grouping-5-2 | Re-group on ProjectsLoadedMsg so grouped first paint is independent of startup message order | SessionsMsg before ProjectsLoadedMsg, setItemsCmd batched not substituted, no spurious re-group in flat mode or before sessions load |
 | session-tagging-and-grouping-5-3 | Reconcile remove-then-re-add of the same tag within one edit-modal session | remove-then-re-add survives save, remove-only still removes, brand-new tag still persists |
 | session-tagging-and-grouping-5-4 | Extract shared grouping-assembly skeleton from buildByProject/buildByTag | pure refactor (byte-identical output), all three boxing sites route through sessionItemsToList, sort + appendCatchAll defined in one place |
+
+### Phase 6: Analysis (Cycle 2)
+
+Address findings from Analysis (Cycle 2).
+
+#### Tasks
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| session-tagging-and-grouping-6-1 | Route WithInsideTmux through the rebuildSessionList chokepoint | sessions already populated + grouped mode + inside tmux, empty-at-construction fast-path retained, guard trips if m.sessions non-empty, inside-tmux exclusion composes with grouping |
+| session-tagging-and-grouping-6-2 | Pre-canonicalise stored project paths once per project-load instead of per grouped render | symlinked project path, index rebuilt after project add/remove/edit, grouped-render output byte-identical, collision policy (last-write-wins), CanonicalDirKey stays sole key form |
+| session-tagging-and-grouping-6-3 | Remove the dead SessionItem.Tag field, derive a tag accessor if needed | catch-all identified via CatchAll not empty Tag, no remaining Tag-field references, By-Tag heading/counts/boundary unchanged, optional derived accessor |
+| session-tagging-and-grouping-6-4 | Add an end-to-end @portal-dir stamp → ListSessions(Dir) round-trip integration test | tmux quoting/format-string drift, path with a space, integration build-tag excluded from default run, isolated state env if subprocess spawned |
