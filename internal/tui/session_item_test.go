@@ -303,96 +303,82 @@ func TestSessionDelegate(t *testing.T) {
 const groupSeparator = "···"
 
 func TestSessionDelegateGroupHeadings(t *testing.T) {
-	t.Run("injects a dimmed heading before the first item of each group", func(t *testing.T) {
-		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
-		}
-		m := list.New(items, d, 80, 10)
+	// Group headings are now real, separate HeaderItem list rows (no longer a
+	// line injected inside a SessionItem's Render). The delegate type-switches:
+	// a HeaderItem renders the dimmed "Heading ··· N" separator; a SessionItem
+	// renders only its own row.
 
-		// The second group's first item (index 2) starts a new group → heading.
+	t.Run("renders a HeaderItem as the dimmed 'Heading ··· N' separator", func(t *testing.T) {
+		d := tui.SessionDelegate{}
+		header := tui.HeaderItem{Heading: "Work", Count: 1, Key: "/p/work"}
+		m := list.New([]list.Item{header}, d, 80, 10)
+
 		var buf bytes.Buffer
-		d.Render(&buf, m, 2, items[2])
+		d.Render(&buf, m, 0, header)
 		out := buf.String()
 		if !strings.Contains(out, "Work") {
-			t.Errorf("expected heading 'Work' before group boundary item: %q", out)
+			t.Errorf("expected heading label 'Work': %q", out)
 		}
 		if !strings.Contains(out, groupSeparator) {
 			t.Errorf("expected separator glyph in heading: %q", out)
 		}
-
-		// An interior item of the first group (index 1) does NOT start a new group.
-		var interior bytes.Buffer
-		d.Render(&interior, m, 1, items[1])
-		if strings.Contains(interior.String(), groupSeparator) {
-			t.Errorf("interior item should emit no heading: %q", interior.String())
-		}
 	})
 
-	t.Run("injects a leading heading before the very first item", func(t *testing.T) {
+	t.Run("a SessionItem renders only its own row, never a heading line", func(t *testing.T) {
+		// A SessionItem carrying group metadata renders just its session row —
+		// the heading is now a separate HeaderItem, not prefixed in-delegate.
 		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-		}
-		m := list.New(items, d, 80, 10)
+		item := tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"}
+		m := list.New([]list.Item{item}, d, 80, 10)
 
 		var buf bytes.Buffer
-		d.Render(&buf, m, 0, items[0])
+		d.Render(&buf, m, 0, item)
 		out := buf.String()
-		if !strings.Contains(out, "Portal") {
-			t.Errorf("expected leading heading 'Portal' before first item: %q", out)
+		if strings.Contains(out, groupSeparator) {
+			t.Errorf("SessionItem render emitted a heading separator: %q", out)
 		}
-		if !strings.Contains(out, groupSeparator) {
-			t.Errorf("expected separator glyph in leading heading: %q", out)
+		if strings.Contains(out, "Portal") {
+			t.Errorf("SessionItem render leaked its GroupHeading 'Portal': %q", out)
+		}
+		if !strings.Contains(out, "a") {
+			t.Errorf("SessionItem render missing its own name 'a': %q", out)
+		}
+		if strings.Contains(out, "\n") {
+			t.Errorf("SessionItem emitted a multi-line render: %q", out)
 		}
 	})
 
-	t.Run("renders a per-group count of the rows beneath the heading", func(t *testing.T) {
+	t.Run("renders the HeaderItem Count as the per-group total", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
-			tui.SessionItem{Session: tmux.Session{Name: "d", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
-			tui.SessionItem{Session: tmux.Session{Name: "e", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
-		}
-		m := list.New(items, d, 80, 10)
+		m := list.New(nil, d, 80, 10)
 
 		var portal bytes.Buffer
-		d.Render(&portal, m, 0, items[0])
+		d.Render(&portal, m, 0, tui.HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"})
 		if !strings.Contains(portal.String(), "Portal "+groupSeparator+" 2") {
 			t.Errorf("expected 'Portal %s 2', got: %q", groupSeparator, portal.String())
 		}
 
 		var work bytes.Buffer
-		d.Render(&work, m, 2, items[2])
+		d.Render(&work, m, 1, tui.HeaderItem{Heading: "Work", Count: 3, Key: "/p/work"})
 		if !strings.Contains(work.String(), "Work "+groupSeparator+" 3") {
 			t.Errorf("expected 'Work %s 3', got: %q", groupSeparator, work.String())
 		}
 	})
 
-	t.Run("counts a multi-tag session under each of its tag headings", func(t *testing.T) {
-		// One live session 'dev' materialised under two tags (Pattern B). The
-		// By-Tag header counts sum to 2 while there is only 1 live session.
-		dev := tmux.Session{Name: "dev", Windows: 1}
+	t.Run("renders a per-tag count of 1 for each of a multi-tag session's headers", func(t *testing.T) {
+		// One live session 'dev' materialised under two tags (Pattern B). Each
+		// tag heading is its own HeaderItem with Count 1.
 		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: dev, GroupKey: "personal", GroupHeading: "personal"},
-			tui.SessionItem{Session: dev, GroupKey: "work", GroupHeading: "work"},
-		}
-		m := list.New(items, d, 80, 10)
+		m := list.New(nil, d, 80, 10)
 
 		var personal bytes.Buffer
-		d.Render(&personal, m, 0, items[0])
+		d.Render(&personal, m, 0, tui.HeaderItem{Heading: "personal", Count: 1, Key: "personal"})
 		if !strings.Contains(personal.String(), "personal "+groupSeparator+" 1") {
 			t.Errorf("expected 'personal %s 1', got: %q", groupSeparator, personal.String())
 		}
 
 		var work bytes.Buffer
-		d.Render(&work, m, 1, items[1])
+		d.Render(&work, m, 1, tui.HeaderItem{Heading: "work", Count: 1, Key: "work"})
 		if !strings.Contains(work.String(), "work "+groupSeparator+" 1") {
 			t.Errorf("expected 'work %s 1', got: %q", groupSeparator, work.String())
 		}
@@ -420,165 +406,177 @@ func TestSessionDelegateGroupHeadings(t *testing.T) {
 		}
 	})
 
-	t.Run("carries the correct count for the last group", func(t *testing.T) {
+	t.Run("renders the catch-all (Untagged) HeaderItem with its group count", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := []list.Item{
-			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
-			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
-			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
-			tui.SessionItem{Session: tmux.Session{Name: "d", Windows: 1}, GroupKey: "Untagged", GroupHeading: "Untagged", CatchAll: true},
-		}
-		m := list.New(items, d, 80, 10)
+		m := list.New(nil, d, 80, 10)
 
 		var last bytes.Buffer
-		d.Render(&last, m, 1, items[1])
+		d.Render(&last, m, 0, tui.HeaderItem{Heading: "Untagged", Count: 3, Key: "Untagged"})
 		if !strings.Contains(last.String(), "Untagged "+groupSeparator+" 3") {
-			t.Errorf("expected last group 'Untagged %s 3', got: %q", groupSeparator, last.String())
+			t.Errorf("expected 'Untagged %s 3', got: %q", groupSeparator, last.String())
+		}
+	})
+
+	t.Run("FilterValue is empty so the built-in filter drops headers", func(t *testing.T) {
+		// Headers vanish during filtering (flatten-on-filter) because their
+		// FilterValue is "" — the built-in filter never matches them.
+		var _ list.Item = tui.HeaderItem{}
+		if got := (tui.HeaderItem{Heading: "Portal", Count: 2}).FilterValue(); got != "" {
+			t.Errorf("HeaderItem.FilterValue() = %q, want empty", got)
 		}
 	})
 }
 
+// TestSessionDelegateFlattenOnFilter pins the new flatten-on-filter mechanism.
+// Group headings are now real HeaderItem list rows whose FilterValue is "", so
+// the built-in filter drops them the moment a query is typed — leaving a flat
+// hit list of session rows. (Previously the delegate suppressed in-line
+// headings by inspecting the model's FilterState; that mechanism is gone.)
 func TestSessionDelegateFlattenOnFilter(t *testing.T) {
+	// projectItems mirrors what buildByProject emits: a HeaderItem before each
+	// group's session rows.
 	projectItems := func() []list.Item {
 		return []list.Item{
+			tui.HeaderItem{Heading: "Portal", Count: 2, Key: "/p/portal"},
 			tui.SessionItem{Session: tmux.Session{Name: "a", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
 			tui.SessionItem{Session: tmux.Session{Name: "b", Windows: 1}, GroupKey: "/p/portal", GroupHeading: "Portal"},
+			tui.HeaderItem{Heading: "Work", Count: 1, Key: "/p/work"},
 			tui.SessionItem{Session: tmux.Session{Name: "c", Windows: 1}, GroupKey: "/p/work", GroupHeading: "Work"},
 		}
 	}
 
+	// tagItems mirrors what buildByTag emits for a single multi-tag session
+	// (Pattern B): one (header, row) pair per tag.
 	tagItems := func() []list.Item {
 		return []list.Item{
+			tui.HeaderItem{Heading: "personal", Count: 1, Key: "personal"},
 			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "personal", GroupHeading: "personal"},
+			tui.HeaderItem{Heading: "work", Count: 1, Key: "work"},
 			tui.SessionItem{Session: tmux.Session{Name: "dev", Windows: 1}, GroupKey: "work", GroupHeading: "work"},
 		}
 	}
 
-	renderAll := func(d tui.SessionDelegate, m list.Model, items []list.Item) string {
-		var buf bytes.Buffer
-		for index := range items {
-			d.Render(&buf, m, index, items[index])
+	// countHeaders / countSessions classify the post-filter visible items.
+	countHeaders := func(items []list.Item) int {
+		n := 0
+		for _, it := range items {
+			if _, ok := it.(tui.HeaderItem); ok {
+				n++
+			}
 		}
-		return buf.String()
+		return n
+	}
+	countSessions := func(items []list.Item) int {
+		n := 0
+		for _, it := range items {
+			if _, ok := it.(tui.SessionItem); ok {
+				n++
+			}
+		}
+		return n
 	}
 
-	t.Run("suppresses group headers while a filter is active in By Project mode", func(t *testing.T) {
+	t.Run("the built-in filter drops all headers in By Project mode", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := projectItems()
-		m := list.New(items, d, 80, 10)
-		m.SetFilterState(list.FilterApplied)
+		m := list.New(projectItems(), d, 80, 10)
+		m.SetFilterText("a") // matches session row "a"
 
-		out := renderAll(d, m, items)
-		if strings.Contains(out, groupSeparator) {
-			t.Errorf("expected no group headings while filtering By Project, got: %q", out)
+		visible := m.VisibleItems()
+		if countHeaders(visible) != 0 {
+			t.Errorf("expected no HeaderItems while filtering By Project, got %d in %v", countHeaders(visible), visible)
+		}
+		if countSessions(visible) == 0 {
+			t.Errorf("expected at least one matching session row to survive the filter, got none")
 		}
 	})
 
-	t.Run("suppresses group headers while a filter is active in By Tag mode", func(t *testing.T) {
+	t.Run("the built-in filter drops all headers in By Tag mode", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := tagItems()
-		m := list.New(items, d, 80, 10)
-		m.SetFilterState(list.FilterApplied)
+		m := list.New(tagItems(), d, 80, 10)
+		m.SetFilterText("dev")
 
-		out := renderAll(d, m, items)
-		if strings.Contains(out, groupSeparator) {
-			t.Errorf("expected no group headings while filtering By Tag, got: %q", out)
+		visible := m.VisibleItems()
+		if countHeaders(visible) != 0 {
+			t.Errorf("expected no HeaderItems while filtering By Tag, got %d in %v", countHeaders(visible), visible)
 		}
 	})
 
-	t.Run("restores group headers when the filter is cleared", func(t *testing.T) {
+	t.Run("headers return to the visible set when the filter is cleared", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := projectItems()
-		m := list.New(items, d, 80, 10)
+		m := list.New(projectItems(), d, 80, 10)
 
-		m.SetFilterState(list.FilterApplied)
-		filtered := renderAll(d, m, items)
-		if strings.Contains(filtered, groupSeparator) {
-			t.Fatalf("precondition failed: headings present while filtering: %q", filtered)
+		m.SetFilterText("a")
+		if countHeaders(m.VisibleItems()) != 0 {
+			t.Fatalf("precondition failed: headers present while filtering")
 		}
 
-		m.SetFilterState(list.Unfiltered)
-		restored := renderAll(d, m, items)
-		if !strings.Contains(restored, groupSeparator) {
-			t.Errorf("expected group headings to return on Unfiltered, got: %q", restored)
+		m.ResetFilter()
+		restored := m.VisibleItems()
+		if countHeaders(restored) != 2 {
+			t.Errorf("expected the 2 group headers to return on clear, got %d", countHeaders(restored))
 		}
-		if !strings.Contains(restored, "Portal") || !strings.Contains(restored, "Work") {
-			t.Errorf("expected By Project headings to return on clear, got: %q", restored)
+		// And the dimmed headings render once more for the restored headers.
+		var buf bytes.Buffer
+		for i := range restored {
+			d.Render(&buf, m, i, restored[i])
+		}
+		out := buf.String()
+		if !strings.Contains(out, "Portal "+groupSeparator) || !strings.Contains(out, "Work "+groupSeparator) {
+			t.Errorf("expected By Project headings to render again on clear, got: %q", out)
 		}
 	})
 
-	t.Run("leaves Flat-mode filtering unchanged", func(t *testing.T) {
+	t.Run("leaves Flat-mode filtering unchanged (no headers ever)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := []list.Item{
+		flat := []list.Item{
 			tui.SessionItem{Session: tmux.Session{Name: "first", Windows: 2, Attached: true}},
 			tui.SessionItem{Session: tmux.Session{Name: "second", Windows: 1, Attached: false}},
 		}
-		m := list.New(items, d, 80, 10)
+		m := list.New(flat, d, 80, 10)
+		m.SetFilterText("first")
 
-		var unfiltered bytes.Buffer
-		for index := range items {
-			d.Render(&unfiltered, m, index, items[index])
+		visible := m.VisibleItems()
+		if countHeaders(visible) != 0 {
+			t.Errorf("flat-mode filtering should never surface headers, got %d", countHeaders(visible))
 		}
-
-		m.SetFilterState(list.FilterApplied)
-		var filtered bytes.Buffer
-		for index := range items {
-			d.Render(&filtered, m, index, items[index])
-		}
-
-		if unfiltered.String() != filtered.String() {
-			t.Errorf("flat-mode filtering changed output: unfiltered=%q filtered=%q", unfiltered.String(), filtered.String())
-		}
-		if strings.Contains(filtered.String(), groupSeparator) {
-			t.Errorf("flat-mode filtering should never emit headings: %q", filtered.String())
+		if countSessions(visible) == 0 {
+			t.Errorf("expected the matching flat session row to survive the filter")
 		}
 	})
 
-	t.Run("restores the current mode's headings on clear (By Tag tags, not By Project)", func(t *testing.T) {
+	t.Run("the current mode's headers return on clear (By Tag tags, not By Project)", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := tagItems()
-		m := list.New(items, d, 80, 10)
+		m := list.New(tagItems(), d, 80, 10)
 
-		m.SetFilterState(list.FilterApplied)
-		_ = renderAll(d, m, items)
+		m.SetFilterText("dev")
+		_ = m.VisibleItems()
 
-		m.SetFilterState(list.Unfiltered)
-		restored := renderAll(d, m, items)
-		if !strings.Contains(restored, "personal "+groupSeparator) {
-			t.Errorf("expected By Tag heading 'personal' to return on clear, got: %q", restored)
+		m.ResetFilter()
+		restored := m.VisibleItems()
+		var buf bytes.Buffer
+		for i := range restored {
+			d.Render(&buf, m, i, restored[i])
 		}
-		if !strings.Contains(restored, "work "+groupSeparator) {
-			t.Errorf("expected By Tag heading 'work' to return on clear, got: %q", restored)
+		out := buf.String()
+		if !strings.Contains(out, "personal "+groupSeparator) {
+			t.Errorf("expected By Tag heading 'personal' to return on clear, got: %q", out)
 		}
-	})
-
-	t.Run("suppresses headings during both Filtering and FilterApplied states", func(t *testing.T) {
-		states := []list.FilterState{list.Filtering, list.FilterApplied}
-		for _, state := range states {
-			d := tui.SessionDelegate{}
-			items := projectItems()
-			m := list.New(items, d, 80, 10)
-			m.SetFilterState(state)
-
-			out := renderAll(d, m, items)
-			if strings.Contains(out, groupSeparator) {
-				t.Errorf("state %v: expected no headings, got: %q", state, out)
-			}
+		if !strings.Contains(out, "work "+groupSeparator) {
+			t.Errorf("expected By Tag heading 'work' to return on clear, got: %q", out)
 		}
 	})
 
 	t.Run("may surface duplicate session rows when filtering in By Tag mode", func(t *testing.T) {
 		d := tui.SessionDelegate{}
-		items := tagItems()
-		m := list.New(items, d, 80, 10)
-		m.SetFilterState(list.FilterApplied)
+		m := list.New(tagItems(), d, 80, 10)
+		m.SetFilterText("dev")
 
-		out := renderAll(d, m, items)
-		if strings.Count(out, "dev") < 2 {
-			t.Errorf("expected duplicate 'dev' rows (one per matching tag instance), got: %q", out)
+		visible := m.VisibleItems()
+		if countSessions(visible) < 2 {
+			t.Errorf("expected duplicate 'dev' rows (one per matching tag instance), got %d", countSessions(visible))
 		}
-		if strings.Contains(out, groupSeparator) {
-			t.Errorf("expected no headings around the duplicate rows, got: %q", out)
+		if countHeaders(visible) != 0 {
+			t.Errorf("expected no headers around the duplicate rows, got %d", countHeaders(visible))
 		}
 	})
 }

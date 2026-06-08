@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -185,17 +186,61 @@ func TestSwitchViewKey(t *testing.T) {
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
 		persister := &fakeModePersister{}
 
-		// Flat → By Project: after the press, items carry the project heading.
+		// Flat → By Project: after the press, a Portal header row leads the
+		// single session row.
 		m := newSwitchViewTestModel(prefs.ModeFlat, persister, sessions, projects)
 
 		updated, _ := m.Update(keyS)
 		mm := updated.(Model)
 		items := mm.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(session rows) = %d, want 1", len(rows))
 		}
-		if got := asSessionItem(t, items[0]).GroupHeading; got != "Portal" {
+		if got := rows[0].GroupHeading; got != "Portal" {
 			t.Errorf("GroupHeading = %q, want %q (list did not re-render into By Project)", got, "Portal")
+		}
+		headers := headerRows(items)
+		if len(headers) != 1 || headers[0].Heading != "Portal" {
+			t.Errorf("headers = %v, want a single Portal header", headers)
+		}
+	})
+
+	t.Run("resets to the first page and first session row on view switch", func(t *testing.T) {
+		// Enough sessions to span multiple pages so an advanced page is
+		// observable, then assert the switch snaps back to page 0 / first row.
+		var sessions []tmux.Session
+		for i := 0; i < 60; i++ {
+			sessions = append(sessions, tmux.Session{Name: fmt.Sprintf("sess-%02d", i)})
+		}
+		persister := &fakeModePersister{}
+		m := newSwitchViewTestModel(prefs.ModeFlat, persister, sessions, nil)
+
+		if m.sessionList.Paginator.TotalPages < 2 {
+			t.Fatalf("test setup: want >1 page, got %d", m.sessionList.Paginator.TotalPages)
+		}
+		m.sessionList.Paginator.Page = 1
+		m.sessionList.Select(m.sessionList.Paginator.Page * m.sessionList.Paginator.PerPage)
+
+		updated, _ := m.Update(keyS)
+		mm := updated.(Model)
+
+		// Page snaps back to the first page (the core fix).
+		if mm.sessionList.Paginator.Page != 0 {
+			t.Errorf("after switch view, page = %d, want 0 (page must reset)", mm.sessionList.Paginator.Page)
+		}
+		// And the cursor lands on the first session row — these dir-less
+		// sessions group under a leading "Unknown" header in By Project, so the
+		// first selectable row is the first session, not the header.
+		if selectedHeader(mm) {
+			t.Errorf("after switch view, cursor rests on a header, want first session row")
+		}
+		first, ok := mm.selectedSessionItem()
+		if !ok {
+			t.Fatalf("selectedSessionItem ok=false after switch view")
+		}
+		if want := sessionRows(mm.sessionList.Items())[0].Session.Name; first.Session.Name != want {
+			t.Errorf("after switch view, selected = %q, want %q (first session row)", first.Session.Name, want)
 		}
 	})
 }

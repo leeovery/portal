@@ -101,15 +101,18 @@ func TestProjectsTransitionRegroupsWithUpdatedTags(t *testing.T) {
 	}
 
 	items := final.sessionList.VisibleItems()
-	if len(items) != 1 {
-		t.Fatalf("expected 1 visible session item after re-group, got %d", len(items))
+	rows := sessionRows(items)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 visible session row after re-group, got %d (items=%v)", len(rows), items)
 	}
-	si, ok := items[0].(SessionItem)
-	if !ok {
-		t.Fatalf("expected SessionItem, got %T", items[0])
-	}
+	si := rows[0]
 	if si.GroupHeading != "work" || si.GroupKey != "work" {
 		t.Errorf("expected session re-grouped under tag heading %q, got heading=%q key=%q", "work", si.GroupHeading, si.GroupKey)
+	}
+	// The interleaved "work" header is present ahead of its row.
+	headers := headerRows(items)
+	if len(headers) != 1 || headers[0].Heading != "work" {
+		t.Errorf("expected a single 'work' header, got %v", headers)
 	}
 }
 

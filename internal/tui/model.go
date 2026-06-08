@@ -234,19 +234,24 @@ type Model struct {
 	previewAttacher PreviewAttacher
 	preview         previewModel
 
-	// dirStamper and dirRunner are the render-layer directory-resolution
-	// seam consumed by rebuildSessionList's lazy stamp-on-render fallback
-	// (spec § The lazy stamp-on-render fallback). When both are non-nil,
+	// dirReader and dirRunner are the render-layer directory-resolution seam
+	// consumed by rebuildSessionList's lazy fallback. When both are non-nil,
 	// each session whose @portal-dir is absent is resolved live from its
-	// active pane → git-root via session.ResolveAndStampDir (which also
-	// best-effort stamps @portal-dir so subsequent renders take the fast
-	// path) before the grouping builders consume Session.Dir. Production
-	// wiring is *tmux.Client + &resolver.RealCommandRunner{} via
-	// WithDirResolver; tests that omit the option leave both nil, in which
-	// case the resolution pass is skipped and un-stamped sessions route to
-	// Unknown/Untagged as before.
-	dirStamper session.PaneStamper
-	dirRunner  resolver.CommandRunner
+	// active pane → git-root via session.ResolveSessionDir before the grouping
+	// builders consume Session.Dir, and the result is cached back into
+	// m.sessions (resolveSessionDirs) so subsequent rebuilds in the same picker
+	// session skip the pane read. The derived directory is NOT stamped back to
+	// tmux: a session's pane cwd can drift away from its origin directory, and
+	// freezing that drift onto @portal-dir would permanently mis-group the
+	// session (the .dotfiles-under-portal bug). New sessions are anchored at
+	// creation instead (session.CreateFromDir / QuickStart stamp @portal-dir);
+	// the lazy read here is a best-effort guess for legacy un-stamped sessions
+	// that self-corrects on the next picker launch. Production wiring is
+	// *tmux.Client + &resolver.RealCommandRunner{} via WithDirResolver; tests
+	// that omit the option leave both nil, in which case the resolution pass is
+	// skipped and un-stamped sessions route to Unknown/Untagged.
+	dirReader session.PaneCurrentPathReader
+	dirRunner resolver.CommandRunner
 
 	// Sessions-page inline-flash state (spec § Inline flash —
 	// feature-local infrastructure). flashText empty string means no
@@ -287,8 +292,8 @@ type Model struct {
 	editError       string
 
 	// Tag-buffer modal state, parallel to the alias-buffer fields above.
-	editTags        []string // working copy of the project's tags
-	editRemovedTags []string // tags marked for removal (parallel to editRemoved)
+	editTags        []string // working copy of the project's tags (persisted live)
+	editTagsMutated bool     // a tag was added/removed this session (triggers a projects reload on modal close)
 	editNewTag      string   // in-progress Add-input text (parallel to editNewAlias)
 	editTagCursor   int      // highlighted row within the Tags block
 }
@@ -606,15 +611,16 @@ func WithPreviewAttachPipeline(p PreviewAttacher) Option {
 }
 
 // WithDirResolver wires the render-layer directory-resolution seam used by
-// rebuildSessionList's lazy stamp-on-render fallback. Production callers pass
-// the concrete *tmux.Client (which satisfies session.PaneStamper:
-// ActivePaneCurrentPath + SetSessionOption) and a &resolver.RealCommandRunner{}.
-// When wired, each session with an absent @portal-dir is resolved live and
-// best-effort stamped before grouping; tests that omit this option leave both
-// seams nil and the resolution pass is skipped.
-func WithDirResolver(stamper session.PaneStamper, runner resolver.CommandRunner) Option {
+// rebuildSessionList's lazy fallback. Production callers pass the concrete
+// *tmux.Client (which satisfies session.PaneCurrentPathReader via
+// ActivePaneCurrentPath) and a &resolver.RealCommandRunner{}. When wired, each
+// session with an absent @portal-dir is resolved live from its active pane →
+// git-root before grouping and cached in-memory (never stamped back to tmux);
+// tests that omit this option leave both seams nil and the resolution pass is
+// skipped.
+func WithDirResolver(reader session.PaneCurrentPathReader, runner resolver.CommandRunner) Option {
 	return func(m *Model) {
-		m.dirStamper = stamper
+		m.dirReader = reader
 		m.dirRunner = runner
 	}
 }
@@ -995,41 +1001,64 @@ func (m *Model) setProjects(projects []project.Project) {
 }
 
 // resolveSessionDirs is the render-layer chokepoint over the lazy
-// stamp-on-render fallback (spec § The lazy stamp-on-render fallback). It maps
-// every session through session.ResolveAndStampDir, so a session whose
-// @portal-dir is absent is resolved live from its active pane → git-root (and
-// best-effort stamped so subsequent renders take the fast path).
-// ResolveAndStampDir's fast path returns an already-stamped Dir verbatim with no
-// pane read, so mapping all sessions is safe and cheap.
+// directory-resolution fallback. For each session whose @portal-dir is absent
+// (Session.Dir == ""), it derives the directory live from the active pane →
+// git-root via session.ResolveSessionDir, and caches the result back into
+// m.sessions so subsequent rebuilds in the same picker session take the fast
+// path (no second pane read / git rev-parse — fixing the 2-3s "switch view"
+// stall). A session whose Dir is already set is passed through untouched, so a
+// fully-stamped install pays zero pane reads.
+//
+// The derived directory is deliberately NOT stamped back to tmux: a session's
+// pane cwd can drift away from its origin directory, and freezing that drift
+// onto @portal-dir would permanently mis-group the session. New sessions are
+// anchored at creation instead; this lazy read is a best-effort guess for
+// legacy un-stamped sessions that self-corrects on the next picker launch (when
+// m.sessions is rebuilt fresh from ListSessions).
 //
 // It is invoked ONLY from the grouped render arms (ModeByProject / ModeByTag,
 // non-signpost) in rebuildSessionList — the lazy fallback is a grouped-render
 // mechanism. The Flat and byTagSignpost arms render via ToListItems, which
 // ignores Session.Dir, so they consume the un-resolved sessions directly and
-// pay zero pane reads / git rev-parse / stamp writes.
+// pay zero pane reads.
 //
 // Resolution is best-effort and overwrite-on-success only: when it yields
 // ok==false (unresolvable this pass — killed mid-resolve, blank pane, or no
-// enclosing path) the session's Dir is left as-is, so an empty Dir still falls
-// through to the Unknown (By Project) / Untagged (By Tag) catch-all.
-//
-// tmux.Session is a value type, so each session is copied and .Dir set on the
-// copy — m.sessions is never mutated. When the seam is unwired (either half
-// nil, e.g. tests without WithDirResolver), the input slice is returned
-// unchanged and no resolution happens.
+// enclosing path) the session's Dir is left empty, so it still falls through to
+// the Unknown (By Project) / Untagged (By Tag) catch-all and is re-attempted
+// next rebuild. When the seam is unwired (either half nil, e.g. tests without
+// WithDirResolver), the input slice is returned unchanged.
 func (m *Model) resolveSessionDirs(sessions []tmux.Session) []tmux.Session {
-	if m.dirStamper == nil || m.dirRunner == nil {
+	if m.dirReader == nil || m.dirRunner == nil {
 		return sessions
 	}
 
 	resolved := make([]tmux.Session, len(sessions))
 	for i, s := range sessions {
-		if dir, ok := session.ResolveAndStampDir(s.Name, s.Dir, m.dirStamper, m.dirRunner); ok {
-			s.Dir = dir
+		if s.Dir == "" {
+			if dir, ok, err := session.ResolveSessionDir(s.Name, m.dirReader, m.dirRunner); ok && err == nil {
+				s.Dir = dir
+				m.cacheSessionDir(s.Name, dir)
+			}
 		}
 		resolved[i] = s
 	}
 	return resolved
+}
+
+// cacheSessionDir records a lazily-derived directory back onto the stored
+// session (matched by name) so a subsequent rebuildSessionList in the same
+// picker session sees Session.Dir set and takes resolveSessionDirs' fast path
+// instead of re-reading the pane. A SessionsMsg refresh replaces m.sessions
+// with a fresh ListSessions snapshot (Dir == "" again for un-stamped
+// sessions), so the guess is re-derived then — it is never frozen.
+func (m *Model) cacheSessionDir(name, dir string) {
+	for i := range m.sessions {
+		if m.sessions[i].Name == name {
+			m.sessions[i].Dir = dir
+			return
+		}
+	}
 }
 
 func (m *Model) rebuildSessionList() tea.Cmd {
@@ -1072,7 +1101,44 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	if m.termWidth > 0 || m.termHeight > 0 {
 		m.applySessionListSize(m.termWidth, m.termHeight)
 	}
+
+	// Grouped lists lead with a non-selectable HeaderItem at index 0, so a
+	// fresh build (or a refresh whose cursor now points at a header) would
+	// leave the selection on a header with no visible cursor. Step it onto the
+	// first real session row.
+	m.ensureSessionRowSelected()
 	return cmd
+}
+
+// ensureSessionRowSelected nudges the selection off a non-selectable HeaderItem
+// onto the following session row. Grouped lists always lead with a header
+// (index 0) and never place two headers adjacently, so a single downward step
+// always lands on a session. It is a no-op in Flat mode (no headers), while
+// filtering (headers are excluded from the visible set), and when the list is
+// empty.
+func (m *Model) ensureSessionRowSelected() {
+	if _, isHeader := m.sessionList.SelectedItem().(HeaderItem); isHeader {
+		m.sessionList.CursorDown()
+	}
+}
+
+// skipHeaderRow keeps the cursor off the non-selectable group headers after the
+// list has processed a navigation key. If the new selection is a HeaderItem it
+// steps once more in the direction the user was moving — up for CursorUp /
+// PrevPage / GoToStart, down otherwise. A single step always clears the header
+// because no two headers are adjacent; at the very top (index 0 header) an
+// upward intent flips to a downward step so the selection never falls off the
+// list.
+func (m *Model) skipHeaderRow(msg tea.KeyMsg) {
+	if _, isHeader := m.sessionList.SelectedItem().(HeaderItem); !isHeader {
+		return
+	}
+	km := m.sessionList.KeyMap
+	if key.Matches(msg, km.CursorUp, km.PrevPage, km.GoToStart) && m.sessionList.Index() > 0 {
+		m.sessionList.CursorUp()
+		return
+	}
+	m.sessionList.CursorDown()
 }
 
 // evaluateDefaultPage sets the active page based on loaded data.
@@ -1660,7 +1726,7 @@ func (m Model) handleEditProjectKey() (tea.Model, tea.Cmd) {
 	// buffer never aliases the stored project slice. slices.Clone(nil)
 	// returns nil, so a back-compat record with no tags seeds an empty buffer.
 	m.editTags = slices.Clone(pi.Project.Tags)
-	m.editRemovedTags = nil
+	m.editTagsMutated = false
 	m.editNewTag = ""
 	m.editTagCursor = 0
 
@@ -1691,6 +1757,14 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.modal = modalNone
 		m.editError = ""
+		// Tags are persisted live (Enter adds, x removes), so closing with Esc
+		// keeps them — unlike name/aliases, which are batched and discarded
+		// here. Reload projects so the cached records + grouping index pick up
+		// any live tag change before the By-Tag view is shown.
+		if m.editTagsMutated {
+			m.editTagsMutated = false
+			return m, m.loadProjects()
+		}
 		return m, nil
 
 	case tea.KeyTab:
@@ -1710,10 +1784,12 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
-		// Tags field: Enter is field-scoped — it adds the typed tag to the
-		// working buffer rather than confirming. A blank/whitespace-only or
-		// duplicate-after-normalisation input is a no-op (and never confirms).
-		// Name/Aliases fall through to the existing confirm path unchanged.
+		// Tags field: Enter is field-scoped — it adds the typed tag and
+		// persists it immediately (project.AddTag), so the visible "[x] tag"
+		// reflects what is on disk and Esc never discards it. A
+		// blank/whitespace-only or duplicate-after-normalisation input is a
+		// no-op (and never confirms). Name/Aliases fall through to the batched
+		// confirm path unchanged.
 		if m.editFocus == editFieldTags {
 			tag, ok := project.NormaliseTag(m.editNewTag)
 			if !ok {
@@ -1725,9 +1801,16 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editNewTag = ""
 				return m, nil
 			}
+			if m.projectEditor != nil {
+				if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
+					m.editError = "Failed to save tag"
+					return m, nil
+				}
+			}
 			m.editTags = append(m.editTags, tag)
 			m.editNewTag = ""
 			m.editError = ""
+			m.editTagsMutated = true
 			return m, nil
 		}
 		return m.handleEditProjectConfirm()
@@ -1786,14 +1869,22 @@ func (m Model) updateEditProjectModal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editError = ""
 			return m, nil
 		}
-		// In tags area, on an existing tag entry: x removes it
+		// In tags area, on an existing tag entry: x removes it and persists the
+		// removal immediately (project.RemoveTag), mirroring the live Enter-add.
 		if m.editFocus == editFieldTags && text == "x" && m.editTagCursor < len(m.editTags) {
 			removed := m.editTags[m.editTagCursor]
-			m.editRemovedTags = append(m.editRemovedTags, removed)
+			if m.projectEditor != nil {
+				if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
+					m.editError = "Failed to remove tag"
+					return m, nil
+				}
+			}
 			m.editTags = append(m.editTags[:m.editTagCursor], m.editTags[m.editTagCursor+1:]...)
 			if m.editTagCursor > len(m.editTags) {
 				m.editTagCursor = len(m.editTags)
 			}
+			m.editError = ""
+			m.editTagsMutated = true
 			return m, nil
 		}
 		// In tags area, on Add input: type into new tag
@@ -1863,45 +1954,16 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Persist tag mutations. Order is removals THEN additions: removing first
-	// avoids a transient state where a re-added tag could momentarily collide
-	// with one still pending removal. The store (Phase 1) owns normalisation and
-	// dedup, so the modal passes raw buffer values verbatim and never
-	// re-normalises here.
-	for _, removed := range m.editRemovedTags {
-		// Reconcile against the final buffer: genuine removals are
-		// editRemovedTags MINUS the final editTags. A tag pressed `x` (queued for
-		// removal) but then re-added via the Add input before saving is still
-		// present in editTags, so it is NOT a genuine removal — skip it. Without
-		// this guard a remove-then-re-add of an originally-present tag would call
-		// RemoveTag (queued) while the addition loop skips it (it was in the
-		// original set), silently dropping the tag from projects.json.
-		if slices.Contains(m.editTags, removed) {
-			continue
-		}
-		if err := m.projectEditor.RemoveTag(m.editProject.Path, removed); err != nil {
-			m.editError = "Failed to save tags"
-			return m, nil
-		}
-	}
-
-	// Additions are diffed against the originally-loaded tag set
-	// (m.editProject.Tags) to minimise store writes: only tags present in the
-	// working buffer but absent from the original set are added. Phase 1's store
-	// dedups, so passing the full buffer would also be correct — the diff is just
-	// cleaner. Buffer entries are already canonical (NormaliseTag ran at add
-	// time), so equality against the canonical original set is exact.
-	for _, tag := range m.editTags {
-		if !slices.Contains(m.editProject.Tags, tag) {
-			if err := m.projectEditor.AddTag(m.editProject.Path, tag); err != nil {
-				m.editError = "Failed to save tags"
-				return m, nil
-			}
-		}
-	}
+	// Tag mutations are NOT handled here: tags persist live as the user edits
+	// them (Enter adds via AddTag, x removes via RemoveTag in
+	// updateEditProjectModal), so by the time the batched name/alias confirm
+	// runs the projects.json tag set is already current. The trailing
+	// loadProjects() refreshes the cached records + grouping index for both
+	// the name/alias changes and any live tag edits.
 
 	m.modal = modalNone
 	m.editError = ""
+	m.editTagsMutated = false
 
 	return m, m.loadProjects()
 }
@@ -2014,6 +2076,11 @@ func (m Model) updateSessionList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate remaining key handling to the list (cursor navigation, filtering, etc.)
 	var cmd tea.Cmd
 	m.sessionList, cmd = m.sessionList.Update(msg)
+	// Skip over non-selectable group headers so the cursor only ever rests on
+	// a session row (grouped modes only; a no-op in Flat / while filtering).
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		m.skipHeaderRow(keyMsg)
+	}
 	return m, cmd
 }
 
@@ -2030,6 +2097,11 @@ func (m Model) handleSwitchViewKey() (tea.Model, tea.Cmd) {
 	// rebuildSessionList is a pointer-receiver method; call it on the local
 	// value copy's address so the re-render mutates this copy before return.
 	cmd := (&m).rebuildSessionList()
+	// Reset to the top of the first page on every view switch: the previous
+	// page offset and cursor are meaningless under the new grouping. Land on
+	// the first session row, stepping past the leading header in grouped modes.
+	m.sessionList.ResetSelected()
+	(&m).ensureSessionRowSelected()
 	if m.modePersister != nil {
 		// Persist exactly once per press. The error is intentionally swallowed:
 		// remembering the last mode is a convenience, not a correctness

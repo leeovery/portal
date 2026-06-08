@@ -20,7 +20,7 @@ func mustMkdir(t *testing.T, dir string) {
 }
 
 // asSessionItem unwraps a list.Item into a SessionItem, failing the test if the
-// item is not a SessionItem (no header should ever appear in the slice).
+// item is not a SessionItem.
 func asSessionItem(t *testing.T, item list.Item) SessionItem {
 	t.Helper()
 	si, ok := item.(SessionItem)
@@ -28,6 +28,32 @@ func asSessionItem(t *testing.T, item list.Item) SessionItem {
 		t.Fatalf("item %v is not a SessionItem", item)
 	}
 	return si
+}
+
+// sessionRows returns only the SessionItem rows from a grouped item slice,
+// dropping the injected HeaderItem separators. Grouped lists now interleave a
+// HeaderItem before each group, so tests that assert on session membership /
+// ordering filter the headers out with this helper.
+func sessionRows(items []list.Item) []SessionItem {
+	var out []SessionItem
+	for _, it := range items {
+		if si, ok := it.(SessionItem); ok {
+			out = append(out, si)
+		}
+	}
+	return out
+}
+
+// headerRows returns only the HeaderItem separators from a grouped item slice,
+// in order — for tests that assert on group headings and their counts.
+func headerRows(items []list.Item) []HeaderItem {
+	var out []HeaderItem
+	for _, it := range items {
+		if h, ok := it.(HeaderItem); ok {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 func TestBuildByProject(t *testing.T) {
@@ -39,10 +65,11 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.Session.Name != "portal-abc" {
 			t.Errorf("Session.Name = %q, want %q", si.Session.Name, "portal-abc")
 		}
@@ -54,6 +81,16 @@ func TestBuildByProject(t *testing.T) {
 		}
 		if si.CatchAll {
 			t.Errorf("CatchAll = true, want false")
+		}
+
+		// The group's header is a real list item carrying the project name and a
+		// row count of 1, interleaved before its session row.
+		headers := headerRows(items)
+		if len(headers) != 1 {
+			t.Fatalf("len(headers) = %d, want 1", len(headers))
+		}
+		if headers[0].Heading != "Portal" || headers[0].Count != 1 {
+			t.Errorf("header = (%q, %d), want (%q, 1)", headers[0].Heading, headers[0].Count, "Portal")
 		}
 	})
 
@@ -72,10 +109,11 @@ func TestBuildByProject(t *testing.T) {
 		}
 
 		items := buildByProject(sessions, idx)
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupKey != matchKey {
 			t.Errorf("GroupKey = %q, want %q (key returned by idx.Match)", si.GroupKey, matchKey)
 		}
@@ -103,8 +141,9 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 3 {
-			t.Fatalf("len(items) = %d, want 3", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
 		wantOrder := []struct {
 			key  string
@@ -115,9 +154,28 @@ func TestBuildByProject(t *testing.T) {
 			{keyB, "bravo-1"},
 		}
 		for i, want := range wantOrder {
-			si := asSessionItem(t, items[i])
+			si := rows[i]
 			if si.GroupKey != want.key || si.Session.Name != want.name {
-				t.Errorf("item[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, want.key, want.name)
+				t.Errorf("row[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, want.key, want.name)
+			}
+		}
+
+		// One header per group, in (sorted) group order: Alpha (2 rows) then
+		// Bravo (1 row).
+		headers := headerRows(items)
+		wantHeaders := []struct {
+			heading string
+			count   int
+		}{
+			{"Alpha", 2},
+			{"Bravo", 1},
+		}
+		if len(headers) != len(wantHeaders) {
+			t.Fatalf("len(headers) = %d, want %d", len(headers), len(wantHeaders))
+		}
+		for i, want := range wantHeaders {
+			if headers[i].Heading != want.heading || headers[i].Count != want.count {
+				t.Errorf("header[%d] = (%q, %d), want (%q, %d)", i, headers[i].Heading, headers[i].Count, want.heading, want.count)
 			}
 		}
 	})
@@ -142,12 +200,12 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
 		keys := map[string]bool{}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if si.GroupHeading != "Portal" {
 				t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "Portal")
 			}
@@ -159,6 +217,18 @@ func TestBuildByProject(t *testing.T) {
 		if len(keys) != 2 {
 			t.Errorf("len(distinct keys) = %d, want 2", len(keys))
 		}
+
+		// Two distinct dirs sharing the name "Portal" form two separate groups,
+		// hence two headers (both labelled "Portal").
+		headers := headerRows(items)
+		if len(headers) != 2 {
+			t.Errorf("len(headers) = %d, want 2 (one per distinct-dir group)", len(headers))
+		}
+		for _, h := range headers {
+			if h.Heading != "Portal" {
+				t.Errorf("header heading = %q, want %q", h.Heading, "Portal")
+			}
+		}
 	})
 
 	t.Run("routes a session with empty Dir to the Unknown bucket", func(t *testing.T) {
@@ -166,10 +236,11 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -188,10 +259,11 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -210,16 +282,17 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		first := asSessionItem(t, items[0])
+		first := rows[0]
 		if first.CatchAll {
-			t.Errorf("first item is CatchAll, want known-project item first")
+			t.Errorf("first row is CatchAll, want known-project item first")
 		}
-		last := asSessionItem(t, items[1])
+		last := rows[1]
 		if !last.CatchAll {
-			t.Errorf("last item is not CatchAll, want Unknown item last")
+			t.Errorf("last row is not CatchAll, want Unknown item last")
 		}
 	})
 
@@ -241,13 +314,19 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range sessionRows(items) {
 			if si.CatchAll {
 				t.Errorf("unexpected catch-all item %+v; Unknown heading should be suppressed", si)
 			}
 			if si.GroupHeading == unknownHeading {
 				t.Errorf("unexpected Unknown heading; should be suppressed when no session is unresolvable")
+			}
+		}
+		// Empty-suppression at the header layer: no Unknown HeaderItem is emitted
+		// when no session is unresolvable.
+		for _, h := range headerRows(items) {
+			if h.Heading == unknownHeading {
+				t.Errorf("unexpected Unknown header; should be suppressed when no session is unresolvable")
 			}
 		}
 	})
@@ -262,14 +341,15 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(nil))
 
-		if len(items) != 3 {
-			t.Fatalf("len(items) = %d, want 3", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
 		wantNames := []string{"alpha", "bravo", "charlie"}
 		for i, want := range wantNames {
-			si := asSessionItem(t, items[i])
+			si := rows[i]
 			if si.Session.Name != want {
-				t.Errorf("item[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
+				t.Errorf("row[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
 			}
 		}
 	})
@@ -279,10 +359,11 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupKey != unknownHeading {
 			t.Errorf("GroupKey = %q, want %q", si.GroupKey, unknownHeading)
 		}
@@ -300,16 +381,29 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		first := asSessionItem(t, items[0])
+		first := rows[0]
 		if first.GroupHeading != "Zulu" {
-			t.Errorf("first item heading = %q, want %q", first.GroupHeading, "Zulu")
+			t.Errorf("first row heading = %q, want %q", first.GroupHeading, "Zulu")
 		}
-		last := asSessionItem(t, items[1])
+		last := rows[1]
 		if !last.CatchAll || last.GroupHeading != unknownHeading {
-			t.Errorf("last item = %+v, want Unknown catch-all pinned last", last)
+			t.Errorf("last row = %+v, want Unknown catch-all pinned last", last)
+		}
+
+		// The header order mirrors the row order: Zulu first, Unknown pinned last.
+		headers := headerRows(items)
+		if len(headers) != 2 {
+			t.Fatalf("len(headers) = %d, want 2", len(headers))
+		}
+		if headers[0].Heading != "Zulu" {
+			t.Errorf("first header heading = %q, want %q", headers[0].Heading, "Zulu")
+		}
+		if headers[1].Heading != unknownHeading {
+			t.Errorf("last header heading = %q, want %q (Unknown pinned last)", headers[1].Heading, unknownHeading)
 		}
 	})
 
@@ -325,8 +419,8 @@ func TestBuildByProject(t *testing.T) {
 		items := buildByProject(sessions, project.NewIndex(projects))
 
 		counts := map[string]int{}
-		for _, it := range items {
-			counts[asSessionItem(t, it).Session.Name]++
+		for _, si := range sessionRows(items) {
+			counts[si.Session.Name]++
 		}
 		for _, s := range sessions {
 			if counts[s.Name] != 1 {
@@ -345,14 +439,22 @@ func TestBuildByProject(t *testing.T) {
 
 		items := buildByProject(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if !si.CatchAll || si.GroupHeading != unknownHeading {
 				t.Errorf("session %q not routed to Unknown: %+v", si.Session.Name, si)
 			}
+		}
+		// Both unresolvable sessions share a single Unknown header with Count 2.
+		headers := headerRows(items)
+		if len(headers) != 1 {
+			t.Fatalf("len(headers) = %d, want 1", len(headers))
+		}
+		if headers[0].Heading != unknownHeading || headers[0].Count != 2 {
+			t.Errorf("header = (%q, %d), want (%q, 2)", headers[0].Heading, headers[0].Count, unknownHeading)
 		}
 	})
 }
@@ -365,12 +467,12 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
 		got := map[string]SessionItem{}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if si.CatchAll {
 				t.Errorf("item for tag %q is CatchAll, want false", si.GroupKey)
 			}
@@ -388,6 +490,25 @@ func TestBuildByTag(t *testing.T) {
 			}
 			if si.Session.Name != "portal-abc" {
 				t.Errorf("tag %q: Session.Name = %q, want %q", tag, si.Session.Name, "portal-abc")
+			}
+		}
+
+		// Each tag forms its own group, so one header per tag (sorted): personal
+		// then work, each counting its single row.
+		headers := headerRows(items)
+		wantHeaders := []struct {
+			heading string
+			count   int
+		}{
+			{"personal", 1},
+			{"work", 1},
+		}
+		if len(headers) != len(wantHeaders) {
+			t.Fatalf("len(headers) = %d, want %d", len(headers), len(wantHeaders))
+		}
+		for i, want := range wantHeaders {
+			if headers[i].Heading != want.heading || headers[i].Count != want.count {
+				t.Errorf("header[%d] = (%q, %d), want (%q, %d)", i, headers[i].Heading, headers[i].Count, want.heading, want.count)
 			}
 		}
 	})
@@ -414,17 +535,26 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 3 {
-			t.Fatalf("len(items) = %d, want 3", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if si.GroupKey != "work" {
 				t.Errorf("GroupKey = %q, want %q", si.GroupKey, "work")
 			}
 			if si.GroupHeading != "work" {
 				t.Errorf("GroupHeading = %q, want %q", si.GroupHeading, "work")
 			}
+		}
+		// The three non-canonical stored values collapse into one "work" group,
+		// hence a single header counting all three rows.
+		headers := headerRows(items)
+		if len(headers) != 1 {
+			t.Fatalf("len(headers) = %d, want 1 (single collapsed work group)", len(headers))
+		}
+		if headers[0].Heading != "work" || headers[0].Count != 3 {
+			t.Errorf("header = (%q, %d), want (%q, 3)", headers[0].Heading, headers[0].Count, "work")
 		}
 	})
 
@@ -435,10 +565,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -457,10 +588,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -474,10 +606,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -494,10 +627,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupKey != "work" || si.GroupHeading != "work" {
 			t.Errorf("item = (GroupKey %q, GroupHeading %q), want both %q", si.GroupKey, si.GroupHeading, "work")
 		}
@@ -513,10 +647,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll {
 			t.Errorf("CatchAll = false, want true")
 		}
@@ -543,8 +678,9 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 3 {
-			t.Fatalf("len(items) = %d, want 3", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
 		wantOrder := []struct {
 			tag  string
@@ -555,9 +691,27 @@ func TestBuildByTag(t *testing.T) {
 			{"work", "z-sess"},
 		}
 		for i, want := range wantOrder {
-			si := asSessionItem(t, items[i])
+			si := rows[i]
 			if si.GroupKey != want.tag || si.Session.Name != want.name {
-				t.Errorf("item[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, want.tag, want.name)
+				t.Errorf("row[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, want.tag, want.name)
+			}
+		}
+
+		// One header per tag group in sorted order: alpha (2 rows) then work (1).
+		headers := headerRows(items)
+		wantHeaders := []struct {
+			heading string
+			count   int
+		}{
+			{"alpha", 2},
+			{"work", 1},
+		}
+		if len(headers) != len(wantHeaders) {
+			t.Fatalf("len(headers) = %d, want %d", len(headers), len(wantHeaders))
+		}
+		for i, want := range wantHeaders {
+			if headers[i].Heading != want.heading || headers[i].Count != want.count {
+				t.Errorf("header[%d] = (%q, %d), want (%q, %d)", i, headers[i].Heading, headers[i].Count, want.heading, want.count)
 			}
 		}
 	})
@@ -574,16 +728,17 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		first := asSessionItem(t, items[0])
+		first := rows[0]
 		if first.CatchAll {
-			t.Errorf("first item is CatchAll, want tagged item first")
+			t.Errorf("first row is CatchAll, want tagged item first")
 		}
-		last := asSessionItem(t, items[1])
+		last := rows[1]
 		if !last.CatchAll {
-			t.Errorf("last item is not CatchAll, want Untagged item last")
+			t.Errorf("last row is not CatchAll, want Untagged item last")
 		}
 	})
 
@@ -594,11 +749,12 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		a := asSessionItem(t, items[0])
-		b := asSessionItem(t, items[1])
+		a := rows[0]
+		b := rows[1]
 		if a.Session != b.Session {
 			t.Errorf("instances reference different sessions: %+v vs %+v", a.Session, b.Session)
 		}
@@ -614,8 +770,9 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) <= len(sessions) {
-			t.Errorf("len(items) = %d, want > live session count %d", len(items), len(sessions))
+		rows := sessionRows(items)
+		if len(rows) <= len(sessions) {
+			t.Errorf("len(rows) = %d, want > live session count %d", len(rows), len(sessions))
 		}
 	})
 
@@ -637,13 +794,19 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range sessionRows(items) {
 			if si.CatchAll {
 				t.Errorf("unexpected catch-all item %+v; Untagged heading should be suppressed", si)
 			}
 			if si.GroupHeading == untaggedHeading {
 				t.Errorf("unexpected Untagged heading; should be suppressed when every session is tagged")
+			}
+		}
+		// Empty-suppression at the header layer: no Untagged HeaderItem when
+		// every session is tagged.
+		for _, h := range headerRows(items) {
+			if h.Heading == untaggedHeading {
+				t.Errorf("unexpected Untagged header; should be suppressed when every session is tagged")
 			}
 		}
 	})
@@ -658,14 +821,15 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(nil))
 
-		if len(items) != 3 {
-			t.Fatalf("len(items) = %d, want 3", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
 		wantNames := []string{"alpha", "bravo", "charlie"}
 		for i, want := range wantNames {
-			si := asSessionItem(t, items[i])
+			si := rows[i]
 			if si.Session.Name != want {
-				t.Errorf("item[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
+				t.Errorf("row[%d].Session.Name = %q, want %q", i, si.Session.Name, want)
 			}
 		}
 	})
@@ -675,10 +839,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupKey != untaggedHeading {
 			t.Errorf("GroupKey = %q, want %q", si.GroupKey, untaggedHeading)
 		}
@@ -696,16 +861,29 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(projects))
 
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2", len(rows))
 		}
-		first := asSessionItem(t, items[0])
+		first := rows[0]
 		if first.GroupHeading != "zeta" {
-			t.Errorf("first item heading = %q, want %q", first.GroupHeading, "zeta")
+			t.Errorf("first row heading = %q, want %q", first.GroupHeading, "zeta")
 		}
-		last := asSessionItem(t, items[1])
+		last := rows[1]
 		if !last.CatchAll || last.GroupHeading != untaggedHeading {
-			t.Errorf("last item = %+v, want Untagged catch-all pinned last", last)
+			t.Errorf("last row = %+v, want Untagged catch-all pinned last", last)
+		}
+
+		// The header order mirrors the row order: zeta first, Untagged pinned last.
+		headers := headerRows(items)
+		if len(headers) != 2 {
+			t.Fatalf("len(headers) = %d, want 2", len(headers))
+		}
+		if headers[0].Heading != "zeta" {
+			t.Errorf("first header heading = %q, want %q", headers[0].Heading, "zeta")
+		}
+		if headers[1].Heading != untaggedHeading {
+			t.Errorf("last header heading = %q, want %q (Untagged pinned last)", headers[1].Heading, untaggedHeading)
 		}
 	})
 
@@ -715,10 +893,11 @@ func TestBuildByTag(t *testing.T) {
 
 		items := buildByTag(sessions, project.NewIndex(nil))
 
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if !si.CatchAll || si.GroupHeading != untaggedHeading {
 			t.Errorf("deleted-project session not routed to Untagged: %+v", si)
 		}
@@ -736,8 +915,8 @@ func TestBuildByTag(t *testing.T) {
 		items := buildByTag(sessions, project.NewIndex(projects))
 
 		seen := map[string]bool{}
-		for _, it := range items {
-			seen[asSessionItem(t, it).Session.Name] = true
+		for _, si := range sessionRows(items) {
+			seen[si.Session.Name] = true
 		}
 		for _, s := range sessions {
 			if !seen[s.Name] {

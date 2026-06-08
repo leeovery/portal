@@ -66,13 +66,33 @@ func TestAssembleGroups(t *testing.T) {
 			{"a", "alpha-z"},
 			{"b", "bravo-1"},
 		}
-		if len(got) != len(want) {
-			t.Fatalf("len(got) = %d, want %d", len(got), len(want))
+		rows := sessionRows(got)
+		if len(rows) != len(want) {
+			t.Fatalf("len(rows) = %d, want %d", len(rows), len(want))
 		}
 		for i, w := range want {
-			si := asSessionItem(t, got[i])
+			si := rows[i]
 			if si.GroupKey != w.key || si.Session.Name != w.name {
-				t.Errorf("got[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, w.key, w.name)
+				t.Errorf("row[%d] = (%q, %q), want (%q, %q)", i, si.GroupKey, si.Session.Name, w.key, w.name)
+			}
+		}
+
+		// assembleGroups now interleaves a header before each group: "a" (2 rows)
+		// then "b" (1 row).
+		headers := headerRows(got)
+		wantHeaders := []struct {
+			key   string
+			count int
+		}{
+			{"a", 2},
+			{"b", 1},
+		}
+		if len(headers) != len(wantHeaders) {
+			t.Fatalf("len(headers) = %d, want %d", len(headers), len(wantHeaders))
+		}
+		for i, w := range wantHeaders {
+			if headers[i].Key != w.key || headers[i].Count != w.count {
+				t.Errorf("header[%d] = (key %q, count %d), want (%q, %d)", i, headers[i].Key, headers[i].Count, w.key, w.count)
 			}
 		}
 	})
@@ -84,15 +104,22 @@ func TestAssembleGroups(t *testing.T) {
 
 		got := assembleGroups(resolved, nil, "Heading")
 
-		if len(got) != 1 {
-			t.Fatalf("len(got) = %d, want 1", len(got))
+		rows := sessionRows(got)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, got[0])
+		si := rows[0]
 		if si.CatchAll {
 			t.Errorf("unexpected catch-all item; heading should be suppressed when no catch-all items")
 		}
 		if si.GroupHeading == "Heading" {
 			t.Errorf("unexpected catch-all heading %q; should be suppressed", "Heading")
+		}
+		// No catch-all header either — empty-suppression holds at the header layer.
+		for _, h := range headerRows(got) {
+			if h.Heading == "Heading" {
+				t.Errorf("unexpected catch-all header %q; should be suppressed", "Heading")
+			}
 		}
 	})
 
@@ -107,20 +134,34 @@ func TestAssembleGroups(t *testing.T) {
 
 		got := assembleGroups(resolved, catchAll, "Heading")
 
-		if len(got) != 3 {
-			t.Fatalf("len(got) = %d, want 3", len(got))
+		rows := sessionRows(got)
+		if len(rows) != 3 {
+			t.Fatalf("len(rows) = %d, want 3", len(rows))
 		}
-		first := asSessionItem(t, got[0])
+		first := rows[0]
 		if first.CatchAll || first.GroupHeading != "Zulu" {
-			t.Errorf("got[0] = %+v, want resolved Zulu item first", first)
+			t.Errorf("row[0] = %+v, want resolved Zulu item first", first)
 		}
-		second := asSessionItem(t, got[1])
-		third := asSessionItem(t, got[2])
+		second := rows[1]
+		third := rows[2]
 		if !second.CatchAll || second.Session.Name != "alpha" || second.GroupKey != "Heading" {
-			t.Errorf("got[1] = %+v, want catch-all alpha stamped with Heading", second)
+			t.Errorf("row[1] = %+v, want catch-all alpha stamped with Heading", second)
 		}
 		if !third.CatchAll || third.Session.Name != "charlie" || third.GroupKey != "Heading" {
-			t.Errorf("got[2] = %+v, want catch-all charlie stamped with Heading", third)
+			t.Errorf("row[2] = %+v, want catch-all charlie stamped with Heading", third)
+		}
+
+		// Two headers: the resolved Zulu group (1 row) then the catch-all
+		// "Heading" group (2 rows) pinned last.
+		headers := headerRows(got)
+		if len(headers) != 2 {
+			t.Fatalf("len(headers) = %d, want 2", len(headers))
+		}
+		if headers[0].Heading != "Zulu" || headers[0].Count != 1 {
+			t.Errorf("header[0] = (%q, %d), want (Zulu, 1)", headers[0].Heading, headers[0].Count)
+		}
+		if headers[1].Heading != "Heading" || headers[1].Count != 2 {
+			t.Errorf("header[1] = (%q, %d), want (Heading, 2) pinned last", headers[1].Heading, headers[1].Count)
 		}
 	})
 }

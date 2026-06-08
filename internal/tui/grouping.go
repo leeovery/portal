@@ -165,47 +165,80 @@ func unknownItem(s tmux.Session) SessionItem {
 	}
 }
 
-// appendCatchAll pins the catch-all bucket (Unknown / Untagged) last and applies
-// the empty-suppression rule. resolved holds the already-alphabetically-ordered
-// resolvable groups (keyed on their real GroupKey — canonical path or tag);
-// catchAll holds the flagged catch-all SessionItems (CatchAll = true,
-// GroupHeading = heading) in arbitrary input order.
+// orderedSessionItems produces the final session-row order for a grouped view:
+// the resolvable groups sorted by (GroupKey, Session.Name) — the single
+// definition of grouped-list ordering — followed by the catch-all bucket
+// (Unknown / Untagged) pinned last.
 //
-// The catch-all items are sorted by Session.Name and each is stamped with
-// GroupKey = heading so that 2-5's boundary logic treats them as one contiguous
-// group under a single heading. They are appended after every resolvable group,
-// pinning them last regardless of where the heading would fall alphabetically.
-//
-// Empty-suppression: when there are no catch-all items, resolved is returned
-// unchanged — no heading materialises, because 2-5 only emits a header where
-// items exist. The catch-all heading's count is derived by 2-5 from the rows
-// beneath it, like any other heading.
+// resolved holds the typed resolvable-group items (real GroupKey: canonical
+// path or tag). catchAll holds the flagged catch-all SessionItems in arbitrary
+// order; each is stamped with GroupKey = heading (so injectGroupHeaders treats
+// them as one contiguous group under a single header) and sorted by
+// Session.Name. The catch-all is pinned after every resolvable group regardless
+// of where the heading would fall alphabetically. Empty resolved + empty
+// catch-all yields an empty slice.
 //
 // Pure function — no I/O.
-func appendCatchAll(resolved []list.Item, catchAll []SessionItem, heading string) []list.Item {
-	if len(catchAll) == 0 {
-		return resolved
-	}
-
-	stamped := make([]SessionItem, 0, len(catchAll))
-	for _, si := range catchAll {
-		si.GroupKey = heading
-		stamped = append(stamped, si)
-	}
-	slices.SortFunc(stamped, func(a, b SessionItem) int {
+func orderedSessionItems(resolved, catchAll []SessionItem, heading string) []SessionItem {
+	slices.SortFunc(resolved, func(a, b SessionItem) int {
+		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
+			return c
+		}
 		return cmp.Compare(a.Session.Name, b.Session.Name)
 	})
 
-	items := make([]list.Item, 0, len(resolved)+len(stamped))
-	items = append(items, resolved...)
-	items = append(items, sessionItemsToList(stamped)...)
-	return items
+	out := make([]SessionItem, 0, len(resolved)+len(catchAll))
+	out = append(out, resolved...)
+
+	if len(catchAll) > 0 {
+		stamped := make([]SessionItem, 0, len(catchAll))
+		for _, si := range catchAll {
+			si.GroupKey = heading
+			stamped = append(stamped, si)
+		}
+		slices.SortFunc(stamped, func(a, b SessionItem) int {
+			return cmp.Compare(a.Session.Name, b.Session.Name)
+		})
+		out = append(out, stamped...)
+	}
+
+	return out
+}
+
+// injectGroupHeaders walks the pre-ordered session rows and inserts a
+// HeaderItem before the first row of every group (a maximal contiguous run of
+// equal GroupKey). The header's Count is the run length, so it renders
+// "Heading ··· N". Because the input is pre-sorted, same-key rows are
+// contiguous and a single forward scan is exact. Empty-suppression falls out
+// naturally: a group with zero rows emits no header.
+//
+// Headers are real list.Items of delegate Height 1, so bubbles/list counts them
+// exactly and a rendered page never overflows the viewport (the old in-delegate
+// heading injection drew uncounted extra lines, scrolling the title and cursor
+// off the top). The leading row is always a HeaderItem (index 0), which
+// model.go's ensureSessionRowSelected steps past so the initial selection lands
+// on a session row. No two headers are ever adjacent (every group has ≥1 row),
+// so a single cursor nudge always clears a header.
+//
+// Pure function — no I/O. Nil/empty input yields a non-nil, len-0 slice.
+func injectGroupHeaders(items []SessionItem) []list.Item {
+	out := make([]list.Item, 0, len(items)+8)
+	for i := 0; i < len(items); {
+		key := items[i].GroupKey
+		j := i
+		for j < len(items) && items[j].GroupKey == key {
+			j++
+		}
+		out = append(out, HeaderItem{Heading: items[i].GroupHeading, Count: j - i, Key: key})
+		out = append(out, sessionItemsToList(items[i:j])...)
+		i = j
+	}
+	return out
 }
 
 // sessionItemsToList boxes a typed []SessionItem into a []list.Item, preserving
-// order and element identity. It is the single source of truth for the
-// SessionItem → list.Item conversion shared by assembleGroups and appendCatchAll.
-// A nil or empty input yields a non-nil, len-0 slice (no panic).
+// order and element identity. A nil or empty input yields a non-nil, len-0
+// slice (no panic).
 func sessionItemsToList(items []SessionItem) []list.Item {
 	out := make([]list.Item, 0, len(items))
 	for _, si := range items {
@@ -215,24 +248,17 @@ func sessionItemsToList(items []SessionItem) []list.Item {
 }
 
 // assembleGroups is the shared grouping-assembly tail for buildByProject and
-// buildByTag. It sorts the resolvable groups by (GroupKey, Session.Name) — the
-// single definition of grouped-list ordering — boxes them into []list.Item via
-// sessionItemsToList, and hands off to appendCatchAll, which pins the catch-all
-// bucket last (under heading) and applies empty-suppression.
+// buildByTag. It orders the session rows (orderedSessionItems — resolvable
+// groups sorted by (GroupKey, Session.Name), catch-all pinned last) then
+// injects the dimmed group headers (injectGroupHeaders), returning the final
+// []list.Item the session list renders.
 //
 // resolved holds the typed resolvable-group items (real GroupKey: canonical path
 // or tag); catchAll holds the flagged catch-all SessionItems in arbitrary order;
 // heading is the catch-all bucket label (Unknown / Untagged). Empty resolved +
-// empty catch-all yields an empty slice.
+// empty catch-all yields an empty slice (no headers).
 //
 // Pure function — no I/O.
 func assembleGroups(resolved []SessionItem, catchAll []SessionItem, heading string) []list.Item {
-	slices.SortFunc(resolved, func(a, b SessionItem) int {
-		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Session.Name, b.Session.Name)
-	})
-
-	return appendCatchAll(sessionItemsToList(resolved), catchAll, heading)
+	return injectGroupHeaders(orderedSessionItems(resolved, catchAll, heading))
 }

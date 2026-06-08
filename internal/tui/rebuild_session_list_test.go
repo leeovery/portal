@@ -85,7 +85,11 @@ func TestRebuildSessionList(t *testing.T) {
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}
-		si := asSessionItem(t, items[0])
+		rows := sessionRows(items)
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
+		}
+		si := rows[0]
 		if si.GroupKey != key {
 			t.Errorf("GroupKey = %q, want %q", si.GroupKey, key)
 		}
@@ -107,12 +111,12 @@ func TestRebuildSessionList(t *testing.T) {
 		if len(items) != len(want) {
 			t.Fatalf("len(items) = %d, want %d", len(items), len(want))
 		}
-		// Two tags → two instances of the same session.
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2 (one per tag)", len(items))
+		// Two tags → two instances of the same session (under two headers).
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("len(rows) = %d, want 2 (one per tag)", len(rows))
 		}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if si.GroupKey == "" {
 				t.Errorf("By Tag item has empty GroupKey (canonical tag): %+v", si)
 			}
@@ -128,13 +132,13 @@ func TestRebuildSessionList(t *testing.T) {
 		// lands in the Unknown catch-all. With cached projects it resolves.
 		without := newRebuildTestModel(prefs.ModeByProject, sessions, nil)
 		without.rebuildSessionList()
-		if !asSessionItem(t, without.sessionList.Items()[0]).CatchAll {
+		if !sessionRows(without.sessionList.Items())[0].CatchAll {
 			t.Fatalf("without cached projects: expected Unknown catch-all item")
 		}
 
 		with := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
 		with.rebuildSessionList()
-		si := asSessionItem(t, with.sessionList.Items()[0])
+		si := sessionRows(with.sessionList.Items())[0]
 		if si.CatchAll {
 			t.Fatalf("with cached projects: expected resolved item, got catch-all")
 		}
@@ -166,11 +170,13 @@ func TestRebuildSessionList(t *testing.T) {
 		m.rebuildSessionList()
 		second := m.sessionList.Items()
 
+		// The full interleaved item slice (headers + rows) must be identical
+		// across re-renders.
 		if len(first) != len(second) {
 			t.Fatalf("len mismatch: first %d, second %d", len(first), len(second))
 		}
 		for i := range first {
-			if asSessionItem(t, first[i]) != asSessionItem(t, second[i]) {
+			if first[i] != second[i] {
 				t.Errorf("item %d differs across re-renders: %+v vs %+v", i, first[i], second[i])
 			}
 		}
@@ -190,11 +196,11 @@ func TestRebuildSessionList(t *testing.T) {
 		if mm.sessionListMode != prefs.ModeByProject {
 			t.Fatalf("sessionListMode = %v after refresh, want ModeByProject", mm.sessionListMode)
 		}
-		items := mm.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(mm.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupHeading != "Portal" {
 			t.Errorf("GroupHeading = %q, want %q (mode reverted to Flat?)", si.GroupHeading, "Portal")
 		}
@@ -235,11 +241,11 @@ func TestWithInsideTmuxRoutesThroughRebuild(t *testing.T) {
 		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
 		m = m.WithInsideTmux("current")
 
-		items := m.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1 (current excluded)", len(items))
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1 (current excluded)", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.Session.Name == "current" {
 			t.Error("current session should be excluded from list items")
 		}

@@ -9,10 +9,11 @@ import (
 	"github.com/leeovery/portal/internal/tmux"
 )
 
-// fakeStamper is a stand-in for the session.PaneStamper seam the lazy
-// stamp-on-render fallback consumes: it reads the active pane's current_path
-// AND records each SetSessionOption stamp so tests can assert the
-// derive-use-then-stamp behaviour in the render path.
+// fakeStamper is a stand-in for the session.PaneCurrentPathReader seam the lazy
+// directory-resolution fallback consumes: it reads the active pane's
+// current_path and records each read so tests can count resolutions. It also
+// implements SetSessionOption so tests can assert the fallback NEVER stamps
+// (the derived dir is cached in-memory only, never frozen onto @portal-dir).
 type fakeStamper struct {
 	path string
 	err  error
@@ -38,8 +39,8 @@ func (f *fakeStamper) SetSessionOption(sess, name, value string) error {
 	return f.setErr
 }
 
-// Compile-time proof the fake satisfies the production seam.
-var _ session.PaneStamper = (*fakeStamper)(nil)
+// Compile-time proof the fake satisfies the production reader seam.
+var _ session.PaneCurrentPathReader = (*fakeStamper)(nil)
 
 // fakeDirRunner is a stand-in for resolver.CommandRunner returning a fixed
 // git-root so the render-path resolution can be unit-tested without git.
@@ -52,23 +53,23 @@ func (r *fakeDirRunner) Run(name string, args ...string) (string, error) {
 }
 
 func TestRebuildSessionListDirResolution(t *testing.T) {
-	t.Run("By Project: an empty-Dir session resolving via the stamper appears under its project, not Unknown", func(t *testing.T) {
+	t.Run("By Project: an empty-Dir session resolving via the reader appears under its project, not Unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
-		m.dirStamper = &fakeStamper{path: dir}
+		m.dirReader = &fakeStamper{path: dir}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
 
-		items := m.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(session rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.CatchAll {
 			t.Fatalf("session routed to Unknown catch-all, want resolved under its project")
 		}
@@ -86,17 +87,16 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(prefs.ModeByTag, sessions, projects)
-		m.dirStamper = &fakeStamper{path: dir}
+		m.dirReader = &fakeStamper{path: dir}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
 
-		items := m.sessionList.Items()
-		if len(items) != 2 {
-			t.Fatalf("len(items) = %d, want 2 (one per tag)", len(items))
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 2 {
+			t.Fatalf("len(session rows) = %d, want 2 (one per tag)", len(rows))
 		}
-		for _, it := range items {
-			si := asSessionItem(t, it)
+		for _, si := range rows {
 			if si.CatchAll {
 				t.Fatalf("session routed to Untagged catch-all, want resolved under its tags")
 			}
@@ -106,62 +106,74 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("stamps the derived directory after the first grouped render", func(t *testing.T) {
+	t.Run("caches the derived directory into m.sessions and never stamps tmux", func(t *testing.T) {
 		dir := t.TempDir()
 		key := project.CanonicalDirKey(dir)
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
 
-		stamper := &fakeStamper{path: dir}
+		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
-		m.dirStamper = stamper
+		m.dirReader = reader
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
 
-		if len(stamper.setCalls) != 1 {
-			t.Fatalf("expected exactly 1 stamp write, got %d: %v", len(stamper.setCalls), stamper.setCalls)
+		// The lazy fallback must NOT stamp @portal-dir: freezing a (possibly
+		// drifted) pane cwd would permanently mis-group the session.
+		if len(reader.setCalls) != 0 {
+			t.Fatalf("expected 0 stamp writes (no freezing), got %d: %v", len(reader.setCalls), reader.setCalls)
 		}
-		got := stamper.setCalls[0]
-		if got.session != "portal-abc" || got.name != session.PortalDirOption || got.value != key {
-			t.Errorf("stamp call = %+v, want session=portal-abc name=%s value=%s", got, session.PortalDirOption, key)
+		// It MUST cache the derived dir back onto m.sessions so subsequent
+		// rebuilds take the fast path.
+		if m.sessions[0].Dir != key {
+			t.Errorf("m.sessions[0].Dir = %q, want %q (cached)", m.sessions[0].Dir, key)
 		}
 	})
 
-	t.Run("an unresolvable empty-Dir session falls through to Unknown", func(t *testing.T) {
+	t.Run("second rebuild reuses the cache and performs no further pane read", func(t *testing.T) {
 		dir := t.TempDir()
 		projects := []project.Project{{Path: dir, Name: "Portal"}}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
 
-		// Empty current_path => unresolvable: no stamp, routes to Unknown.
+		reader := &fakeStamper{path: dir}
 		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
-		m.dirStamper = &fakeStamper{path: ""}
+		m.dirReader = reader
+		m.dirRunner = &fakeDirRunner{gitRoot: dir}
+
+		m.rebuildSessionList()
+		if len(reader.reads) != 1 {
+			t.Fatalf("first rebuild reads = %d, want 1", len(reader.reads))
+		}
+
+		reader.reads = nil
+		m.rebuildSessionList()
+		if len(reader.reads) != 0 {
+			t.Errorf("second rebuild performed %d pane reads, want 0 (cache fast-path)", len(reader.reads))
+		}
+	})
+
+	t.Run("an unresolvable empty-Dir session falls through to Unknown and is not cached", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
+
+		// Empty current_path => unresolvable: no cache, routes to Unknown.
+		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
+		m.dirReader = &fakeStamper{path: ""}
 		m.dirRunner = &fakeDirRunner{gitRoot: dir}
 
 		m.rebuildSessionList()
 
-		items := m.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(session rows) = %d, want 1", len(rows))
 		}
-		if !asSessionItem(t, items[0]).CatchAll {
+		if !rows[0].CatchAll {
 			t.Fatalf("unresolvable session must route to the Unknown catch-all")
 		}
-	})
-
-	t.Run("does not mutate the stored session slice", func(t *testing.T) {
-		dir := t.TempDir()
-		projects := []project.Project{{Path: dir, Name: "Portal"}}
-		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
-
-		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
-		m.dirStamper = &fakeStamper{path: dir}
-		m.dirRunner = &fakeDirRunner{gitRoot: dir}
-
-		m.rebuildSessionList()
-
 		if m.sessions[0].Dir != "" {
-			t.Errorf("m.sessions[0].Dir = %q, want %q (render-path resolution must not mutate m.sessions)", m.sessions[0].Dir, "")
+			t.Errorf("m.sessions[0].Dir = %q, want \"\" (unresolvable, nothing to cache)", m.sessions[0].Dir)
 		}
 	})
 
@@ -171,15 +183,15 @@ func TestRebuildSessionListDirResolution(t *testing.T) {
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: ""}}
 
 		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
-		// dirStamper / dirRunner left nil — no Option wired.
+		// dirReader / dirRunner left nil — no Option wired.
 
 		m.rebuildSessionList()
 
-		items := m.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(m.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(session rows) = %d, want 1", len(rows))
 		}
-		if !asSessionItem(t, items[0]).CatchAll {
+		if !rows[0].CatchAll {
 			t.Fatalf("with a nil seam an empty-Dir session must route to the Unknown catch-all")
 		}
 	})

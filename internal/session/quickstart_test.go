@@ -3,6 +3,7 @@ package session_test
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -16,6 +17,21 @@ type mockSessionChecker struct {
 
 func (m *mockSessionChecker) HasSession(name string) bool {
 	return m.existingSessions[name]
+}
+
+// wantExecArgs builds the expected tmux create-stamp-attach exec chain for a
+// quick-started session: create the session detached, stamp @portal-dir while
+// it is detached (before attach blocks the chain), then attach. ";" elements
+// are literal tmux command separators.
+func wantExecArgs(name, dir, shellCmd string) []string {
+	args := []string{"tmux", "new-session", "-d", "-s", name, "-c", dir}
+	if shellCmd != "" {
+		args = append(args, shellCmd)
+	}
+	return append(args,
+		";", "set-option", "-t", name, session.PortalDirOption, dir,
+		";", "attach-session", "-t", name,
+	)
 }
 
 func TestQuickStart(t *testing.T) {
@@ -41,23 +57,18 @@ func TestQuickStart(t *testing.T) {
 			t.Errorf("result.Dir = %q, want %q", result.Dir, gitRoot)
 		}
 
-		// Verify ExecArgs include resolved dir via -c flag
+		// Verify ExecArgs include resolved dir via -c flag (and the stamp/attach chain).
 		wantSessionName := filepath.Base(gitRoot) + "-abc123"
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", gitRoot}
-		if len(result.ExecArgs) != len(wantArgs) {
+		wantArgs := wantExecArgs(wantSessionName, gitRoot, "")
+		if !reflect.DeepEqual(result.ExecArgs, wantArgs) {
 			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
-		}
-		for i, arg := range result.ExecArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
 		}
 	})
 
-	t.Run("does not stamp at creation in the exec-handoff path", func(t *testing.T) {
-		// syscall.Exec replaces the process, so QuickStart cannot stamp
-		// @portal-dir after creation. No set-option must be injected into the
-		// exec args; the lazy stamp-on-render fallback covers these sessions.
+	t.Run("stamps @portal-dir at creation via the exec chain", func(t *testing.T) {
+		// Creating detached gives an in-server point to stamp @portal-dir
+		// BEFORE attaching, so a quick-started session is anchored to its
+		// origin directory and grouping stays stable after the pane cd's away.
 		gitRoot := t.TempDir()
 		gitResolver := &mockGitResolver{resolvedDir: gitRoot}
 		store := &mockProjectStore{}
@@ -71,13 +82,21 @@ func TestQuickStart(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		for i, arg := range result.ExecArgs {
-			if arg == session.PortalDirOption {
-				t.Errorf("ExecArgs[%d] = %q: @portal-dir must not be injected into the exec handoff", i, arg)
-			}
-			if arg == "set-option" {
-				t.Errorf("ExecArgs[%d] = %q: set-option must not be injected into the exec handoff", i, arg)
-			}
+		wantSessionName := filepath.Base(gitRoot) + "-abc123"
+		// The chain must contain: set-option -t <name> @portal-dir <dir>.
+		assertContainsSubseq(t, result.ExecArgs, []string{
+			"set-option", "-t", wantSessionName, session.PortalDirOption, gitRoot,
+		})
+		// It must NOT attach before stamping (stamp-before-attach ordering).
+		setIdx := indexOf(result.ExecArgs, "set-option")
+		attachIdx := indexOf(result.ExecArgs, "attach-session")
+		if setIdx < 0 || attachIdx < 0 || setIdx >= attachIdx {
+			t.Errorf("set-option (%d) must precede attach-session (%d) in %v", setIdx, attachIdx, result.ExecArgs)
+		}
+		// And it must NOT attach directly via new-session -A (which would block
+		// the stamp); detached create is required.
+		if indexOf(result.ExecArgs, "-A") >= 0 {
+			t.Errorf("ExecArgs must not use new-session -A: %v", result.ExecArgs)
 		}
 	})
 
@@ -136,7 +155,7 @@ func TestQuickStart(t *testing.T) {
 		}
 	})
 
-	t.Run("exec args use new-session -A for atomic create-or-attach", func(t *testing.T) {
+	t.Run("exec args create detached, stamp, then attach", func(t *testing.T) {
 		dir := t.TempDir()
 		gitResolver := &mockGitResolver{}
 		store := &mockProjectStore{}
@@ -156,15 +175,9 @@ func TestQuickStart(t *testing.T) {
 			t.Errorf("result.SessionName = %q, want %q", result.SessionName, wantSessionName)
 		}
 
-		// Verify exec args use tmux new-session -A -s <name> -c <dir>
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir}
-		if len(result.ExecArgs) != len(wantArgs) {
+		wantArgs := wantExecArgs(wantSessionName, dir, "")
+		if !reflect.DeepEqual(result.ExecArgs, wantArgs) {
 			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
-		}
-		for i, arg := range result.ExecArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
 		}
 	})
 
@@ -230,14 +243,9 @@ func TestQuickStart(t *testing.T) {
 
 		wantSessionName := filepath.Base(dir) + "-abc123"
 		shellCmd := "/bin/zsh -ic 'claude --resume; exec /bin/zsh'"
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir, shellCmd}
-		if len(result.ExecArgs) != len(wantArgs) {
+		wantArgs := wantExecArgs(wantSessionName, dir, shellCmd)
+		if !reflect.DeepEqual(result.ExecArgs, wantArgs) {
 			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
-		}
-		for i, arg := range result.ExecArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
 		}
 	})
 
@@ -261,14 +269,9 @@ func TestQuickStart(t *testing.T) {
 
 		wantSessionName := filepath.Base(dir) + "-abc123"
 		shellCmd := "/usr/local/bin/fish -ic 'vim; exec /usr/local/bin/fish'"
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir, shellCmd}
-		if len(result.ExecArgs) != len(wantArgs) {
+		wantArgs := wantExecArgs(wantSessionName, dir, shellCmd)
+		if !reflect.DeepEqual(result.ExecArgs, wantArgs) {
 			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
-		}
-		for i, arg := range result.ExecArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
 		}
 	})
 
@@ -286,16 +289,10 @@ func TestQuickStart(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Should be exactly 7 args: tmux new-session -A -s <name> -c <dir>
 		wantSessionName := filepath.Base(dir) + "-abc123"
-		wantArgs := []string{"tmux", "new-session", "-A", "-s", wantSessionName, "-c", dir}
-		if len(result.ExecArgs) != len(wantArgs) {
+		wantArgs := wantExecArgs(wantSessionName, dir, "")
+		if !reflect.DeepEqual(result.ExecArgs, wantArgs) {
 			t.Fatalf("result.ExecArgs = %v, want %v", result.ExecArgs, wantArgs)
-		}
-		for i, arg := range result.ExecArgs {
-			if arg != wantArgs[i] {
-				t.Errorf("result.ExecArgs[%d] = %q, want %q", i, arg, wantArgs[i])
-			}
 		}
 	})
 
@@ -312,4 +309,26 @@ func TestQuickStart(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+// indexOf returns the first index of v in s, or -1.
+func indexOf(s []string, v string) int {
+	for i, x := range s {
+		if x == v {
+			return i
+		}
+	}
+	return -1
+}
+
+// assertContainsSubseq fails the test unless want appears as a contiguous
+// subsequence of got.
+func assertContainsSubseq(t *testing.T, got, want []string) {
+	t.Helper()
+	for i := 0; i+len(want) <= len(got); i++ {
+		if reflect.DeepEqual(got[i:i+len(want)], want) {
+			return
+		}
+	}
+	t.Errorf("ExecArgs %v does not contain subsequence %v", got, want)
 }

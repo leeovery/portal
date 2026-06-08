@@ -59,8 +59,8 @@ func TestHandleEditProjectKey_LoadsExistingTagsIntoBuffer(t *testing.T) {
 			t.Fatalf("editTags[%d] = %q, want %q", i, got.editTags[i], want[i])
 		}
 	}
-	if got.editRemovedTags != nil {
-		t.Errorf("editRemovedTags = %v, want nil", got.editRemovedTags)
+	if got.editTagsMutated {
+		t.Errorf("editTagsMutated = true, want false on open")
 	}
 	if got.editNewTag != "" {
 		t.Errorf("editNewTag = %q, want empty", got.editNewTag)
@@ -94,7 +94,7 @@ func TestHandleEditProjectKey_ResetsTagBufferOnReopen(t *testing.T) {
 	// First open on the tagged project, then dirty the buffer.
 	updated, _ := m.handleEditProjectKey()
 	first := updated.(Model)
-	first.editRemovedTags = []string{"stale"}
+	first.editTagsMutated = true
 	first.editNewTag = "half-typed"
 	first.editTagCursor = 5
 	first.editTags = append(first.editTags, "leaked")
@@ -107,8 +107,8 @@ func TestHandleEditProjectKey_ResetsTagBufferOnReopen(t *testing.T) {
 	if len(got.editTags) != 0 {
 		t.Errorf("editTags = %v, want empty after reopen on tag-less project", got.editTags)
 	}
-	if got.editRemovedTags != nil {
-		t.Errorf("editRemovedTags = %v, want nil after reopen", got.editRemovedTags)
+	if got.editTagsMutated {
+		t.Errorf("editTagsMutated = true, want false after reopen")
 	}
 	if got.editNewTag != "" {
 		t.Errorf("editNewTag = %q, want empty after reopen", got.editNewTag)

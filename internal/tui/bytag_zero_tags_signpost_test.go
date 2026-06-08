@@ -174,9 +174,15 @@ func TestByTagZeroTagsSignpost(t *testing.T) {
 		if strings.Contains(m.View(), untaggedHeading) {
 			t.Errorf("Untagged heading rendered when all sessions are tagged:\n%s", m.View())
 		}
-		for _, it := range m.sessionList.Items() {
-			if asSessionItem(t, it).CatchAll {
+		for _, si := range sessionRows(m.sessionList.Items()) {
+			if si.CatchAll {
 				t.Errorf("found a CatchAll (Untagged) item; all sessions should be tagged")
+			}
+		}
+		// And no Untagged HeaderItem either.
+		for _, h := range headerRows(m.sessionList.Items()) {
+			if h.Heading == untaggedHeading {
+				t.Errorf("found an Untagged header; all sessions should be tagged")
 			}
 		}
 	})

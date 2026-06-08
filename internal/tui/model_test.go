@@ -5430,7 +5430,7 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		}
 	})
 
-	t.Run("sets editError and keeps the modal open when AddTag fails", func(t *testing.T) {
+	t.Run("sets editError and keeps the modal open when a live AddTag fails", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal"},
@@ -5441,24 +5441,27 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		model = openTagsModal(model)
-		model = typeTagAndAdd(model, "work")
-
-		model, cmd := confirmFromTagsField(model)
+		// Tags persist live: the Enter that commits the add is where AddTag runs
+		// and fails — surfacing the error immediately, not at confirm.
+		for _, r := range "work" {
+			model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 		if cmd != nil {
-			t.Error("expected nil command (no refresh) on AddTag failure, got non-nil")
+			t.Error("expected nil command on AddTag failure, got non-nil")
 		}
 		view := model.View()
 		if !strings.Contains(view, "Error:") {
 			t.Errorf("expected an error message, got:\n%s", view)
 		}
-		// Modal stays open — the Tags field section is still rendered.
+		// Modal stays open — the Name/Tags fields are still rendered.
 		if !strings.Contains(view, "Name:") {
 			t.Errorf("modal should stay open after AddTag failure, got:\n%s", view)
 		}
 	})
 
-	t.Run("sets editError and keeps the modal open when RemoveTag fails", func(t *testing.T) {
+	t.Run("sets editError and keeps the modal open when a live RemoveTag fails", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
@@ -5469,13 +5472,12 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		model := setupEditModel(store, editor, aliases)
 
 		model = openTagsModal(model)
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-
-		model, cmd := confirmFromTagsField(model)
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp}) // onto the existing tag
+		// x is where RemoveTag runs and fails (live), surfacing the error now.
+		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 
 		if cmd != nil {
-			t.Error("expected nil command (no refresh) on RemoveTag failure, got non-nil")
+			t.Error("expected nil command on RemoveTag failure, got non-nil")
 		}
 		view := model.View()
 		if !strings.Contains(view, "Error:") {
@@ -5512,7 +5514,7 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		}
 	})
 
-	t.Run("keeps a tag that was removed then re-added within one modal session", func(t *testing.T) {
+	t.Run("a removed-then-re-added tag fires both live mutations and survives", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
 				{Path: "/code/portal", Name: "portal", Tags: []string{"work"}},
@@ -5526,20 +5528,19 @@ func TestEditProjectTagPersistence(t *testing.T) {
 		// Remove the existing "work" tag (cursor at Add row index 1 → up to 0, x).
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
 		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
-		// Re-add the same tag via the Add input before saving. editRemovedTags
-		// still holds "work" AND editTags now holds it again.
+		// Re-add the same tag via the Add input.
 		model = typeTagAndAdd(model, "work")
 
 		_, cmd := confirmFromTagsField(model)
 
-		// Reconciliation: "work" is still in the final editTags, so it is NOT a
-		// genuine removal — RemoveTag must not fire. It was also in the original
-		// set, so AddTag does not fire either. Net: no-op, tag survives.
-		if len(editor.removedTags) != 0 {
-			t.Errorf("expected no RemoveTag calls for re-added tag, got %+v", editor.removedTags)
+		// Tags persist live, so each keystroke fires its own store call: the x
+		// removed "work" and the re-add added it back. There is no batched
+		// reconciliation anymore — the store dedups, so the tag ends up present.
+		if len(editor.removedTags) != 1 || editor.removedTags[0].rawTag != "work" {
+			t.Errorf("expected 1 live RemoveTag(work), got %+v", editor.removedTags)
 		}
-		if len(editor.addedTags) != 0 {
-			t.Errorf("expected no AddTag calls for re-added tag, got %+v", editor.addedTags)
+		if len(editor.addedTags) != 1 || editor.addedTags[0].rawTag != "work" {
+			t.Errorf("expected 1 live AddTag(work), got %+v", editor.addedTags)
 		}
 		if cmd == nil {
 			t.Error("expected refresh command on successful confirm, got nil")

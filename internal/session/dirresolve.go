@@ -19,6 +19,10 @@ type PaneCurrentPathReader interface {
 	ActivePaneCurrentPath(session string) (string, error)
 }
 
+// Compile-time proof that the production *tmux.Client satisfies the active-pane
+// reader seam consumed by the TUI's lazy directory-resolution fallback.
+var _ PaneCurrentPathReader = (*tmux.Client)(nil)
+
 // ResolveSessionDir is the lazy active-pane → git-root directory resolver for
 // the grouped render's stamp-absent fallback. Given a session whose
 // @portal-dir stamp is missing (post-reboot restore, or a session already live

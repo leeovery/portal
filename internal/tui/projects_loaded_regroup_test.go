@@ -40,11 +40,11 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		updated, _ := m.Update(ProjectsLoadedMsg{Projects: projects})
 		got := updated.(Model)
 
-		items := got.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(got.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.CatchAll {
 			t.Fatalf("session landed in Unknown catch-all; expected re-group under project")
 		}
@@ -66,11 +66,11 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		updated, _ := m.Update(ProjectsLoadedMsg{Projects: projects})
 		got := updated.(Model)
 
-		items := got.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(got.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		si := asSessionItem(t, items[0])
+		si := rows[0]
 		if si.GroupHeading != "work" || si.GroupKey != "work" {
 			t.Errorf("expected session under tag heading %q, got heading=%q key=%q", "work", si.GroupHeading, si.GroupKey)
 		}
@@ -92,7 +92,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 			t.Errorf("projectList items = %d, want 1 (setItemsCmd dropped?)", len(got.projectList.Items()))
 		}
 		// And the session list must be re-grouped (rebuild cmd not dropped).
-		si := asSessionItem(t, got.sessionList.Items()[0])
+		si := sessionRows(got.sessionList.Items())[0]
 		if si.GroupHeading != "Portal" {
 			t.Errorf("session not re-grouped; GroupHeading = %q, want Portal", si.GroupHeading)
 		}
@@ -145,8 +145,7 @@ func TestProjectsLoadedRegroup(t *testing.T) {
 		got := updated.(Model)
 
 		var alphaItem, bravoItem SessionItem
-		for _, it := range got.sessionList.Items() {
-			si := asSessionItem(t, it)
+		for _, si := range sessionRows(got.sessionList.Items()) {
 			switch si.Session.Name {
 			case "alpha":
 				alphaItem = si

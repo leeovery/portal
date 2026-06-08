@@ -49,11 +49,11 @@ func TestWithInitialMode(t *testing.T) {
 
 		updated, _ := m.Update(SessionsMsg{Sessions: sessions})
 		mm := updated.(Model)
-		items := mm.sessionList.Items()
-		if len(items) != 1 {
-			t.Fatalf("len(items) = %d, want 1", len(items))
+		rows := sessionRows(mm.sessionList.Items())
+		if len(rows) != 1 {
+			t.Fatalf("len(rows) = %d, want 1", len(rows))
 		}
-		if got := asSessionItem(t, items[0]).GroupKey; got != "work" {
+		if got := rows[0].GroupKey; got != "work" {
 			t.Errorf("GroupKey = %q, want %q (first ingestion did not group By Tag)", got, "work")
 		}
 	})

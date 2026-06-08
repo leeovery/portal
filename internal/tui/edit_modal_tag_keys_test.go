@@ -1,11 +1,45 @@
 package tui
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/leeovery/portal/internal/project"
 )
+
+// errTagStub is a sentinel for exercising the modal's persist-failure branches.
+var errTagStub = errors.New("stub failure")
+
+// recordingProjectEditor records AddTag/RemoveTag calls so tests can assert the
+// edit modal persists tag mutations immediately (live), rather than batching
+// them until a confirm.
+type recordingProjectEditor struct {
+	added   [][2]string // {path, tag}
+	removed [][2]string
+	addErr  error
+	rmErr   error
+}
+
+func (recordingProjectEditor) Rename(_, _, _ string) error { return nil }
+
+func (r *recordingProjectEditor) AddTag(path, tag string) error {
+	if r.addErr != nil {
+		return r.addErr
+	}
+	r.added = append(r.added, [2]string{path, tag})
+	return nil
+}
+
+func (r *recordingProjectEditor) RemoveTag(path, tag string) error {
+	if r.rmErr != nil {
+		return r.rmErr
+	}
+	r.removed = append(r.removed, [2]string{path, tag})
+	return nil
+}
 
 // tagKeyModel builds a minimal Model with the edit modal open and Tags focused,
 // seeded with the given tag buffer, new-tag input, and cursor.
@@ -54,11 +88,83 @@ func TestEditModalTagKeys_RemoveHighlightedTagOnX(t *testing.T) {
 	}
 }
 
-func TestEditModalTagKeys_RecordsRemovedTag(t *testing.T) {
-	got := pressRunes(t, tagKeyModel([]string{"work", "personal"}, "", 0), "x")
+func TestEditModalTagKeys_RemovePersistsImmediately(t *testing.T) {
+	ed := &recordingProjectEditor{}
+	m := tagKeyModel([]string{"work", "personal"}, "", 0)
+	m.editProject = project.Project{Path: "/p/one"}
+	m.projectEditor = ed
 
-	if !reflect.DeepEqual(got.editRemovedTags, []string{"work"}) {
-		t.Errorf("editRemovedTags = %v, want [work]", got.editRemovedTags)
+	got := pressRunes(t, m, "x")
+
+	// Buffer reflects the removal.
+	if !reflect.DeepEqual(got.editTags, []string{"personal"}) {
+		t.Errorf("editTags = %v, want [personal]", got.editTags)
+	}
+	// And the removal is persisted to projects.json right away (live edit),
+	// so Esc can never discard it.
+	wantRm := [][2]string{{"/p/one", "work"}}
+	if !reflect.DeepEqual(ed.removed, wantRm) {
+		t.Errorf("RemoveTag calls = %v, want %v", ed.removed, wantRm)
+	}
+	if !got.editTagsMutated {
+		t.Errorf("editTagsMutated = false, want true after a live removal")
+	}
+}
+
+func TestEditModalTagKeys_RemoveErrorKeepsTagAndSetsError(t *testing.T) {
+	ed := &recordingProjectEditor{rmErr: errTagStub}
+	m := tagKeyModel([]string{"work"}, "", 0)
+	m.editProject = project.Project{Path: "/p/one"}
+	m.projectEditor = ed
+
+	got := pressRunes(t, m, "x")
+
+	// A failed persist must not drop the tag from the buffer.
+	if !reflect.DeepEqual(got.editTags, []string{"work"}) {
+		t.Errorf("editTags = %v, want [work] (failed remove must not mutate buffer)", got.editTags)
+	}
+	if got.editError == "" {
+		t.Errorf("editError = empty, want a remove-failure message")
+	}
+}
+
+func TestEditModalTagKeys_AddPersistsImmediately(t *testing.T) {
+	ed := &recordingProjectEditor{}
+	m := tagKeyModel(nil, "design", 0) // Add row (cursor == len(editTags) == 0)
+	m.editProject = project.Project{Path: "/p/one"}
+	m.projectEditor = ed
+
+	got := pressEnter(t, m)
+
+	if !reflect.DeepEqual(got.editTags, []string{"design"}) {
+		t.Errorf("editTags = %v, want [design]", got.editTags)
+	}
+	wantAdd := [][2]string{{"/p/one", "design"}}
+	if !reflect.DeepEqual(ed.added, wantAdd) {
+		t.Errorf("AddTag calls = %v, want %v", ed.added, wantAdd)
+	}
+	if !got.editTagsMutated {
+		t.Errorf("editTagsMutated = false, want true after a live add")
+	}
+	// Add must not close the modal — the user may add several tags.
+	if got.modal != modalEditProject {
+		t.Errorf("modal = %v, want modalEditProject", got.modal)
+	}
+}
+
+func TestEditModalTagKeys_AddErrorDoesNotAppendAndSetsError(t *testing.T) {
+	ed := &recordingProjectEditor{addErr: errTagStub}
+	m := tagKeyModel(nil, "design", 0)
+	m.editProject = project.Project{Path: "/p/one"}
+	m.projectEditor = ed
+
+	got := pressEnter(t, m)
+
+	if len(got.editTags) != 0 {
+		t.Errorf("editTags = %v, want empty (failed add must not append)", got.editTags)
+	}
+	if got.editError == "" {
+		t.Errorf("editError = empty, want an add-failure message")
 	}
 }
 
@@ -73,8 +179,8 @@ func TestEditModalTagKeys_XOnAddRowTypesLiteral(t *testing.T) {
 	if got.editNewTag != "x" {
 		t.Errorf("editNewTag = %q, want %q", got.editNewTag, "x")
 	}
-	if got.editRemovedTags != nil {
-		t.Errorf("editRemovedTags = %v, want nil", got.editRemovedTags)
+	if got.editTagsMutated {
+		t.Errorf("editTagsMutated = true, want false (x on Add row removes nothing)")
 	}
 }
 
@@ -205,8 +311,8 @@ func TestEditModalTagKeys_AliasFocusXStillRemoves(t *testing.T) {
 	if !reflect.DeepEqual(got.editRemoved, []string{"a"}) {
 		t.Errorf("editRemoved = %v, want [a]", got.editRemoved)
 	}
-	if got.editTags != nil || got.editRemovedTags != nil {
-		t.Errorf("tag buffers mutated by alias-focused x: tags=%v removed=%v", got.editTags, got.editRemovedTags)
+	if got.editTags != nil || got.editTagsMutated {
+		t.Errorf("tag state mutated by alias-focused x: tags=%v mutated=%v", got.editTags, got.editTagsMutated)
 	}
 }
 

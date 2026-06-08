@@ -10,9 +10,9 @@ import (
 )
 
 // newCursorTestModel builds a Model with a real, production-sized session list
-// loaded with the supplied grouped slice. It drives the cursor/selection
-// contract (task 2-6) against the genuine bubbles/list model and the extended
-// 2-5 delegate — no toggle is wired, the grouped slice is loaded directly.
+// loaded with the supplied grouped slice (HeaderItems interleaved with session
+// rows), then nudges the selection off the leading header exactly as
+// rebuildSessionList does in production.
 func newCursorTestModel(t *testing.T, items []list.Item) Model {
 	t.Helper()
 	m := Model{
@@ -21,26 +21,33 @@ func newCursorTestModel(t *testing.T, items []list.Item) Model {
 	}
 	m.applySessionListSize(80, 24)
 	m.sessionList.SetItems(items)
+	m.ensureSessionRowSelected()
 	return m
 }
 
 // keyG is the bubbles/list GoToStart binding (g/home); keyShiftG is GoToEnd
-// (G/end). They drive cursor navigation over list items — all of which are
-// SessionItems — so the cursor lands on a session instance, never a header.
+// (G/end). keyUp/keyDown drive single-row navigation.
 var (
 	keyG      = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}}
 	keyShiftG = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}}
+	keyUp     = tea.KeyMsg{Type: tea.KeyUp}
+	keyDown   = tea.KeyMsg{Type: tea.KeyDown}
 )
 
-// TestCursorLandsOnlyOnSessionInstances locks the selection/cursor contract:
-// because group headings are render-layer separators and never list items,
-// the initial cursor, g/G, and ordinary navigation all operate on the
-// all-SessionItem slice; and selectedSessionItem resolves whichever instance
-// the cursor sits on to its underlying tmux.Session. See spec § TUI Rendering
-// & Toggle Behaviour → Group headers and § Item model → Selection/cursor
-// contract.
+// selectedHeader reports whether the cursor currently rests on a HeaderItem.
+func selectedHeader(m Model) bool {
+	_, ok := m.sessionList.SelectedItem().(HeaderItem)
+	return ok
+}
+
+// TestCursorLandsOnlyOnSessionInstances locks the post-overflow-fix
+// selection/cursor contract: group headers are now REAL non-selectable list
+// rows, and the cursor skips them so it only ever rests on a session instance —
+// on initial load, on g/G, and on ordinary up/down navigation across group
+// boundaries. selectedSessionItem resolves whichever instance the cursor sits
+// on to its underlying tmux.Session.
 func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
-	t.Run("it places the initial cursor on the first session instance", func(t *testing.T) {
+	t.Run("it places the initial cursor on the first session row, skipping the leading header", func(t *testing.T) {
 		dirA := t.TempDir()
 		dirB := t.TempDir()
 		projects := []project.Project{
@@ -55,20 +62,78 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 
 		m := newCursorTestModel(t, items)
 
-		if got := m.sessionList.Index(); got != 0 {
-			t.Fatalf("initial Index() = %d, want 0", got)
+		if selectedHeader(m) {
+			t.Fatalf("initial selection rests on a header, want a session row")
 		}
 		si, ok := m.selectedSessionItem()
 		if !ok {
 			t.Fatalf("selectedSessionItem returned ok=false on a populated list")
 		}
-		wantFirst := asSessionItem(t, items[0]).Session.Name
+		wantFirst := sessionRows(items)[0].Session.Name
 		if si.Session.Name != wantFirst {
-			t.Errorf("initial selected session = %q, want %q (first instance)", si.Session.Name, wantFirst)
+			t.Errorf("initial selected session = %q, want %q (first session row)", si.Session.Name, wantFirst)
 		}
 	})
 
-	t.Run("it lands g/G on the first and last session instance, never a header", func(t *testing.T) {
+	t.Run("down navigation skips the header between two groups", func(t *testing.T) {
+		dirA := t.TempDir()
+		dirB := t.TempDir()
+		projects := []project.Project{
+			{Path: dirA, Name: "Alpha"},
+			{Path: dirB, Name: "Bravo"},
+		}
+		// One session per project => slice is [H(Alpha), alpha-1, H(Bravo), bravo-1].
+		sessions := []tmux.Session{
+			{Name: "alpha-1", Dir: dirA},
+			{Name: "bravo-1", Dir: dirB},
+		}
+		items := buildByProject(sessions, project.NewIndex(projects))
+		m := newCursorTestModel(t, items)
+
+		// From alpha-1, one Down would land on H(Bravo); the skip must carry it
+		// through to bravo-1.
+		updated, _ := m.Update(keyDown)
+		m = updated.(Model)
+
+		if selectedHeader(m) {
+			t.Fatalf("Down landed on a header, want it skipped to the next session")
+		}
+		si, _ := m.selectedSessionItem()
+		if si.Session.Name != "bravo-1" {
+			t.Errorf("after Down, selected = %q, want bravo-1 (header skipped)", si.Session.Name)
+		}
+	})
+
+	t.Run("up navigation skips the header between two groups", func(t *testing.T) {
+		dirA := t.TempDir()
+		dirB := t.TempDir()
+		projects := []project.Project{
+			{Path: dirA, Name: "Alpha"},
+			{Path: dirB, Name: "Bravo"},
+		}
+		sessions := []tmux.Session{
+			{Name: "alpha-1", Dir: dirA},
+			{Name: "bravo-1", Dir: dirB},
+		}
+		items := buildByProject(sessions, project.NewIndex(projects))
+		m := newCursorTestModel(t, items)
+
+		// Move to the last row (bravo-1), then Up: it must skip H(Bravo) back to alpha-1.
+		updated, _ := m.Update(keyShiftG)
+		m = updated.(Model)
+		updated, _ = m.Update(keyUp)
+		m = updated.(Model)
+
+		if selectedHeader(m) {
+			t.Fatalf("Up landed on a header, want it skipped to the previous session")
+		}
+		si, _ := m.selectedSessionItem()
+		if si.Session.Name != "alpha-1" {
+			t.Errorf("after Up, selected = %q, want alpha-1 (header skipped)", si.Session.Name)
+		}
+	})
+
+	t.Run("it lands g/G on the first and last session row, never a header", func(t *testing.T) {
 		dirA := t.TempDir()
 		dirB := t.TempDir()
 		projects := []project.Project{
@@ -81,43 +146,37 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 			{Name: "bravo-1", Dir: dirB},
 		}
 		items := buildByProject(sessions, project.NewIndex(projects))
-		if len(items) < 2 {
-			t.Fatalf("need at least 2 items to exercise g/G, got %d", len(items))
-		}
+		rows := sessionRows(items)
 
 		m := newCursorTestModel(t, items)
 
-		// Move the cursor off index 0 so G demonstrably travels.
-		m.sessionList.Select(1)
-
-		// G → GoToEnd: last list item, which is a session instance.
+		// G → GoToEnd: last list item is a session row.
 		updated, _ := m.Update(keyShiftG)
 		m = updated.(Model)
-		if got := m.sessionList.Index(); got != len(items)-1 {
-			t.Fatalf("after G, Index() = %d, want %d (last item)", got, len(items)-1)
+		if selectedHeader(m) {
+			t.Fatalf("after G the cursor rests on a header")
 		}
 		last, ok := m.selectedSessionItem()
 		if !ok {
 			t.Fatalf("selectedSessionItem ok=false after G")
 		}
-		wantLast := asSessionItem(t, items[len(items)-1]).Session.Name
-		if last.Session.Name != wantLast {
-			t.Errorf("after G, selected = %q, want %q (last session instance)", last.Session.Name, wantLast)
+		if last.Session.Name != rows[len(rows)-1].Session.Name {
+			t.Errorf("after G, selected = %q, want %q (last session row)", last.Session.Name, rows[len(rows)-1].Session.Name)
 		}
 
-		// g → GoToStart: first list item, which is a session instance.
+		// g → GoToStart: lands on the leading header, which the skip carries to
+		// the first session row.
 		updated, _ = m.Update(keyG)
 		m = updated.(Model)
-		if got := m.sessionList.Index(); got != 0 {
-			t.Fatalf("after g, Index() = %d, want 0 (first item)", got)
+		if selectedHeader(m) {
+			t.Fatalf("after g the cursor rests on a header")
 		}
 		first, ok := m.selectedSessionItem()
 		if !ok {
 			t.Fatalf("selectedSessionItem ok=false after g")
 		}
-		wantFirst := asSessionItem(t, items[0]).Session.Name
-		if first.Session.Name != wantFirst {
-			t.Errorf("after g, selected = %q, want %q (first session instance)", first.Session.Name, wantFirst)
+		if first.Session.Name != rows[0].Session.Name {
+			t.Errorf("after g, selected = %q, want %q (first session row)", first.Session.Name, rows[0].Session.Name)
 		}
 	})
 
@@ -128,70 +187,49 @@ func TestCursorLandsOnlyOnSessionInstances(t *testing.T) {
 		}
 		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
 		items := buildByTag(sessions, project.NewIndex(projects))
-		if len(items) != 2 {
-			t.Fatalf("expected 2 instances (one per tag), got %d", len(items))
+		rows := sessionRows(items)
+		if len(rows) != 2 {
+			t.Fatalf("expected 2 instances (one per tag), got %d", len(rows))
 		}
 
 		// The two instances must be distinct list views (different GroupKey,
-		// i.e. distinct canonical tags) of the same underlying session —
-		// proving multi-instance reachability.
-		i0 := asSessionItem(t, items[0])
-		i1 := asSessionItem(t, items[1])
-		if i0.GroupKey == i1.GroupKey {
-			t.Fatalf("expected distinct tags on the two instances, got %q and %q", i0.GroupKey, i1.GroupKey)
+		// i.e. distinct canonical tags) of the same underlying session.
+		if rows[0].GroupKey == rows[1].GroupKey {
+			t.Fatalf("expected distinct tags on the two instances, got %q and %q", rows[0].GroupKey, rows[1].GroupKey)
 		}
 
 		m := newCursorTestModel(t, items)
 
-		m.sessionList.Select(0)
-		first, ok := m.selectedSessionItem()
-		if !ok {
-			t.Fatalf("selectedSessionItem ok=false at instance 0")
-		}
-
-		m.sessionList.Select(1)
-		second, ok := m.selectedSessionItem()
-		if !ok {
-			t.Fatalf("selectedSessionItem ok=false at instance 1")
-		}
-
-		if first.Session.Name != second.Session.Name {
-			t.Errorf("two By-Tag instances resolve to different sessions: %q vs %q",
-				first.Session.Name, second.Session.Name)
-		}
-		if first.Session.Name != "portal-abc" {
-			t.Errorf("resolved session = %q, want portal-abc", first.Session.Name)
-		}
-	})
-
-	t.Run("it returns the underlying session from selectedSessionItem for the highlighted instance", func(t *testing.T) {
-		dir := t.TempDir()
-		projects := []project.Project{
-			{Path: dir, Name: "Portal", Tags: []string{"alpha", "beta", "gamma"}},
-		}
-		sessions := []tmux.Session{{Name: "portal-xyz", Dir: dir}}
-		items := buildByTag(sessions, project.NewIndex(projects))
-		if len(items) != 3 {
-			t.Fatalf("expected 3 instances (one per tag), got %d", len(items))
-		}
-
-		m := newCursorTestModel(t, items)
-
-		// Every cursor position must resolve to the same underlying session,
-		// carrying the exact tmux.Session of the highlighted instance.
-		for idx := range items {
+		// Select each session row directly (skip the header indices).
+		var resolved []string
+		for idx, it := range items {
+			if _, ok := it.(SessionItem); !ok {
+				continue
+			}
 			m.sessionList.Select(idx)
 			si, ok := m.selectedSessionItem()
 			if !ok {
 				t.Fatalf("selectedSessionItem ok=false at index %d", idx)
 			}
-			want := asSessionItem(t, items[idx])
-			if si != want {
-				t.Errorf("index %d: selectedSessionItem = %+v, want %+v", idx, si, want)
-			}
-			if si.Session != sessions[0] {
-				t.Errorf("index %d: underlying Session = %+v, want %+v", idx, si.Session, sessions[0])
-			}
+			resolved = append(resolved, si.Session.Name)
+		}
+
+		if len(resolved) != 2 || resolved[0] != "portal-abc" || resolved[1] != "portal-abc" {
+			t.Errorf("By-Tag instances resolved to %v, want both portal-abc", resolved)
+		}
+	})
+
+	t.Run("selectedSessionItem returns false when the cursor is parked on a header", func(t *testing.T) {
+		dir := t.TempDir()
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{{Name: "portal-abc", Dir: dir}}
+		items := buildByProject(sessions, project.NewIndex(projects))
+
+		m := newCursorTestModel(t, items)
+		m.sessionList.Select(0) // force onto the leading header
+
+		if _, ok := m.selectedSessionItem(); ok {
+			t.Errorf("selectedSessionItem ok=true on a header row, want false")
 		}
 	})
 }
