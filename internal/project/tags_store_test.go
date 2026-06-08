@@ -39,6 +39,34 @@ func TestAddTag(t *testing.T) {
 		}
 	})
 
+	t.Run("it preserves internal whitespace through the store (trim edges, not collapse)", func(t *testing.T) {
+		dir := t.TempDir()
+		filePath := filepath.Join(dir, "projects.json")
+		store := project.NewStore(filePath)
+
+		if err := store.Upsert("/code/portal", "portal", "internal"); err != nil {
+			t.Fatalf("unexpected error on upsert: %v", err)
+		}
+
+		// "  Code Review " trims to "code review" — edges stripped, internal
+		// space preserved (not collapsed). Asserts the contract at the store
+		// boundary, not just at the NormaliseTag unit level.
+		if err := store.AddTag("/code/portal", "  Code Review "); err != nil {
+			t.Fatalf("unexpected error on AddTag: %v", err)
+		}
+
+		projects, err := store.Load()
+		if err != nil {
+			t.Fatalf("failed to load: %v", err)
+		}
+		if len(projects) != 1 || len(projects[0].Tags) != 1 {
+			t.Fatalf("got %d projects with tags %#v, want 1 project with 1 tag", len(projects), projects)
+		}
+		if projects[0].Tags[0] != "code review" {
+			t.Errorf("Tags[0] = %q, want %q", projects[0].Tags[0], "code review")
+		}
+	})
+
 	t.Run("it is a no-op when adding a tag the project already carries after normalisation", func(t *testing.T) {
 		dir := t.TempDir()
 		filePath := filepath.Join(dir, "projects.json")

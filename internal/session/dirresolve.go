@@ -45,7 +45,9 @@ type PaneCurrentPathReader interface {
 //     transport fault). The caller decides policy; routine session churn is
 //     already absorbed into the ok==false path above and never surfaces here.
 //
-// The active pane only is read — never an enumeration of all panes.
+// The active pane only is read — never an enumeration of all panes. This is
+// enforced structurally by the PaneCurrentPathReader seam, which exposes only
+// the single active-pane read and no all-panes method to call.
 func ResolveSessionDir(session string, reader PaneCurrentPathReader, runner resolver.CommandRunner) (string, bool, error) {
 	paneCwd, err := reader.ActivePaneCurrentPath(session)
 	if err != nil {
