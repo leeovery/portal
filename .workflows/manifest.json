@@ -122,6 +122,9 @@
     },
     "session-tagging-and-grouping": {
       "work_type": "feature"
+    },
+    "status-recent-warnings-pipe-format": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {

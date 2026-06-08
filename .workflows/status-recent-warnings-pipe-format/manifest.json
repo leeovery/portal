@@ -4,7 +4,15 @@
   "status": "in-progress",
   "created": "2026-06-08",
   "description": "portal state status reports zero recent warnings because its log scanner still parses the legacy pipe-delimited format while logs are now written in slog text format",
-  "phases": {},
+  "phases": {
+    "investigation": {
+      "items": {
+        "status-recent-warnings-pipe-format": {
+          "status": "in-progress"
+        }
+      }
+    }
+  },
   "seeds": [
     {
       "path": "seeds/2026-06-02-status-recent-warnings-pipe-format.md",
