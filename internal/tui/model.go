@@ -996,11 +996,17 @@ func (m *Model) setProjects(projects []project.Project) {
 
 // resolveSessionDirs is the render-layer chokepoint over the lazy
 // stamp-on-render fallback (spec § The lazy stamp-on-render fallback). It maps
-// every session through session.ResolveAndStampDir BEFORE the grouping builders
-// consume Session.Dir, so a session whose @portal-dir is absent is resolved live
-// from its active pane → git-root (and best-effort stamped so subsequent renders
-// take the fast path). ResolveAndStampDir's fast path returns an already-stamped
-// Dir verbatim with no pane read, so mapping all sessions is safe and cheap.
+// every session through session.ResolveAndStampDir, so a session whose
+// @portal-dir is absent is resolved live from its active pane → git-root (and
+// best-effort stamped so subsequent renders take the fast path).
+// ResolveAndStampDir's fast path returns an already-stamped Dir verbatim with no
+// pane read, so mapping all sessions is safe and cheap.
+//
+// It is invoked ONLY from the grouped render arms (ModeByProject / ModeByTag,
+// non-signpost) in rebuildSessionList — the lazy fallback is a grouped-render
+// mechanism. The Flat and byTagSignpost arms render via ToListItems, which
+// ignores Session.Dir, so they consume the un-resolved sessions directly and
+// pay zero pane reads / git rev-parse / stamp writes.
 //
 // Resolution is best-effort and overwrite-on-success only: when it yields
 // ok==false (unresolvable this pass — killed mid-resolve, blank pane, or no
@@ -1027,7 +1033,7 @@ func (m *Model) resolveSessionDirs(sessions []tmux.Session) []tmux.Session {
 }
 
 func (m *Model) rebuildSessionList() tea.Cmd {
-	filtered := m.resolveSessionDirs(m.filteredSessions())
+	filtered := m.filteredSessions()
 
 	// Zero-tags-anywhere gate (spec § Empty states → By Tag with zero tags):
 	// when By Tag mode is active but no project carries any tag, degrade to the
@@ -1043,9 +1049,9 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 	case m.byTagSignpost:
 		items = ToListItems(filtered)
 	case m.sessionListMode == prefs.ModeByProject:
-		items = buildByProject(filtered, m.projectIndex)
+		items = buildByProject(m.resolveSessionDirs(filtered), m.projectIndex)
 	case m.sessionListMode == prefs.ModeByTag:
-		items = buildByTag(filtered, m.projectIndex)
+		items = buildByTag(m.resolveSessionDirs(filtered), m.projectIndex)
 	default:
 		items = ToListItems(filtered)
 	}
