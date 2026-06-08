@@ -24,6 +24,7 @@ After [shell integration](#shell-integration), you interact with Portal through 
 
 - **Interactive session picker** — fuzzy-filterable TUI for switching, creating, renaming, or killing tmux sessions from a bare shell.
 - **Scrollback preview** — press `Space` on any session in the picker for a read-only Quick Look of its terminal scrollback. Cycle windows and panes without attaching. See [Scrollback Preview](#scrollback-preview).
+- **Session grouping & tags** — press `s` to cycle the session list between flat, grouped by project, and grouped by tag. Tag directories in the projects editor and every session opened there inherits the tags. See [Session Grouping & Tags](#session-grouping--tags).
 - **Path aliases + zoxide** — open sessions by short name (`x work`) or recent directory; falls back to a TUI filter when nothing matches.
 - **Project memory + git roots** — new sessions auto-resolve to the repository root and are remembered for next time.
 - **Reboot-safe sessions** — automatic tmux server bootstrap plus full restoration of session structure, layout, working dirs, and ANSI scrollback after a reboot. Replaces tmux-resurrect/tmux-continuum.
@@ -243,6 +244,7 @@ portal init bash --cmd p
 | `↓`/`j` | Move down |
 | `Enter` | Select session / confirm |
 | `Space` | Preview scrollback of highlighted session (sessions list only) |
+| `s` | Switch view: cycle Flat → By Project → By Tag (sessions list only) |
 | `/` | Filter mode (fuzzy search) |
 | `R` | Rename session |
 | `K` | Kill session |
@@ -271,6 +273,38 @@ tail. Chrome shows `Window M of N · Pane X of Y · <window-name>` plus key
 hints. A pane that has no saved content yet (brand-new session, daemon
 hasn't ticked) renders `(no saved content)`.
 
+## Session Grouping & Tags
+
+By default the session list is flat and alphabetical. Press **`s`** on the sessions
+list to cycle the view through three modes:
+
+- **Flat** (`Sessions`) — today's list, unchanged.
+- **By Project** (`Sessions — by project`) — a heading per directory; each session
+  appears once under its project name. Valuable with zero setup.
+- **By Tag** (`Sessions — by tag`) — a heading per tag; a session appears under
+  *each* tag its directory carries. Untagged sessions collect under a pinned
+  **Untagged** group.
+
+The cycle is unconditional (it always includes By Tag, even with no tags or no
+sessions) and the last-used mode is remembered across launches in `prefs.json`.
+Group headers are dimmed, non-selectable, and show a count; the cursor only ever
+lands on sessions. While the `/` filter is active the list flattens to matching
+sessions and the headers step aside, restoring when the filter clears.
+
+**Tags live on directories (projects), not individual sessions.** Every session
+opened in a directory inherits that directory's tags via a live lookup — there is
+nothing to tag per session. Tags are freeform, trimmed, and lower-cased
+(`Work`, `WORK`, and `work` are the same tag); applying a tag to a second
+directory auto-joins that group, and removing the last use of a tag makes the
+group disappear. There is no tag registry and no `tags` CLI in v1.
+
+**Managing tags:** open the projects picker (`x`, then switch to projects with
+`x`), highlight a project, and edit it. The edit modal has a **Tags** field
+alongside Name and Aliases — `Tab` cycles between the three fields, type a tag and
+press `Enter` to add it, highlight an entry and press `x` to remove it. Only
+directories already opened in Portal (i.e. known projects) are taggable — open a
+directory once, then tag it.
+
 ## Automatic Server Bootstrap & Restoration
 
 Portal automatically starts the tmux server if absent AND restores saved sessions
@@ -297,6 +331,7 @@ Portal resolves its config directory using XDG: `$XDG_CONFIG_HOME/portal/` if se
 | `aliases` | Path aliases (key=value, one per line) | `PORTAL_ALIASES_FILE` |
 | `projects.json` | Remembered project directories | `PORTAL_PROJECTS_FILE` |
 | `hooks.json` | Per-pane resume hooks (pane → event → command) | `PORTAL_HOOKS_FILE` |
+| `prefs.json` | UI preferences (last-used session-list grouping mode) | `PORTAL_PREFS_FILE` |
 | `state/` | Saved session structure + scrollback for automatic restoration on reboot. Contains: `sessions.json` (structure index), `scrollback/*.bin` (per-pane content), `daemon.pid` + `daemon.version` (liveness markers), `portal.log` (structured, rotating diagnostics — see [Logging](#logging)). See [Privacy Considerations](#privacy-considerations). | `PORTAL_STATE_DIR` |
 
 Projects are auto-populated when you create new sessions and cleaned with `xctl clean`.
