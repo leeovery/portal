@@ -44,7 +44,7 @@ const untaggedHeading = "Untagged"
 // slice.
 func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 	var known []SessionItem
-	var unknown []list.Item
+	var unknown []SessionItem
 
 	for _, s := range sessions {
 		if s.Dir == "" {
@@ -96,7 +96,7 @@ func buildByProject(sessions []tmux.Session, idx project.Index) []list.Item {
 // Pure function — no tmux call, no I/O. Zero live sessions yields an empty slice.
 func buildByTag(sessions []tmux.Session, idx project.Index) []list.Item {
 	var tagged []SessionItem
-	var untagged []list.Item
+	var untagged []SessionItem
 
 	for _, s := range sessions {
 		tags := resolveSessionTags(s, idx)
@@ -182,18 +182,13 @@ func unknownItem(s tmux.Session) SessionItem {
 // beneath it, like any other heading.
 //
 // Pure function — no I/O.
-func appendCatchAll(resolved []list.Item, catchAll []list.Item, heading string) []list.Item {
+func appendCatchAll(resolved []list.Item, catchAll []SessionItem, heading string) []list.Item {
 	if len(catchAll) == 0 {
 		return resolved
 	}
 
 	stamped := make([]SessionItem, 0, len(catchAll))
-	for _, it := range catchAll {
-		si, ok := it.(SessionItem)
-		if !ok {
-			// Defensive: only SessionItems are ever routed to a catch-all bucket.
-			continue
-		}
+	for _, si := range catchAll {
 		si.GroupKey = heading
 		stamped = append(stamped, si)
 	}
@@ -231,7 +226,7 @@ func sessionItemsToList(items []SessionItem) []list.Item {
 // empty catch-all yields an empty slice.
 //
 // Pure function — no I/O.
-func assembleGroups(resolved []SessionItem, catchAll []list.Item, heading string) []list.Item {
+func assembleGroups(resolved []SessionItem, catchAll []SessionItem, heading string) []list.Item {
 	slices.SortFunc(resolved, func(a, b SessionItem) int {
 		if c := cmp.Compare(a.GroupKey, b.GroupKey); c != 0 {
 			return c

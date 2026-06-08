@@ -3,7 +3,6 @@ package tui
 import (
 	"testing"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/leeovery/portal/internal/tmux"
 )
 
@@ -101,9 +100,9 @@ func TestAssembleGroups(t *testing.T) {
 		resolved := []SessionItem{
 			{Session: tmux.Session{Name: "zulu-1"}, GroupKey: "Zulu", GroupHeading: "Zulu"},
 		}
-		catchAll := []list.Item{
-			SessionItem{Session: tmux.Session{Name: "charlie"}, GroupHeading: "Heading", CatchAll: true},
-			SessionItem{Session: tmux.Session{Name: "alpha"}, GroupHeading: "Heading", CatchAll: true},
+		catchAll := []SessionItem{
+			{Session: tmux.Session{Name: "charlie"}, GroupHeading: "Heading", CatchAll: true},
+			{Session: tmux.Session{Name: "alpha"}, GroupHeading: "Heading", CatchAll: true},
 		}
 
 		got := assembleGroups(resolved, catchAll, "Heading")
