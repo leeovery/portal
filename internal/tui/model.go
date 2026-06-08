@@ -1331,6 +1331,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.termWidth > 0 || m.termHeight > 0 {
 				m.applyProjectListSize(m.termWidth, m.termHeight)
 			}
+			// Startup-ordering correction: fetchSessions and loadProjects are
+			// batched concurrently. If SessionsMsg arrives FIRST, applySessions
+			// already ran rebuildSessionList against an EMPTY m.projects, so in a
+			// persisted grouped mode every session landed in the Unknown/Untagged
+			// catch-all. Now that the real project records are cached, re-group so
+			// each session is placed under its project/tag heading. Only when a
+			// grouped mode is active AND sessions are already ingested — Flat mode
+			// and the no-sessions-yet case keep today's behaviour (no spurious
+			// rebuild). The rebuild cmd is BATCHED with setItemsCmd so neither the
+			// project-list nor the session-list SetItems command is dropped.
+			grouped := m.sessionListMode == prefs.ModeByProject || m.sessionListMode == prefs.ModeByTag
+			if grouped && len(m.sessions) > 0 {
+				setItemsCmd = tea.Batch(setItemsCmd, (&m).rebuildSessionList())
+			}
 		}
 		m.projectsLoaded = true
 		m.evaluateDefaultPage()
