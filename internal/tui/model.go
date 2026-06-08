@@ -461,12 +461,15 @@ func (m Model) WithCommand(command []string) Model {
 func (m Model) WithInsideTmux(currentSession string) Model {
 	m.insideTmux = true
 	m.currentSession = currentSession
-	// Re-filter and update list items if sessions are already populated
-	filtered := m.filteredSessions()
-	if cmd := m.sessionList.SetItems(ToListItems(filtered)); cmd != nil {
-		panic("unreachable: WithInsideTmux runs before any filter can be applied")
-	}
-	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, true, currentSession)
+	// Route item population (and the mode-aware + inside-tmux title) through the
+	// single rebuildSessionList chokepoint so inside-tmux exclusion composes with
+	// mode/grouping/dir-resolution rather than bypassing them via a direct
+	// SetItems(ToListItems(...)) push. insideTmux/currentSession are set above so
+	// rebuildSessionList reads them for the filtered view and the title. The
+	// returned cmd is discarded: at construction m.sessions is empty so SetItems
+	// yields no real cmd, matching the prior behaviour. WithInsideTmux is now a
+	// chokepoint participant, not a chokepoint-bypassing path.
+	(&m).rebuildSessionList()
 	return m
 }
 
@@ -1034,11 +1037,11 @@ func (m *Model) rebuildSessionList() tea.Cmd {
 
 	cmd := m.sessionList.SetItems(items)
 
-	// Canonical mode-aware title set. Living here means both the s-toggle
-	// (handleSwitchViewKey → rebuildSessionList) and the SessionsMsg refresh
-	// (applySessions → rebuildSessionList) get the correct mode title for free.
-	// WithInsideTmux sets the title separately because it does not route through
-	// this core (it runs before sessions are populated).
+	// Canonical mode-aware title set. Living here means the s-toggle
+	// (handleSwitchViewKey → rebuildSessionList), the SessionsMsg refresh
+	// (applySessions → rebuildSessionList), and WithInsideTmux (which now routes
+	// item population + title through this core) all get the correct mode title —
+	// reconciled with the inside-tmux current-session decoration — for free.
 	m.sessionList.Title = sessionListTitleForMode(m.sessionListMode, m.insideTmux, m.currentSession)
 
 	// Re-apply terminal size so pagination accounts for the manual keymap

@@ -216,3 +216,72 @@ func TestRebuildSessionList(t *testing.T) {
 		}
 	})
 }
+
+func TestWithInsideTmuxRoutesThroughRebuild(t *testing.T) {
+	t.Run("routes through rebuildSessionList so an already-populated grouped list is grouped", func(t *testing.T) {
+		dir := t.TempDir()
+		key := project.CanonicalDirKey(dir)
+		projects := []project.Project{{Path: dir, Name: "Portal"}}
+		sessions := []tmux.Session{
+			{Name: "portal-abc", Dir: dir},
+			{Name: "current", Dir: dir},
+		}
+
+		// Sessions populated BEFORE WithInsideTmux, in a grouped mode with a
+		// matching project. The old direct-push path (SetItems(ToListItems(...)))
+		// would render these flat; routing through rebuildSessionList must group
+		// them and still exclude the current session.
+		m := newRebuildTestModel(prefs.ModeByProject, sessions, projects)
+		m = m.WithInsideTmux("current")
+
+		items := m.sessionList.Items()
+		if len(items) != 1 {
+			t.Fatalf("len(items) = %d, want 1 (current excluded)", len(items))
+		}
+		si := asSessionItem(t, items[0])
+		if si.Session.Name == "current" {
+			t.Error("current session should be excluded from list items")
+		}
+		if si.GroupKey != key {
+			t.Errorf("GroupKey = %q, want %q (items not grouped — chokepoint bypassed?)", si.GroupKey, key)
+		}
+		if si.GroupHeading != "Portal" {
+			t.Errorf("GroupHeading = %q, want %q (items not grouped — chokepoint bypassed?)", si.GroupHeading, "Portal")
+		}
+	})
+
+	t.Run("preserves construction behaviour: empty sessions yields empty list and mode-aware inside-tmux title", func(t *testing.T) {
+		// Construction ordering: m.sessions is empty when WithInsideTmux runs.
+		m := newRebuildTestModel(prefs.ModeByTag, nil, nil)
+		m = m.WithInsideTmux("current")
+
+		if got := len(m.sessionList.Items()); got != 0 {
+			t.Fatalf("len(items) = %d, want 0 for empty sessions at construction", got)
+		}
+		// Title carries the active mode base plus the inside-tmux decoration.
+		want := "Sessions — by tag (current: current)"
+		if got := m.sessionList.Title; got != want {
+			t.Errorf("title = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("still excludes the current session under WithInsideTmux in flat mode", func(t *testing.T) {
+		sessions := []tmux.Session{
+			{Name: "alpha"},
+			{Name: "current"},
+			{Name: "bravo"},
+		}
+		m := newRebuildTestModel(prefs.ModeFlat, sessions, nil)
+		m = m.WithInsideTmux("current")
+
+		items := m.sessionList.Items()
+		if len(items) != 2 {
+			t.Fatalf("len(items) = %d, want 2 (current excluded)", len(items))
+		}
+		for _, it := range items {
+			if asSessionItem(t, it).Session.Name == "current" {
+				t.Error("current session should be excluded from list items")
+			}
+		}
+	})
+}
