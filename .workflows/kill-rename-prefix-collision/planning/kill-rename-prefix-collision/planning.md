@@ -18,3 +18,12 @@ approved_at: 2026-06-09
 - [ ] Both `KillSession` and `RenameSession` carry rationale godoc blocks mirroring the already-fixed exact-match sites.
 - [ ] `TestKillSession` is updated to expect `kill-session -t =my-session` and `TestRenameSession` to expect `rename-session -t =old-name new-name` (replacing the assertions that pinned the buggy bare-`-t` form).
 - [ ] `go build` and `go test ./...` are green; all existing tmux package tests pass.
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| kill-rename-prefix-collision-1-1 | Introduce exactTarget primitive and fix KillSession to exact-match | live colliding foo-2 never killed when foo absent; _portal-saver kill callers gain prefix harmlessly |
+| kill-rename-prefix-collision-1-2 | Fix RenameSession to exact-match target with bare newName | prefix on target only, newName stays bare; live colliding foo-2 never renamed when foo absent |
+| kill-rename-prefix-collision-1-3 | Migrate five behaviour-neutral session-target sites onto exactTarget | argv must stay byte-identical (existing green tests prove neutrality); no inline "="+name session targets remain; pane/window PaneTargetExact and out-of-scope bare reads untouched |
