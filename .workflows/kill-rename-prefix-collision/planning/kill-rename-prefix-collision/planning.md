@@ -20,7 +20,8 @@ approved_at: 2026-06-09
 - [ ] `go build` and `go test ./...` are green; all existing tmux package tests pass.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-09
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
