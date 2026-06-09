@@ -33,7 +33,7 @@
         "status-recent-warnings-pipe-format": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "6dc4751567214601de021a1305f7d828216ae628",
+          "spec_commit": "924dd7d9cae9b9837694fe7f4be3d740f0db952e",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
