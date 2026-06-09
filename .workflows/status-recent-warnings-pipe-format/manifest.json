@@ -79,11 +79,15 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "status-recent-warnings-pipe-format-1-4",
+          "current_task": "~",
           "completed_tasks": [
             "status-recent-warnings-pipe-format-1-1",
             "status-recent-warnings-pipe-format-1-2",
-            "status-recent-warnings-pipe-format-1-3"
+            "status-recent-warnings-pipe-format-1-3",
+            "status-recent-warnings-pipe-format-1-4"
+          ],
+          "completed_phases": [
+            1
           ]
         }
       }

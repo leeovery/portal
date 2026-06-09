@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,8 +11,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
+
+// writeRealLogLine writes a single real-writer log line to portal.log under dir,
+// sourcing the rendered bytes from the production render seam
+// (log.RenderLineForTest) so the fixture is byte-identical to what the writer
+// emits — never re-formatted from an independent format string. The seam output
+// already ends with a trailing '\n', so it is written verbatim. ts is normalised
+// to UTC (matching the writer's render path) so the window math is unchanged.
+func writeRealLogLine(t *testing.T, dir string, ts time.Time, level slog.Level, component, msg string) {
+	t.Helper()
+	line := log.RenderLineForTest(t, ts.UTC(), level, component, msg)
+	if err := os.WriteFile(state.PortalLog(dir), []byte(line), 0o600); err != nil {
+		t.Fatalf("write portal.log: %v", err)
+	}
+}
 
 // runStateStatus executes "portal state status" with PORTAL_STATE_DIR pointing
 // at dir, returning stdout, stderr, and the rootCmd.Execute error.
@@ -186,17 +202,14 @@ func TestStateStatusRecentWarningsLastLineSuffixWhenNonZero(t *testing.T) {
 	writeIndexAt(t, dir, time.Now().Add(-30*time.Second))
 
 	now := time.Now().UTC()
-	logLine := now.Format(time.RFC3339) + " | WARN | daemon | flush failed: disk full"
-	if err := os.WriteFile(state.PortalLog(dir), []byte(logLine+"\n"), 0o600); err != nil {
-		t.Fatalf("write portal.log: %v", err)
-	}
+	writeRealLogLine(t, dir, now, slog.LevelWarn, "daemon", "flush failed: disk full")
 
 	outBuf, _, err := runStateStatus(t, dir)
 	// Recent warnings > 0 makes status unhealthy, expect ErrStatusUnhealthy.
 	if err != ErrStatusUnhealthy {
 		t.Errorf("Execute err = %v; want ErrStatusUnhealthy when warnings > 0", err)
 	}
-	want := "  Recent warnings: 1 (last: " + logLine + ")\n"
+	want := "  Recent warnings: 1 (last: WARN daemon: flush failed: disk full)\n"
 	if !strings.Contains(outBuf.String(), want) {
 		t.Errorf("output missing warnings-with-last line %q:\n%s", want, outBuf.String())
 	}
@@ -247,10 +260,7 @@ func TestStateStatusExitNonZeroWhenRecentWarningsPresent(t *testing.T) {
 	writeIndexAt(t, dir, time.Now().Add(-30*time.Second))
 
 	now := time.Now().UTC()
-	logLine := now.Format(time.RFC3339) + " | ERROR | daemon | crashed"
-	if err := os.WriteFile(state.PortalLog(dir), []byte(logLine+"\n"), 0o600); err != nil {
-		t.Fatalf("write portal.log: %v", err)
-	}
+	writeRealLogLine(t, dir, now, slog.LevelError, "daemon", "crashed")
 
 	_, _, err := runStateStatus(t, dir)
 	if err != ErrStatusUnhealthy {
