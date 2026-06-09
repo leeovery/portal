@@ -129,26 +129,36 @@ func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
 // returned error in practice; the explicit nil makes the "logging never crashes
 // portal" contract unambiguous.)
 func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
-	var b strings.Builder
-
-	component := h.component(r)
-
 	// The HANDLER — not Enabled — is the authoritative level-filter. Enabled is
 	// only a coarse INFO-floor pre-gate (so lifecycle INFO is never skipped before
 	// Handle sees the record's component+msg), which means non-lifecycle INFO
 	// records can reach Handle even when configured at WARN; Handle drops them
 	// here (negligible cost). A process-component record whose msg is in the closed
 	// lifecycle set ALWAYS writes — it bypasses the level gate unconditionally.
+	component := h.component(r)
 	bypass := component == processComponent && lifecycleBypassMsgs[r.Message]
 	if !bypass && r.Level < h.level.Level() {
 		return nil
 	}
 
+	h.bestEffortWrite(h.render(r))
+	return nil
+}
+
+// render builds the canonical portal.log text line for r and returns it
+// (including the trailing newline). It is the single line-building path: Handle
+// calls it after the level-filter/bypass gate, and the test-only render seam
+// (RenderLineForTest) calls it too, so fixtures stay byte-identical to
+// production output. render itself applies no level filtering and performs no
+// write — those remain Handle's responsibility.
+func (h *textHandler) render(r slog.Record) string {
+	var b strings.Builder
+
 	b.WriteString(r.Time.Format(time.RFC3339Nano))
 	b.WriteByte(' ')
 	b.WriteString(r.Level.String())
 	b.WriteByte(' ')
-	b.WriteString(component)
+	b.WriteString(h.component(r))
 	b.WriteString(": ")
 	b.WriteString(r.Message)
 
@@ -178,8 +188,7 @@ func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 
 	b.WriteByte('\n')
 
-	h.bestEffortWrite(b.String())
-	return nil
+	return b.String()
 }
 
 // bestEffortWrite performs the single unbuffered write of the serialized record
