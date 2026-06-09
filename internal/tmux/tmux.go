@@ -133,7 +133,7 @@ func (c *Client) ServerRunning() bool {
 // sequence. See spec § Pre-select + attach sequence > Exact-match target
 // syntax.
 func (c *Client) HasSession(name string) bool {
-	_, err := c.cmd.Run("has-session", "-t", "="+name)
+	_, err := c.cmd.Run("has-session", "-t", exactTarget(name))
 	return err == nil
 }
 
@@ -163,7 +163,7 @@ func (c *Client) HasSession(name string) bool {
 // Spec: .workflows/enter-attaches-from-preview/specification/enter-attaches-from-preview/specification.md
 // § Pre-select + attach sequence > step 1.
 func (c *Client) HasSessionProbe(name string) (bool, error) {
-	_, err := c.cmd.Run("has-session", "-t", "="+name)
+	_, err := c.cmd.Run("has-session", "-t", exactTarget(name))
 	if err == nil {
 		return true, nil
 	}
@@ -403,7 +403,7 @@ func (c *Client) RenameSession(oldName, newName string) error {
 // resolves to the wrong session. See spec § Pre-select + attach sequence >
 // Exact-match target syntax.
 func (c *Client) SwitchClient(name string) error {
-	_, err := c.cmd.Run("switch-client", "-t", "="+name)
+	_, err := c.cmd.Run("switch-client", "-t", exactTarget(name))
 	if err != nil {
 		return fmt.Errorf("failed to switch to session %q: %w", name, err)
 	}

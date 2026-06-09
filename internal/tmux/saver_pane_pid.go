@@ -46,7 +46,7 @@ import (
 // Whitespace-only stdout is treated as ErrEmptyPaneList, not ErrPanePIDParse:
 // "no pane lines at all" is observably equivalent to an empty result.
 func saverPanePID(c *Client, sessionName string) (int, error) {
-	out, err := c.cmd.Run("list-panes", "-t", "="+sessionName, "-F", "#{pane_pid}")
+	out, err := c.cmd.Run("list-panes", "-t", exactTarget(sessionName), "-F", "#{pane_pid}")
 	if err != nil {
 		wrapped := wrapNoSuchSession(err)
 		return 0, fmt.Errorf("list-panes -t %s: %w", sessionName, wrapped)
@@ -81,7 +81,7 @@ func saverPanePID(c *Client, sessionName string) (int, error) {
 // a contextual prefix and returned verbatim (boundary class 2 — the commander
 // already embeds the tmux argv + stderr).
 func (c *Client) SaverPaneID(sessionName string) (string, error) {
-	out, err := c.cmd.Run("list-panes", "-t", "="+sessionName, "-F", "#{pane_id}")
+	out, err := c.cmd.Run("list-panes", "-t", exactTarget(sessionName), "-F", "#{pane_id}")
 	if err != nil {
 		return "", fmt.Errorf("list-panes -t %s -F #{pane_id}: %w", sessionName, err)
 	}
