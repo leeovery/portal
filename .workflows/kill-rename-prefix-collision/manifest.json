@@ -89,6 +89,18 @@
           ]
         }
       }
+    },
+    "review": {
+      "items": {
+        "kill-rename-prefix-collision": {
+          "status": "in-progress",
+          "reviewed_tasks": [
+            "kill-rename-prefix-collision-1-1",
+            "kill-rename-prefix-collision-1-2",
+            "kill-rename-prefix-collision-1-3"
+          ]
+        }
+      }
     }
   },
   "seeds": [
