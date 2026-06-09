@@ -52,4 +52,4 @@ instrumented (`cmd/alias.go`, `internal/tui/model.go`) are the precedent.
 
 ## Conclusion
 
-(none)
+Routed to investigation.
