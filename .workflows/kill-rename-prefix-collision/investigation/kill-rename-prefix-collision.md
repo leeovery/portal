@@ -206,54 +206,90 @@ hooks.json key formatter; changing it would invalidate existing hook entries.
 
 ## Fix Direction
 
-### Core fix (settled)
+### Chosen Approach
 
-Apply tmux's `=` exact-match prefix to the `-t` target in both methods:
+**Option 2 (centralising helper), executed for a uniform end-state** — fix the
+two destructive callers *and* close the inline-string drift surface for session
+targets, so the codebase reads as if the gap was never there.
 
-- `KillSession`: `kill-session -t =<name>`
-- `RenameSession`: `rename-session -t =<oldName> <newName>` (prefix on the
-  target only; `newName` stays bare).
+1. **Introduce a named session-level primitive** in `internal/tmux`:
+   ```go
+   func exactTarget(session string) string { return "=" + session }
+   ```
+   The session-level sibling of the existing `PaneTargetExact` (pane-level).
+   Together they become the two canonical ways to build an exact-match `-t`
+   target — no inline `"="+name` for a session name left anywhere in `tmux.go`.
 
-Add the rationale godoc block to each (mirroring `HasSession` / `SwitchClient`),
-referencing the spec § Exact-match target syntax. Update the two existing tests
-(`TestKillSession`, `TestRenameSession`) to expect the `=`-prefixed argv, and
-add prefix-collision regression coverage mirroring
-`TestHasSessionUsesExactMatchPrefix`.
+2. **Fix the two destructive callers** (the actual bug) via the helper, each
+   with a rationale godoc block (mirroring the fixed sites):
+   - `KillSession`: `kill-session -t exactTarget(name)`
+   - `RenameSession`: `rename-session -t exactTarget(oldName) <newName>` —
+     prefix on the **target only**; `newName` is the literal positional
+     new-name argument and must stay bare (prefixing it would corrupt the new
+     session name).
 
-### Open scope question (for findings review)
+3. **Migrate the existing bare-session inline sites onto `exactTarget`** so the
+   pattern is uniform — behaviour-neutral (identical argv), a pure
+   readability/anti-drift refactor: `HasSession`, `HasSessionProbe`,
+   `SwitchClient` (the `"="+name` sites). Pane/window-level sites (`SelectPane`,
+   `ResizePaneZoom`, `SelectWindow`) already centralise the prefix via
+   `PaneTargetExact` or build it at the window-target level — left on that path;
+   any tidy-up of `SelectWindow`'s inline `"=" + bareTarget` is an
+   implementation-detail call for the spec.
 
-How to apply the prefix — two options:
+**Deciding factor:** the user's explicit steer — "do it properly, not a hack…
+clean, as if it was never there." A minimal two-caller patch (Option 1) would
+leave a mixed state (helper for 2, inline for the rest), itself a new
+inconsistency. The uniform migration is behaviour-neutral and removes the exact
+drift surface that allowed the bug, without widening into unrelated sites.
 
-1. **Minimal two-caller patch.** Inline `"="+name` at the two sites, matching
-   the existing inline style at the five fixed sites. Smallest diff; consistent
-   with the current codebase pattern. Leaves the policy as a repeated inline
-   string (the same drift surface that allowed this bug).
-2. **Centralising `exactTarget` helper first** (the seed's suggestion). Add
-   `func exactTarget(session string) string { return "=" + session }`, use it in
-   the two callers, and optionally migrate the existing inline-`=` sites onto it
-   to make the policy a single chokepoint and prevent future drift.
+### Options Explored
 
-The seed leans toward option 2 (helper first, optional migration of existing
-sites). Either way, `PaneTarget` stays out of scope and the other bare
-`-t <session>` sites (reads / option-sets) are out of scope for this bugfix.
+- **Option 1 — Minimal two-caller patch (inline `"="+name`).** Smallest diff,
+  consistent with the current inline style, lowest surface. **Not chosen:**
+  leaves the repeated-inline-string drift surface that allowed this bug; a
+  "hack" rather than a clean fix per the user's direction.
+- **Option 2 (chosen) — helper + uniform migration of session-level sites.**
+- **Option 2 variant — helper but no migration** (my initial recommendation).
+  **Superseded:** would leave a mixed inline/helper state, which the user's
+  "clean, as if never there" steer explicitly rules out.
+
+### Discussion
+
+- The core argv fix was never in question — only *how* to apply the prefix.
+- The user prioritised **cleanliness/maintainability over minimal diff**,
+  resolving the open scope question toward the centralising helper and a
+  uniform end-state.
+- Scope was held firmly at the **session-target** surface: `PaneTarget`, the
+  bare `-t <session>` reads/option-sets, the pane/window-target writers, and
+  the QuickStart bare attach all stay out of scope — they are not the
+  destructive kill/rename pair and don't carry the same live-collision exposure
+  (the synthesis agent confirmed QuickStart names are provably unique at
+  creation). Sweeping them is a separate concern.
+- Edge case surfaced and pinned: `RenameSession`'s `newName` must stay bare —
+  flagged by the synthesis agent as the one trap for the implementer.
 
 ### Testing Recommendations
 
-- Update `TestKillSession` → expect `kill-session -t =my-session`.
-- Update `TestRenameSession` → expect `rename-session -t =old-name new-name`.
-- Add prefix-collision regression tests for both (mirror
-  `TestHasSessionUsesExactMatchPrefix`: simulate tmux exact-match semantics so a
-  bare-`-t` regression fails loudly).
-- If a helper is introduced: a focused test that `exactTarget("foo") == "=foo"`.
+- **Update** `TestKillSession` → expect `kill-session -t =my-session`.
+- **Update** `TestRenameSession` → expect `rename-session -t =old-name new-name`.
+- **Add** prefix-collision regression tests for both, mirroring
+  `TestHasSessionUsesExactMatchPrefix` (simulate tmux exact-match semantics via
+  `MockCommander.RunFunc` so a dropped-`=` regression fails loudly).
+- **Add** a focused unit test: `exactTarget("foo") == "=foo"`.
+- The migrated sites (`HasSession`, `HasSessionProbe`, `SwitchClient`) keep
+  their existing tests green (argv unchanged) — that green state *is* the proof
+  the migration is behaviour-neutral.
 
 ### Risk Assessment
 
-- **Fix complexity:** Low (argv string change + test updates; optional small
-  helper).
-- **Regression risk:** Low. The `_portal-saver` internal callers gain the `=`
-  prefix harmlessly (fixed literal name). No caller-side changes. Option 2's
-  optional migration of existing sites is behaviour-neutral (same argv) but
-  widens the diff.
+- **Fix complexity:** Low — small helper, two argv fixes, a behaviour-neutral
+  refactor of three sites, and test updates/additions.
+- **Regression risk:** Low. Migrated sites have identical argv (existing tests
+  pin it). The `_portal-saver` internal `KillSession` callers gain the `=`
+  prefix harmlessly (fixed literal name, no possible prefix collision). No
+  caller-side changes anywhere — the fix lives entirely at the Client-method
+  chokepoint.
 - **Recommended approach:** Regular release (no hotfix infra in this project).
 
 ---
