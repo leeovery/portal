@@ -3,7 +3,7 @@
   "work_type": "bugfix",
   "status": "in-progress",
   "created": "2026-06-09",
-  "description": "File-browser alias-save flow (handleAliasSave) emits no audit breadcrumb because it uses the un-audited Set+Save two-step instead of the audited SetAndSave seam",
+  "description": "Decided fix (investigation): the file-browser alias-save breadcrumb gap is on unreachable dead code; remove the file browser feature entirely (delete internal/ui + internal/browser, excise TUI/cmd wiring + the Projects-page b key). Kept as bugfix — the only work type with an Investigation phase, already done.",
   "phases": {
     "investigation": {
       "items": {

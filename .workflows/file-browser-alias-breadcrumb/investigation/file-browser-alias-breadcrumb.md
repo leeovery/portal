@@ -183,83 +183,135 @@ does.
   chokepoint and the named reachable callers, not on auditing every interface
   that fronts the alias store.
 
-### Blast Radius
+### Blast Radius (of the decided fix — full removal)
 
-**Directly affected:**
-- `internal/ui/browser.go` `handleAliasSave` + `AliasSaver` interface.
-- `internal/ui/browser_test.go` `mockAliasSaver` + alias-save tests.
+**Two packages deleted entirely:**
+- `internal/ui/` — `browser.go`, `browser_test.go`, `testmain_isolation_test.go`.
+  The package contains *nothing but* the file browser, so the whole directory
+  goes.
+- `internal/browser/` — `listing.go` (+ `listing_test.go`). Its only consumers
+  are the file browser (`internal/ui/browser.go`) and `cmd/open.go`'s
+  `osDirLister` — which itself exists solely to feed the file browser. With the
+  browser gone it has zero consumers → removable.
 
-**Potentially affected:**
-- Nothing in the current production runtime (flow is unreachable). The fix is a
-  correctness/latent-landmine repair, not a behaviour change to a live path.
-- If/when the file browser is later wired with a real alias store (the apparent
-  original intent of `NewFileBrowserWithAlias`), the fix ensures alias creation
-  is audited from day one rather than silently bypassing the trail.
+**`internal/tui/model.go` — excise file-browser integration:**
+- `internal/ui` import (l.20).
+- `pageFileBrowser` from the page-state iota (l.34) + its two switch arms
+  (update l.1544-1545, view l.2269-2270). (Go renumbers the iota automatically;
+  no other page constant needs editing.)
+- `type DirLister = ui.DirLister` alias (l.120).
+- fields `dirLister DirLister` (l.189), `startPath string` (l.190),
+  `fileBrowser ui.FileBrowserModel` (l.194).
+- `WithDirLister` Option (l.575-579).
+- `ui.BrowserDirSelectedMsg` / `ui.BrowserCancelMsg` handlers (l.1363-1365).
+- `handleBrowseKey()` (l.1649-1655) + the `b`-key dispatch on the Projects page
+  (l.1638).
+- `updateFileBrowser()` (l.1971-1977).
+
+**`cmd/open.go` — remove wiring:**
+- `osDirLister` type + `ListDirectories` (l.333-339).
+- `internal/browser` import (becomes unused).
+- `dirLister tui.DirLister` field in `tuiConfig` (l.349).
+- `tui.WithDirLister(cfg.dirLister, cfg.cwd)` (l.370).
+- `dirLister: &osDirLister{}` (l.505).
+- (`cfg.cwd` STAYS — still used by `WithCWD` + the lazy dir-resolution fallback.)
+
+**Tests to remove/update:**
+- `internal/ui/*_test.go`, `internal/browser/listing_test.go` (deleted with
+  their packages).
+- `cmd/open_test.go` — `osDirLister` / `browser.DirEntry` references.
+- `internal/tui/model_test.go` — `mockDirLister` / `browser.DirEntry` (l.15-16,
+  l.20, l.1671, l.2377), the `b`-key / `pageFileBrowser` paths, and the
+  bracket-bindings comment referencing the browser (l.14).
+
+**Docs:**
+- `CLAUDE.md` — drop the `ui` and `browser` rows from the internal-packages
+  table; update the TUI page state machine line (remove `FileBrowser` from
+  `Loading → Sessions → Projects → FileBrowser → Preview`); remove the `b`-to-
+  browse mention.
+
+**NOT affected (independent — must stay green):** the alias CLI
+(`cmd/alias.go`, `portal alias set/rm/list`), the projects-modal alias editor
+(`internal/tui/model.go` `aliasEditor` → `SetAndSave`), the resolver chain
+(path → alias → zoxide → TUI filter fallback), and the Sessions/Projects/Preview
+pages. None depend on the file browser.
 
 ---
 
 ## Fix Direction
 
-### Chosen Approach
+### Chosen Approach — REMOVE the file browser feature in full
 
-_(to be confirmed during findings review — see scope question below)_
+Decided with the user at findings review (2026-06-09). The reported "bug" (alias
+save emits no breadcrumb) is on **unreachable dead code**, so a behaviour-
+preserving audit-fix would only polish code that never runs. The user confirmed
+they never use the file browser (reachable only via Projects-page `b`) and want
+it gone. **The fix for this bug is to delete the file-browser feature** — which
+resolves the latent audit-bypass by removal and reclaims two dead packages. No
+`SetAndSave` rewiring is needed.
 
-Leading approach (matches the seed's recommendation): **route the file-browser
-caller onto the audited seam, behaviour-preserving for the reachable surface.**
+Execute the Blast-Radius removal above: delete `internal/ui` + `internal/browser`,
+excise the TUI integration and `cmd/open.go` wiring, remove/adjust the affected
+tests, and update `CLAUDE.md`.
 
-1. Extend the `AliasSaver` interface (`browser.go:44`) to require
-   `SetAndSave(name, path, via string) error` (mirroring `tui.AliasEditor` at
-   `model.go:106`). Drop `Set`/`Save` from the interface if no longer used
-   (narrows the bypass surface); keep `Load` (still needed to populate the map
-   before classification + to avoid clobbering on `Save`).
-2. Rewrite `handleAliasSave` (`browser.go:263-278`) to `Load()` then
-   `store.SetAndSave(name, resolved, "cli")` (`via=cli` — user-facing, matching
-   both precedents), replacing the `Set`+`Save` pair. Map a non-nil return to
-   `BrowserAliasSaveErrMsg`.
-3. Update `mockAliasSaver` (`browser_test.go:716`) to implement `SetAndSave`
-   (and drop `Set`/`Save` if removed from the interface); keep the existing
-   map-state assertions green.
+### Options considered (findings review)
 
-### Scope question to settle at findings review
+- **(A) Audit-fix in place** — route `handleAliasSave` onto `SetAndSave`. Rejected:
+  polishes code that never executes; leaves unused surface area.
+- **(B) Wire it up + finish the feature** — swap in `NewFileBrowserWithAlias`,
+  handle the saved/error messages (confirmation flash), audited save. Rejected:
+  the user doesn't want the feature; this is net-new feature work.
+- **(C) Remove the feature entirely — CHOSEN.** Deletes the bug by deletion,
+  removes two dead packages, no behaviour change to anything the user uses.
 
-Because the flow is **unreachable in production**, there are three coherent
-scopes — the user should pick:
+### Work-type categorization (decided)
 
-- **(A) Fix-in-place (recommended, = seal the latent landmine).** Do the three
-  steps above. Removes the audit-bypass without making the dead shortcut live.
-  Pure bugfix, behaviour-preserving.
-- **(B) Fix-in-place + wire into production.** Also call
-  `NewFileBrowserWithAlias` from `internal/tui/model.go:1653` so the `a`-key
-  actually works. This is **feature work** (activating a dormant shortcut), not
-  a bugfix — likely out of scope for this work unit.
-- **(C) Delete the dead shortcut.** If the `a`-key file-browser alias feature is
-  not wanted, remove `handleAliasSave` / `NewFileBrowserWithAlias` / the alias
-  branch instead of auditing it. Resolves the landmine by deletion.
+Keep `work_type: bugfix`. Rationale: valid types are
+`epic / feature / bugfix / cross-cutting / quick-fix`; there is no "removal"
+type, and **bugfix is the only type with an Investigation phase** — which we have
+already completed. Re-typing to quick-fix or feature would orphan this
+investigation (those pipelines never read it) and force re-seeding the findings
+by hand. A bugfix legitimately concluding "the fix is deletion" is the cleanest,
+lowest-friction framing; the removal's blast radius (two packages + TUI state-
+machine surgery) also wants the spec/planning/review rigor that quick-fix skips.
 
 ### Testing Recommendations
 
-- Add a log-capture assertion (via the `logtest.Sink` pattern used in
-  `internal/alias/store_logging_test.go`) proving the file-browser save path now
-  emits one `aliases: set`/`modify` breadcrumb with `via=cli`.
-- Keep existing `mockAliasSaver` map-state tests green after the interface
-  change.
-- If scope (B): an integration/TUI test that the `a`-key opens the prompt and
-  persists + audits.
+- After removal: `go build ./...` and `go test ./...` green with no dangling
+  references to `ui` / `browser` / `pageFileBrowser` / `DirLister`.
+- Spot-check that the Projects page no longer reacts to `b` and that the
+  Sessions/Projects/Preview pages and alias CLI / projects-modal alias editor
+  are unchanged.
+- Net test delta is removal, not addition (the deleted packages take their own
+  tests with them).
 
 ### Risk Assessment
 
-- **Fix complexity:** Low (scope A) — interface + one call site + mock.
-- **Regression risk:** Low — the only consumer is unreachable in prod; the
-  change is mechanical and mirrors two existing precedents.
+- **Fix complexity:** Low–Medium — mechanical deletion, but spread across two
+  packages + the central TUI model + cmd wiring + docs; easy to leave a dangling
+  reference, so a compile + full-test pass is the gate.
+- **Regression risk:** Low — all removed code is unreachable in production except
+  the `b` keybinding, which the user confirmed they never use.
 - **Recommended approach:** Regular release.
 
 ---
 
 ## Notes
 
-Seed flagged this as a clear, narrowly-scoped bugfix. Investigation confirms the
-defect (un-audited two-step + `AliasSaver` omitting `SetAndSave`) but corrects
-one material fact: the site is **not** currently a live production mutation site
-— it is unreachable, so the bug is a **latent landmine** rather than an active
-missing-breadcrumb. This sharpens severity to Low and raises the fix-scope
-question (A/B/C above) for the user.
+Seed flagged this as a clear, narrowly-scoped bugfix. Investigation corrected one
+material fact: the alias-save site is **not** a live production mutation site — it
+is unreachable dead code, so the original "missing breadcrumb" framing was a
+latent landmine, not an active defect. The findings review then broadened: the
+user confirmed the whole file browser is unused, and the decided fix is **full
+removal** (option C) rather than auditing dead code. Kept as `work_type: bugfix`
+because that is the only pipeline with the Investigation phase already done here.
+
+Adjacent facts established during review (not part of this fix, captured for
+context): the alias system **is** wired and functional and takes priority over
+zoxide in the resolver chain; the user simply had no matching alias for the names
+they tested. A noted UX sharp edge (out of scope): an exact-match alias miss
+silently degrades to a fuzzy zoxide search, which can open a *different*
+directory than intended with no indication the alias was skipped.
+
+The earlier severity note still holds: severity is Low, and the fix-scope
+question (A/B/C above) was resolved at findings review in favour of (C) removal.
