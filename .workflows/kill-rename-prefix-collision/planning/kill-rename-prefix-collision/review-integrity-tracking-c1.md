@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 1
 phase: Plan Integrity Review
@@ -71,8 +71,8 @@ unit test".
 - Add the focused `exactTarget` unit test in a same-package internal test file. `exactTarget` is unexported and `tmux_test.go` is `package tmux_test` (external — it calls `tmux.NewClient`), so it cannot reach `exactTarget` directly. The package already uses `package tmux` internal test files (e.g. `option_discriminator_internal_test.go`, `export_test.go`), so follow that convention: create `internal/tmux/exact_target_internal_test.go` with `package tmux` and a `TestExactTarget` asserting `if got := exactTarget("foo"); got != "=foo" { t.Errorf("exactTarget(\"foo\") = %q, want \"=foo\"", got) }`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim to the authored tick task (tick-6570c5) Do section and the phase-1-tasks.md detail file. Auto-approved.
 
 ---
 
@@ -101,7 +101,7 @@ alternative so the two sections don't disagree on the chosen approach.
 - `tmux_test.go` is `package tmux_test` (external) and cannot reach the unexported `exactTarget`, so the focused unit assertion lives in the `package tmux` internal test file `exact_target_internal_test.go` (per the Do step). The regression tests, which need `MockCommander`, stay in the external `tmux_test.go` and drive the exported `KillSession`.
 ```
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Fixed
+**Notes**: Applied verbatim to the authored tick task (tick-6570c5) Edge Cases section and the phase-1-tasks.md detail file. Auto-approved.
 
 ---
