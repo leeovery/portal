@@ -182,7 +182,81 @@ real writer-produced line.
 
 ## Fix Direction
 
-(to be populated during Steps 6–8 — the discussion/spec phases own the detail)
+### Chosen Approach
+
+Migrate the status reader (`internal/state/status.go`) to parse the slog **text**
+format instead of the legacy pipe format. The reader needs only two fields per
+line — the RFC3339Nano timestamp (token 0) and the level (token 1), both
+whitespace-separated in `<RFC3339Nano> <LEVEL> <component>: <msg> <attrs…>`. So
+`logEntryQualifies` switches from `SplitN(line, " | ", 4)` to a whitespace split
+taking the first two tokens; `logFieldSeparator` / `expectedLogFieldCount` are
+dropped. The existing `time.RFC3339` parse is already compatible with the
+RFC3339Nano output (verified empirically), and the cutoff/window logic is
+unchanged.
+
+Two resolved direction forks:
+
+- **Fork 1 — reader/writer sync (anti-recurrence): chosen = B (shared helper).**
+  Export a parse helper from `internal/log` and consume it from
+  `internal/state/status.go`. `internal/state` may import `internal/log` (log is
+  a leaf that must not import state — one-directional, no import cycle). One
+  format definition, one place to change.
+  **Deciding factor:** directly removes the "writer and reader each define the
+  format independently" contributing factor; the import direction is already
+  legal so the coupling is free.
+
+- **Fork 2 — `LastWarning` rendering: chosen = B (trim to human part).**
+  Render `"<LEVEL> <component>: <msg>"` rather than the whole raw line (which now
+  carries trailing `pid=…/version=…/process_role=…` baselines and every attr).
+  **Deciding factor:** readability on the single `(last: …)` status line; this
+  is a UX call, not correctness.
+
+### Options Explored
+
+- **Fork 1A — independent parser in `status.go`.** Smallest diff, but re-derives
+  the format a second time, leaving the same drift able to recur. Not chosen.
+- **Fork 2A — keep the full raw line.** Literally matches the prior contract but
+  is noisy with baselines/attrs. Not chosen.
+- (No "change the writer" option — the writer/handler is correct and out of
+  scope; the reader is the side that drifted.)
+
+### Discussion
+
+The root cause is a deterministic, fully-validated format mismatch (independent
+synthesis: high confidence, zero gaps), so the fix shape was settled quickly. The
+substantive choices were both about *preventing recurrence and presentation*
+rather than about *what is broken*: couple the reader to the writer's format via a
+shared helper (Fork 1B) and tidy the surfaced warning text (Fork 2B). User agreed
+with both recommendations. No edge cases shifted the direction; the
+timestamp-format nuance was checked and ruled out as a second defect before the
+discussion.
+
+### Testing Recommendations
+
+- Re-point the existing pipe-format fixtures in `internal/state/status_test.go`
+  (`writeLogLine`, line 22) and `cmd/state_status_test.go` (lines 189, 250) to
+  the slog text format.
+- **Anti-false-green:** generate fixtures via the real `internal/log` writer (or
+  the Fork-1B shared helper) so the reader is exercised against producer output —
+  a future writer-format change then turns these tests red instead of leaving
+  them silently green.
+- Add at least one case that round-trips a genuinely-written WARN line through
+  `CollectStatus` end-to-end (asserting `RecentWarnings`/`LastWarning` and the
+  `isUnhealthy` consequence).
+- Keep/extend the existing window-cutoff, level-filter, last-wins, and
+  malformed-line cases against the new format (malformed-line case at
+  `status_test.go:368` must be re-expressed in the new format).
+
+### Risk Assessment
+
+- **Fix complexity:** Low — a localised parser change plus a small exported
+  helper, no behavioural change to the writer.
+- **Regression risk:** Low — single confined reader; no other consumer of
+  `portal.log`; all other status fields untouched. Main watch-item is parsing
+  robustness for malformed/edge lines, which the existing swallow-and-skip
+  contract already covers.
+- **Recommended approach:** Regular release (a diagnostic-surface bugfix, not a
+  hotfix-class production outage).
 
 ---
 
