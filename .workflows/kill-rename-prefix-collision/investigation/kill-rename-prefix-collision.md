@@ -119,11 +119,33 @@ the single argv-construction point. Fixing the argv inside `KillSession` /
 
 ### Root Cause
 
-(to be filled during synthesis)
+`KillSession` and `RenameSession` construct their tmux `-t <session>` argv
+**without** tmux's `=` exact-match prefix. tmux's default target resolution is
+**prefix-match**, so when the named session is not a live exact match but
+another live session has that name as a prefix (e.g. target `foo` with live
+`foo-2`), tmux silently resolves to the prefix-matching session — killing or
+renaming the wrong one.
+
+**Why this happens:** the `=` exact-match policy was introduced by the
+`enter-attaches-from-preview` work, which applied it only to the five sites in
+*its* blast radius (the preview Enter / pre-select-and-attach pipeline). The
+policy lives as an inline `"="+name` string repeated per call site, with no
+centralising helper — so a site outside that pipeline (these two destructive
+callers) was never brought under the policy and there is no single point that
+enforces it.
 
 ### Contributing Factors
 
-(to be filled)
+- **Inline-string policy, no chokepoint.** The `=` prefix is hand-applied at
+  each call site rather than centralised, so adding a new `-t` caller (or
+  leaving an old one) silently opts out of the policy.
+- **Sibling-work scope boundary.** `enter-attaches-from-preview` deliberately
+  fixed only the sites it touched; the two destructive callers sit outside that
+  pipeline and were left bare (later surfaced in that work's own review →
+  inbox bug → this work unit).
+- **Session names are `{project}-{nanoid}` and freely renamed by the user**, so
+  prefix collisions between coexisting sessions are plausible in practice, not
+  theoretical.
 
 ### Why It Wasn't Caught
 
@@ -169,7 +191,55 @@ hooks.json key formatter; changing it would invalidate existing hook entries.
 
 ## Fix Direction
 
-(to be filled during findings review)
+### Core fix (settled)
+
+Apply tmux's `=` exact-match prefix to the `-t` target in both methods:
+
+- `KillSession`: `kill-session -t =<name>`
+- `RenameSession`: `rename-session -t =<oldName> <newName>` (prefix on the
+  target only; `newName` stays bare).
+
+Add the rationale godoc block to each (mirroring `HasSession` / `SwitchClient`),
+referencing the spec § Exact-match target syntax. Update the two existing tests
+(`TestKillSession`, `TestRenameSession`) to expect the `=`-prefixed argv, and
+add prefix-collision regression coverage mirroring
+`TestHasSessionUsesExactMatchPrefix`.
+
+### Open scope question (for findings review)
+
+How to apply the prefix — two options:
+
+1. **Minimal two-caller patch.** Inline `"="+name` at the two sites, matching
+   the existing inline style at the five fixed sites. Smallest diff; consistent
+   with the current codebase pattern. Leaves the policy as a repeated inline
+   string (the same drift surface that allowed this bug).
+2. **Centralising `exactTarget` helper first** (the seed's suggestion). Add
+   `func exactTarget(session string) string { return "=" + session }`, use it in
+   the two callers, and optionally migrate the existing inline-`=` sites onto it
+   to make the policy a single chokepoint and prevent future drift.
+
+The seed leans toward option 2 (helper first, optional migration of existing
+sites). Either way, `PaneTarget` stays out of scope and the other bare
+`-t <session>` sites (reads / option-sets) are out of scope for this bugfix.
+
+### Testing Recommendations
+
+- Update `TestKillSession` → expect `kill-session -t =my-session`.
+- Update `TestRenameSession` → expect `rename-session -t =old-name new-name`.
+- Add prefix-collision regression tests for both (mirror
+  `TestHasSessionUsesExactMatchPrefix`: simulate tmux exact-match semantics so a
+  bare-`-t` regression fails loudly).
+- If a helper is introduced: a focused test that `exactTarget("foo") == "=foo"`.
+
+### Risk Assessment
+
+- **Fix complexity:** Low (argv string change + test updates; optional small
+  helper).
+- **Regression risk:** Low. The `_portal-saver` internal callers gain the `=`
+  prefix harmlessly (fixed literal name). No caller-side changes. Option 2's
+  optional migration of existing sites is behaviour-neutral (same argv) but
+  widens the diff.
+- **Recommended approach:** Regular release (no hotfix infra in this project).
 
 ---
 
