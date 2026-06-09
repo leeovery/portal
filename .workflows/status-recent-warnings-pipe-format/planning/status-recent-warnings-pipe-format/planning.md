@@ -23,7 +23,8 @@ approved_at: 2026-06-09
 - [ ] `go test ./...` passes — no regressions in existing status, log, or cmd tests
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-09
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
