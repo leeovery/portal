@@ -75,7 +75,47 @@ must confirm it in the current source and assess blast radius / scope.
 
 ### Code Trace
 
-(to be filled during code analysis)
+**The two buggy sites (confirmed in current source):**
+
+- `internal/tmux/tmux.go:352-358` — `KillSession(name)`:
+  ```go
+  _, err := c.cmd.Run("kill-session", "-t", name)
+  ```
+  Bare `-t name` — no `=` prefix. No godoc rationale block (unlike the fixed
+  sites).
+- `internal/tmux/tmux.go:360-367` — `RenameSession(oldName, newName)`:
+  ```go
+  _, err := c.cmd.Run("rename-session", "-t", oldName, newName)
+  ```
+  Bare `-t oldName` — no `=` prefix. **Only `oldName` (the `-t` target) needs
+  the prefix; `newName` is the literal new-name positional argument and must
+  stay bare** (it is not a target lookup).
+
+**The already-fixed sites (carry `=`, with rationale godoc) — for contrast:**
+
+- `HasSession` (136) / `HasSessionProbe` (166): `has-session -t =name`
+- `SwitchClient` (378): `switch-client -t =name`
+- `SelectWindow` (936-937): `select-window -t =session:window`
+- `SelectPane` (955-957): `select-pane -t` via `PaneTargetExact`
+- `ResizePaneZoom` (974-976): via `PaneTargetExact`
+- `PaneTargetExact` (546): the `=`-prefixed pane-target formatter; `PaneTarget`
+  (530) is the deliberately non-prefixed hooks.json key formatter (out of scope).
+
+**The fix chokepoint is the Client method, not the callers.** Both methods are
+the single argv-construction point. Fixing the argv inside `KillSession` /
+`RenameSession` covers every caller uniformly — no caller-side change needed.
+
+**Callers (blast radius of the destructive paths):**
+
+- `KillSession`:
+  - `cmd/kill.go:37` — `portal kill <name>` (user session, by name) — **exposed**
+  - `internal/tui/model.go:2171` — TUI kill key (user session) — **exposed**
+  - `cmd/state_cleanup.go:185`, `internal/tmux/portal_saver.go:366,372,385` —
+    kill the fixed-name `_portal-saver` internal session. Low collision risk
+    (fixed literal name) but the method-level fix covers them harmlessly and
+    uniformly.
+- `RenameSession`:
+  - `internal/tui/model.go:2225` — TUI rename (user session) — **exposed**
 
 ### Root Cause
 
@@ -87,11 +127,43 @@ must confirm it in the current source and assess blast radius / scope.
 
 ### Why It Wasn't Caught
 
-(to be filled)
+**The existing unit tests actively pinned the buggy form.**
+
+- `TestKillSession` (`tmux_test.go:737`): `wantArgs := "kill-session -t my-session"`
+- `TestRenameSession` (`tmux_test.go:953`): `wantArgs := "rename-session -t old-name new-name"`
+
+Both assert the bare-`-t` argv, so they *locked in* the bug — a fix must
+**update** these existing assertions, not merely add new ones. Contrast with
+`TestHasSessionUsesExactMatchPrefix` (`tmux_test.go:443`), the regression test
+the sibling work added that pins `=foo` and even simulates tmux's prefix-match
+semantics ("killed foo with live foo-2 reports absent"). `TestSwitchClient`
+(`tmux_test.go:770`) already expects `switch-client -t =my-session`.
+
+The sibling work (`enter-attaches-from-preview`) fixed the five sites in its
+own blast radius (the preview Enter / pre-select-and-attach pipeline) and did
+not sweep the two destructive callers, which sit outside that pipeline.
 
 ### Blast Radius
 
-(to be filled)
+**Directly affected (the fix):**
+- `tmux.go` `KillSession`, `RenameSession`.
+- `tmux_test.go` `TestKillSession`, `TestRenameSession` (assertions updated).
+
+**Same hazard class but OUT OF SCOPE per seed** — other bare `-t <session>`
+sites in `tmux.go` that also lack the `=` prefix. None are destructive (reads
+or option/env sets), and the seed scoped only the two destructive callers.
+They inform the helper-vs-minimal scope question (a centralising `exactTarget`
+helper could eventually cover them to prevent drift) but are not part of this
+bugfix:
+- `ActivePaneCurrentPath` (344): `display-message -t session` (read)
+- `SetSessionOption` (399): `set-option -t session`
+- `ListPanesInSession` (555), and the other `list-panes -t session` reads
+  (631, 686)
+- `ShowEnvironment` (712): `show-environment -t session` (read)
+- `SetSessionEnvironment` (898): `set-environment -t session`
+
+Explicitly out of scope (per seed): `PaneTarget` (530) — the no-prefix
+hooks.json key formatter; changing it would invalidate existing hook entries.
 
 ---
 
