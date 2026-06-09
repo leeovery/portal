@@ -100,6 +100,13 @@ must confirm it in the current source and assess blast radius / scope.
 - `ResizePaneZoom` (974-976): via `PaneTargetExact`
 - `PaneTargetExact` (546): the `=`-prefixed pane-target formatter; `PaneTarget`
   (530) is the deliberately non-prefixed hooks.json key formatter (out of scope).
+- **attach-session is fixed, but not in `tmux.go`**: the `=`-prefixed attach
+  argv lives at `cmd/open.go:104` (`tmux attach-session -t =<name>`). Note a
+  *separate* bare `attach-session -t <name>` (and bare `set-option -t <name>`)
+  exists in `internal/session/quickstart.go:77-78` — left bare and out of scope
+  because `GenerateSessionName` guarantees a freshly-unique name at creation
+  (quickstart.go godoc 61-65), so no live session can prefix-collide at that
+  instant.
 
 **The fix chokepoint is the Client method, not the callers.** Both methods are
 the single argv-construction point. Fixing the argv inside `KillSession` /
@@ -183,6 +190,14 @@ bugfix:
   (631, 686)
 - `ShowEnvironment` (712): `show-environment -t session` (read)
 - `SetSessionEnvironment` (898): `set-environment -t session`
+
+Also same hazard class but operating on **caller-supplied pane/window targets**
+(not session names directly), so lower collision exposure and out of scope —
+listed for completeness so a future `exactTarget`-helper sweep knows the full
+drift surface: `SendKeys` (763), `RespawnPane` (779), `CapturePane` (830),
+`NewWindow` (861), `SplitWindow` (881), `SelectLayout` (912). (`display-message
+-t <paneID>` at 324 targets a unique `%N` pane ID — not a prefix-collision
+concern.)
 
 Explicitly out of scope (per seed): `PaneTarget` (530) — the no-prefix
 hooks.json key formatter; changing it would invalidate existing hook entries.
