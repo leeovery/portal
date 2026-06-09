@@ -39,10 +39,11 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "kill-rename-prefix-collision-1-2",
+          "task": "kill-rename-prefix-collision-1-3",
           "task_map": {
             "kill-rename-prefix-collision-1": "tick-eb3bc7",
-            "kill-rename-prefix-collision-1-1": "tick-6570c5"
+            "kill-rename-prefix-collision-1-1": "tick-6570c5",
+            "kill-rename-prefix-collision-1-2": "tick-6c9f54"
           },
           "external_id": "tick-233874"
         }
