@@ -70,6 +70,8 @@ Each via the helper, each with a rationale godoc block mirroring the already-fix
 
 The fix lives entirely at the Client-method chokepoint. Both methods are the single argv-construction point, so fixing the argv inside them covers every caller uniformly — **no caller-side change anywhere**. This includes the internal `_portal-saver` `KillSession` callers (`cmd/state_cleanup.go`, `internal/tmux/portal_saver.go`), which gain the `=` prefix harmlessly (fixed literal name, no possible prefix collision).
 
+**Exposed user-facing callers (the real-world blast radius).** The entry points that actually expose this bug to users are `portal kill <name>` (`cmd/kill.go`) and the TUI kill key (`internal/tui/model.go`) for `KillSession`, and the TUI rename key (`internal/tui/model.go`) for `RenameSession`. The chokepoint fix covers all of them with no caller-side change; these are the surfaces to manually verify the wrong-session kill/rename no longer occurs.
+
 ## Migration Scope & Out of Scope
 
 ### Sites to migrate onto `exactTarget` (behaviour-neutral)

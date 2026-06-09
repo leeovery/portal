@@ -27,10 +27,12 @@ The specification mentions only the *internal* `_portal-saver` callers (`cmd/sta
 > The fix lives entirely at the Client-method chokepoint. Both methods are the single argv-construction point, so fixing the argv inside them covers every caller uniformly — **no caller-side change anywhere**. This includes the internal `_portal-saver` `KillSession` callers (`cmd/state_cleanup.go`, `internal/tmux/portal_saver.go`), which gain the `=` prefix harmlessly (fixed literal name, no possible prefix collision).
 
 **Proposed Addition**:
-{leave blank until discussed}
+Append a new paragraph immediately after the "chokepoint" paragraph:
 
-**Resolution**: Pending
-**Notes**:
+> **Exposed user-facing callers (the real-world blast radius).** The entry points that actually expose this bug to users are `portal kill <name>` (`cmd/kill.go`) and the TUI kill key (`internal/tui/model.go`) for `KillSession`, and the TUI rename key (`internal/tui/model.go`) for `RenameSession`. The chokepoint fix covers all of them with no caller-side change; these are the surfaces to manually verify the wrong-session kill/rename no longer occurs.
+
+**Resolution**: Approved
+**Notes**: Auto-approved. Added as a new paragraph after the chokepoint paragraph in "Required Behaviour & The Fix" §2.
 
 ---
 
@@ -47,7 +49,9 @@ The investigation explicitly reasons about `display-message -t <paneID>` at line
 > - **Caller-supplied pane/window-target writers** — `SendKeys`, `RespawnPane`, `CapturePane`, `NewWindow`, `SplitWindow`, `SelectLayout`. Lower collision exposure (not session names directly).
 
 **Proposed Addition**:
-{leave blank until discussed}
+Add a new bullet to the "Explicitly out of scope" list:
+
+> - **`display-message -t <paneID>`** (the pane-ID read) — targets a unique `%N` pane ID, so it is categorically immune to prefix collision (not merely "non-destructive" or "lower exposure"). Must stay bare — prefixing it (`=%N`) would break the lookup.
 
 **Resolution**: Pending
 **Notes**:
