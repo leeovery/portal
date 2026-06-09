@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Enforce exact-match session targeting at the tmux chokepoint
-status: draft
+status: approved
+approved_at: 2026-06-09
 
 **Goal**: Eliminate the silent wrong-session kill/rename by introducing the `exactTarget` session-level primitive in `internal/tmux`, fixing the two destructive callers (`KillSession`, `RenameSession`) to build their `-t` target with the `=` exact-match prefix, migrating the five existing inline `"="+name` session-target sites onto the helper, and locking the behaviour with regression and unit tests.
 
