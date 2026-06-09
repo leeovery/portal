@@ -37,4 +37,4 @@ The shape is a clear bugfix: a known malfunction mode with the root cause alread
 
 ## Conclusion
 
-(none)
+Routed to investigation.
