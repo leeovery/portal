@@ -6,21 +6,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/leeovery/portal/internal/log"
 )
 
 // recentWarningWindow is the look-back interval scanRecentWarnings applies to
 // portal.log entries. Entries with timestamps strictly before now-window are
 // skipped. Matches the spec's "recent = last hour" rule.
 const recentWarningWindow = time.Hour
-
-// logFieldSeparator delimits fields on each portal.log line.
-const logFieldSeparator = " | "
-
-// expectedLogFieldCount is the number of pipe-delimited fields a well-formed
-// portal.log entry contains: timestamp | level | component | message.
-const expectedLogFieldCount = 4
 
 // StatusReport is the data-only result of CollectStatus. Each field maps to a
 // section of `portal state status` output; the formatting layer is separate.
@@ -62,8 +56,9 @@ type StatusReport struct {
 	// to the now passed to CollectStatus.
 	RecentWarnings int
 
-	// LastWarning is the full text of the most recent qualifying WARN/ERROR
-	// log line (last-wins). Empty when there are no qualifying entries.
+	// LastWarning is the most recent qualifying entry rendered as
+	// `<LEVEL> <component>: <msg>` — timestamp prefix and trailing
+	// attrs/baselines omitted. Empty when there are no qualifying entries.
 	LastWarning string
 }
 
@@ -178,11 +173,15 @@ func computeStateSize(dir string) int64 {
 	return total
 }
 
-// scanRecentWarnings reads logPath line by line and updates rep.RecentWarnings
-// and rep.LastWarning for each WARN/ERROR entry whose RFC3339 timestamp is at
-// or after cutoff. Missing log file: zero counts (not an error). Malformed
-// lines (wrong field count, unparseable timestamp, non-WARN/ERROR level) are
-// silently skipped.
+// scanRecentWarnings reads logPath line by line, parsing each line once via
+// log.ParseLogLine (the single inverse of the writer's text format), and
+// updates rep.RecentWarnings and rep.LastWarning for every WARN/ERROR entry
+// whose timestamp is at or after cutoff. Missing log file: zero counts (not an
+// error). Unparseable lines and lines whose level is not WARN/ERROR or whose
+// timestamp predates cutoff are silently skipped (swallow-and-skip). LastWarning
+// is last-wins, positional top-to-bottom: because the writer only ever appends
+// in chronological order, the last qualifying line in the file is the most
+// recent one.
 func scanRecentWarnings(rep *StatusReport, logPath string, cutoff time.Time) {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -192,30 +191,35 @@ func scanRecentWarnings(rep *StatusReport, logPath string, cutoff time.Time) {
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
-		if !logEntryQualifies(line, cutoff) {
+		parsed, ok := log.ParseLogLine(scanner.Text())
+		if !ok {
+			continue
+		}
+		if parsed.Level != "WARN" && parsed.Level != "ERROR" {
+			continue
+		}
+		if parsed.Time.Before(cutoff) {
 			continue
 		}
 		rep.RecentWarnings++
-		rep.LastWarning = line
+		rep.LastWarning = composeLastWarning(parsed)
 	}
 }
 
-// logEntryQualifies reports whether line is a WARN or ERROR entry whose
-// timestamp is at or after cutoff. A line qualifies only if all the parse
-// steps succeed; any malformed input causes a false return.
-func logEntryQualifies(line string, cutoff time.Time) bool {
-	parts := strings.SplitN(line, logFieldSeparator, expectedLogFieldCount)
-	if len(parts) < expectedLogFieldCount {
-		return false
+// composeLastWarning renders a qualifying log line as the LastWarning summary:
+// "<LEVEL> <component>: <msg>". The component segment is omitted when empty
+// (yielding "<LEVEL>: <msg>" with no stray space before the colon) and the
+// message segment is omitted when empty (yielding "<LEVEL> <component>:" with no
+// trailing space) — assembling the level, optional " <component>", ":", and
+// optional " <msg>" pieces so no stray space appears in any combination.
+func composeLastWarning(parsed log.LogLine) string {
+	summary := parsed.Level
+	if parsed.Component != "" {
+		summary += " " + parsed.Component
 	}
-	level := parts[1]
-	if level != "WARN" && level != "ERROR" {
-		return false
+	summary += ":"
+	if parsed.Message != "" {
+		summary += " " + parsed.Message
 	}
-	ts, err := time.Parse(time.RFC3339, parts[0])
-	if err != nil {
-		return false
-	}
-	return !ts.Before(cutoff)
+	return summary
 }

@@ -1,25 +1,30 @@
 package state_test
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/state"
 )
 
-// writeLogLine appends a single pipe-delimited entry to path with the supplied
-// timestamp, level, component, and message. It mirrors the format Logger.write
-// produces so CollectStatus's scanner exercises real-shaped input.
-func writeLogLine(t *testing.T, path string, ts time.Time, level, component, msg string) {
+// writeRealLogLine appends a single real-writer log line to path, sourcing the
+// rendered bytes from the production render seam (log.RenderLineForTest) so the
+// fixture is byte-identical to what the writer emits. The seam output already
+// ends with a trailing '\n', so it is appended verbatim — never re-formatted
+// from an independent format string. ts is normalised to UTC (matching the
+// writer's render path) so the window math is unchanged.
+func writeRealLogLine(t *testing.T, path string, ts time.Time, level slog.Level, component, msg string) {
 	t.Helper()
+	line := log.RenderLineForTest(t, ts.UTC(), level, component, msg)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	if _, err := fmt.Fprintf(f, "%s | %s | %s | %s\n", ts.UTC().Format(time.RFC3339), level, component, msg); err != nil {
+	if _, err := f.WriteString(line); err != nil {
 		_ = f.Close()
 		t.Fatalf("write log line: %v", err)
 	}
@@ -287,12 +292,12 @@ func TestCollectStatus_DoesNotScanPortalLogOld(t *testing.T) {
 	// Old log full of WARN entries within the cutoff window — must be ignored.
 	oldPath := state.PortalLogOld(dir)
 	for i := 0; i < 5; i++ {
-		writeLogLine(t, oldPath, recent, "WARN", "daemon", "old warning")
+		writeRealLogLine(t, oldPath, recent, slog.LevelWarn, "daemon", "old warning")
 	}
 
 	// Current log holds a single WARN.
 	logPath := state.PortalLog(dir)
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "current warning")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "current warning")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -310,9 +315,9 @@ func TestCollectStatus_CountsWarnAndErrorEntriesInWindow(t *testing.T) {
 	recent := now.Add(-30 * time.Minute)
 
 	logPath := state.PortalLog(dir)
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "warn-1")
-	writeLogLine(t, logPath, recent, "ERROR", "daemon", "error-1")
-	writeLogLine(t, logPath, recent, "WARN", "restore", "warn-2")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "warn-1")
+	writeRealLogLine(t, logPath, recent, slog.LevelError, "daemon", "error-1")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "restore", "warn-2")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -330,9 +335,9 @@ func TestCollectStatus_IgnoresInfoAndDebugEntries(t *testing.T) {
 	recent := now.Add(-15 * time.Minute)
 
 	logPath := state.PortalLog(dir)
-	writeLogLine(t, logPath, recent, "INFO", "daemon", "info-1")
-	writeLogLine(t, logPath, recent, "DEBUG", "daemon", "debug-1")
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "warn-1")
+	writeRealLogLine(t, logPath, recent, slog.LevelInfo, "daemon", "info-1")
+	writeRealLogLine(t, logPath, recent, slog.LevelDebug, "daemon", "debug-1")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "warn-1")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -351,28 +356,29 @@ func TestCollectStatus_ToleratesMalformedLogEntries(t *testing.T) {
 
 	logPath := state.PortalLog(dir)
 
-	// Append various malformed lines plus one valid WARN.
+	// Append various lines that do NOT match the slog text layout: no colon,
+	// fewer than two whitespace tokens, and a first token that is not an
+	// RFC3339Nano timestamp. None should parse; the scan must continue.
+	malformed := []string{
+		"no colon at all here",
+		"lonelytoken",
+		"not-a-timestamp WARN daemon: bad ts",
+	}
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("open log: %v", err)
 	}
-	if _, err := fmt.Fprintln(f, "no pipes at all"); err != nil {
-		t.Fatalf("write malformed: %v", err)
-	}
-	if _, err := fmt.Fprintln(f, "only | two"); err != nil {
-		t.Fatalf("write malformed: %v", err)
-	}
-	if _, err := fmt.Fprintln(f, "three | parts | here"); err != nil {
-		t.Fatalf("write malformed: %v", err)
-	}
-	if _, err := fmt.Fprintln(f, "not-a-timestamp | WARN | daemon | bad ts"); err != nil {
-		t.Fatalf("write bad timestamp: %v", err)
+	for _, line := range malformed {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			_ = f.Close()
+			t.Fatalf("write malformed: %v", err)
+		}
 	}
 	if err := f.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "valid warn")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "valid warn")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -393,8 +399,8 @@ func TestCollectStatus_UsesCallerSuppliedNowForWindow(t *testing.T) {
 	// matching their era, both fall inside.
 	ts1 := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)
 	ts2 := time.Date(2020, 1, 1, 12, 30, 0, 0, time.UTC)
-	writeLogLine(t, logPath, ts1, "WARN", "daemon", "old-1")
-	writeLogLine(t, logPath, ts2, "WARN", "daemon", "old-2")
+	writeRealLogLine(t, logPath, ts1, slog.LevelWarn, "daemon", "old-1")
+	writeRealLogLine(t, logPath, ts2, slog.LevelWarn, "daemon", "old-2")
 
 	farFuture := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
 	rep, err := state.CollectStatus(dir, farFuture)
@@ -422,9 +428,9 @@ func TestCollectStatus_LastWarningHoldsLastValidEntry(t *testing.T) {
 	recent := now.Add(-20 * time.Minute)
 
 	logPath := state.PortalLog(dir)
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "first warn")
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "second warn")
-	writeLogLine(t, logPath, recent, "WARN", "daemon", "last warn")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "first warn")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "second warn")
+	writeRealLogLine(t, logPath, recent, slog.LevelWarn, "daemon", "last warn")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -433,9 +439,8 @@ func TestCollectStatus_LastWarningHoldsLastValidEntry(t *testing.T) {
 	if rep.RecentWarnings != 3 {
 		t.Errorf("RecentWarnings = %d; want 3", rep.RecentWarnings)
 	}
-	wantSuffix := "last warn"
-	if got := rep.LastWarning; got == "" || got[len(got)-len(wantSuffix):] != wantSuffix {
-		t.Errorf("LastWarning = %q; want suffix %q (last entry wins)", got, wantSuffix)
+	if want := "WARN daemon: last warn"; rep.LastWarning != want {
+		t.Errorf("LastWarning = %q; want %q (last entry wins)", rep.LastWarning, want)
 	}
 }
 
@@ -446,9 +451,9 @@ func TestCollectStatus_SkipsEntriesOlderThanCutoff(t *testing.T) {
 
 	logPath := state.PortalLog(dir)
 	// Two hours ago: outside the 1-hour window.
-	writeLogLine(t, logPath, now.Add(-2*time.Hour), "WARN", "daemon", "stale warn")
+	writeRealLogLine(t, logPath, now.Add(-2*time.Hour), slog.LevelWarn, "daemon", "stale warn")
 	// Twenty minutes ago: inside the window.
-	writeLogLine(t, logPath, now.Add(-20*time.Minute), "WARN", "daemon", "fresh warn")
+	writeRealLogLine(t, logPath, now.Add(-20*time.Minute), slog.LevelWarn, "daemon", "fresh warn")
 
 	rep, err := state.CollectStatus(dir, now)
 	if err != nil {
@@ -456,5 +461,83 @@ func TestCollectStatus_SkipsEntriesOlderThanCutoff(t *testing.T) {
 	}
 	if rep.RecentWarnings != 1 {
 		t.Errorf("RecentWarnings = %d; want 1 (older-than-cutoff must be skipped)", rep.RecentWarnings)
+	}
+}
+
+func TestCollectStatus_LastWarningRendersLevelComponentMessage(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-10 * time.Minute)
+
+	writeRealLogLine(t, state.PortalLog(dir), recent, slog.LevelWarn, "daemon", "tick complete")
+
+	rep, err := state.CollectStatus(dir, now)
+	if err != nil {
+		t.Fatalf("CollectStatus: %v", err)
+	}
+	if want := "WARN daemon: tick complete"; rep.LastWarning != want {
+		t.Errorf("LastWarning = %q; want %q", rep.LastWarning, want)
+	}
+}
+
+func TestCollectStatus_LastWarningRendersWithoutComponent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-10 * time.Minute)
+
+	// Empty component → "WARN: <msg>" with no stray space before the colon.
+	writeRealLogLine(t, state.PortalLog(dir), recent, slog.LevelWarn, "", "tick complete")
+
+	rep, err := state.CollectStatus(dir, now)
+	if err != nil {
+		t.Fatalf("CollectStatus: %v", err)
+	}
+	if want := "WARN: tick complete"; rep.LastWarning != want {
+		t.Errorf("LastWarning = %q; want %q (no stray space before colon)", rep.LastWarning, want)
+	}
+}
+
+func TestCollectStatus_LastWarningRendersWithoutTrailingSpaceWhenMessageEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-10 * time.Minute)
+
+	// Empty message → "WARN daemon:" with no trailing space.
+	writeRealLogLine(t, state.PortalLog(dir), recent, slog.LevelWarn, "daemon", "")
+
+	rep, err := state.CollectStatus(dir, now)
+	if err != nil {
+		t.Fatalf("CollectStatus: %v", err)
+	}
+	if want := "WARN daemon:"; rep.LastWarning != want {
+		t.Errorf("LastWarning = %q; want %q (no trailing space)", rep.LastWarning, want)
+	}
+}
+
+// TestCollectStatus_CountsRealWriterWarnLineEndToEnd is the producer-coupled
+// regression guard: the WARN fixture is sourced from the real internal/log
+// writer via the render seam, so any future drift in the writer's line format
+// breaks this test (the anti-false-green guarantee). It was the missing test
+// that let the pipe-format reader rot silently.
+func TestCollectStatus_CountsRealWriterWarnLineEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PORTAL_STATE_DIR", dir)
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-10 * time.Minute)
+
+	writeRealLogLine(t, state.PortalLog(dir), recent, slog.LevelWarn, "daemon", "flush failed")
+
+	rep, err := state.CollectStatus(dir, now)
+	if err != nil {
+		t.Fatalf("CollectStatus: %v", err)
+	}
+	if rep.RecentWarnings < 1 {
+		t.Errorf("RecentWarnings = %d; want >= 1 from a real-writer WARN line", rep.RecentWarnings)
+	}
+	if want := "WARN daemon: flush failed"; rep.LastWarning != want {
+		t.Errorf("LastWarning = %q; want %q", rep.LastWarning, want)
 	}
 }
