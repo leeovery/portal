@@ -26,8 +26,8 @@ Contributing factors:
 ### Why it wasn't caught
 
 The existing unit tests actively **pinned the buggy form**:
-- `TestKillSession` (`tmux_test.go:737`) asserts `kill-session -t my-session`
-- `TestRenameSession` (`tmux_test.go:953`) asserts `rename-session -t old-name new-name`
+- `TestKillSession` (`tmux_test.go`) asserts `kill-session -t my-session`
+- `TestRenameSession` (`tmux_test.go`) asserts `rename-session -t old-name new-name`
 
 Both lock in the bare-`-t` argv, so the fix must **update** these assertions, not merely add new ones.
 
@@ -57,7 +57,7 @@ In `internal/tmux`:
 func exactTarget(session string) string { return "=" + session }
 ```
 
-This is the session-level sibling of the existing `PaneTargetExact` (pane-level). Together they become the two canonical ways to build an exact-match `-t` target — no inline `"="+name` for a session name left anywhere in `tmux.go`.
+This is the session-level sibling of the existing `PaneTargetExact` (pane-level). Together they become the two canonical ways to build an exact-match `-t` target — no inline `"="+name` for a session name left anywhere in the `internal/tmux` package.
 
 ### 2. Fix the two destructive callers (the actual bug)
 
@@ -76,13 +76,15 @@ The fix lives entirely at the Client-method chokepoint. Both methods are the sin
 
 ### Sites to migrate onto `exactTarget` (behaviour-neutral)
 
-These already carry the `=` prefix as an inline `"="+name` string for a **session** target. Migrate them onto `exactTarget` so the pattern is uniform — a pure readability/anti-drift refactor producing **identical argv**:
+These already carry the `=` prefix as an inline `"="+name` string for a **session** target. Migrate them onto `exactTarget` so the pattern is uniform across the `internal/tmux` package — a pure readability/anti-drift refactor producing **identical argv**:
 
-- `HasSession`
-- `HasSessionProbe`
-- `SwitchClient`
+- `HasSession` (`tmux.go`)
+- `HasSessionProbe` (`tmux.go`)
+- `SwitchClient` (`tmux.go`)
+- `saverPanePID` (`saver_pane_pid.go`)
+- `SaverPaneID` (`saver_pane_pid.go`)
 
-Their existing tests stay green (argv unchanged); that green state *is* the proof the migration is behaviour-neutral.
+The two `saver_pane_pid.go` sites target the fixed `_portal-saver` name (no collision exposure), but they carry the same inline `"="+session` drift surface, so they migrate for consistency. Their existing tests stay green (argv unchanged); that green state *is* the proof the migration is behaviour-neutral.
 
 ### Pane/window-level sites — leave as-is
 
@@ -114,7 +116,7 @@ These inform a possible future `exactTarget`-helper sweep to prevent drift, but 
 
 - `KillSession(name)` issues `kill-session -t =<name>`; `RenameSession(oldName, newName)` issues `rename-session -t =<oldName> <newName>` with `newName` bare.
 - A live prefix-colliding session (e.g. `foo-2`) is **never** killed or renamed when the target (`foo`) is not a live exact match — verified by the new regression tests.
-- `exactTarget` exists in `internal/tmux` as the canonical session-level exact-match target builder; no inline `"="+name` session-target strings remain in `tmux.go`.
+- `exactTarget` exists in `internal/tmux` as the canonical session-level exact-match target builder; no inline `"="+name` session-target strings remain anywhere in the `internal/tmux` package (covering both `tmux.go` and `saver_pane_pid.go`).
 - The two destructive methods carry rationale godoc blocks mirroring the already-fixed sites.
 - All existing tmux package tests pass; `go build` and `go test ./...` are green.
 

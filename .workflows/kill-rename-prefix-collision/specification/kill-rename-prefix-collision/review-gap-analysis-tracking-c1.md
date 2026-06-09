@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 1
 phase: Gap Analysis
@@ -32,10 +32,23 @@ This forces the implementer to make a scope decision the spec should make for th
 Either is defensible, but the spec currently leaves it undefined, so two implementers could reach different end-states and the "no inline strings remain" acceptance check would be interpreted differently.
 
 **Proposed Addition**:
-{leave blank until discussed — resolution is to pick Option A or B and state it explicitly in § Migration Scope, then reconcile the acceptance criterion (see finding 2)}
+Resolve toward **Option A** (migrate the two saver sites), aligned with the investigation's recorded "uniform, as if it was never there, removes the drift surface" steer. The sites already emit `=sessionName`, so routing through `exactTarget` is behaviour-neutral (identical argv).
 
-**Resolution**: Pending
-**Notes**:
+1. In § Required Behaviour & The Fix > 1, change "no inline `"="+name` for a session name left anywhere in `tmux.go`" → "...anywhere in the `internal/tmux` package."
+2. In § Migration Scope > "Sites to migrate onto `exactTarget`", add the two saver sites and reframe the list as package-wide:
+
+> These already carry the `=` prefix as an inline `"="+name` string for a **session** target. Migrate them onto `exactTarget` so the pattern is uniform across the `internal/tmux` package — a pure readability/anti-drift refactor producing **identical argv**:
+>
+> - `HasSession` (`tmux.go`)
+> - `HasSessionProbe` (`tmux.go`)
+> - `SwitchClient` (`tmux.go`)
+> - `saverPanePID` (`saver_pane_pid.go`)
+> - `SaverPaneID` (`saver_pane_pid.go`)
+>
+> The two `saver_pane_pid.go` sites target the fixed `_portal-saver` name (no collision exposure), but they carry the same inline `"="+session` drift surface, so they migrate for consistency. Their existing tests stay green (argv unchanged); that green state *is* the proof the migration is behaviour-neutral.
+
+**Resolution**: Approved
+**Notes**: Auto-approved; resolved toward Option A per the investigation's documented "clean, as if it was never there" steer. Behaviour-neutral migration of two additional sibling-file sites.
 
 ---
 
@@ -56,10 +69,12 @@ This is the testability/planning-readiness half of finding 1: an acceptance crit
 - `exactTarget` exists in `internal/tmux` as the canonical session-level exact-match target builder; no inline `"="+name` session-target strings remain in `tmux.go`.
 
 **Proposed Addition**:
-{leave blank until discussed — wording will follow the Option A/B decision from finding 1}
+Reconcile the acceptance criterion to the package-level intent (Option A from finding 1):
 
-**Resolution**: Pending
-**Notes**:
+> - `exactTarget` exists in `internal/tmux` as the canonical session-level exact-match target builder; no inline `"="+name` session-target strings remain anywhere in the `internal/tmux` package (covering both `tmux.go` and `saver_pane_pid.go`).
+
+**Resolution**: Approved
+**Notes**: Auto-approved; broadens the verifiable gate from the `tmux.go` file to the `internal/tmux` package so it matches finding 1's Option A end-state.
 
 ---
 
@@ -73,9 +88,13 @@ This is the testability/planning-readiness half of finding 1: an acceptance crit
 The spec cites "`TestKillSession` (`tmux_test.go:737`)" and "`TestRenameSession` (`tmux_test.go:953`)". In the current tree the `func TestKillSession` declaration is at line 723 (the cited 737 is the `wantArgs := "kill-session -t my-session"` assertion line) and `func TestRenameSession` is at line 939 (953 is its `wantArgs` assertion line). The referenced functions and the exact asserted argv strings are correct and easily findable, so this does not block implementation — but the line numbers attached to the function names are slightly off and will drift further as the file changes. Optional: cite by function name only, or note that the line is the assertion line. Flagging only because line-precise references invite over-trust.
 
 **Proposed Addition**:
-{leave blank until discussed — likely just drop or relabel the line numbers}
+Cite the two tests by function name only (drop the drift-prone assertion-line numbers):
 
-**Resolution**: Pending
-**Notes**:
+> The existing unit tests actively **pinned the buggy form**:
+> - `TestKillSession` (`tmux_test.go`) asserts `kill-session -t my-session`
+> - `TestRenameSession` (`tmux_test.go`) asserts `rename-session -t old-name new-name`
+
+**Resolution**: Approved
+**Notes**: Auto-approved; removed the imprecise line numbers (they pointed at assertion lines, not declarations, and drift as the file changes). Function names + asserted argv are unambiguous.
 
 ---
