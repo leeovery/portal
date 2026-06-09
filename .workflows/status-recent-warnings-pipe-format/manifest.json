@@ -31,7 +31,7 @@
     "planning": {
       "items": {
         "status-recent-warnings-pipe-format": {
-          "status": "in-progress",
+          "status": "completed",
           "format": "tick",
           "spec_commit": "924dd7d9cae9b9837694fe7f4be3d740f0db952e",
           "task_list_gate_mode": "auto",
