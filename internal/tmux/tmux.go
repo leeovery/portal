@@ -371,8 +371,23 @@ func (c *Client) KillSession(name string) error {
 }
 
 // RenameSession renames a tmux session from oldName to newName.
+//
+// The "=" exact-match prefix (via exactTarget) forces tmux's exact-match target
+// resolution on oldName rather than the default prefix match — uniform with
+// HasSession / SwitchClient / KillSession — so a rename never silently
+// prefix-matches a colliding session (renaming "foo-2" when only a live "foo-2"
+// exists and "foo" is targeted). Session names are {project}-{nanoid} and freely
+// renamed by the user, so the live-collision exposure is real; the rename path
+// is recoverable (unlike kill) but still incorrect without the prefix.
+//
+// Implementer trap: the "=" prefix goes on the TARGET ONLY. newName is the
+// literal positional new-name argument and must stay bare — prefixing it would
+// literally name the session "=...".
+//
+// This Client-method chokepoint fix covers every caller with no caller-side
+// change. See spec § Required Behaviour & The Fix.
 func (c *Client) RenameSession(oldName, newName string) error {
-	_, err := c.cmd.Run("rename-session", "-t", oldName, newName)
+	_, err := c.cmd.Run("rename-session", "-t", exactTarget(oldName), newName)
 	if err != nil {
 		return fmt.Errorf("failed to rename tmux session %q to %q: %w", oldName, newName, err)
 	}

@@ -1007,7 +1007,7 @@ func TestRenameSession(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "rename-session -t old-name new-name"
+		wantArgs := "rename-session -t =old-name new-name"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -1024,6 +1024,75 @@ func TestRenameSession(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+// TestRenameSessionUsesExactMatchPrefix pins the "=" exact-match prefix on
+// RenameSession's -t target while proving the new-name positional stays bare.
+//
+// Without the "=" prefix, tmux's default `-t <session>` resolution matches by
+// prefix. A target "foo" with a live "foo-2" coexisting would silently
+// resolve `rename-session -t foo` to "foo-2", renaming the wrong session. The
+// rename path is recoverable (unlike kill) but still incorrect, and session
+// names ({project}-{nanoid}, freely renamed) carry the same live-collision
+// exposure.
+//
+// The implementer trap this guards: the "=" prefix goes on the TARGET ONLY.
+// newName is the literal positional new-name argument — prefixing it would
+// literally name the session "=...". The bare-newName argv assertion is the
+// guard.
+//
+// Spec: .workflows/kill-rename-prefix-collision/specification/kill-rename-prefix-collision/specification.md
+// § Required Behaviour & The Fix > Fix the two destructive callers.
+func TestRenameSessionUsesExactMatchPrefix(t *testing.T) {
+	// Drive a commander that simulates real tmux's exact-match semantics:
+	// "=foo" matches the literal session "foo" only, while bare "foo" would
+	// prefix-match the live "foo-2" (the hazard). The live server holds only
+	// "foo-2", so "=foo" must resolve to absent (error) and RenameSession must
+	// never reach the bare-"foo" prefix-match arm.
+	exactMock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "rename-session" && args[1] == "-t" {
+				switch args[2] {
+				case "=foo":
+					// "foo" is not a live exact match; tmux errors out.
+					return "", fmt.Errorf("can't find session: foo")
+				case "foo":
+					// If reached, RenameSession dropped the "=" prefix and
+					// tmux would prefix-match the live "foo-2" — the exact
+					// regression this test guards against.
+					t.Fatalf("RenameSession used bare target %q; prefix-collision regression (would rename live foo-2)", args[2])
+				}
+			}
+			return "", fmt.Errorf("unexpected args: %v", args)
+		},
+	}
+	c := tmux.NewClient(exactMock)
+
+	err := c.RenameSession("foo", "bar")
+	if err == nil {
+		t.Fatal("RenameSession(\"foo\", \"bar\") returned nil; expected error because \"foo\" is not a live exact match (live foo-2 must NOT be renamed)")
+	}
+
+	// Assert the recorded argv: prefix on the target slot only, new-name slot
+	// exactly "bar" (no "="). This is the implementer-trap guard.
+	if len(exactMock.Calls) != 1 {
+		t.Fatalf("expected 1 call, got %d: %v", len(exactMock.Calls), exactMock.Calls)
+	}
+	got := exactMock.Calls[0]
+	want := []string{"rename-session", "-t", "=foo", "bar"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d args %v, want %d args %v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("args[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	// The new-name positional must stay bare — prefixing it would literally
+	// name the session "=bar".
+	if strings.HasPrefix(got[3], "=") {
+		t.Errorf("new-name slot %q carries an '=' prefix; newName must stay bare", got[3])
+	}
 }
 
 func TestSetServerOption(t *testing.T) {

@@ -78,9 +78,10 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "tick-6c9f54",
+          "current_task": "tick-4dc323",
           "completed_tasks": [
-            "kill-rename-prefix-collision-1-1"
+            "kill-rename-prefix-collision-1-1",
+            "kill-rename-prefix-collision-1-2"
           ]
         }
       }
