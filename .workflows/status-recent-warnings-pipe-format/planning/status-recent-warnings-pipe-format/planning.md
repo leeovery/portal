@@ -21,3 +21,13 @@ approved_at: 2026-06-09
 - [ ] No test constructs a log line from a format string defined independently of the production writer: the `writeLogLine` helper in `internal/state/status_test.go` is removed, the two `cmd/state_status_test.go` cases are migrated (assertions retained, log line sourced from the real writer, suffix updated to the trimmed form), and a producer-coupled seam in `internal/log` renders via the same path `textHandler.Handle` uses in production
 - [ ] At least one producer-coupled end-to-end regression test drives the real writer to emit a WARN line into the status directory's `portal.log`, runs `CollectStatus`, asserts `RecentWarnings` / trimmed `LastWarning` / the non-zero-exit consequence, and would turn red on any future writer-format drift
 - [ ] `go test ./...` passes — no regressions in existing status, log, or cmd tests
+
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| status-recent-warnings-pipe-format-1-1 | Add ParseLogLine helper to internal/log | unparseable timestamp → ok=false, no colon → ok=false, <2 whitespace tokens → ok=false, empty line → ok=false, empty component → Component="" ok=true, empty message → Message="" ok=true, message with later colons preserved, key=value boundary drops contextual attrs + pid/version/process_role baselines, quoted multi-word attr value does not shift boundary, no-attrs message preserved whole |
+| status-recent-warnings-pipe-format-1-2 | Factor a producer-coupled render seam out of textHandler.Handle | byte-identical to Handle output incl. baselines and trailing newline, no process-global handler mutation, testing.T-first test-only marker |
+| status-recent-warnings-pipe-format-1-3 | Migrate status reader to ParseLogLine | WARN+ERROR counted / INFO+DEBUG excluded, one-hour window cutoff inside vs outside, missing portal.log → 0 no error, malformed/non-matching line skipped without aborting scan, last-wins positional in append order, LastWarning component-present vs empty-component rendering, empty-message no-trailing-space, logFieldSeparator/expectedLogFieldCount removed, no doc comment references pipe format, writeLogLine helper removed, portal.log.old ignored |
+| status-recent-warnings-pipe-format-1-4 | Migrate cmd-layer status tests to real-writer fixtures | rendered (last: <LEVEL> <component>: <msg>) suffix, ErrStatusUnhealthy when RecentWarnings > 0, no independently-defined format string remains, assertions retained |
