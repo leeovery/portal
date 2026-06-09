@@ -27,6 +27,22 @@
           }
         }
       }
+    },
+    "planning": {
+      "items": {
+        "status-recent-warnings-pipe-format": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "6dc4751567214601de021a1305f7d828216ae628",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   },
   "seeds": [
