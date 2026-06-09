@@ -97,6 +97,30 @@ Held firmly at the **session-target** surface. The following are the same hazard
 
 These inform a possible future `exactTarget`-helper sweep to prevent drift, but sweeping them is a separate concern outside this work unit.
 
+## Testing Requirements & Acceptance Criteria
+
+### Test changes
+
+- **Update** `TestKillSession` → expect `kill-session -t =my-session` (replaces the bare-`-t` assertion that pinned the bug).
+- **Update** `TestRenameSession` → expect `rename-session -t =old-name new-name` (prefix on target only; `new-name` stays bare).
+- **Add** prefix-collision regression tests for both `KillSession` and `RenameSession`, mirroring `TestHasSessionUsesExactMatchPrefix`: simulate tmux's exact-match semantics via `MockCommander.RunFunc` so a dropped-`=` regression fails loudly.
+- **Add** a focused unit test: `exactTarget("foo") == "=foo"`.
+- The migrated sites (`HasSession`, `HasSessionProbe`, `SwitchClient`) keep their existing tests **green** with unchanged argv — that green state is the proof the migration is behaviour-neutral.
+
+### Acceptance criteria
+
+- `KillSession(name)` issues `kill-session -t =<name>`; `RenameSession(oldName, newName)` issues `rename-session -t =<oldName> <newName>` with `newName` bare.
+- A live prefix-colliding session (e.g. `foo-2`) is **never** killed or renamed when the target (`foo`) is not a live exact match — verified by the new regression tests.
+- `exactTarget` exists in `internal/tmux` as the canonical session-level exact-match target builder; no inline `"="+name` session-target strings remain in `tmux.go`.
+- The two destructive methods carry rationale godoc blocks mirroring the already-fixed sites.
+- All existing tmux package tests pass; `go build` and `go test ./...` are green.
+
+### Risk
+
+- **Fix complexity:** Low — small helper, two argv fixes, a behaviour-neutral refactor of three sites, and test updates/additions.
+- **Regression risk:** Low — migrated sites have identical argv (existing tests pin it); `_portal-saver` callers gain the prefix harmlessly; no caller-side changes.
+- **Release:** Regular release (no hotfix infra in this project).
+
 ---
 
 ## Working Notes
