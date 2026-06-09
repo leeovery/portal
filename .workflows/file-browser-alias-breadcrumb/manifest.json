@@ -1,0 +1,15 @@
+{
+  "name": "file-browser-alias-breadcrumb",
+  "work_type": "bugfix",
+  "status": "in-progress",
+  "created": "2026-06-09",
+  "description": "File-browser alias-save flow (handleAliasSave) emits no audit breadcrumb because it uses the un-audited Set+Save two-step instead of the audited SetAndSave seam",
+  "phases": {},
+  "seeds": [
+    {
+      "path": "seeds/2026-06-02-file-browser-alias-breadcrumb.md",
+      "source": "inbox:bug",
+      "seeded_at": "2026-06-09T21:01:44Z"
+    }
+  ]
+}
