@@ -70,6 +70,33 @@ Each via the helper, each with a rationale godoc block mirroring the already-fix
 
 The fix lives entirely at the Client-method chokepoint. Both methods are the single argv-construction point, so fixing the argv inside them covers every caller uniformly — **no caller-side change anywhere**. This includes the internal `_portal-saver` `KillSession` callers (`cmd/state_cleanup.go`, `internal/tmux/portal_saver.go`), which gain the `=` prefix harmlessly (fixed literal name, no possible prefix collision).
 
+## Migration Scope & Out of Scope
+
+### Sites to migrate onto `exactTarget` (behaviour-neutral)
+
+These already carry the `=` prefix as an inline `"="+name` string for a **session** target. Migrate them onto `exactTarget` so the pattern is uniform — a pure readability/anti-drift refactor producing **identical argv**:
+
+- `HasSession`
+- `HasSessionProbe`
+- `SwitchClient`
+
+Their existing tests stay green (argv unchanged); that green state *is* the proof the migration is behaviour-neutral.
+
+### Pane/window-level sites — leave as-is
+
+`SelectPane`, `ResizePaneZoom`, and `SelectWindow` already centralise the prefix via `PaneTargetExact` (pane-level) or build it at the window-target level. They stay on that path. Any tidy-up of `SelectWindow`'s inline `"=" + bareTarget` is an implementation-detail call left to the implementer — not required by this fix.
+
+### Explicitly out of scope
+
+Held firmly at the **session-target** surface. The following are the same hazard class but are **not** part of this bugfix (none are the destructive kill/rename pair, and none carry the same live-collision exposure):
+
+- **`PaneTarget`** (the no-prefix hooks.json key formatter) — must stay as-is; changing it would silently invalidate existing hook entries.
+- **Bare `-t <session>` reads / option-and-env sets** in `tmux.go` — `ActivePaneCurrentPath`, `SetSessionOption`, `ListPanesInSession` (and the other `list-panes -t session` reads), `ShowEnvironment`, `SetSessionEnvironment`. Non-destructive; left bare.
+- **Caller-supplied pane/window-target writers** — `SendKeys`, `RespawnPane`, `CapturePane`, `NewWindow`, `SplitWindow`, `SelectLayout`. Lower collision exposure (not session names directly).
+- **`internal/session/quickstart.go` bare `attach-session -t <name>` / `set-option -t <name>`** — left bare because `GenerateSessionName` guarantees a freshly-unique name at creation, so no live session can prefix-collide at that instant.
+
+These inform a possible future `exactTarget`-helper sweep to prevent drift, but sweeping them is a separate concern outside this work unit.
+
 ---
 
 ## Working Notes
