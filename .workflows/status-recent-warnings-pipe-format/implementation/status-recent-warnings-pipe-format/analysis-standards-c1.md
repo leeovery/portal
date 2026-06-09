@@ -1,0 +1,3 @@
+AGENT: standards
+FINDINGS: none
+SUMMARY: Implementation conforms to specification and project conventions. Anti-false-green requirement met (all valid log-line fixtures sourced from log.RenderLineForTest; only deliberately-malformed inputs are hand-authored raw strings). Pipe-format constants/comments fully removed from status.go. composeLastWarning renders all four component×message cases without stray/trailing space. Producer-coupled regression test present at the CollectStatus layer. ParseLogLine matches spec rules and ok==false triggers. Conventions clean: build passes, no t.Parallel() in touched test files, internal/log does not import internal/state.
