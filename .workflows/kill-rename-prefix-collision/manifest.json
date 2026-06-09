@@ -1,7 +1,7 @@
 {
   "name": "kill-rename-prefix-collision",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-06-09",
   "description": "KillSession and RenameSession issue bare -t target argv without tmux exact-match = prefix, risking prefix-collision that kills or renames the wrong session",
   "phases": {
@@ -109,5 +109,6 @@
       "source": "inbox:bug",
       "seeded_at": "2026-06-09T14:51:57Z"
     }
-  ]
+  ],
+  "completed_at": "2026-06-09"
 }
