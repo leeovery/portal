@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Migrate status reader to slog text format
-status: draft
+status: approved
+approved_at: 2026-06-09
 
 **Goal**: Fix `portal state status` so the "Recent warnings" line reflects the actual WARN/ERROR lines in `portal.log`, by migrating the status reader (`internal/state/status.go`) from the legacy pipe-delimited layout to the slog text format the writer now emits — and defining that format in exactly one place via a new `ParseLogLine` helper exported from `internal/log` (the writer's package) and consumed by the reader.
 
