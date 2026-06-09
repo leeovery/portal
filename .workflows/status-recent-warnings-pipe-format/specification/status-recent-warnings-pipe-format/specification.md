@@ -89,6 +89,35 @@ func ParseLogLine(line string) (parsed LogLine, ok bool)
 
 The recent-warnings window (last hour, `recentWarningWindow`), the WARN/ERROR level filter, last-wins selection, missing-`portal.log` → zero-counts, and `CollectStatus`'s best-effort no-error-propagation are all preserved. The writer/handler in `internal/log` is not modified.
 
+## Acceptance Criteria & Testing
+
+### Acceptance criteria (behaviour)
+
+Given `portal.log` written by the real `internal/log` writer:
+
+1. A `WARN` or `ERROR` line with a timestamp within the last hour → `CollectStatus` reports `RecentWarnings ≥ 1`.
+2. `LastWarning` is the trimmed summary `<LEVEL> <component>: <msg>` of the most recent qualifying entry (last-wins), and `portal state status` renders `Recent warnings: N (last: <LEVEL> <component>: <msg>)`.
+3. `isUnhealthy` returns true (process exits non-zero) when `RecentWarnings > 0`.
+4. A qualifying-level line **older** than the one-hour window is **not** counted.
+5. An `INFO`/`DEBUG` line is **not** counted (level filter intact).
+6. Missing `portal.log` → `RecentWarnings = 0`, `LastWarning = ""`, no error.
+7. A malformed/unparseable line is silently skipped and does not abort the scan of remaining lines.
+
+### Testing requirements
+
+**Anti-false-green (the core requirement).** The original bug survived because the existing status tests hand-authored pipe-format fixtures — validating the parser against input only the parser understood. The fix must close this:
+
+- **Remove the independent format fixtures.** The hand-authored pipe-format helpers/lines must go: `writeLogLine` in `internal/state/status_test.go` (emits `… | … | … | …`) and the two pipe-format fixtures in `cmd/state_status_test.go`. No test may construct a log line from a format string defined independently of the production writer.
+- **At least one producer-coupled end-to-end regression test.** A test must drive the **real `internal/log` writer** to emit a `WARN` line into the status directory's `portal.log`, then run `CollectStatus` and assert `RecentWarnings`, the trimmed `LastWarning`, and the `isUnhealthy`/non-zero-exit consequence. This is the guard that would have caught the original mismatch and will turn **red** on any future writer-format drift — fixtures derive from the single production format source, never a parallel definition.
+
+**Retained coverage, re-expressed in the slog text format.** The existing cases must be preserved (translated to the new format, not deleted): window-cutoff (inside vs. outside the last hour), level-filter (`INFO`/`DEBUG` excluded; both `WARN` and `ERROR` included), last-wins selection, missing-`portal.log` → zero, and the malformed-line skip case (currently `status_test.go:368`) re-expressed as a line that does not match the new layout.
+
+**Unit coverage for `ParseLogLine`.** Direct tests of the new helper: a well-formed line → correct `Time`/`Level`/`Component`/`Message`; the message-boundary rule strips contextual attrs and the `pid`/`version`/`process_role` baselines; a message with no attrs is preserved whole; an empty-component line parses with `Component == ""` and `ok == true`; an unparseable timestamp → `ok == false`.
+
+### Definition of done
+
+`portal state status` surfaces the actual recent-warning count with a readable last-warning summary, exits non-zero when warnings are present, and a producer-coupled test fails if the writer's line format changes without a matching parser update.
+
 ---
 
 ## Working Notes
