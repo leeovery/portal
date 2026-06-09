@@ -183,58 +183,137 @@ does.
   chokepoint and the named reachable callers, not on auditing every interface
   that fronts the alias store.
 
-### Blast Radius (of the decided fix — full removal)
+### Blast Radius / Removal Manifest (of the decided fix — full removal)
 
-**Two packages deleted entirely:**
-- `internal/ui/` — `browser.go`, `browser_test.go`, `testmain_isolation_test.go`.
-  The package contains *nothing but* the file browser, so the whole directory
-  goes.
-- `internal/browser/` — `listing.go` (+ `listing_test.go`). Its only consumers
-  are the file browser (`internal/ui/browser.go`) and `cmd/open.go`'s
-  `osDirLister` — which itself exists solely to feed the file browser. With the
-  browser gone it has zero consumers → removable.
+Exhaustively swept (every importer, every exported symbol, all tests, help
+text, docs) and independently cross-verified by a second pass. Line numbers are
+as of investigation date — implementation must re-confirm, but the *set* of
+sites is complete. **Sequencing note:** delete the two packages last (or expect
+transient compile breaks) — remove the consumers first, then the packages.
 
-**`internal/tui/model.go` — excise file-browser integration:**
-- `internal/ui` import (l.20).
-- `pageFileBrowser` from the page-state iota (l.34) + its two switch arms
-  (update l.1544-1545, view l.2269-2270). (Go renumbers the iota automatically;
-  no other page constant needs editing.)
-- `type DirLister = ui.DirLister` alias (l.120).
-- fields `dirLister DirLister` (l.189), `startPath string` (l.190),
-  `fileBrowser ui.FileBrowserModel` (l.194).
-- `WithDirLister` Option (l.575-579).
-- `ui.BrowserDirSelectedMsg` / `ui.BrowserCancelMsg` handlers (l.1363-1365).
-- `handleBrowseKey()` (l.1649-1655) + the `b`-key dispatch on the Projects page
-  (l.1638).
-- `updateFileBrowser()` (l.1971-1977).
+#### Packages deleted entirely
+- **`internal/ui/`** — `browser.go`, `browser_test.go`, `testmain_isolation_test.go`.
+  Nothing but the file browser lives here. Sole importers: `internal/tui/model.go`
+  (+ its test) — both edited below.
+- **`internal/browser/`** — `listing.go`, `listing_test.go`,
+  `testmain_isolation_test.go`. After `internal/ui` and `cmd/open.go`'s
+  `osDirLister` are gone it has **zero** importers (verified: only consumers were
+  `internal/ui`, `cmd/open.go`, and three test files, all removed/edited).
 
-**`cmd/open.go` — remove wiring:**
-- `osDirLister` type + `ListDirectories` (l.333-339).
-- `internal/browser` import (becomes unused).
-- `dirLister tui.DirLister` field in `tuiConfig` (l.349).
-- `tui.WithDirLister(cfg.dirLister, cfg.cwd)` (l.370).
-- `dirLister: &osDirLister{}` (l.505).
-- (`cfg.cwd` STAYS — still used by `WithCWD` + the lazy dir-resolution fallback.)
+#### `internal/tui/model.go` — edit sites
+- L20 — remove `internal/ui` import (becomes unused).
+- L33-34 — remove `pageFileBrowser` const + comment from the `page` iota.
+  `pagePreview` renumbers 4→3 — **safe** (iota-safety verified below).
+- L119-120 — remove `DirLister` comment + `type DirLister = ui.DirLister`.
+- L189 / L190 / L194 — remove fields `dirLister`, `startPath`, `fileBrowser`.
+- L574-580 — remove `WithDirLister` Option + its doc comment.
+- L721 — remove the `projectHelpKeys` `b`/"browse" binding.
+- **L728-729 — update the `commandPendingHelpKeys` doc comment** (it lists `b` as
+  a shown key: *"Only enter (run here), n, b, /, and q are shown"*) to drop `b`.
+- L732 — remove the `commandPendingHelpKeys` `b`/"browse" binding.
+- L1363-1366 — remove the `ui.BrowserDirSelectedMsg` and `ui.BrowserCancelMsg`
+  cross-view handlers. **`createSession` STAYS** — it has 3 other callers
+  (project-enter L1666, `createSessionInCWD` L2241); only the browser→create-
+  session entry point goes.
+- L1544-1545 — remove the `case pageFileBrowser:` update arm.
+- L1637-1638 — remove the `case isRuneKey(msg, "b"):` dispatch on the Projects
+  page.
+- L1649-1656 — remove `handleBrowseKey()`.
+- L1971-1977 — remove `updateFileBrowser()`.
+- L2269-2270 — remove the `case pageFileBrowser:` view arm.
 
-**Tests to remove/update:**
-- `internal/ui/*_test.go`, `internal/browser/listing_test.go` (deleted with
-  their packages).
-- `cmd/open_test.go` — `osDirLister` / `browser.DirEntry` references.
-- `internal/tui/model_test.go` — `mockDirLister` / `browser.DirEntry` (l.15-16,
-  l.20, l.1671, l.2377), the `b`-key / `pageFileBrowser` paths, and the
-  bracket-bindings comment referencing the browser (l.14).
+#### `cmd/open.go` — edit sites
+- L11 — remove `internal/browser` import.
+- L332-338 — remove `osDirLister` type + `ListDirectories` method + comment.
+- L349 — remove `dirLister tui.DirLister` field from `tuiConfig`.
+- L370 — remove the `tui.WithDirLister(cfg.dirLister, cfg.cwd)` opt.
+  **Keep L371 `tui.WithCWD(cfg.cwd)`.**
+- L505 — remove `dirLister: &osDirLister{}` from the cfg literal.
+  **Keep `cwd: cwd`** (still consumed by `WithCWD`).
 
-**Docs:**
-- `CLAUDE.md` — drop the `ui` and `browser` rows from the internal-packages
-  table; update the TUI page state machine line (remove `FileBrowser` from
-  `Loading → Sessions → Projects → FileBrowser → Preview`); remove the `b`-to-
-  browse mention.
+#### `internal/tui/model_test.go` — test edits
+- L13 / L17 — remove `internal/browser` and `internal/ui` imports (both become
+  unused after the deletions below).
+- L775-785 — remove the `mockDirLister` type + method (unused after deletions).
+- **Delete whole functions:**
+  - `TestFileBrowserIntegration` (L787-1034) — every subtest is the
+    `b`→browser→select/cancel flow.
+  - `TestFileBrowserFromProjectsPage` (L5551-5758) — entirely browser.
+- **Delete browser subtests (enclosing function survives):**
+  - `TestCommandPendingMode` → "browse selection applies pending command"
+    (L2371-2414).
+  - `TestNewWithFunctionalOptions` → "WithDirLister enables file browser"
+    (L3031-3066).
+  - `TestCommandPendingBrowseAndNKey` → "browse directory selection forwards
+    command…" (L6737-6785) and "browse cancel returns to locked Projects page…"
+    (L6787-6829). Survivor is n-key-only — optional rename to
+    `TestCommandPendingNKey`.
+  - `TestCommandPendingEscAndQuit` → "Esc in file browser…" (L7182-7229).
+- **Rework (keep test, strip browser setup):**
+  - `TestKillSession` → "NewWithAllDeps supports kill" — drop L1671
+    (`mockDirLister`) + the `WithDirLister(...)` arg at L1673; keep the kill
+    assertion.
+  - `TestNewWithFunctionalOptions` → "all options combined" — drop the
+    `dirLister` var (L3080-3084) + `WithDirLister(...)` at L3092; keep the rest.
 
-**NOT affected (independent — must stay green):** the alias CLI
-(`cmd/alias.go`, `portal alias set/rm/list`), the projects-modal alias editor
-(`internal/tui/model.go` `aliasEditor` → `SetAndSave`), the resolver chain
-(path → alias → zoxide → TUI filter fallback), and the Sessions/Projects/Preview
-pages. None depend on the file browser.
+#### `cmd/open_test.go` — edit sites
+- L18 — remove `internal/browser` import.
+- L703-708 — remove `stubDirLister` type + `ListDirectories`.
+- L706 — (the `browser.DirEntry` use lives inside `stubDirLister`, removed with it).
+- L773 — remove `dirLister: &stubDirLister{}` from `defaultTestTUIConfig`'s
+  literal (**required** — the production `tuiConfig.dirLister` field is gone;
+  leaving it is a compile error). Keep `cwd`.
+
+#### Other `*_test.go` (incidental coupling — preview tests)
+- `internal/tui/pagepreview_entry_test.go`:
+  - **Delete** `TestSpaceOnFileBrowserPageDoesNotCallNewPreviewModel`
+    (L264-286) — its premise (being on the file-browser page) ceases to exist;
+    the guarantee "Space only previews from the Sessions page" is already covered
+    by sibling `TestSpaceOnProjectsPageDoesNotCallNewPreviewModel` (L240-262).
+  - L12 — drop the stale `internal/ui/browser_test.go` doc reference in the
+    file-header comment.
+- `internal/tui/pagepreview_refetch_test.go` L27 — update the comment to drop the
+  `pageFileBrowser → PageSessions` transition mention.
+- `internal/tui/pagepreview_bracket_test.go` L14 — drop the stale
+  `internal/ui/browser.go` doc reference (compiles, but dangling pointer).
+
+#### Docs / non-Go
+- `README.md:253` — *"The TUI has four views: session list, project picker,
+  file browser, and scrollback preview."* → three views (drop "file browser").
+- `CLAUDE.md` L48 (`tui` row) — update the page state machine
+  (`Loading → Sessions → Projects → FileBrowser → Preview` → drop FileBrowser)
+  and the "`pagePreview` arm (peer of `pageFileBrowser`)" phrasing.
+- `CLAUDE.md` L52 — delete the `browser` package-table row.
+- `CLAUDE.md` L60 — delete the `ui` package-table row.
+- `go.mod` / `go.sum` — no change (internal packages).
+- No `.goreleaser*`, `Makefile`, shell-completion, embed, or build-tag
+  references to the file browser (swept — none).
+
+#### Iota-safety + dangling-reference verification
+- **Iota-safe.** `type page int` constants are pure in-memory runtime state — no
+  int↔page cast, no numeric comparison, no JSON/prefs serialization; both
+  `pageFileBrowser` and `pagePreview` are unexported and all tests compare the
+  symbolic constant. Removing `pageFileBrowser` and letting `pagePreview`
+  renumber is transparent.
+- **No dangling reads.** `m.startPath` and `m.dirLister` are read only inside the
+  removed sites; nothing else references them after removal.
+- **`cfg.cwd` / `m.cwd` MUST stay** — consumed by `WithCWD` (open.go L371) and
+  `viewCWD` / `createSession(m.cwd)` (model.go L443 / L2241), independent of the
+  browser.
+
+#### NOT affected (independent — must stay green)
+The alias CLI (`cmd/alias.go`, `portal alias set/rm/list`), the projects-modal
+alias editor (`internal/tui/model.go` `aliasEditor` → `SetAndSave`), the resolver
+chain (path → alias → zoxide → TUI filter fallback), and the
+Sessions/Projects/Preview pages. None depend on the file browser. `createSession`
+survives (3 non-browser callers).
+
+#### Acceptance gate
+`go build ./...` and `go test ./...` both green, with zero remaining references
+to `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`,
+`WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`,
+`handleBrowseKey`, `updateFileBrowser`, or a `b`/"browse" keybinding. Manual
+check: Projects page no longer reacts to `b`.
 
 ---
 
