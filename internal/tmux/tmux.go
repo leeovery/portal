@@ -375,8 +375,8 @@ func (c *Client) KillSession(name string) error {
 // The "=" exact-match prefix (via exactTarget) forces tmux's exact-match target
 // resolution on oldName rather than the default prefix match — uniform with
 // HasSession / SwitchClient / KillSession — so a rename never silently
-// prefix-matches a colliding session (renaming "foo-2" when only a live "foo-2"
-// exists and "foo" is targeted). Session names are {project}-{nanoid} and freely
+// prefix-matches a colliding session (renaming "foo" when only a live "foo-2"
+// exists must NOT rename "foo-2"). Session names are {project}-{nanoid} and freely
 // renamed by the user, so the live-collision exposure is real; the rename path
 // is recoverable (unlike kill) but still incorrect without the prefix.
 //
