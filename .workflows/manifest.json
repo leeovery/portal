@@ -128,6 +128,9 @@
     },
     "kill-rename-prefix-collision": {
       "work_type": "bugfix"
+    },
+    "file-browser-alias-breadcrumb": {
+      "work_type": "bugfix"
     }
   },
   "defaults": {
