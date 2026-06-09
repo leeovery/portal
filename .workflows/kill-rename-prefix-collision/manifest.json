@@ -33,7 +33,7 @@
         "kill-rename-prefix-collision": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "ffbd4898da07480a900dd4bf5ad9e94ecb14c49f",
+          "spec_commit": "2aa93372d87af51f1be2caeacff9aadd26e4f605",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
