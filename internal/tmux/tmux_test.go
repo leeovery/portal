@@ -734,7 +734,7 @@ func TestKillSession(t *testing.T) {
 		if len(mock.Calls) != 1 {
 			t.Fatalf("expected 1 call, got %d", len(mock.Calls))
 		}
-		wantArgs := "kill-session -t my-session"
+		wantArgs := "kill-session -t =my-session"
 		gotArgs := strings.Join(mock.Calls[0], " ")
 		if gotArgs != wantArgs {
 			t.Errorf("called with %q, want %q", gotArgs, wantArgs)
@@ -751,6 +751,63 @@ func TestKillSession(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+// TestKillSessionUsesExactMatchPrefix is the prefix-collision regression guard
+// for the destructive kill path, mirroring TestHasSessionUsesExactMatchPrefix.
+//
+// Without the "=" prefix, tmux's default `-t <session>` resolution matches by
+// prefix. A killed session "foo" coexisting with a live "foo-2" would silently
+// resolve `kill-session -t foo` to "foo-2" and destroy the wrong session with
+// no error — the kill path is destructive, has no undo, and is silent on a
+// wrong-session kill.
+//
+// This test drives a commander simulating real tmux's exact-match semantics:
+// the live server holds only "foo-2". KillSession("foo") must resolve "=foo"
+// to absent (error) and never reach the bare-"foo" prefix-match arm — if it
+// does, "=" was dropped and tmux would have prefix-matched and killed "foo-2".
+//
+// Spec: .workflows/kill-rename-prefix-collision/specification/kill-rename-prefix-collision/specification.md
+// § Required Behaviour & The Fix; Testing Requirements & Acceptance Criteria.
+func TestKillSessionUsesExactMatchPrefix(t *testing.T) {
+	exactMock := &MockCommander{
+		RunFunc: func(args ...string) (string, error) {
+			if len(args) >= 3 && args[0] == "kill-session" && args[1] == "-t" {
+				switch args[2] {
+				case "=foo":
+					// "foo" is dead; exact-match finds nothing.
+					return "", fmt.Errorf("can't find session: foo")
+				case "=foo-2":
+					return "", nil
+				case "foo":
+					// Reaching this arm means KillSession dropped the "="
+					// prefix and tmux would have prefix-matched and killed
+					// the live "foo-2" — the regression we guard against.
+					t.Errorf("KillSession reached bare-\"foo\" prefix-match arm; \"=\" prefix dropped, live \"foo-2\" would have been killed")
+					return "", nil
+				}
+			}
+			return "", fmt.Errorf("unexpected args: %v", args)
+		},
+	}
+	client := tmux.NewClient(exactMock)
+
+	if err := client.KillSession("foo"); err == nil {
+		t.Errorf("KillSession(\"foo\") = nil error while only live session is \"foo-2\"; prefix-collision regression (foo-2 must not be killed)")
+	}
+
+	if len(exactMock.Calls) == 0 {
+		t.Fatalf("expected at least 1 call, got 0")
+	}
+	got := exactMock.Calls[0]
+	if len(got) < 3 || got[0] != "kill-session" || got[1] != "-t" {
+		t.Fatalf("unexpected first call %v, want kill-session -t <target>", got)
+	}
+	// The recorded -t argument MUST begin with "=" so tmux's exact-match
+	// resolution kicks in and a destructive kill never silently prefix-matches.
+	if !strings.HasPrefix(got[2], "=") {
+		t.Errorf("target %q lacks exact-match prefix '='; prefix-collision regression hazard", got[2])
+	}
 }
 
 func TestSwitchClient(t *testing.T) {

@@ -349,8 +349,21 @@ func (c *Client) ActivePaneCurrentPath(session string) (string, error) {
 }
 
 // KillSession kills the tmux session with the given name.
+//
+// The "=" exact-match prefix (via exactTarget) forces tmux's exact-match target
+// resolution rather than the default prefix match — uniform with HasSession /
+// SwitchClient — so this destructive kill never silently prefix-matches a
+// colliding session (killing "foo" when only a live "foo-2" exists must NOT
+// destroy "foo-2"). The kill path is destructive, has no undo, and is silent
+// on a wrong-session kill, so the prefix is load-bearing here.
+//
+// This Client-method chokepoint fix covers every caller with no caller-side
+// change — including the internal _portal-saver callers (cmd/state_cleanup.go,
+// internal/tmux/portal_saver.go), which gain the prefix harmlessly (fixed
+// literal name, no possible prefix collision). See spec § Required Behaviour &
+// The Fix.
 func (c *Client) KillSession(name string) error {
-	_, err := c.cmd.Run("kill-session", "-t", name)
+	_, err := c.cmd.Run("kill-session", "-t", exactTarget(name))
 	if err != nil {
 		return fmt.Errorf("failed to kill tmux session %q: %w", name, err)
 	}
@@ -545,6 +558,25 @@ func PaneTarget(session string, window, pane int) string {
 // mix the two — hook lookups against an "=" -prefixed key would miss.
 func PaneTargetExact(session string, window, pane int) string {
 	return fmt.Sprintf("=%s:%d.%d", session, window, pane)
+}
+
+// exactTarget formats a tmux session target string with the "=" exact-match
+// prefix (e.g. "=my-session"). It is the session-level sibling of
+// PaneTargetExact (pane-level): together they are the two canonical ways to
+// build an exact-match `-t` target in this package.
+//
+// The "=" prefix forces tmux's exact-match target resolution rather than the
+// default prefix match. Without it, a killed session "foo" coexisting with a
+// live "foo-2" would silently resolve `-t foo` to "foo-2", operating on the
+// wrong session — and for the destructive kill path that means destroying the
+// wrong session with no error.
+//
+// Callers issuing a session-level `-t` flag MUST route through this helper; no
+// inline "="+name session target should remain anywhere in the internal/tmux
+// package. See spec § Required Behaviour & The Fix > Introduce the exactTarget
+// session-level primitive.
+func exactTarget(session string) string {
+	return "=" + session
 }
 
 // ListPanesInSession enumerates live panes in the named session and returns
