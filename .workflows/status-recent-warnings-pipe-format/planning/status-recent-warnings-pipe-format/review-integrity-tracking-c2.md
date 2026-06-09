@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 2
 phase: Plan Integrity Review
@@ -55,7 +55,7 @@ This is genuinely minor — it does not break any assertion. Task 4's assertions
   - In `TestStateStatusRecentWarningsLastLineSuffixWhenNonZero` (~182-203): remove the hand-authored `logLine := now.Format(time.RFC3339) + " | WARN | daemon | flush failed: disk full"`. Source the line from the real writer via the Task 2 seam (`log.RenderLineForTest(t, slog.LevelWarn, "daemon", "flush failed: disk full", …)` with a timestamp inside the one-hour window) and write it to `state.PortalLog(dir)`. The seam output already ends with a trailing `'\n'` (Task 2 contract), so write it verbatim — drop the `+"\n"` the legacy fixture appended; do not double the newline. Update the asserted suffix to `"  Recent warnings: 1 (last: WARN daemon: flush failed: disk full)\n"` (the trimmed `<LEVEL> <component>: <msg>` form — note the message contains a later colon which is preserved). **Keep the existing `strings.Contains(outBuf.String(), want)` matcher** — `portal state status` prints a multi-line report, so the warnings line is asserted as a substring, not via full-output equality. Retain the `ErrStatusUnhealthy` assertion (warnings > 0 → unhealthy).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**: Applies to both tasks. Task 4's second migrated case (`TestStateStatusExitNonZeroWhenRecentWarningsPresent`) writes its ERROR line the same way; if the first case's note is adopted, the implementer carries the same verbatim-write convention to the second case (no separate edit strictly required, but the helper-extraction bullet already covers it).
 
 ---
