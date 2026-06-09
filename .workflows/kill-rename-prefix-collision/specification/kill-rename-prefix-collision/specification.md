@@ -37,6 +37,39 @@ Both lock in the bare-`-t` argv, so the fix must **update** these assertions, no
 - **Scope:** Any portal user with prefix-colliding session names.
 - **Business impact:** Data/work loss (a wrong tmux session killed).
 
+## Required Behaviour & The Fix
+
+### Required behaviour
+
+`KillSession(name)` and `RenameSession(oldName, newName)` must operate on **exactly** the named session. The `-t` target must use tmux's `=` exact-match prefix so it binds only to the literal session name and never prefix-matches a different session.
+
+### Chosen approach
+
+**Centralising helper + uniform migration of session-level sites** (the investigation's Option 2, executed for a uniform end-state). Fix the two destructive callers *and* close the inline-string drift surface for session targets, so the codebase reads as if the gap was never there.
+
+**Deciding factor:** the user's explicit steer — "do it properly, not a hack… clean, as if it was never there." A minimal two-caller patch would leave a mixed state (helper for two callers, inline `"="+name` for the rest), itself a new inconsistency. The uniform migration is behaviour-neutral (identical argv) and removes the exact drift surface that allowed the bug, without widening into unrelated sites.
+
+### 1. Introduce the `exactTarget` session-level primitive
+
+In `internal/tmux`:
+
+```go
+func exactTarget(session string) string { return "=" + session }
+```
+
+This is the session-level sibling of the existing `PaneTargetExact` (pane-level). Together they become the two canonical ways to build an exact-match `-t` target — no inline `"="+name` for a session name left anywhere in `tmux.go`.
+
+### 2. Fix the two destructive callers (the actual bug)
+
+Each via the helper, each with a rationale godoc block mirroring the already-fixed sites:
+
+- `KillSession`: `kill-session -t exactTarget(name)`
+- `RenameSession`: `rename-session -t exactTarget(oldName) <newName>`
+
+**Edge case (the one implementer trap):** in `RenameSession`, the prefix goes on the **target only**. `newName` is the literal positional new-name argument and **must stay bare** — prefixing it would corrupt the new session name (the session would literally be named `=...`).
+
+The fix lives entirely at the Client-method chokepoint. Both methods are the single argv-construction point, so fixing the argv inside them covers every caller uniformly — **no caller-side change anywhere**. This includes the internal `_portal-saver` `KillSession` callers (`cmd/state_cleanup.go`, `internal/tmux/portal_saver.go`), which gain the `=` prefix harmlessly (fixed literal name, no possible prefix collision).
+
 ---
 
 ## Working Notes
