@@ -89,7 +89,7 @@ total: 4
   - `func RenderLineForTest(t *testing.T, level slog.Level, component, message string, attrs ...slog.Attr) string`
   - It constructs a `textHandler` via the production `newTextHandler` constructor (choose representative baselines — e.g. `os.Getpid()`, a version string, a process role — or pin documented fixed test baselines), builds a `slog.Record` with the given time/level/message and attrs (component supplied as the `component` attr via `r.AddAttrs(slog.String("component", component))` or through the constructor's accumulated attrs so the existing component-resolution path renders it as the literal prefix), and returns `h.render(record)` — the same path Handle uses.
   - It must NOT call `setHandler` / `Init` / `SetTestHandler` (no process-global handler mutation) and must NOT perform any sink write.
-  - Allow the caller to supply the record time (add a time parameter, or document that the helper stamps a caller-chosen time) so Task 3/4 can place lines inside or outside the one-hour window. If a single fixed signature is cleaner, accept a `time.Time` as the first value parameter after `t`.
+  - Allow the caller to supply the record time (add a time parameter, or document that the helper stamps a caller-chosen time) so Task 3/4 can place lines inside or outside the one-hour window. If a single fixed signature is cleaner, accept a `time.Time` as the first value parameter after `t`. The caller-supplied time is rendered through the same `r.Time.Format(time.RFC3339Nano)` path `Handle` uses, so the fixture's timestamp is `RFC3339Nano` — exactly what `ParseLogLine` (Task 1) expects. Tests must always source the line from this seam rather than hand-formatting a timestamp, so the format cannot drift back to the legacy `time.RFC3339`.
 - Add a doc comment stating the helper renders through the real handler's production render path, is the only sanctioned way to obtain real-writer output in tests, and is `*testing.T`-first to structurally mark it test-only.
 
 **Acceptance Criteria**:
@@ -131,7 +131,17 @@ total: 4
   - Rewrite `scanRecentWarnings` (lines ~186-202) so each line is parsed once via `log.ParseLogLine`. A line qualifies when `ok == true` **and** `Level` is `WARN` or `ERROR` **and** `!Time.Before(cutoff)`. On a qualifying line: `rep.RecentWarnings++` and `rep.LastWarning = composeLastWarning(parsed)` (last-wins, positional top-to-bottom). Non-qualifying / unparseable lines are silently skipped (swallow-and-skip contract preserved).
   - Add the `LastWarning` composition (a small helper or inline): when `Component != ""` render `"<LEVEL> <component>: <msg>"`; when `Component == ""` render `"<LEVEL>: <msg>"` (no stray space before the colon). An empty `Message` renders as `"<LEVEL> <component>:"` / `"<LEVEL>:"` with no trailing space.
   - Fold `logEntryQualifies` into the parse-once flow or rewrite it to operate on the parsed `LogLine` (function boundary is the implementer's choice) — but its body and doc comment must no longer reference `logFieldSeparator` / `expectedLogFieldCount` / "wrong field count".
-  - Update the `StatusReport.LastWarning` doc comment (lines ~65-66) from "the full text of the most recent qualifying WARN/ERROR log line" to: "the most recent qualifying entry rendered as `<LEVEL> <component>: <msg>` — timestamp prefix and trailing attrs/baselines omitted. Empty when there are no qualifying entries."
+  - Replace the `StatusReport.LastWarning` doc comment (status.go:65-66), currently:
+    ```go
+    // LastWarning is the full text of the most recent qualifying WARN/ERROR
+    // log line (last-wins). Empty when there are no qualifying entries.
+    ```
+    with:
+    ```go
+    // LastWarning is the most recent qualifying entry rendered as
+    // `<LEVEL> <component>: <msg>` — timestamp prefix and trailing
+    // attrs/baselines omitted. Empty when there are no qualifying entries.
+    ```
   - Refresh `scanRecentWarnings`'s doc comment (lines ~181-185) to drop the pipe-format concepts ("wrong field count"); describe it as parsing each line via `log.ParseLogLine` and counting WARN/ERROR entries at or after cutoff.
 - In `/Users/leeovery/Code/portal/internal/state/status_test.go`:
   - **Remove** the `writeLogLine` helper (lines ~13-29) — it constructs the pipe format from an independent format string and must not survive.
@@ -198,9 +208,10 @@ total: 4
 
 **Do**:
 - In `/Users/leeovery/Code/portal/cmd/state_status_test.go`:
-  - In `TestStateStatusRecentWarningsLastLineSuffixWhenNonZero` (~182-203): remove the hand-authored `logLine := now.Format(time.RFC3339) + " | WARN | daemon | flush failed: disk full"`. Source the line from the real writer via the Task 2 seam (`log.RenderLineForTest(t, slog.LevelWarn, "daemon", "flush failed: disk full", …)` with a timestamp inside the one-hour window) and write it to `state.PortalLog(dir)`. Update the asserted suffix to `"  Recent warnings: 1 (last: WARN daemon: flush failed: disk full)\n"` (the trimmed `<LEVEL> <component>: <msg>` form — note the message contains a later colon which is preserved). Retain the `ErrStatusUnhealthy` assertion (warnings > 0 → unhealthy).
+  - In `TestStateStatusRecentWarningsLastLineSuffixWhenNonZero` (~182-203): remove the hand-authored `logLine := now.Format(time.RFC3339) + " | WARN | daemon | flush failed: disk full"`. Source the line from the real writer via the Task 2 seam (`log.RenderLineForTest(t, slog.LevelWarn, "daemon", "flush failed: disk full", …)` with a timestamp inside the one-hour window) and write it to `state.PortalLog(dir)`. Update the asserted suffix to `"  Recent warnings: 1 (last: WARN daemon: flush failed: disk full)\n"` (the trimmed `<LEVEL> <component>: <msg>` form — note the message contains a later colon which is preserved). **Keep the existing `strings.Contains(outBuf.String(), want)` matcher** — `portal state status` prints a multi-line report, so the warnings line is asserted as a substring, not via full-output equality. Retain the `ErrStatusUnhealthy` assertion (warnings > 0 → unhealthy).
   - In `TestStateStatusExitNonZeroWhenRecentWarningsPresent` (~243-259): remove the hand-authored `logLine := now.Format(time.RFC3339) + " | ERROR | daemon | crashed"`. Source an ERROR line from the seam (`log.RenderLineForTest(t, slog.LevelError, "daemon", "crashed", …)`, timestamp inside window), write it to `state.PortalLog(dir)`, and retain the `ErrStatusUnhealthy` assertion.
   - If sourcing fixtures from the seam is repetitive, add a local `*testing.T`-first helper in this test file that wraps `log.RenderLineForTest` + write to `state.PortalLog(dir)` (or reuse a shared `internal/state`-test helper if practical) — but it must delegate to the seam, never define a format string.
+  - Add the `log/slog` and `github.com/leeovery/portal/internal/log` imports to `cmd/state_status_test.go` (the file currently imports neither). The `now.Format(time.RFC3339)` calls are removed with the hand-authored strings; `time` remains needed for the one-hour window math.
   - Verify no remaining hand-authored pipe-format string (`" | "`) exists anywhere in `cmd/state_status_test.go`.
 - Do not modify `cmd/state_status.go` — `warningsLine` already renders `LastWarning` directly via `"%d (last: %s)"`; the displayed line follows from the pre-trimmed `LastWarning` produced in Task 3.
 

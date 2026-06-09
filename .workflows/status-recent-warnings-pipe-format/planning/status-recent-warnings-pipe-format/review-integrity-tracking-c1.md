@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 1
 phase: Plan Integrity Review
@@ -36,7 +36,7 @@ The existing test asserts the suffix via `strings.Contains(outBuf.String(), want
   - In `TestStateStatusRecentWarningsLastLineSuffixWhenNonZero` (~182-203): remove the hand-authored `logLine := now.Format(time.RFC3339) + " | WARN | daemon | flush failed: disk full"`. Source the line from the real writer via the Task 2 seam (`log.RenderLineForTest(t, slog.LevelWarn, "daemon", "flush failed: disk full", …)` with a timestamp inside the one-hour window) and write it to `state.PortalLog(dir)`. Update the asserted suffix to `"  Recent warnings: 1 (last: WARN daemon: flush failed: disk full)\n"` (the trimmed `<LEVEL> <component>: <msg>` form — note the message contains a later colon which is preserved). **Keep the existing `strings.Contains(outBuf.String(), want)` matcher** — `portal state status` prints a multi-line report, so the warnings line is asserted as a substring, not via full-output equality. Retain the `ErrStatusUnhealthy` assertion (warnings > 0 → unhealthy).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -61,7 +61,7 @@ The legacy cmd-layer fixtures stamp the timestamp with `time.RFC3339` (state_sta
   - Allow the caller to supply the record time (add a time parameter, or document that the helper stamps a caller-chosen time) so Task 3/4 can place lines inside or outside the one-hour window. If a single fixed signature is cleaner, accept a `time.Time` as the first value parameter after `t`. The caller-supplied time is rendered through the same `r.Time.Format(time.RFC3339Nano)` path `Handle` uses, so the fixture's timestamp is `RFC3339Nano` — exactly what `ParseLogLine` (Task 1) expects. Tests must always source the line from this seam rather than hand-formatting a timestamp, so the format cannot drift back to the legacy `time.RFC3339`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -89,7 +89,7 @@ The legacy cmd-layer fixtures stamp the timestamp with `time.RFC3339` (state_sta
   - Verify no remaining hand-authored pipe-format string (`" | "`) exists anywhere in `cmd/state_status_test.go`.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
@@ -124,7 +124,7 @@ Task 3 instructs updating the `StatusReport.LastWarning` doc comment "(lines ~65
     ```
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed
 **Notes**:
 
 ---
