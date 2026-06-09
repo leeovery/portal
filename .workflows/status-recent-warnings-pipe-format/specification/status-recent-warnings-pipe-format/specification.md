@@ -70,16 +70,28 @@ func ParseLogLine(line string) (parsed LogLine, ok bool)
 
 - **Time** = the first whitespace-delimited token, parsed with `time.RFC3339Nano`. (Whole-second and fractional-second inputs both parse; `time.RFC3339` is equivalent — the writer emits RFC3339Nano, so the helper uses the matching layout for producer-consumer symmetry.) Unparseable → `ok=false`.
 - **Level** = the second whitespace-delimited token, verbatim.
-- **Component** = the run after the level token up to the first `:` (component names carry no spaces or colons), trailing `:` removed. An empty component (writer emitted no component) yields `Component == ""` and still `ok=true`.
+- **Component** = the text between the level token and the first `:` in the line, with surrounding whitespace trimmed. (The writer emits one space after the level token, and — for an empty component — a space before the colon.) An all-whitespace or empty run yields `Component == ""` with `ok == true`. Component names carry no spaces or colons, so the first `:` reliably ends the component.
 - **Message** = the text after `<component>: `, up to (but excluding) the first whitespace-delimited token of the form `key=value` (matching `^[A-Za-z_][A-Za-z0-9_.]*=`). This single boundary rule drops both contextual attrs and the trailing baselines in one pass.
+  - A message may itself contain `:`. Only the **first** `:` in the line (immediately after the component token) delimits the component; any later colons belong to the message. E.g. `… WARN daemon: flush failed: disk full pid=…` parses as `Component="daemon"`, `Message="flush failed: disk full"`.
+  - A plain whitespace split suffices to find the boundary even when an attr value is quoted and contains spaces (`version="3.6 beta"`): the boundary token (`pid=`/`version=`/`process_role=` or any contextual attr key) always begins a fresh whitespace-delimited token, so the first regex match lands at the first real attr regardless of quoting. The boundary keys off the *first* matching token and a genuine attr key always precedes any value content, so a `key=value`-shaped substring inside a quoted value can never shift the boundary earlier than the first attr.
   - **Documented assumption:** log messages do not contain a `key=value`-shaped token. The codebase's messages are short human phrases (closed catalogs per component), so this holds. If ever violated, the *only* effect is the displayed `LastWarning` summary truncating early — it never affects `RecentWarnings` count or the health signal.
+
+**`ok == false` triggers.** `ParseLogLine` returns `ok == false` for any line that does not match the layout — specifically when **any** of:
+- the line contains no `:` (no component delimiter), or
+- the line has fewer than two whitespace-delimited tokens, or
+- the first token does not parse as an RFC3339Nano timestamp.
+
+An empty line (`""`) falls under these (no tokens / no colon) → `ok == false`. These are exactly the shapes the malformed-line test treats as "does not match the new layout."
 
 ### 2. Reader migration — `internal/state/status.go`
 
 - **Remove** the `logFieldSeparator = " | "` and `expectedLogFieldCount = 4` constants.
 - `scanRecentWarnings` parses each line **once** via `log.ParseLogLine`. A line is a qualifying entry when: `ok == true` **and** `Level` is `WARN` or `ERROR` **and** `!Time.Before(cutoff)`. Non-qualifying / unparseable lines are silently skipped (the existing swallow-and-skip contract is preserved — a 100%-mismatch now becomes a 0%-mismatch, but malformed individual lines still skip cleanly).
-- On a qualifying line, increment `RecentWarnings` and set `LastWarning` to the composed summary **`<LEVEL> <component>: <msg>`** (e.g. `WARN daemon: tick complete`), last-wins. This replaces storing the raw line.
+- On a qualifying line, increment `RecentWarnings` and set `LastWarning` to the composed summary (defined below), last-wins. This replaces storing the raw line.
+- **`LastWarning` composition:** when `Component != ""`, render `"<LEVEL> <component>: <msg>"` (e.g. `WARN daemon: tick complete`); when `Component == ""`, render `"<LEVEL>: <msg>"` (e.g. `WARN: tick complete`) — no stray space before the colon. The displayed status line is deterministic for both cases.
+- **Last-wins is positional:** the reader overwrites `LastWarning` on each qualifying line top-to-bottom, so "most recent" means "last qualifying line in the file." This equals chronological-most-recent because the writer only ever appends, in chronological order. The producer-coupled test (see Testing) must therefore write its fixtures in append (chronological) order so "last in file" and "most-recent timestamp" coincide.
 - Update the `StatusReport.LastWarning` doc comment: from "full text of the most recent qualifying WARN/ERROR log line" to "the most recent qualifying entry rendered as `<LEVEL> <component>: <msg>` — timestamp prefix and trailing attrs/baselines omitted."
+- **Doc-comment / constant hygiene:** after the change, no doc comment or constant in `status.go` may reference the removed pipe format. Refresh `scanRecentWarnings`'s doc comment to drop "wrong field count" (a pipe-format concept). `logEntryQualifies` may be folded into the parse-once flow or rewritten to operate on the parsed `LogLine` — the function boundary is the implementer's choice — but its body and doc comment must no longer reference `logFieldSeparator` / `expectedLogFieldCount`.
 
 ### 3. Consumer — `cmd/state_status.go`
 
@@ -109,6 +121,7 @@ Given `portal.log` written by the real `internal/log` writer:
 
 - **Remove the independent format fixtures.** The hand-authored pipe-format helpers/lines must go: `writeLogLine` in `internal/state/status_test.go` (emits `… | … | … | …`) and the two pipe-format fixtures in `cmd/state_status_test.go`. No test may construct a log line from a format string defined independently of the production writer.
 - **At least one producer-coupled end-to-end regression test.** A test must drive the **real `internal/log` writer** to emit a `WARN` line into the status directory's `portal.log`, then run `CollectStatus` and assert `RecentWarnings`, the trimmed `LastWarning`, and the `isUnhealthy`/non-zero-exit consequence. This is the guard that would have caught the original mismatch and will turn **red** on any future writer-format drift — fixtures derive from the single production format source, never a parallel definition.
+- **Where the producer-coupled assertion lives, and the cmd-layer tests.** The end-to-end regression test lives at the `CollectStatus` (state) layer. The two `cmd/state_status_test.go` pipe-format fixtures are **migrated, not deleted**: their assertions are retained (the rendered `Recent warnings: N (last: …)` suffix and the non-zero exit when warnings are present), but each must source its log line from the real `internal/log` writer rather than a hand-authored string, and the asserted `(last: …)` suffix updates to the trimmed `<LEVEL> <component>: <msg>` form. No cmd-layer test may construct a log line from an independently-defined format string.
 
 **Retained coverage, re-expressed in the slog text format.** The existing cases must be preserved (translated to the new format, not deleted): window-cutoff (inside vs. outside the last hour), level-filter (`INFO`/`DEBUG` excluded; both `WARN` and `ERROR` included), last-wins selection, missing-`portal.log` → zero, and the malformed-line skip case (currently `status_test.go:368`) re-expressed as a line that does not match the new layout.
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 1
 phase: Gap Analysis
@@ -35,7 +35,7 @@ The non-empty case has the same latent issue: writer emits `<level> <component>:
 Replace the Component bullet in Solution Design §1 with:
 - **Component** = the text between the level token and the first `:` in the line, with surrounding whitespace trimmed. (The writer emits one space after the level token, and — for an empty component — a space before the colon.) An all-whitespace or empty run yields `Component == ""` with `ok == true`. Component names carry no spaces or colons, so the first `:` reliably ends the component.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -65,7 +65,7 @@ Add to the `ParseLogLine` contract in Solution Design §1:
 
 An empty line (`""`) falls under these (no tokens / no colon) → `ok == false`. These are exactly the shapes the malformed-line test treats as "does not match the new layout."
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -84,7 +84,7 @@ Add a note under the Message bullet in Solution Design §1:
 
 A message may itself contain `:`. Only the **first** `:` in the line (immediately after the component token) delimits the component; any later colons belong to the message. E.g. `… WARN daemon: flush failed: disk full pid=…` parses as `Component="daemon"`, `Message="flush failed: disk full"`.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -106,7 +106,7 @@ Add a clarification under the Message-boundary rule in Solution Design §1:
 
 A plain whitespace split is sufficient to find the boundary even when an attr value is quoted and contains spaces (`version="3.6 beta"`): the boundary token (`pid=`/`version=`/`process_role=` or any contextual attr key) always begins a fresh whitespace-delimited token, so the first regex match lands at the first real attr regardless of quoting. The boundary keys off the *first* matching token and a genuine attr key always precedes any value content, so a `key=value`-shaped substring inside a quoted value can never shift the boundary earlier than the first attr. (The documented assumption below concerns only the message text.)
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -125,7 +125,7 @@ Pin the `LastWarning` composition in Solution Design §2:
 
 `LastWarning` composition: when `Component != ""`, render `"<LEVEL> <component>: <msg>"` (e.g. `WARN daemon: tick complete`); when `Component == ""`, render `"<LEVEL>: <msg>"` (e.g. `WARN: tick complete`) — no stray space before the colon. The displayed status line is therefore deterministic for both cases.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -144,7 +144,7 @@ Add to the Testing requirements:
 
 The producer-coupled end-to-end regression test lives at the `CollectStatus` (state) layer. The two `cmd/state_status_test.go` pipe-format fixtures are **migrated, not deleted**: their assertions are retained (the rendered `Recent warnings: N (last: …)` suffix and the non-zero exit when warnings are present), but each must source its log line from the real `internal/log` writer rather than a hand-authored string, and the asserted `(last: …)` suffix updates to the trimmed `<LEVEL> <component>: <msg>` form. No cmd-layer test may construct a log line from an independently-defined format string.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -163,7 +163,7 @@ Add to Solution Design §2:
 
 After the change, no doc comment or constant in `status.go` may reference the removed pipe format. Specifically: refresh `scanRecentWarnings`'s doc comment to drop "wrong field count" (a pipe-format concept). `logEntryQualifies` may be folded into the parse-once flow or rewritten to operate on the parsed `LogLine` — the function boundary is the implementer's choice — but its body and doc comment must no longer reference `logFieldSeparator` / `expectedLogFieldCount`.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
@@ -182,7 +182,7 @@ Add to Solution Design §2:
 
 Last-wins is positional: the reader overwrites `LastWarning` on each qualifying line top-to-bottom, so "most recent" means "last qualifying line in the file." This equals chronological-most-recent because the writer only ever appends, in chronological order. The producer-coupled test must therefore write its fixtures in append (chronological) order so "last in file" and "most-recent timestamp" coincide.
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
