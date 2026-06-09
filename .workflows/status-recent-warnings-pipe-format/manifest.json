@@ -39,11 +39,12 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "status-recent-warnings-pipe-format-1-3",
+          "task": "status-recent-warnings-pipe-format-1-4",
           "task_map": {
             "status-recent-warnings-pipe-format-1": "tick-74ac57",
             "status-recent-warnings-pipe-format-1-1": "tick-d6fd60",
-            "status-recent-warnings-pipe-format-1-2": "tick-1c4434"
+            "status-recent-warnings-pipe-format-1-2": "tick-1c4434",
+            "status-recent-warnings-pipe-format-1-3": "tick-095fcb"
           },
           "external_id": "tick-8795f8"
         }
