@@ -95,6 +95,7 @@ Held firmly at the **session-target** surface. The following are the same hazard
 - **`PaneTarget`** (the no-prefix hooks.json key formatter) — must stay as-is; changing it would silently invalidate existing hook entries.
 - **Bare `-t <session>` reads / option-and-env sets** in `tmux.go` — `ActivePaneCurrentPath`, `SetSessionOption`, `ListPanesInSession` (and the other `list-panes -t session` reads), `ShowEnvironment`, `SetSessionEnvironment`. Non-destructive; left bare.
 - **Caller-supplied pane/window-target writers** — `SendKeys`, `RespawnPane`, `CapturePane`, `NewWindow`, `SplitWindow`, `SelectLayout`. Lower collision exposure (not session names directly).
+- **`display-message -t <paneID>`** (the pane-ID read) — targets a unique `%N` pane ID, so it is categorically immune to prefix collision (not merely "non-destructive" or "lower exposure"). Must stay bare — prefixing it (`=%N`) would break the lookup.
 - **`internal/session/quickstart.go` bare `attach-session -t <name>` / `set-option -t <name>`** — left bare because `GenerateSessionName` guarantees a freshly-unique name at creation, so no live session can prefix-collide at that instant.
 
 These inform a possible future `exactTarget`-helper sweep to prevent drift, but sweeping them is a separate concern outside this work unit.

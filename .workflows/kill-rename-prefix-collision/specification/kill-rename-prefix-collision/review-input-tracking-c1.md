@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-09
 cycle: 1
 phase: Input Review
@@ -53,7 +53,7 @@ Add a new bullet to the "Explicitly out of scope" list:
 
 > - **`display-message -t <paneID>`** (the pane-ID read) — targets a unique `%N` pane ID, so it is categorically immune to prefix collision (not merely "non-destructive" or "lower exposure"). Must stay bare — prefixing it (`=%N`) would break the lookup.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Auto-approved. Added as a new bullet to the "Explicitly out of scope" list in "Migration Scope & Out of Scope".
 
 ---
