@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Re-sweep and Reconcile the Removal Manifest
-status: draft
+status: approved
+approved_at: 2026-06-10
 
 **Goal**: Re-confirm the Removal Manifest against the current HEAD before deleting anything — run the mandated fresh repo-wide reference sweep and reconcile any site not already in the manifest, producing a verified edit set for the deletion phases to consume.
 
@@ -16,7 +17,8 @@ status: draft
 - [ ] No deletion or edit performed in this phase; `go build ./...` and `go test ./...` remain green as the unchanged baseline.
 
 ### Phase 2: Remove the Consumers
-status: draft
+status: approved
+approved_at: 2026-06-10
 
 **Goal**: Delete every reference to the file browser from its consumers — the central TUI model (`internal/tui/model.go`), the `cmd/open.go` wiring, and all coupled test files — while the `internal/ui` and `internal/browser` packages still physically exist, so the tree never enters a transient non-compiling state.
 
@@ -30,7 +32,8 @@ status: draft
 - [ ] `go build ./...` and `go test ./...` are green with `internal/ui` and `internal/browser` still present on disk but now carrying zero importers.
 
 ### Phase 3: Delete the Packages, Docs, and Verify the Gate
-status: draft
+status: approved
+approved_at: 2026-06-10
 
 **Goal**: Remove the two now-unreferenced packages with `rm -rf`, bring the docs into line with the post-removal reality, and satisfy the full acceptance gate — green build/test, zero remaining references, and the blocking manual checks that are this fix's only behavioural verification.
 
