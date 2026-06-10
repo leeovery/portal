@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "file-browser-alias-breadcrumb-3-2",
+          "task": "file-browser-alias-breadcrumb-3-3",
           "task_map": {
             "file-browser-alias-breadcrumb": "tick-95054b",
             "file-browser-alias-breadcrumb-1": "tick-de796e",
@@ -51,7 +51,8 @@
             "file-browser-alias-breadcrumb-2-1": "tick-0e954d",
             "file-browser-alias-breadcrumb-2-2": "tick-8b8435",
             "file-browser-alias-breadcrumb-3": "tick-340541",
-            "file-browser-alias-breadcrumb-3-1": "tick-19ea89"
+            "file-browser-alias-breadcrumb-3-1": "tick-19ea89",
+            "file-browser-alias-breadcrumb-3-2": "tick-916c1b"
           },
           "external_id": "tick-95054b"
         }
