@@ -26,7 +26,7 @@ func (f *fakeModePersister) Save(mode prefs.SessionListMode) error {
 	return f.saveErr
 }
 
-// keyS is the browse-mode switch-view key.
+// keyS is the session-list grouping switch-view key.
 var keyS = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
 
 // newSwitchViewTestModel builds a Model on the sessions page with a real
