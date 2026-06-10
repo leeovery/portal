@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/browser"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/resolver"
@@ -700,13 +699,6 @@ func (s *stubTUISessionCreator) CreateFromDir(_ string, _ []string) (string, err
 	return "stub-session", nil
 }
 
-// stubDirLister implements tui.DirLister for cmd-level testing.
-type stubDirLister struct{}
-
-func (s *stubDirLister) ListDirectories(_ string, _ bool) ([]browser.DirEntry, error) {
-	return nil, nil
-}
-
 // stubProjectEditor implements tui.ProjectEditor for cmd-level testing.
 type stubProjectEditor struct{}
 
@@ -770,7 +762,6 @@ func defaultTestTUIConfig() tuiConfig {
 		renamer:        &stubSessionRenamer{},
 		projectStore:   &stubProjectStore{},
 		sessionCreator: &stubTUISessionCreator{},
-		dirLister:      &stubDirLister{},
 		cwd:            "/home/user",
 	}
 }

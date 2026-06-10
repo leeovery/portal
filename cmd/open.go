@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/browser"
 	"github.com/leeovery/portal/internal/log"
 	"github.com/leeovery/portal/internal/prefs"
 	"github.com/leeovery/portal/internal/project"
@@ -329,14 +328,6 @@ func (r *resolverAdapter) Resolve(dir string) (string, error) {
 	return resolver.ResolveGitRoot(dir, &resolver.RealCommandRunner{})
 }
 
-// osDirLister adapts browser.ListDirectories to the tui.DirLister interface.
-type osDirLister struct{}
-
-// ListDirectories lists directory entries at the given path.
-func (o *osDirLister) ListDirectories(path string, showHidden bool) ([]browser.DirEntry, error) {
-	return browser.ListDirectories(path, showHidden)
-}
-
 // tuiConfig holds injectable dependencies for building the TUI model.
 type tuiConfig struct {
 	lister          tui.SessionLister
@@ -346,7 +337,6 @@ type tuiConfig struct {
 	projectEditor   tui.ProjectEditor
 	aliasEditor     tui.AliasEditor
 	sessionCreator  tui.SessionCreator
-	dirLister       tui.DirLister
 	enumerator      tui.TmuxEnumerator
 	reader          tui.ScrollbackReader
 	previewAttacher tui.PreviewAttacher
@@ -367,7 +357,6 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		tui.WithRenamer(cfg.renamer),
 		tui.WithProjectStore(cfg.projectStore),
 		tui.WithSessionCreator(cfg.sessionCreator),
-		tui.WithDirLister(cfg.dirLister, cfg.cwd),
 		tui.WithCWD(cfg.cwd),
 	}
 	if cfg.serverStarted {
@@ -502,7 +491,6 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		projectEditor:   store,
 		aliasEditor:     aliasStore,
 		sessionCreator:  session.NewSessionCreator(gitResolver, store, client, gen),
-		dirLister:       &osDirLister{},
 		enumerator:      client,
 		reader:          previewReader,
 		previewAttacher: previewAttacher,
