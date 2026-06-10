@@ -22,8 +22,8 @@ The manifest deletes `internal/ui/` and names three files: `browser.go`, `browse
 **Proposed Addition**:
 State the deletion as "remove the entire `internal/ui/` directory (and `internal/browser/` directory)" with the file list given as confirmation of current contents rather than as the deletion target. Optionally add to the acceptance gate: "the `internal/ui` and `internal/browser` directories no longer exist."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Reframed both bullets as whole-directory (`rm -rf`) removal with file lists as confirmation-of-contents, and added "the `internal/ui` and `internal/browser` directories no longer exist" to the acceptance gate. Approved via auto.
 
 ---
 

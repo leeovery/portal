@@ -53,8 +53,10 @@ The removal was exhaustively swept (every importer, every exported symbol, all t
 
 ### Packages deleted entirely
 
-- **`internal/ui/`** — `browser.go`, `browser_test.go`, `testmain_isolation_test.go`. Nothing but the file browser lives here. Sole importers are `internal/tui/model.go` (+ its test), both edited below.
-- **`internal/browser/`** — `listing.go`, `listing_test.go`, `testmain_isolation_test.go`. After `internal/ui` and `cmd/open.go`'s `osDirLister` are gone it has **zero** importers (verified: only consumers were `internal/ui`, `cmd/open.go`, and three test files, all removed/edited).
+Remove the **entire directory** in each case (`rm -rf`), not just the files named below. The file lists are a confirmation of current contents as of the investigation, not the deletion target — if the directory holds any file not listed (e.g. one added between investigation and implementation), it is still part of the removal.
+
+- **`internal/ui/`** — remove the whole directory. Current contents: `browser.go`, `browser_test.go`, `testmain_isolation_test.go`. Nothing but the file browser lives here. Sole importers are `internal/tui/model.go` (+ its test), both edited below.
+- **`internal/browser/`** — remove the whole directory. Current contents: `listing.go`, `listing_test.go`, `testmain_isolation_test.go`. After `internal/ui` and `cmd/open.go`'s `osDirLister` are gone it has **zero** importers (verified: only consumers were `internal/ui`, `cmd/open.go`, and three test files, all removed/edited).
 
 ### `internal/tui/model.go` — edit sites
 
@@ -133,6 +135,7 @@ The removal was exhaustively swept (every importer, every exported symbol, all t
 - `go build ./...` is green.
 - `go test ./...` is green.
 - **Zero remaining references** to any of: `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`, `handleBrowseKey`, `updateFileBrowser`, or a `b`/"browse" keybinding.
+- The `internal/ui` and `internal/browser` directories no longer exist.
 - Manual check: the Projects page no longer reacts to `b` (pressing `b` does nothing browser-related).
 
 ### Testing requirements
