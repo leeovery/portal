@@ -134,7 +134,7 @@ Remove the **entire directory** in each case (`rm -rf`), not just the files name
 
 - `go build ./...` is green.
 - `go test ./...` is green.
-- **Zero remaining references** to any of: `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`, `handleBrowseKey`, `updateFileBrowser`, or a `b`/"browse" keybinding.
+- **Zero remaining references** to the removed feature. The authoritative gate is the green `go build ./...` + green `go test ./...` above — those catch any surviving reference in compiled or tested code. The following symbol list is a **non-exhaustive set of spot-check grep targets**, not a closed checklist: `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`, `handleBrowseKey`, `updateFileBrowser`, `FileBrowserModel`, `NewFileBrowser`, `NewFileBrowserWithChecker`, `NewFileBrowserWithAlias`, `BrowserDirSelectedMsg`, `BrowserCancelMsg`, `BrowserDirSelectErrMsg`, `BrowserAliasSavedMsg`, `BrowserAliasSaveErrMsg`, `AliasSaver`, `GitRootResolver`, `PathChecker`, `browser.DirEntry`, `browser.ListDirectories`, or a `b`/"browse" keybinding. A grep hit in a non-compiled context (doc comment, prose) that the build/test gate would miss must also be reconciled.
 - The `internal/ui` and `internal/browser` directories no longer exist.
 - Manual check: the Projects page no longer reacts to `b` (pressing `b` does nothing browser-related).
 

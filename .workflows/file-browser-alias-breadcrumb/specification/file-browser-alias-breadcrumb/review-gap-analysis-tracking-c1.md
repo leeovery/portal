@@ -39,8 +39,8 @@ The zero-references gate enumerates a specific symbol list (`internal/ui`, `inte
 **Proposed Addition**:
 Either (a) append the remaining ui/browser exported symbols (`FileBrowserModel`, `NewFileBrowser`, `NewFileBrowserWithChecker`, `NewFileBrowserWithAlias`, `BrowserDirSelectedMsg`, `BrowserCancelMsg`, `BrowserDirSelectErrMsg`, `BrowserAliasSavedMsg`, `BrowserAliasSaveErrMsg`, `AliasSaver`, `GitRootResolver`, `PathChecker`, `browser.DirEntry`, `browser.ListDirectories`) to the zero-references list, or (b) reword the bullet so the green compile + green test is the authoritative gate and the symbol list is "spot-check grep targets, non-exhaustive."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Did both (a) and (b) — reworded the gate so green build + green test is the authoritative check, appended the remaining exported symbols, and labelled the list as non-exhaustive spot-check grep targets (with an explicit note to reconcile non-compiled doc/prose hits). Approved via auto.
 
 ---
 
