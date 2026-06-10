@@ -56,8 +56,8 @@ The manifest says: after deleting the two browse subtests, the surviving functio
 **Proposed Addition**:
 Replace "optional rename" with a definite instruction — either "rename the survivor to `TestCommandPendingNKey`" or "leave the function name as-is (the stale `Browse` in the name is acceptable; renaming is out of scope)."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Settled on the definite instruction to rename the survivor to `TestCommandPendingNKey` (decided end-state, not optional). Approved via auto.
 
 ---
 

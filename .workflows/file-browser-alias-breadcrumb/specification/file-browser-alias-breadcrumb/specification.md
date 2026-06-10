@@ -93,7 +93,7 @@ Remove the **entire directory** in each case (`rm -rf`), not just the files name
 - **Delete browser subtests (enclosing function survives):**
   - `TestCommandPendingMode` → "browse selection applies pending command" (L2371-2414).
   - `TestNewWithFunctionalOptions` → "WithDirLister enables file browser" (L3031-3066).
-  - `TestCommandPendingBrowseAndNKey` → "browse directory selection forwards command…" (L6737-6785) and "browse cancel returns to locked Projects page…" (L6787-6829). Survivor is n-key-only — optional rename to `TestCommandPendingNKey`.
+  - `TestCommandPendingBrowseAndNKey` → "browse directory selection forwards command…" (L6737-6785) and "browse cancel returns to locked Projects page…" (L6787-6829). Survivor is n-key-only — **rename the survivor to `TestCommandPendingNKey`** (the `Browse` in the old name is now stale; this is the decided end-state, not optional).
   - `TestCommandPendingEscAndQuit` → "Esc in file browser…" (L7182-7229).
 - **Rework (keep test, strip browser setup):**
   - `TestKillSession` → "NewWithAllDeps supports kill" — drop L1671 (`mockDirLister`) + the `WithDirLister(...)` arg at L1673; keep the kill assertion.
