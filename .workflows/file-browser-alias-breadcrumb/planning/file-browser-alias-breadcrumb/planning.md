@@ -17,7 +17,8 @@ approved_at: 2026-06-10
 - [ ] No deletion or edit performed in this phase; `go build ./...` and `go test ./...` remain green as the unchanged baseline.
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-10
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
