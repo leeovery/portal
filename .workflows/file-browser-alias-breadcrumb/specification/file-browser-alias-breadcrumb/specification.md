@@ -28,6 +28,8 @@ Alternatives rejected at findings review:
 - **(B) Wire it up and finish the feature** — net-new feature work the user doesn't want.
 - **(C) Remove the feature entirely** — **chosen**.
 
+**Work-type — remains a `bugfix`.** This work unit stays typed as `bugfix` even though the fix is a full removal. Bugfix is the only work type whose pipeline includes an Investigation phase — which is already complete here. Re-typing to `quick-fix` or `feature` would orphan this investigation (those pipelines never read it) and force re-seeding the findings by hand. The removal's blast radius (two packages + TUI state-machine surgery) also warrants the spec/planning/review rigor that quick-fix skips. A bugfix concluding "the fix is deletion" is the cleanest framing; expect a bugfix that adds no behaviour and writes no new tests.
+
 ### Scope boundary — what must stay green and unchanged
 
 These are independent of the file browser and must not be touched:

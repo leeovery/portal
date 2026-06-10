@@ -29,9 +29,10 @@ The spec captures the A/B/C fix-scope decision faithfully but says nothing about
 > Decided with the user at findings review (2026-06-09). Because the reported bug sits on unreachable dead code, an in-place audit-fix would only polish code that never runs. The user confirmed they never use the file browser and want it gone. **The fix for this bug is to delete the file-browser feature** — this resolves the latent audit-bypass by removal and reclaims two dead packages. No `SetAndSave` rewiring is performed.
 
 **Proposed Addition**:
+**Work-type — remains a `bugfix`.** This work unit stays typed as `bugfix` even though the fix is a full removal. Bugfix is the only work type whose pipeline includes an Investigation phase — which is already complete here. Re-typing to `quick-fix` or `feature` would orphan this investigation (those pipelines never read it) and force re-seeding the findings by hand. The removal's blast radius (two packages + TUI state-machine surgery) also warrants the spec/planning/review rigor that quick-fix skips. A bugfix concluding "the fix is deletion" is the cleanest framing; expect a bugfix that adds no behaviour and writes no new tests.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Logged to "Decision" section after the A/B/C alternatives list. Approved via auto.
 
 ---
 
