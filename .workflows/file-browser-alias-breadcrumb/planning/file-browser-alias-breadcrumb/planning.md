@@ -42,6 +42,15 @@ approved_at: 2026-06-10
 - [ ] All coupled test edits applied per the manifest across `internal/tui/model_test.go`, `cmd/open_test.go`, and the three `pagepreview_*_test.go` files — including removal of the stale `"browser"` and `"ui"` keys from the surface-audit `preExistingPackages` allow-list, and the rename of the `TestCommandPendingBrowseAndNKey` survivor to `TestCommandPendingNKey`.
 - [ ] `go build ./...` and `go test ./...` are green with `internal/ui` and `internal/browser` still present on disk but now carrying zero importers.
 
+#### Tasks
+status: approved
+approved_at: 2026-06-10
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| file-browser-alias-breadcrumb-2-1 | Remove the file browser from the internal/tui package (model.go + coupled tui test files) | pagePreview iota renumbers 4→3 — verify all symbolic-constant comparisons still pass and no int↔page cast exists; createSession and cfg.cwd/m.cwd MUST stay (3 non-browser createSession callers; m.cwd feeds viewCWD); rename TestCommandPendingBrowseAndNKey survivor to TestCommandPendingNKey; Projects-page `b` must fall through to projectList.Update as a visible no-op that opens no view; same-package coupling — model_test.go + pagepreview_entry_test.go + pagepreview_refetch_test.go + pagepreview_bracket_test.go + pagepreview_surface_audit_test.go all reference removed symbols and must be edited in this same task or the internal/tui build/test reds; bare "ui" surface-audit allow-list key escapes path-prefixed greps and the build/test gate (audit only errors on missing dir, not extra key) — remove it explicitly; internal/ui directory MUST remain on disk (Phase 3 deletes it) |
+| file-browser-alias-breadcrumb-2-2 | Remove the file browser from the cmd package (open.go + open_test.go) | keep WithCWD(cfg.cwd) opt and the cwd: cwd cfg literal while removing the adjacent WithDirLister opt and dirLister field/literal; internal/browser import in open.go becomes unused only after osDirLister is removed, and in open_test.go only after stubDirLister is removed — strip type+method+import together; leaving dirLister in defaultTestTUIConfig after the production field is gone is a compile error; internal/browser directory MUST remain on disk with zero importers (Phase 3 deletes it) |
+
 ### Phase 3: Delete the Packages, Docs, and Verify the Gate
 status: approved
 approved_at: 2026-06-10
