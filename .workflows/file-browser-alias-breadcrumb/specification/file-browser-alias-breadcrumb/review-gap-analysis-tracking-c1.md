@@ -73,8 +73,8 @@ Two acceptance items are manual: "the Projects page no longer reacts to `b` (pre
 **Proposed Addition**:
 State the expected post-removal behaviour of `b` on the Projects page precisely (e.g. "`b` is no longer a recognised Projects-page command; it falls through to the default list handler and is a visible no-op / does not open any view"). Optionally note who runs the manual checks and that they are blocking for the acceptance gate.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Defined the post-removal `b` behaviour precisely (falls through to default `projectList.Update`, visible no-op that opens no view) and marked both manual/spot-check items blocking, run by whoever lands the change. Approved via auto.
 
 ---
 

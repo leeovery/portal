@@ -136,12 +136,12 @@ Remove the **entire directory** in each case (`rm -rf`), not just the files name
 - `go test ./...` is green.
 - **Zero remaining references** to the removed feature. The authoritative gate is the green `go build ./...` + green `go test ./...` above — those catch any surviving reference in compiled or tested code. The following symbol list is a **non-exhaustive set of spot-check grep targets**, not a closed checklist: `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`, `handleBrowseKey`, `updateFileBrowser`, `FileBrowserModel`, `NewFileBrowser`, `NewFileBrowserWithChecker`, `NewFileBrowserWithAlias`, `BrowserDirSelectedMsg`, `BrowserCancelMsg`, `BrowserDirSelectErrMsg`, `BrowserAliasSavedMsg`, `BrowserAliasSaveErrMsg`, `AliasSaver`, `GitRootResolver`, `PathChecker`, `browser.DirEntry`, `browser.ListDirectories`, or a `b`/"browse" keybinding. A grep hit in a non-compiled context (doc comment, prose) that the build/test gate would miss must also be reconciled.
 - The `internal/ui` and `internal/browser` directories no longer exist.
-- Manual check: the Projects page no longer reacts to `b` (pressing `b` does nothing browser-related).
+- Manual check (blocking — this is the fix's only behavioural verification, since no new tests are added): on the Projects page, `b` is no longer a recognised command. With the `projectHelpKeys` binding and the `case isRuneKey(msg, "b")` dispatch removed, `b` falls through to the default `projectList.Update(msg)` handler — its expected post-removal behaviour is a visible **no-op that opens no view** (it must not open the file browser or any other page). Confirm pressing `b` opens nothing.
 
 ### Testing requirements
 
 - After removal, `go build ./...` and `go test ./...` must pass with no dangling references to `ui` / `browser` / `pageFileBrowser` / `DirLister`.
-- Spot-check that the Sessions, Projects, and Preview pages, the alias CLI (`portal alias set/rm/list`), and the projects-modal alias editor are unchanged and functional.
+- Spot-check (blocking) that the Sessions, Projects, and Preview pages, the alias CLI (`portal alias set/rm/list`), and the projects-modal alias editor are unchanged and functional. Pass criterion: each behaves exactly as before the removal — no page fails to open, no command regresses. These manual checks are run by whoever lands the change and gate acceptance alongside the build/test pass.
 - Net test delta is **removal, not addition** — the deleted packages take their own tests with them; no new tests are required.
 
 ### Risk
