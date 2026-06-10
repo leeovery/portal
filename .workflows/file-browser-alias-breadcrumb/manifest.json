@@ -63,16 +63,34 @@
       "items": {
         "file-browser-alias-breadcrumb": {
           "status": "in-progress",
-          "task_gate_mode": "gated",
+          "task_gate_mode": "auto",
           "fix_gate_mode": "gated",
           "analysis_gate_mode": "gated",
           "fix_attempts": 0,
           "analysis_cycle_total": 0,
           "analysis_cycle_session": 0,
-          "linters": [],
-          "project_skills": [],
+          "linters": [
+            {
+              "name": "go vet",
+              "command": "go vet ./..."
+            },
+            {
+              "name": "gofmt",
+              "command": "gofmt -l ."
+            },
+            {
+              "name": "golangci-lint",
+              "command": "golangci-lint run ./..."
+            }
+          ],
+          "project_skills": [
+            ".claude/skills/golang-pro"
+          ],
           "current_phase": 1,
-          "current_task": "~"
+          "current_task": "file-browser-alias-breadcrumb-1-2",
+          "completed_tasks": [
+            "file-browser-alias-breadcrumb-1-1"
+          ]
         }
       }
     }
