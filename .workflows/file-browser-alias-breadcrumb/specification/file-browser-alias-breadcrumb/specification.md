@@ -120,6 +120,27 @@ The removal was exhaustively swept (every importer, every exported symbol, all t
 - **No dangling reads.** `m.startPath` and `m.dirLister` are read only inside the removed sites; nothing else references them after removal.
 - **`cfg.cwd` / `m.cwd` MUST stay** — consumed by `WithCWD` (open.go L371) and `viewCWD` / `createSession(m.cwd)` (model.go L443 / L2241), independent of the browser.
 
+## Acceptance Criteria & Testing
+
+### Acceptance gate
+
+- `go build ./...` is green.
+- `go test ./...` is green.
+- **Zero remaining references** to any of: `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, `osDirLister`, `mockDirLister`, `stubDirLister`, `handleBrowseKey`, `updateFileBrowser`, or a `b`/"browse" keybinding.
+- Manual check: the Projects page no longer reacts to `b` (pressing `b` does nothing browser-related).
+
+### Testing requirements
+
+- After removal, `go build ./...` and `go test ./...` must pass with no dangling references to `ui` / `browser` / `pageFileBrowser` / `DirLister`.
+- Spot-check that the Sessions, Projects, and Preview pages, the alias CLI (`portal alias set/rm/list`), and the projects-modal alias editor are unchanged and functional.
+- Net test delta is **removal, not addition** — the deleted packages take their own tests with them; no new tests are required.
+
+### Risk
+
+- **Fix complexity:** Low–Medium — mechanical deletion spread across two packages, the central TUI model, the `cmd` wiring, and docs; easy to leave a dangling reference, so a clean compile + full-test pass is the gate.
+- **Regression risk:** Low — all removed code is unreachable in production except the `b` keybinding, which the user confirmed they never use.
+- **Release:** regular release (no special rollout).
+
 ---
 
 ## Working Notes
