@@ -292,7 +292,6 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 	preExistingPackages := map[string]struct{}{
 		"alias":            {},
 		"bootstrapadapter": {},
-		"browser":          {},
 		"fileutil":         {},
 		"fuzzy":            {},
 		"hooks":            {},
@@ -318,7 +317,6 @@ func TestSurfaceAudit_NoNewPackageForPreview(t *testing.T) {
 		"tmuxtest":      {},
 		"transienttest": {},
 		"tui":           {},
-		"ui":            {},
 		"warning":       {},
 		"xdg":           {},
 	}
