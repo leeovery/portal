@@ -24,7 +24,7 @@ import (
 //                              itself trigger a fresh ListSessions call.
 //
 // No tea.Cmd in model.go re-fetches sessions on PageProjects → PageSessions,
-// pageFileBrowser → PageSessions, or pagePreview → PageSessions transitions.
+// or pagePreview → PageSessions transitions.
 // There is no periodic refresh, no on-page-entry refresh, no "loadSessionsCmd"
 // or "refreshSessions" dispatcher. Therefore: GAP.
 //

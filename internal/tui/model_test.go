@@ -10,11 +10,9 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/leeovery/portal/internal/browser"
 	"github.com/leeovery/portal/internal/project"
 	"github.com/leeovery/portal/internal/tmux"
 	"github.com/leeovery/portal/internal/tui"
-	"github.com/leeovery/portal/internal/ui"
 )
 
 func TestView(t *testing.T) {
@@ -772,267 +770,6 @@ func (m *mockSessionCreator) CreateFromDir(dir string, command []string) (string
 	return m.sessionName, nil
 }
 
-// mockDirLister implements tui.DirLister for testing.
-type mockDirLister struct {
-	entries map[string][]browser.DirEntry
-}
-
-func (m *mockDirLister) ListDirectories(path string, showHidden bool) ([]browser.DirEntry, error) {
-	if entries, ok := m.entries[path]; ok {
-		return entries, nil
-	}
-	return []browser.DirEntry{}, nil
-}
-
-func TestFileBrowserIntegration(t *testing.T) {
-	t.Run("browse option opens file browser", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}, {Name: "docs"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"test"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		view := model.View()
-		// File browser should show the starting directory path
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected file browser view with starting path, got:\n%s", view)
-		}
-		// Should show directory entries
-		if !strings.Contains(view, "code") {
-			t.Errorf("expected file browser to show directory entries, got:\n%s", view)
-		}
-		// Should NOT show project list
-		if strings.Contains(view, "Projects") {
-			t.Errorf("should not show project list when file browser is open:\n%s", view)
-		}
-	})
-
-	t.Run("selection creates session with browsed path", func(t *testing.T) {
-		sessions := []tmux.Session{}
-		store := &mockProjectStore{projects: []project.Project{}}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to projects page, then open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// File browser emits BrowserDirSelectedMsg
-		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-
-		msg := cmd()
-		createdMsg, ok := msg.(tui.SessionCreatedMsg)
-		if !ok {
-			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
-		}
-		if createdMsg.SessionName != "code-abc123" {
-			t.Errorf("expected session name %q, got %q", "code-abc123", createdMsg.SessionName)
-		}
-		if creator.createdDir != "/home/user/code" {
-			t.Errorf("expected CreateFromDir called with %q, got %q", "/home/user/code", creator.createdDir)
-		}
-	})
-
-	t.Run("selection registers project in store via session creator", func(t *testing.T) {
-		sessions := []tmux.Session{}
-		store := &mockProjectStore{projects: []project.Project{}}
-		creator := &mockSessionCreator{sessionName: "myproj-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		)
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Navigate to projects page, then open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// File browser selects directory
-		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/myproj"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-
-		// Execute the command to trigger session creation
-		cmd()
-
-		// SessionCreator.CreateFromDir handles git resolution, project registration, and session creation.
-		// Verify it was called with the browsed path.
-		if creator.createdDir != "/home/user/myproj" {
-			t.Errorf("expected CreateFromDir with %q, got %q", "/home/user/myproj", creator.createdDir)
-		}
-	})
-
-	t.Run("file browser selection forwards command to session creator", func(t *testing.T) {
-		sessions := []tmux.Session{}
-		store := &mockProjectStore{projects: []project.Project{}}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: sessions},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"vim", "."})
-		var model tea.Model = m
-		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// File browser selects directory
-		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-
-		// Execute the command to trigger session creation
-		cmd()
-
-		// Verify command was forwarded
-		wantCmd := []string{"vim", "."}
-		if len(creator.createdCommand) != len(wantCmd) {
-			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
-		}
-		for i, arg := range creator.createdCommand {
-			if arg != wantCmd[i] {
-				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
-			}
-		}
-	})
-
-	t.Run("cancel in file browser returns to project picker", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"test"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Cancel the file browser
-		model, _ = model.Update(ui.BrowserCancelMsg{})
-
-		view := model.View()
-		// Should be back on projects page showing project items
-		if !strings.Contains(view, "myapp") {
-			t.Errorf("expected projects page with 'myapp' after cancel, got:\n%s", view)
-		}
-	})
-
-	t.Run("browse works from empty project list", func(t *testing.T) {
-		store := &mockProjectStore{projects: []project.Project{}}
-		creator := &mockSessionCreator{sessionName: "docs-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "docs"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"test"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		view := model.View()
-		// Should be in file browser
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected file browser with starting path, got:\n%s", view)
-		}
-		if !strings.Contains(view, "docs") {
-			t.Errorf("expected file browser to show entries, got:\n%s", view)
-		}
-
-		// Selecting a directory should create a session
-		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/docs"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-		msg = cmd()
-		createdMsg, ok := msg.(tui.SessionCreatedMsg)
-		if !ok {
-			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
-		}
-		if createdMsg.SessionName != "docs-abc123" {
-			t.Errorf("expected session name %q, got %q", "docs-abc123", createdMsg.SessionName)
-		}
-	})
-}
-
 func TestInitialFilter(t *testing.T) {
 	t.Run("model stores initial filter text", func(t *testing.T) {
 		m := tui.New(&mockSessionLister{sessions: []tmux.Session{}})
@@ -1668,9 +1405,8 @@ func TestKillSession(t *testing.T) {
 		lister := &mockSessionLister{sessions: sessions}
 		store := &mockProjectStore{projects: []project.Project{}}
 		creator := &mockSessionCreator{}
-		dirLister := &mockDirLister{entries: map[string][]browser.DirEntry{}}
 
-		m := tui.New(lister, tui.WithKiller(killer), tui.WithProjectStore(store), tui.WithSessionCreator(creator), tui.WithDirLister(dirLister, "/home/user"))
+		m := tui.New(lister, tui.WithKiller(killer), tui.WithProjectStore(store), tui.WithSessionCreator(creator))
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
 
@@ -2368,51 +2104,6 @@ func TestCommandPendingMode(t *testing.T) {
 		}
 	})
 
-	t.Run("browse selection applies pending command", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{},
-		}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"vim", "."})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Select directory from browser
-		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-		cmd()
-
-		// Verify command was forwarded
-		wantCmd := []string{"vim", "."}
-		if len(creator.createdCommand) != len(wantCmd) {
-			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
-		}
-		for i, arg := range creator.createdCommand {
-			if arg != wantCmd[i] {
-				t.Errorf("command[%d] = %q, want %q", i, arg, wantCmd[i])
-			}
-		}
-	})
-
 	t.Run("no command starts in session list view", func(t *testing.T) {
 		m := tui.New(&mockSessionLister{
 			sessions: []tmux.Session{
@@ -2488,9 +2179,6 @@ func TestCommandPendingMode(t *testing.T) {
 		view := model.View()
 		if !strings.Contains(view, "Select project to run: claude") {
 			t.Errorf("expected status line in empty state, got:\n%s", view)
-		}
-		if !strings.Contains(view, "b") || !strings.Contains(view, "browse") {
-			t.Errorf("expected browse help key in empty state, got:\n%s", view)
 		}
 		if !strings.Contains(view, "No saved projects") {
 			t.Errorf("expected empty projects message, got:\n%s", view)
@@ -2651,8 +2339,8 @@ func TestCommandPendingMode(t *testing.T) {
 				t.Errorf("help bar should not contain %q in command-pending mode, got:\n%s", desc, view)
 			}
 		}
-		// browse, new in cwd should still appear
-		for _, desc := range []string{"browse", "new in cwd"} {
+		// new in cwd should still appear
+		for _, desc := range []string{"new in cwd"} {
 			if !strings.Contains(view, desc) {
 				t.Errorf("help bar should contain %q in command-pending mode, got:\n%s", desc, view)
 			}
@@ -3028,43 +2716,6 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("WithDirLister enables file browser", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-		dirLister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}, {Name: "docs"}},
-			},
-		}
-		lister := &mockSessionLister{sessions: []tmux.Session{}}
-
-		m := tui.New(lister,
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(dirLister, "/home/user"),
-		).WithCommand([]string{"test"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		view := model.View()
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected file browser with starting path, got:\n%s", view)
-		}
-		if !strings.Contains(view, "code") {
-			t.Errorf("expected file browser to show entries, got:\n%s", view)
-		}
-	})
-
 	t.Run("all options combined", func(t *testing.T) {
 		sessions := []tmux.Session{
 			{Name: "alpha", Windows: 1, Attached: false},
@@ -3077,11 +2728,6 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 			},
 		}
 		creator := &mockSessionCreator{sessionName: "myapp-abc123"}
-		dirLister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
 		lister := &mockSessionLister{sessions: sessions}
 
 		m := tui.New(lister,
@@ -3089,7 +2735,6 @@ func TestNewWithFunctionalOptions(t *testing.T) {
 			tui.WithRenamer(renamer),
 			tui.WithProjectStore(store),
 			tui.WithSessionCreator(creator),
-			tui.WithDirLister(dirLister, "/home/user"),
 		)
 		var model tea.Model = m
 		model, _ = model.Update(tui.SessionsMsg{Sessions: sessions})
@@ -5548,215 +5193,6 @@ func TestEditProjectTagPersistence(t *testing.T) {
 	})
 }
 
-func TestFileBrowserFromProjectsPage(t *testing.T) {
-	// Helper to set up a model on the projects page with projects loaded.
-	setupProjectsModel := func(t *testing.T, dirEntries map[string][]browser.DirEntry) tea.Model {
-		t.Helper()
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/portal", Name: "portal"},
-				{Path: "/code/webapp", Name: "webapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "portal-abc123"}
-		lister := &mockDirLister{entries: dirEntries}
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		)
-		var model tea.Model = m
-		// Switch to projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
-		// Populate projects
-		model, _ = model.Update(tui.ProjectsLoadedMsg{
-			Projects: store.projects,
-		})
-		// Give it a size
-		model, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-		return model
-	}
-
-	t.Run("b on projects page opens file browser", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}, {Name: "docs"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		view := model.View()
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected file browser with starting path /home/user, got:\n%s", view)
-		}
-		if !strings.Contains(view, "code") {
-			t.Errorf("expected file browser to show directory entry 'code', got:\n%s", view)
-		}
-		if !strings.Contains(view, "docs") {
-			t.Errorf("expected file browser to show directory entry 'docs', got:\n%s", view)
-		}
-		// Should not show project list
-		if strings.Contains(view, "Projects") {
-			t.Errorf("should not show projects list title when file browser is open:\n%s", view)
-		}
-	})
-
-	t.Run("BrowserDirSelectedMsg creates session and quits", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Browser emits BrowserDirSelectedMsg
-		_, cmd := model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
-		if cmd == nil {
-			t.Fatal("expected command from BrowserDirSelectedMsg, got nil")
-		}
-
-		msg := cmd()
-		createdMsg, ok := msg.(tui.SessionCreatedMsg)
-		if !ok {
-			t.Fatalf("expected SessionCreatedMsg, got %T", msg)
-		}
-		if createdMsg.SessionName != "portal-abc123" {
-			t.Errorf("session name = %q, want %q", createdMsg.SessionName, "portal-abc123")
-		}
-	})
-
-	t.Run("BrowserCancelMsg returns to projects page", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Cancel the file browser
-		model, _ = model.Update(ui.BrowserCancelMsg{})
-
-		updated := model.(tui.Model)
-		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after cancel, got %d", updated.ActivePage())
-		}
-		view := model.View()
-		if !strings.Contains(view, "portal") {
-			t.Errorf("expected projects page with 'portal' after cancel, got:\n%s", view)
-		}
-	})
-
-	t.Run("Esc in browser with no filter returns to projects page", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Press Esc with no filter — browser emits BrowserCancelMsg
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-		// The browser should emit BrowserCancelMsg as a command
-		if cmd != nil {
-			msg := cmd()
-			model, _ = model.Update(msg)
-		}
-
-		updated := model.(tui.Model)
-		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after Esc in browser, got %d", updated.ActivePage())
-		}
-	})
-
-	t.Run("Esc in browser with filter clears filter", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}, {Name: "docs"}, {Name: "configs"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Type a filter into the browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-
-		// Press Esc — should clear filter, not cancel browser
-		model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-
-		// Should NOT have a BrowserCancelMsg command
-		if cmd != nil {
-			msg := cmd()
-			if _, ok := msg.(ui.BrowserCancelMsg); ok {
-				t.Error("Esc with active filter should clear filter, not cancel browser")
-			}
-		}
-
-		// Should still be in file browser, showing all entries
-		view := model.View()
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected to still be in file browser, got:\n%s", view)
-		}
-		if !strings.Contains(view, "docs") {
-			t.Errorf("expected all entries visible after filter clear, got:\n%s", view)
-		}
-	})
-
-	t.Run("b works when projects list has active filter", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Apply a filter on the projects list
-		updated := model.(tui.Model)
-		updated.SetProjectListFilter("portal")
-		model = tea.Model(updated)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		view := model.View()
-		if !strings.Contains(view, "/home/user") {
-			t.Errorf("expected file browser after b with filter, got:\n%s", view)
-		}
-		if !strings.Contains(view, "code") {
-			t.Errorf("expected file browser entries, got:\n%s", view)
-		}
-	})
-
-	t.Run("projects page state preserved when returning from browser", func(t *testing.T) {
-		entries := map[string][]browser.DirEntry{
-			"/home/user": {{Name: "code"}},
-		}
-		model := setupProjectsModel(t, entries)
-
-		// Remember the project list state
-		pre := model.(tui.Model)
-		preItems := pre.ProjectListItems()
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Cancel back to projects
-		model, _ = model.Update(ui.BrowserCancelMsg{})
-
-		post := model.(tui.Model)
-		postItems := post.ProjectListItems()
-
-		if len(postItems) != len(preItems) {
-			t.Errorf("project list items changed: had %d, now %d", len(preItems), len(postItems))
-		}
-		if post.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects, got %d", post.ActivePage())
-		}
-	})
-}
-
 func TestPageSwitchingFilterIndependence(t *testing.T) {
 	t.Run("switching pages does not carry filter text", func(t *testing.T) {
 		store := &mockProjectStore{
@@ -5888,7 +5324,6 @@ func TestPageSwitchingFilterIndependence(t *testing.T) {
 			"sessions",
 			"edit",
 			"delete",
-			"browse",
 		}
 		for _, desc := range expectedDescs {
 			if !strings.Contains(view, desc) {
@@ -6733,101 +6168,7 @@ func TestCommandPendingEnterCreatesSession(t *testing.T) {
 	})
 }
 
-func TestCommandPendingBrowseAndNKey(t *testing.T) {
-	t.Run("browse directory selection forwards command in command-pending mode", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"claude", "--resume"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser from projects page
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Browser emits BrowserDirSelectedMsg
-		_, cmd = model.Update(ui.BrowserDirSelectedMsg{Path: "/home/user/code"})
-		if cmd == nil {
-			t.Fatal("expected command from directory selection, got nil")
-		}
-		cmd()
-
-		// Verify command was forwarded to CreateFromDir
-		wantCmd := []string{"claude", "--resume"}
-		if len(creator.createdCommand) != len(wantCmd) {
-			t.Fatalf("command = %v, want %v", creator.createdCommand, wantCmd)
-		}
-		for i, arg := range wantCmd {
-			if creator.createdCommand[i] != arg {
-				t.Errorf("command[%d] = %q, want %q", i, creator.createdCommand[i], arg)
-			}
-		}
-		if creator.createdDir != "/home/user/code" {
-			t.Errorf("dir = %q, want %q", creator.createdDir, "/home/user/code")
-		}
-	})
-
-	t.Run("browse cancel returns to locked Projects page in command-pending mode", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"claude"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Press b to open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Cancel the file browser
-		model, _ = model.Update(ui.BrowserCancelMsg{})
-
-		updated := model.(tui.Model)
-		// Should return to Projects page (not Sessions)
-		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after cancel, got %d", updated.ActivePage())
-		}
-
-		// View should show the command-pending banner (confirms still in command-pending mode)
-		view := model.View()
-		if !strings.Contains(view, "Select project to run:") {
-			t.Errorf("expected command-pending banner after cancel, got:\n%s", view)
-		}
-	})
-
+func TestCommandPendingNKey(t *testing.T) {
 	t.Run("n-key creates session in cwd with command in command-pending mode", func(t *testing.T) {
 		store := &mockProjectStore{
 			projects: []project.Project{
@@ -7176,55 +6517,6 @@ func TestCommandPendingEscAndQuit(t *testing.T) {
 		view = model.(tui.Model).View()
 		if strings.Contains(view, "Edit:") {
 			t.Errorf("modal should be dismissed after Esc, got:\n%s", view)
-		}
-	})
-
-	t.Run("Esc in file browser returns to Projects page in command-pending mode", func(t *testing.T) {
-		store := &mockProjectStore{
-			projects: []project.Project{
-				{Path: "/code/myapp", Name: "myapp"},
-			},
-		}
-		creator := &mockSessionCreator{sessionName: "code-abc123"}
-		lister := &mockDirLister{
-			entries: map[string][]browser.DirEntry{
-				"/home/user": {{Name: "code"}},
-			},
-		}
-
-		m := tui.New(
-			&mockSessionLister{sessions: []tmux.Session{}},
-			tui.WithProjectStore(store),
-			tui.WithSessionCreator(creator),
-			tui.WithDirLister(lister, "/home/user"),
-		).WithCommand([]string{"claude"})
-
-		var model tea.Model = m
-		cmd := m.Init()
-		msg := cmd()
-		model, _ = model.Update(msg)
-
-		// Open file browser
-		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-
-		// Verify we left the projects page (now on file browser)
-		updated := model.(tui.Model)
-		if updated.ActivePage() == tui.PageProjects || updated.ActivePage() == tui.PageSessions {
-			t.Fatalf("precondition: expected file browser page, got %d", updated.ActivePage())
-		}
-
-		// Cancel the browser (simulates Esc producing BrowserCancelMsg)
-		model, _ = model.Update(ui.BrowserCancelMsg{})
-
-		updated = model.(tui.Model)
-		if updated.ActivePage() != tui.PageProjects {
-			t.Errorf("expected PageProjects after Esc in file browser, got %d", updated.ActivePage())
-		}
-
-		// Should still be in command-pending mode
-		view := model.(tui.Model).View()
-		if !strings.Contains(view, "Select project to run:") {
-			t.Errorf("expected command-pending banner after returning from browser, got:\n%s", view)
 		}
 	})
 

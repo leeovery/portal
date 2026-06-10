@@ -9,7 +9,7 @@ import (
 )
 
 // keySpaceMsg synthesises a standalone Space keypress, matching the shape
-// produced by bubbletea v1 (and exercised in internal/ui/browser_test.go).
+// produced by bubbletea v1.
 func keySpaceMsg() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeySpace}
 }
@@ -258,30 +258,6 @@ func TestSpaceOnProjectsPageDoesNotCallNewPreviewModel(t *testing.T) {
 	}
 	if enum.calls != 0 {
 		t.Errorf("expected enumerator NOT called from PageProjects, got %d", enum.calls)
-	}
-}
-
-func TestSpaceOnFileBrowserPageDoesNotCallNewPreviewModel(t *testing.T) {
-	enum := &stubEnumerator{
-		groups: []tmux.WindowGroup{
-			{WindowIndex: 0, WindowName: "main", PaneIndices: []int{0}},
-		},
-	}
-	reader := &recordingReader{}
-	m := modelWithSeams(nil, enum, reader)
-	m.activePage = pageFileBrowser
-
-	updated, _ := m.Update(keySpaceMsg())
-
-	got, ok := updated.(Model)
-	if !ok {
-		t.Fatalf("expected Model, got %T", updated)
-	}
-	if got.activePage != pageFileBrowser {
-		t.Errorf("expected to remain on pageFileBrowser, got %v", got.activePage)
-	}
-	if enum.calls != 0 {
-		t.Errorf("expected enumerator NOT called from pageFileBrowser, got %d", enum.calls)
 	}
 }
 

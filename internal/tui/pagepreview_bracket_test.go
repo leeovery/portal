@@ -10,8 +10,8 @@ import (
 )
 
 // nextWindowKey and prevWindowKey are the bubbletea KeyMsg shapes for `]` and
-// `[`. The codebase represents printable runes with Type=KeyRunes (see
-// internal/ui/browser.go), so the bracket bindings follow the same shape.
+// `[`. The codebase represents printable runes with Type=KeyRunes, so the
+// bracket bindings follow the same shape.
 var (
 	nextWindowKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}
 	prevWindowKey = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}

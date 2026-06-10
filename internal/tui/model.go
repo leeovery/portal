@@ -17,7 +17,6 @@ import (
 	"github.com/leeovery/portal/internal/resolver"
 	"github.com/leeovery/portal/internal/session"
 	"github.com/leeovery/portal/internal/tmux"
-	"github.com/leeovery/portal/internal/ui"
 )
 
 // page tracks which page the TUI is currently displaying.
@@ -30,8 +29,6 @@ const (
 	PageSessions
 	// PageProjects displays the projects list.
 	PageProjects
-	// pageFileBrowser displays the file browser sub-view.
-	pageFileBrowser
 	// pagePreview displays the session scrollback preview sub-view.
 	pagePreview
 )
@@ -116,9 +113,6 @@ const (
 	editFieldTags
 )
 
-// DirLister abstracts directory listing for testability.
-type DirLister = ui.DirLister
-
 // SessionsMsg carries the result of fetching tmux sessions.
 type SessionsMsg struct {
 	Sessions []tmux.Session
@@ -186,12 +180,9 @@ type Model struct {
 	projectEditor     ProjectEditor
 	aliasEditor       AliasEditor
 	sessionCreator    SessionCreator
-	dirLister         DirLister
-	startPath         string
 	cwd               string
 	activePage        page
 	projectList       list.Model
-	fileBrowser       ui.FileBrowserModel
 	initialFilter     string
 	insideTmux        bool
 	currentSession    string
@@ -571,14 +562,6 @@ func WithServerStarted(started bool) Option {
 	}
 }
 
-// WithDirLister sets the directory lister and starting path for the file browser.
-func WithDirLister(d DirLister, startPath string) Option {
-	return func(m *Model) {
-		m.dirLister = d
-		m.startPath = startPath
-	}
-}
-
 // WithEnumerator wires the TmuxEnumerator seam used by the scrollback
 // preview page. Production callers pass a *tmux.Client; tests that do not
 // exercise preview entry can omit this option, leaving enumerator nil.
@@ -718,18 +701,16 @@ func projectHelpKeys() []key.Binding {
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s/x", "sessions")),
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
 }
 
 // commandPendingHelpKeys returns key.Binding entries for command-pending mode.
-// Only enter (run here), n, b, /, and q are shown; s, x, e, and d are omitted.
+// Only enter (run here), n, /, and q are shown; s, x, e, and d are omitted.
 func commandPendingHelpKeys() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "run here")),
-		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "browse")),
 		key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new in cwd")),
 		key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	}
@@ -1360,11 +1341,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle cross-view messages regardless of view state
 	switch msg := msg.(type) {
-	case ui.BrowserDirSelectedMsg:
-		return m, m.createSession(msg.Path)
-	case ui.BrowserCancelMsg:
-		m.activePage = PageProjects
-		return m, nil
 	case SessionsMsg:
 		if msg.Err != nil {
 			return m, tea.Quit
@@ -1541,8 +1517,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case PageProjects:
 		return m.updateProjectsPage(msg)
-	case pageFileBrowser:
-		return m.updateFileBrowser(msg)
 	case pagePreview:
 		var cmd tea.Cmd
 		m.preview, cmd = m.preview.Update(msg)
@@ -1634,8 +1608,6 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.handleEditProjectKey()
-		case isRuneKey(msg, "b"):
-			return m.handleBrowseKey()
 		case msg.Type == tea.KeyEnter:
 			return m.handleProjectEnter()
 		}
@@ -1644,15 +1616,6 @@ func (m Model) updateProjectsPage(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.projectList, cmd = m.projectList.Update(msg)
 	return m, cmd
-}
-
-func (m Model) handleBrowseKey() (tea.Model, tea.Cmd) {
-	if m.dirLister == nil {
-		return m, nil
-	}
-	m.fileBrowser = ui.NewFileBrowser(m.startPath, m.dirLister)
-	m.activePage = pageFileBrowser
-	return m, nil
 }
 
 func (m Model) handleProjectEnter() (tea.Model, tea.Cmd) {
@@ -1968,14 +1931,6 @@ func (m Model) handleEditProjectConfirm() (tea.Model, tea.Cmd) {
 	return m, m.loadProjects()
 }
 
-func (m Model) updateFileBrowser(msg tea.Msg) (tea.Model, tea.Cmd) {
-	updated, cmd := m.fileBrowser.Update(msg)
-	if fb, ok := updated.(ui.FileBrowserModel); ok {
-		m.fileBrowser = fb
-	}
-	return m, cmd
-}
-
 // selectedSessionItem returns the currently selected SessionItem from the list, if any.
 func (m Model) selectedSessionItem() (SessionItem, bool) {
 	item := m.sessionList.SelectedItem()
@@ -2266,8 +2221,6 @@ func (m Model) View() string {
 			return listView + "\n" + statusLine
 		}
 		return m.viewProjectList()
-	case pageFileBrowser:
-		return m.fileBrowser.View()
 	case pagePreview:
 		return m.preview.View()
 	default:
