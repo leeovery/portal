@@ -35,12 +35,17 @@
           "format": "tick",
           "spec_commit": "e322c480472889ea3e010fe5ce9838dbca1c580d",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "file-browser-alias-breadcrumb-1-1",
-          "task_map": {}
+          "task": "file-browser-alias-breadcrumb-1-2",
+          "task_map": {
+            "file-browser-alias-breadcrumb": "tick-95054b",
+            "file-browser-alias-breadcrumb-1": "tick-de796e",
+            "file-browser-alias-breadcrumb-1-1": "tick-8bae77"
+          },
+          "external_id": "tick-95054b"
         }
       }
     }
