@@ -1,7 +1,7 @@
 {
   "name": "file-browser-alias-breadcrumb",
   "work_type": "bugfix",
-  "status": "in-progress",
+  "status": "completed",
   "created": "2026-06-09",
   "description": "Decided fix (investigation): the file-browser alias-save breadcrumb gap is on unreachable dead code; remove the file browser feature entirely (delete internal/ui + internal/browser, excise TUI/cmd wiring + the Projects-page b key). Kept as bugfix — the only work type with an Investigation phase, already done.",
   "phases": {
@@ -110,7 +110,7 @@
     "review": {
       "items": {
         "file-browser-alias-breadcrumb": {
-          "status": "in-progress",
+          "status": "completed",
           "reviewed_tasks": [
             "file-browser-alias-breadcrumb-1-1",
             "file-browser-alias-breadcrumb-1-2",
@@ -132,5 +132,6 @@
       "source": "inbox:bug",
       "seeded_at": "2026-06-09T21:01:44Z"
     }
-  ]
+  ],
+  "completed_at": "2026-06-10"
 }
