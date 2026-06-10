@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-10
 cycle: 2
 phase: Gap Analysis
@@ -34,7 +34,8 @@ Three concrete problems, each genuinely new (not addressed by cycle 1):
 Net effect: an implementer following the manifest section-by-section, then running the prescribed re-sweep, then trusting the green build/test gate, would ship with two stale allow-list entries naming non-existent packages — contradicting the spec's own "Zero remaining references" goal. The fix is to add this file to the manifest (remove the two allow-list keys) and to broaden the re-sweep grep targets to include the bare `ui`/`browser` tokens (or simply note that bare-token allow-list maps must be reconciled).
 
 **Proposed Addition**:
-_(leave blank until discussed)_
+1. New manifest bullet under "Other `*_test.go` (incidental coupling — preview tests)": `internal/tui/pagepreview_surface_audit_test.go` — remove the stale `"browser":` (L295) and `"ui":` (L321) keys from `TestSurfaceAudit_NoNewPackageForPreview`'s `preExistingPackages` allow-list, with a note that the build/test gate misses this (unused allow-list keys leave the test green) and the bare `"ui"` key escapes the path-prefixed re-sweep grep.
+2. Broaden the "Re-sweep at implementation start (required)" grep targets to also include the bare quoted tokens `"ui"` and `"browser"` for allow-list/map-key references.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Verified against the live tree — `internal/tui/pagepreview_surface_audit_test.go:295` (`"browser"`) and `:321` (`"ui"`) are real stale allow-list entries that survive removal undetected. Logged both edits. Approved via auto.

@@ -49,7 +49,7 @@ Established during the findings-review side-investigation, captured so it isn't 
 
 The removal was exhaustively swept (every importer, every exported symbol, all tests, help text, docs) and independently cross-verified by a second pass. **Line numbers are as of the investigation date — the implementation must re-confirm each, but the *set* of sites below is complete as of that date.**
 
-**Re-sweep at implementation start (required).** The set-completeness guarantee above is relative to the codebase at investigation time. Before deleting anything, run a fresh repo-wide reference sweep — grep for `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, and the `b`/"browse" strings — and reconcile any site **not** in this manifest before proceeding. Treat the manifest as the verified baseline, not a closed set: a reference newly added between investigation and implementation (especially a doc/comment reference, which the compile+test gate would not catch) must be caught here.
+**Re-sweep at implementation start (required).** The set-completeness guarantee above is relative to the codebase at investigation time. Before deleting anything, run a fresh repo-wide reference sweep — grep for `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, and the `b`/"browse" strings — **and also for the bare quoted tokens `"ui"` and `"browser"`** (allow-list / map-key references such as the surface-audit `preExistingPackages` map use the bare package name, which the path-prefixed `internal/ui` grep misses). Reconcile any site **not** in this manifest before proceeding. Treat the manifest as the verified baseline, not a closed set: a reference newly added between investigation and implementation (especially a doc/comment reference, which the compile+test gate would not catch) must be caught here.
 
 **Sequencing:** delete the two packages **last** (or expect transient compile breaks) — remove the consumers first, then the packages.
 
@@ -114,6 +114,7 @@ Remove the **entire directory** in each case (`rm -rf`), not just the files name
   - L12 — drop the stale `internal/ui/browser_test.go` doc reference in the file-header comment.
 - `internal/tui/pagepreview_refetch_test.go` L27 — update the comment to drop the `pageFileBrowser → PageSessions` transition mention.
 - `internal/tui/pagepreview_bracket_test.go` L14 — drop the stale `internal/ui/browser.go` doc reference (compiles, but dangling pointer).
+- `internal/tui/pagepreview_surface_audit_test.go` — in `TestSurfaceAudit_NoNewPackageForPreview`'s `preExistingPackages` allow-list, remove the stale `"browser":` (L295) and `"ui":` (L321) map keys. These name the two deleted packages; after removal they are dangling references to directories that no longer exist. **The build/test gate does not catch this** — the audit only errors on a directory present on disk but *absent* from the allow-list, so unused allow-list keys leave the test green. **The bare `"ui"` key also escapes the path-prefixed re-sweep greps** (`internal/ui` requires the prefix), so it must be removed explicitly here.
 
 ### Docs / non-Go
 
