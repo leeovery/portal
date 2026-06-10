@@ -250,7 +250,7 @@ portal init bash --cmd p
 | `K` | Kill session |
 | `q`/`Esc` | Quit |
 
-The TUI has four views: session list, project picker, file browser, and scrollback preview.
+The TUI has three views: session list, project picker, and scrollback preview.
 
 ### Scrollback Preview
 
