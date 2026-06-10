@@ -66,3 +66,13 @@ approved_at: 2026-06-10
 - [ ] Zero remaining references: the acceptance-gate spot-check grep targets all come back clean, including non-compiled doc/prose hits the build/test gate would miss.
 - [ ] Blocking manual check passes: on the Projects page, `b` opens nothing — a visible no-op that opens no view (it must not open the file browser or any other page).
 - [ ] Blocking manual check passes: the Sessions, Projects, and Preview pages, the alias CLI (`portal alias set/rm/list`), and the projects-modal alias editor all behave exactly as before the removal — no page fails to open, no command regresses.
+
+#### Tasks
+status: approved
+approved_at: 2026-06-10
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| file-browser-alias-breadcrumb-3-1 | Delete the internal/ui and internal/browser packages | directory holds a file not in the investigation content list (delete whole dir regardless), a stray new importer reintroduced after Phase 2 (build catches it) |
+| file-browser-alias-breadcrumb-3-2 | Update the non-Go docs (README.md, CLAUDE.md) | doc/prose references invisible to the build/test gate (reconcile by hand-grep), line numbers may have drifted since investigation (locate by content not line) |
+| file-browser-alias-breadcrumb-3-3 | Run the final acceptance gate (build/test + zero references + two blocking manual checks) | grep hit surviving in a non-compiled doc/prose context the gate misses, Projects-page `b` must fall through to a visible no-op opening no view, no regression in Sessions/Projects/Preview pages, alias CLI, or projects-modal alias editor |
