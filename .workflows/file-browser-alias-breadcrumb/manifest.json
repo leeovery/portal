@@ -87,9 +87,10 @@
             ".claude/skills/golang-pro"
           ],
           "current_phase": 1,
-          "current_task": "file-browser-alias-breadcrumb-1-2",
+          "current_task": "file-browser-alias-breadcrumb-1-3",
           "completed_tasks": [
-            "file-browser-alias-breadcrumb-1-1"
+            "file-browser-alias-breadcrumb-1-1",
+            "file-browser-alias-breadcrumb-1-2"
           ]
         }
       }
