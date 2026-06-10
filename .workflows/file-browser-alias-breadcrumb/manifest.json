@@ -33,7 +33,7 @@
         "file-browser-alias-breadcrumb": {
           "status": "in-progress",
           "format": "tick",
-          "spec_commit": "fc1e2939b1baeda4598942612e45b035122b9bd2",
+          "spec_commit": "e322c480472889ea3e010fe5ce9838dbca1c580d",
           "task_list_gate_mode": "gated",
           "author_gate_mode": "gated",
           "finding_gate_mode": "gated",
