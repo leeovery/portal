@@ -41,6 +41,10 @@ These are independent of the file browser and must not be touched:
 - `createSession` — survives; it has three non-browser callers. Only the browser→create-session entry point is removed.
 - `cfg.cwd` / `m.cwd` — consumed by `WithCWD` and `viewCWD` / `createSession(m.cwd)`, independent of the browser.
 
+### Out-of-scope context note (not a requirement of this fix)
+
+Established during the findings-review side-investigation, captured so it isn't lost: the alias system is wired, functional, and out-prioritises zoxide in the resolver chain (the user simply had no matching alias for the names they tried). A noted UX sharp edge — an exact-match alias miss silently degrades to a fuzzy zoxide search, which can open a *different* directory than intended with **no indication the alias was skipped**. This is **not** part of the removal and must **not** become an acceptance criterion; it is recorded only as context for whoever revisits the resolver later.
+
 ## Removal Manifest
 
 The removal was exhaustively swept (every importer, every exported symbol, all tests, help text, docs) and independently cross-verified by a second pass. **Line numbers are as of the investigation date — the implementation must re-confirm each, but the *set* of sites below is complete.**

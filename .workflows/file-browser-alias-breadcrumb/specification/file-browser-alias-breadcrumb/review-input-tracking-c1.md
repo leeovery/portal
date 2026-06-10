@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-10
 cycle: 1
 phase: Input Review
@@ -50,8 +50,9 @@ The investigation deliberately records an adjacent fact established during the f
 This is explicitly out of scope for the removal — it must NOT become a requirement of this fix. But it is a captured-on-purpose observation that the spec drops entirely. The spec's scope boundary lists what stays unchanged (including the resolver chain) but omits this noted UX edge and the alias-priority-over-zoxide fact. Surfacing it as an explicit "noted, out of scope" line preserves the context for whoever revisits the resolver later and prevents the observation from being lost between investigation and any future planning.
 
 **Proposed Addition**:
+**Out-of-scope context note (not a requirement of this fix).** Established during the findings-review side-investigation, captured so it isn't lost: the alias system is wired, functional, and out-prioritises zoxide in the resolver chain (the user simply had no matching alias for the names they tried). A noted UX sharp edge — an exact-match alias miss silently degrades to a fuzzy zoxide search, which can open a *different* directory than intended with **no indication the alias was skipped**. This is **not** part of the removal and must **not** become an acceptance criterion; it is recorded only as context for whoever revisits the resolver later.
 
-**Resolution**: Pending
-**Notes**: Investigation marks this explicitly as "not part of this fix, captured for context." If logged, it must be framed as an out-of-scope / future-context note only — never as an acceptance criterion or requirement of the removal.
+**Resolution**: Approved
+**Notes**: Logged as a new "Out-of-scope context note" subsection under the Scope boundary. Framed strictly as out-of-scope context, not a requirement. Approved via auto.
 
 ---
