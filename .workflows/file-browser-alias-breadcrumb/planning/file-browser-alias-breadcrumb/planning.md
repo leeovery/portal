@@ -16,6 +16,16 @@ approved_at: 2026-06-10
 - [ ] Manifest line numbers re-confirmed against current HEAD (line numbers may have drifted since the investigation date).
 - [ ] No deletion or edit performed in this phase; `go build ./...` and `go test ./...` remain green as the unchanged baseline.
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| file-browser-alias-breadcrumb-1-1 | Run the mandated repo-wide reference sweep for all required tokens | bare "ui"/"browser" tokens missed by path-prefixed greps, doc/comment hits in non-compiled contexts, .workflows/.tick artifact hits that are not code sites |
+| file-browser-alias-breadcrumb-1-2 | Reconcile each sweep hit against the Removal Manifest and record dispositions | references newly added since investigation (esp. doc/comment refs invisible to the compile gate), false positives in unrelated packages or strings, scope-boundary sites that must NOT be touched (alias CLI, projects alias editor, createSession, cfg.cwd/m.cwd) |
+| file-browser-alias-breadcrumb-1-3 | Re-confirm manifest line numbers against HEAD and produce the corrected edit set | line drift since the investigation date, the TestCommandPendingBrowseAndNKey → TestCommandPendingNKey rename target, surface-audit allow-list keys at L295/L321 |
+| file-browser-alias-breadcrumb-1-4 | Confirm the green go build + go test baseline on unchanged HEAD | pre-existing flaky tests (load-flaky kill-barrier timing test) distinguished from genuine baseline breakage |
+
 ### Phase 2: Remove the Consumers
 status: approved
 approved_at: 2026-06-10
