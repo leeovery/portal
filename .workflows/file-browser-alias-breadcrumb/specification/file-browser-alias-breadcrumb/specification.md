@@ -47,7 +47,9 @@ Established during the findings-review side-investigation, captured so it isn't 
 
 ## Removal Manifest
 
-The removal was exhaustively swept (every importer, every exported symbol, all tests, help text, docs) and independently cross-verified by a second pass. **Line numbers are as of the investigation date — the implementation must re-confirm each, but the *set* of sites below is complete.**
+The removal was exhaustively swept (every importer, every exported symbol, all tests, help text, docs) and independently cross-verified by a second pass. **Line numbers are as of the investigation date — the implementation must re-confirm each, but the *set* of sites below is complete as of that date.**
+
+**Re-sweep at implementation start (required).** The set-completeness guarantee above is relative to the codebase at investigation time. Before deleting anything, run a fresh repo-wide reference sweep — grep for `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, and the `b`/"browse" strings — and reconcile any site **not** in this manifest before proceeding. Treat the manifest as the verified baseline, not a closed set: a reference newly added between investigation and implementation (especially a doc/comment reference, which the compile+test gate would not catch) must be caught here.
 
 **Sequencing:** delete the two packages **last** (or expect transient compile breaks) — remove the consumers first, then the packages.
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-10
 cycle: 1
 phase: Gap Analysis
@@ -90,7 +90,7 @@ The manifest opens with "Line numbers are as of the investigation date — the i
 **Proposed Addition**:
 Add an instruction that the implementer re-runs a repo-wide reference sweep (grep for `internal/ui`, `internal/browser`, `pageFileBrowser`, `DirLister`, `WithDirLister`, and the `b`/browse strings) at implementation start and reconciles any sites not in the manifest before deleting, treating the manifest as the verified baseline rather than a closed set.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added a "Re-sweep at implementation start (required)" paragraph to the manifest intro instructing a fresh repo-wide grep + reconciliation before deletion, treating the manifest as a verified baseline and explicitly calling out non-compiled doc/comment references the build/test gate would miss. Approved via auto.
 
 ---
