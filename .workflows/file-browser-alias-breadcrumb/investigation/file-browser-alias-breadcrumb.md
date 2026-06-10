@@ -354,6 +354,25 @@ by hand. A bugfix legitimately concluding "the fix is deletion" is the cleanest,
 lowest-friction framing; the removal's blast radius (two packages + TUI state-
 machine surgery) also wants the spec/planning/review rigor that quick-fix skips.
 
+### Discussion (findings-review journey)
+
+- The seed framed this as auditing a "third production alias-mutation site." The
+  user challenged *why* we'd fix it at all — which forced the reachability trace
+  that flipped the framing: the site is unreachable dead code, not a live gap.
+- The user then questioned the whole feature: they never use the file browser
+  and couldn't recall why it was added. A side-investigation confirmed the alias
+  system itself works and out-prioritises zoxide (the user simply had no matching
+  alias for the names they'd tried), so removing the browser touches nothing they
+  rely on.
+- Decision shifted from "audit-fix" (A) → "remove entirely" (C). The user
+  explicitly weighed re-typing the work unit and landed on keeping it a bugfix
+  once it was clear bugfix is the only pipeline with the (already-completed)
+  Investigation phase.
+- The user's final, load-bearing instruction was **completeness**: this
+  investigation feeds the spec and plan, so the removal surface must be
+  exhaustive and accurate. That drove the full sweep + independent cross-check
+  now captured in the Removal Manifest above.
+
 ### Testing Recommendations
 
 - After removal: `go build ./...` and `go test ./...` green with no dangling
