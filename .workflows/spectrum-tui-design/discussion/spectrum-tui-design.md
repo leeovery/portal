@@ -471,8 +471,29 @@ checklist (2)** becomes genuinely meaningful — real steps completing), **and**
 fixes "frozen terminal on a slow boot" with instant "Portal is starting"
 feedback. Real UX win, consistent with the reframe.
 
-**Decision pending:** fold the startup flip into this feature (→ enables checklist
-/ determinate) vs keep loading indeterminate now (concept 3/4) and flip later.
+### Cold vs warm — loading only on cold boot (CONFIRMED)
+The loading page is gated on the **`serverStarted`** flag, not "every open":
+`WithServerStarted(true)` is the *only* thing that sets the initial page to
+`PageLoading` (`model.go:556-560`); `serverStarted` comes from `serverWasStarted`
+→ the context value set when **EnsureServer actually had to start the tmux
+server** (`cmd/open.go:136`). So:
+- **Cold** (no tmux server): server started → full bootstrap (restore scrollback,
+  register Claude-resume hooks, etc.) → **loading page shown**.
+- **Warm** (server already up, sessions in progress, just opening another):
+  `serverStarted=false` → bootstrap steps no-op (restore skips already-live
+  sessions; hooks already registered) → **straight to the picker, no loading
+  page**. This is the common case and it's already instant.
+
+**Flip is therefore scoped to the COLD path only.** A cheap `tmux has-server`
+check decides: warm → today's fast synchronous path, untouched; cold → launch the
+TUI on the loading page immediately and stream bootstrap progress. The
+common/warm case carries **zero new risk** — the refactor only touches the
+once-per-reboot cold boot. This materially de-risks the change and fully honours
+"don't show the loading screen every time."
+
+**Decision pending:** fold the (cold-path-only) startup flip into this feature
+(→ enables the honest checklist / determinate loading) vs keep loading
+indeterminate now (concept 3/4) and flip later.
 
 ### Notes
 Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
