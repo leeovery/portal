@@ -30,11 +30,11 @@ Every renderer references a small fixed set of **semantic role tokens**, never s
 
 Roles:
 - **primary accent** — cursor / selection / active title / header caret. *(MV: violet.)*
-- **detail** — paths / secondary text / dim metadata / group counts. *(MV: dim grey.)*
+- **key-hint** — footer / modal key glyphs. *(MV: blue.)*
+- **detail** — paths / secondary text / metadata / counts, across a **tonal ramp** (bright → faint; pinned in §2.9). *(MV: blue-greys.)*
 - **state — attached** — the live/attached marker. *(MV: green; reserved for the attached state only — never reused for chips or decoration.)*
 - **state — destructive** — kill/delete confirmation emphasis. *(MV: red; reserved for destructive actions only.)*
-- **state — warning / transient** — inline flash / warnings. *(MV: amber.)*
-- **filter / search** — the live filter query text. *(MV: bright orange.)*
+- **filter / search & warning / transient** — filter query and inline flash share one warm token. *(MV: orange.)*
 - **preview mode-chrome** — the read-only preview frame, deliberately distinct from the primary violet to signal "peek mode." *(MV: cyan.)*
 
 Each role has **light and dark variants** (`AdaptiveColor`). A direction instantiates the roles; the roles are the stable interface the rest of the spec refers to.
@@ -68,6 +68,53 @@ Define a **minimum supported terminal size**; below it the UI **degrades** rathe
 ### 2.8 Theming — tokenise now, user-override deferred
 - **In scope:** structure the role-token colour layer as a single named built-in theme ("Modern Vivid"). Every renderer references **tokens**, not scattered hex. This locks layout and delegates colour, making the app theme-*ready* at near-zero extra cost.
 - **Deferred to its own initiative:** a **user-overridable theme system** (external theme file e.g. `~/.config/portal/theme.{json,toml}`, merge-over-default, validation when a user picks unreadable colours — contrast floor becomes advisory + warn/clamp — multiple built-in themes, a `theme` setting, docs). Bigger surface; ships independently after the redesign. (See §16.)
+
+### 2.9 MV token table (closed vocabulary — pinned values)
+
+Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every renderer references a token — **no literal hex at call sites** (this is what makes §2.8 theming work). **Dark variants are pinned exactly** (extracted from the canonical Paper frames, then reconciled to clear the contrast floor). **Light variants** are derived from the Tokyo Night Day siblings, contrast-verified against white, and **locked at the in-terminal validation gate (§15)**.
+
+**Greys / text ramp**
+
+| Token | Role | Dark (on black) | Light (on white) | Floor |
+|---|---|---|---|---|
+| `text.primary` | names, wordmark, active labels, modal titles, chip text | `#C0CAF5` · 13.0 | `#2E3C64` · 10.8 | 4.5 |
+| `text.strong` | selected-row meta, help actions, banner/signpost | `#A9B1D6` · 9.9 | `#3F4760` · 9.2 | 4.5 |
+| `text.muted-bright` | done-tick labels, selected-row path | `#828BB8` · 6.3 | `#515A80` · 6.7 | 4.5 |
+| `text.detail` | paths, counts, footer labels, subtitles, group headings | `#737AA2` · 5.0 | `#5A6296` · 5.8 | 4.5 |
+| `text.dim` | group `··· N` counts, pending loading steps | `#535C86` · 3.2 | `#7C84AA` · 3.7 | 3.0¹ |
+| `text.faint` | decorative only — inactive dots, `+ add`, mode indicator, hints | `#3B4261` | `#AEB2C6` | exempt² |
+| `text.on-selection` | name on the selected row | `#FFFFFF` | `#1A1B2E` | 4.5 |
+
+¹ Held to the 3:1 large/UI floor — deliberately de-emphasised but legible. ² Decorative-only; **must never carry functional text** (2.1:1, exempt from the floor).
+
+**Accents**
+
+| Token | Role | Dark | Light | Floor |
+|---|---|---|---|---|
+| `accent.violet` | cursor, selector `▌`, active dot, `?` key, focused field label, EDIT MODE, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 5.7 | 3.0 |
+| `accent.blue` | footer / modal **key-hint glyphs** | `#7AA2F7` · 8.3 | `#2E5FD0` · 5.7 | 4.5 |
+| `accent.cyan` | Sessions header, Preview chrome, active tick `◐` | `#7DCFFF` · 12.2 | `#0E7490` · 5.4 | 4.5 |
+| `state.green` | `● attached`, `✓` done, success flash | `#9ECE6A` · 11.5 | `#4C7A1F` · 5.1 | 4.5 |
+| `state.red` | kill/delete emphasis, `▲` | `#F7768E` · 7.9 | `#C32647` · 5.7 | 4.5 |
+| `accent.orange` | filter query / `/` / `type`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 5.9 | 4.5 |
+
+**Surfaces (tints / borders — light values finalised at validation)**
+
+| Token | Role | Dark | Light |
+|---|---|---|---|
+| `canvas` | terminal background (never painted) | terminal bg | terminal bg |
+| `bg.selection` | selected-row tint | `#1A1726` | light violet |
+| `bg.warning` | warning-flash band | `#241B10` | light amber |
+| `bg.track` | loading-bar empty track | `#26283A` | light grey |
+| `border.separator` | title rule (2px) | `#292E42` | light blue-grey |
+| `border.footer` | footer rule (1px) | `#20232E` | light blue-grey |
+| `text.on-warning` | warning-flash message | `#E8C9A0` · 13.3 | `#7A4B12` · 7.4 |
+
+**Rules**
+- **Closed vocabulary** — every rendered colour is one of these tokens; no literal hex outside the token layer (enforces §2.8 theme-readiness).
+- `state.green` is **attached-only** (+ success flash); `state.red` is **destructive-only**; chips are `text.primary` on a tint, never green.
+- **One documented exception:** the **Preview scrollback capture** renders the pane's **real ANSI output**, not theme tokens — intentionally outside the palette. Only its *chrome* (frame, top bar) is themed (`accent.cyan` + `text.detail`).
+- All values are a **hypothesis until prototyped in a real terminal (§15)**; the table is the build target, validation is the lock.
 
 ---
 
