@@ -283,6 +283,27 @@ violet/cyan/green foreground palette), with grafted refinements:
 Still front-runner, not locked: loading-page mockups + in-terminal validation
 remain before the colour direction is final.
 
+### Round 2b — reality alignment (validated vs code)
+The user showed the real Sessions screen. Validated against code (`tmux.Session`
+= Name/Windows/Attached/Dir; `GenerateSessionName` = `{project}-{nanoid}`;
+`internal/tui/session_item.go` delegate):
+- **Names** are `{project}-{nanoid}` (6-char code) and freely **renameable**
+  (arbitrary, may contain spaces) — highly variable length/format. Mock names
+  corrected to realistic ones.
+- **Directory:** every session carries `@portal-dir` (git-root at *creation*) →
+  maps to a Project (name + tags). It is the session's **origin/project**, set
+  once — NOT a live cwd, and a session may span multiple pane dirs. The flat list
+  **deliberately omits it**; the project/tag dimension is surfaced via the `s`
+  grouping modes (By Project / By Tag). The earlier "path column" was both
+  fabricated and redundant — **removed**.
+- **Row content (matches code):** name · window count · `● attached`.
+- **Pagination:** `bubbles/list`'s built-in paginator (height-driven dots). Mock
+  now shows **centred dots** above the footer; list lengthened so paging is
+  visible.
+- **Principle reinforced:** validate against how Portal actually works before
+  designing; code *can* change for good UI, but "the juice must be worth the
+  squeeze" — no gratuitous restructure.
+
 **Judging & bail gate** (folds review-001 F6/F9/F12):
 1. **Objective** — each direction must clear the contrast floor or it is out.
 2. **Taste** — the user judges whether any survivor is genuinely "more exciting /
@@ -381,6 +402,9 @@ concern — does NOT block the colour mockups; settle later.
   cursor/border in an always-open tool; non-TTY / CI / unfocused behaviour. (F5)
 - **(review-001 → scope) Page coverage:** decide whether the retro chrome applies
   to all four pages or selectively. (F10)
+- **Surface project/tags in the flat session row?** Useful for renamed sessions
+  whose name hides the project; but grouping (By Project / By Tag) already serves
+  it. Leaning **keep flat = name only**; revisit if wanted.
 
 ### Current State
 - **Decided:** respect terminal theme / no forced canvas / adaptive colours;
