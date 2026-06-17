@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (18 subtopics — 6 decided · 4 converging · 2 exploring · 6 pending)
+  Discussion Map — ZX Spectrum TUI (19 subtopics — 7 decided · 5 converging · 1 exploring · 6 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -64,7 +64,8 @@ improvement worth shipping."
   ├─ ✓ Cursor & selection (thick violet left bar) [decided]
   ├─ → Status / footer & keybindings (? help modal) [converging]
   ├─ ○ Borders & framing [pending]
-  ├─ ◐ Loading interstitial [exploring]
+  ├─ → Loading interstitial (combined: header + bar + tick-list) [converging]
+  ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
   ├─ ○ Modal accent [pending]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
@@ -491,9 +492,21 @@ common/warm case carries **zero new risk** — the refactor only touches the
 once-per-reboot cold boot. This materially de-risks the change and fully honours
 "don't show the loading screen every time."
 
-**Decision pending:** fold the (cold-path-only) startup flip into this feature
-(→ enables the honest checklist / determinate loading) vs keep loading
-indeterminate now (concept 3/4) and flip later.
+### DECIDED — fold the cold-path flip; honest combined loading
+The user **folded the startup flip in** (cold-path-only concurrent bootstrap with
+live progress). The loading screen becomes genuinely honest/determinate, and it's
+its **own phase** within this feature (planning to sequence; gated behind
+in-terminal validation of the visual direction).
+
+**Combined loading design (round 2):** centred `PORTAL ▌` header + a progress bar
++ a **tick-list that ticks off** as each boot step completes (`✓` done / `◐`
+active / `·` pending) — a real list, *not* an in-place text swap. Friendly steps
+(maps to the real bootstrap): Started tmux server → Registered hooks → Restoring
+sessions (N/M) → Replaying scrollback → Resuming Claude sessions. Two bar weights
+mocked for comparison — **thick block bar** (`Loading 6`) vs **thin line bar**
+(`Loading 7`). **Bar weight: pending user pick.**
+
+Warm path unchanged: no loading screen, straight to the picker.
 
 ### Notes
 Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
