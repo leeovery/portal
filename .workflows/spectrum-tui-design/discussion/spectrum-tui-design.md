@@ -143,6 +143,45 @@ retro tipping into gimmicky/noisy.
 
 ---
 
+## Colour palette (adaptive accents)
+
+### Context
+Under retro-arcade we want vivid, characterful colour — adaptive (light/dark)
+and disciplined enough to stay readable in a tool opened many times a day.
+
+### Journey
+First proposal: **rainbow-as-signature, not rainbow-as-wallpaper** — vivid
+multi-hue anchors (logo, separators, loading bar) over a *restrained* working
+palette (one primary accent + existing semantic colours: green=attached,
+grey=detail), vs a rainbow-everywhere maximalist version (every header a
+different hue, cursor strobing colours) carrying readability/fatigue cost.
+
+Before settling that, the user **dropped the rainbow concept entirely** — a
+multi-hue rainbow reads too close to the pride flag, an association they
+explicitly do not want. Colour stays in play; the *rainbow specifically* is out.
+This drifts the identity further from literal ZX Spectrum (whose signature *is*
+the rainbow stripe) — Spectrum is now loose inspiration at most.
+
+Decided to stop discussing colour in the abstract and **visualise** instead:
+research non-rainbow retro/TUI colour directions, mock ~5 variations in Paper
+MCP, and feed the chosen direction back into this discussion.
+
+### Decision (partial)
+- **No rainbow / multi-hue spectrum motif** — firm (pride-flag association
+  unwanted).
+- Colour is still leveraged; positive palette direction **TBD via Paper
+  mockups**.
+- Confidence: high on the exclusion; open on the positive direction.
+
+### Tooling note — Paper MCP for mockups
+Paper renders web/app UI, not terminals — it can produce gradients,
+anti-aliased fonts, sub-cell positioning, shadows, none of which a TUI can
+render. **Guardrail:** constrain every mockup to terminal fidelity (monospace
+grid, block/box-drawing characters only, flat per-cell fg/bg colour). Paper is a
+visualisation aid only; all resulting decisions are documented back here.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -150,14 +189,24 @@ retro tipping into gimmicky/noisy.
    preference-fighting part — dropped) and **structure/typography** (logo,
    borders, headers, status bar, cursor, loading — theme-agnostic, kept). You
    get most of the "exciting" without owning the canvas.
+2. Identity has drifted from literal "ZX Spectrum" to "colourful, characterful
+   retro-ish TUI." Two signature ZX motifs are now explicitly OUT: forced black
+   canvas, and the rainbow. Spectrum is loose inspiration, not a spec.
+3. Colour direction is hard to settle verbally — moving to concrete Paper
+   mockups to decide.
 
 ### Open Threads
 - Bail is explicitly acceptable if the redesign doesn't earn its place.
 - Animated cycling-colour border noted in seed as possible-but-likely-overkill.
+- **Deferred palette sub-question:** impose exact hues via truecolor
+  (`AdaptiveColor`, our identity) vs inherit the user's terminal scheme via the
+  16 named ANSI colours (maximally respects "their reds are our reds"). Revisit
+  once a direction is chosen.
 
 ### Current State
-- **Decided:** respect terminal theme, no forced canvas, adaptive colours.
-- **Exploring:** overall direction & ambition level.
+- **Decided:** respect terminal theme / no forced canvas / adaptive colours;
+  retro-arcade direction; no rainbow motif.
+- **Exploring:** positive colour direction (via Paper mockups).
 
 ## Triage
 
