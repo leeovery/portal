@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (19 subtopics — 7 decided · 5 converging · 1 exploring · 6 pending)
+  Discussion Map — ZX Spectrum TUI (20 subtopics — 8 decided · 4 converging · 1 exploring · 7 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -58,13 +58,14 @@ improvement worth shipping."
   │  ├─ ✓ Contrast floor [decided]
   │  ├─ ✓ Colour-capability ladder (truecolor/256/16) [decided]
   │  ├─ ○ Narrow / short terminal behaviour [pending]
-  │  └─ ○ NO_COLOR / monochrome degradation [pending]
+  │  ├─ ○ NO_COLOR / monochrome degradation [pending]
+  │  └─ ○ AdaptiveColor binary light/dark — mid-tone & detect-fail contrast [pending]
   ├─ → PORTAL logo & header (wordmark + caret + separator) [converging]
   ├─ → Spaced uppercase header treatment [converging]
   ├─ ✓ Cursor & selection (thick violet left bar) [decided]
   ├─ → Status / footer & keybindings (? help modal) [converging]
   ├─ ○ Borders & framing [pending]
-  ├─ → Loading interstitial (combined: header + bar + tick-list) [converging]
+  ├─ ✓ Loading interstitial (combined: header + thick bar + tick-list) [decided]
   ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
   ├─ ○ Modal accent [pending]
   ├─ ○ Animation infra & performance [pending]
@@ -370,6 +371,27 @@ A colour-led identity needs defined behaviour when colour is suppressed
 and how state (e.g. attached) is still conveyed without colour. Degradation
 concern — does NOT block the colour mockups; settle later.
 
+### AdaptiveColor binary classification — pending (review-002 F2/F6)
+`AdaptiveColor` makes a **binary** light/dark choice from terminal-bg detection;
+the real world is continuous. Two genuine risks:
+- **Mid-tone backgrounds** (Solarized base03, Gruvbox soft-dark — *mainstream*,
+  not exotic) are classified to an extreme they're not on, so a variant tuned for
+  near-white/near-black may dip **below the contrast floor** on their actual bg.
+- **Detection failure** (no OSC response over SSH / tmux passthrough; `COLORFGBG`
+  unset) → termenv defaults (often dark), so a *light*-terminal user can be served
+  the *dark* variant on a light bg — a cross-pairing the floor never tests.
+  Acute because Portal runs **inside tmux**, where bg-detection passthrough is
+  unreliable.
+Mitigations to weigh in spec/planning: choose variants that also survive mid-tone;
+a manual `--theme` / light-dark override; detect-and-degrade. Open.
+
+### Review-002 dispositions (for the record)
+F3 in-terminal validation → folded into the Judging & bail gate (step 3).
+F4 monochrome role-separation → moot (chose multi-hue Modern-Vivid, not a
+single-hue direction). F5 retro-vs-modern shortlist → resolved (user consciously
+chose the restrained option; direction evolved, documented). F8 baseline owner /
+F9 narrowing cardinality → resolved (user picks; narrowed to one front-runner).
+
 ---
 
 ## Loading interstitial
@@ -504,7 +526,7 @@ active / `·` pending) — a real list, *not* an in-place text swap. Friendly st
 (maps to the real bootstrap): Started tmux server → Registered hooks → Restoring
 sessions (N/M) → Replaying scrollback → Resuming Claude sessions. Two bar weights
 mocked for comparison — **thick block bar** (`Loading 6`) vs **thin line bar**
-(`Loading 7`). **Bar weight: pending user pick.**
+(`Loading 7`). **Bar weight: DECIDED — thick (`Loading 6`).**
 
 Warm path unchanged: no loading screen, straight to the picker.
 
