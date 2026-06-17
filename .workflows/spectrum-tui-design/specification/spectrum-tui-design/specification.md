@@ -152,6 +152,26 @@ A single bottom row above a **1px** top rule (`border.footer`):
 
 ---
 
+## 4. Sessions — Flat list
+
+The default Sessions view (mode **Flat**) and the baseline every other view derives from. `s` cycles Flat → by Project → by Tag (§5); the active mode shows in the section header.
+
+### 4.1 Row anatomy
+Each session is **one delegate line** — the load-bearing pagination invariant (every list row is exactly one line). Layout:
+- **Name** — full-width **left column (flex)**, `text.primary` (selected: `text.on-selection` over the `bg.selection` tint + violet bar). Names are `{project}-{nanoid}` or arbitrary renamed strings (variable length, may contain spaces); over-long names **truncate with `…`** (§2.7). The flat row shows **name only** — no project/path column (that dimension is served by the grouping modes, §5).
+- **Window count** — a **fixed-width trailing slot**, left-aligned, `text.detail` (selected row: `text.strong`). Reads `N window` / `N windows`.
+- **Attached marker** — a **fixed-width trailing slot** right of the count: `● attached` in `state.green` when attached; an **empty slot of the same width** when not — so the bullets line up vertically down the list and the counts stay column-aligned.
+
+Trailing slots are fixed-width and right-pinned; the name flexes to fill the remainder. This keeps the `● attached` bullets and the window counts each vertically aligned regardless of name length.
+
+### 4.2 Section header & count
+`Sessions` (`accent.cyan`) + count (`state.green`) on the left; the `/ to filter` hint on the right (§3.2). An empty list shows the empty state (§11.1).
+
+### 4.3 Selection & navigation
+A single violet left-bar + tint marks the cursor row (§3.3). The cursor never lands on a header/non-row; navigation is arrows + `Ctrl+↑/↓` page (§12). Selection feeds `⏎ attach` and `␣ preview`.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
