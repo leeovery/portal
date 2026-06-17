@@ -924,7 +924,14 @@ naming convention.)
 - **F4 (Projects / Preview help content) — RESOLVED:** each page's `?` modal lists
   **that page's audited keymap** (above). Sessions help is mocked; Projects/Preview
   help = their keymaps, mocked at implementation.
-- **F5 (cold-path flip error / warning contract) — see open question below.**
+- **F5 (cold-path flip error / warning contract) — DECIDED:** a *fatal* cold-boot
+  step failure shows an **in-TUI error state on the loading page** (the failed step
+  gets a red marker + one-line message; `q`/`Esc` quits with a **non-zero exit**),
+  rather than dropping into a half-restored picker. Soft warnings ride the
+  **progress channel** and surface as a post-load notice. That same progress
+  channel carries `serverStarted` + per-step progress to the TUI (replacing the
+  `context`/package-memo delivery on the cold/TUI path). A loading-page **error
+  frame** to be mocked at implementation.
 - **F7 (loading step mapping) — SPEC TASK:** spec maps the **11 real bootstrap
   steps → the 5 friendly tick-list labels** (each label spans ≥1 real step),
   defines bar weighting, and places the per-step `tea.Msg` emitters; the bar
