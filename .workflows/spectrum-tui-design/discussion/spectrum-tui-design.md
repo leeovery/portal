@@ -598,6 +598,63 @@ Warm path unchanged: no loading screen, straight to the picker.
 Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
 and doubles as a "what's happening" surface if restore is slow.
 
+## Keybindings (audited against code)
+
+Per-screen keymap, verified in `internal/tui/model.go` + `pagepreview.go`:
+- **Sessions (flat & grouped):** `↑↓`/`j`/`k` nav · `PgUp`/`PgDn` page · `g`/`Home`
+  start · `G`/`End` end · `/` filter · `Enter` attach · `Space` preview · `s`
+  cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd ·
+  `p`/`x` → Projects · `q` quit · `Esc` clear-filter/quit. Grouping adds no keys.
+- **Projects:** nav/page/start/end · `/` filter · `Enter` new-session-from-project
+  · `s`/`x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
+- **Preview:** `↑↓`/`PgUp`/`PgDn`/`Ctrl+U`/`Ctrl+D`/`j`/`k` scroll · `Home`/`End`
+  top/bottom · `Tab` next pane · `]` next window · `[` prev window · `Enter`
+  attach (this pane) · `Space`/`Esc` back.
+- **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename
+  `Enter`/`Esc` · edit `Tab` cycle / `Enter` add-or-save / `x` remove / `Esc`.
+
+**Key finding:** there is **no `?` help binding today** — `?` is actively
+*swallowed* (so bubbles/list doesn't toggle its own help). The redesign's `?` help
+modal therefore means **binding `?`** (new behaviour) + per-page help content.
+
+**Mock corrections applied (audit caught my errors):** help modal had `x Kill`
+— wrong: `x` is Projects, kill is `k`. Fixed to `k Kill` (red), added `p/x
+Switch to Projects`, fixed `n → new session in cwd`. Preview chrome now includes
+`[ ] window` nav (was missing).
+
+## Implementation feasibility — "a lot of custom components?" (No)
+
+Audited the render architecture. **The bespoke look is achievable mostly by
+restyling existing hand-rendered Lipgloss — not by building widgets** — precisely
+because today's TUI is already hand-rendered on top of `bubbles/list` (not an
+off-the-shelf component kit).
+
+- **Kept as-is (the engine):** `bubbles/list` provides the list model, pagination
+  (the dots), filtering, cursor/selection, nav for Sessions & Projects. The
+  CLAUDE.md build constraint holds (no `lipgloss/tree`; grouping stays Lipgloss in
+  the delegate).
+- **Restyle-existing** (edit current custom code + point at palette tokens): the
+  row delegates (`SessionDelegate`/`ProjectDelegate`), the manual 3-column footer
+  (→ condensed), the group `HeaderItem`, the kill/rename modals, the preview
+  chrome (already hand-composed in `pagepreview.go`), the loading `viewLoading`.
+- **New-but-small:** the header/logo + separator block above the list (~Lipgloss
+  `JoinVertical`); edit-modal **chips** (restyle the alias/tag field render).
+- **New-substantial (only one):** the **`?` help modal** — a new modal type +
+  binding `?` (currently swallowed) + per-page help content (~60–80 lines), but it
+  extends the existing rounded-border modal overlay primitive.
+- **Cross-cutting foundation:** an `AdaptiveColor` **palette / role-token** layer
+  (primary / detail / state, each with light+dark variants), contrast-floor
+  adherence, and `NO_COLOR` handling. Moderate, touches every style — but it's
+  *centralising* colour, not new widgets.
+- **Separate engineering item (not a widget):** the **startup flip** (concurrent
+  bootstrap + live progress) for the honest loading screen — ~1–1.5 days, its own
+  phase.
+
+**Bottom line:** ~80% is restyling already-custom render code; the only genuinely
+new UI is the header block + chips (small) and the `?` help modal (moderate). The
+real *engineering* chunk is the startup flip, which is plumbing, not components.
+No widget framework needed.
+
 ## Summary
 
 ### Key Insights
