@@ -180,6 +180,36 @@ render. **Guardrail:** constrain every mockup to terminal fidelity (monospace
 grid, block/box-drawing characters only, flat per-cell fg/bg colour). Paper is a
 visualisation aid only; all resulting decisions are documented back here.
 
+### Research — non-rainbow retro directions
+Web research + domain knowledge surfaced the well-trodden non-rainbow retro
+palettes: phosphor monochromes (amber, green), synthwave/outrun (magenta+cyan),
+vintage-micro palettes (C64), and the modern-vivid base16 families (Tokyo Night
+/ Dracula / Catppuccin) that the best-looking real TUIs (btop, lazygit, k9s) use
+with 24-bit truecolour. References below.
+
+### Candidate directions for Paper mockups
+Five to mock on the Sessions page (apples-to-apples colour comparison), each
+terminal-faithful and `AdaptiveColor`-ready:
+
+1. **Amber CRT** — single warm hue: amber/gold on near-black, hotter amber for
+   cursor/selection. Calm, nostalgic, maximally readable. Adaptive: deep
+   burnt-orange on cream. Risk: monochrome may not feel "colourful" enough.
+2. **Green phosphor** — single cool hue: CRT green on black. Classic
+   old-terminal/hacker feel. Risk: can read cliché / "Matrix".
+3. **Synthwave / Outrun** — vivid duo: hot magenta + electric cyan over indigo
+   structure on near-black. 80s arcade energy, bold, distinctive, zero rainbow
+   association. Likely frontrunner for "exciting + retro + colour".
+4. **C64 / vintage micro** — light-blue primary on deep blue-purple, cream text,
+   one warm accent. Home-computer 8-bit feel; softer than synthwave.
+5. **Modern-vivid (Tokyo Night family)** — one signature accent (vivid
+   purple/teal) + tasteful semantic colours on a soft dark. Less retro; the
+   restrained-colour comparison point — what proven beautiful TUIs actually do.
+
+**Mockup plan:** mock the Sessions page in all five (colour is the variable, so
+hold layout constant); pick a direction; then expand the winner across the other
+screens (loading, modal, projects). All in Paper, constrained to terminal
+fidelity, decisions written back here.
+
 ---
 
 ## Summary
