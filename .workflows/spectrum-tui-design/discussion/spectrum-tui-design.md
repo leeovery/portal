@@ -809,6 +809,12 @@ When a modal opens, the page behind is **cleared to a blank screen** (modal
 centred on black) rather than overlaying the dimmed list — the user finds this
 cleaner. Our mocks already reflect this.
 
+### Typography — counts beside labels
+A count next to a label (`Sessions N`, `Projects N`, group `heading ··· N`) renders
+at the **same font size as the label** — distinguished by its **dim colour**, not
+by being smaller — so it shares the baseline and cap-height. (Earlier mocks had
+the count a couple px smaller, which sat misaligned.)
+
 ## Design reference (Paper)
 
 All visual decisions are mocked in the Paper file **"Portal"** (page "Page 1",
