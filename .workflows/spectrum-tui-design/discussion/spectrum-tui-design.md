@@ -753,14 +753,16 @@ No widget framework needed.
 Two states, identical grammar across the Name field, chips, and any editable
 element:
 - **Focused** (navigate): **outline only** — a violet ring, no fill change.
-  (Fixed: the chip-focused mock previously used a brighter fill, which read as
-  edit; now outline-only.) A focused **chip** also shows a dim `✕` to signal `x`
-  removes it.
 - **Editing** (cursor live): **filled violet background + cursor**, plus a
   `◉ EDIT MODE` indicator in the modal header. The **Name field in edit mode also
-  turns violet-filled** (answering "does the name go purple?" — yes; same
-  treatment as chips). The `✕` is hidden while editing.
-- So: **outline = focused, fill = editing** — unambiguous everywhere.
+  turns violet-filled** (yes — the name goes purple, same treatment as chips).
+- **So: outline = focused, fill = editing** — unambiguous everywhere.
+- **Chips (aliases AND tags) are ONE neutral grey style** — identical to each
+  other; **green is reserved for the `attached` state only, never chips.** Normal
+  chip = grey, no `✕`. Focused chip = grey + **purple border + a purple `✕`** (the
+  ✕ appears to show it's actionable; the `x` key removes it). Editing chip =
+  **purple fill + cursor**, no `✕`. (Replaces an earlier green-tags / grey-aliases
+  split that wrongly borrowed the attached-green and clashed.)
 
 ### Filtering (`/`)
 - `/` opens an **inline filter input** in the section-header row (where the
