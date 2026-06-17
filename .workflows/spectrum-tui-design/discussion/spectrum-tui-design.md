@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (28 subtopics — all 28 decided)
+  Discussion Map — ZX Spectrum TUI (28 subtopics — 27 decided · 1 converging)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -72,7 +72,7 @@ improvement worth shipping."
   │  └─ ✓ Edit-modal interaction model (two-mode; immediate persist) [decided]
   ├─ ✓ Preview page (MV cyan chrome) [decided]
   ├─ ✓ Theming (tokenise in-scope · user-override deferred/logged) [decided]
-  ├─ ✓ Filtering (`/` live, bright-orange query) [decided]
+  ├─ → Filtering (`/` live, orange) — two-mode boundary to lock [converging]
   ├─ ✓ Interaction conventions (focus/edit · per-page help · modals on blank) [decided]
   ├─ ✓ Animation & performance (minimal; idle-zero tick) [decided]
   ├─ ✓ Scope boundary (v1 vs deferred) [decided]
@@ -773,6 +773,24 @@ element:
   (Flat / by Project / by Tag) and Projects — filtering works on all of them.
   `s switch view` lives in the **footer only** (removed from the header to avoid
   duplicating the footer).
+
+#### Filter modes — REVISIT (to lock before spec) [circle back]
+User correction: filtering has **two mutually-exclusive modes — never both at
+once** (the current `Sessions — filtering (MV)` mock wrongly shows an active
+cursor AND a selected row):
+1. **Input-active** (typing): keystrokes go to the filter query; the **cursor
+   sits at the end of the typed text**; the list updates live; **no list row is
+   selected/cursored**. `↵` *or* `↓` **commits/locks the filter** → switches to
+   list-active. `Esc` clears.
+2. **List-active** (browsing the filtered results): the input row stays visible
+   (locked query, **no cursor**) — proposed with a **faint orange background** on
+   the input row to signal "this list is filtered"; arrows move the selection;
+   `↵` **attaches**; `Esc` clears and returns.
+States to mock on circle-back: (a) input-active (typing, cursor, no selection);
+(b) **over-filtered / no matches** ("No matches" while filtering); (c)
+list-active on a filtered list (faint-orange locked input + a selected row).
+Why it matters: nailing the mode boundary now prevents implementation
+ambiguity / unclean state / bugs.
 
 ### Page model — views vs pages
 - **Sessions is ONE page with three grouping *views*** (Flat / by Project / by
