@@ -48,11 +48,16 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (12 subtopics — 2 decided · 1 exploring · 9 pending)
+  Discussion Map — ZX Spectrum TUI (17 subtopics — 3 decided · 2 exploring · 12 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition [decided]
   ├─ ◐ Colour palette (adaptive accents) [exploring]
+  ├─ ◐ Terminal-environment robustness [exploring]
+  │  ├─ ✓ Contrast floor [decided]
+  │  ├─ ○ Colour-capability ladder (truecolor/256/16) [pending]
+  │  ├─ ○ Narrow / short terminal behaviour [pending]
+  │  └─ ○ NO_COLOR / monochrome degradation [pending]
   ├─ ○ PORTAL logo [pending]
   ├─ ○ Borders & framing [pending]
   ├─ ○ Spaced uppercase headers [pending]
@@ -212,6 +217,54 @@ fidelity, decisions written back here.
 
 ---
 
+## Terminal-environment robustness
+
+### Context
+The canvas decision (no forced background) means Portal's appearance is now a
+function of an **unknown, user-controlled environment**: background colour,
+colour depth, terminal size, font, and `NO_COLOR`. The redesign must survive
+that whole space, not just look good on one mock. Raised as a cluster by
+review-001 and promoted to its own subtopic — it is the largest untouched risk
+area created by the canvas decision.
+
+### Contrast floor — DECIDED
+Every candidate direction must clear a hard contrast gate **before taste is
+judged**. Functional foreground (session names, paths, footer, status text) must
+meet WCAG AA — **4.5:1** normal text, **3:1** large/bold text and UI accents
+(cursor, border, selection highlight) — against **both** a canonical light
+background (≈ white) and a canonical dark background (≈ black). With
+`AdaptiveColor` that means: the light-variant tested on white AND the
+dark-variant tested on black, each ≥ the ratio. Purely decorative glyphs (logo)
+are exempt from the text ratio but must stay visible. Arbitrary mid-tone custom
+backgrounds are **out of scope** — we target the standard light/dark cases
+`AdaptiveColor` flips between; we can't guarantee every exotic user background.
+A direction that can't hit the floor on both extremes is disqualified before we
+judge looks.
+- **Rationale:** turns "is it readable?" from hope into pass/fail; stops a
+  mock-approved direction failing on a real user's theme. Confidence: high.
+
+### Colour-capability ladder (truecolor / 256 / 16) — pending
+Absorbs the earlier deferred palette sub-question. How the palette behaves across
+the capability ladder: truecolor terminals, 256-colour, 16-colour,
+`TERM=dumb`/redirected. Two framings to reconcile: **impose exact hues** via
+truecolor `AdaptiveColor` (distinctive identity; Lipgloss auto-downsamples) vs
+**inherit the user's scheme** via the 16 named ANSI colours ("their reds are our
+reds"; max respect, but no identity). Currently exploring.
+
+### Narrow / short terminal behaviour — pending
+Chunky chrome (block logo, framing, spaced headers, status bar) competes for rows
+and columns that may not exist in a small tmux split. Needs a minimum supported
+size and a degrade strategy (e.g. drop the logo below N columns). Layout concern
+— does NOT block the colour mockups; take it with the chrome subtopics.
+
+### NO_COLOR / monochrome — pending
+A colour-led identity needs defined behaviour when colour is suppressed
+(`NO_COLOR` convention), unavailable (monochrome terminal), or piped/redirected,
+and how state (e.g. attached) is still conveyed without colour. Degradation
+concern — does NOT block the colour mockups; settle later.
+
+---
+
 ## Summary
 
 ### Key Insights
@@ -224,19 +277,22 @@ fidelity, decisions written back here.
    canvas, and the rainbow. Spectrum is loose inspiration, not a spec.
 3. Colour direction is hard to settle verbally — moving to concrete Paper
    mockups to decide.
+4. The canvas decision's hidden cost: appearance now depends on an unknown
+   user environment (bg, colour depth, size, NO_COLOR). "Terminal-environment
+   robustness" captures that; a **contrast floor** is the first gate, and the
+   mockups must clear it before taste is judged.
 
 ### Open Threads
 - Bail is explicitly acceptable if the redesign doesn't earn its place.
 - Animated cycling-colour border noted in seed as possible-but-likely-overkill.
-- **Deferred palette sub-question:** impose exact hues via truecolor
-  (`AdaptiveColor`, our identity) vs inherit the user's terminal scheme via the
-  16 named ANSI colours (maximally respects "their reds are our reds"). Revisit
-  once a direction is chosen.
 
 ### Current State
 - **Decided:** respect terminal theme / no forced canvas / adaptive colours;
-  retro-arcade direction; no rainbow motif.
-- **Exploring:** positive colour direction (via Paper mockups).
+  retro-arcade direction; no rainbow motif; contrast floor (WCAG AA both
+  extremes) as a hard mockup gate.
+- **Exploring:** positive colour direction (via Paper mockups);
+  terminal-environment robustness (capability ladder, narrow-terminal,
+  NO_COLOR still open).
 
 ## Triage
 
