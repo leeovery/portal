@@ -30,3 +30,4 @@ changelog:
 
 release:
   draft: false
+  mode: keep-existing   # keep mint's release + AI-notes body, just upload the binaries
