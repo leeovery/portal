@@ -131,6 +131,9 @@
     },
     "file-browser-alias-breadcrumb": {
       "work_type": "bugfix"
+    },
+    "spectrum-tui-design": {
+      "work_type": "feature"
     }
   },
   "defaults": {
