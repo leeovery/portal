@@ -48,37 +48,36 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (26 subtopics — 8 decided · 10 converging · 2 exploring · 6 pending)
+  Discussion Map — ZX Spectrum TUI (28 subtopics — 26 decided · 1 converging · 1 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
-  ├─ → Colour palette — Modern Vivid front-runner [converging]
+  ├─ ✓ Colour palette — Modern Vivid [decided]
   │  └─ ✓ Semantic colour roles [decided]
-  ├─ ◐ Terminal-environment robustness [exploring]
+  ├─ ✓ Terminal-environment robustness [decided]
   │  ├─ ✓ Contrast floor [decided]
   │  ├─ ✓ Colour-capability ladder (truecolor/256/16) [decided]
-  │  ├─ ○ Narrow / short terminal behaviour [pending]
-  │  ├─ ○ NO_COLOR / monochrome degradation [pending]
-  │  └─ ○ AdaptiveColor binary light/dark — mid-tone & detect-fail contrast [pending]
-  ├─ → PORTAL logo & header (wordmark + caret + separator) [converging]
-  ├─ → Spaced uppercase header treatment [converging]
+  │  ├─ ✓ Narrow / short terminal behaviour [decided]
+  │  ├─ ✓ NO_COLOR / monochrome degradation [decided]
+  │  └─ ✓ AdaptiveColor binary light/dark — mid-tone & detect-fail [decided]
+  ├─ ✓ PORTAL logo & header (wordmark + caret + separator) [decided]
+  ├─ ✓ Spaced uppercase header treatment [decided]
   ├─ ✓ Cursor & selection (thick violet left bar) [decided]
-  ├─ → Status / footer & keybindings (? help modal) [converging]
-  ├─ ○ Borders & framing [pending]
+  ├─ ✓ Status / footer & keybindings (? help modal) [decided]
+  ├─ ✓ Borders & framing (no full frame; separators + per-element) [decided]
   ├─ ✓ Loading interstitial (combined: header + thick bar + tick-list) [decided]
   ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
-  ├─ → Grouped views (by project / by tag) & Projects page [converging]
-  ├─ → Modals — edit / kill / rename (MV) [converging]
-  │  └─ → Edit-modal interaction model (fields/chips/contextual footer) [converging]
-  ├─ → Preview page (MV cyan chrome) [converging]
-  ├─ ◐ Theming system (tokenise in-scope; user-override = own topic) [exploring]
-  ├─ → Filtering (`/` live, bright-orange query) [converging]
-  ├─ → Interaction conventions (focus/edit · per-page help · modals on blank) [converging]
-  ├─ ○ Animation infra & performance [pending]
-  └─ ○ Scope boundary (v1 vs deferred) [pending]
-
-*Subtopics 4–11 are contingent on the Direction & ambition decision — their
-shape depends on how far the redesign pushes.*
+  ├─ ✓ Grouped views (by project / by tag) & Projects page [decided]
+  ├─ ✓ Modals — edit / kill / rename (MV) [decided]
+  │  └─ ✓ Edit-modal interaction model (two-mode; immediate persist) [decided]
+  ├─ ✓ Preview page (MV cyan chrome) [decided]
+  ├─ ✓ Theming (tokenise in-scope · user-override deferred/logged) [decided]
+  ├─ ✓ Filtering (`/` live, bright-orange query) [decided]
+  ├─ ✓ Interaction conventions (focus/edit · per-page help · modals on blank) [decided]
+  ├─ ✓ Animation & performance (minimal; idle-zero tick) [decided]
+  ├─ ✓ Scope boundary (v1 vs deferred) [decided]
+  ├─ → Design reference & visual verification (Paper map + capture harness) [converging]
+  └─ ○ Remaining UX states (empty · flash · no-tags signpost · command-pending) [pending]
 
 ---
 
@@ -791,6 +790,69 @@ pattern, page-specific content.
 When a modal opens, the page behind is **cleared to a blank screen** (modal
 centred on black) rather than overlaying the dimmed list — the user finds this
 cleaner. Our mocks already reflect this.
+
+## Design reference (Paper)
+
+All visual decisions are mocked in the Paper file **"Portal"** (page "Page 1",
+`https://app.paper.design/file/01KVAT8NFHMBDTM4YY6V93R53S`), accessed via the
+`paper` MCP (`get_basic_info` lists artboards; `get_screenshot` captures one by
+id). **Canonical frames** (the decided Modern-Vivid design — the build targets):
+
+- `Sessions — Modern Vivid v2` — flat sessions list (baseline screen)
+- `Sessions — by Project (MV)` · `Sessions — by Tag (MV)` — grouping views
+- `Sessions — filtering (MV)` — `/` filter active (orange query)
+- `Projects (MV)` — projects page (two-line rows)
+- `Loading 6 — Combined (thick bar)` — loading interstitial
+- `Sessions — Help Modal (?)` — `?` keybindings overlay
+- `Edit Modal — navigate (name)` · `Edit Modal — chip focused` · `Edit Modal —
+  edit in place` — the three edit-modal states
+- `Kill Confirm Modal (MV)` · `Rename Modal (MV)` — confirm / rename
+- `Preview Screen (MV)` — scrollback preview (cyan mode-chrome)
+
+All uniform 860×680, laid out as a 2-row grid (screens row / modals row) below the
+exploration artboards. **Exploration frames** (the five colour directions, loading
+concepts 1–5/7, Modern-Vivid v1) are kept above for reference only — NOT build
+targets. This map is the carrier for spec → planning → implementation/review.
+
+## Visual verification methodology
+
+This redesign is predominantly look-and-feel, so each implementation task needs a
+visual check against its Paper frame. Two layers:
+
+- **Per-task review point (manual):** at each task's end the user inspects the
+  rendered TUI against the named Paper frame. (Standard review gate; carried via
+  the Design-reference map above.)
+- **Programmatic capture — feasible, recommended.** A terminal TUI *can* be
+  screenshotted headlessly. Best-fit first:
+  - **`vhs` (charmbracelet/vhs)** — scripts a headless terminal via a `.tape`
+    (set size · send keys · screenshot → PNG/GIF). Natural fit (Portal is a
+    Bubble Tea / charm app); runs in CI. Drive Portal to a screen, capture a PNG.
+  - **`freeze` (charmbracelet/freeze)** — render a command's output / ANSI to
+    PNG/SVG; good for static frame snapshots.
+  - **`tmux capture-pane -e -p`** — capture the live pane *with* ANSI colour as
+    text (Portal already runs in tmux); cheapest, no image (pipe via `aha` →
+    headless Chromium for a PNG if needed).
+  - **Ghostty** is a terminal *emulator*, not a headless capturer — not the tool;
+    `vhs`/`freeze` are.
+  - **Recommendation:** a small **`vhs`-tape harness** (one tape per canonical
+    screen) so each task self-captures a PNG that the agent/user compares to the
+    Paper frame. Caveat: not pixel-perfect vs Paper (Paper is an HTML
+    approximation; the real terminal uses the user's font/colours) — the check
+    validates **layout, structure, colour-role intent**, which is the review need.
+    Exact harness validated at implementation.
+
+## Remaining UX states (to design — not defer)
+
+Present in code, not yet mocked; decide rather than leave to implementation:
+- **Empty lists** — zero sessions / zero projects: a friendly empty state + hint.
+- **Inline flash** (`flashText`, Sessions) — transient messages (e.g. "session
+  killed externally") between the filter input and the list: define MV colour,
+  placement, auto-clear.
+- **"No tags yet" signpost** (`byTagSignpost`) — by-tag with zero tags:
+  degrade-with-message (not silent flatten): define MV styling.
+- **Command-pending banner** (Projects, `commandPending`) — "Select project to
+  run: <cmd>": define MV styling.
+Proposed: mock these (quick) before locking the spec, for consistency.
 
 ## Summary
 
