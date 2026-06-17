@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (24 subtopics — 8 decided · 8 converging · 2 exploring · 6 pending)
+  Discussion Map — ZX Spectrum TUI (26 subtopics — 8 decided · 10 converging · 2 exploring · 6 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -72,6 +72,8 @@ improvement worth shipping."
   │  └─ → Edit-modal interaction model (fields/chips/contextual footer) [converging]
   ├─ → Preview page (MV cyan chrome) [converging]
   ├─ ◐ Theming system (tokenise in-scope; user-override = own topic) [exploring]
+  ├─ → Filtering (`/` live, bright-orange query) [converging]
+  ├─ → Interaction conventions (focus/edit · per-page help · modals on blank) [converging]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
 
@@ -744,6 +746,49 @@ off-the-shelf component kit).
 new UI is the header block + chips (small) and the `?` help modal (moderate). The
 real *engineering* chunk is the startup flip, which is plumbing, not components.
 No widget framework needed.
+
+## Interaction conventions (cross-cutting)
+
+### Focus vs edit — unified visual language
+Two states, identical grammar across the Name field, chips, and any editable
+element:
+- **Focused** (navigate): **outline only** — a violet ring, no fill change.
+  (Fixed: the chip-focused mock previously used a brighter fill, which read as
+  edit; now outline-only.) A focused **chip** also shows a dim `✕` to signal `x`
+  removes it.
+- **Editing** (cursor live): **filled violet background + cursor**, plus a
+  `◉ EDIT MODE` indicator in the modal header. The **Name field in edit mode also
+  turns violet-filled** (answering "does the name go purple?" — yes; same
+  treatment as chips). The `✕` is hidden while editing.
+- So: **outline = focused, fill = editing** — unambiguous everywhere.
+
+### Filtering (`/`)
+- `/` opens an **inline filter input** in the section-header row (where the
+  `/ to filter` hint sits). The query renders in a **bright-orange** accent
+  (`#FF9E64` — new "filter/search" role token). The list filters **live as you
+  type**; `↵` accepts (stay on filtered results, navigate); `Esc` clears. A
+  `N matches` count shows at the right. Mocked: `Sessions — filtering (MV)`.
+- The `/ to filter` hint shows top-right **consistently** on every session view
+  (Flat / by Project / by Tag) and Projects — filtering works on all of them.
+  `s switch view` lives in the **footer only** (removed from the header to avoid
+  duplicating the footer).
+
+### Page model — views vs pages
+- **Sessions is ONE page with three grouping *views*** (Flat / by Project / by
+  Tag), cycled by `s` — the same data pivoted, not separate pages.
+- **Projects is a separate *page*** (different data + keymap), reached by `p`/`x`.
+- **Preview** is an overlay screen (`Space`); **Loading** is the startup screen.
+This taxonomy frames the spec's structure.
+
+### `?` help — per-page contextual
+`?` is bound on every page (not modals) and opens a help modal listing **that
+page's** keymap (Sessions / Projects / Preview keymaps differ). One overlay
+pattern, page-specific content.
+
+### Modals render on a blank screen
+When a modal opens, the page behind is **cleared to a blank screen** (modal
+centred on black) rather than overlaying the dimmed list — the user finds this
+cleaner. Our mocks already reflect this.
 
 ## Summary
 
