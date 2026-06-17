@@ -48,11 +48,11 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (12 subtopics — 1 decided · 1 exploring · 10 pending)
+  Discussion Map — ZX Spectrum TUI (12 subtopics — 2 decided · 1 exploring · 9 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
-  ├─ ◐ Direction & ambition [exploring]
-  ├─ ○ Colour palette (adaptive accents) [pending]
+  ├─ ✓ Direction & ambition [decided]
+  ├─ ◐ Colour palette (adaptive accents) [exploring]
   ├─ ○ PORTAL logo [pending]
   ├─ ○ Borders & framing [pending]
   ├─ ○ Spaced uppercase headers [pending]
@@ -121,8 +121,25 @@ pushes — from a bold distinctive retro identity down to a light tasteful accen
 pass (or bail). This is a taste/ambition fork that shapes every contingent
 subtopic below it.
 
-### Journey
-*(in progress — presenting three concrete directions for the user to react to)*
+### Options Considered
+Three ambition levels presented (all theme-adaptive):
+**1 — Retro-arcade:** keep the Spectrum soul but adaptive — block-letter logo,
+chunky framed border, spaced uppercase headers, playful "HI-SCORE" status bar,
+vibrant multi-colour accents. Bold/distinctive/nostalgic. Risk: retro can read
+gimmicky, age faster; block fonts + spaced caps cost screen space.
+**2 — Modern-polished:** clean/confident (lazygit/k9s/charm-tool vibe) — one or
+two restrained accents, refined borders, subtle row highlight, tidy status bar.
+Timeless, legible, less "fun".
+**3 — Minimal accent:** lightest touch — accent colour + nicer cursor + a little
+border polish on today's layout. Low risk, bail-friendly.
+
+### Decision
+**Direction 1 — Retro-arcade (adaptive).** The user wants a real, distinctive
+identity, not a safe accent pass. Spectrum soul retained as flavour; executed
+with adaptive colours so it respects terminal themes (per the canvas decision).
+Confidence: **high** (explicit pick). This sets the bar for every contingent
+subtopic: bold and characterful, but still readable — the open risk to manage is
+retro tipping into gimmicky/noisy.
 
 ---
 
