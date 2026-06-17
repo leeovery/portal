@@ -364,17 +364,17 @@ ANSI colours.
   contrast floor still governs legibility). Matches existing repo practice
   (`previewBorderColor`). Confidence: high.
 
-### Narrow / short terminal behaviour — pending
-Chunky chrome (block logo, framing, spaced headers, status bar) competes for rows
-and columns that may not exist in a small tmux split. Needs a minimum supported
-size and a degrade strategy (e.g. drop the logo below N columns). Layout concern
-— does NOT block the colour mockups; take it with the chrome subtopics.
+### Narrow / short terminal behaviour — DECIDED
+Define a **minimum supported size**; below it, **degrade** rather than break: drop
+the logo → compact wordmark, drop the right-side header hint, truncate names with
+`…`, and let height drive pagination. **Never overflow** (respect the
+one-row-per-delegate pagination invariant). Exact thresholds pinned in spec.
 
-### NO_COLOR / monochrome — pending
-A colour-led identity needs defined behaviour when colour is suppressed
-(`NO_COLOR` convention), unavailable (monochrome terminal), or piped/redirected,
-and how state (e.g. attached) is still conveyed without colour. Degradation
-concern — does NOT block the colour mockups; settle later.
+### NO_COLOR / monochrome — DECIDED
+**Honour `NO_COLOR`** (and monochrome terminals): render colourless, leaning on
+the **glyph-backed state** we already mandated (`●` attached, `▌` selector, `✕`,
+spaced headers) plus bold/dim attributes. Because state is **never colour-only**,
+the UI stays fully usable without colour.
 
 ### AdaptiveColor binary classification — pending (review-002 F2/F6)
 `AdaptiveColor` makes a **binary** light/dark choice from terminal-bg detection;
@@ -387,8 +387,11 @@ the real world is continuous. Two genuine risks:
   the *dark* variant on a light bg — a cross-pairing the floor never tests.
   Acute because Portal runs **inside tmux**, where bg-detection passthrough is
   unreliable.
-Mitigations to weigh in spec/planning: choose variants that also survive mid-tone;
-a manual `--theme` / light-dark override; detect-and-degrade. Open.
+**DECIDED:** choose token variants that also hold up on mid-tone backgrounds
+where possible; the eventual manual `--theme` / light-dark override (the deferred
+user-theme initiative) is the ultimate escape hatch; exotic backgrounds are
+**best-effort**. Detection-miss cross-pairing is accepted as best-effort, mitigated
+by the override.
 
 ### Review-002 dispositions (for the record)
 F3 in-terminal validation → folded into the Judging & bail gate (step 3).
@@ -692,17 +695,27 @@ and doubles as a "what's happening" surface if restore is slow.
 ## Keybindings (audited against code)
 
 Per-screen keymap, verified in `internal/tui/model.go` + `pagepreview.go`:
-- **Sessions (flat & grouped):** `↑↓`/`j`/`k` nav · `PgUp`/`PgDn` page · `g`/`Home`
-  start · `G`/`End` end · `/` filter · `Enter` attach · `Space` preview · `s`
-  cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd ·
-  `p`/`x` → Projects · `q` quit · `Esc` clear-filter/quit. Grouping adds no keys.
-- **Projects:** nav/page/start/end · `/` filter · `Enter` new-session-from-project
-  · `s`/`x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
-- **Preview:** `↑↓`/`PgUp`/`PgDn`/`Ctrl+U`/`Ctrl+D`/`j`/`k` scroll · `Home`/`End`
-  top/bottom · `Tab` next pane · `]` next window · `[` prev window · `Enter`
-  attach (this pane) · `Space`/`Esc` back.
+- **Sessions (flat & grouped):** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/`
+  filter · `Enter` attach · `Space` preview · `s` cycle grouping
+  (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd · `p`/`x` →
+  Projects · `q` quit · `Esc` clear-filter/quit. Grouping adds no keys.
+- **Projects:** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter`
+  new-session-from-project · `s`/`x` → Sessions · `e` edit · `d` delete ·
+  `n` new-in-cwd · `q` quit · `Esc`.
+- **Preview:** `↑`/`↓` + `Ctrl+↑`/`Ctrl+↓` scroll · `Tab` next pane · `]`/`[`
+  window · `Enter` attach (this pane) · `Space`/`Esc` back.
 - **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename
   `Enter`/`Esc` · edit `Tab` cycle / `Enter` add-or-save / `x` remove / `Esc`.
+
+**Keymap REVISED (final-review F1 — real collision fixed):** the original bound
+`k` to **both** vim-up nav AND kill. Resolved by **dropping all vim aliases
+(`h`/`j`/`k`/`l`, `g`/`G`) and `PgUp`/`PgDn`/`Home`/`End`** — navigation is now
+**arrows only** (`↑`/`↓` move, `Ctrl+↑`/`Ctrl+↓` page), with `/` filter as the
+fast-find (filtering, not jump-to-extremes, is how you find a session). That frees
+lowercase **`k` = kill** — the tmux-accurate verb, kept distinct from Projects'
+`d` = delete (which removes a project *record*, a different operation). **No
+uppercase bindings anywhere.** Caveat: confirm `Ctrl+↑/↓` isn't swallowed by the
+terminal/tmux during in-terminal validation; fall back to another page key if so.
 
 **Key finding:** there is **no `?` help binding today** — `?` is actively
 *swallowed* (so bubbles/list doesn't toggle its own help). The redesign's `?` help
@@ -895,6 +908,38 @@ screen keeps the **full Projects chrome** (green `Projects` header + `/ to
 filter`) with the banner on top — not a stripped page. Consistent and
 terminal-cheap. (Lists in these mocks use realistic Portal session names per the
 naming convention.)
+
+## Final-review dispositions (set 003)
+
+- **F1 (k collision) — DECIDED:** see Keybindings → "Keymap REVISED". `k` = kill;
+  nav = arrows + `Ctrl+↑/↓`; no vim aliases; no uppercase.
+- **F2 (Map vs body inconsistency) — FIXED:** the robustness body sections now read
+  DECIDED (narrow-degrade · honour NO_COLOR · AdaptiveColor best-effort + override),
+  consistent with the Map.
+- **F3 / F6 (palette hexes + light variants) — SPEC TASK:** the discussion fixes
+  the *roles + contrast floor*; the **spec pins the values** — extract exact MV
+  role-token hexes for **both light and dark variants** from the Paper canonical
+  frames (`paper get_jsx` / `get_computed_styles`) and **record the contrast-floor
+  pass (≥4.5:1 text / 3:1 large·UI) for each** vs white and black.
+- **F4 (Projects / Preview help content) — RESOLVED:** each page's `?` modal lists
+  **that page's audited keymap** (above). Sessions help is mocked; Projects/Preview
+  help = their keymaps, mocked at implementation.
+- **F5 (cold-path flip error / warning contract) — see open question below.**
+- **F7 (loading step mapping) — SPEC TASK:** spec maps the **11 real bootstrap
+  steps → the 5 friendly tick-list labels** (each label spans ≥1 real step),
+  defines bar weighting, and places the per-step `tea.Msg` emitters; the bar
+  advances on every real step, the active label = the friendly group it falls in.
+- **F8 (vhs verification) — DECIDED:** the `vhs`-tape harness is an **in-scope dev
+  aid** — tapes committed + runnable (not a strict pixel-diff CI gate); **pass =
+  layout / structure / colour-role match** to the Paper frame, agent/user-judged.
+- **F9 (Preview vs blank-modal) — RESOLVED:** Preview is a **full-screen overlay**
+  (its own cyan chrome), **not** a blanked modal; the blank-screen rule applies to
+  **centred modal panels** only. A `?` opened from Preview **overlays** the preview
+  (doesn't blank it).
+- **F10 (flash vs pagination) — DECIDED:** the flash band is **chrome** — when it
+  appears/clears, the list viewport height is **recomputed** (the same recompute
+  the one-row-per-delegate invariant already mandates), so the list never overflows
+  or miscounts rows.
 
 ## Summary
 
