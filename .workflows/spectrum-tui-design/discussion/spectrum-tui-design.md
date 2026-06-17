@@ -767,8 +767,9 @@ element:
 - `/` opens an **inline filter input** in the section-header row (where the
   `/ to filter` hint sits). The query renders in a **bright-orange** accent
   (`#FF9E64` — new "filter/search" role token). The list filters **live as you
-  type**; `↵` accepts (stay on filtered results, navigate); `Esc` clears. A
-  `N matches` count shows at the right. (See the three filter-mode states below.)
+  type**; `↵` accepts (stay on filtered results, navigate); `Esc` clears. **No
+  match-count is shown** — the visible results suffice. (See the three filter-mode
+  states below.)
 - The `/ to filter` hint shows top-right **consistently** on every session view
   (Flat / by Project / by Tag) and Projects — filtering works on all of them.
   `s switch view` lives in the **footer only** (removed from the header to avoid
