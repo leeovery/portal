@@ -296,7 +296,11 @@ The user showed the real Sessions screen. Validated against code (`tmux.Session`
   **deliberately omits it**; the project/tag dimension is surfaced via the `s`
   grouping modes (By Project / By Tag). The earlier "path column" was both
   fabricated and redundant — **removed**.
-- **Row content (matches code):** name · window count · `● attached`.
+- **Row content & layout (matches code):** name takes the **full-width left
+  column** (flex); window-count and `● attached` are **fixed-width trailing
+  slots pinned right**, each left-aligned so the counts line up and the lime
+  bullets line up vertically down the list. (User preferred this over inline
+  metadata.) Flat row = name only re: project — confirmed, no project column.
 - **Pagination:** `bubbles/list`'s built-in paginator (height-driven dots). Mock
   now shows **centred dots** above the footer; list lengthened so paging is
   visible.
