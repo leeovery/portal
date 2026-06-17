@@ -48,14 +48,14 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (17 subtopics — 3 decided · 2 exploring · 12 pending)
+  Discussion Map — ZX Spectrum TUI (17 subtopics — 4 decided · 2 exploring · 11 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition [decided]
   ├─ ◐ Colour palette (adaptive accents) [exploring]
   ├─ ◐ Terminal-environment robustness [exploring]
   │  ├─ ✓ Contrast floor [decided]
-  │  ├─ ○ Colour-capability ladder (truecolor/256/16) [pending]
+  │  ├─ ✓ Colour-capability ladder (truecolor/256/16) [decided]
   │  ├─ ○ Narrow / short terminal behaviour [pending]
   │  └─ ○ NO_COLOR / monochrome degradation [pending]
   ├─ ○ PORTAL logo [pending]
@@ -243,13 +243,17 @@ judge looks.
 - **Rationale:** turns "is it readable?" from hope into pass/fail; stops a
   mock-approved direction failing on a real user's theme. Confidence: high.
 
-### Colour-capability ladder (truecolor / 256 / 16) — pending
-Absorbs the earlier deferred palette sub-question. How the palette behaves across
-the capability ladder: truecolor terminals, 256-colour, 16-colour,
-`TERM=dumb`/redirected. Two framings to reconcile: **impose exact hues** via
-truecolor `AdaptiveColor` (distinctive identity; Lipgloss auto-downsamples) vs
-**inherit the user's scheme** via the 16 named ANSI colours ("their reds are our
-reds"; max respect, but no identity). Currently exploring.
+### Colour-capability ladder (truecolor / 256 / 16) — DECIDED
+**Impose our own exact hues via truecolor `AdaptiveColor`**, not inherit the 16
+ANSI colours.
+- **Rationale:** a recognisable identity needs consistent hues across machines;
+  inheriting the user's palette means no identity and possible clashes.
+  Respecting the *background* (decided) plus honouring `NO_COLOR` (parked)
+  already covers "don't fight the user" — imposing *hues* doesn't conflict with
+  that distinction. Lipgloss/termenv auto-downsamples to 256/16 on weaker
+  terminals; we accept graceful degradation (a hue may approximate, but the
+  contrast floor still governs legibility). Matches existing repo practice
+  (`previewBorderColor`). Confidence: high.
 
 ### Narrow / short terminal behaviour — pending
 Chunky chrome (block logo, framing, spaced headers, status bar) competes for rows
@@ -289,7 +293,8 @@ concern — does NOT block the colour mockups; settle later.
 ### Current State
 - **Decided:** respect terminal theme / no forced canvas / adaptive colours;
   retro-arcade direction; no rainbow motif; contrast floor (WCAG AA both
-  extremes) as a hard mockup gate.
+  extremes) as a hard mockup gate; truecolor adaptive hues (impose, don't
+  inherit), graceful downsample.
 - **Exploring:** positive colour direction (via Paper mockups);
   terminal-environment robustness (capability ladder, narrow-terminal,
   NO_COLOR still open).
