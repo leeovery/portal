@@ -118,6 +118,40 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 ---
 
+## 3. Visual Identity (shared chrome)
+
+These elements form the shared frame around every page (Sessions, Projects, Preview, Loading); per-page specifics are in §4–§10. Measurements are the Paper-frame reference values — exact cell mapping is finalised at implementation (terminal cells, not web px).
+
+### 3.1 Header — wordmark + caret + subtitle + rule
+- **Wordmark:** `PORTAL` in **uppercase, letter-spaced** (≈0.26em), heavy weight, `text.primary`. Decorative — exempt from the text-contrast ratio but must stay visible.
+- **Caret:** a solid block `▌` in `accent.violet`, immediately right of the wordmark — the one retained retro flourish.
+- **Subtitle:** right-aligned `session manager` in `text.detail`, small + letter-spaced.
+- **Separator rule:** a full-width **2px** rule (`border.separator`) under the header, dividing it from the body.
+- **Narrow degrade:** below the minimum width the wordmark collapses to a compact form and the subtitle drops (per §2.7).
+
+### 3.2 Section header
+Directly under the rule: a **page/mode label** + **count** on the left, an optional hint on the right.
+- Label in `accent.cyan` (Sessions) or `state.green` (Projects); a mode suffix (`— by project` / `— by tag`) in `text.detail`.
+- The count renders at the **same font size** as the label, distinguished by **dim colour** not by being smaller (shares the baseline/cap-height): `state.green` for the Sessions count, `text.detail` for the Projects count.
+- Right side carries the persistent `/ to filter` hint (`text.detail`) on every filterable view; `s switch view` lives in the footer only (never duplicated here).
+
+### 3.3 Selection — thick violet left-bar
+The selected row is marked by a **thick block `▌` in `accent.violet`** pinned at the far-left (a full 2-cell column), over a subtle **`bg.selection`** row tint; the selected name renders in `text.on-selection`. Unselected rows have no bar and no tint. This is the single, consistent selection signal across Sessions, grouped views, and Projects (Projects uses a full-height bar spanning its two-line row — §6).
+
+### 3.4 Footer — condensed keymap + `?` help
+A single bottom row above a **1px** top rule (`border.footer`):
+- Shows only the **core** keys for the page (e.g. Sessions: `↑↓ navigate · ⏎ attach · / filter · ␣ preview`) plus a right-aligned `? help`.
+- **Key glyphs** render in `accent.blue`, their **labels** in `text.detail`, the `?` glyph in `accent.violet`.
+- The **full** keymap lives in the `?` help modal (§8), per page. This solves the footer-space problem (the old three-column footer couldn't fit every bind).
+
+### 3.5 Pagination
+`bubbles/list`'s built-in height-driven paginator renders as **centred dots** above the footer: the active page dot in `accent.violet`, inactive dots in `text.faint`.
+
+### 3.6 Borders & framing
+**No full-screen frame.** Structure is carried by the two horizontal rules (header separator, footer rule) plus per-element treatments (selection tint, modal panels, preview chrome) — never a box around the whole UI. This keeps the foreground-only canvas honest (§1) and avoids full-bleed background fills.
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
