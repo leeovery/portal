@@ -2,18 +2,16 @@
 
 ## Context
 
-Portal's TUI is currently functional but personality-free. The proposal is a
-single coherent retro visual pass giving it a ZX Spectrum aesthetic: bold
-saturated rainbow primaries on a black canvas, a block-character `PORTAL` logo
-(each letter a different colour), rainbow gradient separator lines, a coloured
-block cursor (`▌`) that cycles colours on navigation, spaced uppercase 8-bit
-headers (`S E S S I O N S`), heavy/double ZX-style borders framing the TUI, a
-Manic Miner-inspired status bar, a small rainbow block accent on modals, and a
-loading interstitial with the logo and a rainbow-block progress bar.
+Portal's TUI is currently functional but personality-free. The seed proposed a
+ZX Spectrum aesthetic (rainbow primaries on black, block logo, chunky borders,
+spaced uppercase headers, cycling block cursor, Manic Miner-style status bar).
 
-Discovery settled this as **one feature shipped as a unit** — the constituent
-pieces all serve the one identity and do not split into independent
-deliverables.
+**Reframed in session (2026-06-17):** the user widened the goal. The real want
+is *"make Portal's UI more colourful / exciting / nicer to use from a design
+perspective,"* **without going against the user's terminal preferences.** ZX
+Spectrum is now treated as *inspiration, not a literal spec.* Bailing on the
+redesign entirely is explicitly on the table — the bar is "is this actually an
+improvement worth shipping."
 
 **Current state (baseline):**
 - No visual identity. Pink cursor (`lipgloss.Color("212")`), grey detail text
@@ -34,8 +32,10 @@ deliverables.
 
 - Seed: `seeds/2026-03-19-spectrum-tui-design.md` (inbox:idea)
 - Discovery: `discovery/session-001.md`
-- Stack: Bubble Tea (TUI) + Lipgloss (styling) — both support terminal colours,
-  block characters, borders, and tick-based animation.
+- Prior art in-repo: `preview-visual-distinction` spec established
+  `AdaptiveColor` usage + manual border-row composition in `pagepreview.go`.
+- Stack: Bubble Tea (TUI) + Lipgloss (styling) — colours, block characters,
+  borders, tick-based animation all supported.
 
 ## Discussion Map
 
@@ -48,42 +48,99 @@ deliverables.
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (11 subtopics, all pending)
+  Discussion Map — ZX Spectrum TUI (12 subtopics — 1 decided · 1 exploring · 10 pending)
 
-  ├─ ○ Black-canvas assumption & terminal theming [pending]
-  ├─ ○ Colour palette & accessibility [pending]
-  ├─ ○ PORTAL block-character logo [pending]
-  ├─ ○ Borders & whole-TUI framing [pending]
+  ┌─ ✓ Terminal theming & canvas ownership [decided]
+  ├─ ◐ Direction & ambition [exploring]
+  ├─ ○ Colour palette (adaptive accents) [pending]
+  ├─ ○ PORTAL logo [pending]
+  ├─ ○ Borders & framing [pending]
   ├─ ○ Spaced uppercase headers [pending]
-  ├─ ○ Cycling block cursor [pending]
-  ├─ ○ Manic Miner status bar [pending]
+  ├─ ○ Cursor & selection treatment [pending]
+  ├─ ○ Status bar [pending]
   ├─ ○ Loading interstitial [pending]
-  ├─ ○ Modal rainbow accent [pending]
-  ├─ ○ Animation infrastructure & performance [pending]
+  ├─ ○ Modal accent [pending]
+  ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
+
+*Subtopics 4–11 are contingent on the Direction & ambition decision — their
+shape depends on how far the redesign pushes.*
 
 ---
 
-*Subtopics are documented below as they reach `decided` or accumulate enough
-exploration to capture.*
+## Terminal theming & canvas ownership
+
+### Context
+The ZX Spectrum identity is defined by bright saturated colour on a *black
+canvas*. A TUI doesn't own its background by default — Lipgloss paints
+foreground colour onto the terminal's existing background. So the literal
+aesthetic forces a choice: does Portal paint its own black canvas, or adapt to
+the terminal?
+
+### Options Considered
+**A — Own the canvas:** paint a black backdrop across the full alt-screen;
+aesthetic identical everywhere.
+- Pros: literal Spectrum look guaranteed on any terminal.
+- Cons: overrides light-terminal users' deliberate themes; full-bleed background
+  painting must fill *every* cell or the terminal bg leaks at the seams.
+
+**B — Adapt to the canvas:** `AdaptiveColor` (light/dark variants), respect the
+terminal background.
+- Pros: plays nice with the user's theme; reuses the in-repo
+  `previewBorderColor` pattern.
+- Cons: cannot be literal "rainbow on pure black" on a light terminal.
+
+### Journey
+Opened arguing for **A** — the identity *is* the black canvas, and adapting felt
+like a false comfort that trades the feature's whole reason for existing in
+order to stay polite. The user rejected the premise: they will not override
+user preferences, and — more importantly — reframed the goal away from literal
+Spectrum toward general "more colourful / nicer" with Spectrum as inspiration.
+That collapses the A-vs-B tension entirely: if literal rainbow-on-black isn't a
+hard requirement, there is no reason to fight the terminal. Key realisation that
+unlocked it: the Spectrum proposal's *elements* (logo, borders, spaced headers,
+status bar, cursor, loading screen) are structure/typography and are
+theme-agnostic — only the literal pure-black colour scheme needs canvas
+ownership.
+
+### Decision
+**Respect the terminal background. Do NOT force a black canvas.** Use adaptive
+accent colours (light/dark variants) so the redesign works on any terminal
+theme. Drops literal "bright rainbow on pure black" as a goal; keeps everything
+else viable. Confidence: **high** (explicit user steer). Consequence: "Spectrum"
+is now inspiration/flavour, not a literal spec — carried into Direction &
+ambition.
+
+---
+
+## Direction & ambition
+
+### Context
+With the canvas decision made, the open question is *how far* the redesign
+pushes — from a bold distinctive retro identity down to a light tasteful accent
+pass (or bail). This is a taste/ambition fork that shapes every contingent
+subtopic below it.
+
+### Journey
+*(in progress — presenting three concrete directions for the user to react to)*
 
 ---
 
 ## Summary
 
 ### Key Insights
-
-*(to be populated as the discussion progresses)*
+1. The Spectrum proposal separates cleanly into a **colour scheme** (the only
+   preference-fighting part — dropped) and **structure/typography** (logo,
+   borders, headers, status bar, cursor, loading — theme-agnostic, kept). You
+   get most of the "exciting" without owning the canvas.
 
 ### Open Threads
-
-- Black-background assumption across terminal themes flagged in discovery as the
-  primary validation question.
-- Animated cycling-colour border noted as possible-but-likely-overkill.
+- Bail is explicitly acceptable if the redesign doesn't earn its place.
+- Animated cycling-colour border noted in seed as possible-but-likely-overkill.
 
 ### Current State
-
-- Nothing decided yet — discussion just initialized.
+- **Decided:** respect terminal theme, no forced canvas, adaptive colours.
+- **Exploring:** overall direction & ambition level.
 
 ## Triage
 
