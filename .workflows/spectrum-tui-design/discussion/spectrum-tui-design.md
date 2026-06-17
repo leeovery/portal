@@ -782,14 +782,14 @@ mock wrongly showed an active cursor AND a selected row; corrected):
    sits at the end of the typed text**; the list updates live; **no list row is
    selected/cursored**. `↵` *or* `↓` **commits/locks the filter** → switches to
    list-active. `Esc` clears.
-2. **List-active** (browsing the filtered results): the input row stays visible
-   (locked query, **no cursor**) — proposed with a **faint orange background** on
-   the input row to signal "this list is filtered"; arrows move the selection;
-   `↵` **attaches**; `Esc` clears and returns.
+2. **List-active** (browsing the filtered results): the input row stays visible —
+   the **orange query text** (locked, **no cursor**) is what signals the list is
+   filtered; arrows move the selection; `↵` **attaches**; `Esc` clears and
+   returns. (No background tint — tried a faint orange and it read oddly.)
 **Boundary:** `↵` or `↓` commits input-active → list-active; `Esc` clears from
 either. Mocked (locks the boundary): `Filtering — input active (MV)` (orange
 query + cursor, **no** row selected), `Filtering — no matches (MV)` (over-filtered
-empty state), `Filtering — list-active (MV)` (**faint-orange** locked input band,
+empty state), `Filtering — list-active (MV)` (locked orange query,
 no cursor, **row selected**). Nailing this prevents implementation
 ambiguity / unclean state / bugs.
 
