@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-06-17
+
+🔧 Changed
+
+- Release workflow is now delegated to the `mint` CLI — run `brew install leeovery/tools/mint` if the `release` script reports mint is missing.
+- GoReleaser is set to `keep-existing` release mode so binary uploads no longer overwrite a release body written by other tooling.
+
+🗑️ Removed
+
+- Deleted the inline bash release script (~350 lines) — replaced by the `mint release` delegation above.
+- Removed the `BUG-resume-hooks-lost-on-server-restart.md` tracking document from the repository.
+
 ## [0.7.2] - 2026-06-08
 
 - Preserve tag case in `NormaliseTag` (trim only, no lower-casing); tag matching is now case-sensitive, so "Work"/"work" are distinct tags and By-Tag headings
