@@ -394,15 +394,47 @@ with Sessions.
 
 All terminal-faithful (block/box/braille glyphs, flat colour), neutral black.
 
-### Feasibility flag (juice vs squeeze)
-Determinate concepts (1 block-fill, 2 live-checklist, 5 percentage) need
-**progress reporting from bootstrap** to the loading page — count / step /
-percent. Today bootstrap runs its 11 steps and only returns accumulated warnings
-to the loading page (drained via `LoadingMinElapsedMsg`); it does **not** stream
-per-step or per-session progress. So determinate progress = new plumbing
-(validate scope before committing). Indeterminate concepts (3 minimal line as a
-sweep, 4 spinner) need only a looping animation — far cheaper. Animation cost /
-non-TTY behaviour ties to the "Animation infra & performance" subtopic.
+### Feasibility — INVESTIGATED (route-changing)
+Traced the bootstrap → loading-page flow (`cmd/root.go` `PersistentPreRunE` →
+`cmd/open.go` TUI launch → `internal/tui/model.go` loading lifecycle →
+`internal/restore`):
+
+- **Crux:** the full 11-step bootstrap (incl. step 6 Restore) runs **synchronously
+  to completion in `PersistentPreRunE`, BEFORE the TUI launches**
+  (`cmd/root.go:157`, `cmd/open.go:529`). By the time the loading page renders,
+  **restore is already 100% done**. The loading page is a **cosmetic 1.2s pad**
+  (`LoadingMinDuration`): `BootstrapCompleteMsg` fires on the first tick, the
+  page just waits out `LoadingMinElapsedMsg`. No channel/goroutine streams
+  anything from bootstrap to the TUI; warnings are a static post-bootstrap
+  snapshot.
+- **Consequence:** a determinate bar would either flash to 100% instantly (work
+  already done) or be **faked** (a 1.2s animation pretending to be progress —
+  dishonest, and we've been holding to honest mocks). Worse: if a restore is
+  *slow*, the slow part happens **before** the loading page even appears — so the
+  loading page doesn't cover the slow moment at all.
+- **Effort verdict:**
+  - **(a) indeterminate spinner / line-sweep — SMALL** (~30 lines in
+    `viewLoading`; the TUI tick already exists). No bootstrap change.
+  - **(b) determinate percent / N-of-M — LARGE** (4–8h): requires decoupling
+    bootstrap from `PersistentPreRunE`, running it **concurrently** with the TUI,
+    streaming progress via `tea.Msg`/channel, injecting a callback into the
+    restore loop (`restore.go:70-81` has the per-session loop but no emitter),
+    and handling fatal-error + restore/daemon **race** risks. The synchronous
+    design was deliberate (simple error handling; avoids restore/daemon races).
+  - **(c) live step checklist — MEDIUM-LARGE** (3–6h): same concurrency
+    restructure, per-step `tea.Msg` instead of per-session.
+- **Secondary insight:** the concurrency restructure *does* carry a real,
+  separate UX benefit — launching the TUI **immediately** (loading page first)
+  while bootstrap runs behind it would replace the current "frozen terminal
+  during a slow boot" with instant feedback. But that is its own initiative with
+  race risk (cf. the prior slow-open/zombie-session incident), not a sub-task of
+  a visual redesign.
+
+**Recommendation:** for this redesign, go **indeterminate** (concept 3 line-sweep
+or 4 spinner) — cheap, honest, fits Modern-Vivid restraint. Defer
+"determinate progress + concurrent bootstrap" as a **separate future initiative**
+to weigh on its own merits (slow-boot feedback), not bundled here. Juice ≠
+squeeze for a 1.2s cosmetic screen.
 
 ### Notes
 Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
