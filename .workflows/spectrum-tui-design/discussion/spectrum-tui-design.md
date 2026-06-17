@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (22 subtopics — 8 decided · 7 converging · 1 exploring · 6 pending)
+  Discussion Map — ZX Spectrum TUI (24 subtopics — 8 decided · 8 converging · 2 exploring · 6 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -69,7 +69,9 @@ improvement worth shipping."
   ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
   ├─ → Grouped views (by project / by tag) & Projects page [converging]
   ├─ → Modals — edit / kill / rename (MV) [converging]
+  │  └─ → Edit-modal interaction model (fields/chips/contextual footer) [converging]
   ├─ → Preview page (MV cyan chrome) [converging]
+  ├─ ◐ Theming system (tokenise in-scope; user-override = own topic) [exploring]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
 
@@ -457,6 +459,57 @@ per-page.
   (`↹ pane · ⏎ attach · ␣ back`); captured pane content rendered dim (read-only).
   Artboard: `Preview Screen (MV)`. (This restyles the existing chrome; the
   captured content itself is the real pane output, untouched.)
+
+### Edit modal — interaction model (proposed, mocked)
+The original modal's focus/keymap was ambiguous; worked it through:
+- **Field traversal:** `Tab`/`Shift+Tab` cycle the three fields Name → Aliases →
+  Tags → Name. **`←/→`** move *within* a chip field (across chips and onto the
+  trailing `+ add` slot).
+- **Tab into Aliases/Tags lands on the `+ add` slot** (input ready) — adding is
+  the common action; `←` reaches the chips. So `Tab` from Aliases → Tags (next
+  field); `→` is what reaches the next chip (e.g. fapi → v1).
+- **Chip focused → `x` removes.** **No in-place edit** — change a chip by
+  remove + re-add (short tokens; an edit sub-mode isn't worth it). No
+  cursor-in-chip, no nested modal.
+- **`+ add` is an inline input slot** (not a button / popup / pre-spawned empty
+  chip): type, `↵` materialises the typed text as a chip and clears for the next.
+- **`↵`** = commit the in-progress chip if an add-slot is being typed, else
+  **save & close**. **`Esc`** = cancel & close.
+- **Contextual footer** (the key fix): Name → `↵ save · ⇥ next field · esc`;
+  chip → `✕ remove · ←→ move · ⇥ next field · esc`; add-slot → `↵ add · ←→ move ·
+  ⇥ next field · esc`.
+- **Persistence — PROPOSED CHANGE:** make all three fields **batch** (Enter saves
+  all, Esc discards all) — the standard predictable modal contract — replacing
+  today's asymmetric "tags persist live" behaviour (CLAUDE.md). Flagged for
+  explicit confirm.
+- Mocked states: `Edit Project Modal (MV)` (Name focused), `Edit Modal — chip
+  focused`, `Edit Modal — adding tag`. Same contextual-footer principle applies to
+  the other modals.
+
+## Theming system
+
+### Context
+Raised by the user: rather than hardcoding the new colours, delegate them to a
+**theme** — layout locked by this redesign, colours pulled from named tokens
+(potentially a user-overridable theme file).
+
+### Two levels (proposed split)
+- **In scope for this feature — tokenise.** The redesign is *already* built on a
+  role-token colour layer (primary / detail / state × light/dark — see Colour
+  palette + Implementation feasibility). We structure those as a single named
+  built-in **theme** ("Modern Vivid"): every renderer references **tokens**, not
+  scattered hex. Locks layout, delegates colour. It's the foundation we need
+  anyway — building on tokens makes the app theme-*ready* at near-zero extra cost.
+- **Its own topic/initiative — user-overridable themes.** Loading an external
+  theme file (e.g. `~/.config/portal/theme.{json,toml}`), merge-over-default,
+  **validation** (a user can pick unreadable colours → contrast floor becomes
+  advisory + warn, or clamp), multiple built-in themes, a `theme` setting, docs.
+  Bigger surface; ships independently after the redesign.
+
+### Recommendation
+Build the redesign **token-based** (in scope) so it's theme-ready; **log the
+user-overridable theme system as its own topic/idea** to scope separately.
+Confidence: high on the split.
 
 ## Loading interstitial
 
