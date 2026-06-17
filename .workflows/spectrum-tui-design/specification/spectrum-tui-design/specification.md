@@ -129,6 +129,8 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 These elements form the shared frame around every page (Sessions, Projects, Preview, Loading); per-page specifics are in §4–§10. Measurements are the Paper-frame reference values — exact cell mapping is finalised at implementation (terminal cells, not web px).
 
+> **Reference (Paper):** the shared chrome is exemplified by `Sessions — Modern Vivid v2` (dark) and `Sessions — Modern Vivid (Light)`.
+
 ### 3.1 Header — wordmark + caret + subtitle + rule
 - **Wordmark:** `PORTAL` in **uppercase, letter-spaced** (≈0.26em), heavy weight, `text.primary`. Decorative — exempt from the text-contrast ratio but must stay visible.
 - **Caret:** a solid block `▌` in `accent.violet`, immediately right of the wordmark — the one retained retro flourish.
@@ -163,6 +165,8 @@ A single bottom row above a **1px** top rule (`border.footer`):
 
 The default Sessions view (mode **Flat**) and the baseline every other view derives from. `s` cycles Flat → by Project → by Tag (§5); the active mode shows in the section header.
 
+> **Reference (Paper):** `Sessions — Modern Vivid v2`.
+
 ### 4.1 Row anatomy
 Each session is **one delegate line** — the load-bearing pagination invariant (every list row is exactly one line). Layout:
 - **Name** — full-width **left column (flex)**, `text.primary` (selected: `text.on-selection` over the `bg.selection` tint + violet bar). Names are `{project}-{nanoid}` or arbitrary renamed strings (variable length, may contain spaces); over-long names **truncate with `…`** (§2.7). The flat row shows **name only** — no project/path column (that dimension is served by the grouping modes, §5).
@@ -182,6 +186,8 @@ A single violet left-bar + tint marks the cursor row (§3.3). The cursor never l
 ## 5. Sessions — Grouped views (by Project / by Tag)
 
 > **Existing behaviour — preserved (reskin).** The grouping *machinery* — the `s` cycle, the `HeaderItem` model, Pattern A/B, the catch-alls, cursor-skip, directory resolution, tag anchoring, and mode persistence — is **already implemented**. The only change here is the **MV visual treatment** of headings and rows (§5.1); §5.2–§5.5 record the existing logic the styling consumes, as constraints to preserve — not to rebuild.
+>
+> **Reference (Paper):** `Sessions — by Project (MV)` · `Sessions — by Tag (MV)`.
 
 `s` cycles the Sessions page through three **views of the same data**: Flat → **by Project** → **by Tag** → Flat. The cycle is **unconditional** (always includes by Tag, even with zero tags or zero sessions). The active view shows in the section header (`Sessions — by project` / `— by tag`); the footer adds an `s switch view` hint. Pressing `s` resets the paginator to page 1. The last-used view **persists** in `prefs.json` (best-effort; failure non-fatal). While the `/` filter is focused, `s` is a literal filter character.
 
@@ -205,6 +211,30 @@ Each live session maps to a directory via the **`@portal-dir`** session user-opt
 
 ### 5.5 Tags are directory-anchored (v1)
 Tags live on the **project record** (not per session). A session's effective tags = its directory's tags, looked up **live at grouped-render time**. Tags are managed only in the projects edit modal (§8) — never per session, no CLI. (Deferred: per-session tags, live-grouped filtering, tag exclusion — §16.)
+
+---
+
+## 6. Projects page
+
+> **Existing behaviour — preserved (reskin).** The Projects page, its keymap, and project CRUD already exist; this section restyles them in MV. Behaviour stays identical.
+>
+> **Reference (Paper):** `Projects (MV)`.
+
+A **separate page** (different data + keymap), reached by `p`/`x` from Sessions; `s`/`x` returns. Same shared chrome (§3): PORTAL header + separator, pagination, condensed footer.
+
+### 6.1 Section header
+`Projects` (`state.green`) + count (`text.detail`) on the left; the `/ to filter` hint on the right.
+
+### 6.2 Two-line rows
+Each project is a **two-line row** (uniform height, so `bubbles/list` height-driven pagination stays exact):
+- **Line 1 — name** in `text.primary` (heavy).
+- **Line 2 — path** in `text.detail` (dim).
+- **Selected:** a **full-height `accent.violet` left bar** (a column of coloured cells spanning **both** lines) + `bg.selection` tint; the name becomes `text.on-selection`, the path `text.muted-bright`.
+
+An empty list shows the empty projects state (§11.1).
+
+### 6.3 Footer (project keymap)
+Condensed: `⏎ new session · s sessions · e edit · / filter · ? help`. The **full** set — `d delete`, `n new in cwd`, navigation — lives in the per-page `?` help modal (§8).
 
 ---
 
