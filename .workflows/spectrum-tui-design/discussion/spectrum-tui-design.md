@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (21 subtopics — 8 decided · 5 converging · 1 exploring · 7 pending)
+  Discussion Map — ZX Spectrum TUI (22 subtopics — 8 decided · 7 converging · 1 exploring · 6 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -68,7 +68,8 @@ improvement worth shipping."
   ├─ ✓ Loading interstitial (combined: header + thick bar + tick-list) [decided]
   ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
   ├─ → Grouped views (by project / by tag) & Projects page [converging]
-  ├─ ○ Modal accent [pending]
+  ├─ → Modals — edit / kill / rename (MV) [converging]
+  ├─ → Preview page (MV cyan chrome) [converging]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
 
@@ -427,6 +428,35 @@ the `?` modal. Artboard: `Projects (MV)`.
   the Sessions variant is mocked so far.
 - Project-row left bar is a 4px violet **bg column** (terminal-faithful — a column
   of coloured cells), spanning both text lines.
+
+## Modals & preview (MV)
+
+Mocked the remaining surfaces the user flagged (edit modal "really poor", kill
+"not user-friendly", rename "okay but could be better", plus the preview screen).
+All centred panels on a dimmed page (mocked on plain dark); `?` help modal is
+per-page.
+
+- **Edit project modal — full rethink.** Original was cramped with a confusing
+  inline "(none) / Add:". New: a bordered panel with **labelled fields** (NAME /
+  ALIASES / TAGS); the focused field gets a violet input border + caret;
+  aliases/tags render as **removable chips** (`label ✕`; tags tinted green to
+  match the attached/semantic green); a dim `+ add` affordance; footer
+  `↵ save · tab next field · ↵ add chip · ✕ remove`. Honours the live-tag model
+  (Tab cycles fields; Enter adds; ✕/x removes). Artboard: `Edit Project Modal (MV)`.
+- **Kill confirm — destructive red.** `▲ Kill session?` with the session name in
+  **red** (`#F7768E`), `· N window(s)`, a consequence line ("Ends the tmux
+  session and all its panes. Can't be undone."), footer `y kill · n cancel ·
+  esc`. Red is reserved for destructive actions. Artboard: `Kill Confirm Modal (MV)`.
+- **Rename — cleaner.** Labelled `NEW NAME` input (focused violet), a `was:
+  <old name>` context line, footer `↵ rename · esc cancel`. Artboard:
+  `Rename Modal (MV)`.
+- **Preview screen — cyan mode-chrome.** Read-only scrollback in a **cyan-framed**
+  chrome (cyan = "peek mode", deliberately distinct from the violet main UI —
+  preserves the `preview-visual-distinction` mode-signal intent in the new
+  palette). Top bar: `⊙ preview <session> · Window x/y · Pane x/y` + nav hints
+  (`↹ pane · ⏎ attach · ␣ back`); captured pane content rendered dim (read-only).
+  Artboard: `Preview Screen (MV)`. (This restyles the existing chrome; the
+  captured content itself is the real pane output, untouched.)
 
 ## Loading interstitial
 
