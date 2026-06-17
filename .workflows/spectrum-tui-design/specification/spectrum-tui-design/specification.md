@@ -2,6 +2,14 @@
 
 ## Specification
 
+> **⚠ Verification mandate — applies to every task (read before planning).**
+> This is a visual reskin, so correctness is *visual*. **Every plan task MUST carry explicit visual-verification steps in its acceptance criteria** — not just "tests pass". For each task:
+> 1. Add or extend the task's **`vhs` tape** to drive the TUI to the screen/state it changes and write a PNG (`vhs <tape>` — harness + setup in §15).
+> 2. Compare the captured PNG against the task's **named Paper frame** (§15 frame map) for **layout, structure, and colour-role match**.
+> 3. Confirm **behaviour parity** with the pre-reskin implementation (§1 "Reskin, not rebuild").
+>
+> A task is **not done** until its `vhs` capture is produced and checked against its frame. **Planning MUST propagate this into every task it authors.** §15 defines the `vhs` harness, its setup, and the frame map.
+
 ## 1. Overview & Design Direction
 
 ### Goal
@@ -235,6 +243,87 @@ An empty list shows the empty projects state (§11.1).
 
 ### 6.3 Footer (project keymap)
 Condensed: `⏎ new session · s sessions · e edit · / filter · ? help`. The **full** set — `d delete`, `n new in cwd`, navigation — lives in the per-page `?` help modal (§8).
+
+---
+
+## 7. Filtering (`/`)
+
+> **Existing behaviour — preserved (reskin).** Live filtering is `bubbles/list`'s built-in filter; this section restyles the query in MV and **pins the two-mode boundary** so the state machine is unambiguous. The styling + boundary clarity is the change — the filter engine is unchanged.
+>
+> **Reference (Paper):** `Filtering — input active (MV)` · `Filtering — list-active (MV)` · `Filtering — no matches (MV)`.
+
+`/` opens an **inline filter input** in the section-header row (where the `/ to filter` hint sits). The query renders in **`accent.orange`** (with an `accent.orange` `/` prefix); the list filters **live as you type**. The `/ to filter` hint shows top-right **consistently** on every session view (Flat / by Project / by Tag) and Projects. **No match-count is shown** — the visible results suffice. Typing a query flattens grouped views (headings vanish — §5.1).
+
+### 7.1 Two mutually-exclusive modes
+Filtering is **never both at once** — there is never an active input cursor *and* a selected row simultaneously:
+
+1. **Input-active (typing).** Keystrokes go to the query; the **cursor sits at the end of the typed text**; the list updates live; **no list row is selected**. Filter bar reads `/ <query>▌`; footer: `type to filter · ↵/↓ browse results · esc clear`.
+2. **List-active (browsing results).** The input row stays visible — the **locked `accent.orange` query (no cursor)** is what signals the list is filtered; **arrows move the selection**; `↵` attaches; `Esc` clears and returns. No background tint (a faint orange was tried and read oddly). Footer: `↵ attach · ↑↓ navigate · esc clear filter`.
+
+### 7.2 Boundary
+- **`↵` or `↓`** commits input-active → list-active.
+- **`Esc`** clears the filter from either mode (returns to the unfiltered list).
+
+### 7.3 Over-filtered (no matches)
+When the query matches nothing: a centred empty state — a dim `⌀` glyph (`text.faint`), `No sessions match "<query>"` (`text.primary`), hint `⌫ to widen the search · esc to clear the filter` (`text.detail`). Footer stays in input-active form.
+
+---
+
+## 15. Design reference & visual verification
+
+### 15.1 Paper design reference (the frame map)
+All visual decisions are mocked in the Paper file **"Portal"** (`https://app.paper.design/file/01KVAT8NFHMBDTM4YY6V93R53S`, page "Page 1"), via the `paper` MCP. The **canonical frames** (build targets, uniform 860×680):
+
+| Surface | Frame(s) | Spec |
+|---|---|---|
+| Sessions — flat | `Sessions — Modern Vivid v2` · `Sessions — Modern Vivid (Light)` | §4 |
+| Sessions — grouped | `Sessions — by Project (MV)` · `Sessions — by Tag (MV)` | §5 |
+| Filtering | `Filtering — input active (MV)` · `Filtering — list-active (MV)` · `Filtering — no matches (MV)` | §7 |
+| Projects | `Projects (MV)` | §6 |
+| Loading | `Loading 6 — Combined (thick bar)` | §10 |
+| Help modal | `Sessions — Help Modal (?)` | §8 |
+| Edit modal | `Edit Modal — navigate (name)` · `Edit Modal — chip focused` · `Edit Modal — edit in place` | §8 |
+| Kill / Rename | `Kill Confirm Modal (MV)` · `Rename Modal (MV)` | §8 |
+| Preview | `Preview Screen (MV)` | §9 |
+| Edge states | `Sessions — empty (MV)` · `Sessions — inline flash (MV)` · `Sessions — no tags signpost (MV)` · `Projects — command pending (MV)` | §11 |
+
+Exploration frames (the five colour directions, loading concepts, MV v1) are reference-only — **not build targets**. Paper is an HTML approximation: authoritative for **layout, structure, and colour-role**, not pixel-exact rendering (the real terminal uses the user's font + the §2.9 token hexes).
+
+### 15.2 `vhs` capture harness (the prescribed verification tool)
+Visual verification uses **`vhs`** (charmbracelet/vhs) — a headless terminal driven by a `.tape` script that sends keys and writes a PNG. Prescribed for this feature (Portal is a Bubble Tea / charm app; `vhs` is the natural fit and runs in CI).
+
+**Setup (one-time):**
+1. `brew install vhs` — pulls its `ttyd` + `ffmpeg` dependencies. *(Non-Homebrew: `go install github.com/charmbracelet/vhs@latest`, with `ttyd` + `ffmpeg` installed separately.)*
+2. Verify with `vhs --version`.
+
+**Harness structure:**
+- **One `.tape` per canonical screen**, committed under a fixed harness dir (e.g. `testdata/vhs/`).
+- Each tape sets a fixed terminal size, seeds a **known fixture state** (a fixed set of sessions/projects for deterministic captures — fixture-seeding mechanics are a harness implementation detail), launches Portal, sends keys to reach the target screen, then `Screenshot <name>.png`. Example:
+  ```
+  Output sessions.png
+  Set FontFamily "JetBrains Mono"
+  Set Width 1280
+  Set Height 800
+  Type "portal"
+  Enter
+  Sleep 800ms
+  Screenshot sessions.png
+  ```
+- Run `vhs <tape>` to produce the PNG.
+
+**Pass criterion:** **layout / structure / colour-role match** to the named Paper frame — **agent/user-judged, NOT a pixel-diff CI gate** (Paper is an approximation; an exact diff would always fail). Tapes are committed and runnable so any reviewer can re-capture.
+
+### 15.3 Per-task manual review
+In addition to the `vhs` capture, the user inspects the rendered TUI in a real terminal at each task's end — catching font/colour realities the Paper approximation can't show.
+
+### 15.4 Verification responsibilities in the task loop
+Each implementation task runs a fixed loop with an explicit owner for the visual check at every step:
+
+1. **Implementer (sub-agent)** — does the work **and produces the task's `vhs` capture**, comparing it to the named Paper frame to **self-verify before handing off**. The implementer owns the capture so it can check and converge its own work — without this, the implement↔review loop never terminates.
+2. **Reviewer (sub-agent)** — reviews the **code** (its primary, essential job) **and** the **visual**: confirms the implementer's capture matches the frame (layout / structure / colour-role) and that **behaviour parity** holds (§1). Only when **both** pass does the task **gate for human review**.
+3. **Human gate** — the human opens the task's **latest screenshot** (and inspects the live TUI) before approving.
+
+**Screenshot storage (explicit):** each task's latest `vhs` PNG is **committed in-repo** under the harness dir, **named per frame/task** (e.g. `testdata/vhs/sessions-flat.png`), overwritten in place so "latest" is always current — giving the reviewer and the human a stable, well-labelled image to open without re-running anything.
 
 ---
 
