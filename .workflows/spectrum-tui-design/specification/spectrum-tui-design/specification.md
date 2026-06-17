@@ -21,6 +21,13 @@ Portal renders **foreground-only on the user's existing terminal background**, u
 ### Nothing is sacred
 The current UI carries no special claim. Today's pink cursor (`212`), green=attached (`76`), grey detail text (`#777777`), and blue preview border may all be replaced wholesale. The redesign may restructure colour, layout, and UI — and, where justified, UX — but only where "the juice is worth the squeeze." Code may change in service of good UI; gratuitous restructure is avoided. Every design decision is validated against how Portal actually works before being adopted.
 
+### Reskin, not rebuild (applies throughout)
+This feature is a **visual reskin** of the existing TUI, **not** a reimplementation. The specification describes the **styling target** (palette tokens, glyphs, layout treatment) and the **behaviour it must preserve** — it is not a rebuild brief. The existing list model, grouping logic, directory resolution, persistence, resolution chain, and keybinding plumbing are **already implemented and must stay behaviourally identical**; implementation **restyles existing render code** (per the feasibility audit §14) rather than re-deriving the machinery.
+
+**Changing existing code is explicitly permitted** where a restyle genuinely requires it — reworking a row delegate, centralising colour into tokens, adjusting a layout/measurement calc are all in-bounds; a reskin is not limited to additive styling. The bar is **like-for-like behaviour**: whenever existing code is touched, verify the new behaviour against the current implementation (read it, trace every path, diff the logic) so the change is **provably cosmetic**. Behaviour parity — not "did we avoid touching the file" — is the acceptance test.
+
+Where a section documents existing behaviour, treat it as a **constraint to preserve**, not a task to build. Genuinely **new** work is flagged explicitly and is limited to: the `?` help modal, the header/wordmark + separator block, edit-modal chips, the `AdaptiveColor` token layer, and the cold-path startup flip (§10). **If implementing a section would mean re-deriving logic that already exists, restyle in place and verify parity instead of rebuilding** — that is the anti-bug guardrail.
+
 ---
 
 ## 2. Colour System & Terminal Robustness
@@ -169,6 +176,35 @@ Trailing slots are fixed-width and right-pinned; the name flexes to fill the rem
 
 ### 4.3 Selection & navigation
 A single violet left-bar + tint marks the cursor row (§3.3). The cursor never lands on a header/non-row; navigation is arrows + `Ctrl+↑/↓` page (§12). Selection feeds `⏎ attach` and `␣ preview`.
+
+---
+
+## 5. Sessions — Grouped views (by Project / by Tag)
+
+> **Existing behaviour — preserved (reskin).** The grouping *machinery* — the `s` cycle, the `HeaderItem` model, Pattern A/B, the catch-alls, cursor-skip, directory resolution, tag anchoring, and mode persistence — is **already implemented**. The only change here is the **MV visual treatment** of headings and rows (§5.1); §5.2–§5.5 record the existing logic the styling consumes, as constraints to preserve — not to rebuild.
+
+`s` cycles the Sessions page through three **views of the same data**: Flat → **by Project** → **by Tag** → Flat. The cycle is **unconditional** (always includes by Tag, even with zero tags or zero sessions). The active view shows in the section header (`Sessions — by project` / `— by tag`); the footer adds an `s switch view` hint. Pressing `s` resets the paginator to page 1. The last-used view **persists** in `prefs.json` (best-effort; failure non-fatal). While the `/` filter is focused, `s` is a literal filter character.
+
+### 5.1 Render-layer grouping (the key invariant)
+Group headings are **real, non-selectable rows** (`HeaderItem`) interleaved before each group's session rows — **every list row, header or session, is exactly one delegate line**, so `bubbles/list` pagination stays exact (a page can never draw more lines than the viewport). Grouping is pure Lipgloss styling in the existing delegate — **not** routed through `lipgloss/tree`.
+- **Heading row:** `heading ··· N` — the heading in `text.detail`, the `··· N` count in `text.dim` (dimmer). Non-selectable: its filter value is empty, so headings **vanish the instant a filter query is typed** (flatten-on-filter for free).
+- **Session rows** nest **one indent level further** than flat (cursor at col 2, name at col 4); flat rows sit flush at col 2.
+- The **cursor skips header rows** on initial selection and on every navigation (arrows, paging, and crossing a group boundary) — it only ever lands on session rows.
+
+### 5.2 By Project (Pattern A)
+**One row per session**, grouped under its **project**. Key = the session's directory reduced to a canonical path. Sessions whose directory resolves to no known project collect under a pinned **Unknown** catch-all (counted, empty-suppressed, with its own heading).
+
+### 5.3 By Tag (Pattern B)
+**One row per `(session, tag)` pair** — a session with multiple tags **repeats** under each tag's heading. Untagged sessions collect under a pinned **Untagged** catch-all. If **no project anywhere has tags**, the view shows the **"No tags yet" signpost** over the flat list instead (degrade-with-message, not silent flatten — §11.3).
+
+### 5.4 Session → directory resolution
+Each live session maps to a directory via the **`@portal-dir`** session user-option, stamped at creation from the git-root (by both normal creation and QuickStart), so a session stays anchored to its origin project even after its panes `cd` away.
+- **Legacy fallback:** for sessions created before the stamp shipped (no `@portal-dir`), the grouped render derives the directory from the **active pane's `current_path` → git-root**, uses it for this render, and **caches the guess in-memory only** (later rebuilds in the same picker skip the pane read). It is **never stamped back to tmux** (a pane's cwd can drift; freezing it would mis-group the session permanently) — it re-derives next launch, so a session that has `cd`'d back self-corrects.
+- The lookup key and the stored project path are both reduced via the same canonical-path function.
+- **Pane reads are gated to grouped modes only** — Flat and the zero-tags signpost perform **zero** pane reads.
+
+### 5.5 Tags are directory-anchored (v1)
+Tags live on the **project record** (not per session). A session's effective tags = its directory's tags, looked up **live at grouped-render time**. Tags are managed only in the projects edit modal (§8) — never per session, no CLI. (Deferred: per-session tags, live-grouped filtering, tag exclusion — §16.)
 
 ---
 
