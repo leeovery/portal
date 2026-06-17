@@ -9,140 +9,368 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 🔧 Changed
 
-- CI release workflow actions updated to their latest major versions (checkout@v6, setup-go@v6, goreleaser-action@v7).
+- Bumped CI release workflow to use latest major versions of `actions/checkout`, `actions/setup-go`, and `goreleaser/goreleaser-action`.
 
 ## [0.7.6] - 2026-06-17
 
 🔧 Changed
 
-- Release workflow is now delegated to the `mint` CLI — run `brew install leeovery/tools/mint` if the `release` script reports mint is missing.
-- GoReleaser is set to `keep-existing` release mode so binary uploads no longer overwrite a release body written by other tooling.
+- The `release` script now delegates to the `mint` CLI — install `mint` via `brew install leeovery/tools/mint` to continue using it.
+- GoReleaser is set to `keep-existing` release mode so manually authored release notes and bodies are preserved when binaries are uploaded.
 
 🗑️ Removed
 
-- Deleted the inline bash release script (~350 lines) — replaced by the `mint release` delegation above.
-- Removed the `BUG-resume-hooks-lost-on-server-restart.md` tracking document from the repository.
+- Deleted the in-repo bug report for resume hooks lost on server restart — no longer needed as a tracking file.
+
+## [0.7.5] - 2026-06-10
+
+🗑️ Removed
+
+- The file browser view has been removed from the TUI — the picker now has three views (session list, project picker, scrollback preview) instead of four.
+
+## [0.7.4] - 2026-06-09
+
+🐛 Fixed
+
+- `KillSession` and `RenameSession` now use tmux's exact-match target syntax (`=name`) — prevents prefix collisions from silently operating on the wrong session when a session name is a prefix of another live session's name.
+
+## [0.7.3] - 2026-06-09
+
+🐛 Fixed
+
+- `portal state status` recent-warnings display was broken — the log parser used a legacy pipe-delimited format that no longer matched the actual log output, so warnings were silently missed and the last-warning line showed raw log text instead of a clean summary.
+- The "Recent warnings" last-entry display now shows `<LEVEL> <component>: <message>` instead of the full raw log line with timestamp and internal attributes.
 
 ## [0.7.2] - 2026-06-08
 
-- Preserve tag case in `NormaliseTag` (trim only, no lower-casing); tag matching is now case-sensitive, so "Work"/"work" are distinct tags and By-Tag headings
-- Indent grouped session list: headers align with the title box, grouped rows nest under their header (Flat rows unchanged)
+🔧 Changed
 
+- Tags are now case-sensitive and stored exactly as typed — "Work" and "work" are distinct tags rather than being folded to lowercase.
+- Grouped session rows are visually indented under their group headings, making the hierarchy clearer in By Project and By Tag views.
 
 ## [0.7.1] - 2026-06-08
 
-- Stamp @portal-dir at QuickStart creation via chained `new-session -d ; set-option ; attach-session` so sessions stay anchored to their origin dir after the pane cd's away
-- Remove the lazy stamp-on-render fallback (`dirstamp.go`); render-layer dir resolution now derives from the active pane → git-root and caches in-memory only, never re-stamping tmux (fixes mis-grouping of drifted panes, e.g. .dotfiles-under-portal)
-- Cache derived dirs back into `m.sessions` so subsequent rebuilds skip the pane read (fixes the 2-3s "switch view" stall)
-- Fix grouped-list viewport overflow: render group headings as real non-selectable `HeaderItem` rows (delegate Height 1) instead of uncounted in-delegate lines, so pagination is exact and the title/cursor no longer scroll off the top
-- Add cursor-skip (`ensureSessionRowSelected`/`skipHeaderRow`) keeping selection off header rows; reset paginator to page 1 on view switch
-- Persist project tags live (Enter adds, x removes immediately) so Esc no longer discards them; remove batched tag reconciliation in confirm
+🐛 Fixed
 
+- Group headings in the sessions list are now real list rows, eliminating the bug where the title bar and cursor scrolled off the top of the terminal when many grouped sessions were displayed.
+- Switching between Flat / By Project / By Tag views now resets to the first page and lands the cursor on the first session row rather than leaving it on a stale offset or a non-selectable header.
+- Cursor navigation (up, down, g, G) no longer stops on group header rows — the selection always lands on a session.
+
+🔧 Changed
+
+- Tags added or removed in the project edit modal are now written to disk immediately on each keystroke (`Enter` to add, `x` to remove), so closing the modal with `Esc` never silently discards a tag change.
+- New sessions opened with `portal open <path>` are now stamped with their origin directory at creation time, so the session stays correctly grouped even after the pane `cd`s elsewhere.
+- The lazy directory fallback for ungrouped legacy sessions now caches the derived path in memory rather than writing it back to tmux, preventing permanent mis-grouping when a pane's working directory has drifted.
+
+## [0.7.0] - 2026-06-08
+
+✨ Added
+
+- Session list groups — press `s` on the sessions page to cycle between Flat, By Project, and By Tag views; the last-used mode is remembered across launches in `prefs.json`.
+- Directory tags — open the projects editor, focus the new Tags field with `Tab`, and type a tag then `Enter` to add it; `x` removes a highlighted tag. Every session opened in that directory inherits its tags.
+- `prefs.json` config file — stores UI preferences (currently the session-list grouping mode); supports `PORTAL_PREFS_FILE` override and migrates from the legacy macOS path like other config files.
+- `Session.Dir` field — `ListSessions` now reads `#{@portal-dir}` so each session carries its stamped directory, enabling O(1) project lookups without pane reads in grouped modes.
+- `ActivePaneCurrentPath` tmux method — reads a session's active pane cwd via `display-message` for the lazy directory-resolution fallback used in grouped renders.
+
+🔧 Changed
+
+- New sessions are stamped with `@portal-dir` (the resolved git root) at creation time, so grouped renders take a fast map-lookup path rather than reading active pane cwd on every render.
+- The projects-to-sessions transition (`s`/`x` on the projects page) now dispatches a session-list refresh so tag edits are reflected immediately on return.
+- The edit-project modal Tab cycle now visits three fields — Name → Aliases → Tags → Name — instead of two.
+- `ListSessions` format string extended to a four-field pipe-delimited format; the directory field is last so embedded pipes in paths are preserved via an unbounded `SplitN` slot.
+
+🐛 Fixed
+
+- Sessions opened with the `QuickStart` (exec-handoff) path were missing `@portal-dir` stamps, causing them to always land in the Unknown bucket in grouped modes — they now self-correct on the first grouped render via the lazy stamp-on-render fallback.
+- In a persisted grouped mode, sessions arriving before projects were loaded always fell into the Unknown/Untagged catch-all; `ProjectsLoadedMsg` now triggers a re-group so sessions are placed under the correct heading once project data arrives.
+- The `WithInsideTmux` construction path now routes through the mode-aware rebuild chokepoint, so an already-populated grouped list is grouped correctly and the current-session decoration composes with the mode title rather than overwriting it.
 
 ## [0.6.5] - 2026-06-04
 
-- Add package-level TestMain to 15 packages poisoning PORTAL_*_FILE / PORTAL_STATE_DIR to /nonexistent paths, making test state-isolation opt-out fail loudly instead of mutating the developer's real ~/.config/portal/
-- Isolate symptom-fixture's per-file config env vars (hooks/projects/aliases) so the bootstrap subprocess's step-11 CleanStale can't wipe real config
-- Hoist per-subtest PORTAL_STATE_DIR isolation in TestStateInternalSubcommandsAcceptValidArgv to cover all subcommands, not just daemon
+🐛 Fixed
 
+- Integration tests that spawned subprocesses (e.g. `portal list`) could silently wipe a developer's real `~/.config/portal/hooks.json` and `projects.json` — the symptom fixture now isolates all per-file config env vars alongside the state directory.
+
+## [0.6.4] - 2026-06-04
+
+🐛 Fixed
+
+- Test isolation for `portal state` subcommands — each subtest now uses its own temp state dir, preventing `cleanup` and `cleanup --purge` cases from mutating the developer's real config directory.
 
 ## [0.6.3] - 2026-06-04
 
-- Export `tmux.KillBarrierTimeoutCeiling` as single source of truth; daemon integration test imports it instead of mirroring the 5s literal
-- Convert fast-host no-op-pass to `t.Skip` in mid-tick SIGHUP test so a too-fast capture-pane host skips rather than passes trivially
+🔧 Changed
 
+- The kill-barrier timeout ceiling is now a single exported constant (`KillBarrierTimeoutCeiling`) shared between production code and integration tests — eliminating the risk of the two silently drifting apart if the value changes.
+- Integration tests that run on hardware where tmux `capture-pane` is too fast to exercise the cancellation path now skip cleanly instead of logging a non-fatal warning and continuing.
 
 ## [0.6.2] - 2026-06-03
 
-- Restructure agentic-workflows skill suite (v0.4.12 → v0.4.17): collapse separate `start-*` and `continue-*` skills into a unified `workflow-discovery` first phase plus `workflow-continue-*` skills; route all new work through discovery with work-type detection
-- Add inbox working-set and archived-item management to `workflow-start` (multi-select, archive/restore/delete, seed-into-discovery)
-- Add `seeds[]` manifest tracking and `seeds/` storage for inbox-promoted work units; wire seed context into research/discussion/investigation/scoping and knowledge indexing (new `seeds.json` chunking config)
-- Add `[do-now]` review category for zero-risk fixes applied in-place, with file:line recommendations and clustering in review output
-- Widen TUI page-jump footer hints to surface the `x` toggle (`p/x`, `s/x`) in `internal/tui/model.go` (display-only)
+🔧 Changed
 
+- The `p` and `s` navigation hints in the TUI footer now show `p/x` and `s/x` to reflect that `x` is an additional keybinding for switching between the sessions and projects pages.
+
+## [0.6.1] - 2026-06-03
+
+🔧 Changed
+
+- Hook registration now reads each tmux event individually via `show-hooks -g <event>` instead of a single global enumeration — fixing silent hook accumulation on `pane-focus-out` and `window-layout-changed`, which tmux 3.6b omits from the no-arg global read.
+- Bootstrap step 2 converges each managed event to exactly one Portal entry per run, collapsing any pre-existing duplicate stack in place rather than appending blindly — installations with hundreds of stacked hooks self-heal on the next `portal open`.
+- `portal hooks reset` (unregister) now also reads per-event, so it correctly removes Portal hooks from the previously-blind events and continues tearing down remaining events when a single event's read fails.
+- The `session-closed` hook now evicts stale `portal state notify` entries using substring matching rather than exact-string matching, converging them to `commit-now` as an ordinary side effect of bootstrap.
+
+🐛 Fixed
+
+- Duplicate `portal state notify` hooks stacking unbounded on `pane-focus-out` and `window-layout-changed` across repeated bootstraps — each tmux event that fires a managed hook now spawns exactly one `portal state notify` process instead of N.
+- `portal hooks reset` left converged `session-closed commit-now` entries installed because the teardown fingerprint set omitted `portal state commit-now`; the fingerprint set is now derived from the registration table so no registered category can be un-reapable.
+
+## [0.5.13] - 2026-05-28
+
+🐛 Fixed
+
+- Added a negative-control integration test for the eager-signal hydrate step — a regression that silently wired the no-op signaler would now be caught before reaching users.
+
+## [0.5.12] - 2026-05-27
+
+🐛 Fixed
+
+- Stale hook cleanup no longer wipes `hooks.json` when `list-panes -a` returns an empty result — a mass-deletion hazard guard now defers the cleanup rather than treating an empty live-pane set as authoritative.
+- `ListAllPanes` now propagates errors from tmux instead of silently returning an empty slice, letting callers distinguish a genuine tmux failure from a server with no panes.
+
+🔧 Changed
+
+- Stale hook cleanup logic is unified into a single shared helper (`runHookStaleCleanup`) consumed by both bootstrap step 11 and `portal clean`, so log format strings and failure-mode behaviour are identical at both call sites.
+- `portal clean` hook cleanup now emits an auditable log breadcrumb to `portal.log` on every invocation, including a debug line when there are no hooks to clean.
+- `bootstrap.NoopLogger` is now exported so adapter packages can reference it directly instead of declaring local no-op stand-ins.
+- The canonical tmux structural-key format string (`#{session_name}:#{window_index}.#{pane_index}`) is now a single exported constant (`tmux.StructuralKeyFormat`) shared across all pane-enumeration and key-resolution call sites.
+
+## [0.5.11] - 2026-05-26
+
+🔧 Changed
+
+- `portal hooks` commands (`list`, `set`, `rm`) no longer trigger the full tmux bootstrap orchestrator — they run as lightweight config-file operations, eliminating spurious ENOENT errors when hooks fire at session start.
+
+## [0.5.10] - 2026-05-26
+
+🐛 Fixed
+
+- Session names containing whitespace, shell metacharacters (`$`, backtick, `;`), or other special bytes no longer break pane restore — the hydrate command arguments are now single-quoted so they survive word-splitting in the shell.
+- Session name sanitization now replaces all non-alphanumeric, non-`._-` bytes (not just `/`, `\`, and NUL) with `_`, preventing shell-unsafe characters from leaking into pane keys, FIFO paths, and scrollback filenames.
+
+## [0.5.9] - 2026-05-26
+
+🔧 Changed
+
+- `hooks rm --on-resume` accepts a `--pane-key <key>` flag to remove a hook for any pane by structural key — works outside tmux and allows pruning entries for panes that no longer exist.
+
+## [0.5.7] - 2026-05-22
+
+🔧 Changed
+
+- The sessions and projects keymap footers are now rendered as a fixed three-column layout beneath each page — disabling the built-in bubbles/list help renderer in favour of a manually composed footer that stays visible and correctly sized at all terminal dimensions.
+
+## [0.5.6] - 2026-05-22
+
+✨ Added
+
+- New `portal state commit-now` command writes `sessions.json` synchronously from live tmux state — invoked by the `session-closed` hook so killed sessions are removed before the next bootstrap can resurrect them.
+
+🔧 Changed
+
+- The `session-closed` tmux hook now fires `portal state commit-now` instead of `portal state notify` — closing the window where a killed session could be resurrected by the next portal bootstrap within the daemon's 1-second tick interval.
+- `TouchSaveRequested` extracted as a shared function in `internal/state` — the dirty-flag touch sequence is now a single canonical implementation used by both `state notify` and the new `commit-now` failure/short-circuit paths.
+- Silent-exit error detection replaced brittle empty-string comparison with `cmd.IsSilentExitError` — compile-time-linked across `cmd` and `main` so neither side can drift; `ErrStatusUnhealthy` now carries a descriptive message instead of an empty one.
+- When `@portal-restoring` is set during a `session-closed` hook, `commit-now` skips the structural commit and touches `save.requested` so the daemon's first post-restoration tick commits promptly without waiting for the gap rule.
+
+## [0.5.5] - 2026-05-21
+
+🐛 Fixed
+
+- Killing a session while a filter is active no longer clears the filtered list — the sessions view stays filtered with the killed entry removed.
+- Pressing Space on the scrollback preview now dismisses it, matching the behaviour of Esc.
+
+## [0.5.4] - 2026-05-20
+
+✨ Added
+
+- New `internal/portalbintest` package consolidates binary-build and PATH-staging helpers for integration tests, usable by daemon, saver, and restore tests without pulling in restore-specific scaffolding.
+- `PollUntil` helper in `internal/tmuxtest` provides a reusable, deadline-bounded polling primitive for integration tests.
+- `WriteVersionFile` now emits a DEBUG breadcrumb (`daemon.version write:`) to `portal.log` on every call, including the bootstrap-side defensive write, giving a single grep anchor for version-file lifecycle investigations.
+
+🔧 Changed
+
+- Bootstrap no longer kills the `_portal-saver` session when the daemon is alive but `daemon.version` is missing — it repairs the file defensively instead, eliminating unnecessary kill-respawn cycles on healthy systems.
+- The daemon's `captureAndCommit` loop checks for context cancellation at three points (entry, post-enumeration, and between per-pane iterations) so a SIGHUP mid-tick exits within one pane's capture time rather than grinding through the rest of the loop.
+- `EnsurePortalSaverVersion` consults daemon aliveness before the version-mismatch predicate — a dead daemon no longer triggers the kill barrier regardless of version state.
+
+🐛 Fixed
+
+- Daemon shutdown flush after SIGHUP now uses a non-cancellable context so the final state save completes rather than being aborted by the already-cancelled signal context.
+
+## [0.5.3] - 2026-05-19
+
+🔧 Changed
+
+- `tmux attach-session` no longer passes `-A` — attaching to an existing session uses exact-match target resolution only, removing the implicit create-or-attach fallback.
+
+🐛 Fixed
+
+- Release note generation strips null bytes from the git diff before passing it to Claude, preventing silent truncation or prompt corruption on binary-adjacent diffs.
+
+## [0.5.2] - 2026-05-18
+
+✨ Added
+
+- Press Enter in the scrollback preview to attach to the previewed session, with optional window and pane pre-selection via `]` / `[` / `Tab` before committing.
+- Preview frame now renders with a styled rounded border, adaptive border colour, and a cascading chrome line that shows window/pane counters, window name, and keymap hints — compressing gracefully at narrow terminal widths.
+- When a previewed session is killed externally and Enter is pressed, Portal returns to the sessions list and shows a brief inline flash (`session "<name>" no longer exists`) that auto-clears after ~3 seconds or on the next keypress.
+- New `SelectWindow` tmux client method for pre-selecting a window before attaching.
+- New `HasSessionProbe` tmux client method that discriminates a genuine missing-session exit from an OS-layer fault, enabling the externally-killed bail path.
+
+🔧 Changed
+
+- All tmux target resolution (`has-session`, `switch-client`, `select-pane`, `resize-pane -Z`, `attach-session`) now uses the `=` exact-match prefix, preventing silent prefix-collision matches (e.g. a killed `foo` matching live `foo-2`).
+- Attach-session now passes `-A` so tmux creates the session atomically if absent rather than failing — the residual fallback for the TOCTOU window between existence check and handoff.
+- The connector handoff runs after the TUI exits rather than inside the live event loop, preventing an orphan portal process that would keep running after `switch-client` moved the terminal away.
+
+## [0.5.1] - 2026-05-14
+
+✨ Added
+
+- Space bar opens the scrollback preview from the sessions list — the key hint now appears in the help bar.
+
+🔧 Changed
+
+- Preview chrome bar labels are expanded to spell out each navigation key (`next win`, `prev win`, `tab next pane`, `esc back`) and prefixes the window name with `win:` for clarity.
+
+## [0.5.0] - 2026-05-14
+
+✨ Added
+
+- Eager hydration signaling at bootstrap — all restored sessions now receive their scrollback replay signal immediately at startup, eliminating the bug where only the attached session recovered while N-1 sessions' helpers timed out and leaked their `@portal-skeleton-*` markers.
+- Stale `@portal-skeleton-*` marker cleanup as a new bootstrap step — markers whose pane no longer exists are unset each boot, unblocking the daemon's scrollback-save loop for any pane previously stuck behind a leaked marker.
+- On-resume hooks now fire on every restored pane including non-attached sessions — the timeout recovery path was unified with the success and file-missing paths so hooks always execute.
+- Daemon singleton lock (`daemon.lock`) — a `flock`-based advisory lock prevents more than one `portal state daemon` from running against the same state directory, eliminating duplicate-daemon races during rapid restarts.
+- Kill barrier before saver-session respawn — portal now waits for the prior daemon to fully exit before spawning a replacement, making the recycle path silent on the happy path.
+- `tmux.CommandError` type — tmux command failures now carry the child's stderr for precise absence-vs-transport-fault discrimination, fixing cases where a lost-server error was silently treated as "option not found."
+
+🔧 Changed
+
+- Restored panes are now launched with a bare `portal state hydrate` invocation instead of a `sh -c '...; exec $SHELL'` wrapper, so typing `exit` once in a restored pane closes it immediately with no orphan shell parent.
+- The hydrate helper's timeout path now unsets the `@portal-skeleton-*` marker and fires on-resume hooks instead of leaving the marker set and skipping hooks.
+- FIFO-write retry logic moved from `cmd/state_signal_hydrate` to `internal/state` as `WriteFIFOSignal` / `SendHydrateSignal` / `DefaultFIFOSignaler`, giving both the bootstrap eager-signal step and the `client-attached` hook a shared, tested implementation.
+- The daemon's merge filter now rejects stale skeleton markers pointing at killed sessions, windows, or panes — preventing killed sessions from being resurrected into `sessions.json` on the next capture tick.
+- `WaitForSkeletonMarkersCleared` now requires an explicit poll-tick argument so call sites are unambiguous about their cadence.
+- `golang.org/x/sys` promoted from an indirect to a direct dependency.
+
+🐛 Fixed
+
+- Sessions other than the one the user attached to no longer have their scrollback silently skipped forever after a reboot — the eager-signal step delivers the FIFO byte to every restored pane without requiring a client attach.
+- Typing `exit` in a restored pane now closes the pane on the first invocation instead of requiring two exits due to the former outer `sh -c` wrapper.
+- Transport errors from tmux (lost server, socket connect failure) are no longer misclassified as "option not found," allowing the daemon's restoring-marker check to correctly skip captures during transient tmux failures.
+- Multiple daemons could accumulate after rapid saver-session recycles; the flock singleton and kill barrier together enforce at most one daemon per state directory.
 
 ## [0.4.0] - 2026-05-08
 
-- Add scrollback preview page (`pagePreview`) opened via Space on Sessions list, with `]`/`[`/Tab cycling, chrome line, and Esc dismiss
-- Add `state.TailScrollback` reverse-chunked tail-N reader with three-shape return contract and single-fd invariant
-- Add `tmux.Client.ListWindowsAndPanesInSession` for window-grouped pane enumeration
-- Wire constructor-injected `TmuxEnumerator`/`ScrollbackReader` seams with production adapters at TUI startup
-- Refresh sessions list on preview dismiss to drop externally-killed sessions, re-anchoring cursor by name
-- Extract `applySessions` helper to deduplicate session-list refresh between `SessionsMsg` and preview-refresh handlers
-- Remove unmaintained CHANGELOG.md
+✨ Added
 
+- Press `Space` on any session in the picker to open a read-only scrollback preview — browse saved terminal output across windows and panes without attaching to the session.
+- Cycle windows with `]`/`[` and panes with `Tab` inside the preview; scroll the loaded buffer with arrow keys, `j`/`k`, `PgUp`/`PgDn`, `Home`, and `End`; dismiss with `Esc`.
+- The sessions list automatically refreshes when preview is dismissed, so a session killed externally while you were previewing disappears from the list immediately.
+- Panes with no saved content yet (brand-new session or daemon hasn't ticked) render `(no saved content)` rather than an empty screen.
 
 ## [0.3.1] - 2026-05-01
 
-- Fix scrollback hydration failure for sessions with leading-dash names by adding `--` end-of-flags separator to signal-hydrate hook command, with one-shot bootstrap migration to evict legacy un-separated entries
-- Hide internal sessions on startup: filter `_*` prefixed sessions in `Client.ListSessions` and rename bootstrap session to `_portal-bootstrap` via new `PortalBootstrapName` constant
-- Delete dead `PredictLiveIndices` diagnostic path and misleading `predicted=...__0.0 live=...__X.Y` WARN that fired under non-zero base-index configs
-- Bump agentic-workflows to v0.3.2 with new knowledge base subsystem (semantic search over completed artifacts via OpenAI embeddings), discussion gap analysis, polarity-pair perspective agents with stable finding IDs, and `completed_at` tracking for work units
-- Add real-tmux integration test coverage for leading-dash sessions and post-bootstrap session set assertions
+🐛 Fixed
 
+- Session names beginning with `-` (e.g. from projects whose directory starts with `.`) no longer cause the hydration hook to exit silently — a `--` end-of-flags separator in the registered tmux hook command prevents cobra/pflag from misreading the session name as a flag cluster.
+- Stale hook entries from older Portal installs that lack the `--` separator are automatically evicted at bootstrap startup, leaving exactly one correct entry per hydration event.
+- The tmux server's bootstrap session is now created with an explicit reserved name (`_portal-bootstrap`) and is filtered out of all user-facing session listings alongside `_portal-saver`, so it never appears in the TUI picker or `portal list`.
+- A spurious per-pane warning comparing predicted vs. live pane keys (which fired incorrectly when tmux was configured with non-zero `base-index` or `pane-base-index`) has been removed.
 
 ## [0.2.5] - 2026-04-07
 
-- Fix server bootstrap: replace `tmux start-server` with `tmux new-session -d` to prevent exit-empty killing server before continuum restores sessions
-- Add bootstrap-to-query regression test validating EnsureServer → ListSessions → ServerRunning flow
-- Bump agentic-workflows to v0.2.10
-- Add research deep-dive and review background agents
-- Add convergence analysis for review/fix cycle escalation diagnostics
-- Add epic dependency map view
-- Add manifest CLI `pull` command for array element removal
-- Add final gap review step to discussion and research processes
-- Categorize review recommendations as quickfix/idea/bug with inbox surfacing
-- Surface pending discussion topics from research analysis in epic menus
+🔧 Changed
 
+- Server startup now creates a detached bootstrap session instead of calling `start-server` directly — prevents tmux's `exit-empty` from terminating the server before plugins like tmux-continuum can restore saved sessions.
 
 ## [0.2.4] - 2026-04-03
 
-- Fix resume hooks lost on tmux server restart (empty-pane guard + structural key migration)
-- Replace ephemeral pane IDs with structural keys (session:window.pane) in hook storage
-- Add tmux.Client.ResolveStructuralKey for pane ID to structural key resolution
-- Migrate hooks set/rm/list and clean command to structural key model
-- Update agentic-workflows skills to v0.2.1 with step signposting
+🐛 Fixed
 
+- On-resume hooks are no longer silently deleted when the tmux server is killed and restarted — hooks are now keyed by stable structural position (`session:window.pane`) instead of ephemeral pane IDs (`%N`) that reset on every server restart.
+- Stale-hook cleanup is now skipped when no live panes are found, preventing all stored hooks from being wiped on the first open after a server restart.
 
 ## [0.2.3] - 2026-03-30
 
-- Workflow housekeeping: close config-homedir-error-test idea as not worth doing, register in manifest
-
-
+Maintenance release — no notable source changes
 ## [0.2.2] - 2026-03-30
 
-- Add quick-fix work type with scoping → implementation → review pipeline
-- Add scoping phase: single-pass spec + plan generation for mechanical changes
-- Add verification workflow (baseline → change → verify) as TDD alternative for quick-fixes
-- Rework discussion process: replace linear Questions list with Discussion Map subtopic lifecycle (pending/exploring/converging/decided)
-- Add step banners and contextual descriptions across all workflow skills
-- Fix migrateConfigFile to use os.IsNotExist explicitly on newPath stat check
-- Add PORTAL_HOOKS_FILE isolation to 7 project-only clean tests
+🐛 Fixed
 
+- Config migration no longer overwrites files when a permission error prevents checking the destination path — previously a non-"not found" stat error could trigger an unsafe migration.
 
 ## [0.2.1] - 2026-03-28
 
-- Fix config path resolution on macOS — replace `os.UserConfigDir()` with XDG-compliant logic (`XDG_CONFIG_HOME` → `~/.config`)
-- Add one-shot migration of config files from `~/Library/Application Support/portal/` to XDG path
-- Update agentic-workflows to v0.1.4 (discussion agents, investigation synthesis, compliance checks)
+🔧 Changed
 
+- Config files now resolve using XDG conventions — `$XDG_CONFIG_HOME/portal/` when set, falling back to `~/.config/portal/`, so Portal behaves correctly on Linux and with custom XDG setups.
+- On first run after upgrading, config files are automatically moved from the old macOS location (`~/Library/Application Support/portal/`) to the XDG path — no manual migration needed.
 
 ## [0.2.0] - 2026-03-28
 
-- Add resume hooks system (`hooks set/rm/list`) for restarting processes after reboot via per-pane registry with volatile tmux server-option markers
-- Wire hook execution into all connection paths (attach, TUI picker, direct path) before session connect
-- Extend `clean` command with stale hook pruning alongside stale project removal
-- Extract `internal/fileutil.AtomicWrite` shared by hooks and project stores
-- Add tmux client methods: SetServerOption, GetServerOption, DeleteServerOption, ListPanes, ListAllPanes, SendKeys
-- Upgrade agentic-workflows to v0.1.0 (.js → .cjs, project-level manifest defaults, new migrations)
+✨ Added
 
+- `portal hooks` command — register per-pane on-resume commands that re-execute automatically when a session is attached after a reboot.
+- Resume hooks fire via `tmux send-keys` on `open` and `attach`; a volatile tmux server-option marker prevents duplicate execution within the same boot cycle.
+- `portal clean` now prunes hook entries for panes that no longer exist, in addition to stale projects.
+- hooks are stored in `~/.config/portal/hooks.json` (overridable via `PORTAL_HOOKS_FILE`).
+
+🔧 Changed
+
+- Atomic file writes extracted into a shared `fileutil.AtomicWrite` helper — previously inlined only in the project store, now used by both the project and hooks stores.
+
+## [0.1.0] - 2026-03-21
+
+✨ Added
+
+- Portal automatically starts the tmux server on any command that needs it, eliminating the need for LaunchAgents or other workarounds after a reboot.
+- The TUI shows a "Starting tmux server..." loading screen while waiting for sessions to restore, exiting as soon as sessions appear or after a 6-second maximum.
+- CLI commands (`list`, `attach`, `kill`) print "Starting tmux server..." to stderr and wait briefly for sessions before proceeding.
 
 ## [0.0.3] - 2026-03-01
 
-- Show full help bar permanently and swallow `?` toggle
-- Enable infinite list scrolling (cursor wraps around)
-- Brighten help bar and detail text styles (#777777)
-- Cache terminal dimensions and re-apply after data loads for correct pagination
-- Mark TUI session picker phases 3–6 complete
+✨ Added
 
+- The help bar is now always fully expanded on the sessions and projects pages — all key bindings are visible at a glance without pressing `?`.
+- List navigation now wraps around — pressing down past the last item jumps to the first, and pressing up past the first jumps to the last.
 
+🔧 Changed
+
+- Secondary text (session details, project paths, help bar labels) uses lighter, more readable colours.
+
+## [0.0.2] - 2026-03-01
+
+✨ Added
+
+- Sessions and projects now appear together in one unified full-screen list — switch between them with `s`/`p`/`x` without leaving the picker.
+- Kill (`k`), rename (`r`), and delete project (`d`) actions now open centered modal overlays with border styling instead of inline text prompts.
+- Project edit modal supports renaming and managing aliases in-place — `Tab` switches fields, `x` removes an alias, `Enter` saves immediately.
+- Built-in `bubbles/list` filtering replaces the custom filter mode — press `/` to filter and `Esc` to clear, consistent across both pages.
+- Help bar updates dynamically per page, showing context-appropriate keybindings (attach, rename, kill, projects, new in cwd, filter, quit).
+- New `n` key creates a session in the current working directory from any page.
+- Command-pending mode (`portal open --command`) locks the picker to the Projects page and shows a `Select project to run: <cmd>` status line; `s`, `x`, `e`, and `d` keys are suppressed in this mode.
+- The picker auto-selects the default page on load: Sessions when sessions exist, Projects otherwise.
+
+🔧 Changed
+
+- Kill shortcut changed from uppercase `K` to lowercase `k`; rename shortcut changed from `R` to `r`.
+- Session list title now shows `Sessions (current: <name>)` when inside tmux instead of a separate header line above the list.
+- Command-pending banner changed from `Command: <cmd>` to `Select project to run: <cmd>`, inserted after the list title line.
+- `Esc` is now progressive: dismisses an open modal first, then clears an applied filter, then quits — rather than quitting immediately from any state.
+- The standalone `internal/ui/projectpicker.go` component is removed; project-picking logic is now part of the main TUI model.
+- `ProjectStore`, `ProjectEditor`, and `AliasEditor` interfaces moved from `internal/ui` to `internal/tui`; callers updated accordingly.
+
+## [0.0.1] - 2026-02-26
+
+Initial release.
