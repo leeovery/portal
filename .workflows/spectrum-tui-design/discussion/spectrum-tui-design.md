@@ -48,11 +48,12 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (17 subtopics — 4 decided · 2 exploring · 11 pending)
+  Discussion Map — ZX Spectrum TUI (18 subtopics — 5 decided · 2 exploring · 11 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition [decided]
   ├─ ◐ Colour palette (adaptive accents) [exploring]
+  │  └─ ✓ Semantic colour roles [decided]
   ├─ ◐ Terminal-environment robustness [exploring]
   │  ├─ ✓ Contrast floor [decided]
   │  ├─ ✓ Colour-capability ladder (truecolor/256/16) [decided]
@@ -210,10 +211,36 @@ terminal-faithful and `AdaptiveColor`-ready:
    purple/teal) + tasteful semantic colours on a soft dark. Less retro; the
    restrained-colour comparison point — what proven beautiful TUIs actually do.
 
-**Mockup plan:** mock the Sessions page in all five (colour is the variable, so
-hold layout constant); pick a direction; then expand the winner across the other
-screens (loading, modal, projects). All in Paper, constrained to terminal
-fidelity, decisions written back here.
+### Semantic colour roles — DECIDED
+Design to **roles, not fixed hex**: a small fixed set — *primary accent* (cursor
+/ selection / active title), *detail* (paths / secondary text), *state*
+(attached, error/warning). Each direction instantiates the roles. **State is
+never carried by hue alone** — always glyph + colour (e.g. a marker glyph for
+attached, tinted only if colour is available), which makes the monochrome
+directions and the parked `NO_COLOR` path work for free and protects colour-blind
+users. **Existing colours are not sacred** — the user is open to a full
+restructure of colour/layout/UI (and possibly UX); today's pink cursor /
+green=attached / grey detail / blue preview border have no special claim and may
+be replaced wholesale. Consistent with the prior `preview-visual-distinction`
+decision ("don't rely on colour alone" for the quick-view border). Confidence:
+high.
+
+### Mockup plan
+Mock the Sessions page in all five over a **single shared baseline layout** so
+colour is the only variable. That baseline may itself be a *new* structure
+(restructure is on the table) — but held constant across the five for a fair
+colour comparison. Layout/UX restructure beyond colour is explored *after* a
+colour direction is chosen. All in Paper, terminal-faithful, decisions written
+back here.
+
+**Judging & bail gate** (folds review-001 F6/F9/F12):
+1. **Objective** — each direction must clear the contrast floor or it is out.
+2. **Taste** — the user judges whether any survivor is genuinely "more exciting /
+   nicer to use" enough to ship. If none clears that bar → **bail** (explicit
+   anti-sunk-cost gate; "better" = passes the floor AND beats today on the user's
+   subjective read).
+3. **Validation** — the chosen direction is a *hypothesis* until **prototyped in
+   a real terminal** (Lipgloss output, inside tmux); only then is it locked.
 
 ---
 
@@ -285,19 +312,35 @@ concern — does NOT block the colour mockups; settle later.
    user environment (bg, colour depth, size, NO_COLOR). "Terminal-environment
    robustness" captures that; a **contrast floor** is the first gate, and the
    mockups must clear it before taste is judged.
+5. Nothing in the current UI is sacred — the user is open to a full restructure
+   (colour/layout/UI, possibly UX). Mockups may propose a *new* baseline layout,
+   not just recolour today's. Colour decided by role (state glyph-backed), not
+   fixed hex.
 
 ### Open Threads
-- Bail is explicitly acceptable if the redesign doesn't earn its place.
+- Bail is explicitly acceptable if the redesign doesn't earn its place (now a
+  concrete gate — see Mockup plan).
 - Animated cycling-colour border noted in seed as possible-but-likely-overkill.
+- **(review-001 → chrome stage) Pagination invariant:** new framed border /
+  status bar must recompute the list viewport height so "one row = one delegate
+  line" still holds; `HeaderItem` stays one line and non-selectable. (F4)
+- **(review-001 → chrome stage) Logo fidelity:** block-glyph logo is
+  font-dependent; need a plain-text wordmark fallback for fonts lacking the
+  glyphs. (F7)
+- **(review-001 → chrome stage) Animation cost:** idle CPU of a strobing
+  cursor/border in an always-open tool; non-TTY / CI / unfocused behaviour. (F5)
+- **(review-001 → scope) Page coverage:** decide whether the retro chrome applies
+  to all four pages or selectively. (F10)
 
 ### Current State
 - **Decided:** respect terminal theme / no forced canvas / adaptive colours;
   retro-arcade direction; no rainbow motif; contrast floor (WCAG AA both
   extremes) as a hard mockup gate; truecolor adaptive hues (impose, don't
   inherit), graceful downsample.
+  Also decided: semantic colour roles (state always glyph-backed); existing
+  colours/layout not sacred (restructure on the table).
 - **Exploring:** positive colour direction (via Paper mockups);
-  terminal-environment robustness (capability ladder, narrow-terminal,
-  NO_COLOR still open).
+  terminal-environment robustness (narrow-terminal, NO_COLOR still open).
 
 ## Triage
 
