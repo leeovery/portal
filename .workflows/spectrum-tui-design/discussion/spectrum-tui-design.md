@@ -376,7 +376,7 @@ the **glyph-backed state** we already mandated (`●` attached, `▌` selector, 
 spaced headers) plus bold/dim attributes. Because state is **never colour-only**,
 the UI stays fully usable without colour.
 
-### AdaptiveColor binary classification — pending (review-002 F2/F6)
+### AdaptiveColor binary classification — DECIDED (review-002 F2/F6)
 `AdaptiveColor` makes a **binary** light/dark choice from terminal-bg detection;
 the real world is continuous. Two genuine risks:
 - **Mid-tone backgrounds** (Solarized base03, Gruvbox soft-dark — *mainstream*,
@@ -449,6 +449,10 @@ per-page.
   match the attached/semantic green); a dim `+ add` affordance; footer
   `↵ save · tab next field · ↵ add chip · ✕ remove`. Honours the live-tag model
   (Tab cycles fields; Enter adds; ✕/x removes). Artboard: `Edit Project Modal (MV)`.
+  **Superseded:** chip styling later unified to **neutral grey** (green is
+  attached-only) and the interaction replaced by the **two-mode immediate-persist**
+  model — see "Edit modal — model UPDATE" + "Interaction conventions → Focus vs
+  edit". This bullet is retained as the journey.
 - **Kill confirm — destructive red.** `▲ Kill session?` with the session name in
   **red** (`#F7768E`), `· N window(s)`, a consequence line ("Ends the tmux
   session and all its panes. Can't be undone."), footer `y kill · n cancel ·
@@ -688,9 +692,9 @@ mocked for comparison — **thick block bar** (`Loading 6`) vs **thin line bar**
 
 Warm path unchanged: no loading screen, straight to the picker.
 
-### Notes
-Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
-and doubles as a "what's happening" surface if restore is slow.
+### Note
+The tick-list doubles as a "what's happening" surface if a restore is slow. The
+11-real-steps → 5-display-labels mapping is a spec task (Final-review F7).
 
 ## Keybindings (audited against code)
 
@@ -970,37 +974,54 @@ naming convention.)
    fixed hex.
 
 ### Open Threads
-- Bail is explicitly acceptable if the redesign doesn't earn its place (now a
-  concrete gate — see Mockup plan).
-- Animated cycling-colour border noted in seed as possible-but-likely-overkill.
-- **(review-001 → chrome stage) Pagination invariant:** new framed border /
-  status bar must recompute the list viewport height so "one row = one delegate
-  line" still holds; `HeaderItem` stays one line and non-selectable. (F4)
-- **(review-001 → chrome stage) Logo fidelity:** block-glyph logo is
-  font-dependent; need a plain-text wordmark fallback for fonts lacking the
-  glyphs. (F7)
-- **(review-001 → chrome stage) Animation cost:** idle CPU of a strobing
-  cursor/border in an always-open tool; non-TTY / CI / unfocused behaviour. (F5)
-- **(review-001 → scope) Page coverage:** decide whether the retro chrome applies
-  to all four pages or selectively. (F10)
-- **Surface project/tags in the flat session row?** Useful for renamed sessions
-  whose name hides the project; but grouping (By Project / By Tag) already serves
-  it. Leaning **keep flat = name only**; revisit if wanted.
+Nothing blocking — every review-001 chrome-stage thread is now resolved:
+- **Bail** was on the table throughout and **not taken** — the redesign earned
+  its place (the gate's taste step). (review-001 F6/F12)
+- **Animated cycling-colour border — CUT** (idle-CPU cost in an always-open tool;
+  animation is minimal / idle-zero). (review-001 F5)
+- **Pagination invariant — RESOLVED:** the recompute rule holds; the flash band
+  is chrome that recomputes viewport height (F10), `HeaderItem` stays one line /
+  non-selectable. (review-001 F4)
+- **Logo fidelity — RESOLVED:** the header is a styled **`PORTAL` wordmark**
+  (letterspaced text + `▌` caret), **not** block-ASCII art, so font-glyph
+  dependence is largely moot; narrow-terminal degrade drops it to a compact
+  wordmark. (review-001 F7)
+- **Page coverage — RESOLVED:** Modern-Vivid applies to **all** pages (Sessions /
+  Projects / Preview / Loading / modals). (review-001 F10)
+- **Flat-row project/tags — RESOLVED:** kept **name only**; the By Project / By
+  Tag grouping modes serve that need.
 
-### Current State
-- **Decided:** respect terminal theme / no forced canvas / adaptive colours;
-  retro-arcade direction; no rainbow motif; contrast floor (WCAG AA both
-  extremes) as a hard mockup gate; truecolor adaptive hues (impose, don't
-  inherit), graceful downsample.
-  Also decided: semantic colour roles (state always glyph-backed); existing
-  colours/layout not sacred (restructure on the table); cursor/selection = thick
-  violet left bar.
-- **Front-runner:** Modern-Vivid v2 (restrained violet/cyan/green foreground;
-  Amber-style header + separator; thick left-bar selector; condensed footer +
-  `?` help modal). Direction softened from bold-retro to restrained-modern.
-- **Exploring/converging:** header/footer/keybindings detail; terminal-
-  environment robustness (narrow-terminal, NO_COLOR still open); loading-page
-  designs next; in-terminal validation before lock.
+Carried forward (work items, not open questions):
+- **To spec/planning:** pin exact token hexes (light+dark) + record the
+  contrast-floor pass (F3/F6); map 11 bootstrap steps → 5 loading labels (F7);
+  mock the Projects/Preview `?` help and the loading-page error frame; sequence
+  the startup-flip phase.
+- **Separate initiative (logged):** user-overridable theme system
+  (`.workflows/.inbox/ideas/2026-06-17--user-overridable-theme-system.md`).
+
+### Current State — COMPLETE (all 28 subtopics decided)
+The design is fully specified and mocked. **Locked direction: Modern-Vivid** — a
+restrained violet/cyan/green **token-based** palette (impose-our-hues truecolor
+`AdaptiveColor`, contrast floor WCAG-AA on both extremes, honour `NO_COLOR`,
+graceful downsample, narrow/short degrade), applied across **every** surface:
+Sessions (flat / by-project / by-tag), Projects, Preview (cyan mode-chrome),
+Loading, all modals (edit with the two-mode immediate-persist model, kill,
+rename, `?` help), filtering (two-mode), and every edge state (empty, inline
+flash, no-tags signpost, command-pending). Identity = `PORTAL` wordmark + `▌`
+caret + separator rule, thick-violet left-bar selector, condensed footer + `?`
+help, left-bar accent notices (amber = transient, violet = mode). Keymap:
+arrows-only nav + `Ctrl+↑/↓` page, `/` filter, `k` = kill, no vim aliases, no
+uppercase.
+- **Its own phase (in scope):** the cold-path **startup flip** (concurrent
+  bootstrap + honest live loading + in-TUI failure state) — the biggest
+  engineering item (~1–1.5 days), gated behind in-terminal validation.
+- **Spec tasks (noted, not open questions):** pin exact token hexes (light+dark)
+  from the Paper frames + record the contrast pass; map the 11 bootstrap steps →
+  5 loading labels; mock the Projects/Preview `?` help + the loading error frame.
+- **Deferred (logged):** user-overridable theme system. **Cut:** animated
+  cycling border.
+- **Before lock-in:** in-terminal prototype validation of the direction (the
+  gate's step 3).
 
 ## Triage
 
