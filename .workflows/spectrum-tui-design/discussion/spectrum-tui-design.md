@@ -867,10 +867,10 @@ Previously un-mocked states, now decided + mocked (Modern Vivid):
   reduces to the still-relevant keys (`n` / `p` / `/` / `?`). Artboard: `Sessions
   — empty (MV)`. **Empty projects** mirrors it ("No projects yet" + open-a-
   directory hint) — same pattern, not separately mocked.
-- **Inline flash** — a transient line between the section header and the list:
-  **amber left-bar** + `⚠` + message (e.g. "folio-Jiz4el closed externally — list
-  updated"); auto-clears. Success variant uses green. Artboard: `Sessions —
-  inline flash (MV)`.
+- **Inline flash** — a transient band **directly under the title separator, above
+  the section header** (list shifts down): **amber left-bar** + `⚠` + message
+  (e.g. "folio-Jiz4el closed externally — list updated"); auto-clears. Success
+  variant uses green. Artboard: `Sessions — inline flash (MV)`.
 - **"No tags yet" signpost** — by-tag with zero tags: a **violet left-bar**
   signpost ("No tags yet — add tags in the project editor (e)…") over the flat
   list (degrade-with-message, not silent flatten). Artboard: `Sessions — no tags
@@ -881,7 +881,13 @@ Previously un-mocked states, now decided + mocked (Modern Vivid):
   `Projects — command pending (MV)`.
 
 **Shared convention:** a **left-bar accent line** for inline notices — **amber**
-= transient / warning, **violet** = mode / info. Consistent and terminal-cheap.
+= transient / warning, **violet** = mode / info. **Placement:** the band sits
+**directly under the title separator, above the section header** (full-width
+across the top); the section header + list shift down. The **command-pending**
+screen keeps the **full Projects chrome** (green `Projects` header + `/ to
+filter`) with the banner on top — not a stripped page. Consistent and
+terminal-cheap. (Lists in these mocks use realistic Portal session names per the
+naming convention.)
 
 ## Summary
 
