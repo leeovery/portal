@@ -225,13 +225,35 @@ be replaced wholesale. Consistent with the prior `preview-visual-distinction`
 decision ("don't rely on colour alone" for the quick-view border). Confidence:
 high.
 
-### Mockup plan
-Mock the Sessions page in all five over a **single shared baseline layout** so
-colour is the only variable. That baseline may itself be a *new* structure
-(restructure is on the table) — but held constant across the five for a fair
-colour comparison. Layout/UX restructure beyond colour is explored *after* a
-colour direction is chosen. All in Paper, terminal-faithful, decisions written
-back here.
+### Mockup approach (revised in session)
+The user rejected "five recolours of today's layout" — they want **five
+genuinely different designs**, each its own layout + structure + character +
+palette. The current layout is only a content reference (what info must appear),
+not a constraint.
+
+**Canvas honesty (corrected mid-build):** an early pass painted each design on a
+bespoke tinted background; the user caught that it contradicts the no-forced-
+canvas decision. Corrected — the mockups now render **foreground-only on a
+neutral black terminal** (a real "black terminal" the user would have, not a
+Portal-painted tint). Per-element backgrounds (selected-row highlight, status
+strip) are permitted — that's focus styling, not canvas ownership, and still
+must pass the contrast floor on light *and* dark. Frames sized to a realistic
+modern terminal (status bar pinned to the bottom; empty mid-screen is authentic
+for few sessions).
+
+**Built — round 1 (Sessions), Paper file "Portal":** five artboards — Amber CRT
+· Green Phosphor · Synthwave · C64 Micro · Modern-Vivid. Palettes per the session
+brief (Amber single-hue amber; Green single-hue phosphor; Synthwave magenta+cyan
+neon; C64 light-blue+cream+gold; Modern violet+cyan+green).
+
+**Finding from building:** directions whose identity depends on a *painted
+background* lose richness foreground-only — Modern/Tokyo-Night most of all (it is
+literally a background colourscheme), plus Synthwave's indigo and C64's blue. The
+**robust** directions read as a pure *foreground* palette on the user's own
+terminal: Amber, Green phosphor, and Synthwave's neon survive best. This is real
+selection signal, surfaced only by building.
+
+**Next:** user reactions → narrow; then five loading-page mockups.
 
 **Judging & bail gate** (folds review-001 F6/F9/F12):
 1. **Objective** — each direction must clear the contrast floor or it is out.
