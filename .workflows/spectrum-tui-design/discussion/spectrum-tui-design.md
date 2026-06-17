@@ -515,11 +515,13 @@ Falling-out rules:
 - **Bundle, not split:** one modal for Name+Aliases+Tags is fine under this model
   (user weighed splitting; chose bundle).
 
-**To lock visually:** a "chip in edit mode" state (edit highlight + cursor inside
-an existing chip, distinct from focus). Other mocked states
-(`Edit Project Modal (MV)` Name-focused, `Edit Modal — chip focused`, `Edit Modal
-— adding tag`) stand; the add-state will be re-read as "new empty chip in edit
-mode" rather than a separate trailing input.
+**Mocked (rebuilt to the two-mode model; footers fixed — were squished):**
+`Edit Modal — navigate (name)` (Name focused, footer `↵ edit · ⇥ next field · esc
+close`), `Edit Modal — chip focused` (footer `↵/e edit · x remove · ←→ move ·
+⇥ next field · esc close`), `Edit Modal — edit in place` (chip in edit mode:
+filled edit-highlight + cursor `Fabric▌`, `◉ EDIT MODE`, footer `↵ save · esc
+discard · ←→ cursor · empty on save = delete`). Adding a tag is the **same edit
+mode on a new empty chip** — no separate state needed.
 
 ## Theming system
 
