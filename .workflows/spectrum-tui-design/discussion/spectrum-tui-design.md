@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (18 subtopics — 6 decided · 4 converging · 1 exploring · 7 pending)
+  Discussion Map — ZX Spectrum TUI (18 subtopics — 6 decided · 4 converging · 2 exploring · 6 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -64,7 +64,7 @@ improvement worth shipping."
   ├─ ✓ Cursor & selection (thick violet left bar) [decided]
   ├─ → Status / footer & keybindings (? help modal) [converging]
   ├─ ○ Borders & framing [pending]
-  ├─ ○ Loading interstitial [pending]
+  ├─ ◐ Loading interstitial [exploring]
   ├─ ○ Modal accent [pending]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
@@ -370,6 +370,43 @@ and how state (e.g. attached) is still conveyed without colour. Degradation
 concern — does NOT block the colour mockups; settle later.
 
 ---
+
+## Loading interstitial
+
+### Context
+Shown on first launch after a tmux/computer restart while bootstrap restores
+sessions (subject to `LoadingMinDuration` = 1.2s). Today it's a plain centred
+"Restoring sessions…". Designed in the Modern-Vivid language for consistency
+with Sessions.
+
+### Concepts built (Paper, round 1) — five treatments
+1. **Block progress** — centred `PORTAL ▌`, violet block progress bar,
+   "Restoring sessions · 8 / 12".
+2. **Boot checklist** — `PORTAL ▌` + step list: green `✓` done / cyan `◐` active
+   / dim `·` pending (Started tmux server → Registered hooks → Launched saver →
+   Restoring sessions 8/12 → Replaying scrollback). Most informative.
+3. **Minimal line** — `PORTAL ▌` + a thin violet/dim rule + "RESTORING SESSIONS".
+   Ultra-restrained.
+4. **Spinner** — `PORTAL ▌` + braille spinner + "Restoring sessions… 8 / 12".
+   Compact.
+5. **Percentage** — `PORTAL ▌` + big "67%" + block bar + "Restoring 12
+   sessions…".
+
+All terminal-faithful (block/box/braille glyphs, flat colour), neutral black.
+
+### Feasibility flag (juice vs squeeze)
+Determinate concepts (1 block-fill, 2 live-checklist, 5 percentage) need
+**progress reporting from bootstrap** to the loading page — count / step /
+percent. Today bootstrap runs its 11 steps and only returns accumulated warnings
+to the loading page (drained via `LoadingMinElapsedMsg`); it does **not** stream
+per-step or per-session progress. So determinate progress = new plumbing
+(validate scope before committing). Indeterminate concepts (3 minimal line as a
+sweep, 4 spinner) need only a looping animation — far cheaper. Animation cost /
+non-TTY behaviour ties to the "Animation infra & performance" subtopic.
+
+### Notes
+Awaiting user pick. The checklist (2) maps naturally to the real bootstrap steps
+and doubles as a "what's happening" surface if restore is slow.
 
 ## Summary
 
