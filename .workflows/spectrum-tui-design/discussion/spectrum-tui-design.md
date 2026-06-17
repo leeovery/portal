@@ -48,22 +48,22 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (18 subtopics — 5 decided · 2 exploring · 11 pending)
+  Discussion Map — ZX Spectrum TUI (18 subtopics — 6 decided · 4 converging · 1 exploring · 7 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
-  ├─ ✓ Direction & ambition [decided]
-  ├─ ◐ Colour palette (adaptive accents) [exploring]
+  ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
+  ├─ → Colour palette — Modern Vivid front-runner [converging]
   │  └─ ✓ Semantic colour roles [decided]
   ├─ ◐ Terminal-environment robustness [exploring]
   │  ├─ ✓ Contrast floor [decided]
   │  ├─ ✓ Colour-capability ladder (truecolor/256/16) [decided]
   │  ├─ ○ Narrow / short terminal behaviour [pending]
   │  └─ ○ NO_COLOR / monochrome degradation [pending]
-  ├─ ○ PORTAL logo [pending]
+  ├─ → PORTAL logo & header (wordmark + caret + separator) [converging]
+  ├─ → Spaced uppercase header treatment [converging]
+  ├─ ✓ Cursor & selection (thick violet left bar) [decided]
+  ├─ → Status / footer & keybindings (? help modal) [converging]
   ├─ ○ Borders & framing [pending]
-  ├─ ○ Spaced uppercase headers [pending]
-  ├─ ○ Cursor & selection treatment [pending]
-  ├─ ○ Status bar [pending]
   ├─ ○ Loading interstitial [pending]
   ├─ ○ Modal accent [pending]
   ├─ ○ Animation infra & performance [pending]
@@ -146,6 +146,15 @@ with adaptive colours so it respects terminal themes (per the canvas decision).
 Confidence: **high** (explicit pick). This sets the bar for every contingent
 subtopic: bold and characterful, but still readable — the open risk to manage is
 retro tipping into gimmicky/noisy.
+
+**Evolution (post-mockup, 2026-06-17):** seeing all five rendered, the user
+gravitated to the *least* retro option (Modern-Vivid) for its restraint, then
+asked to graft a few retro touches onto it (Amber-style header wordmark + block
+caret + separator rule). So the direction has softened from "bold retro-arcade"
+to **restrained-modern with light retro accents**. The retro-arcade label is
+retained as lineage, but the working target is Modern-Vivid v2. Not a
+contradiction — the mockups were exactly the instrument meant to let taste
+correct the abstract pick.
 
 ---
 
@@ -255,6 +264,25 @@ selection signal, surfaced only by building.
 
 **Next:** user reactions → narrow; then five loading-page mockups.
 
+### Round 2 — refined direction (Modern Vivid v2 + help modal)
+User reactions narrowed to **Modern-Vivid as the base** (restrained
+violet/cyan/green foreground palette), with grafted refinements:
+- **Header:** Amber-style — uppercase `PORTAL` wordmark + block caret (`▌`) + a
+  **separator rule** under it (the element Modern-Vivid lacked).
+- **Cursor & selection — DECIDED:** a **thick violet left bar** (`▌`) at the
+  far-left of the highlighted row (C64's chunkier block, not the thin `▍`), over
+  a subtle row-tint highlight.
+- **Footer & keybindings — converging:** the footer was running out of room for
+  all binds. Decision pattern: footer shows only the **core** keys
+  (navigate / open / filter / preview) + `? help`; the **full** keybinding set
+  lives in a **`?` modal overlay**. Standard TUI idiom; solves the footer-space
+  problem; the `?` modal was mocked (key/action two-column list, `x` in red,
+  "esc to close").
+- Built artboards: `Sessions — Modern Vivid v2`, `Sessions — Help Modal (?)`.
+
+Still front-runner, not locked: loading-page mockups + in-terminal validation
+remain before the colour direction is final.
+
 **Judging & bail gate** (folds review-001 F6/F9/F12):
 1. **Objective** — each direction must clear the contrast floor or it is out.
 2. **Taste** — the user judges whether any survivor is genuinely "more exciting /
@@ -360,9 +388,14 @@ concern — does NOT block the colour mockups; settle later.
   extremes) as a hard mockup gate; truecolor adaptive hues (impose, don't
   inherit), graceful downsample.
   Also decided: semantic colour roles (state always glyph-backed); existing
-  colours/layout not sacred (restructure on the table).
-- **Exploring:** positive colour direction (via Paper mockups);
-  terminal-environment robustness (narrow-terminal, NO_COLOR still open).
+  colours/layout not sacred (restructure on the table); cursor/selection = thick
+  violet left bar.
+- **Front-runner:** Modern-Vivid v2 (restrained violet/cyan/green foreground;
+  Amber-style header + separator; thick left-bar selector; condensed footer +
+  `?` help modal). Direction softened from bold-retro to restrained-modern.
+- **Exploring/converging:** header/footer/keybindings detail; terminal-
+  environment robustness (narrow-terminal, NO_COLOR still open); loading-page
+  designs next; in-terminal validation before lock.
 
 ## Triage
 
