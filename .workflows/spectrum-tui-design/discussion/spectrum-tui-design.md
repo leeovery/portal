@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (20 subtopics — 8 decided · 4 converging · 1 exploring · 7 pending)
+  Discussion Map — ZX Spectrum TUI (21 subtopics — 8 decided · 5 converging · 1 exploring · 7 pending)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -67,6 +67,7 @@ improvement worth shipping."
   ├─ ○ Borders & framing [pending]
   ├─ ✓ Loading interstitial (combined: header + thick bar + tick-list) [decided]
   ├─ ✓ Startup flip (cold-path concurrent bootstrap + live progress) [decided]
+  ├─ → Grouped views (by project / by tag) & Projects page [converging]
   ├─ ○ Modal accent [pending]
   ├─ ○ Animation infra & performance [pending]
   └─ ○ Scope boundary (v1 vs deferred) [pending]
@@ -393,6 +394,39 @@ chose the restrained option; direction evolved, documented). F8 baseline owner /
 F9 narrowing cardinality → resolved (user picks; narrowed to one front-runner).
 
 ---
+
+## Other surfaces — grouped views & Projects (MV applied)
+
+### Context
+Beyond the flat Sessions list, the picker has two grouping modes (`s` cycles
+Flat → by Project → by Tag) and a separate Projects page (`p`/`x`), all paginated
+with their own keymaps. The Modern-Vivid identity must apply to all. Mocked for
+sign-off (closes review-002 F7).
+
+### By Project / By Tag (grouped Sessions)
+Same chrome as flat Sessions (PORTAL header, separator, pagination, condensed
+footer); the mode shows in the section header ("Sessions — by project" /
+"— by tag"). Group headers are **dim, non-selectable** rows: `heading ··· N`
+(dim heading + dimmer "··· count"). Session rows **indent** under their header;
+same name(flex) + trailing window/attached layout + thick-violet-bar selection as
+flat. By Tag groups by tag (a multi-tag session repeats under each — Pattern B)
+with a pinned **Untagged** catch-all; By Project groups by project dir with an
+**Unknown** catch-all. Mirrors the existing `HeaderItem` model (every row exactly
+one delegate line — the load-bearing pagination invariant). Artboards:
+`Sessions — by Project (MV)`, `Sessions — by Tag (MV)`.
+
+### Projects page
+Same chrome; section header "Projects N". **Two-line rows:** project name (bold
+fg) over its path (dim). Selection = full-height violet left bar + row tint +
+white name. Distinct footer (project keymap): `⏎ new session · s sessions ·
+e edit · / filter · ? help` — full set (`d delete`, `n new in cwd`, nav) lives in
+the `?` modal. Artboard: `Projects (MV)`.
+
+### Notes
+- The `?` help modal is **per-page** (Sessions vs Projects keymaps differ); only
+  the Sessions variant is mocked so far.
+- Project-row left bar is a 4px violet **bg column** (terminal-faithful — a column
+  of coloured cells), spanning both text lines.
 
 ## Loading interstitial
 
