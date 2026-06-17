@@ -486,6 +486,41 @@ The original modal's focus/keymap was ambiguous; worked it through:
   focused`, `Edit Modal — adding tag`. Same contextual-footer principle applies to
   the other modals.
 
+### Edit modal — model UPDATE (decided): in-place edit + immediate persistence
+Supersedes the two flagged calls above (no-in-place-edit, batch-all). Final model
+— **two modes applied uniformly to Name / Aliases / Tags:**
+- **Navigate mode (default):** `Tab`/`Shift+Tab` between fields; `←/→` across chips
+  + the `+ add` slot. Focused element shows a **focus highlight** (violet outline).
+  `x` deletes a focused chip immediately. `Esc` **closes the modal**.
+- **Edit mode (one element live):** entered by `Enter`/`e` on a chip, `Enter` on
+  Name, or `+ add` → which **spawns a new empty chip already in edit mode** (looks
+  like a normal chip + an **edit highlight** + live cursor). Type; `←/→` move the
+  **text cursor within the value**. `Enter` commits & persists → back to navigate
+  (focus highlight); `Esc` **discards that element's edit** (a brand-new empty chip
+  vanishes) → back to navigate.
+
+**Persistence = IMMEDIATE per item** (not batch). Each element persists on exit-
+edit (`Enter`). Why this wins: it **dissolves the dirty-state + save-key problem**
+— there's never an unsaved batch, so no dirty indicator and no save-key question.
+Extends the codebase's existing tags-persist-live to Name + Aliases (consistent,
+not a reversal).
+
+Falling-out rules:
+- **Empty-on-commit = delete** (new or existing chip); deleting a focused chip is
+  immediate. Empty **Name** can't persist → reverts.
+- **`Esc` backs out one level:** edit mode → discard element edit; navigate mode →
+  close modal (all already saved).
+- **Three chip visual states:** normal (subtle) · focused (violet outline) ·
+  editing (edit highlight + cursor) — mode always legible.
+- **Bundle, not split:** one modal for Name+Aliases+Tags is fine under this model
+  (user weighed splitting; chose bundle).
+
+**To lock visually:** a "chip in edit mode" state (edit highlight + cursor inside
+an existing chip, distinct from focus). Other mocked states
+(`Edit Project Modal (MV)` Name-focused, `Edit Modal — chip focused`, `Edit Modal
+— adding tag`) stand; the add-state will be re-read as "new empty chip in edit
+mode" rather than a separate trailing input.
+
 ## Theming system
 
 ### Context
