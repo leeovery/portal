@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (28 subtopics — 26 decided · 1 converging · 1 pending)
+  Discussion Map — ZX Spectrum TUI (28 subtopics — all 28 decided)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -76,8 +76,8 @@ improvement worth shipping."
   ├─ ✓ Interaction conventions (focus/edit · per-page help · modals on blank) [decided]
   ├─ ✓ Animation & performance (minimal; idle-zero tick) [decided]
   ├─ ✓ Scope boundary (v1 vs deferred) [decided]
-  ├─ → Design reference & visual verification (Paper map + capture harness) [converging]
-  └─ ○ Remaining UX states (empty · flash · no-tags signpost · command-pending) [pending]
+  ├─ ✓ Design reference & visual verification (Paper map + vhs harness) [decided]
+  └─ ✓ Remaining UX states (empty · flash · signpost · command-pending) [decided]
 
 ---
 
@@ -841,18 +841,29 @@ visual check against its Paper frame. Two layers:
     validates **layout, structure, colour-role intent**, which is the review need.
     Exact harness validated at implementation.
 
-## Remaining UX states (to design — not defer)
+## Remaining UX states (designed)
 
-Present in code, not yet mocked; decide rather than leave to implementation:
-- **Empty lists** — zero sessions / zero projects: a friendly empty state + hint.
-- **Inline flash** (`flashText`, Sessions) — transient messages (e.g. "session
-  killed externally") between the filter input and the list: define MV colour,
-  placement, auto-clear.
-- **"No tags yet" signpost** (`byTagSignpost`) — by-tag with zero tags:
-  degrade-with-message (not silent flatten): define MV styling.
-- **Command-pending banner** (Projects, `commandPending`) — "Select project to
-  run: <cmd>": define MV styling.
-Proposed: mock these (quick) before locking the spec, for consistency.
+Previously un-mocked states, now decided + mocked (Modern Vivid):
+- **Empty sessions** — centred empty state: a dim block glyph, "No sessions yet",
+  hint "Press n to start one in the current directory · p for projects"; footer
+  reduces to the still-relevant keys (`n` / `p` / `/` / `?`). Artboard: `Sessions
+  — empty (MV)`. **Empty projects** mirrors it ("No projects yet" + open-a-
+  directory hint) — same pattern, not separately mocked.
+- **Inline flash** — a transient line between the section header and the list:
+  **amber left-bar** + `⚠` + message (e.g. "folio-Jiz4el closed externally — list
+  updated"); auto-clears. Success variant uses green. Artboard: `Sessions —
+  inline flash (MV)`.
+- **"No tags yet" signpost** — by-tag with zero tags: a **violet left-bar**
+  signpost ("No tags yet — add tags in the project editor (e)…") over the flat
+  list (degrade-with-message, not silent flatten). Artboard: `Sessions — no tags
+  signpost (MV)`.
+- **Command-pending banner** — Projects invoked to run a command: a **violet
+  left-bar** banner ("Pick a project to run") with the command in an **orange
+  chip**; footer becomes `⏎ run here · n run in cwd · esc cancel`. Artboard:
+  `Projects — command pending (MV)`.
+
+**Shared convention:** a **left-bar accent line** for inline notices — **amber**
+= transient / warning, **violet** = mode / info. Consistent and terminal-cheap.
 
 ## Summary
 
