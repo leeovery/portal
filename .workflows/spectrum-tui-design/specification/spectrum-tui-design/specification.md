@@ -567,7 +567,7 @@ Each implementation task runs a fixed loop with an explicit owner for the visual
 
 1. **Implementer (sub-agent)** — does the work **and produces the task's `vhs` capture**, comparing it to the named Paper frame to **self-verify before handing off**. The implementer owns the capture so it can check and converge its own work — without this, the implement↔review loop never terminates.
 2. **Reviewer (sub-agent)** — reviews the **code** (its primary, essential job) **and** the **visual**: confirms the implementer's capture matches the frame (layout / structure / colour-role) and that **behaviour parity** holds (§1). Only when **both** pass does the task **gate for human review**.
-3. **Human gate** — the human opens the task's **latest screenshot** (and inspects the live TUI) before approving.
+3. **Human gate** — the human opens **both** the task's latest `vhs` capture **and** its committed Paper reference (§15.5), and inspects the live TUI, before approving.
 
 **Screenshot storage (explicit):** each task's latest `vhs` PNG is **committed in-repo** under the harness dir, **named per frame/task** (e.g. `testdata/vhs/sessions-flat.png`), overwritten in place so "latest" is always current — giving the reviewer and the human a stable, well-labelled image to open without re-running anything.
 
