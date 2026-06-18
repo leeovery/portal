@@ -99,7 +99,7 @@ Define a **minimum supported terminal size**; below it the UI **degrades** rathe
 
 ### 2.9 MV token table (closed vocabulary — pinned values)
 
-Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every renderer references a token — **no literal hex at call sites** (this is what makes §2.8 theming work). **Dark variants are pinned exactly** (extracted from the canonical Paper frames, then reconciled to clear the contrast floor). **Light variants** are derived from the Tokyo Night Day siblings, contrast-verified against white, and **locked at the in-terminal validation gate (§15)**.
+Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every renderer references a token — **no literal hex at call sites** (this is what makes §2.8 theming work). **Dark variants are pinned exactly**, reconciled to clear the contrast floor against the **dark canvas `#0b0c14`**. **Light variants** are derived from the Tokyo Night Day siblings, contrast-verified against the **light canvas `#e1e2e7`**, with surface tints **pinned and eyeballed at the in-terminal validation gate (§15)**.
 
 **Greys / text ramp**
 
@@ -130,18 +130,22 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 | Token | Role | Dark | Light |
 |---|---|---|---|
-| `canvas` | terminal background (never painted) | terminal bg | terminal bg |
-| `bg.selection` | selected-row tint | `#1A1726` | light violet |
-| `bg.warning` | warning-flash band | `#241B10` | light amber |
-| `bg.track` | loading-bar empty track | `#26283A` | light grey |
-| `border.separator` | title rule (2px) | `#292E42` | light blue-grey |
-| `border.footer` | footer rule (1px) | `#20232E` | light blue-grey |
+| `canvas` | owned mode-matched canvas (painted on every cell) | `#0b0c14` | `#e1e2e7` |
+| `bg.selection` | selected-row tint | `#28243a` | `#D0C6F0` |
+| `bg.warning` | warning-flash band | `#241B10` | light amber (§15) |
+| `bg.track` | loading-bar empty track | `#26283A` | light grey (§15) |
+| `border.separator` | title rule (2px) | `#292E42` | `#C9CDDB` |
+| `border.footer` | footer rule (1px) | `#20232E` | `#C9CDDB` |
 | `text.on-warning` | warning-flash message | `#E8C9A0` · 13.3 | `#7A4B12` · 7.4 |
 
 **Rules**
 - **Closed vocabulary** — every rendered colour is one of these tokens; no literal hex outside the token layer (enforces §2.8 theme-readiness).
 - `state.green` is **attached-only** (+ success flash); `state.red` is **destructive-only**; chips are `text.primary` on a tint, never green.
 - **One documented exception:** the **Preview scrollback capture** renders the pane's **real ANSI output**, not theme tokens — intentionally outside the palette. Only its *chrome* (frame, top bar) is themed (`accent.cyan` + `text.detail`).
+- **Contrast re-verification (the canvas pass).** Every foreground token, every per-element tint/band, and every foreground-on-tint pairing is verified against the **exact canvas** — dark variants vs `#0b0c14`, light variants vs `#e1e2e7`. The two variants resolve **independently** (each only against its own mode-canvas; no single value need hold on both). Remedy when one dips under floor: **adjust toward more contrast** — *brighten* a dark variant on `#0b0c14`, *darken / saturate* a light variant on `#e1e2e7` — never drop the floor.
+- **Text-carrying tints are co-tuned with their on-band text token.** A tint that carries text (the selection band, notice bands) is pinned by **two** ratios — tint-vs-canvas (≥3:1 UI floor) and text-vs-tint (≥4.5/3:1 text floor) — and **both must clear simultaneously**. There are two knobs (the tint *and* its on-band text token); when no single tint value satisfies both, the text token moves too. The spec measures the **pair**, not the tint alone.
+- **No stray hex.** The mockups' ad-hoc values collapse to tokens: `#15131F` → `bg.selection`, `#2B3050` → `border.separator`. No raw hex survives outside this table.
+- **Light surface tints finalised at §15.** `bg.selection` (`#D0C6F0`), `bg.warning`, `bg.track`, and the light borders (`#C9CDDB`) are **pinned and eyeballed** against `#e1e2e7` at the validation gate, each **derived from its dark anchor + the surface it renders** — not invented. A numeric pass alone is insufficient; the light-tint-on-light-canvas case is the recurring risk.
 - All values are a **hypothesis until prototyped in a real terminal (§15)**; the table is the build target, validation is the lock.
 
 ---
