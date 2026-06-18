@@ -282,6 +282,35 @@ is not perturbed. Spec/implementation note, not a design blocker. Lipgloss v2 ke
 primitives; the open companion is **which** canvas to paint — light/dark detection
 (review-004 F9).
 
+### Light/dark detection & fallback — DECIDED (resolves review-004 F9 + F7; disposes F8)
+The whole canvas choice rides on detecting the terminal's light/dark mode. Four parts:
+- **Mechanism:** an **OSC 11 query** (`tea.RequestBackgroundColor` → `BackgroundColorMsg`
+  in Bubble Tea v2) → luminance → light/dark. (`COLORFGBG` is a weak secondary hint only;
+  OSC 11 is the real signal. Lipgloss v2 removed `AdaptiveColor`, so detection is now
+  explicit.)
+- **When:** once, **per launch at startup** — no caching (theme is stable mid-session,
+  the query is cheap, always fresh).
+- **Flip avoidance (also resolves F7):** the reply is async, so **gate the first real
+  paint on "detection resolved OR a short timeout (tens of ms)."** Terminals that answer
+  (single-digit ms) paint the right canvas from frame one; a non-responding tmux falls
+  through to the fallback after a brief, invisible wait. The cold-path loading page
+  already covers this, so it paints the correct canvas from its first frame (F7); the
+  warm-path wait stays under the ~100ms "instant" threshold.
+- **Fallback default = dark** — the majority of terminal users run dark, termenv defaults
+  dark, MV is dark-first; a no-answer → dark canvas (legible-but-wrong-mode on a light
+  terminal — cosmetic, not broken).
+- **Override = `prefs.json` `appearance: auto | light | dark`** (default `auto`), **v1
+  scope.** `auto` detects with the dark fallback; `light`/`dark` pin it and skip detection
+  (also killing the startup wait). It's the recourse for tmux misdetection — and **not a
+  second render path** (both light and dark are owned-canvas paths that exist regardless),
+  so it's cheap, unlike the shelved transparency toggle. Sits beside `session_list_mode`.
+
+**F8 disposition (light-mode intrusiveness):** accepted — the user confirmed the light
+canvas ("light mode looks great"); the `appearance` pin lets a user force light/dark, and
+opting *out* of repainting entirely (transparency) is the deferred toggle. Repainting a
+light terminal's shade is accepted v1 behaviour with the escape hatch deferred to the
+theme system.
+
 ### Paper frames
 All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
 `#e1e2e7` light); the **exploration** mocks (5 colour directions, loading concepts
