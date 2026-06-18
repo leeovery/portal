@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "spectrum-tui-design": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "spectrum-tui-design": {
               "status": "incorporated"
@@ -24,7 +24,7 @@
           "review_cycle": 5,
           "finding_gate_mode": "gated",
           "construction_gate_mode": "gated",
-          "date": "2026-06-17"
+          "date": "2026-06-18"
         }
       }
     }
