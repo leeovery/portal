@@ -540,11 +540,13 @@ All visual decisions are mocked in the Paper file **"Portal"** (`https://app.pap
 | Loading | `Loading 6 — Combined (thick bar)` | §10 |
 | Help modal | `Sessions — Help Modal (?)` | §8 |
 | Edit modal | `Edit Modal — navigate (name)` · `Edit Modal — chip focused` · `Edit Modal — edit in place` | §8 |
-| Kill / Rename | `Kill Confirm Modal (MV)` · `Rename Modal (MV)` | §8 |
+| Kill / Rename | `Kill Confirm Modal (MV)` · `Kill Confirm Modal (Light)` · `Rename Modal (MV)` | §8 |
 | Preview | `Preview Screen (MV)` | §9 |
 | Edge states | `Sessions — empty (MV)` · `Sessions — inline flash (MV)` · `Sessions — no tags signpost (MV)` · `Projects — command pending (MV)` | §11 |
 
-Exploration frames (the five colour directions, loading concepts, MV v1) are reference-only — **not build targets**. Paper is an HTML approximation: authoritative for **layout, structure, and colour-role**, not pixel-exact rendering (the real terminal uses the user's font + the §2.9 token hexes).
+All build-target frames are painted on the **owned canvas** (`#0b0c14` dark / `#e1e2e7` light).
+
+Exploration frames (the five colour directions, loading concepts, MV v1) **and the `Sessions — MV on Nord bg` mid-tone preview** are reference-only — **not build targets**. Paper is an HTML approximation: authoritative for **layout, structure, and colour-role**, not pixel-exact rendering (the real terminal uses the user's font + the §2.9 token hexes).
 
 ### 15.2 `vhs` capture harness (the prescribed verification tool)
 Visual verification uses **`vhs`** (charmbracelet/vhs) — a headless terminal driven by a `.tape` script that sends keys and writes a PNG. Prescribed for this feature (Portal is a Bubble Tea / charm app; `vhs` is the natural fit and runs in CI).
@@ -586,6 +588,11 @@ Each implementation task runs a fixed loop with an explicit owner for the visual
 Each task's reference is its **named Paper frame** (§15.1). The comparison is made against a **committed PNG export of that frame** — exported from the Paper file via the **`paper` MCP** (`get_screenshot` / `export` by the frame's node-id) and committed alongside the tapes (e.g. `testdata/vhs/reference/<frame>.png`). This keeps the reference **in-repo and durable**: no live-MCP dependency at implementation or CI time, while the `paper` MCP is the *authoring source* that produces and refreshes these exports.
 
 Both the **implementer** (self-check, §15.4) and the **reviewer** (gate, §15.4) place the task's **`vhs` capture beside the committed Paper reference** and judge **layout / structure / colour-role match**; the human gate opens both. When a frame changes in Paper, its reference export is **re-committed** so the baseline stays current.
+
+### 15.6 Light-mode visual check (implementation task)
+Light-mode coverage is **per-token, not per-screen** — verifying each light token once covers every screen that reuses it (the semantic-token payoff). The validated mocks (`Sessions — Modern Vivid (Light)`, `Kill Confirm Modal (Light)`) lock the direction and the full light **foreground** palette, so **no further Paper mocks are required**. Two residual checks are an explicit implementation task at the §15 gate:
+- **Pin + eyeball each light surface tint** against `#e1e2e7` — `bg.selection` (`#D0C6F0`), `bg.warning`, `bg.track`, and the light borders (`#C9CDDB`) — not merely numerically. The recurring failure class is a **light tint on a light canvas**; a numeric pass is insufficient (§2.9).
+- **Eyeball the remaining light modal/edit states** (rename, the three edit states, `?` help) and the **per-screen token wiring** in light mode against `#e1e2e7` — each rendered and visually confirmed, not just numerically verified.
 
 ---
 
