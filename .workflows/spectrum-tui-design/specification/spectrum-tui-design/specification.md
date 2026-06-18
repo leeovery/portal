@@ -344,6 +344,57 @@ Scroll `↑↓` + `Ctrl+↑/↓`; `Tab` next pane; `]`/`[` window; `⏎` attach 
 
 ---
 
+## 10. Loading interstitial & cold-path startup flip
+
+> **New engineering — the single biggest item in the redesign (its own phase/PR).** Making the loading screen honest/determinate requires restructuring cold-boot bootstrap to run concurrently with the TUI. Gated behind in-terminal validation of the visual direction (§15). Estimated **~1–1.5 days** incl. tests + race review — treat the estimate as having genuine variance given the load-bearing startup path and its prior-incident history (the slow-open / zombie-session episode).
+>
+> **Reference (Paper):** `Loading 6 — Combined (thick bar)`. *(The loading-page error frame is mocked at implementation — §10.5.)*
+
+### 10.1 Cold vs warm — when the loading screen shows
+The loading page is gated on **`serverStarted`** (set only when `EnsureServer` actually had to start the tmux server):
+- **Cold boot** (no tmux server): server started → full bootstrap → **loading page shown**.
+- **Warm** (server already up, just opening another picker): `serverStarted=false` → bootstrap steps no-op → **straight to the picker, no loading page**. The common case — instant and **untouched**.
+
+**The flip is scoped to the COLD path only.** A cheap `tmux has-server` check decides; warm keeps today's fast synchronous path, carrying **zero new risk**.
+
+### 10.2 The startup flip (concurrent cold-boot bootstrap)
+**Today:** the full 11-step bootstrap runs **synchronously in `PersistentPreRunE` before the TUI launches** — by the time the loading page renders, restore is already 100 % done, so the page is a cosmetic 1.2 s pad. A slow restore happens *before* the page appears (frozen terminal).
+
+**Flip:** for the **cold + TUI path only** (scoped via the existing `isTUIPath`; CLI/direct-path keeps the synchronous bootstrap), launch Bubble Tea **immediately** on the loading page, run the orchestrator in a **goroutine**, stream a `tea.Msg` per real step (and per restored session), transition to Sessions on complete, **quit-with-error** on the one fatal step. A progress callback is injected at the restore per-session loop.
+- The loading page already gates Sessions enumeration on `BootstrapCompleteMsg`, and the TUI is **inert during loading** (animation only) — this **contains the race surface**.
+- **A progress channel carries `serverStarted` + per-step progress to the TUI** on the cold/TUI path, replacing today's `context` + package-memo delivery.
+
+**Real costs / risks (not zero):** reworking `serverStarted`/warnings delivery; fatal-error-as-`tea.Quit` (today a `PersistentPreRunE` error return); careful restore/daemon race review against the live event loop (prior-incident history); integration-test updates around startup ordering.
+
+**Payoff:** an *honest* determinate loading screen **and** elimination of "frozen terminal on a slow boot" (instant "Portal is starting" feedback).
+
+### 10.3 Loading screen design (combined, honest)
+Centred **`PORTAL ▌`** (wordmark `text.primary` + caret `accent.violet`) over a **thick block progress bar** (filled `accent.violet`, track `bg.track`) and a **tick-list that ticks off** as each boot step completes — a **real list**, not an in-place text swap:
+- `✓` done — glyph `state.green`, label `text.muted-bright`
+- `◐` active — glyph `accent.cyan`, label `text.primary`
+- `·` pending — glyph `text.faint`, label `text.dim`
+
+Bar weight is **thick** (decided). Warm path shows no loading screen.
+
+### 10.4 Step mapping (11 real steps → 5 friendly labels)
+The bar advances on **every real bootstrap step**; the **active label** is the friendly group the current step falls in (each label spans ≥1 real step). Proposed grouping (cleanup steps 8–11 are near-instant and fold under the final label; implementation may adjust which fast step sits under which label):
+
+| Friendly label | Real bootstrap step(s) |
+|---|---|
+| `Started tmux server` | 1 EnsureServer |
+| `Registered hooks` | 2 RegisterPortalHooks · 3 set `@portal-restoring` · 4 SweepOrphanDaemons · 5 EnsureSaver |
+| `Restoring sessions (N/M)` | 6 Restore — skeleton phase (the per-session loop; `N/M` is its real counter) |
+| `Replaying scrollback` | 6 Restore — geometry + scrollback replay · 7 EagerSignalHydrate |
+| `Resuming Claude sessions` | hydrate helpers firing on-resume hooks · 8 clear `@portal-restoring` · 9–11 marker/FIFO/stale cleanup |
+
+Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one real per-item progress source); other labels tick once.
+
+### 10.5 Error & warning contract (cold-path)
+- **Fatal cold-boot step failure** → an **in-TUI error state on the loading page**: the failed step gets a **`state.red` marker + a one-line message**; `q`/`Esc` quits with a **non-zero exit** — rather than dropping into a half-restored picker. The loading-page **error frame** is mocked at implementation.
+- **Soft warnings** ride the **progress channel** and surface as a **post-load notice** (after the picker appears).
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
