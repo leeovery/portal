@@ -39,7 +39,7 @@
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 3,
-          "task": "spectrum-tui-design-3-8",
+          "task": "spectrum-tui-design-3-9",
           "task_map": {
             "spectrum-tui-design-1": "tick-854c0f",
             "spectrum-tui-design-1-1": "tick-09ba3b",
@@ -68,7 +68,8 @@
             "spectrum-tui-design-3-4": "tick-a7dd69",
             "spectrum-tui-design-3-5": "tick-e9a48a",
             "spectrum-tui-design-3-6": "tick-a99733",
-            "spectrum-tui-design-3-7": "tick-9524d2"
+            "spectrum-tui-design-3-7": "tick-9524d2",
+            "spectrum-tui-design-3-8": "tick-da7766"
           },
           "external_id": "tick-7331a6"
         }
