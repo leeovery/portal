@@ -27,6 +27,22 @@
           "date": "2026-06-18"
         }
       }
+    },
+    "planning": {
+      "items": {
+        "spectrum-tui-design": {
+          "status": "in-progress",
+          "format": "tick",
+          "spec_commit": "55a0bdb2b929ad3f13e5fecb867e916dbf8f9fd6",
+          "task_list_gate_mode": "gated",
+          "author_gate_mode": "gated",
+          "finding_gate_mode": "gated",
+          "review_cycle": 0,
+          "phase": 1,
+          "task": "~",
+          "task_map": {}
+        }
+      }
     }
   },
   "seeds": [
