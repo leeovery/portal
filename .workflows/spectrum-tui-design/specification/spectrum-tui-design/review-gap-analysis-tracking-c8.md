@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 8
 phase: Gap Analysis
@@ -48,9 +48,9 @@ Both references point to §2.2 as the authority for the principle that success m
 This is consistent at the principle level (§2.2 states "Every state is conveyed by glyph + colour," and §2.9 line 128 correctly anchors `✓` to the `state.green` role + success flash), so it is not a contradiction. But the §2.2 list is presented as a representative catalogue and is the cross-referenced anchor for the warning-vs-success distinction; omitting `✓` from it while including `⚠` makes the §11.2/§2.5 cross-references slightly dangling — an implementer building the glyph-backed state catalogue from §2.2 alone would not include the success tick. Adding `✓` success to §2.2's list would make the catalogue self-consistent with the references that point at it.
 
 **Proposed Addition**:
-[blank until discussed]
+§2.2 list: "... `⚠` warning, `✓` success."
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
