@@ -26,10 +26,11 @@ Across the rest of the spec the `▌` glyph is pinned exclusively to selection/s
 The consequence: an implementer building the notice bands from §11 would render a solid-colour left bar with no glyph. Under `NO_COLOR` (colour stripped), a glyphless solid bar carries no information — defeating the §2.5 claim that the bar carries state "by construction." Either §11 should pin the notice-band left-bar as a `▌` glyph (so the NO_COLOR argument holds and §2.5/§2.2 are consistent), or §2.5 should not cite the left-bar as a NO_COLOR state-carrier. This is the only mechanism §2.5 relies on that the owning section doesn't establish.
 
 **Proposed Addition**:
-[blank until discussed]
+(a) §11 intro: pin the bar as a glyph — "Inline notices use a **`▌` left-bar accent line**: ...".
+(b) §2.5: "**notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and bar colour — the band stays present via its `▌` left-bar and position — and carry the **state** through the message text plus, on the flashes, the `⚠`/`✓` glyph and bold/dim (§2.2)".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: §11 now pins the notice left-bar as `▌` (consistent with §3.3); §2.5 separates structure (bar + position) from state (message text + flash glyph), so the NO_COLOR carrier is accurate.
 
 ---
 

@@ -78,7 +78,7 @@ Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, l
 
 Under `NO_COLOR`, Portal **paints no canvas at all** — it renders on the terminal's **native fg/bg**. This is the one documented carve-out to the single owned-canvas render path (§1): `NO_COLOR` imposes *no* hues, so falling back to the terminal's own default fg-on-bg is legible **by construction** — a second, distinct, colourless render path whose legibility guarantee is the terminal's own defaults.
 
-This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and bar colour and carry the state through the message text, their `▌` left-bar, and their glyph where they have one (the warning flash's `⚠`, the success flash's `✓`), plus bold/dim (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2).
+This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and bar colour — the band stays present via its `▌` left-bar and position — and carry the **state** through the message text plus, on the flashes, the `⚠`/`✓` glyph and bold/dim (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2).
 
 ### 2.6 Light/dark detection & canvas selection
 Portal owns a mode-matched canvas (§1), so it must decide **which** canvas — light or dark — to paint. This is a detection-plus-override decision; with an owned canvas a wrong guess is only a cosmetic light/dark surprise, never an illegibility (the floor holds against whichever canvas is painted).
@@ -430,7 +430,7 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 
 > **Reference (Paper):** `Sessions — empty (MV)` · `Sessions — inline flash (MV)` · `Sessions — no tags signpost (MV)` · `Projects — command pending (MV)`.
 
-**Shared convention — left-bar accent notices.** Inline notices use a **left-bar accent line**: **`accent.orange`** = transient / warning, **`accent.violet`** = mode / info. **Placement:** the band sits **directly under the title separator, above the section header** (full-width); the section header + list **shift down**.
+**Shared convention — left-bar accent notices.** Inline notices use a **`▌` left-bar accent line**: **`accent.orange`** = transient / warning, **`accent.violet`** = mode / info. **Placement:** the band sits **directly under the title separator, above the section header** (full-width); the section header + list **shift down**.
 
 **Single-slot rule.** The notice slot holds **at most one band**. Persistent mode notices (no-tags signpost §11.3, command-pending banner §11.4) own the slot while their mode is active; a transient flash (§11.2) **takes the slot temporarily**, replacing any persistent band for its duration, then the persistent band returns. The flash **auto-clears on the next keypress or after a short timeout**. Orange (warning) and violet (info) never display at once — the transient flash wins while shown.
 
