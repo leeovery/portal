@@ -324,6 +324,26 @@ A centred panel listing **the current page's** keymap (two columns: key-hint gly
 
 ---
 
+## 9. Preview screen
+
+> **Existing behaviour — preserved (reskin).** The read-only scrollback preview already exists (`pagepreview.go`, hand-composed chrome); this restyles its chrome to the MV cyan "peek mode". The captured content and scroll/nav behaviour are unchanged.
+>
+> **Reference (Paper):** `Preview Screen (MV)`.
+
+A **full-screen overlay** (not a modal — the blank-screen rule of §8.1 does not apply), reached by `Space` on a session. Its chrome is **`accent.cyan`-framed** to signal **"peek mode"** — deliberately distinct from the violet main UI, preserving the `preview-visual-distinction` mode-signal in the MV palette.
+
+### 9.1 Chrome
+- **Top bar:** `⊙ preview` (`accent.cyan`) + `<session>` (`text.primary`) + `Window x/y · Pane x/y` (`text.detail`), with right-aligned nav hints `[ ] window · ↹ pane · ⏎ attach · ␣ back` (`text.detail`).
+- A **cyan border** (`accent.cyan`) frames the read-only content area.
+
+### 9.2 Captured content (out-of-theme)
+The pane content is the **real captured ANSI output**, rendered read-only — **not** theme tokens (the documented palette exception, §2.9/§15.1). Only the chrome is themed; the content is whatever the pane actually printed.
+
+### 9.3 Keys & overlays
+Scroll `↑↓` + `Ctrl+↑/↓`; `Tab` next pane; `]`/`[` window; `⏎` attach (this pane); `Space`/`Esc` back (§12). A `?` help opened here **overlays** the preview (doesn't blank it — §8.1).
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
