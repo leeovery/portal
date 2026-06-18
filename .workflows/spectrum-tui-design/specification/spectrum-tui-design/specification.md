@@ -569,6 +569,11 @@ Each implementation task runs a fixed loop with an explicit owner for the visual
 
 **Screenshot storage (explicit):** each task's latest `vhs` PNG is **committed in-repo** under the harness dir, **named per frame/task** (e.g. `testdata/vhs/sessions-flat.png`), overwritten in place so "latest" is always current — giving the reviewer and the human a stable, well-labelled image to open without re-running anything.
 
+### 15.5 Comparing the capture against the Paper reference
+Each task's reference is its **named Paper frame** (§15.1). The comparison is made against a **committed PNG export of that frame** — exported from the Paper file via the **`paper` MCP** (`get_screenshot` / `export` by the frame's node-id) and committed alongside the tapes (e.g. `testdata/vhs/reference/<frame>.png`). This keeps the reference **in-repo and durable**: no live-MCP dependency at implementation or CI time, while the `paper` MCP is the *authoring source* that produces and refreshes these exports.
+
+Both the **implementer** (self-check, §15.4) and the **reviewer** (gate, §15.4) place the task's **`vhs` capture beside the committed Paper reference** and judge **layout / structure / colour-role match**; the human gate opens both. When a frame changes in Paper, its reference export is **re-committed** so the baseline stays current.
+
 ---
 
 ## 16. Scope boundary
