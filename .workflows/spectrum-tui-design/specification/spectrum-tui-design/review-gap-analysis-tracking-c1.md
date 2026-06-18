@@ -21,10 +21,10 @@ topic: spectrum-tui-design
 §8.5 binds `?` on every page to open the help modal and shows a right-aligned `esc to close` hint, implying the help modal closes on `Esc`. But the spec never states whether pressing `?` again (while the help modal is open) closes it, nor whether any other key dismisses it. More pointedly, §12.1 lists `Esc` on Sessions as `clear-filter / quit` and on Projects as a bare keybind — so when a help modal is open, does `Esc` close the help modal, or fall through to clear-filter/quit? The modal-open key-routing precedence is unspecified. An implementer must guess whether help is a true modal that swallows all keys until dismissed (the natural reading) and whether `?` is a toggle or open-only. This matters because §12.2 explicitly notes `?` was previously *swallowed* to stop `bubbles/list` toggling its own help — the new binding's open/close/toggle semantics should be pinned so the implementer doesn't reintroduce ambiguous routing.
 
 **Proposed Addition**:
-(leave blank until discussed)
+§8.1 — add bullet: "Modals are key-exclusive while open … `Esc` resolves against the modal first." §8.5 — append: help closes on `?` (toggle) or `Esc`; key-exclusive, no fall-through to clear-filter/quit.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Applied to §8.1 + §8.5. Also resolves finding 7 (modals consume page keys).
 
 ---
 

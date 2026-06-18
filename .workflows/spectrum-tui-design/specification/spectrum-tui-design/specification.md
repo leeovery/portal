@@ -278,6 +278,7 @@ When the query matches nothing: a centred empty state — a dim `⌀` glyph (`te
   - **Open implementation question (feasibility-gated, §14):** whether the existing modal render path can be **adapted** (clear/replace the page, then draw the centred modal — likely small) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. Either way, the underlying **confirm / input logic of each modal must be preserved** (parity); only the surrounding render shell changes.
   - *(Exception: the Preview screen is a full-screen overlay, not a modal — §9; a `?` help opened from Preview overlays the preview without blanking it.)*
 - Centred bordered panel with a **contextual footer** reflecting the modal's current focus/mode.
+- **Modals are key-exclusive while open** — an open modal consumes all key input until dismissed; underlying page binds (`s`/`p`/`n`/`e`/`d`/clear-filter/quit, etc.) do **not** fire beneath it. `Esc` resolves against the modal first.
 - Reskin status: **kill** and **rename** keep their **confirm/rename logic** (parity) but adopt the new blank-screen rendering + MV restyle; the **edit modal** adopts a **new interaction model** (§8.2); the **`?` help modal** is **new** (§8.5).
 
 ### 8.2 Edit Project modal — two-mode, immediate-persist (⚠ behaviour change)
@@ -320,7 +321,7 @@ A labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary`
 ### 8.5 `?` help modal (new) — per-page
 > **New behaviour.** There is **no `?` binding today** (`?` is actively swallowed so `bubbles/list` doesn't toggle its own help). This adds: **bind `?`** on every page + a help-modal type + **per-page content**.
 
-A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc to close` (`text.detail`). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. Opened from Preview, it **overlays** the preview (doesn't blank it — §9).
+A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc to close` (`text.detail`). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. Opened from Preview, it **overlays** the preview (doesn't blank it — §9). The help modal closes on `?` (toggle) or `Esc`; while open it is key-exclusive (§8.1), so `Esc` dismisses it and does **not** fall through to the page's clear-filter / quit.
 
 ---
 
