@@ -269,6 +269,61 @@ When the query matches nothing: a centred empty state — a dim `⌀` glyph (`te
 
 ---
 
+## 8. Modals (edit · kill · rename · help)
+
+> **Reference (Paper):** `Edit Modal — navigate (name)` · `Edit Modal — chip focused` · `Edit Modal — edit in place` · `Kill Confirm Modal (MV)` · `Rename Modal (MV)` · `Sessions — Help Modal (?)`.
+
+### 8.1 Modal framing (shared)
+- **Modals render on a blank screen (changed behaviour).** When a modal opens, the page behind is **cleared to blank** and the modal is centred on the canvas. **This changes today's behaviour** — existing modals render **as an overlay on top of the page content**. Blank-screen is therefore a **shared modal-layer change**, not a per-modal restyle.
+  - **Open implementation question (feasibility-gated, §14):** whether the existing modal render path can be **adapted** (clear/replace the page, then draw the centred modal — likely small) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. Either way, the underlying **confirm / input logic of each modal must be preserved** (parity); only the surrounding render shell changes.
+  - *(Exception: the Preview screen is a full-screen overlay, not a modal — §9; a `?` help opened from Preview overlays the preview without blanking it.)*
+- Centred bordered panel with a **contextual footer** reflecting the modal's current focus/mode.
+- Reskin status: **kill** and **rename** keep their **confirm/rename logic** (parity) but adopt the new blank-screen rendering + MV restyle; the **edit modal** adopts a **new interaction model** (§8.2); the **`?` help modal** is **new** (§8.5).
+
+### 8.2 Edit Project modal — two-mode, immediate-persist (⚠ behaviour change)
+> **New behaviour (not a reskin-preserve).** This replaces the current asymmetric model (tags persist live; Name/Aliases batch) with a **uniform two-mode immediate-persist** model across all three fields. Behaviour parity does **not** apply here — it is a deliberate change; implement as specified.
+
+A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a mode indicator in the header (`Edit Project <name>` + `navigate` / `◉ EDIT MODE`). Two modes apply uniformly to all three fields:
+
+- **Navigate mode (default).** `Tab`/`Shift+Tab` move between fields; `←/→` move across chips and the trailing `+ add` slot within a chip field. The focused element shows a **focus highlight** (`accent.violet` outline, no fill). `x` **deletes** a focused chip immediately. `Esc` **closes the modal**.
+- **Edit mode (one element live).** Entered by `Enter`/`e` on a chip, `Enter` on Name, or landing on `+ add` — which **spawns a new empty chip already in edit mode** (edit highlight + live cursor). Type to edit; `←/→` move the **text cursor within the value**. `Enter` **commits & persists** → back to navigate; `Esc` **discards that element's edit** (a brand-new empty chip vanishes) → back to navigate.
+
+**Persistence is immediate, per item** — each element persists on exit-edit (`Enter`). There is **no dirty state, no save key, no batch**; `Esc` never discards saved work (it only backs out the current edit, or closes the already-saved modal). This extends the codebase's existing tags-persist-live behaviour to Name + Aliases (consistent, not a reversal).
+
+**Falling-out rules:**
+- **Empty on commit = delete** (new or existing chip); deleting a focused chip is immediate.
+- **Empty Name can't persist → reverts** to the prior value.
+- **`Esc` backs out one level:** edit mode → discard the element's edit; navigate mode → close (all already saved).
+
+**Visual states (the focus-vs-edit grammar, §13):**
+- **Chips** (aliases AND tags) are **one neutral style** — `text.primary` on a subtle tint; **never green** (green is attached-only). Three states: **normal** (subtle, no `✕`) · **focused** (`accent.violet` outline + a violet `✕` showing it's actionable — `x` removes it) · **editing** (`accent.violet` fill + cursor, no `✕`).
+- **Field labels:** the **focused field's** label is `accent.violet`; the others are `text.detail`.
+- **`+ add`** is an inline input slot (not a button/popup) in `text.faint`; the **mode indicator** reads `◉ EDIT MODE` (`accent.violet`) in edit mode, dim in navigate.
+
+**Contextual footer** (matches focus/mode):
+- Name focused (navigate): `↵ edit · ⇥ next field · esc close`.
+- Chip focused (navigate): `↵/e edit · x remove · ←→ move · ⇥ next field · esc close`.
+- Editing in place: `↵ save · esc discard · ←→ cursor · empty on save = delete`.
+
+The modal stays a **single bundle** for Name + Aliases + Tags (not split).
+
+### 8.3 Kill confirm modal
+> **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
+
+A centred panel: `▲ Kill session?` (`state.red` triangle), the **session name in `state.red`**, `· N window(s)` (`text.detail`), a consequence line "Ends the tmux session and all its panes. Can't be undone." (`text.detail`), footer `y kill · n cancel · esc to cancel`. **`state.red` is reserved for destructive actions.** Keys: `y`/`n`/`Esc`.
+
+### 8.4 Rename modal
+> **Logic preserved; rendering changed.** The rename flow is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
+
+A labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary` + violet `▌` cursor), a `was: <old name>` context line (`text.detail`), footer `↵ rename · esc cancel`. Keys: `Enter`/`Esc`.
+
+### 8.5 `?` help modal (new) — per-page
+> **New behaviour.** There is **no `?` binding today** (`?` is actively swallowed so `bubbles/list` doesn't toggle its own help). This adds: **bind `?`** on every page + a help-modal type + **per-page content**.
+
+A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc to close` (`text.detail`). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. Opened from Preview, it **overlays** the preview (doesn't blank it — §9).
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
