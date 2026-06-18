@@ -392,7 +392,7 @@ The bar advances on **every real bootstrap step**; the **active label** is the f
 | `Registered hooks` | 2 RegisterPortalHooks · 3 set `@portal-restoring` · 4 SweepOrphanDaemons · 5 EnsureSaver |
 | `Restoring sessions (N/M)` | 6 Restore — skeleton phase (the per-session loop; `N/M` is its real counter) |
 | `Replaying scrollback` | 6 Restore — geometry + scrollback replay · 7 EagerSignalHydrate |
-| `Resuming Claude sessions` | hydrate helpers firing on-resume hooks · 8 clear `@portal-restoring` · 9–11 marker/FIFO/stale cleanup |
+| `Running resume commands` | hydrate helpers firing the registered on-resume commands · 8 clear `@portal-restoring` · 9–11 marker/FIFO/stale cleanup |
 
 Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one real per-item progress source); other labels tick once.
 
