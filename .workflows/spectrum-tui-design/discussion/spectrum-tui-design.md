@@ -249,6 +249,39 @@ Mockups carry **unnamed raw hex** breaking §2.9's closed vocabulary: banner ban
 (not in §2.9). Each → collapse to an existing role token or promote to a **named**
 role; never leave raw hex. (Folds into the §2.9 contrast re-verification pass.)
 
+### Transparency toggle — SHELVED (resolves review-004 F2 + F6)
+The "use terminal background" opt-out toggle is **shelved for v1**. `prefs.json` already
+exists (it holds the session-list view mode) and could cheaply host a flag — but the
+toggle is **not one setting, it's a second render path**: toggle-ON means maintaining
+the foreground-only-on-unknown-bg path alongside the owned-canvas path, re-introducing
+the exact un-guaranteed legibility we reversed to escape (review F6's compound case).
+**v1 ships opaque-canvas-only — one render path, guaranteed legible.** The "respect my
+terminal background" escape hatch is **deferred to the user-theme system** (§2.8/§16),
+where respect-terminal + advisory-floor already live. Accepted v1 limitation:
+transparency/blur users get an opaque Portal until the theme system ships — fine for a
+transient full-screen picker, fully reversible. This **strengthens** the reversal's cost
+case (fewer moving parts) and makes F6 moot for v1 (no transparency-on path to compound).
+
+### Canvas painting mechanism (resolves review-004 F3 — real but routine)
+Portal already runs in the **alt-screen** (the separate full-screen buffer vim/less use).
+The alt-screen starts filled with the terminal's **default** bg; a cell only takes
+Portal's colour where Portal emits a styled cell. So "owning the canvas" = ensure **every
+cell carries the canvas bg**, in two layers:
+- **Leaf styles** carry `.Background(canvas)` so every text/accent run paints its own
+  cells (no bare default-bg cells leaking between glyphs).
+- **Outer fill:** wrap the whole composed view in a container sized to the full terminal
+  (`Width=termW · Height=termH · Background=canvas`, or `lipgloss.Place` +
+  `WithWhitespaceBackground`) so each line pads to full width and the view fills full
+  height — no right-edge / bottom bleed, and empty mid-screen rows are painted.
+
+**The bleed is real but routine** — standard Lipgloss primitives; k9s/btop paint their
+canvases this way. **Portal-specific care:** the fill must be an **outer-layer wrap**
+(not per-delegate-row painting) with the list's width/height budget unchanged, so the
+**one-row-per-delegate pagination invariant** (and the prior grouped-overflow incident)
+is not perturbed. Spec/implementation note, not a design blocker. Lipgloss v2 keeps these
+primitives; the open companion is **which** canvas to paint — light/dark detection
+(review-004 F9).
+
 ### Paper frames
 All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
 `#e1e2e7` light); the **exploration** mocks (5 colour directions, loading concepts
