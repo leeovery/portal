@@ -182,7 +182,7 @@ A single bottom row above a **1px** top rule (`border.footer`):
 `bubbles/list`'s built-in height-driven paginator renders as **centred dots** above the footer: the active page dot in `accent.violet`, inactive dots in `text.faint`.
 
 ### 3.6 Borders & framing
-**No full-screen frame.** Structure is carried by the two horizontal rules (header separator, footer rule) plus per-element treatments (selection tint, modal panels, preview chrome) — never a box around the whole UI. This keeps the foreground-only canvas honest (§1) and avoids full-bleed background fills.
+**No full-screen frame.** Structure is carried by the two horizontal rules (header separator, footer rule) plus per-element treatments (selection tint, modal panels, preview chrome) — never a box around the whole UI. The owned canvas (§1) is a flat full-terminal **fill**, not a frame: it paints every cell the same `canvas` colour but draws no border around the UI.
 
 ---
 
@@ -196,7 +196,7 @@ The default Sessions view (mode **Flat**) and the baseline every other view deri
 Each session is **one delegate line** — the load-bearing pagination invariant (every list row is exactly one line). Layout:
 - **Name** — full-width **left column (flex)**, `text.primary` (selected: `text.on-selection` over the `bg.selection` tint + violet bar). Names are `{project}-{nanoid}` or arbitrary renamed strings (variable length, may contain spaces); over-long names **truncate with `…`** (§2.7). The flat row shows **name only** — no project/path column (that dimension is served by the grouping modes, §5).
 - **Window count** — a **fixed-width trailing slot**, left-aligned, `text.detail` (selected row: `text.strong`). Reads `N window` / `N windows`.
-- **Attached marker** — a **fixed-width trailing slot** right of the count: `● attached` in `state.green` when attached; an **empty slot of the same width** when not — so the bullets line up vertically down the list and the counts stay column-aligned. On the **selected** row the `● attached` marker **keeps `state.green`** (the attached-only rule holds; green-on-`bg.selection` clears the floor, ≈9.8:1 dark). The selection/warning tints must keep every selected-row foreground — name, count, attached bullet — above the floor; these are verified **against the tints** in addition to the §2.3 white/black gate.
+- **Attached marker** — a **fixed-width trailing slot** right of the count: `● attached` in `state.green` when attached; an **empty slot of the same width** when not — so the bullets line up vertically down the list and the counts stay column-aligned. On the **selected** row the `● attached` marker **keeps `state.green`** (the attached-only rule holds; green-on-`bg.selection` clears the floor). The selection/warning tints must keep every selected-row foreground — name, count, attached bullet — above the floor; these are verified **against the tints** in addition to the §2.3 canvas gate (the foreground-on-tint pairings of §2.9).
 
 Trailing slots are fixed-width and right-pinned; the name flexes to fill the remainder. This keeps the `● attached` bullets and the window counts each vertically aligned regardless of name length.
 
