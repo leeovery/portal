@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 9
 phase: Gap Analysis
@@ -61,9 +61,10 @@ Two spots are left under-counted:
 §11.2 does fully describe the green success band, and the single-slot rule clearly covers it by reference, so an implementer would not be blocked — but the convention paragraph and the exclusion sentence read as a complete two-colour enumeration that the green success case silently violates. Minor: a one-clause addition to line 433 (and/or generalising line 435 to "the transient flash wins over any persistent band") closes it.
 
 **Proposed Addition**:
-(leave blank until discussed)
+(a) §11 convention map: "... **`accent.orange`** = transient / warning, **`state.green`** = transient / success, **`accent.violet`** = mode / info."
+(b) §11 single-slot rule: "A persistent (violet info) band and a transient flash (orange warning or green success) never display at once — the transient flash wins while shown."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: §11 convention now enumerates all three notice colours and the exclusion sentence generalises to persistent-vs-transient.
 
 ---
