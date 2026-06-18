@@ -77,6 +77,8 @@ Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, l
 
 **Decision:** choose token variants that also hold up on mid-tone backgrounds **where possible**; the eventual manual theme / light-dark override (the deferred user-theme initiative, §16) is the ultimate escape hatch; exotic backgrounds and detection-miss cross-pairing are **accepted as best-effort**, mitigated by the override.
 
+**⚠ Open item (revisit pending) — mid-tone backgrounds.** Real-world evidence (the **Nord** theme, a mainstream mid-tone dark bg ≈ `#2E3440`) shows the dark grey ramp drops below the floor on it: `text.detail` → ~3.0:1 and `text.dim` → ~1.9:1, while accents and `text.primary` still pass. The "best-effort + override" stance above is therefore **insufficient for a common case**. Whether Portal should **take control of the canvas** — a *mode-matched* canonical near-black / near-white backdrop, reversing the §1 respect-the-terminal-bg decision — is **deferred to a follow-up discussion** (§16.6). Until decided, §1 / §2.3 / §2.6 stand as written but are **provisional** on this point.
+
 ### 2.7 Narrow / short terminal — degrade, never break
 Define a **minimum supported terminal size**; below it the UI **degrades** rather than breaks: drop the wordmark → compact wordmark, drop the right-side header hint, truncate names with `…`, and let height drive pagination. It must **never overflow** — the one-row-per-delegate pagination invariant always holds (every list row, header or session, is exactly one delegate line). Exact thresholds are pinned as an implementation detail.
 
@@ -586,6 +588,9 @@ Animation is **minimal and idle-zero** — no idle CPU tick in an always-open to
 
 ### 16.5 Lock-in gate
 The colour direction is a **hypothesis until prototyped in a real terminal** (§15) — the in-terminal validation gate is the final lock before implementation closes; bail remains a legitimate outcome if the direction doesn't clear the bar (§1).
+
+### 16.6 Open — pending follow-up discussion
+- **Background ownership & mid-tone legibility (revisit).** The §1 "respect the terminal background" decision may be revised to a **mode-matched canonical canvas** (detect light/dark; paint near-white / near-black) so the grey ramp clears the contrast floor on mainstream mid-tone terminals (e.g. **Nord** `#2E3440`, where `text.detail` / `text.dim` currently fail — §2.6). This re-opens the existing `spectrum-tui-design` discussion (canvas-ownership topic), then re-specs §1 / §2.3 / §2.6 (and §2.8 / §2.9 if canvas tokens are added). Captured during spec review with a rendered mid-tone preview (Paper: `Sessions — MV on Nord bg (mid-tone preview)`).
 
 ---
 
