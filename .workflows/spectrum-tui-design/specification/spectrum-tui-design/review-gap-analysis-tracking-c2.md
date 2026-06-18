@@ -1,10 +1,12 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 2
 phase: Gap Analysis
 topic: Spectrum TUI Design
 ---
+
+> **All 3 findings resolved (cycle 2).** 1: authoritative Sessions footer membership (§3.4/§11.1). 2: no-tags signpost `x → e` path (§11.3 + mock). 3: expanded by user into a full **modal anatomy unification** — header title (red if destructive), `◉ EDIT MODE`-only right-corner, dismiss key in footer as `esc <verb>`, kill/delete `y kill · esc cancel` (dropped `n`); applied to §8.1/§8.2/§8.3/§8.4/§8.6/§12.1 + mocks (kill title red + footer, rename/edit header words removed). Also captured (separately): mid-tone background open item → §2.6/§16.6 routing to follow-up discussion.
 
 # Review Tracking: Spectrum TUI Design - Gap Analysis
 
