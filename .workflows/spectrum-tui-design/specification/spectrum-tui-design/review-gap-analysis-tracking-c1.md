@@ -39,10 +39,10 @@ topic: spectrum-tui-design
 §12.1 (Modals) and §12.1 (Projects keymap) reference a **delete-project** confirmation modal: "delete-project `y`/`n`/`Esc`" and Projects `d delete`. §6.3 also defers `d delete` to the help modal. But §8 (Modals) specifies edit, kill, rename, and help modals in detail — and never specifies the delete-project modal's content, copy, colour treatment, or rendering. §8.1 lists "delete-project" nowhere; only kill is given destructive-modal treatment (§8.3). An implementer building the Projects page has a binding (`d`) and a key contract (`y`/`n`/`Esc`) but no spec for what the delete-project modal looks like or says. Since this is a destructive action analogous to kill, the implementer would have to invent its copy/styling (does it reuse `state.red`? what's the consequence line for deleting a *project record* vs killing a session?). The spec is careful to distinguish "delete a project record" from "kill a session" (§12.2) but then never describes the former modal.
 
 **Proposed Addition**:
-(leave blank until discussed)
+New §8.6 Delete project confirm modal (mirrors kill; project-record consequence copy; `y delete · n cancel · esc`); add delete-project to §8.1 reskin-status line.
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Added §8.6 + updated §8.1.
 
 ---
 
