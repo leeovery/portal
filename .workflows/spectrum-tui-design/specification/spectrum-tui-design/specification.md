@@ -468,6 +468,34 @@ A count next to a label (`Sessions N`, `Projects N`, group `heading ··· N`) r
 
 ---
 
+## 14. Implementation architecture (feasibility)
+
+> **Context for planning — sizing, not task breakdown.** ~80 % of this reskin is restyling already-custom Lipgloss render code (today's TUI is hand-rendered on top of `bubbles/list`, not an off-the-shelf widget kit). No widget framework is needed.
+
+### 14.1 Kept as-is (the engine)
+`bubbles/list` provides the list model, pagination (the dots), filtering, cursor/selection, and nav for Sessions & Projects. The **build constraint holds**: grouping stays pure Lipgloss in the delegate — **no `lipgloss/tree`**.
+
+### 14.2 Restyle existing render code (the bulk)
+Edit current custom code and point it at palette tokens: the row delegates (`SessionDelegate` / `ProjectDelegate`), the manual three-column footer (→ condensed), the group `HeaderItem`, the kill / rename modals, the preview chrome (`pagepreview.go`), and the loading `viewLoading`.
+
+### 14.3 New-but-small
+- The **header / wordmark + separator block** above the list (≈ Lipgloss `JoinVertical`).
+- **Edit-modal chips** (restyle the alias/tag field render into chip elements).
+
+### 14.4 New-substantial (one)
+The **`?` help modal** — a new modal type + binding `?` (currently swallowed) + per-page help content (~60–80 lines). Extends the existing rounded-border modal overlay primitive.
+
+### 14.5 Cross-cutting foundation
+An **`AdaptiveColor` palette / role-token layer** (the §2.9 tokens, each with light + dark variants), contrast-floor adherence, and `NO_COLOR` handling. Moderate, touches every style — but it is **centralising colour, not adding widgets**.
+
+### 14.6 Open question — modal rendering path
+Whether the existing modal render path can be **adapted** for the blank-screen treatment (§8.1) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. The underlying confirm/input logic of each modal is preserved either way.
+
+### 14.7 Separate engineering item
+The **cold-path startup flip** (§10) — concurrent bootstrap + live progress — is plumbing, not a widget, and is its **own phase** (~1–1.5 days).
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
