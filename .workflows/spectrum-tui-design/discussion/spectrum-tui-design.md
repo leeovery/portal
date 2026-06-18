@@ -363,7 +363,10 @@ each light token once covers every screen that reuses it — no need to mock eve
 The recurring failure class is a **light tint on a light canvas** (the selection band,
 then the dividers); *foreground* tokens are dark-on-light and low-risk. So §15 must **pin
 *and* eyeball each light surface tint** (`bg.selection` `#D0C6F0`, `bg.warning`, `bg.track`)
-against `#e1e2e7`, not just numerically. The Sessions + Kill light mocks validate the
+against `#e1e2e7`, not just numerically — **deriving** each light value from its §2.9 dark
+anchor + the surface it renders (`bg.warning` `#241B10` → the inline-flash band, `bg.track`
+`#26283A` → the loading-bar track; both already in dark Paper frames), not inventing from
+nothing (resolves review-006 F3). The Sessions + Kill light mocks validate the
 direction and the full foreground palette, so **no further Paper mocks are needed for this
 revisit** — the residual surface-tint pinning is §15's job by design (those light values
 were always "finalised at validation").
