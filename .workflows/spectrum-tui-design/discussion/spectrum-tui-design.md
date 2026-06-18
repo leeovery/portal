@@ -311,6 +311,15 @@ opting *out* of repainting entirely (transparency) is the deferred toggle. Repai
 light terminal's shade is accepted v1 behaviour with the escape hatch deferred to the
 theme system.
 
+### Preview on the owned canvas (resolves review-004 F5)
+The Preview screen renders **real captured pane output** — §2.9's one documented palette
+exception ("untouched real content"). On the owned canvas: the canvas paints only the
+preview **chrome** (cyan frame + top bar) and surrounding margins; the **content area
+stays the untouched real ANSI**. A captured pane with no bg of its own shows the canvas
+behind it (consistent); one with its own ANSI bg shows that (a patch floating in the
+canvas) — both coherent. The cyan chrome's contrast against the exact canvas folds into
+the §2.9 contrast re-verification pass (no separate decision).
+
 ### Paper frames
 All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
 `#e1e2e7` light); the **exploration** mocks (5 colour directions, loading concepts
