@@ -175,6 +175,26 @@ ramp rungs, or adopt TN's published fg) and pin a real light canvas (`#e1e2e7`),
 not "white." The `canvas` token stops being "terminal bg (never painted)" and
 becomes an owned, painted value.
 
+**Canvas values — LOCKED (2026-06-18, via Paper):** dark = **`#0b0c14`** (an inky
+TN-tinted near-black — user preferred it darker than TN Night `#1a1b26`, keeping a
+whisper of the cool TN tint so it reads as an intentional ground, not flat black);
+light = **`#e1e2e7`** (TN Day — confirmed "looks great"). Demonstrated tint re-tune:
+the selected-row band `bg.selection` `#1A1726` (tuned to pure black) vanished on the
+new dark canvas and was lifted to **`#28243a`** to read — the first concrete instance
+of the rule below.
+
+**Contrast re-verification — DECIDED (rule here; computation is a spec task):** the
+floor (§2.3) is now measured against the **exact owned canvas** (`#0b0c14` /
+`#e1e2e7`), not ≈black/≈white. Scope is **every** rendered element, not just the base
+text column: all foreground tokens, **all per-element tints/bands** (selected-row
+tint, the amber/violet/green left-bar accents, status strips, chip states) AND
+**foreground-on-tint** pairings. Remedy when something dips under: **brighten/re-tune
+to clear** (exactly as the selection band was just fixed) — never drop the floor. This
+**extends the existing F3/F6 spec task** (pin exact hexes + record the contrast-floor
+pass) to the new canvas reference; the per-element *measurement* is mechanical spec
+work, but the *rule, scope, and remedy are decided here* so spec executes rather than
+re-decides. (Surfaces review-004 F4.)
+
 **Re-spec downstream:** §1 (canvas ownership), §2.3 (floor now guaranteed vs the
 exact canvas), §2.6 (mid-tone/collision solved, not best-effort), §2.8/§2.9 (canvas
 tokens + transparency toggle). Implementation heads-up (not decided here): Lipgloss
