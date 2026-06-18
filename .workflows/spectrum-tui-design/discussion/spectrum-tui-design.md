@@ -301,7 +301,11 @@ The whole canvas choice rides on detecting the terminal's light/dark mode. Four 
   (single-digit ms) paint the right canvas from frame one; a non-responding tmux falls
   through to the fallback after a brief, invisible wait. The cold-path loading page
   already covers this, so it paints the correct canvas from its first frame (F7); the
-  warm-path wait stays under the ~100ms "instant" threshold.
+  warm-path wait stays under the ~100ms "instant" threshold. **Cold-path ordering
+  (resolves review-005 F3):** the loading page gates on detect-or-timeout *too* — no
+  conflict with the startup-flip's "launch immediately" win, because the tens-of-ms
+  detection is invisible against the multi-hundred-ms bootstrap the cold path is already
+  running; the first frame still lands well under 100ms and the flip is avoided.
 - **Fallback default = dark** — the majority of terminal users run dark, termenv defaults
   dark, MV is dark-first; a no-answer → dark canvas (legible-but-wrong-mode on a light
   terminal — cosmetic, not broken).
@@ -341,6 +345,16 @@ requirement.) The remaining light modal/edit states (rename,
 the three edit states, `?` help) are lower-risk (violet/text, not red-on-light) and are
 an **explicit implementation visual-check task**: each mocked + eyeballed in light mode
 against `#e1e2e7`, not merely numerically verified (per the §15 visual-verification gate).
+
+**Light coverage is per-token, not per-screen** (the semantic-token payoff): verifying
+each light token once covers every screen that reuses it — no need to mock every screen.
+The recurring failure class is a **light tint on a light canvas** (the selection band,
+then the dividers); *foreground* tokens are dark-on-light and low-risk. So §15 must **pin
+*and* eyeball each light surface tint** (`bg.selection` `#D0C6F0`, `bg.warning`, `bg.track`)
+against `#e1e2e7`, not just numerically. The Sessions + Kill light mocks validate the
+direction and the full foreground palette, so **no further Paper mocks are needed for this
+revisit** — the residual surface-tint pinning is §15's job by design (those light values
+were always "finalised at validation").
 
 ### Paper frames
 All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
