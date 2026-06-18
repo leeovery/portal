@@ -189,8 +189,14 @@ floor (§2.3) is now measured against the **exact owned canvas** (`#0b0c14` /
 `#e1e2e7`), not ≈black/≈white. Scope is **every** rendered element, not just the base
 text column: all foreground tokens, **all per-element tints/bands** (selected-row
 tint, the amber/violet/green left-bar accents, status strips, chip states) AND
-**foreground-on-tint** pairings. Remedy when something dips under: **brighten/re-tune
-to clear** (exactly as the selection band was just fixed) — never drop the floor. This
+**foreground-on-tint** pairings. Remedy when something dips under: **adjust toward more contrast** — *brighten* a
+dark-variant token on the dark canvas, *darken / saturate* a light-variant token on the
+light canvas — never drop the floor. **The two variants resolve independently**, each
+measured only against its own mode-canvas (dark vs `#0b0c14`, light vs `#e1e2e7`); no
+single value need hold on both (resolves review-005 F4). Instances: dark selected-row
+band `#1A1726` → `#28243a` (brightened on `#0b0c14`); **light** selected-row band
+`#ECE7F7` → `#D0C6F0` (darkened/saturated on `#e1e2e7` — it was paler than the canvas
+and receded). This
 **extends the existing F3/F6 spec task** (pin exact hexes + record the contrast-floor
 pass) to the new canvas reference; the per-element *measurement* is mechanical spec
 work, but the *rule, scope, and remedy are decided here* so spec executes rather than
@@ -1207,7 +1213,7 @@ Carried forward (work items, not open questions):
 - **Separate initiative (logged):** user-overridable theme system
   (`.workflows/.inbox/ideas/2026-06-17--user-overridable-theme-system.md`).
 
-### Current State — COMPLETE (all 28 subtopics decided)
+### Current State — COMPLETE (all 29 subtopics decided — canvas reopened & reversed 2026-06-18)
 The design is fully specified and mocked. **Locked direction: Modern-Vivid** — a
 restrained violet/cyan/green **token-based** palette (impose-our-hues truecolor
 `AdaptiveColor`, contrast floor WCAG-AA on both extremes, honour `NO_COLOR`,
@@ -1231,9 +1237,11 @@ uppercase.
 - **Before lock-in:** in-terminal prototype validation of the direction (the
   gate's step 3).
 - **Reversed (2026-06-18):** canvas ownership — Portal now **owns a mode-matched
-  canvas** (TN `#1a1b26` / `#e1e2e7`, opaque default + a transparency opt-out
-  toggle), superseding "respect the terminal background." Makes the contrast floor
-  **guaranteed**; re-specs §1 / §2.3 / §2.6 / §2.8 / §2.9. See the canvas subtopic.
+  canvas** (`#0b0c14` dark / `#e1e2e7` light, **opaque-only in v1** — the transparency
+  opt-out is shelved to the theme system; light/dark via OSC 11 detection + dark fallback
+  + an `appearance: auto|light|dark` pref), superseding "respect the terminal background."
+  Makes the contrast floor **guaranteed**; re-specs §1 / §2.3 / §2.6 / §2.8 / §2.9 + the
+  `appearance` pref. See the canvas + token-architecture subtopics.
 
 ## Triage
 
