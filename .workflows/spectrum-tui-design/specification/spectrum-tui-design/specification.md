@@ -425,7 +425,7 @@ A **transient band** under the title separator: an **`accent.orange` left-bar** 
 - **F10 — flash vs pagination:** the flash band is **chrome** — when it appears/clears, the list **viewport height is recomputed** (the same recompute the one-row-per-delegate invariant already mandates), so the list never overflows or miscounts rows.
 
 ### 11.3 "No tags yet" signpost (reskin)
-By-Tag with **zero tags anywhere**: an **`accent.violet` left-bar** signpost (`No tags yet — add tags in the project editor (e) …`, `text.strong`) over the **flat list** — degrade-with-message, not a silent flatten (§5.3).
+By-Tag with **zero tags anywhere**: an **`accent.violet` left-bar** signpost (`No tags yet — add tags in a project's editor: press x for projects, then e to edit`, `text.strong`) over the **flat list** — degrade-with-message, not a silent flatten (§5.3).
 
 ### 11.4 Command-pending banner (reskin)
 When Projects is invoked to **run a command**: an **`accent.violet` left-bar** banner (`Pick a project to run`) with the command in an **`accent.orange` chip**; the footer becomes `⏎ run here · n run in cwd · esc cancel`. The screen keeps the **full Projects chrome** (green `Projects` header + `/ to filter`) — not a stripped page; the banner sits on top.
