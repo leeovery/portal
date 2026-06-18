@@ -15,18 +15,22 @@
 ## 1. Overview & Design Direction
 
 ### Goal
-Portal's TUI is functional but personality-free. This redesign gives it a colourful, characterful visual identity that makes Portal nicer and more exciting to use **without overriding the user's terminal preferences**. The shipping bar is concrete: the result must be a genuine improvement over today's UI — both *objectively* (clears the contrast floor, §2) and on the user's *subjective* read. Bailing is a legitimate outcome if no direction clears that bar; this is an explicit anti-sunk-cost gate.
+Portal's TUI is functional but personality-free. This redesign gives it a colourful, characterful visual identity that makes Portal nicer and more exciting to use. Portal **owns a mode-matched canvas**: it respects the user's light/dark mode but neutralises the background shade, painting its own canonical backdrop so MV's colours always sit on the surface they were tuned for. The shipping bar is concrete: the result must be a genuine improvement over today's UI — both *objectively* (clears the contrast floor, §2 — guaranteed against the exact owned canvas) and on the user's *subjective* read. Bailing is a legitimate outcome if no direction clears that bar; this is an explicit anti-sunk-cost gate.
 
 ### Locked direction — Modern Vivid
-The visual language is **Modern Vivid (MV)**: a restrained, modern palette (violet / cyan / green accents, plus an orange filter accent) with light retro touches grafted on (wordmark + caret + separator rule). It descends from a "ZX Spectrum" inspiration but is explicitly **not** a literal Spectrum reproduction. Two signature Spectrum motifs are **out**:
+The visual language is **Modern Vivid (MV)**: a restrained, modern palette (violet / cyan / green accents, plus an orange filter accent) with light retro touches grafted on (wordmark + caret + separator rule). It is **not** a literal Spectrum reproduction:
 
-- **No forced black canvas** — Portal does not paint its own background (see canvas ownership below).
-- **No rainbow / multi-hue spectrum motif** — the multi-hue rainbow is firmly excluded (unwanted pride-flag association). Colour is still used heavily; it is just never a rainbow.
+- **No rainbow / multi-hue spectrum motif** — the multi-hue rainbow is firmly excluded (unwanted pride-flag association). Colour is used heavily, but never as a rainbow.
+- **The canvas is mode-matched, not pure black** — Portal owns a near-black (dark) / near-white (light) backdrop (see Canvas ownership below), not a literal black-on-every-terminal scheme.
 
-Spectrum is loose inspiration only. The redesign keeps the structural/typographic ideas (wordmark, separators, spaced headers, chunky selector, honest loading screen) — which are theme-agnostic — and drops the literal colour scheme.
+MV keeps the structural/typographic ideas (wordmark, separators, spaced headers, chunky selector, honest loading screen) and pairs them with its own colour scheme.
 
-### Canvas ownership — respect the terminal background
-Portal renders **foreground-only on the user's existing terminal background**, using adaptive (light/dark) accent colours so the redesign works on any terminal theme. Per-element backgrounds (selected-row tint, status strips, modal panels) are permitted — that is focus styling, not canvas ownership — but each must clear the contrast floor (§2) on **both** light and dark backgrounds. Portal never fills the full alt-screen with a bespoke colour.
+### Canvas ownership — Portal owns a mode-matched canvas
+Portal detects the terminal's light/dark mode and paints its **own opaque canvas** on every cell: an inky near-black **`#0b0c14`** in dark mode, a soft near-white **`#e1e2e7`** in light mode (both Tokyo-Night-derived). Owning the canvas makes the contrast floor (§2.3) **guaranteed** — every token is measured against the exact surface it renders on, never an arbitrary terminal background.
+
+- **Painted on every cell, two layers.** Every cell carries the canvas bg: (1) leaf styles carry `.Background(canvas)` so every text/accent run paints its own cells, and (2) an **outer-layer full-terminal fill** (a container sized `Width=termW · Height=termH · Background=canvas`, or `lipgloss.Place` + `WithWhitespaceBackground`) pads every line to full width and fills full height, so no edge bleeds and empty mid-screen rows are painted. The fill is an **outer-layer wrap** (not per-delegate-row painting) with the list's width/height budget unchanged — it must **not** perturb the one-row-per-delegate pagination invariant (§3.6).
+- **Per-element backgrounds remain.** Selected-row tint, status strips, modal panels, etc. are focus/structure styling layered over the canvas; each must clear the contrast floor against the exact canvas (§2.3 / §2.9).
+- **Opaque-only in v1.** A "use terminal background" transparency opt-out is **deferred** to the user-theme system (§2.8 / §16); v1 ships one render path. `NO_COLOR` is the one carve-out (§2.5).
 
 ### Nothing is sacred
 The current UI carries no special claim. Today's pink cursor (`212`), green=attached (`76`), grey detail text (`#777777`), and blue preview border may all be replaced wholesale. The redesign may restructure colour, layout, and UI — and, where justified, UX — but only where "the juice is worth the squeeze." Code may change in service of good UI; gratuitous restructure is avoided. Every design decision is validated against how Portal actually works before being adopted.
@@ -36,7 +40,7 @@ This feature is a **visual reskin** of the existing TUI, **not** a reimplementat
 
 **Changing existing code is explicitly permitted** where a restyle genuinely requires it — reworking a row delegate, centralising colour into tokens, adjusting a layout/measurement calc are all in-bounds; a reskin is not limited to additive styling. The bar is **like-for-like behaviour**: whenever existing code is touched, verify the new behaviour against the current implementation (read it, trace every path, diff the logic) so the change is **provably cosmetic**. Behaviour parity — not "did we avoid touching the file" — is the acceptance test.
 
-Where a section documents existing behaviour, treat it as a **constraint to preserve**, not a task to build. Genuinely **new** work is flagged explicitly and is limited to: the `?` help modal, the header/wordmark + separator block, edit-modal chips, the `AdaptiveColor` token layer, and the cold-path startup flip (§10). **If implementing a section would mean re-deriving logic that already exists, restyle in place and verify parity instead of rebuilding** — that is the anti-bug guardrail.
+Where a section documents existing behaviour, treat it as a **constraint to preserve**, not a task to build. Genuinely **new** work is flagged explicitly and is limited to: the `?` help modal, the header/wordmark + separator block, edit-modal chips, the **role-token colour layer + light/dark detection + owned-canvas paint** (§2.6 / §2.9), and the cold-path startup flip (§10). **If implementing a section would mean re-deriving logic that already exists, restyle in place and verify parity instead of rebuilding** — that is the anti-bug guardrail.
 
 ---
 
