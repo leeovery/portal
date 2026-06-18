@@ -388,6 +388,7 @@ The loading page is gated on **`serverStarted`** (set only when `EnsureServer` a
 **Flip:** for the **cold + TUI path only** (scoped via the existing `isTUIPath`; CLI/direct-path keeps the synchronous bootstrap), launch Bubble Tea **immediately** on the loading page, run the orchestrator in a **goroutine**, stream a `tea.Msg` per real step (and per restored session), transition to Sessions on complete, **quit-with-error** on the one fatal step. A progress callback is injected at the restore per-session loop.
 - The loading page already gates Sessions enumeration on `BootstrapCompleteMsg`, and the TUI is **inert during loading** (animation only) — this **contains the race surface**.
 - **A progress channel carries `serverStarted` + per-step progress to the TUI** on the cold/TUI path, replacing today's `context` + package-memo delivery.
+- **Canvas-flip avoidance:** the first real paint gates on **light/dark detection-or-timeout** (§2.6), so the loading page paints the correct canvas from frame one; the tens-of-ms detection is invisible against the multi-hundred-ms bootstrap, and "launch immediately" still holds.
 
 **Real costs / risks (not zero):** reworking `serverStarted`/warnings delivery; fatal-error-as-`tea.Quit` (today a `PersistentPreRunE` error return); careful restore/daemon race review against the live event loop (prior-incident history); integration-test updates around startup ordering.
 
@@ -491,7 +492,7 @@ Two states, identical grammar everywhere (the Name field, chips, any editable el
 The `/ to filter` hint shows top-right on every session view and Projects; `s switch view` lives in the **footer**. Two-mode filtering detail in §7.
 
 ### 13.5 Modals on a blank screen
-When a (centred) modal opens, the page behind is cleared to blank — not a dimmed overlay (a change from today; §8.1). The Preview overlay is the exception (§9).
+When a (centred) modal opens, the page behind is cleared to the **owned canvas** (mode-matched — §8.1), not a dimmed overlay (a change from today). The Preview overlay is the exception (§9).
 
 ### 13.6 Typography — counts beside labels
 A count next to a label (`Sessions N`, `Projects N`, group `heading ··· N`) renders at the **same font size** as the label, distinguished by its **dim colour**, not by being smaller — so it shares the baseline and cap-height.
