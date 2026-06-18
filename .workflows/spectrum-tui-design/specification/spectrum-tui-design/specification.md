@@ -282,13 +282,14 @@ When the query matches nothing: a centred empty state — a dim `⌀` glyph (`te
   - **Open implementation question (feasibility-gated, §14):** whether the existing modal render path can be **adapted** (clear/replace the page, then draw the centred modal — likely small) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. Either way, the underlying **confirm / input logic of each modal must be preserved** (parity); only the surrounding render shell changes.
   - *(Exception: the Preview screen is a full-screen overlay, not a modal — §9; a `?` help opened from Preview overlays the preview without blanking it.)*
 - Centred bordered panel with a **contextual footer** reflecting the modal's current focus/mode.
+- **Shared anatomy.** Every modal = a **header row** (title left; right-corner **empty except `◉ EDIT MODE` while editing in place** — no standing "navigate" label) over the body over a **contextual footer**. The title is `text.primary`, except **destructive modals (kill, delete) render the title + `▲` in `state.red`**. The **dismiss key always lives in the footer** (never the header) as `esc <verb>` — `esc cancel` (kill / delete / rename), `esc close` (edit navigate / chip), `esc discard` (edit-in-place); the verbs differ by semantics, never the wording (no "esc *to* cancel").
 - **Modals are key-exclusive while open** — an open modal consumes all key input until dismissed; underlying page binds (`s`/`x`/`n`/`e`/`d`/clear-filter/quit, etc.) do **not** fire beneath it. `Esc` resolves against the modal first.
 - Reskin status: **kill**, **rename**, and **delete-project** keep their **confirm/rename logic** (parity) but adopt the new blank-screen rendering + MV restyle; the **edit modal** adopts a **new interaction model** (§8.2); the **`?` help modal** is **new** (§8.5).
 
 ### 8.2 Edit Project modal — two-mode, immediate-persist (⚠ behaviour change)
 > **New behaviour (not a reskin-preserve).** This replaces the current asymmetric model (tags persist live; Name/Aliases batch) with a **uniform two-mode immediate-persist** model across all three fields. Behaviour parity does **not** apply here — it is a deliberate change; implement as specified.
 
-A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a mode indicator in the header (`Edit Project <name>` + `navigate` / `◉ EDIT MODE`). Two modes apply uniformly to all three fields:
+A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a header (`Edit Project <name>`; the right-corner shows `◉ EDIT MODE` **only while editing in place**, empty otherwise — no standing "navigate" label). Two modes apply uniformly to all three fields:
 
 - **Navigate mode (default).** `Tab`/`Shift+Tab` move between fields; `←/→` move across chips and the trailing `+ add` slot within a chip field. **Entering a chip field via `Tab`/`Shift+Tab` lands on the trailing `+ add` slot** (adding is the common action); `←` then reaches the existing chips. The focused element shows a **focus highlight** (`accent.violet` outline, no fill). `x` **deletes** a focused chip immediately. `Esc` **closes the modal**.
 - **Edit mode (one element live).** Entered by `Enter`/`e` on a chip, `Enter` on Name, or `Enter`/`+` on a focused `+ add` slot — which **spawns a new empty chip already in edit mode** (edit highlight + live cursor). Landing on `+ add` (via `Tab` or `←/→`) is navigate-mode focus only; it never auto-enters edit mode. Type to edit; `←/→` move the **text cursor within the value**. `Enter` **commits & persists** → back to navigate; `Esc` **discards that element's edit** (a brand-new empty chip vanishes) → back to navigate.
@@ -316,12 +317,12 @@ The modal stays a **single bundle** for Name + Aliases + Tags (not split).
 ### 8.3 Kill confirm modal
 > **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
 
-A centred panel: `▲ Kill session?` (`state.red` triangle), the **session name in `state.red`**, `· N window(s)` (`text.detail`), a consequence line "Ends the tmux session and all its panes. Can't be undone." (`text.detail`), footer `y kill · n cancel · esc to cancel`. **`state.red` is reserved for destructive actions.** Keys: `y`/`n`/`Esc`.
+A centred panel with a **`state.red` header** `▲ Kill session?`, the **session name in `state.red`**, `· N window(s)` (`text.detail`), a consequence line "Ends the tmux session and all its panes. Can't be undone." (`text.detail`), footer `y kill · esc cancel`. **`state.red` is reserved for destructive actions.** Keys: `y` (confirm) / `Esc` (cancel).
 
 ### 8.4 Rename modal
 > **Logic preserved; rendering changed.** The rename flow is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
 
-A labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary` + violet `▌` cursor), a `was: <old name>` context line (`text.detail`), footer `↵ rename · esc cancel`. Keys: `Enter`/`Esc`.
+A header `Rename session` (`text.primary`), a labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary` + violet `▌` cursor), a `was: <old name>` context line (`text.detail`), footer `↵ rename · esc cancel`. Keys: `Enter`/`Esc`.
 
 ### 8.5 `?` help modal (new) — per-page
 > **New behaviour.** There is **no `?` binding today** (`?` is actively swallowed so `bubbles/list` doesn't toggle its own help). This adds: **bind `?`** on every page + a help-modal type + **per-page content**.
@@ -331,7 +332,7 @@ A centred panel listing **the current page's** keymap (two columns: key-hint gly
 ### 8.6 Delete project confirm modal
 > **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the blank-screen rendering (§8.1) + MV restyle. *(Mocked at implementation, mirroring `Kill Confirm Modal (MV)`.)*
 
-A centred panel mirroring the kill modal's destructive treatment: `▲ Delete project?` (`state.red` triangle), the **project name in `state.red`**, its path (`text.detail`), and a consequence line that disambiguates it from killing a session — it removes only the **project record**: "Removes this project from Portal (name, aliases, tags). Your sessions and files are untouched." (`text.detail`). Footer `y delete · n cancel · esc to cancel`. Keys: `y`/`n`/`Esc`.
+A centred panel mirroring the kill modal's destructive treatment: a **`state.red` header** `▲ Delete project?`, the **project name in `state.red`**, its path (`text.detail`), and a consequence line that disambiguates it from killing a session — it removes only the **project record**: "Removes this project from Portal (name, aliases, tags). Your sessions and files are untouched." (`text.detail`). Footer `y delete · esc cancel`. Keys: `y` (confirm) / `Esc` (cancel).
 
 ---
 
@@ -440,7 +441,7 @@ When Projects is invoked to **run a command**: an **`accent.violet` left-bar** b
 - **Sessions (flat & grouped):** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` attach · `Space` preview · `s` cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd · `x` → Projects · `q` quit · `Esc` clear-filter / quit. Grouping adds no keys.
 - **Projects:** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` new-session-from-project · `x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
 - **Preview:** `↑`/`↓` + `Ctrl+↑`/`Ctrl+↓` scroll · `Tab` next pane · `]`/`[` window · `Enter` attach (this pane) · `Space`/`Esc` back.
-- **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename `Enter`/`Esc` · edit — two-mode (§8.2).
+- **Modals:** kill `y`/`Esc` · delete-project `y`/`Esc` · rename `Enter`/`Esc` · edit — two-mode (§8.2).
 
 ### 12.2 Keymap revision (the changes)
 - **Navigation is arrows only.** **Drop all vim aliases (`h`/`j`/`k`/`l`, `g`/`G`) and `PgUp`/`PgDn`/`Home`/`End`** — move is `↑`/`↓`, page is `Ctrl+↑`/`Ctrl+↓`. `/` filter is the fast-find (filtering, not jump-to-extremes, is how you find a session).
