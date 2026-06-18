@@ -45,8 +45,9 @@ Appended to §2.5 carve-out paragraph: "This carve-out applies to **every** canv
 §2.6 explicitly states that the `appearance: light | dark` override "pin[s] the mode and skip[s] detection (also skipping the startup detection wait)." `NO_COLOR` has an *even stronger* reason to skip the detection wait — there is no mode-dependent surface at all — yet the spec gives `NO_COLOR` no equivalent statement. An implementer wiring the first-paint gate must therefore decide on their own whether a `NO_COLOR` launch still incurs the (invisible, tens-of-ms) OSC 11 wait. The wait is harmless but pointless under `NO_COLOR`; more importantly the *omission* leaves a behaviour undefined that the appearance-override case took care to define. One sentence ("under `NO_COLOR`, detection and its first-paint wait are skipped — there is no canvas to select") would close it and keep §2.5/§2.6 mutually consistent.
 
 **Proposed Addition**:
+Added §2.6 bullet: "**`NO_COLOR` skips detection.** Under `NO_COLOR` (§2.5) there is no canvas to select, so light/dark detection and its first-paint wait are skipped entirely."
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
