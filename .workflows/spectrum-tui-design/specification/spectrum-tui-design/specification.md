@@ -58,20 +58,20 @@ Roles:
 - **filter / search & warning / transient** — filter query and inline flash share one warm token. *(MV: orange.)*
 - **preview mode-chrome** — the read-only preview frame, deliberately distinct from the primary violet to signal "peek mode." *(MV: cyan.)*
 
-Each role has **light and dark variants** (`AdaptiveColor`). A direction instantiates the roles; the roles are the stable interface the rest of the spec refers to.
+Each role has **light and dark variants** (resolved via explicit light/dark detection — §2.6). A direction instantiates the roles; the roles are the stable interface the rest of the spec refers to.
 
 ### 2.2 State is never carried by hue alone
 Every state is conveyed by **glyph + colour**, never colour alone: `●` attached, `▌` selector bar, `✕` removable/destructive, spaced uppercase headers, `⚠` warning. Colour, where available, only *reinforces* the glyph. This makes the monochrome / `NO_COLOR` path work for free and protects colour-blind users. (Consistent with the prior `preview-visual-distinction` rule: don't rely on colour alone.)
 
 ### 2.3 Contrast floor (hard gate)
-Every direction must clear a contrast gate **before taste is judged**. Functional foreground — session names, paths, footer, status text — must meet **WCAG AA**:
+Every foreground token must clear a contrast gate **before taste is judged**. Functional foreground — session names, paths, footer, status text — must meet **WCAG AA**:
 - **4.5:1** for normal text,
 - **3:1** for large/bold text and UI accents (cursor, border, selection highlight),
 
-measured against **both** a canonical light background (≈ white) and a canonical dark background (≈ black). With `AdaptiveColor` this means the **light variant tested on white** AND the **dark variant tested on black**, each ≥ its ratio. Purely decorative glyphs (the wordmark) are exempt from the text ratio but must stay visible. Arbitrary mid-tone custom backgrounds are out of scope for the hard gate — we target the standard light/dark cases `AdaptiveColor` flips between. A direction that can't hit the floor on both extremes is **disqualified** before looks are judged.
+measured against the **exact owned canvas** for its mode: the **dark variant on `#0b0c14`** and the **light variant on `#e1e2e7`**, each ≥ its ratio. **The two variants resolve independently** — each is measured only against its own mode-canvas, so no single value need hold on both. The gate's scope is **every** rendered element, not just the base text column: all foreground tokens, **all per-element tints/bands** (selected-row tint, the amber/violet/green left-bar accents, status strips, chip states), **and** every **foreground-on-tint** pairing. Purely decorative glyphs (the wordmark) are exempt from the text ratio but must stay visible. Because the canvas is owned, the floor is **guaranteed**: there is no arbitrary terminal background to defeat it. A token that can't hit the floor against its canvas is **adjusted toward more contrast** (the remedy rule, §2.9) — never shipped under-floor.
 
 ### 2.4 Colour-capability ladder (truecolor / 256 / 16)
-Portal **imposes its own exact hues via truecolor `AdaptiveColor`** — it does **not** inherit the terminal's 16 ANSI colours. Rationale: a recognisable identity needs consistent hues across machines; inheriting the user's palette means no identity and possible clashes. Respecting the *background* (§1) plus honouring `NO_COLOR` (§2.5) already covers "don't fight the user"; imposing *hues* does not conflict with that distinction. Lipgloss/termenv **auto-downsamples** to 256/16 on weaker terminals — accepted as graceful degradation (a hue may approximate, but the contrast floor still governs legibility). Matches existing repo practice (`previewBorderColor`).
+Portal **imposes its own exact hues via truecolor**, painted on the owned canvas — it does **not** inherit the terminal's 16 ANSI colours. Rationale: a recognisable identity needs consistent hues across machines; inheriting the user's palette means no identity and possible clashes. Honouring `NO_COLOR` (§2.5) covers "don't fight the user" for anyone who opts out of colour entirely. Lipgloss/termenv **auto-downsamples** to 256/16 on weaker terminals — accepted as graceful degradation (a hue may approximate, but the contrast floor still governs legibility). Matches existing repo practice (`previewBorderColor`).
 
 ### 2.5 NO_COLOR / monochrome
 Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, leaning on the glyph-backed state (§2.2) plus bold/dim attributes. Because state is never colour-only, the UI stays fully usable without colour.
