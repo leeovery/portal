@@ -26,9 +26,10 @@ The canvas reversal added §2.5's carve-out: under `NO_COLOR` Portal "paints no 
 The §2.5 carve-out is stated once at the colour-system level but isn't propagated to the canvas-dependent surface descriptions, so an implementer building any of those three surfaces must guess how each degrades. This matters because `NO_COLOR` is now a *second distinct render path* (§1) — the spec asserts it exists but only fully specifies it for the base list, not for the modal/flash/preview surfaces.
 
 **Proposed Addition**:
+Appended to §2.5 carve-out paragraph: "This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and lean on the glyph + `⚠`/`✓` + bold/dim to carry the state (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2)."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Generalised the carve-out in §2.5 (single chokepoint) rather than editing the three surface sections.
 
 ---
 

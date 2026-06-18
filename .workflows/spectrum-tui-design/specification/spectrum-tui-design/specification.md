@@ -78,6 +78,8 @@ Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, l
 
 Under `NO_COLOR`, Portal **paints no canvas at all** — it renders on the terminal's **native fg/bg**. This is the one documented carve-out to the single owned-canvas render path (§1): `NO_COLOR` imposes *no* hues, so falling back to the terminal's own default fg-on-bg is legible **by construction** — a second, distinct, colourless render path whose legibility guarantee is the terminal's own defaults.
 
+This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and lean on the glyph + `⚠`/`✓` + bold/dim to carry the state (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2).
+
 ### 2.6 Light/dark detection & canvas selection
 Portal owns a mode-matched canvas (§1), so it must decide **which** canvas — light or dark — to paint. This is a detection-plus-override decision; with an owned canvas a wrong guess is only a cosmetic light/dark surprise, never an illegibility (the floor holds against whichever canvas is painted).
 
