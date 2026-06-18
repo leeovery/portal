@@ -159,7 +159,7 @@ The selected row is marked by a **thick block `▌` in `accent.violet`** pinned 
 
 ### 3.4 Footer — condensed keymap + `?` help
 A single bottom row above a **1px** top rule (`border.footer`):
-- Shows only the **core** keys for the page (e.g. Sessions: `↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch view · x projects`) plus a right-aligned `? help`. `s switch view` and `x projects` appear on **all** session views (Flat included). The full keymap — including the footer's own keys — is always listed in `?` help (§8.5).
+- Shows the page's **core** keys — for Sessions exactly: `↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch view · x projects` plus a right-aligned `? help`. `n` new, `r` rename, `k` kill, `q` quit, and paging are **not** in the footer — they live in `?` help (§8.5). `s switch view` and `x projects` appear on **all** session views (Flat included). The full keymap — including the footer's own keys — is always listed in `?` help (§8.5).
 - **Key glyphs** render in `accent.blue`, their **labels** in `text.detail`, the `?` glyph in `accent.violet`.
 - The **full** keymap lives in the `?` help modal (§8), per page. This solves the footer-space problem (the old three-column footer couldn't fit every bind).
 
@@ -415,7 +415,7 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 **Single-slot rule.** The notice slot holds **at most one band**. Persistent mode notices (no-tags signpost §11.3, command-pending banner §11.4) own the slot while their mode is active; a transient flash (§11.2) **takes the slot temporarily**, replacing any persistent band for its duration, then the persistent band returns. The flash **auto-clears on the next keypress or after a short timeout**. Orange (warning) and violet (info) never display at once — the transient flash wins while shown.
 
 ### 11.1 Empty states (reskin)
-- **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · x for projects` (`text.detail`); the footer reduces to the still-relevant keys (`n` / `x` / `/` / `?`).
+- **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · x for projects` (`text.detail`); the footer is **replaced** by the keys relevant with no sessions — `n new in cwd · x projects · / filter · ? help` (drawn from the page's full keymap §12.1, not a subset of the standard footer).
 - **Empty projects** mirrors it — `No projects yet` + an open-a-directory hint (same pattern; not separately mocked).
 
 ### 11.2 Inline flash (chrome band)
