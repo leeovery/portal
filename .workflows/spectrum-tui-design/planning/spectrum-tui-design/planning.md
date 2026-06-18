@@ -50,7 +50,8 @@ approved_at: 2026-06-18
 - [ ] Behaviour parity verified against the pre-reskin implementation for every touched render path (read it, trace paths, diff logic — provably cosmetic)
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
