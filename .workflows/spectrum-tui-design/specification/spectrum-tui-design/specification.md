@@ -159,7 +159,7 @@ The selected row is marked by a **thick block `▌` in `accent.violet`** pinned 
 
 ### 3.4 Footer — condensed keymap + `?` help
 A single bottom row above a **1px** top rule (`border.footer`):
-- Shows only the **core** keys for the page (e.g. Sessions: `↑↓ navigate · ⏎ attach · / filter · ␣ preview`) plus a right-aligned `? help`.
+- Shows only the **core** keys for the page (e.g. Sessions: `↑↓ navigate · ⏎ attach · / filter · ␣ preview · s switch view · x projects`) plus a right-aligned `? help`. `s switch view` and `x projects` appear on **all** session views (Flat included). The full keymap — including the footer's own keys — is always listed in `?` help (§8.5).
 - **Key glyphs** render in `accent.blue`, their **labels** in `text.detail`, the `?` glyph in `accent.violet`.
 - The **full** keymap lives in the `?` help modal (§8), per page. This solves the footer-space problem (the old three-column footer couldn't fit every bind).
 
@@ -230,7 +230,7 @@ Tags live on the **project record** (not per session). A session's effective tag
 >
 > **Reference (Paper):** `Projects (MV)`.
 
-A **separate page** (different data + keymap), reached by `p`/`x` from Sessions; `s`/`x` returns. Same shared chrome (§3): PORTAL header + separator, pagination, condensed footer.
+A **separate page** (different data + keymap), reached by `x` from Sessions; `x` returns. Same shared chrome (§3): PORTAL header + separator, pagination, condensed footer.
 
 ### 6.1 Section header
 `Projects` (`state.green`) + count (`text.detail`) on the left; the `/ to filter` hint on the right.
@@ -244,7 +244,7 @@ Each project is a **two-line row** (uniform height, so `bubbles/list` height-dri
 An empty list shows the empty projects state (§11.1).
 
 ### 6.3 Footer (project keymap)
-Condensed: `⏎ new session · s sessions · e edit · / filter · ? help`. The **full** set — `d delete`, `n new in cwd`, navigation — lives in the per-page `?` help modal (§8).
+Condensed: `⏎ new session · x sessions · e edit · / filter · ? help`. The **full** set — `d delete`, `n new in cwd`, navigation — lives in the per-page `?` help modal (§8).
 
 ---
 
@@ -280,7 +280,7 @@ When the query matches nothing: a centred empty state — a dim `⌀` glyph (`te
   - **Open implementation question (feasibility-gated, §14):** whether the existing modal render path can be **adapted** (clear/replace the page, then draw the centred modal — likely small) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. Either way, the underlying **confirm / input logic of each modal must be preserved** (parity); only the surrounding render shell changes.
   - *(Exception: the Preview screen is a full-screen overlay, not a modal — §9; a `?` help opened from Preview overlays the preview without blanking it.)*
 - Centred bordered panel with a **contextual footer** reflecting the modal's current focus/mode.
-- **Modals are key-exclusive while open** — an open modal consumes all key input until dismissed; underlying page binds (`s`/`p`/`n`/`e`/`d`/clear-filter/quit, etc.) do **not** fire beneath it. `Esc` resolves against the modal first.
+- **Modals are key-exclusive while open** — an open modal consumes all key input until dismissed; underlying page binds (`s`/`x`/`n`/`e`/`d`/clear-filter/quit, etc.) do **not** fire beneath it. `Esc` resolves against the modal first.
 - Reskin status: **kill**, **rename**, and **delete-project** keep their **confirm/rename logic** (parity) but adopt the new blank-screen rendering + MV restyle; the **edit modal** adopts a **new interaction model** (§8.2); the **`?` help modal** is **new** (§8.5).
 
 ### 8.2 Edit Project modal — two-mode, immediate-persist (⚠ behaviour change)
@@ -324,7 +324,7 @@ A labelled `NEW NAME` input (focused label `accent.violet`, value `text.primary`
 ### 8.5 `?` help modal (new) — per-page
 > **New behaviour.** There is **no `?` binding today** (`?` is actively swallowed so `bubbles/list` doesn't toggle its own help). This adds: **bind `?`** on every page + a help-modal type + **per-page content**.
 
-A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc to close` (`text.detail`). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. Opened from Preview, it **overlays** the preview (doesn't blank it — §9). The help modal closes on `?` (toggle) or `Esc`; while open it is key-exclusive (§8.1), so `Esc` dismisses it and does **not** fall through to the page's clear-filter / quit.
+A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc to close` (`text.detail`). The help modal lists the page's **complete** keymap — **including the keys also shown in the footer** (it is the full reference, not just the footer's overflow). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. Opened from Preview, it **overlays** the preview (doesn't blank it — §9). The help modal closes on `?` (toggle) or `Esc`; while open it is key-exclusive (§8.1), so `Esc` dismisses it and does **not** fall through to the page's clear-filter / quit.
 
 ### 8.6 Delete project confirm modal
 > **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the blank-screen rendering (§8.1) + MV restyle. *(Mocked at implementation, mirroring `Kill Confirm Modal (MV)`.)*
@@ -415,7 +415,7 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 **Single-slot rule.** The notice slot holds **at most one band**. Persistent mode notices (no-tags signpost §11.3, command-pending banner §11.4) own the slot while their mode is active; a transient flash (§11.2) **takes the slot temporarily**, replacing any persistent band for its duration, then the persistent band returns. The flash **auto-clears on the next keypress or after a short timeout**. Orange (warning) and violet (info) never display at once — the transient flash wins while shown.
 
 ### 11.1 Empty states (reskin)
-- **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · p for projects` (`text.detail`); the footer reduces to the still-relevant keys (`n` / `p` / `/` / `?`).
+- **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · x for projects` (`text.detail`); the footer reduces to the still-relevant keys (`n` / `x` / `/` / `?`).
 - **Empty projects** mirrors it — `No projects yet` + an open-a-directory hint (same pattern; not separately mocked).
 
 ### 11.2 Inline flash (chrome band)
@@ -435,8 +435,8 @@ When Projects is invoked to **run a command**: an **`accent.violet` left-bar** b
 > **Mixed: mostly existing bindings, with a deliberate keymap revision.** The per-screen keymaps below are audited against the current code. The **changes** are: drop all vim/extra nav aliases, repurpose `k`, and add the `?` binding (§12.2). Unchanged bindings are preserved (parity).
 
 ### 12.1 Per-screen keymaps
-- **Sessions (flat & grouped):** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` attach · `Space` preview · `s` cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd · `p`/`x` → Projects · `q` quit · `Esc` clear-filter / quit. Grouping adds no keys.
-- **Projects:** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` new-session-from-project · `s`/`x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
+- **Sessions (flat & grouped):** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` attach · `Space` preview · `s` cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd · `x` → Projects · `q` quit · `Esc` clear-filter / quit. Grouping adds no keys.
+- **Projects:** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` new-session-from-project · `x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
 - **Preview:** `↑`/`↓` + `Ctrl+↑`/`Ctrl+↓` scroll · `Tab` next pane · `]`/`[` window · `Enter` attach (this pane) · `Space`/`Esc` back.
 - **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename `Enter`/`Esc` · edit — two-mode (§8.2).
 
@@ -445,6 +445,7 @@ When Projects is invoked to **run a command**: an **`accent.violet` left-bar** b
 - **`k` = kill** — freed by dropping vim-up; the tmux-accurate verb, kept distinct from Projects' `d` = delete (removing a project *record* is a different operation).
 - **No uppercase bindings anywhere.**
 - **`?` is newly bound** on every page → opens the per-page help modal (§8.5). **Today `?` is actively swallowed** (so `bubbles/list` doesn't toggle its own help); the redesign binds it.
+- **Page ⟷ view keys de-overloaded.** **`x` toggles Sessions ⟷ Projects** (both directions); **`s` is Sessions-only** (cycle views). The former `p` (Sessions → Projects) and `s` (Projects → Sessions) aliases are **dropped**, so each key has a single meaning.
 
 ### 12.3 Validation caveat
 Confirm `Ctrl+↑`/`Ctrl+↓` isn't swallowed by the terminal/tmux during in-terminal validation (§15); **fall back to another page key if so.**
@@ -464,7 +465,7 @@ Two states, identical grammar everywhere (the Name field, chips, any editable el
 
 ### 13.2 Page model — views vs pages
 - **Sessions is ONE page with three grouping *views*** (Flat / by Project / by Tag), cycled by `s` — the same data pivoted, not separate pages (§4–§5).
-- **Projects is a separate *page*** (different data + keymap), reached by `p`/`x` (§6).
+- **Projects is a separate *page*** (different data + keymap), reached by `x` (§6).
 - **Preview** is an overlay screen (`Space`, §9); **Loading** is the startup screen (§10).
 
 ### 13.3 `?` help is per-page contextual
