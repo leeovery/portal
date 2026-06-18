@@ -48,7 +48,7 @@ improvement worth shipping."
 
 ### Map
 
-  Discussion Map — ZX Spectrum TUI (28 subtopics — all 28 decided)
+  Discussion Map — ZX Spectrum TUI (29 subtopics — all 29 decided · canvas reopened & reversed 2026-06-18)
 
   ┌─ ✓ Terminal theming & canvas ownership [decided]
   ├─ ✓ Direction & ambition (evolved → restrained-modern) [decided]
@@ -77,7 +77,8 @@ improvement worth shipping."
   ├─ ✓ Animation & performance (minimal; idle-zero tick) [decided]
   ├─ ✓ Scope boundary (v1 vs deferred) [decided]
   ├─ ✓ Design reference & visual verification (Paper map + vhs harness) [decided]
-  └─ ✓ Remaining UX states (empty · flash · signpost · command-pending) [decided]
+  ├─ ✓ Remaining UX states (empty · flash · signpost · command-pending) [decided]
+  └─ ✓ Token architecture & canvas surfaces (semantic roles · modal = border-defined) [decided]
 
 ---
 
@@ -200,6 +201,59 @@ exact canvas), §2.6 (mid-tone/collision solved, not best-effort), §2.8/§2.9 (
 tokens + transparency toggle). Implementation heads-up (not decided here): Lipgloss
 **v2 removed `AdaptiveColor`** from root → explicit detection via
 `tea.RequestBackgroundColor`; still needed to pick *which* canvas.
+
+---
+
+## Token architecture & canvas surfaces (2026-06-18)
+
+### Context
+Owning the canvas forced new surface/depth questions (modal panels, banners, inputs
+on the painted canvas) and surfaced **ad-hoc hex drift** in the mockups. The user
+pushed token economy across three points — reuse an existing token for the modal
+panel, "avoid creating new theme items," and "are the 2-tone borders necessary?" —
+which clarified the architecture. Worked live in Paper.
+
+### Token architecture — DECIDED: semantic role tokens, NOT per-element
+The user floated the opposite extreme — name **every element** with its own theme
+item so anything re-themes independently. **Rejected; keep semantic/role tokens**
+(the §2.9 model).
+- Per-element naming makes re-theming **harder**: a theme author edits hundreds of
+  values and hand-keeps them consistent; with role tokens you change `accent.violet`
+  once and every violet element moves coherently. The real use case (swap the
+  palette / canvas) is what the small set serves. (Analogy: Tailwind's semantic scale
+  vs a hex per component.)
+- **Cohesion + validation:** shared roles can't clash, and the deferred theme system
+  must validate user colours against the floor — tractable for ~20 tokens, not
+  hundreds.
+- **Distinctness ≠ more tokens:** each distinct *role* is its own **named** token
+  (the 2-tone borders are two legit roles — `border.separator` + `border.footer` —
+  kept; they "add character"); component/per-element tokens only as a **defaulted
+  override**, where a real need appears, never wholesale.
+- **Rule:** every distinct rendered value is a **named role token** — reuse on
+  genuine role-match, name a new role where it genuinely differs, **never raw hex**.
+
+### Modal & canvas surfaces — DECIDED
+- **Modal blank-screen = the owned canvas** (mode-matched), not literal "black" —
+  resolves **review-004 F1**; re-spec the "Modals render on a blank screen"
+  convention accordingly.
+- **Modal panel = no distinct fill** — it matches the canvas, defined by its **2-tone
+  border** + header/footer dividers, **not** a new `bg.surface` token. (Trialled an
+  elevated panel — `#1a1b26`, then `bg.selection` `#1A1726`; rejected: too purple,
+  and it swallowed the inner borders + the transparent input. The border-defined
+  panel reads cleanly and "adds character.") Inputs stay border-defined (transparent
+  fill); no recessed-input token.
+
+### Ad-hoc hex drift — SPEC TASK
+Mockups carry **unnamed raw hex** breaking §2.9's closed vocabulary: banner band
+`#15131F` vs selected-row `#1A1726` (near-duplicate violets), and modal edge `#2B3050`
+(not in §2.9). Each → collapse to an existing role token or promote to a **named**
+role; never leave raw hex. (Folds into the §2.9 contrast re-verification pass.)
+
+### Paper frames
+All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
+`#e1e2e7` light); the **exploration** mocks (5 colour directions, loading concepts
+1–5/7, MV v1) and the **Nord mid-tone preview** (the why-we-reversed evidence) were
+left untouched as reference.
 
 ---
 
