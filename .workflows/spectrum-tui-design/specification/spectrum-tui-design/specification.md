@@ -80,6 +80,8 @@ Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, l
 ### 2.7 Narrow / short terminal — degrade, never break
 Define a **minimum supported terminal size**; below it the UI **degrades** rather than breaks: drop the wordmark → compact wordmark, drop the right-side header hint, truncate names with `…`, and let height drive pagination. It must **never overflow** — the one-row-per-delegate pagination invariant always holds (every list row, header or session, is exactly one delegate line). Exact thresholds are pinned as an implementation detail.
 
+**Degrade is progressive and per-dimension, not all-at-once.** Width-driven steps apply in order as width shrinks — (1) drop the right-side header hint, (2) wordmark → compact, (3) truncate names with `…`; height continues to drive pagination independently. Each step has its own trigger (exact thresholds deferred to implementation), so a short-but-wide terminal keeps the full wordmark and a narrow-but-tall one keeps full pagination.
+
 ### 2.8 Theming — tokenise now, user-override deferred
 - **In scope:** structure the role-token colour layer as a single named built-in theme ("Modern Vivid"). Every renderer references **tokens**, not scattered hex. This locks layout and delegates colour, making the app theme-*ready* at near-zero extra cost.
 - **Deferred to its own initiative:** a **user-overridable theme system** (external theme file e.g. `~/.config/portal/theme.{json,toml}`, merge-over-default, validation when a user picks unreadable colours — contrast floor becomes advisory + warn/clamp — multiple built-in themes, a `theme` setting, docs). Bigger surface; ships independently after the redesign. (See §16.)
