@@ -67,8 +67,9 @@ This is the cross-ref the canvas fold-in introduced, so it is in-scope for this 
 The fill is an **outer-layer wrap** (not per-delegate-row painting) with the list's width/height budget unchanged — it must **not** perturb the one-row-per-delegate pagination invariant (§3.6).
 
 **Proposed Addition**:
+Retargeted the cross-reference: "...pagination invariant (§3.5, §4.1)."
 
-**Resolution**: Pending
+**Resolution**: Approved
 **Notes**:
 
 ---
