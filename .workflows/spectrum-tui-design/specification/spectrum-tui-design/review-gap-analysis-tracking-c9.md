@@ -34,10 +34,12 @@ This is a cumulative consequence of the canvas-reversal + cycle 6–8 reconcilia
 The genuine "don't decorate with green" intent (chips, arbitrary decoration) is clear and correct — but the literal wording "attached state only" / the incomplete table role list creates a real contradiction an implementer must resolve by guessing which statement wins.
 
 **Proposed Addition**:
-(leave blank until discussed)
+(a) §2.1 green role: "reserved for **live / positive** signals — the attached marker, Sessions count, Projects label, `✓` done-tick, success flash — never chips or decoration."
+(b) §2.9 accents-table role cell: "`● attached`, Sessions count, Projects label, `✓` done, success flash".
+(c) §2.9 Rules: "`state.green` carries **live / positive** signals (attached marker, Sessions count, Projects label, `✓` done-tick, success flash) — **never** chips or decoration; ...".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: Harmonised the green role/reservation prose with its five actual call-sites; the §2.9 closed-vocabulary table now documents the Sessions count + Projects label sites it omitted. Pre-existing inconsistency, exposed by the success-flash work; "never chips/decoration" intent preserved.
 
 ---
 

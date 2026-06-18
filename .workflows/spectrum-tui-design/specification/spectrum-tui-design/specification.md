@@ -53,7 +53,7 @@ Roles:
 - **primary accent** — cursor / selection / active title / header caret. *(MV: violet.)*
 - **key-hint** — footer / modal key glyphs. *(MV: blue.)*
 - **detail** — paths / secondary text / metadata / counts, across a **tonal ramp** (bright → faint; pinned in §2.9). *(MV: blue-greys.)*
-- **state — attached** — the live/attached marker. *(MV: green; reserved for the attached state only — never reused for chips or decoration.)*
+- **state — attached** — the live/attached marker. *(MV: green; reserved for **live / positive** signals — the attached marker, Sessions count, Projects label, `✓` done-tick, success flash — never chips or decoration.)*
 - **state — destructive** — kill/delete confirmation emphasis. *(MV: red; reserved for destructive actions only.)*
 - **filter / search & warning / transient** — filter query and inline flash share one warm token. *(MV: orange.)*
 - **preview mode-chrome** — the read-only preview frame, deliberately distinct from the primary violet to signal "peek mode." *(MV: cyan.)*
@@ -125,7 +125,7 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 | `accent.violet` | cursor, selector `▌`, active dot, `?` key, focused field label, EDIT MODE, mode bar, loading bar | `#BB9AF7` · 9.1 | `#8A3FD1` · 5.7 | 3.0 |
 | `accent.blue` | footer / modal **key-hint glyphs** | `#7AA2F7` · 8.3 | `#2E5FD0` · 5.7 | 4.5 |
 | `accent.cyan` | Sessions header, Preview chrome, active tick `◐` | `#7DCFFF` · 12.2 | `#0E7490` · 5.4 | 4.5 |
-| `state.green` | `● attached`, `✓` done, success flash | `#9ECE6A` · 11.5 | `#4C7A1F` · 5.1 | 4.5 |
+| `state.green` | `● attached`, Sessions count, Projects label, `✓` done, success flash | `#9ECE6A` · 11.5 | `#4C7A1F` · 5.1 | 4.5 |
 | `state.red` | kill/delete emphasis, `▲` | `#F7768E` · 7.9 | `#C32647` · 5.7 | 4.5 |
 | `accent.orange` | filter query / `/` / `type`, warning flash `⚠` | `#FF9E64` · 10.3 | `#9A5200` · 5.9 | 4.5 |
 
@@ -143,7 +143,7 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 **Rules**
 - **Closed vocabulary** — every rendered colour is one of these tokens; no literal hex outside the token layer (enforces §2.8 theme-readiness).
-- `state.green` is **attached-only** (+ success flash); `state.red` is **destructive-only**; chips are `text.primary` on a tint, never green.
+- `state.green` carries **live / positive** signals (attached marker, Sessions count, Projects label, `✓` done-tick, success flash) — **never** chips or decoration; `state.red` is **destructive-only**; chips are `text.primary` on a tint, never green.
 - **One documented exception:** the **Preview scrollback capture** renders the pane's **real ANSI output**, not theme tokens — intentionally outside the palette. Only its *chrome* (frame, top bar) is themed (`accent.cyan` + `text.detail`).
 - **Contrast re-verification (the canvas pass).** Every foreground token, every per-element tint/band, and every foreground-on-tint pairing is verified against the **exact canvas** — dark variants vs `#0b0c14`, light variants vs `#e1e2e7`. The two variants resolve **independently** (each only against its own mode-canvas; no single value need hold on both). Remedy when one dips under floor: **adjust toward more contrast** — *brighten* a dark variant on `#0b0c14`, *darken / saturate* a light variant on `#e1e2e7` — never drop the floor.
 - **Text-carrying tints are co-tuned with their on-band text token.** A tint that carries text (the selection band, notice bands) is pinned by **two** ratios — tint-vs-canvas (≥3:1 UI floor) and text-vs-tint (≥4.5/3:1 text floor) — and **both must clear simultaneously**. There are two knobs (the tint *and* its on-band text token); when no single tint value satisfies both, the text token moves too. The spec measures the **pair**, not the tint alone.
