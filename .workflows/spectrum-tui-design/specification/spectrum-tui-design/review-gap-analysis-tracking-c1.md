@@ -1,10 +1,12 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 1
 phase: Gap Analysis
 topic: spectrum-tui-design
 ---
+
+> **All 10 findings resolved (cycle 1).** 1: modal key-exclusivity + help close (§8.1/§8.5). 2: delete-project modal (§8.6). 3: notice single-slot rule (§11). 4: edit duplicate-on-commit (§8.2). 5: empty-restore loading (§10.4). 6: progressive degrade (§2.7). 7: folded into 1. 8: expanded by user → x-keymap simplification + footers (§3.4/§6.3/§11.1/§12/§13.2/§8.5 + mocks). 9: help generated from keymap descriptor (§8.5/§14.4). 10: selected-row attached marker + tint contrast (§4.1). Approved by user.
 
 # Review Tracking: spectrum-tui-design - Gap Analysis
 
