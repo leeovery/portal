@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 1
 phase: Input Review
@@ -24,7 +24,10 @@ This detail is genuinely ambiguous (not just omitted) because the final two-mode
 Worth a one-line clarification in §8.2 so the navigate-mode entry point into a chip field (and whether it auto-enters edit mode) is unambiguous.
 
 **Proposed Addition**:
-(leave blank until discussed)
+Two clarifications to §8.2, resolving landing-position + the "auto-edit on landing" conflict consistently with the two-mode invariant (landing never auto-enters edit mode):
 
-**Resolution**: Pending
-**Notes**:
+1. Navigate-mode bullet — append: "Entering a chip field via `Tab`/`Shift+Tab` lands on the trailing **`+ add`** slot (adding is the common action); `←` then reaches the existing chips."
+2. Edit-mode bullet — change "or landing on `+ add` — which **spawns a new empty chip already in edit mode**" to "or `Enter`/`+` on a focused `+ add` slot — which **spawns a new empty chip already in edit mode**" (so `+ add` is a navigate-mode target like a chip; you focus it, then `Enter` to start adding — landing never auto-edits).
+
+**Resolution**: Approved
+**Notes**: Consistency-first model (A) approved by user. §8.2 navigate + edit bullets updated: Tab lands on `+ add` in navigate; `Enter`/`+` on a focused `+ add` spawns the edit chip; landing never auto-edits.
