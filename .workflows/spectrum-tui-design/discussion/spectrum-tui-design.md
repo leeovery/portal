@@ -333,7 +333,11 @@ passing ratio ≠ a confirmed-legible appearance. Spot-checked the **highest-ris
 the kill modal's red name on `#e1e2e7` (Paper: `Kill Confirm Modal (Light)`): with the
 light token variants (`state.red` `#C32647`, `accent.blue` `#2E5FD0`, `text.detail`
 `#5A6296`, soft red-tinted panel border) it reads cleanly — the name is clearly
-destructive and legible. **De-risks F2.** The remaining light modal/edit states (rename,
+destructive and legible. **De-risks F2.** (The spot-check itself caught a real miss —
+the inner header/footer dividers were left on the **dark** `border.footer` `#20232E`,
+reading as harsh near-black rules on `#e1e2e7` until swapped to a light blue-grey
+`#C9CDDB`; a numeric pass would not have flagged it — direct evidence for the visual-check
+requirement.) The remaining light modal/edit states (rename,
 the three edit states, `?` help) are lower-risk (violet/text, not red-on-light) and are
 an **explicit implementation visual-check task**: each mocked + eyeballed in light mode
 against `#e1e2e7`, not merely numerically verified (per the §15 visual-verification gate).
