@@ -3,7 +3,8 @@
 ## Phases
 
 ### Phase 1: Verification harness + colour-token/canvas/detection foundation (lock-in gate)
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 **Goal**: Stand up the `vhs` capture harness and build the cross-cutting Modern Vivid foundation — the ~20 §2.9 role tokens (light + dark variants), the owned mode-matched canvas paint, explicit light/dark detection (OSC 11 + `appearance` pref + detect-or-timeout first-paint gate), contrast-floor adherence against the exact canvas, and `NO_COLOR` handling — then lock the direction at the in-terminal validation gate before any broad rollout.
 
@@ -18,7 +19,8 @@ status: draft
 - [ ] Every foreground token, per-element tint/band, and foreground-on-tint pairing clears the contrast floor against its exact canvas (dark on `#0b0c14`, light on `#e1e2e7`, resolved independently); the in-terminal validation/lock-in gate is passed — light surface tints (`bg.selection`, `bg.warning`, `bg.track`, light borders) pinned and eyeballed against `#e1e2e7` — or a bail outcome is recorded (§16.5)
 
 ### Phase 2: Shared chrome + Sessions surfaces (flat, grouped, filtering)
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 **Goal**: Restyle the shared chrome (header/wordmark + violet caret + subtitle + 2px rule, section header + count, condensed footer + `? help`, centred pagination dots) and the Sessions page across all three views (flat, by Project, by Tag) plus two-mode filtering — all onto the Phase 1 foundation, preserving behaviour.
 
@@ -32,7 +34,8 @@ status: draft
 - [ ] Behaviour parity verified against the pre-reskin implementation for every touched render path (read it, trace paths, diff logic — provably cosmetic)
 
 ### Phase 3: Projects page + modal layer (kill · rename · delete · two-mode edit · ? help)
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 **Goal**: Restyle the Projects page, introduce the shared blank-screen modal layer, parity-restyle the kill / rename / delete-project modals, build the new two-mode immediate-persist edit-project modal, and add the new per-page `?` help modal driven by a per-page keymap descriptor — applying the keymap revision (§12.2).
 
@@ -47,7 +50,8 @@ status: draft
 - [ ] Behaviour parity verified for Projects and every restyled (non-edit) modal render path
 
 ### Phase 4: Preview chrome + edge/UX states
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 **Goal**: Restyle the read-only Preview overlay's chrome to the `accent.cyan` peek-mode treatment, and restyle every edge/UX state — empty sessions/projects, inline flash (warning + success), no-tags signpost, command-pending banner — under the shared left-bar notice convention and single-slot rule.
 
@@ -61,7 +65,8 @@ status: draft
 - [ ] Behaviour parity verified for the preview chrome and every edge-state render path
 
 ### Phase 5: Cold-path startup flip (concurrent bootstrap + honest loading screen)
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 **Goal**: Restructure cold-boot so the 11-step bootstrap runs concurrently with the TUI on the cold + TUI path, streaming live per-step progress to an honest determinate loading screen (thick violet bar + ticking step-list), with the cold-path error/warning contract — while the warm path keeps today's synchronous fast path untouched.
 
