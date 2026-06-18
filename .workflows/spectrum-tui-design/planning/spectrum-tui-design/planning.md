@@ -18,6 +18,21 @@ approved_at: 2026-06-18
 - [ ] `NO_COLOR` skips detection, suppresses the canvas, and renders colourless on the terminal's native fg/bg legibly (the documented carve-out, §2.5)
 - [ ] Every foreground token, per-element tint/band, and foreground-on-tint pairing clears the contrast floor against its exact canvas (dark on `#0b0c14`, light on `#e1e2e7`, resolved independently); the in-terminal validation/lock-in gate is passed — light surface tints (`bg.selection`, `bg.warning`, `bg.track`, light borders) pinned and eyeballed against `#e1e2e7` — or a bail outcome is recorded (§16.5)
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| spectrum-tui-design-1-1 | `vhs` capture harness: install/verify, committed tapes dir, fixture-seeded foundation capture, Paper reference PNG export pipeline | vhs not installed / non-Homebrew install path, deterministic fixture-seeded state, agent/user-judged compare (not pixel-diff) |
+| spectrum-tui-design-1-2 | Upgrade to Bubble Tea v2 / Lipgloss v2 (OSC 11 API + AdaptiveColor removal) with full parity | existing `AdaptiveColor` (`previewBorderColor`) migrated unchanged, all TUI tests stay green, no render/key behaviour drift |
+| spectrum-tui-design-1-3 | MV role-token colour layer — closed ~20-token vocabulary with pinned dark variants, centralising scattered dark literals | `state.green` live/positive-only, `state.red` destructive-only, no raw hex at centralised call sites, `text.faint` decorative-only |
+| spectrum-tui-design-1-4 | Light token variants + independent contrast-floor numeric verification | variants resolve independently, `text.dim` 3:1 floor, `text.faint` exempt, text-carrying tints co-tuned with on-band text token (pair clears) |
+| spectrum-tui-design-1-5 | `appearance: auto\|light\|dark` pref in prefs.json (default `auto`, tolerant decode) | missing/unrecognised/corrupt/empty → `auto`, no `session_list_mode` regression, prefs stays a leaf (no log import) |
+| spectrum-tui-design-1-6 | Owned mode-matched canvas paint — leaf `.Background(canvas)` + outer full-terminal fill as last layer | fill outside list height budget, re-pads to `termH` on vertical change, no edge bleed / empty rows painted, zero-size fallback, pagination invariant preserved |
+| spectrum-tui-design-1-7 | Light/dark detection (OSC 11) + `appearance` override + detect-or-timeout first-paint gate (dark fallback) | never paint-then-flip, no-answer/timeout → dark, `light`/`dark` pin skips detection+wait, mis-detection cosmetic-not-broken, `COLORFGBG` weak hint only |
+| spectrum-tui-design-1-8 | `NO_COLOR` carve-out — skip detection, suppress canvas, colourless native fg/bg path | skips detection + first-paint wait, no canvas painted, state via glyph + bold/dim, legible-by-construction on terminal defaults |
+| spectrum-tui-design-1-9 | In-terminal contrast-floor validation & lock-in/bail gate — pin + eyeball light surface tints against `#e1e2e7` | light-tint-on-light-canvas recurring failure (numeric insufficient), text-on-tint pairs verified vs tint, remedy = more contrast never lower floor, bail is legitimate |
+
 ### Phase 2: Shared chrome + Sessions surfaces (flat, grouped, filtering)
 status: approved
 approved_at: 2026-06-18
