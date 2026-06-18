@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 6
 phase: Gap Analysis
@@ -86,8 +86,9 @@ Retargeted the cross-reference: "...pagination invariant (§3.5, §4.1)."
 An implementer must reconcile: when the band appears and the list viewport shrinks, the outer fill still paints the full termH (correct — it pads the now-shorter content region), but is the band itself painted by a leaf `.Background` or does it rely on the outer fill? And does inserting/removing the band's row(s) re-drive the same height recompute that pagination already mandates, *underneath* the outer fill? §1 asserts the fill "must not perturb the one-row-per-delegate pagination invariant" but says nothing about the band's dynamic height change, which is the one place the vertical budget actually moves at runtime. The ordering (recompute list height first, then wrap with the full-height fill) is implied but not stated, leaving the layering order an implementer design decision on a path the spec elsewhere treats as load-bearing.
 
 **Proposed Addition**:
+Appended to §1 outer-fill bullet: "The outer fill is the **last** layer: it wraps the already-composed view (header + any notice band + list + footer, summed to `termH`), so a dynamic vertical change — e.g. the §11.2 flash band appearing or clearing — drives the list's height recompute **underneath** the fill, which simply re-pads to `termH`. The fill never participates in the list's height budget."
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: States the layering order (recompute list height first, fill wraps last); leaf-style `.Background(canvas)` already covers per-cell paint per §1, so the band's tint paints itself and the fill only pads the residual region.
 
 ---
