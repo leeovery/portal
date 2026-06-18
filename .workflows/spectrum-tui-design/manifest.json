@@ -15,7 +15,7 @@
     "specification": {
       "items": {
         "spectrum-tui-design": {
-          "status": "in-progress",
+          "status": "completed",
           "sources": {
             "spectrum-tui-design": {
               "status": "incorporated"
