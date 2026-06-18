@@ -8,7 +8,9 @@
 > 2. Compare the captured PNG against the task's **named Paper frame** (§15 frame map) for **layout, structure, and colour-role match**.
 > 3. Confirm **behaviour parity** with the pre-reskin implementation (§1 "Reskin, not rebuild").
 >
-> A task is **not done** until its `vhs` capture is produced and checked against its frame. **Planning MUST propagate this into every task it authors.** §15 defines the `vhs` harness, its setup, and the frame map.
+> A task is **not done** until its `vhs` capture is produced and checked against its frame.
+>
+> **This is a per-task requirement distributed across the plan — never a single dedicated "verification" task.** It applies to **every task that produces or changes UI** (anything that renders a screen, surface, or element comparable to a Paper frame). Each such task **carries the information to perform the check itself**: its named Paper frame(s) (§15.1), the `vhs` tape that drives the TUI to that state, and the compare step (§15.5). Where a Paper-comparable surface is only complete after several tasks build it up, the check attaches to the task — or phase boundary — that first reaches that comparable state. Purely non-visual tasks (plumbing with no rendered output) are exempt; any task touching rendering is in. **Planning MUST embed these checks per-task.** §15 defines the `vhs` harness, its setup, the frame map, and the comparison mechanism.
 
 ## 1. Overview & Design Direction
 
