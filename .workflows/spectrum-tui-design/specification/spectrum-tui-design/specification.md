@@ -294,6 +294,7 @@ A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a mode indic
 **Falling-out rules:**
 - **Empty on commit = delete** (new or existing chip); deleting a focused chip is immediate.
 - **Empty Name can't persist → reverts** to the prior value.
+- **Duplicate on commit = no-op.** Committing a chip whose value already exists in the same field silently dedupes (the existing chip remains; no duplicate is added, no error shown) — consistent with the project store's existing per-field dedupe (tags are case-sensitive).
 - **`Esc` backs out one level:** edit mode → discard the element's edit; navigate mode → close (all already saved).
 
 **Visual states (the focus-vs-edit grammar, §13):**
