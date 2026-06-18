@@ -19,7 +19,8 @@ approved_at: 2026-06-18
 - [ ] Every foreground token, per-element tint/band, and foreground-on-tint pairing clears the contrast floor against its exact canvas (dark on `#0b0c14`, light on `#e1e2e7`, resolved independently); the in-terminal validation/lock-in gate is passed — light surface tints (`bg.selection`, `bg.warning`, `bg.track`, light borders) pinned and eyeballed against `#e1e2e7` — or a bail outcome is recorded (§16.5)
 
 #### Tasks
-status: draft
+status: approved
+approved_at: 2026-06-18
 
 | Internal ID | Name | Edge Cases |
 |-------------|------|------------|
