@@ -516,7 +516,7 @@ Edit current custom code and point it at palette tokens: the row delegates (`Ses
 The **`?` help modal** — a new modal type + binding `?` (currently swallowed) + a **generic renderer over the per-page keymap descriptor** (the single source of truth that drives footer + help; introduce the descriptor if one doesn't exist), not hand-authored content per page (~60–80 lines for the modal type + renderer). Extends the existing rounded-border modal overlay primitive.
 
 ### 14.5 Cross-cutting foundation
-An **`AdaptiveColor` palette / role-token layer** (the §2.9 tokens, each with light + dark variants), contrast-floor adherence, and `NO_COLOR` handling. Moderate, touches every style — but it is **centralising colour, not adding widgets**.
+A **role-token colour layer** (the §2.9 tokens, each with light + dark variants), the **owned-canvas paint** (leaf `.Background(canvas)` + the outer full-terminal fill — §1), **explicit light/dark detection** (OSC 11 / `tea.RequestBackgroundColor`, the `appearance` pref, the detect-or-timeout first-paint gate — §2.6), contrast-floor adherence against the exact canvas, and `NO_COLOR` handling (suppress the canvas — §2.5). Moderate, touches every style — but it is **centralising colour + canvas, not adding widgets**. (Lipgloss v2 removed `AdaptiveColor`, so the light/dark choice is wired explicitly, not via a framework adaptive type.)
 
 ### 14.6 Open question — modal rendering path
 Whether the existing modal render path can be **adapted** for the blank-screen treatment (§8.1) or needs a **modal-system rework** is **not yet determined** — assess against the code at implementation. The underlying confirm/input logic of each modal is preserved either way.
