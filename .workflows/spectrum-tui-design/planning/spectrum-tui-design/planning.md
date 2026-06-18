@@ -49,6 +49,21 @@ approved_at: 2026-06-18
 - [ ] Each Sessions/grouped/filtering surface has its `vhs` capture produced and checked against its named Paper frame (§15.1) for layout/structure/colour-role
 - [ ] Behaviour parity verified against the pre-reskin implementation for every touched render path (read it, trace paths, diff logic — provably cosmetic)
 
+#### Tasks
+status: draft
+
+| Internal ID | Name | Edge Cases |
+|-------------|------|------------|
+| spectrum-tui-design-2-1 | Sessions keymap descriptor (footer data source) + §12.2 keymap revision (arrows-only, drop `p`, de-overload `s`/`x`, no uppercase) | drop `p` (s/x single-meaning), `s` literal while filter focused (unchanged), filter-mode bindings excluded from core footer, no uppercase aliases, parity of every dispatched action |
+| spectrum-tui-design-2-2 | Header block — PORTAL wordmark + violet `▌` caret + right-aligned `session manager` subtitle + full-width 2px separator rule | narrow degrade (drop subtitle → compact wordmark), one-row-per-delegate pagination invariant unperturbed, owned-canvas render without edge bleed |
+| spectrum-tui-design-2-3 | Section header + count — `Sessions` accent.cyan + state.green count + mode suffix text.detail + right-aligned `/ to filter` hint | count same cap-height as label (dim not smaller), mode suffix from existing sessionListTitleForMode (parity), narrow degrade drops right hint, inside-tmux `(current: …)` decoration preserved |
+| spectrum-tui-design-2-4 | Condensed footer + right-aligned `? help` — single row of core keys from the keymap descriptor (glyphs accent.blue / labels text.detail / `?` accent.violet) | `s switch view`/`x projects` on all session views incl. Flat, paging/`n`/`r`/`k`/`q` excluded (help-only), single-row height-budget recompute, narrow truncation |
+| spectrum-tui-design-2-5 | Centred pagination dots — built-in paginator restyled (active accent.violet / inactive text.faint), no full-screen frame | single-page suppresses dots, centred across width, no-full-frame rule, page count unchanged (parity) |
+| spectrum-tui-design-2-6 | Sessions Flat row anatomy + violet left-bar selection — name flex / fixed window-count + attached-marker slots, `▌` bar + bg.selection tint + text.on-selection | attached marker keeps state.green on selection (fg-on-tint floor), columns aligned regardless of name length, empty attached slot preserves alignment, over-long name `…` truncation, selected-row count text.strong |
+| spectrum-tui-design-2-7 | Sessions grouped reskin — `heading ··· N` (text.detail + text.dim) + indented rows (cursor col 2 / name col 4) for By Project & By Tag, pure Lipgloss | cursor never lands on header (skip preserved), catch-all (Unknown/Untagged) headings same style, flat rows still flush col 2, no lipgloss/tree, pagination exactness preserved, no-tags signpost reskin out of scope (Phase 4) |
+| spectrum-tui-design-2-8 | Filtering input-active + list-active reskin — accent.orange `/` query + contextual footers + flatten-on-filter | never both cursor+selection (§7.1), `↵`/`↓` commits input→list (§7.2), `Esc` clears from either mode, flatten-on-filter via empty HeaderItem FilterValue (parity), `s` literal while input-active, no match-count shown |
+| spectrum-tui-design-2-9 | Filtering no-matches state — centred `⌀` text.faint + `No sessions match "<query>"` text.primary + widen-search hint text.detail, footer stays input-active | renders only when query matches zero, query interpolated into message, footer stays input-active (not list-active), distinct from empty-sessions state (Phase 4) |
+
 ### Phase 3: Projects page + modal layer (kill · rename · delete · two-mode edit · ? help)
 status: approved
 approved_at: 2026-06-18
