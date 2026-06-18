@@ -208,8 +208,7 @@ token moves too. In practice the tint and its text sit at opposite polarities (l
 near-black text, dark band + white text) so both clear comfortably; the spec measures the
 **pair**, not the tint alone.
 
-This
-**extends the existing F3/F6 spec task** (pin exact hexes + record the contrast-floor
+This contrast re-verification **extends the existing F3/F6 spec task** (pin exact hexes + record the contrast-floor
 pass) to the new canvas reference; the per-element *measurement* is mechanical spec
 work, but the *rule, scope, and remedy are decided here* so spec executes rather than
 re-decides. (Surfaces review-004 F4.)
@@ -1243,6 +1242,14 @@ naming convention.)
    (colour/layout/UI, possibly UX). Mockups may propose a *new* baseline layout,
    not just recolour today's. Colour decided by role (state glyph-backed), not
    fixed hex.
+6. **Canvas ownership REVERSED (2026-06-18) — supersedes insights 1, 2 & 4.** Portal
+   now **owns a mode-matched canvas** (`#0b0c14` dark / `#e1e2e7` light). A contrast
+   floor **cannot** be guaranteed against an arbitrary terminal bg (colour collision is
+   unsurvivable by re-tuning), and every identity-forward TUI (k9s, btop) owns its bg —
+   so "get the exciting *without* owning the canvas" (1), "forced black canvas OUT" (2),
+   and "appearance depends on an unknown environment" (4) are overturned: owning the
+   canvas **removes** the unknown-environment dependency and makes the floor guaranteed.
+   See the canvas-ownership + token-architecture subtopics.
 
 ### Open Threads
 Nothing blocking — every review-001 chrome-stage thread is now resolved:
