@@ -396,6 +396,8 @@ The bar advances on **every real bootstrap step**; the **active label** is the f
 
 Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one real per-item progress source); other labels tick once.
 
+**Empty restore (M=0 — first run / nothing saved):** the `Restoring sessions` label **suppresses the `(N/M)` counter** (renders without it) and ticks `✓` immediately; `Running resume commands` likewise ticks `✓` with no per-item work. The bar still advances through every real step — a label whose steps completed with zero items is "done," not stalled.
+
 ### 10.5 Error & warning contract (cold-path)
 - **Fatal cold-boot step failure** → an **in-TUI error state on the loading page**: the failed step gets a **`state.red` marker + a one-line message**; `q`/`Esc` quits with a **non-zero exit** — rather than dropping into a half-restored picker. The loading-page **error frame** is mocked at implementation.
 - **Soft warnings** ride the **progress channel** and surface as a **post-load notice** (after the picker appears).
