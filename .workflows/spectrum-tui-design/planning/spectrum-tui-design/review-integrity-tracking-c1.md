@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 1
 phase: Plan Integrity Review
@@ -54,7 +54,7 @@ The decision is resolvable from the existing material without inventing scope: �
 - [ ] The post-load warning notice uses the orange/warning role and is transient — it auto-clears on the next actionable keypress (reusing the existing `flashGen`/`isActionableKey` lifecycle), following the 4-1 arbiter's transient hand-off rules (yields the slot to a persistent band on clear); it is not a standing persistent band
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed (auto-approved cycle 1) — task 5-7 Do bullet + Edge Case replaced and a new acceptance criterion added in phase-5-tasks.md (orange/warning role + transient/auto-clear lifetime); note added on tick-93c4fc.
 **Notes**: The fix resolves the open decision toward the spec-faithful default (§10.5 one-shot post-load notice + today's one-shot stderr flush ⇒ transient), keeps the implementer escape hatch for a §11-forced deviation, and makes the 4-1 arbiter interaction testable. No new scope — it only pins a choice the task already required the implementer to make.
 
 ---
@@ -85,7 +85,7 @@ The decision is resolvable from the existing material without inventing scope: �
 - `"it renders exactly the five §10.4 friendly labels in order, sourced from the task-5-4 mapping"`
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed (auto-approved cycle 1) — task 5-5 first acceptance criterion split into two (pinning the five §10.4 labels in order) + matching test added in phase-5-tasks.md; note added on tick-c9b7f5.
 **Notes**: Reinforces 5-4 as the single source of truth for the label set and makes the render's label-set/order directly verifiable rather than only frame-compare-implied.
 
 ---

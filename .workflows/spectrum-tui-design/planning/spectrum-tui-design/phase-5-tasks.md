@@ -214,6 +214,7 @@ total: 8
 
 **Acceptance Criteria**:
 - [ ] `viewLoading` renders centred `PORTAL ▌` (`text.primary` + `accent.violet` caret) over a thick block bar (filled `accent.violet`, track `bg.track`) and a real ticking step-list
+- [ ] The step-list is exactly the five §10.4 friendly labels in order — `Started tmux server` · `Registered hooks` · `Restoring sessions (N/M)` · `Replaying scrollback` · `Running resume commands` — sourced from the task-5-4 mapping (one row per label, no label invented or dropped at the render layer)
 - [ ] Step-list rows tick ✓ (glyph `state.green` / label `text.muted-bright`), ◐ (glyph `accent.cyan` / label `text.primary`), · (glyph `text.faint` / label `text.dim`) per task-5-4 live state; only `Restoring sessions` shows `(N/M)`
 - [ ] The first real paint gates on the Phase 1 task 1-7 detect-or-timeout gate — correct canvas from frame one, no flip
 - [ ] It is a real list (rows), not an in-place text swap
@@ -224,6 +225,7 @@ total: 8
 
 **Tests**:
 - `"it renders PORTAL ▌ over a thick violet bar on bg.track with a step-list"`
+- `"it renders exactly the five §10.4 friendly labels in order, sourced from the task-5-4 mapping"`
 - `"it ticks step rows ✓/◐/· with the spec'd glyph and label tokens from live progress"`
 - `"it renders (N/M) only on Restoring sessions and suppresses it when M=0"`
 - `"it paints the correct canvas from frame one (gated on detect-or-timeout, no flip)"`
@@ -308,7 +310,7 @@ total: 8
 
 **Do**:
 - On the cold/TUI path, carry the orchestrator's accumulated `[]bootstrap.Warning` over the progress channel (task 5-2) — bundle them onto the terminal complete event (cleanest) or stream per-warning events; document the choice. This replaces the package-memo staging (`stageBootstrapWarningsOnModel` → `pendingBootstrapWarnings` → synthetic `BootstrapCompleteMsg`) ON THE COLD/TUI PATH ONLY.
-- In the model, hold the warnings through the loading window and, on transition to Sessions, surface them as a post-load notice via the Phase 4 notice-band primitive (the `▌` left-bar band routed through the single-slot arbiter; task 4-1). Decide which role variant fits a warning — these are warnings, so the orange/warning treatment is the natural fit; confirm against the notice-band role variants. Replace today's stderr alt-screen flush (`flushBufferedWarningsCmd`) for the cold/TUI path with the in-TUI notice band.
+- In the model, hold the warnings through the loading window and, on transition to Sessions, surface them as a post-load notice via the Phase 4 notice-band primitive (the `▌` left-bar band routed through the single-slot arbiter; task 4-1). Use the **orange/warning role variant** (these are warnings — the §11.2 `accent.orange` treatment) and surface the notice as a **transient band that auto-clears on the next actionable keypress** (reuse the existing `flashGen`/`isActionableKey` lifecycle the 4-1/4-2 tasks preserve), consistent with §10.5's "post-load notice surfaced once after the picker appears" framing and today's one-shot `flushBufferedWarningsCmd` delivery — NOT a standing persistent mode band. (If §11 single-slot semantics force a different lifetime at implementation, record the deviation + rationale in a code comment.) Replace today's stderr alt-screen flush (`flushBufferedWarningsCmd`) for the cold/TUI path with this in-TUI notice band.
 - Zero warnings → no notice band (the single-slot arbiter shows nothing; do not toggle alt-screen).
 - Keep the warm/CLI path delivery unchanged: `PersistentPreRunE` still feeds the package sink and `EmitTo`s to stderr for `!isTUIPath` (cmd/root.go:168-173); the warm-TUI path (no loading page) keeps whatever delivery it has today. Only the cold/TUI concurrent route changes.
 - Ensure the notice surfaces AFTER the picker appears (post-transition), not over the loading page or during the alt-screen — the notice band lives on the Sessions page chrome.
@@ -319,6 +321,7 @@ total: 8
 - [ ] Zero warnings produces no notice
 - [ ] The warm/CLI warning delivery path (package sink → stderr for CLI) is byte-for-byte unchanged
 - [ ] The cold/TUI path no longer relies on the pre-launch package-sink staging / synthetic-BootstrapCompleteMsg fold for warnings
+- [ ] The post-load warning notice uses the orange/warning role and is transient — it auto-clears on the next actionable keypress (reusing the existing `flashGen`/`isActionableKey` lifecycle), following the 4-1 arbiter's transient hand-off rules (yields the slot to a persistent band on clear); it is not a standing persistent band
 - [ ] Non-visual plumbing (the band render is Phase 4) — explicitly `vhs`-exempt here; verification is behavioural (warnings surface post-load, zero → none, warm path unchanged)
 
 **Tests**:
@@ -331,7 +334,7 @@ total: 8
 **Edge Cases**:
 - Zero warnings: no notice, no alt-screen toggle (today's `flushBufferedWarningsCmd` already returns nil for empty — preserve the no-spurious-toggle property in the new path).
 - A warning produced by a best-effort step that fails (e.g. SaverDownWarning, CorruptSessionsJSONWarning) must ride the channel and surface post-load — not abort the boot (task 5-6 covers only fatal steps).
-- The single-slot rule: if a transient flash or persistent band would also want the slot, the post-load warning notice must coexist per the Phase 4 arbiter's hand-off rules — it is a notice surfaced once after load, not a permanent band; document expected lifetime (auto-clear like a flash, or persists until keypress) and confirm against §11 single-slot semantics.
+- The single-slot rule: the post-load warning notice is a **transient** band (auto-clears on the next actionable keypress per the §11.2 flash lifecycle — pinned in Do), so it follows the 4-1 arbiter's transient hand-off rules exactly as the inline flash (4-2) does: it wins the slot while shown, then yields to any persistent band (e.g. the By-Tag signpost) once it auto-clears. It is surfaced once after load, never a permanent band.
 - Multiple warnings: all surface (the notice band must accommodate or sequence them per Phase 4); confirm ordering matches orchestrator-observation order.
 
 **Context**:
