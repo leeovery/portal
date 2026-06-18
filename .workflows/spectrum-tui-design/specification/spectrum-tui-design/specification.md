@@ -315,7 +315,7 @@ A bordered panel with labelled fields **NAME / ALIASES / TAGS** and a header (`E
 The modal stays a **single bundle** for Name + Aliases + Tags (not split).
 
 ### 8.3 Kill confirm modal
-> **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the new blank-screen rendering (§8.1) and the MV restyle.
+> **Confirm logic preserved; rendering + keymap changed.** The confirm action is unchanged, but the keymap drops `n` (cancel is `Esc` only — §8.1 anatomy); it also inherits the new blank-screen rendering (§8.1) and the MV restyle.
 
 A centred panel with a **`state.red` header** `▲ Kill session?`, the **session name in `state.red`**, `· N window(s)` (`text.detail`), a consequence line "Ends the tmux session and all its panes. Can't be undone." (`text.detail`), footer `y kill · esc cancel`. **`state.red` is reserved for destructive actions.** Keys: `y` (confirm) / `Esc` (cancel).
 
@@ -330,7 +330,7 @@ A header `Rename session` (`text.primary`), a labelled `NEW NAME` input (focused
 A centred panel listing **the current page's** keymap (two columns: key-hint glyph in `accent.blue` / action label in `text.strong`), header `? Keybindings` (`text.primary`), right-aligned `esc close` (`text.detail`) — the documented help-modal exception to §8.1. The help modal lists the page's **complete** keymap — **including the keys also shown in the footer** (it is the full reference, not just the footer's overflow). Content differs per page (Sessions / Projects / Preview keymaps — §12); only Sessions help is mocked, the others follow their audited keymaps at implementation. **Content source:** the help modal is **generated from the page's keymap descriptor** — the single source of truth that also drives the footer and §12.1 — not hand-authored per page. A binding change updates the footer and help together, and the Projects/Preview help modals are produced from their audited keymaps with no separate copy to author. Opened from Preview, it **overlays** the preview (doesn't blank it — §9). The help modal closes on `?` (toggle) or `Esc`; while open it is key-exclusive (§8.1), so `Esc` dismisses it and does **not** fall through to the page's clear-filter / quit.
 
 ### 8.6 Delete project confirm modal
-> **Logic preserved; rendering changed.** The confirm flow (`y`/`n`/`Esc`) is unchanged (parity); it inherits the blank-screen rendering (§8.1) + MV restyle. *(Mocked at implementation, mirroring `Kill Confirm Modal (MV)`.)*
+> **Confirm logic preserved; rendering + keymap changed.** The confirm action is unchanged, but the keymap drops `n` (cancel is `Esc` only — §8.1 anatomy); it also inherits the blank-screen rendering (§8.1) + MV restyle. *(Mocked at implementation, mirroring `Kill Confirm Modal (MV)`.)*
 
 A centred panel mirroring the kill modal's destructive treatment: a **`state.red` header** `▲ Delete project?`, the **project name in `state.red`**, its path (`text.detail`), and a consequence line that disambiguates it from killing a session — it removes only the **project record**: "Removes this project from Portal (name, aliases, tags). Your sessions and files are untouched." (`text.detail`). Footer `y delete · esc cancel`. Keys: `y` (confirm) / `Esc` (cancel).
 

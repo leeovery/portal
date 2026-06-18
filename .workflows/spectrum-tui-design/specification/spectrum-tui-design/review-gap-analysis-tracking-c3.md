@@ -1,10 +1,12 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 3
 phase: Gap Analysis
 topic: spectrum-tui-design
 ---
+
+> **Both findings resolved (cycle 3).** 1: help modal reconciled to §8.1 anatomy via a stated exception (header dismiss `esc close`, no "to") — §8.1/§8.5 + mock. 2: kill/delete parity notes aligned to `y`/`Esc` (dropped stray `n`, reworded from "parity" to "keymap changed") — §8.3/§8.6. Also during this turn: kill modal mock given a proper header row (structural §8.1 conformance), and §15.5 added (Paper-reference comparison mechanism).
 
 # Review Tracking: Spectrum TUI Design - Gap Analysis
 
