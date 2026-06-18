@@ -356,6 +356,18 @@ direction and the full foreground palette, so **no further Paper mocks are neede
 revisit** — the residual surface-tint pinning is §15's job by design (those light values
 were always "finalised at validation").
 
+### NO_COLOR suppresses the canvas (resolves review-006 F1)
+Under **`NO_COLOR`**, Portal paints **no canvas at all** — it renders fully colourless on
+the terminal's **native fg/bg** (per §2.5), leaning on the glyph-backed state (§2.2). This
+does **not** re-open the legibility hole: that hole exists only when Portal **imposes its
+own hues** on an unknown bg — `NO_COLOR` imposes *nothing*, so it falls back to the
+terminal's own default fg-on-bg, legible **by construction** (the pairing the user reads
+all day). So "one render path, guaranteed legible" carries a clean carve-out: `NO_COLOR`
+is a **second, colourless** path whose guarantee is the terminal's own defaults — distinct
+from the shelved transparency toggle (which kept Portal's potentially-clashing hues while
+dropping the bg). §2.5 stands as written; the owned-canvas decision (§1) gains an explicit
+`NO_COLOR` exception.
+
 ### Paper frames
 All MV **build-target** frames repainted on the owned canvas (`#0b0c14` dark /
 `#e1e2e7` light); the **exploration** mocks (5 colour directions, loading concepts
