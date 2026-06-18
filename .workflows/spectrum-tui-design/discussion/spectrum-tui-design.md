@@ -196,7 +196,19 @@ measured only against its own mode-canvas (dark vs `#0b0c14`, light vs `#e1e2e7`
 single value need hold on both (resolves review-005 F4). Instances: dark selected-row
 band `#1A1726` → `#28243a` (brightened on `#0b0c14`); **light** selected-row band
 `#ECE7F7` → `#D0C6F0` (darkened/saturated on `#e1e2e7` — it was paler than the canvas
-and receded). This
+and receded).
+
+**Text-carrying tints are co-tuned with their on-band text token (resolves review-006
+F2):** a tint that carries foreground text (the selection band, notice bands) is pinned by
+*two* ratios that can pull opposite ways — tint-vs-canvas and text-vs-tint. **Both must
+clear simultaneously:** text-vs-tint at the 4.5/3:1 *text* floor (the hard constraint),
+tint-vs-canvas at the 3:1 *UI* floor. There are **two knobs** — the tint *and* its
+`text.on-selection`-style token — so when no single tint value satisfies both, the text
+token moves too. In practice the tint and its text sit at opposite polarities (light band +
+near-black text, dark band + white text) so both clear comfortably; the spec measures the
+**pair**, not the tint alone.
+
+This
 **extends the existing F3/F6 spec task** (pin exact hexes + record the contrast-floor
 pass) to the new canvas reference; the per-element *measurement* is mechanical spec
 work, but the *rule, scope, and remedy are decided here* so spec executes rather than
