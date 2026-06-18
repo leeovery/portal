@@ -554,6 +554,27 @@ Each implementation task runs a fixed loop with an explicit owner for the visual
 
 ---
 
+## 16. Scope boundary
+
+### 16.1 In scope (v1)
+- The full **Modern Vivid reskin** across **every** surface — Sessions (flat / by-project / by-tag), Projects, Preview, Loading, all modals (edit two-mode, kill, rename, `?` help), filtering (two-mode), and every edge state (empty, inline flash, no-tags signpost, command-pending) — built **token-based** (theme-ready, §2.8).
+- The **cold-path startup flip** (§10) — its own phase, gated behind in-terminal validation (§15).
+
+### 16.2 Animation & performance
+Animation is **minimal and idle-zero** — no idle CPU tick in an always-open tool. The loading screen animates only while bootstrap runs; the picker does not animate at rest.
+
+### 16.3 Deferred (logged separately)
+- **User-overridable theme system** — external theme file, merge-over-default, validation/clamp, multiple built-in themes, a `theme` setting, docs (§2.8). Ships independently after the reskin. *(Logged: `.workflows/.inbox/ideas/2026-06-17--user-overridable-theme-system.md`.)*
+- **Tag features (v2):** per-session tags (`@portal-tags` + `--tag=`), live-grouped filtering, tag exclusion (§5.5).
+
+### 16.4 Cut
+- The **animated cycling-colour border** — dropped for its idle-CPU cost in an always-open tool (inconsistent with idle-zero animation).
+
+### 16.5 Lock-in gate
+The colour direction is a **hypothesis until prototyped in a real terminal** (§15) — the in-terminal validation gate is the final lock before implementation closes; bail remains a legitimate outcome if the direction doesn't clear the bar (§1).
+
+---
+
 ## Working Notes
 
 [Optional - capture in-progress discussion if needed]
