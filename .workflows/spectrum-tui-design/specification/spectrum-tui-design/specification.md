@@ -362,7 +362,7 @@ A **full-screen overlay** (not a modal — the blank-screen rule of §8.1 does n
 - A **cyan border** (`accent.cyan`) frames the read-only content area.
 
 ### 9.2 Captured content (out-of-theme)
-The pane content is the **real captured ANSI output**, rendered read-only — **not** theme tokens (the documented palette exception, §2.9/§15.1). Only the chrome is themed; the content is whatever the pane actually printed.
+The pane content is the **real captured ANSI output**, rendered read-only — **not** theme tokens (the documented palette exception, §2.9/§15.1). Only the chrome is themed; the content is whatever the pane actually printed. On the owned canvas, the `canvas` colour paints the preview **chrome** (cyan frame + top bar) and surrounding margins; the **content area is left as the untouched real ANSI** — a captured pane with no background of its own shows the canvas behind it, one with its own ANSI background shows that. The cyan chrome's contrast against the canvas is covered by the §2.9 re-verification pass.
 
 ### 9.3 Keys & overlays
 Scroll `↑↓` + `Ctrl+↑/↓`; `Tab` next pane; `]`/`[` window; `⏎` attach (this pane); `Space`/`Esc` back (§12). A `?` help opened here **overlays** the preview (doesn't blank it — §8.1).
