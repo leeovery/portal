@@ -395,6 +395,28 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 
 ---
 
+## 11. Edge / UX states
+
+> **Reference (Paper):** `Sessions — empty (MV)` · `Sessions — inline flash (MV)` · `Sessions — no tags signpost (MV)` · `Projects — command pending (MV)`.
+
+**Shared convention — left-bar accent notices.** Inline notices use a **left-bar accent line**: **`accent.orange`** = transient / warning, **`accent.violet`** = mode / info. **Placement:** the band sits **directly under the title separator, above the section header** (full-width); the section header + list **shift down**.
+
+### 11.1 Empty states (reskin)
+- **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · p for projects` (`text.detail`); the footer reduces to the still-relevant keys (`n` / `p` / `/` / `?`).
+- **Empty projects** mirrors it — `No projects yet` + an open-a-directory hint (same pattern; not separately mocked).
+
+### 11.2 Inline flash (chrome band)
+A **transient band** under the title separator: an **`accent.orange` left-bar** + `⚠` + message (e.g. `folio-Jiz4el closed externally — list updated`), on a `bg.warning` tint with `text.on-warning` message text; **auto-clears**. The **success variant** uses `state.green`.
+- **F10 — flash vs pagination:** the flash band is **chrome** — when it appears/clears, the list **viewport height is recomputed** (the same recompute the one-row-per-delegate invariant already mandates), so the list never overflows or miscounts rows.
+
+### 11.3 "No tags yet" signpost (reskin)
+By-Tag with **zero tags anywhere**: an **`accent.violet` left-bar** signpost (`No tags yet — add tags in the project editor (e) …`, `text.strong`) over the **flat list** — degrade-with-message, not a silent flatten (§5.3).
+
+### 11.4 Command-pending banner (reskin)
+When Projects is invoked to **run a command**: an **`accent.violet` left-bar** banner (`Pick a project to run`) with the command in an **`accent.orange` chip**; the footer becomes `⏎ run here · n run in cwd · esc cancel`. The screen keeps the **full Projects chrome** (green `Projects` header + `/ to filter`) — not a stripped page; the banner sits on top.
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
