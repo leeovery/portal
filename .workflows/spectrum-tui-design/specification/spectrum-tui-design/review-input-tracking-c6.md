@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 6
 phase: Input Review
@@ -32,8 +32,14 @@ This is a faithful-fold-in miss (a decided source point — the canvas reference
 ```
 
 **Proposed Addition**:
+```
+**Greys / text ramp**
 
-**Resolution**: Pending
-**Notes**:
+| Token | Role | Dark (on `#0b0c14`) | Light (on `#e1e2e7`) | Floor |
+|---|---|---|---|---|
+```
+
+**Resolution**: Approved
+**Notes**: Column headers updated to reference the exact owned canvas (`#0b0c14` / `#e1e2e7`), matching §2.3 and the §2.9 contrast re-verification rule; resolves the internal inconsistency with the Accents/Surfaces tables.
 
 ---

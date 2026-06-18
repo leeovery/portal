@@ -103,7 +103,7 @@ Modern Vivid is a **closed set of ~20 named tokens** (Tokyo Night family). Every
 
 **Greys / text ramp**
 
-| Token | Role | Dark (on black) | Light (on white) | Floor |
+| Token | Role | Dark (on `#0b0c14`) | Light (on `#e1e2e7`) | Floor |
 |---|---|---|---|---|
 | `text.primary` | names, wordmark, active labels, modal titles, chip text | `#C0CAF5` · 13.0 | `#2E3C64` · 10.8 | 4.5 |
 | `text.strong` | selected-row meta, help actions, banner/signpost | `#A9B1D6` · 9.9 | `#3F4760` · 9.2 | 4.5 |
