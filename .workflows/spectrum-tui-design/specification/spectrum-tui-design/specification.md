@@ -417,6 +417,27 @@ When Projects is invoked to **run a command**: an **`accent.violet` left-bar** b
 
 ---
 
+## 12. Keybindings (audited against code)
+
+> **Mixed: mostly existing bindings, with a deliberate keymap revision.** The per-screen keymaps below are audited against the current code. The **changes** are: drop all vim/extra nav aliases, repurpose `k`, and add the `?` binding (§12.2). Unchanged bindings are preserved (parity).
+
+### 12.1 Per-screen keymaps
+- **Sessions (flat & grouped):** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` attach · `Space` preview · `s` cycle grouping (flat→project→tag) · `r` rename · `k` kill · `n` new-in-cwd · `p`/`x` → Projects · `q` quit · `Esc` clear-filter / quit. Grouping adds no keys.
+- **Projects:** `↑`/`↓` move · `Ctrl+↑`/`Ctrl+↓` page · `/` filter · `Enter` new-session-from-project · `s`/`x` → Sessions · `e` edit · `d` delete · `n` new-in-cwd · `q` quit · `Esc`.
+- **Preview:** `↑`/`↓` + `Ctrl+↑`/`Ctrl+↓` scroll · `Tab` next pane · `]`/`[` window · `Enter` attach (this pane) · `Space`/`Esc` back.
+- **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename `Enter`/`Esc` · edit — two-mode (§8.2).
+
+### 12.2 Keymap revision (the changes)
+- **Navigation is arrows only.** **Drop all vim aliases (`h`/`j`/`k`/`l`, `g`/`G`) and `PgUp`/`PgDn`/`Home`/`End`** — move is `↑`/`↓`, page is `Ctrl+↑`/`Ctrl+↓`. `/` filter is the fast-find (filtering, not jump-to-extremes, is how you find a session). *(This resolves a real collision: the original bound `k` to both vim-up and kill.)*
+- **`k` = kill** — freed by dropping vim-up; the tmux-accurate verb, kept distinct from Projects' `d` = delete (removing a project *record* is a different operation).
+- **No uppercase bindings anywhere.**
+- **`?` is newly bound** on every page → opens the per-page help modal (§8.5). **Today `?` is actively swallowed** (so `bubbles/list` doesn't toggle its own help); the redesign binds it.
+
+### 12.3 Validation caveat
+Confirm `Ctrl+↑`/`Ctrl+↓` isn't swallowed by the terminal/tmux during in-terminal validation (§15); **fall back to another page key if so.**
+
+---
+
 ## 15. Design reference & visual verification
 
 ### 15.1 Paper design reference (the frame map)
