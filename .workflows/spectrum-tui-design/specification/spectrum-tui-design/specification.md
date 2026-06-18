@@ -407,6 +407,8 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 
 **Shared convention — left-bar accent notices.** Inline notices use a **left-bar accent line**: **`accent.orange`** = transient / warning, **`accent.violet`** = mode / info. **Placement:** the band sits **directly under the title separator, above the section header** (full-width); the section header + list **shift down**.
 
+**Single-slot rule.** The notice slot holds **at most one band**. Persistent mode notices (no-tags signpost §11.3, command-pending banner §11.4) own the slot while their mode is active; a transient flash (§11.2) **takes the slot temporarily**, replacing any persistent band for its duration, then the persistent band returns. The flash **auto-clears on the next keypress or after a short timeout**. Orange (warning) and violet (info) never display at once — the transient flash wins while shown.
+
 ### 11.1 Empty states (reskin)
 - **Empty sessions** — centred: a dim block glyph `▌ ▌ ▌` (`text.faint`), `No sessions yet` (`text.primary`), hint `Press n to start one in the current directory · p for projects` (`text.detail`); the footer reduces to the still-relevant keys (`n` / `p` / `/` / `?`).
 - **Empty projects** mirrors it — `No projects yet` + an open-a-directory hint (same pattern; not separately mocked).
