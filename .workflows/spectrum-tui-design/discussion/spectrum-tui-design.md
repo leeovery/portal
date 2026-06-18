@@ -124,6 +124,63 @@ else viable. Confidence: **high** (explicit user steer). Consequence: "Spectrum"
 is now inspiration/flavour, not a literal spec — carried into Direction &
 ambition.
 
+### Decision — REVERSED (2026-06-18): own a mode-matched canvas
+**Supersedes the "respect the terminal background" decision above** (kept as the
+journey). Reopened because the contrast floor (spec §2.3) and "respect any
+terminal background" (spec §1) are **fundamentally incompatible** — a floor can't
+be guaranteed against a surface Portal doesn't control. The surface trigger was
+mid-tone failure (Nord `#2E3440`: `text.detail` ~3.0, `text.dim` ~1.9 — below
+floor), but the **fatal** case is **colour collision**: a user's bg can *be* one
+of our tokens (e.g. `#3B4261` = our `text.faint`), which **no token re-tuning can
+survive**. Surgical re-tuning only defends against bgs *darker* than a reference;
+it cannot defend against a colliding hue.
+
+**Prior-art check** (k9s, btop, lazygit, gitui, Charm/Lipgloss, Tokyo Night): the
+field splits into two **package-deal** camps — **own the bg** (k9s, btop —
+identity-forward) vs **respect the terminal** (lazygit, gitui, the Charm idiom,
+Claude Code — polite/embedded). **No mainstream TUI guarantees a contrast floor
+against an arbitrary terminal bg** — `AdaptiveColor` only does a binary light/dark
+bucket (HSL threshold), never compares bg vs fg. The universal "your colours don't
+work on my terminal" escape hatch is **switch theme / override the colour**
+(respect camp) or a **transparency toggle** (own-bg camp — btop's
+`theme_background`, k9s's `default`). Decisive for Portal: (a) our palette **is**
+Tokyo Night, a bg-owning scheme whose fg is tuned to its *own* bg — foreground-only
+discards that built-in contrast; (b) Portal already chose the **identity** camp
+(the redesign's whole premise); (c) **scope inverts** — Portal ships ONE theme + a
+*deferred* override system, so respect-terminal gives a colliding user **zero
+recourse** (worse than every tool surveyed) and would force pulling the theme
+subsystem into v1, whereas owning the canvas needs only **one opt-out toggle**.
+
+**DECISION:** Portal **owns a mode-matched canonical canvas** — detect light/dark,
+paint a near-black (dark) / near-white (light) backdrop so MV tokens always sit on
+the bg they were tuned for. **Opaque by default**, with a single
+`theme_background`-style **"use terminal background" opt-out toggle** as the escape
+hatch for transparency/blur users (when on, legibility becomes the user's problem —
+consistent with §2.8's advisory-floor stance). This is **NOT** the
+originally-rejected "force black on everyone": it respects the user's light/dark
+*mode*, neutralising only the *shade*. One move resolves three failures (mid-tone,
+colour-collision, detection-misfire — a misfire is now at worst a cosmetic
+light/dark surprise, never illegible) **and** restores the richness MV lost
+foreground-only. The floor goes from **best-effort → guaranteed** (tokens tested
+against our *exact* canvas, not ≈white/≈black). Confidence: **high** (explicit user
+steer + prior-art convergence).
+
+**Canvas colour — revert to Tokyo Night** (recommended; visualising to confirm):
+paint TN's actual backgrounds — **`#1a1b26`** (Night, dark) / **`#e1e2e7`** (Day,
+light) — not pure black/white. TN's fg was designed against these exact bgs
+(contrast guaranteed-by-design); it restores the foreground-only-lost richness;
+pure black would be all-cost-no-benefit. **Consequence (spec §2.9 task):**
+re-verify the dark token column against `#1a1b26` (minor brighten at the bottom
+ramp rungs, or adopt TN's published fg) and pin a real light canvas (`#e1e2e7`),
+not "white." The `canvas` token stops being "terminal bg (never painted)" and
+becomes an owned, painted value.
+
+**Re-spec downstream:** §1 (canvas ownership), §2.3 (floor now guaranteed vs the
+exact canvas), §2.6 (mid-tone/collision solved, not best-effort), §2.8/§2.9 (canvas
+tokens + transparency toggle). Implementation heads-up (not decided here): Lipgloss
+**v2 removed `AdaptiveColor`** from root → explicit detection via
+`tea.RequestBackgroundColor`; still needed to pick *which* canvas.
+
 ---
 
 ## Direction & ambition
@@ -392,6 +449,12 @@ where possible; the eventual manual `--theme` / light-dark override (the deferre
 user-theme initiative) is the ultimate escape hatch; exotic backgrounds are
 **best-effort**. Detection-miss cross-pairing is accepted as best-effort, mitigated
 by the override.
+
+**REVERSED (2026-06-18):** the "best-effort + override" stance here is superseded —
+Portal now **owns a mode-matched canvas** (see the canvas-ownership subtopic),
+which makes the floor *guaranteed* and removes mid-tone, colour-collision, and
+detection-misfire as **legibility** risks. Detection still picks *which* canvas,
+but a misfire is now only a cosmetic light/dark surprise, never illegible.
 
 ### Review-002 dispositions (for the record)
 F3 in-terminal validation → folded into the Judging & bail gate (step 3).
@@ -1022,6 +1085,10 @@ uppercase.
   cycling border.
 - **Before lock-in:** in-terminal prototype validation of the direction (the
   gate's step 3).
+- **Reversed (2026-06-18):** canvas ownership — Portal now **owns a mode-matched
+  canvas** (TN `#1a1b26` / `#e1e2e7`, opaque default + a transparency opt-out
+  toggle), superseding "respect the terminal background." Makes the contrast floor
+  **guaranteed**; re-specs §1 / §2.3 / §2.6 / §2.8 / §2.9. See the canvas subtopic.
 
 ## Triage
 
