@@ -35,12 +35,16 @@
           "format": "tick",
           "spec_commit": "1fdc8c131dff37fac45eed217cc615d06613c181",
           "task_list_gate_mode": "auto",
-          "author_gate_mode": "gated",
+          "author_gate_mode": "auto",
           "finding_gate_mode": "gated",
           "review_cycle": 0,
           "phase": 1,
-          "task": "spectrum-tui-design-1-1",
-          "task_map": {}
+          "task": "spectrum-tui-design-1-2",
+          "task_map": {
+            "spectrum-tui-design-1": "tick-854c0f",
+            "spectrum-tui-design-1-1": "tick-09ba3b"
+          },
+          "external_id": "tick-7331a6"
         }
       }
     }
