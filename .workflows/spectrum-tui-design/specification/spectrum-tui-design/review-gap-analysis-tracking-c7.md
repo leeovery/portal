@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 7
 phase: Gap Analysis
@@ -26,9 +26,10 @@ The cycle-6 generalisation of the NO_COLOR carve-out (§2.5, line 81) enumerates
 Why it matters (Minor, not blocking): §2.2's "state is never carried by hue alone" still holds for all four bands because each carries a distinct full-text message (e.g. "No tags yet — …", "Pick a project to run", "… closed externally — list updated"), so the colourless path remains usable. The defect is precision: §2.5 names a `⚠`/`✓`-glyph fallback as the NO_COLOR differentiator for surfaces that don't carry those glyphs, which would send an implementer looking for a `✓` on the success flash and `⚠`/`✓` on the mode bands and finding neither specified. The fix is to make §2.5's claim accurate to what each band actually carries (text + `▌` left-bar + the `⚠` only on the warning flash, plus deciding whether the success flash gets an explicit `✓` glyph in §11.2 to match the §2.9 role cell), not to add new behaviour.
 
 **Proposed Addition**:
-(leave blank until discussed)
+(a) §11.2 success variant: "uses `state.green` with a `✓` glyph (so success stays glyph-distinct from the warning `⚠`, not colour-only — §2.2, matching the §2.9 `state.green` role)."
+(b) §2.5 reworded: "**notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and bar colour and carry the state through the message text, their `▌` left-bar, and their glyph where they have one (the warning flash's `⚠`, the success flash's `✓`), plus bold/dim (§2.2)".
 
-**Resolution**: Pending
-**Notes**:
+**Resolution**: Approved
+**Notes**: §11.2 aligned to the §2.9 `state.green` role cell (resolving the latent §2.9↔§11.2 inconsistency and the §2.2 colour-only risk on the success flash); §2.5 reworded to attribute glyphs only where they exist.
 
 ---

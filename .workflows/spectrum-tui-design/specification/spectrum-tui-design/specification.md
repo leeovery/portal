@@ -78,7 +78,7 @@ Portal **honours `NO_COLOR`** and monochrome terminals: it renders colourless, l
 
 Under `NO_COLOR`, Portal **paints no canvas at all** — it renders on the terminal's **native fg/bg**. This is the one documented carve-out to the single owned-canvas render path (§1): `NO_COLOR` imposes *no* hues, so falling back to the terminal's own default fg-on-bg is legible **by construction** — a second, distinct, colourless render path whose legibility guarantee is the terminal's own defaults.
 
-This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and lean on the glyph + `⚠`/`✓` + bold/dim to carry the state (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2).
+This carve-out applies to **every** canvas-dependent surface, not just the base list: under `NO_COLOR` the **modal blank-screen** (§8.1 / §13.5) clears to the terminal's native bg (no painted canvas), **notice bands** (§11.2 inline flash, §11.3/§11.4 mode bands) drop their tint and bar colour and carry the state through the message text, their `▌` left-bar, and their glyph where they have one (the warning flash's `⚠`, the success flash's `✓`), plus bold/dim (§2.2), and the **preview chrome** (§9.2) renders colourless on the native bg. The captured preview *content* is already out-of-theme real ANSI regardless (§9.2).
 
 ### 2.6 Light/dark detection & canvas selection
 Portal owns a mode-matched canvas (§1), so it must decide **which** canvas — light or dark — to paint. This is a detection-plus-override decision; with an owned canvas a wrong guess is only a cosmetic light/dark surprise, never an illegibility (the floor holds against whichever canvas is painted).
@@ -439,7 +439,7 @@ Only `Restoring sessions` carries an `N/M` counter (the restore loop is the one 
 - **Empty projects** mirrors it — `No projects yet` + an open-a-directory hint (same pattern; not separately mocked).
 
 ### 11.2 Inline flash (chrome band)
-A **transient band** under the title separator: an **`accent.orange` left-bar** + `⚠` + message (e.g. `folio-Jiz4el closed externally — list updated`), on a `bg.warning` tint with `text.on-warning` message text; **auto-clears**. The **success variant** uses `state.green`.
+A **transient band** under the title separator: an **`accent.orange` left-bar** + `⚠` + message (e.g. `folio-Jiz4el closed externally — list updated`), on a `bg.warning` tint with `text.on-warning` message text; **auto-clears**. The **success variant** uses `state.green` with a `✓` glyph (so success stays glyph-distinct from the warning `⚠`, not colour-only — §2.2, matching the §2.9 `state.green` role).
 - **F10 — flash vs pagination:** the flash band is **chrome** — when it appears/clears, the list **viewport height is recomputed** (the same recompute the one-row-per-delegate invariant already mandates), so the list never overflows or miscounts rows.
 
 ### 11.3 "No tags yet" signpost (reskin)
