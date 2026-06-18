@@ -258,7 +258,7 @@ Condensed: `⏎ new session · s sessions · e edit · / filter · ? help`. The 
 Filtering is **never both at once** — there is never an active input cursor *and* a selected row simultaneously:
 
 1. **Input-active (typing).** Keystrokes go to the query; the **cursor sits at the end of the typed text**; the list updates live; **no list row is selected**. Filter bar reads `/ <query>▌`; footer: `type to filter · ↵/↓ browse results · esc clear`.
-2. **List-active (browsing results).** The input row stays visible — the **locked `accent.orange` query (no cursor)** is what signals the list is filtered; **arrows move the selection**; `↵` attaches; `Esc` clears and returns. No background tint (a faint orange was tried and read oddly). Footer: `↵ attach · ↑↓ navigate · esc clear filter`.
+2. **List-active (browsing results).** The input row stays visible — the **locked `accent.orange` query (no cursor)** is what signals the list is filtered; **arrows move the selection**; `↵` attaches; `Esc` clears and returns. No background tint. Footer: `↵ attach · ↑↓ navigate · esc clear filter`.
 
 ### 7.2 Boundary
 - **`↵` or `↓`** commits input-active → list-active.
@@ -428,13 +428,43 @@ When Projects is invoked to **run a command**: an **`accent.violet` left-bar** b
 - **Modals:** kill `y`/`n`/`Esc` · delete-project `y`/`n`/`Esc` · rename `Enter`/`Esc` · edit — two-mode (§8.2).
 
 ### 12.2 Keymap revision (the changes)
-- **Navigation is arrows only.** **Drop all vim aliases (`h`/`j`/`k`/`l`, `g`/`G`) and `PgUp`/`PgDn`/`Home`/`End`** — move is `↑`/`↓`, page is `Ctrl+↑`/`Ctrl+↓`. `/` filter is the fast-find (filtering, not jump-to-extremes, is how you find a session). *(This resolves a real collision: the original bound `k` to both vim-up and kill.)*
+- **Navigation is arrows only.** **Drop all vim aliases (`h`/`j`/`k`/`l`, `g`/`G`) and `PgUp`/`PgDn`/`Home`/`End`** — move is `↑`/`↓`, page is `Ctrl+↑`/`Ctrl+↓`. `/` filter is the fast-find (filtering, not jump-to-extremes, is how you find a session).
 - **`k` = kill** — freed by dropping vim-up; the tmux-accurate verb, kept distinct from Projects' `d` = delete (removing a project *record* is a different operation).
 - **No uppercase bindings anywhere.**
 - **`?` is newly bound** on every page → opens the per-page help modal (§8.5). **Today `?` is actively swallowed** (so `bubbles/list` doesn't toggle its own help); the redesign binds it.
 
 ### 12.3 Validation caveat
 Confirm `Ctrl+↑`/`Ctrl+↓` isn't swallowed by the terminal/tmux during in-terminal validation (§15); **fall back to another page key if so.**
+
+---
+
+## 13. Interaction conventions (cross-cutting)
+
+These conventions apply across surfaces; per-surface detail lives in the referenced sections.
+
+### 13.1 Focus vs edit — unified visual grammar
+Two states, identical grammar everywhere (the Name field, chips, any editable element):
+- **Focused** (navigate): **outline only** — an `accent.violet` ring, no fill change.
+- **Editing** (cursor live): **`accent.violet` fill + cursor**, plus a `◉ EDIT MODE` indicator in the modal header (the Name field in edit mode also turns violet-filled — same treatment as chips).
+- **So: outline = focused, fill = editing** — unambiguous everywhere.
+- **Chips** (aliases AND tags) are **one neutral style**; **green is reserved for `attached` only, never chips** (detail in §8.2).
+
+### 13.2 Page model — views vs pages
+- **Sessions is ONE page with three grouping *views*** (Flat / by Project / by Tag), cycled by `s` — the same data pivoted, not separate pages (§4–§5).
+- **Projects is a separate *page*** (different data + keymap), reached by `p`/`x` (§6).
+- **Preview** is an overlay screen (`Space`, §9); **Loading** is the startup screen (§10).
+
+### 13.3 `?` help is per-page contextual
+`?` is bound on every page (not modals) and opens a help modal listing **that page's** keymap — one overlay pattern, page-specific content (§8.5, §12).
+
+### 13.4 Filtering & the `/ to filter` hint
+The `/ to filter` hint shows top-right on every session view and Projects; `s switch view` lives in the **footer**. Two-mode filtering detail in §7.
+
+### 13.5 Modals on a blank screen
+When a (centred) modal opens, the page behind is cleared to blank — not a dimmed overlay (a change from today; §8.1). The Preview overlay is the exception (§9).
+
+### 13.6 Typography — counts beside labels
+A count next to a label (`Sessions N`, `Projects N`, group `heading ··· N`) renders at the **same font size** as the label, distinguished by its **dim colour**, not by being smaller — so it shares the baseline and cap-height.
 
 ---
 
