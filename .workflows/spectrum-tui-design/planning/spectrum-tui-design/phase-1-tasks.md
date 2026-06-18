@@ -411,6 +411,7 @@ total: 9
 - [ ] Each pinned tint is derived from its dark anchor + the surface it renders on (recorded), not invented.
 - [ ] The lock-in (or bail) decision is recorded explicitly with the final pinned hexes (lock-in) or the failing tint/pairing and rationale (bail).
 - [ ] vhs captures of the foundation Sessions screen in dark and light each match `Sessions — Modern Vivid v2` / `Sessions — Modern Vivid (Light)` for layout/structure/colour-role.
+- [ ] **(§12.3 validation caveat)** During the in-terminal validation pass, confirm `Ctrl+↑`/`Ctrl+↓` (the paging chords bound in task 2-1) are actually delivered to Portal and not swallowed by the terminal or tmux (notably tmux passthrough); if either chord is intercepted, record the finding and choose a fallback page key, and flag that fallback for tasks 2-1 / 3-3 / 4-7 (the descriptor + keymap consumers) to adopt.
 
 **Tests**:
 - `"it pins the four light surface tints to concrete hexes derived from their dark anchor + surface"`

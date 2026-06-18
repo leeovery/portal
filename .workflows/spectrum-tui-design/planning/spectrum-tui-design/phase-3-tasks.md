@@ -192,6 +192,7 @@ total: 9
 - [ ] Preview's `?` (overlay-without-blanking) + the Preview descriptor + help-from-Preview wiring are flagged as deferred to Phase 4 (code comment), not wired here.
 - [ ] No literal hex at the renderer call sites — every colour is a §2.9 token.
 - [ ] VISUAL VERIFICATION: a `vhs` tape opens the Sessions help modal (Sessions → `?`) and writes a PNG; compared against `Sessions — Help Modal (?)` for layout/structure/colour-role (two columns, blue glyphs / strong labels, `? Keybindings` header + right `esc close`, complete keymap on a cleared canvas).
+- [ ] LIGHT-MODE EYEBALL (§15.6): the `?` help modal is rendered in light mode against `#e1e2e7` and visually confirmed in a real terminal — the two-column glyph/label wiring (`accent.blue` glyph / `text.strong` action) and the header (`text.primary` / `text.detail` `esc close`) read correctly in light (no further Paper mock required per §15.6; this is the deferred light eyeball task 1-9 punted to this surface, not a frame compare).
 
 **Tests**:
 - `"it opens the help modal on ? for Sessions"`
@@ -299,6 +300,7 @@ total: 9
 - [ ] Under `NO_COLOR` the modal clears to native bg and renders colourless.
 - [ ] No literal hex at the call sites — every colour is a §2.9 token.
 - [ ] VISUAL VERIFICATION: a `vhs` tape drives the TUI to the rename modal (Sessions → `r`) and writes a PNG; compared against `Rename Modal (MV)` for layout/structure/colour-role (header, labelled NEW NAME input with violet cursor, `was:` line, footer).
+- [ ] LIGHT-MODE EYEBALL (§15.6): the rename modal is rendered in light mode against `#e1e2e7` and visually confirmed in a real terminal — each light token reads correctly and the panel/input/`was:` line stay legible (no further Paper mock required per §15.6; this is the deferred light eyeball task 1-9 punted to this surface, not a frame compare).
 
 **Tests**:
 - `"it renders the header Rename session in text.primary"`
@@ -482,6 +484,7 @@ total: 9
 - [ ] Under `NO_COLOR` the modal clears to native bg and chip states carry via the `✕` glyph + outline/fill + bold/dim (not colour-only).
 - [ ] No literal hex at the call sites — every colour is a §2.9 token; the legacy `[x]`/`Add:`/`[Enter] Save` rendering is removed.
 - [ ] VISUAL VERIFICATION: `vhs` tapes drive the TUI to each of the three states — (a) navigate focus on Name, (b) a chip focused, (c) editing a chip in place — and write PNGs; compared against `Edit Modal — navigate (name)`, `Edit Modal — chip focused`, and `Edit Modal — edit in place` respectively for layout/structure/colour-role (chip states, violet field label, `+ add` faint slot, `◉ EDIT MODE` only-while-editing, per-mode footer).
+- [ ] LIGHT-MODE EYEBALL (§15.6): all three edit-modal states are rendered in light mode against `#e1e2e7` and visually confirmed in a real terminal — chip tint/outline/fill, the violet field label, the `+ add` faint slot, and the `◉ EDIT MODE` indicator each read correctly in light (no further Paper mock required per §15.6; this is the deferred light eyeball task 1-9 punted to this surface, not a frame compare).
 
 **Tests**:
 - `"it renders chips in one neutral style (text.primary on a subtle tint, never green)"`

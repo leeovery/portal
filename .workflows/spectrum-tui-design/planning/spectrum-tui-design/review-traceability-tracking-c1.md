@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 created: 2026-06-18
 cycle: 1
 phase: Traceability Review
@@ -47,7 +47,7 @@ Both directions checked against the validated specification read in full.
 - [ ] **(§12.3 validation caveat)** During the in-terminal validation pass, confirm `Ctrl+↑`/`Ctrl+↓` (the paging chords bound in task 2-1) are actually delivered to Portal and not swallowed by the terminal or tmux (notably tmux passthrough); if either chord is intercepted, record the finding and choose a fallback page key, and flag that fallback for tasks 2-1 / 3-3 / 4-7 (the descriptor + keymap consumers) to adopt.
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed (auto-approved cycle 1) — §12.3 criterion appended to task 1-9 acceptance criteria in phase-1-tasks.md and as a note on tick-6b0f62.
 **Notes**: The §12.3 check is scoped by the spec to the §15 in-terminal validation, which is task 1-9's domain; placing it there keeps the single in-terminal pass authoritative. The criterion deliberately records *the obligation to check + have a fallback* (spec content), not a pre-chosen fallback key (an implementation detail the spec leaves open). If reviewers prefer the swallow-check to live with the paging binding instead, task 2-1 is the alternative host — but 1-9 is the better fit because the spec ties the check to the in-terminal gate.
 
 ---
@@ -94,7 +94,7 @@ Both directions checked against the validated specification read in full.
 - [ ] LIGHT-MODE EYEBALL (§15.6): the `?` help modal is rendered in light mode against `#e1e2e7` and visually confirmed in a real terminal — the two-column glyph/label wiring (`accent.blue` glyph / `text.strong` action) and the header (`text.primary` / `text.detail` `esc close`) read correctly in light (no further Paper mock required per §15.6; this is the deferred light eyeball task 1-9 punted to this surface, not a frame compare).
 ```
 
-**Resolution**: Pending
+**Resolution**: Fixed (auto-approved cycle 1) — §15.6 light-eyeball criterion appended to tasks 3-4, 3-6, 3-9 acceptance criteria in phase-3-tasks.md and as notes on tick-a7dd69 / tick-a99733 / tick-b1924e.
 **Notes**: This is the natural completion of the chain task 1-9 already set up: 1-9 confirms the foundation Sessions light wiring and the four light surface tints, then explicitly delegates the per-modal light eyeball (rename / edit ×3 / `?` help) to "those surfaces in later phases." The three add-to-task edits give that delegation a concrete landing site on each surface as it is built. Kill (3-5) already covers light because a Light Paper frame exists; the §15.6 residual set deliberately excludes kill and is an eyeball, not a frame compare.
 
 ---
