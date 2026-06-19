@@ -349,6 +349,21 @@ type tuiConfig struct {
 	insideTmux      bool
 	currentSession  string
 	serverStarted   bool
+	// noColor is the NO_COLOR carve-out decision (§2.5), read ONCE here in the cmd
+	// layer (os.Getenv) so internal/tui stays env-free. It is the single inheritable
+	// colourless flag passed into tui.Deps.NoColor.
+	noColor bool
+}
+
+// noColorEnabled reports whether the NO_COLOR carve-out (§2.5) is active, per the
+// no-color.org convention: the NO_COLOR env var must be PRESENT and NON-EMPTY. A
+// set-but-empty NO_COLOR ("") does NOT enable it (an empty value is treated as
+// unset by the convention). This is the SINGLE place NO_COLOR is read in the
+// cmd/open path; the decision flows as a boolean into tui.Deps so internal/tui
+// stays env-free and every canvas-dependent surface inherits one flag.
+func noColorEnabled() bool {
+	v, ok := os.LookupEnv("NO_COLOR")
+	return ok && v != ""
 }
 
 // buildTUIModel constructs a tui.Model from the given config and parameters by
@@ -380,6 +395,7 @@ func buildTUIModel(cfg tuiConfig, initialFilter string, command []string) tui.Mo
 		ServerStarted:   cfg.serverStarted,
 		InsideTmux:      cfg.insideTmux,
 		CurrentSession:  cfg.currentSession,
+		NoColor:         cfg.noColor,
 	})
 }
 
@@ -496,6 +512,10 @@ func openTUI(cmd *cobra.Command, initialFilter string, command []string, serverS
 		appearance:    appearance,
 		cwd:           cwd,
 		serverStarted: serverStarted,
+		// NO_COLOR carve-out (§2.5): read the env ONCE here (cmd layer) so
+		// internal/tui stays env-free. The single colourless flag flows through
+		// tui.Deps.NoColor and is inherited by every canvas-dependent surface.
+		noColor: noColorEnabled(),
 	}
 	// Guard the persister assignment: a typed-nil *prefs.Store boxed into the
 	// tui.ModePersister interface would be non-nil, defeating buildTUIModel's nil

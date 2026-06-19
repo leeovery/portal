@@ -95,6 +95,14 @@ func resolveModel(fixture, appearance string) (tui.Model, error) {
 	}
 	deps := fx.Deps()
 	deps.Appearance = pin
+	// NO_COLOR carve-out (§2.5): read the env (present and non-empty, the
+	// no-color.org convention) and inject the single colourless flag so the
+	// NO_COLOR tape (NO_COLOR=1 inline) renders the colourless native-bg path —
+	// the same flag cmd/open.go drives in production. When set it wins over the
+	// appearance pin (no canvas to select), so the capture shows no painted canvas.
+	if v, ok := os.LookupEnv("NO_COLOR"); ok && v != "" {
+		deps.NoColor = true
+	}
 	return tui.Build(deps), nil
 }
 

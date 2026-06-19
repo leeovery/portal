@@ -42,6 +42,10 @@ type appearanceTimeoutMsg struct{}
 //
 // A pinned appearance (light/dark, §2.6 override) constructs the gate already
 // resolved and unarmable — detection and the timeout wait are skipped entirely.
+// The NO_COLOR carve-out (§2.5 / §2.6) does the same via colourless: under
+// NO_COLOR there is no canvas to select, so the gate is resolved and unarmable
+// and detection + its first-paint wait are skipped — exactly like a pin, but for
+// a different reason (no hue at all, rather than a chosen mode).
 type appearanceGate struct {
 	// mode is the resolved light/dark canvas the owned canvas (§1) is painted
 	// for. Dark is the zero value (the §2.6 no-answer fallback), so an unresolved
@@ -58,6 +62,13 @@ type appearanceGate struct {
 	// pinned marks a light/dark appearance override. A pinned gate is never armed
 	// (arm is a no-op), so the pin's mode survives and no timeout tick is issued.
 	pinned bool
+	// colourless marks the NO_COLOR carve-out (§2.5). A colourless gate is never
+	// armed (arm is a no-op) and is constructed already resolved, so detection and
+	// the first-paint wait are skipped entirely — there is no canvas to select. It
+	// is independent of mode: under NO_COLOR no canvas is painted at all, so the
+	// resolved mode is irrelevant (the render path reads m.colourless to suppress
+	// the paint).
+	colourless bool
 }
 
 // resolved reports whether the first real paint may proceed — the positive read
@@ -86,6 +97,16 @@ func newAppearanceGate(appearance prefs.Appearance) appearanceGate {
 	}
 }
 
+// newColourlessGate builds the gate for the NO_COLOR carve-out (§2.5 / §2.6). It
+// is constructed already resolved (pending=false) and unarmable (colourless=true,
+// so arm() is a no-op), so detection and the first-paint wait are skipped — there
+// is no canvas to select. The mode is the dark zero value but is never consumed:
+// the render path reads m.colourless and paints no canvas at all, so the resolved
+// mode is irrelevant.
+func newColourlessGate() appearanceGate {
+	return appearanceGate{colourless: true}
+}
+
 // arm opens the detect-or-timeout window on a non-pinned (auto) gate: it marks
 // the gate pending so View holds the neutral blank frame and Init issues the
 // timeout tick, until the OSC 11 reply or the timeout resolves it. It is a no-op
@@ -93,7 +114,7 @@ func newAppearanceGate(appearance prefs.Appearance) appearanceGate {
 // arms the gate for auto appearance; the foundation Sessions screen and the §10
 // loading page (Phase 5) share this one mechanism.
 func (g *appearanceGate) arm() {
-	if g.pinned {
+	if g.pinned || g.colourless {
 		return
 	}
 	g.pending = true

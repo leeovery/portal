@@ -60,6 +60,14 @@ type Deps struct {
 	ServerStarted  bool
 	InsideTmux     bool
 	CurrentSession string
+	// NoColor is the NO_COLOR carve-out decision (§2.5). The cmd layer reads
+	// os.Getenv("NO_COLOR") (present and non-empty, the no-color.org convention)
+	// and injects the boolean here so internal/tui stays env-free. Build sets ONE
+	// colourless flag on the model (WithColourless); every canvas-dependent surface
+	// inherits that single flag rather than re-deriving NO_COLOR. When true, Portal
+	// paints no canvas at all and skips light/dark detection + the first-paint wait
+	// — there is no canvas to select.
+	NoColor bool
 }
 
 // Build constructs a Model from the shared Deps seam set. It is the single
@@ -109,6 +117,11 @@ func Build(deps Deps) Model {
 	// and the sole driver of the owned canvas mode. The model resolves the
 	// painted canvas from it (pin → immediate; auto → OSC 11 detect-or-timeout).
 	opts = append(opts, WithAppearance(deps.Appearance))
+	// NoColor is the single NO_COLOR carve-out (§2.5). When set it WINS over the
+	// appearance-driven gate (New consumes it after the options apply): the canvas
+	// is suppressed and detection is skipped. Always injected — false is the
+	// no-op coloured path, so omitting it leaves the canvas painted.
+	opts = append(opts, WithColourless(deps.NoColor))
 	if deps.ModePersister != nil {
 		opts = append(opts, WithModePersister(deps.ModePersister))
 	}

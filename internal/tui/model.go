@@ -198,7 +198,19 @@ type Model struct {
 	// directly constructed model are already resolved (the zero-value gate is
 	// resolved), so detection and the wait are skipped. canvasMode mirrors
 	// gate.mode for the render path (see syncResolvedMode).
-	gate              appearanceGate
+	gate appearanceGate
+	// colourless is the SINGLE NO_COLOR carve-out flag (§2.5). It is set once at
+	// construction from Deps.NoColor (the cmd layer reads os.Getenv("NO_COLOR");
+	// internal/tui stays env-free) and is the one flag EVERY canvas-dependent
+	// surface inherits — later phases (modal blank-screen, notice bands, preview
+	// chrome) read THIS flag rather than re-deriving NO_COLOR. When set, Portal
+	// paints no canvas at all: the leaf styles drop Background(canvas), the outer
+	// fill (fillCanvas) becomes a no-op-background pass-through, View sets no OSC 11
+	// BackgroundColor, and detection + its first-paint wait are skipped (the gate is
+	// constructed colourless). Foreground hue is stripped FREE by the Bubble Tea v2
+	// writer layer (colorprofile.Detect honours NO_COLOR), so state stays
+	// glyph-distinct (§2.2: ● attached, ▌ selector, spaced headers) + bold/dim.
+	colourless        bool
 	selected          string
 	sessionLister     SessionLister
 	sessionKiller     SessionKiller
@@ -600,6 +612,20 @@ func WithCanvasMode(mode theme.Mode) Option {
 	}
 }
 
+// WithColourless sets the NO_COLOR carve-out flag (§2.5). The cmd layer detects
+// NO_COLOR (env var present and non-empty, the no-color.org convention) and
+// injects the decision here via Build → Deps.NoColor, so internal/tui stays
+// env-free. When set, the model paints no canvas at all and skips light/dark
+// detection + the first-paint wait — there is no canvas to select. It is the
+// single inheritable flag every canvas-dependent surface reads (rather than each
+// re-deriving NO_COLOR). New consumes it after the options apply to construct the
+// colourless gate and re-point the leaf styles colourless.
+func WithColourless(colourless bool) Option {
+	return func(m *Model) {
+		m.colourless = colourless
+	}
+}
+
 // WithProjectStore sets the project store dependency.
 func WithProjectStore(s ProjectStore) Option {
 	return func(m *Model) {
@@ -756,6 +782,25 @@ func canvasHelpStyles(l *list.Model, mode theme.Mode) {
 	l.Help.Styles.FullSeparator = onCanvas(sepColor)
 	l.Help.Styles.Ellipsis = onCanvas(sepColor)
 	l.Styles.HelpStyle = l.Styles.HelpStyle.Background(canvas)
+}
+
+// colourlessHelpStyles strips the footer keymap help styles to bare styles for
+// the NO_COLOR carve-out (§2.5): no canvas background and no foreground hue, so
+// the footer renders on the terminal's native fg/bg. The footer keys stay
+// glyph-legible by construction (§2.2 — the key glyphs and labels are the text
+// itself, not colour-only state). Foreground hue would be stripped by the writer
+// layer anyway; setting bare styles also drops the canvas background lipgloss
+// would otherwise still emit.
+func colourlessHelpStyles(l *list.Model) {
+	bare := lipgloss.NewStyle()
+	l.Help.Styles.ShortKey = bare
+	l.Help.Styles.ShortDesc = bare
+	l.Help.Styles.ShortSeparator = bare
+	l.Help.Styles.FullKey = bare
+	l.Help.Styles.FullDesc = bare
+	l.Help.Styles.FullSeparator = bare
+	l.Help.Styles.Ellipsis = bare
+	l.Styles.HelpStyle = l.Styles.HelpStyle.UnsetBackground()
 }
 
 // sessionListTitleForMode computes the session list title for the active
@@ -969,13 +1014,20 @@ func New(lister SessionLister, opts ...Option) Model {
 	// detect-or-timeout window explicitly via Build → arm (only for auto), so the
 	// live picker gates the first paint while a direct New(...) does not.
 	//
-	// WithCanvasMode is a test/capture-only DIRECT override: when it was applied
-	// in the options loop it set its own resolved gate AND left appearance at the
-	// auto zero value, so reconstructing the gate from auto would discard that
-	// override. Guard against that — only (re)build the gate from appearance when
-	// WithCanvasMode did NOT pin a mode (the common path), or when an explicit
-	// non-auto appearance was passed (a pin must win over a stray default gate).
-	if m.appearance != prefs.AppearanceAuto || !m.gate.pinned {
+	// The NO_COLOR carve-out (§2.5) wins over both the appearance pin and the auto
+	// gate: under NO_COLOR there is no canvas to select, so the gate is colourless
+	// (already resolved, unarmable) and detection + its first-paint wait are
+	// skipped. Checked first so the WithColourless option short-circuits the
+	// appearance-driven gate construction below.
+	if m.colourless {
+		m.gate = newColourlessGate()
+	} else if m.appearance != prefs.AppearanceAuto || !m.gate.pinned {
+		// WithCanvasMode is a test/capture-only DIRECT override: when it was applied
+		// in the options loop it set its own resolved gate AND left appearance at the
+		// auto zero value, so reconstructing the gate from auto would discard that
+		// override. Guard against that — only (re)build the gate from appearance when
+		// WithCanvasMode did NOT pin a mode (the common path), or when an explicit
+		// non-auto appearance was passed (a pin must win over a stray default gate).
 		m.gate = newAppearanceGate(m.appearance)
 	}
 	m.syncResolvedMode()
@@ -1022,6 +1074,24 @@ func (m *Model) syncResolvedMode() {
 // foundation Sessions screen (per the canvas task); the projects screen's leaf
 // restyle is a later phase, and the outer fill in View() paints around it.
 func (m *Model) applyCanvasMode() {
+	// NO_COLOR carve-out (§2.5): paint no canvas at all. The delegate drops its
+	// Background(canvas) leaf paint (Colourless), the footer help styles drop their
+	// canvas background and foreground hue, and the title bar carries no canvas
+	// background — every cell renders on the terminal's native bg. Foreground hue
+	// is stripped FREE by the writer layer (colorprofile honours NO_COLOR), so
+	// state stays glyph-distinct (§2.2).
+	if m.colourless {
+		m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode, Colourless: true})
+		colourlessHelpStyles(&m.sessionList)
+		m.sessionList.Styles.TitleBar = m.sessionList.Styles.TitleBar.UnsetBackground()
+		// Strip the bubbles/list default Title box colours (its violet 48;5;62
+		// background + bright foreground) so "Sessions" renders on the terminal's
+		// native fg/bg — the title is a leaf canvas-dependent surface too. The
+		// coloured path leaves this default box untouched (the wordmark/header chrome
+		// restyle is Phase 2); under NO_COLOR it must carry no background SGR.
+		m.sessionList.Styles.Title = m.sessionList.Styles.Title.UnsetBackground().UnsetForeground()
+		return
+	}
 	m.sessionList.SetDelegate(SessionDelegate{Mode: m.canvasMode})
 	canvasHelpStyles(&m.sessionList, m.canvasMode)
 	// Background the title bar so its leading left-pad cells (bubbles/list's
@@ -1533,6 +1603,15 @@ func (m Model) Init() tea.Cmd {
 	// empty. It is distinct from canvasMode (Portal's chosen canvas); 1-7 will
 	// later consume the captured value for auto-appearance resolution.
 	requestBg := tea.Cmd(tea.RequestBackgroundColor)
+
+	// NO_COLOR carve-out (§2.5 / §2.6): Portal paints no canvas, so there is no
+	// OSC 11 set to undo on exit and no canvas to detect — skip the background
+	// query entirely. The detect-or-timeout tick is already suppressed (the
+	// colourless gate is resolved, so timeoutCmd returns nil), but nil-ing
+	// requestBg too means colourless issues NO OSC 11 query at all.
+	if m.colourless {
+		requestBg = nil
+	}
 
 	// Arm the §2.6 detect-or-timeout deadline. The gate returns nil for a pinned
 	// (already-resolved) appearance — the pin path skips the wait entirely — and
@@ -2522,6 +2601,13 @@ func (m Model) View() tea.View {
 	}
 	v := tea.NewView(m.fillCanvas(m.viewString()))
 	v.AltScreen = true
+	// NO_COLOR carve-out (§2.5): Portal imposes no hues, so it does NOT set the
+	// screen background (OSC 11) — the terminal keeps its native bg. fillCanvas is
+	// already a no-op-background pass-through under colourless, so leaving
+	// BackgroundColor nil completes the canvas suppression (both layers).
+	if m.colourless {
+		return v
+	}
 	// Gutter aid for the owned canvas (§1): set the screen's background colour
 	// (OSC 11) to the mode-matched canvas so the terminal's padding/gutter OUTSIDE
 	// the rendered grid reads on the canvas too, on terminals that honour it
@@ -2591,6 +2677,13 @@ func (m Model) fillCanvas(view string) string {
 	if h == 0 {
 		h = 24
 	}
+	// NO_COLOR carve-out (§2.5): no canvas bg and no mid-line backfill — render on
+	// the terminal's native bg. Padding to width / filling to height keeps the
+	// layout (the structure parity the capture verifies) but every padding cell is
+	// a plain space with NO background SGR, so no canvas is painted.
+	if m.colourless {
+		return fillColourless(view, w, h)
+	}
 	canvas := lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(m.canvasMode))
 	blank := canvas.Render(strings.Repeat(" ", w))
 	canvasBg := canvasBgParams(theme.MV.Canvas.ColorFor(m.canvasMode))
@@ -2607,6 +2700,36 @@ func (m Model) fillCanvas(view string) string {
 		// pad the trailing region to the full width.
 		line = backfillCanvasBackground(line, canvasBg, parser)
 		out = append(out, padLineToCanvasWidth(line, w, canvas))
+	}
+	for len(out) < h {
+		out = append(out, blank)
+	}
+	return strings.Join(out, "\n")
+}
+
+// fillColourless is the NO_COLOR (§2.5) variant of fillCanvas: it pads every
+// content line to the full terminal width and fills to the full terminal height
+// for layout parity, but emits NO background SGR — every padding cell is a plain
+// space and every overflow row a plain blank line, so the frame renders on the
+// terminal's native bg with no painted canvas. There is no mid-line backfill (no
+// canvas to re-establish) and no canvas-styled blank; the composed line's own
+// trailing block-padding is trimmed first so the plain pad owns the trailing
+// region, matching fillCanvas's line geometry exactly (the structure the capture
+// verifies). Content taller than termH is clamped (no overflow).
+func fillColourless(view string, w, h int) string {
+	blank := strings.Repeat(" ", w)
+	lines := strings.Split(view, "\n")
+	out := make([]string, 0, h)
+	for _, line := range lines {
+		if len(out) == h {
+			break // clamp: never exceed the terminal height (no overflow)
+		}
+		line = strings.TrimRight(line, " ")
+		gap := w - lipgloss.Width(line)
+		if gap > 0 {
+			line += strings.Repeat(" ", gap)
+		}
+		out = append(out, line)
 	}
 	for len(out) < h {
 		out = append(out, blank)

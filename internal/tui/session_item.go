@@ -152,12 +152,24 @@ func (h HeaderItem) label() string {
 // canvasMode after the options apply.
 type SessionDelegate struct {
 	Mode theme.Mode
+	// Colourless is the NO_COLOR carve-out (§2.5): when set, the delegate paints NO
+	// canvas background and NO foreground hue — every run renders on the terminal's
+	// native fg/bg. The row TEXT and column structure are unchanged, so state stays
+	// glyph-distinct (§2.2: ● attached, ▌ selector). Foreground hue would be
+	// stripped by the writer layer anyway; suppressing the canvas background here is
+	// the work (lipgloss would otherwise still emit it). It is set from the model's
+	// single colourless flag (applyCanvasMode), so the delegate inherits the one
+	// carve-out decision rather than re-deriving NO_COLOR.
+	Colourless bool
 }
 
-// canvasBg is the bare Background(canvas) style for the delegate's mode, used to
-// paint the structural spacers (no foreground run) so every cell of a content
-// row is the canvas colour.
+// canvasBg is the structural-spacer style: the Background(canvas) for the
+// delegate's mode normally, or a bare style under the NO_COLOR carve-out (§2.5)
+// so the spacers render on the terminal's native bg with no canvas paint.
 func (d SessionDelegate) canvasBg() lipgloss.Style {
+	if d.Colourless {
+		return lipgloss.NewStyle()
+	}
 	return lipgloss.NewStyle().Background(theme.MV.Canvas.ColorFor(d.Mode))
 }
 
@@ -166,7 +178,15 @@ func (d SessionDelegate) canvasBg() lipgloss.Style {
 // foreground for the resolved mode, sitting on the owned canvas. base carries
 // the non-colour attributes (Bold for the name); a zero base is fine for runs
 // that only need the colour pair.
+//
+// Under the NO_COLOR carve-out (§2.5) it returns base unchanged — no foreground
+// hue and no canvas background — so the run renders on the terminal's native
+// fg/bg, keeping base's non-colour attributes (Bold/dim) which carry state
+// glyph-distinctly (§2.2) without colour.
 func (d SessionDelegate) tokenStyle(base lipgloss.Style, fg theme.Token) lipgloss.Style {
+	if d.Colourless {
+		return base
+	}
 	return base.
 		Foreground(fg.ColorFor(d.Mode)).
 		Background(theme.MV.Canvas.ColorFor(d.Mode))
