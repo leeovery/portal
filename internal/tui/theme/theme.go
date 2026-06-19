@@ -123,33 +123,56 @@ func (t Theme) All() []Token {
 }
 
 // MV is the built-in Modern Vivid theme. DARK variants are pinned exactly to the
-// §2.9 token table (the authoritative hex source). Light variants are empty
-// placeholders — task 1-4 fills them and 1-7 wires the resolver; neither edits
-// any call site, because every renderer already references these tokens.
+// §2.9 token table (the authoritative hex source). LIGHT variants are filled by
+// task 1-4 (this task) and measured against the owned light canvas `#e1e2e7`
+// (§2.3 / §2.9); 1-7 wires the resolver. Neither edits any call site, because
+// every renderer already references these tokens.
+//
+// §2.9-erratum note (user-approved 2026-06-19). §2.9's published light *ratio*
+// column was computed against pure white `#FFFFFF`, but §2.3 / §2.9 mandate
+// measuring each light variant against the owned light canvas `#e1e2e7`. Six
+// light foreground hexes were under-floor vs `#e1e2e7` under the original §2.9
+// values; they are corrected below (darkened, hue-preserved) so each clears its
+// floor vs `#e1e2e7`. Each correction carries an inline erratum comment recording
+// original → corrected and the measured ratio vs `#e1e2e7`. The light surface
+// tints stay provisional — 1-9 eyeball finalises (the light-tint-on-light-canvas
+// case is numeric-insufficient, §2.9 / §15.6).
 var MV = Theme{
-	// Text ramp.
-	TextPrimary:     Token{Name: "text.primary", Dark: "#C0CAF5"},
-	TextStrong:      Token{Name: "text.strong", Dark: "#A9B1D6"},
-	TextMutedBright: Token{Name: "text.muted-bright", Dark: "#828BB8"},
-	TextDetail:      Token{Name: "text.detail", Dark: "#737AA2"},
-	TextDim:         Token{Name: "text.dim", Dark: "#535C86"},
-	TextFaint:       Token{Name: "text.faint", Dark: "#3B4261"},
-	TextOnSelection: Token{Name: "text.on-selection", Dark: "#FFFFFF"},
+	// Text ramp (light variants vs `#e1e2e7`).
+	TextPrimary:     Token{Name: "text.primary", Dark: "#C0CAF5", Light: "#2E3C64"},
+	TextStrong:      Token{Name: "text.strong", Dark: "#A9B1D6", Light: "#3F4760"},
+	TextMutedBright: Token{Name: "text.muted-bright", Dark: "#828BB8", Light: "#515A80"},
+	// §2.9 erratum: light #5A6296 → #586093 (4.63 vs #e1e2e7).
+	TextDetail: Token{Name: "text.detail", Dark: "#737AA2", Light: "#586093"},
+	// §2.9 erratum: light #7C84AA → #767DA2 (3.11 vs #e1e2e7, 3:1 floor).
+	TextDim:         Token{Name: "text.dim", Dark: "#535C86", Light: "#767DA2"},
+	TextFaint:       Token{Name: "text.faint", Dark: "#3B4261", Light: "#AEB2C6"},
+	TextOnSelection: Token{Name: "text.on-selection", Dark: "#FFFFFF", Light: "#1A1B2E"},
 
-	// Accents.
-	AccentViolet: Token{Name: "accent.violet", Dark: "#BB9AF7"},
-	AccentBlue:   Token{Name: "accent.blue", Dark: "#7AA2F7"},
-	AccentCyan:   Token{Name: "accent.cyan", Dark: "#7DCFFF"},
-	StateGreen:   Token{Name: "state.green", Dark: "#9ECE6A"},
-	StateRed:     Token{Name: "state.red", Dark: "#F7768E"},
-	AccentOrange: Token{Name: "accent.orange", Dark: "#FF9E64"},
+	// Accents (light variants vs `#e1e2e7`).
+	AccentViolet: Token{Name: "accent.violet", Dark: "#BB9AF7", Light: "#8A3FD1"},
+	// §2.9 erratum: light #2E5FD0 → #2D5CCA (4.64 vs #e1e2e7).
+	AccentBlue: Token{Name: "accent.blue", Dark: "#7AA2F7", Light: "#2D5CCA"},
+	// §2.9 erratum: light #0E7490 → #0D6C87 (4.62 vs #e1e2e7).
+	AccentCyan: Token{Name: "accent.cyan", Dark: "#7DCFFF", Light: "#0D6C87"},
+	// §2.9 erratum: light #4C7A1F → #456E1C (4.64 vs #e1e2e7).
+	StateGreen: Token{Name: "state.green", Dark: "#9ECE6A", Light: "#456E1C"},
+	// §2.9 erratum: light #C32647 → #BD2545 (4.62 vs #e1e2e7).
+	StateRed:     Token{Name: "state.red", Dark: "#F7768E", Light: "#BD2545"},
+	AccentOrange: Token{Name: "accent.orange", Dark: "#FF9E64", Light: "#9A5200"},
 
-	// Surfaces.
-	Canvas:          Token{Name: "canvas", Dark: "#0b0c14"},
-	BgSelection:     Token{Name: "bg.selection", Dark: "#28243a"},
-	BgWarning:       Token{Name: "bg.warning", Dark: "#241B10"},
-	BgTrack:         Token{Name: "bg.track", Dark: "#26283A"},
-	BorderSeparator: Token{Name: "border.separator", Dark: "#292E42"},
-	BorderFooter:    Token{Name: "border.footer", Dark: "#20232E"},
-	TextOnWarning:   Token{Name: "text.on-warning", Dark: "#E8C9A0"},
+	// Surfaces (light tints vs `#e1e2e7`).
+	Canvas:      Token{Name: "canvas", Dark: "#0b0c14", Light: "#e1e2e7"},
+	BgSelection: Token{Name: "bg.selection", Dark: "#28243a", Light: "#D0C6F0"},
+	// PROVISIONAL (1-9 finalises — §2.9 leaves this "light amber (§15)"). Derived
+	// from the dark amber anchor #241B10 shifted to sit subtly above the light
+	// canvas #e1e2e7 (perceptible 1.11; on-warning leg 5.14). Not a final value.
+	BgWarning: Token{Name: "bg.warning", Dark: "#241B10", Light: "#E8D6A8"},
+	// PROVISIONAL (1-9 finalises — §2.9 leaves this "light grey (§15)"). Derived
+	// from the dark grey anchor #26283A shifted to sit subtly above the light
+	// canvas #e1e2e7 (perceptible 1.14). Not a final value.
+	BgTrack:         Token{Name: "bg.track", Dark: "#26283A", Light: "#D2D4DE"},
+	BorderSeparator: Token{Name: "border.separator", Dark: "#292E42", Light: "#C9CDDB"},
+	BorderFooter:    Token{Name: "border.footer", Dark: "#20232E", Light: "#C9CDDB"},
+	TextOnWarning:   Token{Name: "text.on-warning", Dark: "#E8C9A0", Light: "#7A4B12"},
 }
